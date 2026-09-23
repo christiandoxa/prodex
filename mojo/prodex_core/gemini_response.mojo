@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from json_view import (
@@ -357,8 +359,8 @@ def gemini_views_valid(input: ProdexGeminiResponseKernelInput) -> Bool:
     )
 
 
-def gemini_tool_name_split(view: ProdexRichStringView) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+def gemini_tool_name_split(view: ProdexRichStringView) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     var length = Int64(view.len)
     if length < 2:
         return result^
@@ -773,19 +775,19 @@ def gemini_put_stream_tool_call(
 
 
 
-def gemini_raw_bounds_present(bounds: InlineArray[Int64, 2]) -> Bool:
+def gemini_raw_bounds_present(bounds: Array[Int64, 2]) -> Bool:
     return bounds[0] >= 0 and bounds[1] > bounds[0]
 
 
-def gemini_raw_root(view: ProdexRichStringView) -> InlineArray[Int64, 2]:
-    var missing = InlineArray[Int64, 2](fill=-1)
+def gemini_raw_root(view: ProdexRichStringView) -> Array[Int64, 2]:
+    var missing = Array[Int64, 2](fill=-1)
     var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
     if start >= Int64(view.len) or deepseek_json_byte(view, start) != 123:
         return missing^
     var end = deepseek_json_value_end(view, start, Int64(view.len), 0)
     if end < 0 or deepseek_json_skip_ws(view, end, Int64(view.len)) != Int64(view.len):
         return missing^
-    var root = InlineArray[Int64, 2](fill=-1)
+    var root = Array[Int64, 2](fill=-1)
     root[0] = start
     root[1] = end
     return root^
@@ -793,19 +795,19 @@ def gemini_raw_root(view: ProdexRichStringView) -> InlineArray[Int64, 2]:
 
 def gemini_raw_member(
     view: ProdexRichStringView,
-    object: InlineArray[Int64, 2],
+    object: Array[Int64, 2],
     key: StringSlice,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     if not gemini_raw_bounds_present(object) or deepseek_json_byte(view, object[0]) != 123:
-        return InlineArray[Int64, 2](fill=-1)^
+        return Array[Int64, 2](fill=-1)^
     return deepseek_json_object_member(view, object[0], object[1], key)
 
 
 def gemini_raw_first_array_item(
     view: ProdexRichStringView,
-    array: InlineArray[Int64, 2],
-) -> InlineArray[Int64, 2]:
-    var missing = InlineArray[Int64, 2](fill=-1)
+    array: Array[Int64, 2],
+) -> Array[Int64, 2]:
+    var missing = Array[Int64, 2](fill=-1)
     if not gemini_raw_bounds_present(array) or deepseek_json_byte(view, array[0]) != 91:
         return missing^
     var start = deepseek_json_skip_ws(view, array[0] + 1, array[1] - 1)
@@ -814,14 +816,14 @@ def gemini_raw_first_array_item(
     var end = deepseek_json_value_end(view, start, array[1] - 1, 0)
     if end < 0:
         return missing^
-    var item = InlineArray[Int64, 2](fill=-1)
+    var item = Array[Int64, 2](fill=-1)
     item[0] = start
     item[1] = end
     return item^
 
 
 def gemini_raw_string_nonempty(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     return (
         gemini_raw_bounds_present(bounds)
@@ -855,7 +857,7 @@ def gemini_raw_part_supported(
 
 
 def gemini_raw_parts_supported(
-    view: ProdexRichStringView, parts: InlineArray[Int64, 2]
+    view: ProdexRichStringView, parts: Array[Int64, 2]
 ) -> Bool:
     if not gemini_raw_bounds_present(parts) or deepseek_json_byte(view, parts[0]) != 91:
         return False
@@ -888,7 +890,7 @@ def gemini_raw_part_is_thought(
 
 
 def gemini_raw_has_visible_text(
-    view: ProdexRichStringView, parts: InlineArray[Int64, 2]
+    view: ProdexRichStringView, parts: Array[Int64, 2]
 ) -> Bool:
     var index = deepseek_json_skip_ws(view, parts[0] + 1, parts[1] - 1)
     while index < parts[1] - 1 and deepseek_json_byte(view, index) != 93:
@@ -910,7 +912,7 @@ def gemini_raw_has_visible_text(
 def gemini_raw_put_visible_text(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     view: ProdexRichStringView,
-    parts: InlineArray[Int64, 2],
+    parts: Array[Int64, 2],
 ) -> Bool:
     var index = deepseek_json_skip_ws(view, parts[0] + 1, parts[1] - 1)
     while index < parts[1] - 1 and deepseek_json_byte(view, index) != 93:
@@ -932,7 +934,7 @@ def gemini_raw_put_visible_text(
 
 def gemini_raw_u64(
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     default_value: UInt64,
 ) -> UInt64:
     if not gemini_raw_bounds_present(bounds):
@@ -958,7 +960,7 @@ def gemini_raw_u64(
 def gemini_raw_put_usage(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     view: ProdexRichStringView,
-    usage: InlineArray[Int64, 2],
+    usage: Array[Int64, 2],
 ) -> Bool:
     if not gemini_raw_bounds_present(usage) or deepseek_json_byte(view, usage[0]) != 123:
         return gemini_put_literal(writer, StringSlice("{}"))
@@ -997,8 +999,8 @@ def gemini_raw_put_usage(
 
 def gemini_raw_metadata_supported(
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
-    candidate: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
+    candidate: Array[Int64, 2],
 ) -> Bool:
     var feedback = gemini_raw_member(view, root, StringSlice("promptFeedback"))
     if gemini_raw_bounds_present(feedback) and not (
@@ -1031,8 +1033,8 @@ def gemini_raw_metadata_supported(
 def gemini_raw_put_metadata(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
-    candidate: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
+    candidate: Array[Int64, 2],
 ) -> Bool:
     var usage = gemini_raw_member(view, root, StringSlice("usageMetadata"))
     var finish = gemini_raw_member(view, candidate, StringSlice("finishReason"))

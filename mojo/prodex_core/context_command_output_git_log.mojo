@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from context_command_output_common import (
@@ -48,8 +50,8 @@ def git_log_hash_valid(
 
 def git_log_header_bounds(
     ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     var bounds = context_text_trim_bounds(ptr, start, end)
     var line_start = bounds[0]
     var line_end = bounds[1]

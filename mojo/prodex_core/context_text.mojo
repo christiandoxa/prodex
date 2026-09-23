@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 from std.sys.info import align_of, size_of
 
@@ -461,8 +463,8 @@ def context_output_ends_exact[literal: StaticString](
 
 def context_output_next_word(
     ptr: Pointer[mut=False, UInt8, _], length: Int64, cursor: Int64
-) -> InlineArray[Int64, 3]:
-    var result = InlineArray[Int64, 3](fill=-1)
+) -> Array[Int64, 3]:
+    var result = Array[Int64, 3](fill=-1)
     var index = cursor
     while index < length:
         var whitespace = context_text_whitespace_width(ptr, index, length)
@@ -658,8 +660,8 @@ def context_output_find_last_byte(
 
 def context_output_trim_ascii_punctuation(
     ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=0)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=0)
     var first = start
     var last = end
     while first < last:
@@ -2280,8 +2282,8 @@ def context_metadata_lower(value: UInt8) -> UInt8:
 
 def context_metadata_next_token(
     ptr: Pointer[mut=False, UInt8, _], length: Int64, cursor: Int64
-) -> InlineArray[Int64, 3]:
-    var bounds = InlineArray[Int64, 3](fill=-1)
+) -> Array[Int64, 3]:
+    var bounds = Array[Int64, 3](fill=-1)
     var index = cursor
     while index < length and not context_metadata_token_byte(
         ptr[unsafe_offset=index]
@@ -2301,8 +2303,8 @@ def context_metadata_next_token(
 
 def context_metadata_command_bounds(
     ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
-) -> InlineArray[Int64, 2]:
-    var bounds = InlineArray[Int64, 2](fill=0)
+) -> Array[Int64, 2]:
+    var bounds = Array[Int64, 2](fill=0)
     var command_start = start
     var index = end
     while index > start:
@@ -2456,8 +2458,8 @@ def context_metadata_token_option_takes_value(
 
 def context_metadata_subcommand_after(
     ptr: Pointer[mut=False, UInt8, _], length: Int64, cursor: Int64
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     var scan = cursor
     var skip_next = False
     while scan < length:
@@ -2482,8 +2484,8 @@ def context_metadata_subcommand_after(
 
 def context_metadata_package_script_after(
     ptr: Pointer[mut=False, UInt8, _], length: Int64, cursor: Int64
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     var scan = cursor
     var saw_run = False
     var skip_next = False
@@ -2529,8 +2531,8 @@ def context_metadata_package_script_after(
 
 def context_metadata_package_install_after(
     ptr: Pointer[mut=False, UInt8, _], length: Int64, cursor: Int64
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     var scan = cursor
     var skip_next = False
     while scan < length:
@@ -2798,8 +2800,8 @@ def context_text_whitespace_width(
 
 def context_text_trim_bounds(
     ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
-) -> InlineArray[Int64, 2]:
-    var bounds = InlineArray[Int64, 2](fill=0)
+) -> Array[Int64, 2]:
+    var bounds = Array[Int64, 2](fill=0)
     var first = end
     var last = start
     var index = start
@@ -2898,8 +2900,8 @@ def context_text_ascii_find[literal: StaticString](
 
 def context_ci_first_integer_token(
     ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     var index = start
     var token_start: Int64 = -1
     var started = False
@@ -2925,8 +2927,8 @@ def context_ci_first_integer_token(
 
 def context_ci_exit_code_span(
     ptr: Pointer[mut=False, UInt8, _], length: Int64
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     var marker = context_text_ascii_find["exit code"](ptr, 0, length)
     if marker >= 0:
         result = context_ci_first_integer_token(ptr, marker + 9, length)
@@ -3214,8 +3216,8 @@ def context_search_windows_drive_prefix(
 
 def context_search_heading_path_bounds(
     ptr: Pointer[mut=False, UInt8, _], length: Int64
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     var trimmed = context_text_trim_bounds(ptr, 0, length)
     var start = trimmed[0]
     var end = trimmed[1]
@@ -3307,8 +3309,8 @@ def context_search_copy_trimmed_span(
 
 def context_search_json_field_bounds[literal: StaticString](
     ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     var marker = context_search_ascii_find_exact[literal](ptr, start, end)
     if marker < 0:
         return result^
@@ -3495,8 +3497,8 @@ def context_search_plain_result(
     path_capacity: Int64,
     text_output: Pointer[mut=True, UInt8, _],
     text_capacity: Int64,
-) -> InlineArray[Int64, 4]:
-    var result = InlineArray[Int64, 4](fill=-1)
+) -> Array[Int64, 4]:
+    var result = Array[Int64, 4](fill=-1)
     result[0] = 0
     var separator_start: Int64 = 0
     if context_search_windows_drive_prefix(ptr, 0, length):
@@ -3546,8 +3548,8 @@ def context_search_json_result(
     path_capacity: Int64,
     text_output: Pointer[mut=True, UInt8, _],
     text_capacity: Int64,
-) -> InlineArray[Int64, 4]:
-    var result = InlineArray[Int64, 4](fill=-1)
+) -> Array[Int64, 4]:
+    var result = Array[Int64, 4](fill=-1)
     result[0] = 0
     var trimmed = context_text_trim_bounds(ptr, 0, length)
     if (
@@ -3637,8 +3639,8 @@ def context_search_heading_match_result(
     heading_present: Bool,
     text_output: Pointer[mut=True, UInt8, _],
     text_capacity: Int64,
-) -> InlineArray[Int64, 4]:
-    var result = InlineArray[Int64, 4](fill=-1)
+) -> Array[Int64, 4]:
+    var result = Array[Int64, 4](fill=-1)
     result[0] = 0
     if not heading_present:
         return result^
@@ -3671,7 +3673,7 @@ def context_search_classify_line(
     path_capacity: Int64,
     text_output: Pointer[mut=True, UInt8, _],
     text_capacity: Int64,
-) -> InlineArray[Int64, 4]:
+) -> Array[Int64, 4]:
     var result = context_search_plain_result(
         ptr, length, path_output, path_capacity, text_output, text_capacity
     )
@@ -3707,9 +3709,9 @@ def context_search_classify_line(
 
 def context_text_line_counts(
     counts: Pointer[mut=False, Int64, _], line: Int64
-) -> InlineArray[Int64, 7]:
+) -> Array[Int64, 7]:
     var offset = line * CONTEXT_SIGNAL_COUNTER_COUNT
-    var values = InlineArray[Int64, 7](fill=0)
+    var values = Array[Int64, 7](fill=0)
     values[0] = counts[unsafe_offset=offset]
     values[1] = counts[unsafe_offset=offset + 1]
     values[2] = counts[unsafe_offset=offset + 2]
@@ -3720,7 +3722,7 @@ def context_text_line_counts(
     return values^
 
 
-def context_text_counts_have_signal(values: InlineArray[Int64, 7]) -> Bool:
+def context_text_counts_have_signal(values: Array[Int64, 7]) -> Bool:
     return (
         values[0] > 0
         or values[1] > 0
@@ -3737,8 +3739,8 @@ comptime CONTEXT_GEMINI_GLOB_MAX_BYTES: Int64 = 131_072
 
 def context_gemini_glob_component_bounds(
     view: ProdexStringView, cursor: Int64
-) -> InlineArray[Int64, 3]:
-    var bounds = InlineArray[Int64, 3](fill=-1)
+) -> Array[Int64, 3]:
+    var bounds = Array[Int64, 3](fill=-1)
     var length = Int64(view.len)
     if cursor < 0 or cursor > length:
         return bounds^
@@ -3761,9 +3763,9 @@ def context_gemini_glob_ascii_lower(value: UInt8) -> UInt8:
 
 def context_gemini_glob_segment_matches(
     pattern: ProdexStringView,
-    pattern_bounds: InlineArray[Int64, 3],
+    pattern_bounds: Array[Int64, 3],
     text: ProdexStringView,
-    text_bounds: InlineArray[Int64, 3],
+    text_bounds: Array[Int64, 3],
 ) -> Bool:
     ref pattern_ptr = pattern.ptr.unsafe_value()
     ref text_ptr = text.ptr.unsafe_value()
@@ -3803,7 +3805,7 @@ def context_gemini_glob_segment_matches(
 
 
 def context_gemini_glob_component_is_double_star(
-    view: ProdexStringView, bounds: InlineArray[Int64, 3]
+    view: ProdexStringView, bounds: Array[Int64, 3]
 ) -> Bool:
     return (
         bounds[1] - bounds[0] == 2
@@ -3941,15 +3943,15 @@ def context_text_skip_ansi_escape(
 
 def context_text_find_line(
     ptr: Pointer[mut=False, UInt8, _], start: Int64, length: Int64
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     var end = context_search_find_byte(ptr, start, length, 10)
     if end < 0:
         end = length
-        var result = InlineArray[Int64, 2](fill=0)
+        var result = Array[Int64, 2](fill=0)
         result[0] = end
         result[1] = end
         return result^
-    var result = InlineArray[Int64, 2](fill=0)
+    var result = Array[Int64, 2](fill=0)
     result[0] = end
     result[1] = end + 1
     return result^

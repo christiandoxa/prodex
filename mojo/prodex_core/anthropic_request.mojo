@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from rich_text import rich_view_ptr, rich_view_valid
@@ -716,8 +718,8 @@ def anthropic_request_object_field(
     object_start: Int64,
     object_end: Int64,
     key: StringSlice,
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     if (
         object_start < 0
         or object_end <= object_start + 1
@@ -760,8 +762,8 @@ def anthropic_request_object_field(
 
 def anthropic_request_array_last_item(
     view: ProdexRichStringView,
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     if view.len < 2 or anthropic_request_byte(view, 0) != 91 or anthropic_request_byte(view, Int64(view.len) - 1) != 93:
         return result^
     var index = anthropic_request_skip_ws(view, 1, Int64(view.len) - 1)
@@ -771,7 +773,7 @@ def anthropic_request_array_last_item(
         var item_start = index
         var item_end = anthropic_request_value_end(view, item_start, Int64(view.len) - 1, 0)
         if item_end < 0:
-            return InlineArray[Int64, 2](fill=-1)
+            return Array[Int64, 2](fill=-1)
         result[0] = item_start
         result[1] = item_end
         index = anthropic_request_skip_ws(view, item_end, Int64(view.len) - 1)
@@ -780,14 +782,14 @@ def anthropic_request_array_last_item(
             continue
         if index == Int64(view.len) - 1:
             return result^
-        return InlineArray[Int64, 2](fill=-1)
+        return Array[Int64, 2](fill=-1)
     return result^
 
 
 def anthropic_request_array_first_item(
     view: ProdexRichStringView,
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     if view.len < 2 or anthropic_request_byte(view, 0) != 91 or anthropic_request_byte(view, Int64(view.len) - 1) != 93:
         return result^
     var start = anthropic_request_skip_ws(view, 1, Int64(view.len) - 1)
@@ -1048,7 +1050,7 @@ def anthropic_request_append_message(
 def anthropic_request_put_range_or_literal(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     view: ProdexRichStringView,
-    value: InlineArray[Int64, 2],
+    value: Array[Int64, 2],
     default: StringSlice,
 ) -> Bool:
     if value[0] < 0:
@@ -1057,7 +1059,7 @@ def anthropic_request_put_range_or_literal(
 
 
 def anthropic_request_range_is_string(
-    view: ProdexRichStringView, value: InlineArray[Int64, 2]
+    view: ProdexRichStringView, value: Array[Int64, 2]
 ) -> Bool:
     return (
         value[0] >= 0
@@ -1103,7 +1105,7 @@ def anthropic_request_write_stream_queries(
         var item_end = anthropic_request_value_end(view, index, queries[1] - 1, 0)
         if item_end < 0:
             return False
-        var item = InlineArray[Int64, 2](fill=-1)
+        var item = Array[Int64, 2](fill=-1)
         item[0] = index
         item[1] = item_end
         if anthropic_request_range_is_string(view, item):
@@ -1144,9 +1146,9 @@ def anthropic_request_write_stream_event_result(
             view, message[0], message[1], StringSlice('"model"')
         )
         if not anthropic_request_range_is_string(view, id):
-            id = InlineArray[Int64, 2](fill=-1)
+            id = Array[Int64, 2](fill=-1)
         if not anthropic_request_range_is_string(view, model):
-            model = InlineArray[Int64, 2](fill=-1)
+            model = Array[Int64, 2](fill=-1)
         return (
             anthropic_request_put_byte(writer, 1)
             and anthropic_request_put_event_prefix(writer, StringSlice("response.created"))
@@ -1335,7 +1337,7 @@ def anthropic_request_write_stream_event_result(
             view, delta[0], delta[1], field
         )
         if not anthropic_request_range_is_string(view, text):
-            text = InlineArray[Int64, 2](fill=-1)
+            text = Array[Int64, 2](fill=-1)
         return (
             anthropic_request_put_byte(writer, 1)
             and anthropic_request_put_event_prefix(writer, event)

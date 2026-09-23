@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from json_view import (
@@ -30,41 +32,41 @@ struct StructuredJsonSummary(Copyable):
     var arrays: Int64
     var scalars: Int64
     var key_count: Int64
-    var key_starts: InlineArray[Int64, 16]
-    var key_ends: InlineArray[Int64, 16]
-    var key_counts: InlineArray[Int64, 16]
+    var key_starts: Array[Int64, 16]
+    var key_ends: Array[Int64, 16]
+    var key_counts: Array[Int64, 16]
     var level_count: Int64
-    var level_starts: InlineArray[Int64, 10]
-    var level_ends: InlineArray[Int64, 10]
-    var level_counts: InlineArray[Int64, 10]
+    var level_starts: Array[Int64, 10]
+    var level_ends: Array[Int64, 10]
+    var level_counts: Array[Int64, 10]
     var error_count: Int64
-    var error_key_starts: InlineArray[Int64, 8]
-    var error_key_ends: InlineArray[Int64, 8]
-    var error_value_starts: InlineArray[Int64, 8]
-    var error_value_ends: InlineArray[Int64, 8]
+    var error_key_starts: Array[Int64, 8]
+    var error_key_ends: Array[Int64, 8]
+    var error_value_starts: Array[Int64, 8]
+    var error_value_ends: Array[Int64, 8]
     var path_count: Int64
-    var path_key_starts: InlineArray[Int64, 8]
-    var path_key_ends: InlineArray[Int64, 8]
-    var path_value_starts: InlineArray[Int64, 8]
-    var path_value_ends: InlineArray[Int64, 8]
+    var path_key_starts: Array[Int64, 8]
+    var path_key_ends: Array[Int64, 8]
+    var path_value_starts: Array[Int64, 8]
+    var path_value_ends: Array[Int64, 8]
     var id_count: Int64
-    var id_key_starts: InlineArray[Int64, 8]
-    var id_key_ends: InlineArray[Int64, 8]
-    var id_value_starts: InlineArray[Int64, 8]
-    var id_value_ends: InlineArray[Int64, 8]
+    var id_key_starts: Array[Int64, 8]
+    var id_key_ends: Array[Int64, 8]
+    var id_value_starts: Array[Int64, 8]
+    var id_value_ends: Array[Int64, 8]
 
 def structured_json_summary() -> StructuredJsonSummary:
     return StructuredJsonSummary(
         0, 0, 0, 0, 0,
-        InlineArray[Int64, 16](fill=-1), InlineArray[Int64, 16](fill=-1), InlineArray[Int64, 16](fill=0),
+        Array[Int64, 16](fill=-1), Array[Int64, 16](fill=-1), Array[Int64, 16](fill=0),
         0,
-        InlineArray[Int64, 10](fill=-1), InlineArray[Int64, 10](fill=-1), InlineArray[Int64, 10](fill=0),
+        Array[Int64, 10](fill=-1), Array[Int64, 10](fill=-1), Array[Int64, 10](fill=0),
         0,
-        InlineArray[Int64, 8](fill=-1), InlineArray[Int64, 8](fill=-1), InlineArray[Int64, 8](fill=-1), InlineArray[Int64, 8](fill=-1),
+        Array[Int64, 8](fill=-1), Array[Int64, 8](fill=-1), Array[Int64, 8](fill=-1), Array[Int64, 8](fill=-1),
         0,
-        InlineArray[Int64, 8](fill=-1), InlineArray[Int64, 8](fill=-1), InlineArray[Int64, 8](fill=-1), InlineArray[Int64, 8](fill=-1),
+        Array[Int64, 8](fill=-1), Array[Int64, 8](fill=-1), Array[Int64, 8](fill=-1), Array[Int64, 8](fill=-1),
         0,
-        InlineArray[Int64, 8](fill=-1), InlineArray[Int64, 8](fill=-1), InlineArray[Int64, 8](fill=-1), InlineArray[Int64, 8](fill=-1),
+        Array[Int64, 8](fill=-1), Array[Int64, 8](fill=-1), Array[Int64, 8](fill=-1), Array[Int64, 8](fill=-1),
     )
 
 def structured_json_put_byte(writer: Pointer[mut=True, StructuredJsonWriter, _], value: UInt8) -> Bool:

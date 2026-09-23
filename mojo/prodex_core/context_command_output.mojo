@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from context_command_output_common import (
@@ -183,7 +185,7 @@ def context_command_output_parse_short_status(
     hash_slots: Pointer[mut=True, Int64, _],
     hash_capacity: Int64,
     scratch: Pointer[mut=True, ContextCommandOutputWriter, _],
-    branch: Pointer[mut=True, InlineArray[Int64, 2], _],
+    branch: Pointer[mut=True, Array[Int64, 2], _],
 ) -> Bool:
     var ptr = rich_view_ptr(input.input)
     var length = Int64(input.input.len)
@@ -220,7 +222,7 @@ def context_command_output_parse_long_status(
     hash_slots: Pointer[mut=True, Int64, _],
     hash_capacity: Int64,
     scratch: Pointer[mut=True, ContextCommandOutputWriter, _],
-    branch: Pointer[mut=True, InlineArray[Int64, 2], _],
+    branch: Pointer[mut=True, Array[Int64, 2], _],
     clean: Pointer[mut=True, Bool, _],
 ) -> Bool:
     var ptr = rich_view_ptr(input.input)
@@ -693,7 +695,7 @@ def context_command_output_git_status(
     hash_capacity: Int64,
 ) -> Int64:
     var record_count: Int64 = 0
-    var branch = InlineArray[Int64, 2](fill=-1)
+    var branch = Array[Int64, 2](fill=-1)
     var branch_ptr = Pointer(to=branch)
     var clean = False
     var clean_ptr = Pointer(to=clean)

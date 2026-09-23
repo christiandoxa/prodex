@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
@@ -169,8 +171,8 @@ def smart_context_emit_literal[literal: StaticString](
 
 def smart_context_parse_unsigned(
     source: Pointer[mut=False, UInt8, _], length: Int64, start: Int64
-) -> InlineArray[UInt64, 3]:
-    var result = InlineArray[UInt64, 3](fill=0)
+) -> Array[UInt64, 3]:
+    var result = Array[UInt64, 3](fill=0)
     if start < 0 or start >= length:
         return result^
     var index = start
@@ -517,8 +519,8 @@ def smart_context_duration_len(
 
 def smart_context_key_bounds(
     source: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
-) -> InlineArray[Int64, 2]:
-    var bounds = InlineArray[Int64, 2](fill=0)
+) -> Array[Int64, 2]:
+    var bounds = Array[Int64, 2](fill=0)
     var lower: Int64 = start
     var upper: Int64 = end
     while lower < upper and smart_context_is_ascii_whitespace(source[unsafe_offset=lower]):

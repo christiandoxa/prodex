@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
@@ -648,8 +650,8 @@ def accounting_value(
     return values[unsafe_offset=index]
 
 
-def accounting_checked_add(left: UInt64, right: UInt64) -> InlineArray[UInt64, 2]:
-    var result = InlineArray[UInt64, 2](fill=0)
+def accounting_checked_add(left: UInt64, right: UInt64) -> Array[UInt64, 2]:
+    var result = Array[UInt64, 2](fill=0)
     if left > UINT64_MAX - right:
         result[1] = 1
     else:

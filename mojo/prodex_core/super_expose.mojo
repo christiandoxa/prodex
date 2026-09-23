@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from rich_text import rich_view_matches_literal, rich_view_ptr, rich_view_valid
@@ -188,7 +190,7 @@ def super_expose_ascii_trim_bounds(
     view: ProdexRichStringView,
     start: Int64,
     end: Int64,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     var left = start
     var right = end
     var ptr = rich_view_ptr(view)
@@ -204,7 +206,7 @@ def super_expose_ascii_trim_bounds(
             right -= 1
         else:
             break
-    var bounds = InlineArray[Int64, 2](fill=0)
+    var bounds = Array[Int64, 2](fill=0)
     bounds[0] = left
     bounds[1] = right
     return bounds^

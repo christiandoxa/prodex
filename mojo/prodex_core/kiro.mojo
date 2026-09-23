@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from rich_text import (
@@ -1924,8 +1926,8 @@ def kiro_kernel_v1(
 
 # Raw JSON request validation. This removes Rust fact-extraction from the
 # production Mojo path while preserving the same ordered policy plan.
-def kiro_raw_root(view: ProdexRichStringView) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+def kiro_raw_root(view: ProdexRichStringView) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
     if start >= Int64(view.len) or deepseek_json_byte(view, start) != 123:
         return result^
@@ -1936,12 +1938,12 @@ def kiro_raw_root(view: ProdexRichStringView) -> InlineArray[Int64, 2]:
     result[1] = end
     return result^
 
-def kiro_raw_present(bounds: InlineArray[Int64, 2]) -> Bool:
+def kiro_raw_present(bounds: Array[Int64, 2]) -> Bool:
     return bounds[0] >= 0 and bounds[1] > bounds[0]
 
 def kiro_raw_is_literal(
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     literal: StringSlice,
 ) -> Bool:
     if not kiro_raw_present(bounds):
@@ -1958,17 +1960,17 @@ def kiro_raw_is_literal(
             return False
     return True
 
-def kiro_raw_is_null(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+def kiro_raw_is_null(view: ProdexRichStringView, bounds: Array[Int64, 2]) -> Bool:
     return kiro_raw_is_literal(view, bounds, StringSlice("null"))
 
-def kiro_raw_is_true(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+def kiro_raw_is_true(view: ProdexRichStringView, bounds: Array[Int64, 2]) -> Bool:
     return kiro_raw_is_literal(view, bounds, StringSlice("true"))
 
-def kiro_raw_is_false(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+def kiro_raw_is_false(view: ProdexRichStringView, bounds: Array[Int64, 2]) -> Bool:
     return kiro_raw_is_literal(view, bounds, StringSlice("false"))
 
 def kiro_raw_nonempty_string(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if not kiro_raw_present(bounds) or deepseek_json_byte(view, bounds[0]) != 34:
         return False
@@ -1977,7 +1979,7 @@ def kiro_raw_nonempty_string(
 
 def kiro_raw_number_default(
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     default_one: Bool,
 ) -> Bool:
     if not kiro_raw_present(bounds):
@@ -2052,7 +2054,7 @@ def kiro_raw_number_default(
     return integer_digits - 1 - one_index + exponent == 0
 
 def kiro_raw_positive_u64_integer(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if not kiro_raw_present(bounds):
         return False
@@ -2075,7 +2077,7 @@ def kiro_raw_positive_u64_integer(
     return digits > 0 and value > 0
 
 def kiro_raw_stop_requested(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if not kiro_raw_present(bounds) or kiro_raw_is_null(view, bounds):
         return False
@@ -2089,7 +2091,7 @@ def kiro_raw_stop_requested(
         var value_end = deepseek_json_value_end(view, cursor, bounds[1] - 1, 0)
         if value_end < 0:
             return True
-        var item = InlineArray[Int64, 2](fill=-1)
+        var item = Array[Int64, 2](fill=-1)
         item[0] = cursor
         item[1] = value_end
         if deepseek_json_byte(view, cursor) != 34 or kiro_raw_nonempty_string(view, item):
@@ -2102,7 +2104,7 @@ def kiro_raw_stop_requested(
     return False
 
 def kiro_raw_supported_response_format(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if not kiro_raw_present(bounds) or kiro_raw_is_null(view, bounds):
         return True
@@ -2115,10 +2117,10 @@ def kiro_raw_supported_response_format(
 
 def kiro_raw_token_limit(
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
-) -> InlineArray[Int64, 3]:
+    root: Array[Int64, 2],
+) -> Array[Int64, 3]:
     # present, field-index, positive
-    var result = InlineArray[Int64, 3](fill=0)
+    var result = Array[Int64, 3](fill=0)
     var field_index: Int64 = 0
     for key in [
         StringSlice("max_output_tokens"),
@@ -2136,7 +2138,7 @@ def kiro_raw_token_limit(
 
 def kiro_raw_response_format_supported(
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
 ) -> Bool:
     var direct = deepseek_json_object_member(
         view, root[0], root[1], StringSlice("response_format")
@@ -2155,14 +2157,14 @@ def kiro_raw_response_format_supported(
     return True
 
 def kiro_raw_array_empty(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if not kiro_raw_present(bounds) or deepseek_json_byte(view, bounds[0]) != 91:
         return False
     return deepseek_json_skip_ws(view, bounds[0] + 1, bounds[1] - 1) == bounds[1] - 1
 
 def kiro_raw_reasoning_effort_supported(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if not kiro_raw_present(bounds) or deepseek_json_byte(view, bounds[0]) != 34:
         return True
@@ -2276,7 +2278,7 @@ def kiro_raw_validation_flags(
     if kiro_raw_present(deepseek_json_object_member(view, root[0], root[1], StringSlice("web_search_options"))):
         flags |= UInt64(KIRO_REQUEST_FLAG_WEB_SEARCH)
 
-    var effort = InlineArray[Int64, 2](fill=-1)
+    var effort = Array[Int64, 2](fill=-1)
     var reasoning = deepseek_json_object_member(view, root[0], root[1], StringSlice("reasoning"))
     if kiro_raw_present(reasoning) and deepseek_json_byte(view, reasoning[0]) == 123:
         effort = deepseek_json_object_member(view, reasoning[0], reasoning[1], StringSlice("effort"))
@@ -2387,14 +2389,14 @@ comptime KIRO_CHAT_REWRITE_ISSUE_INVALID_MESSAGES: Int64 = 2
 
 def kiro_raw_member(
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
     key: StringSlice,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     return deepseek_json_object_member(view, root[0], root[1], key)
 
 def kiro_raw_string_nonblank(
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if not kiro_raw_present(bounds) or deepseek_json_byte(view, bounds[0]) != 34:
         return False
@@ -2463,7 +2465,7 @@ def kiro_raw_string_nonblank(
 def kiro_raw_put_string_token(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     return (
         kiro_raw_present(bounds)
@@ -2474,7 +2476,7 @@ def kiro_raw_put_string_token(
 def kiro_raw_put_default_or_string(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     default_value: StringSlice,
 ) -> Bool:
     if kiro_raw_present(bounds) and deepseek_json_byte(view, bounds[0]) == 34:
@@ -2483,7 +2485,7 @@ def kiro_raw_put_default_or_string(
 
 def kiro_raw_text_piece(
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     writer: Pointer[mut=True, KiroResponseWriter, _],
     add_separator: Bool,
     depth: Int64,
@@ -2504,7 +2506,7 @@ def kiro_raw_text_piece(
             var item_end = deepseek_json_value_end(view, cursor, bounds[1] - 1, depth + 1)
             if item_end < 0:
                 return -1
-            var item = InlineArray[Int64, 2](fill=-1)
+            var item = Array[Int64, 2](fill=-1)
             item[0] = cursor
             item[1] = item_end
             var result: Int64 = 0
@@ -2542,7 +2544,7 @@ def kiro_raw_text_piece(
 def kiro_raw_put_text_json_string(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Int64:
     var saved = writer[].written
     if not kiro_put_byte(writer, 34):
@@ -2558,21 +2560,21 @@ def kiro_raw_put_text_json_string(
 
 def kiro_raw_object_string_member(
     view: ProdexRichStringView,
-    object_bounds: InlineArray[Int64, 2],
+    object_bounds: Array[Int64, 2],
     key: StringSlice,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     if not kiro_raw_present(object_bounds) or deepseek_json_byte(view, object_bounds[0]) != 123:
-        return InlineArray[Int64, 2](fill=-1)^
+        return Array[Int64, 2](fill=-1)^
     var value = deepseek_json_object_member(
         view, object_bounds[0], object_bounds[1], key
     )
     if kiro_raw_present(value) and deepseek_json_byte(view, value[0]) == 34:
         return value
-    return InlineArray[Int64, 2](fill=-1)^
+    return Array[Int64, 2](fill=-1)^
 
 def kiro_raw_role_is(
     view: ProdexRichStringView,
-    role: InlineArray[Int64, 2],
+    role: Array[Int64, 2],
     literal: StringSlice,
 ) -> Bool:
     return kiro_raw_present(role) and deepseek_json_raw_equals(
@@ -2591,7 +2593,7 @@ def kiro_raw_item_prefix(
 def kiro_raw_write_message_item(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    message: InlineArray[Int64, 2],
+    message: Array[Int64, 2],
     first: Pointer[mut=True, Int64, _],
 ) -> Bool:
     var role = kiro_raw_member(view, message, StringSlice("role"))
@@ -2630,9 +2632,9 @@ def kiro_raw_write_message_item(
 def kiro_raw_write_function_call_item(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    call_id: InlineArray[Int64, 2],
-    name: InlineArray[Int64, 2],
-    arguments: InlineArray[Int64, 2],
+    call_id: Array[Int64, 2],
+    name: Array[Int64, 2],
+    arguments: Array[Int64, 2],
     first: Pointer[mut=True, Int64, _],
 ) -> Bool:
     if not kiro_raw_item_prefix(writer, first):
@@ -2656,7 +2658,7 @@ def kiro_raw_write_function_call_item(
 def kiro_raw_write_tool_calls(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    message: InlineArray[Int64, 2],
+    message: Array[Int64, 2],
     first: Pointer[mut=True, Int64, _],
 ) -> Bool:
     var role = kiro_raw_member(view, message, StringSlice("role"))
@@ -2671,7 +2673,7 @@ def kiro_raw_write_tool_calls(
         if item_end < 0:
             return False
         if deepseek_json_byte(view, cursor) == 123:
-            var item = InlineArray[Int64, 2](fill=-1)
+            var item = Array[Int64, 2](fill=-1)
             item[0] = cursor
             item[1] = item_end
             var function = kiro_raw_member(view, item, StringSlice("function"))
@@ -2697,7 +2699,7 @@ def kiro_raw_write_tool_calls(
 def kiro_raw_write_legacy_function_call_item(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    message: InlineArray[Int64, 2],
+    message: Array[Int64, 2],
     first: Pointer[mut=True, Int64, _],
 ) -> Bool:
     var role = kiro_raw_member(view, message, StringSlice("role"))
@@ -2723,7 +2725,7 @@ def kiro_raw_write_legacy_function_call_item(
 def kiro_raw_write_tool_output_item(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    message: InlineArray[Int64, 2],
+    message: Array[Int64, 2],
     first: Pointer[mut=True, Int64, _],
 ) -> Bool:
     var role = kiro_raw_member(view, message, StringSlice("role"))
@@ -2763,7 +2765,7 @@ def kiro_raw_write_tool_output_item(
 def kiro_raw_write_chat_input(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    messages: InlineArray[Int64, 2],
+    messages: Array[Int64, 2],
 ) -> Bool:
     if not kiro_raw_present(messages) or deepseek_json_byte(view, messages[0]) != 91:
         return False
@@ -2779,7 +2781,7 @@ def kiro_raw_write_chat_input(
         if message_end < 0:
             return False
         if deepseek_json_byte(view, cursor) == 123:
-            var message = InlineArray[Int64, 2](fill=-1)
+            var message = Array[Int64, 2](fill=-1)
             message[0] = cursor
             message[1] = message_end
             if (
@@ -2969,7 +2971,7 @@ def kiro_chat_request_rewrite_v1(
     return KIRO_KERNEL_STATUS_OK
 
 def kiro_raw_string_empty(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     return (
         kiro_raw_present(bounds)
@@ -2981,7 +2983,7 @@ def kiro_raw_put_prefixed_string_token(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     prefix: StringSlice,
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if not kiro_raw_present(bounds) or deepseek_json_byte(view, bounds[0]) != 34:
         return False
@@ -2992,7 +2994,7 @@ def kiro_raw_put_prefixed_string_token(
     return kiro_put_byte(writer, 34)
 
 def kiro_raw_json_positive_integer(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if not kiro_raw_present(bounds):
         return False
@@ -3009,9 +3011,9 @@ def kiro_raw_json_positive_integer(
 
 def kiro_raw_first_output_message_text(
     view: ProdexRichStringView,
-    output: InlineArray[Int64, 2],
-) -> InlineArray[Int64, 2]:
-    var missing = InlineArray[Int64, 2](fill=-1)
+    output: Array[Int64, 2],
+) -> Array[Int64, 2]:
+    var missing = Array[Int64, 2](fill=-1)
     if not kiro_raw_present(output) or deepseek_json_byte(view, output[0]) != 91:
         return missing^
     var cursor = deepseek_json_skip_ws(view, output[0] + 1, output[1] - 1)
@@ -3020,7 +3022,7 @@ def kiro_raw_first_output_message_text(
         if item_end < 0:
             return missing^
         if deepseek_json_byte(view, cursor) == 123:
-            var item = InlineArray[Int64, 2](fill=-1)
+            var item = Array[Int64, 2](fill=-1)
             item[0] = cursor
             item[1] = item_end
             var kind = kiro_raw_member(view, item, StringSlice("type"))
@@ -3037,7 +3039,7 @@ def kiro_raw_first_output_message_text(
                             view, first, content[1] - 1, 0
                         )
                         if first_end > first and deepseek_json_byte(view, first) == 123:
-                            var first_item = InlineArray[Int64, 2](fill=-1)
+                            var first_item = Array[Int64, 2](fill=-1)
                             first_item[0] = first
                             first_item[1] = first_end
                             var text = kiro_raw_member(
@@ -3055,7 +3057,7 @@ def kiro_raw_first_output_message_text(
 
 def kiro_raw_function_call_count(
     view: ProdexRichStringView,
-    output: InlineArray[Int64, 2],
+    output: Array[Int64, 2],
 ) -> Int64:
     if not kiro_raw_present(output) or deepseek_json_byte(view, output[0]) != 91:
         return 0
@@ -3066,7 +3068,7 @@ def kiro_raw_function_call_count(
         if item_end < 0:
             return -1
         if deepseek_json_byte(view, cursor) == 123:
-            var item = InlineArray[Int64, 2](fill=-1)
+            var item = Array[Int64, 2](fill=-1)
             item[0] = cursor
             item[1] = item_end
             var kind = kiro_raw_member(view, item, StringSlice("type"))
@@ -3086,7 +3088,7 @@ def kiro_raw_function_call_count(
 def kiro_raw_put_chat_tool_calls(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    output: InlineArray[Int64, 2],
+    output: Array[Int64, 2],
 ) -> Bool:
     if not kiro_put_byte(writer, 91):
         return False
@@ -3097,7 +3099,7 @@ def kiro_raw_put_chat_tool_calls(
         if item_end < 0:
             return False
         if deepseek_json_byte(view, cursor) == 123:
-            var item = InlineArray[Int64, 2](fill=-1)
+            var item = Array[Int64, 2](fill=-1)
             item[0] = cursor
             item[1] = item_end
             var kind = kiro_raw_member(view, item, StringSlice("type"))
@@ -3139,13 +3141,13 @@ def kiro_raw_put_chat_tool_calls(
 
 def kiro_raw_nested_member(
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
     first_key: StringSlice,
     second_key: StringSlice,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     var first = kiro_raw_member(view, root, first_key)
     if not kiro_raw_present(first) or deepseek_json_byte(view, first[0]) != 123:
-        return InlineArray[Int64, 2](fill=-1)^
+        return Array[Int64, 2](fill=-1)^
     return kiro_raw_member(view, first, second_key)
 
 def kiro_raw_chat_response(
@@ -3330,8 +3332,8 @@ def kiro_chat_response_rewrite_v1(
 def kiro_raw_put_anthropic_message_text_item(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    role: InlineArray[Int64, 2],
-    text: InlineArray[Int64, 2],
+    role: Array[Int64, 2],
+    text: Array[Int64, 2],
     first: Pointer[mut=True, Int64, _],
 ) -> Bool:
     if not kiro_raw_present(text) or deepseek_json_byte(view, text[0]) != 34:
@@ -3349,7 +3351,7 @@ def kiro_raw_put_anthropic_message_text_item(
 def kiro_raw_put_anthropic_tool_use_item(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    block: InlineArray[Int64, 2],
+    block: Array[Int64, 2],
     first: Pointer[mut=True, Int64, _],
 ) -> Bool:
     var call_id = kiro_raw_member(view, block, StringSlice("id"))
@@ -3378,7 +3380,7 @@ def kiro_raw_put_anthropic_tool_use_item(
 def kiro_raw_put_anthropic_tool_result_item(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    block: InlineArray[Int64, 2],
+    block: Array[Int64, 2],
     first: Pointer[mut=True, Int64, _],
 ) -> Bool:
     var call_id = kiro_raw_member(view, block, StringSlice("tool_use_id"))
@@ -3404,8 +3406,8 @@ def kiro_raw_put_anthropic_tool_result_item(
 def kiro_raw_put_anthropic_content(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
-    role: InlineArray[Int64, 2],
-    content: InlineArray[Int64, 2],
+    role: Array[Int64, 2],
+    content: Array[Int64, 2],
     first: Pointer[mut=True, Int64, _],
 ) -> Bool:
     if not kiro_raw_present(content):
@@ -3420,7 +3422,7 @@ def kiro_raw_put_anthropic_content(
         if block_end < 0:
             return False
         if deepseek_json_byte(view, cursor) == 123:
-            var block = InlineArray[Int64, 2](fill=-1)
+            var block = Array[Int64, 2](fill=-1)
             block[0] = cursor
             block[1] = block_end
             var kind = kiro_raw_member(view, block, StringSlice("type"))
@@ -3488,7 +3490,7 @@ def kiro_raw_rewrite_anthropic_request(
     var first: Int64 = 1
     var first_ptr = Pointer(to=first)
     if kiro_raw_present(system):
-        var system_role = InlineArray[Int64, 2](fill=-1)
+        var system_role = Array[Int64, 2](fill=-1)
         if not kiro_raw_item_prefix(writer, first_ptr):
             return False
         if not kiro_put_literal(
@@ -3513,7 +3515,7 @@ def kiro_raw_rewrite_anthropic_request(
             if message_end < 0:
                 return False
             if deepseek_json_byte(view, cursor) == 123:
-                var message = InlineArray[Int64, 2](fill=-1)
+                var message = Array[Int64, 2](fill=-1)
                 message[0] = cursor
                 message[1] = message_end
                 var role = kiro_raw_member(view, message, StringSlice("role"))

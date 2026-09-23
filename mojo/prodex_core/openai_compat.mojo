@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from rich_text import rich_trim_bounds, rich_view_matches_literal, rich_view_ptr, rich_view_valid
@@ -639,7 +641,7 @@ def openai_compat_json_key_is_cmd(
 ) -> Bool:
     if start >= end or ptr[unsafe_offset=start] != 34:
         return False
-    var expected = InlineArray[UInt8, 3](fill=0)
+    var expected = Array[UInt8, 3](fill=0)
     expected[0] = 99
     expected[1] = 109
     expected[2] = 100
@@ -667,8 +669,8 @@ def openai_compat_json_key_is_cmd(
 
 def openai_compat_rtk_bounds(
     view: ProdexRichStringView,
-) -> InlineArray[Int64, 5]:
-    var result = InlineArray[Int64, 5](fill=-1)
+) -> Array[Int64, 5]:
+    var result = Array[Int64, 5](fill=-1)
     if view.len == 0:
         return result^
     var ptr = rich_view_ptr(view)
@@ -686,14 +688,14 @@ def openai_compat_rtk_bounds(
         var key_start = index
         var key_end = openai_compat_json_string_end(ptr, key_start, end)
         if key_end < 0:
-            return InlineArray[Int64, 5](fill=-1)
+            return Array[Int64, 5](fill=-1)
         index = openai_compat_json_skip_ws(ptr, key_end, end)
         if index >= end or ptr[unsafe_offset=index] != 58:
-            return InlineArray[Int64, 5](fill=-1)
+            return Array[Int64, 5](fill=-1)
         var value_start = openai_compat_json_skip_ws(ptr, index + 1, end)
         var value_end = openai_compat_json_value_end(ptr, value_start, end, 0)
         if value_end < 0:
-            return InlineArray[Int64, 5](fill=-1)
+            return Array[Int64, 5](fill=-1)
         if openai_compat_json_key_is_cmd(ptr, key_start, key_end):
             result[1] = 1
             result[4] = 0
@@ -712,9 +714,9 @@ def openai_compat_rtk_bounds(
             result[0] = 1
             return result^
         if index >= end or ptr[unsafe_offset=index] != 44:
-            return InlineArray[Int64, 5](fill=-1)
+            return Array[Int64, 5](fill=-1)
         index = openai_compat_json_skip_ws(ptr, index + 1, end)
-    return InlineArray[Int64, 5](fill=-1)
+    return Array[Int64, 5](fill=-1)
 
 
 def openai_compat_command_needs_rtk(

@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 comptime DECISION_COMPATIBLE: Int64 = 0
@@ -1123,8 +1125,8 @@ def gemini_request_content_object_member(
     object_start: Int64,
     object_end: Int64,
     key: StringSlice,
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     if object_start < 0 or object_end > Int64(view.len) or object_end <= object_start + 1:
         return result^
     if gemini_request_content_byte(view, object_start) != 123 or gemini_request_content_byte(view, object_end - 1) != 125:
@@ -1134,14 +1136,14 @@ def gemini_request_content_object_member(
         var key_start = index
         var key_end = gemini_request_content_string_end(view, key_start, object_end - 1)
         if key_end < 0:
-            return InlineArray[Int64, 2](fill=-1)^
+            return Array[Int64, 2](fill=-1)^
         index = gemini_request_content_skip_ws(view, key_end, object_end - 1)
         if index >= object_end - 1 or gemini_request_content_byte(view, index) != 58:
-            return InlineArray[Int64, 2](fill=-1)^
+            return Array[Int64, 2](fill=-1)^
         var value_start = gemini_request_content_skip_ws(view, index + 1, object_end - 1)
         var value_end = gemini_request_content_value_end(view, value_start, object_end - 1, 0)
         if value_end < 0:
-            return InlineArray[Int64, 2](fill=-1)^
+            return Array[Int64, 2](fill=-1)^
         if gemini_request_content_raw_equals(view, key_start, key_end, key):
             result[0] = value_start
             result[1] = value_end
@@ -1151,7 +1153,7 @@ def gemini_request_content_object_member(
             continue
         if index == object_end - 1:
             break
-        return InlineArray[Int64, 2](fill=-1)^
+        return Array[Int64, 2](fill=-1)^
     return result^
 
 
@@ -1869,8 +1871,8 @@ def gemini_bridge_request_input_valid(input: GeminiBridgeRequestInput) -> Bool:
 
 def gemini_bridge_request_value_bounds(
     view: GeminiRequestContentStringView,
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     if not gemini_request_content_view_valid(view) or view.len == 0:
         return result^
     var end = Int64(view.len)
@@ -1888,7 +1890,7 @@ def gemini_bridge_request_object_member(
     object_start: Int64,
     object_end: Int64,
     key: StringSlice,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     return gemini_request_content_object_member(view, object_start, object_end, key)
 
 
@@ -1958,7 +1960,7 @@ def gemini_bridge_request_put_literal_field(
 
 def gemini_bridge_request_write_optional_original_fields(
     original: GeminiRequestContentStringView,
-    original_bounds: InlineArray[Int64, 2],
+    original_bounds: Array[Int64, 2],
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
     first: Pointer[mut=True, Bool, _],
 ) -> Bool:
@@ -2062,10 +2064,10 @@ def gemini_bridge_request_write_content_body(
 
 def gemini_bridge_request_source_bounds(
     source: GeminiRequestContentStringView,
-    object_bounds: InlineArray[Int64, 2],
+    object_bounds: Array[Int64, 2],
     index: Int64,
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     if index < 0 or not gemini_bridge_request_is_object(
         source, object_bounds[0], object_bounds[1]
     ):
@@ -2132,7 +2134,7 @@ def gemini_bridge_request_source_bounds(
 
 
 def gemini_bridge_request_value_view(
-    source: GeminiRequestContentStringView, bounds: InlineArray[Int64, 2]
+    source: GeminiRequestContentStringView, bounds: Array[Int64, 2]
 ) -> GeminiRequestContentStringView:
     return GeminiRequestContentStringView(
         source.ptr + UInt64(bounds[0]), UInt64(bounds[1] - bounds[0])
@@ -2141,7 +2143,7 @@ def gemini_bridge_request_value_view(
 
 def gemini_bridge_request_put_source_pair(
     source: GeminiRequestContentStringView,
-    object_bounds: InlineArray[Int64, 2],
+    object_bounds: Array[Int64, 2],
     first_source: Int64,
     second_source: Int64,
     target: StringSlice,
@@ -2161,7 +2163,7 @@ def gemini_bridge_request_put_source_pair(
 
 def gemini_bridge_request_put_source_triple(
     source: GeminiRequestContentStringView,
-    object_bounds: InlineArray[Int64, 2],
+    object_bounds: Array[Int64, 2],
     first_source: Int64,
     second_source: Int64,
     third_source: Int64,
@@ -2227,7 +2229,7 @@ def gemini_bridge_request_string_contains(
 
 def gemini_bridge_request_text_format_kind(
     original: GeminiRequestContentStringView,
-    original_bounds: InlineArray[Int64, 2],
+    original_bounds: Array[Int64, 2],
 ) -> Int64:
     if not gemini_bridge_request_is_object(original, original_bounds[0], original_bounds[1]):
         return 0
@@ -2259,7 +2261,7 @@ def gemini_bridge_request_text_format_kind(
 
 def gemini_bridge_request_write_text_format(
     original: GeminiRequestContentStringView,
-    original_bounds: InlineArray[Int64, 2],
+    original_bounds: Array[Int64, 2],
     format_kind: Int64,
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
     first: Pointer[mut=True, Bool, _],
@@ -2299,7 +2301,7 @@ def gemini_bridge_request_write_text_format(
 
 def gemini_bridge_request_reasoning_effort(
     original: GeminiRequestContentStringView,
-    original_bounds: InlineArray[Int64, 2],
+    original_bounds: Array[Int64, 2],
 ) -> GeminiRequestContentStringView:
     var empty = GeminiRequestContentStringView(0, 0)
     if not gemini_bridge_request_is_object(original, original_bounds[0], original_bounds[1]):
@@ -2319,7 +2321,7 @@ def gemini_bridge_request_reasoning_effort(
 
 def gemini_bridge_request_write_thinking_config(
     original: GeminiRequestContentStringView,
-    original_bounds: InlineArray[Int64, 2],
+    original_bounds: Array[Int64, 2],
     model: GeminiRequestContentStringView,
     budget: GeminiRequestContentStringView,
     budget_present: Int64,
@@ -2822,8 +2824,8 @@ def gemini_bridge_request_write_without_tool(
 
 def gemini_bridge_request_raw_values_equal(
     source: GeminiRequestContentStringView,
-    left: InlineArray[Int64, 2],
-    right: InlineArray[Int64, 2],
+    left: Array[Int64, 2],
+    right: Array[Int64, 2],
 ) -> Bool:
     if left[0] < 0 or right[0] < 0 or left[1] - left[0] != right[1] - right[0]:
         return False
@@ -3265,7 +3267,7 @@ def gemini_bridge_request_simple(
 
 def gemini_bridge_text_raw_string(
     source: GeminiRequestContentStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     return (
         bounds[0] >= 0
@@ -3345,8 +3347,8 @@ def gemini_bridge_text_object_value(
     source: GeminiRequestContentStringView,
     start: Int64,
     end: Int64,
-) -> InlineArray[Int64, 2]:
-    var missing = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var missing = Array[Int64, 2](fill=-1)
     if not gemini_bridge_request_is_object(source, start, end):
         return missing^
     if gemini_bridge_text_media_like_object(source, start, end):
@@ -3366,7 +3368,7 @@ def gemini_bridge_text_object_value(
 
 def gemini_bridge_text_content_supported(
     source: GeminiRequestContentStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if bounds[0] < 0:
         return True
@@ -3419,7 +3421,7 @@ def gemini_bridge_text_contextual_prefix(
 
 def gemini_bridge_text_content_has_contextual_prefix(
     source: GeminiRequestContentStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if bounds[0] < 0:
         return False
@@ -3438,7 +3440,7 @@ def gemini_bridge_text_content_has_contextual_prefix(
         )
         if value_end < 0:
             return False
-        var text = InlineArray[Int64, 2](fill=-1)
+        var text = Array[Int64, 2](fill=-1)
         if gemini_request_content_byte(source, index) == 34:
             text[0] = index
             text[1] = value_end
@@ -3458,7 +3460,7 @@ def gemini_bridge_text_content_has_contextual_prefix(
 def gemini_bridge_text_copy_inner(
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
     source: GeminiRequestContentStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     return gemini_request_content_put_range(
         writer, source, bounds[0] + 1, bounds[1] - 1
@@ -3467,7 +3469,7 @@ def gemini_bridge_text_copy_inner(
 
 def gemini_bridge_text_write_joined_inner(
     source: GeminiRequestContentStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
     found: Pointer[mut=True, Int64, _],
     separator: StringSlice,
@@ -3494,7 +3496,7 @@ def gemini_bridge_text_write_joined_inner(
         )
         if value_end < 0:
             return False
-        var text = InlineArray[Int64, 2](fill=-1)
+        var text = Array[Int64, 2](fill=-1)
         if gemini_request_content_byte(source, index) == 34:
             text[0] = index
             text[1] = value_end
@@ -3518,7 +3520,7 @@ def gemini_bridge_text_write_joined_inner(
 
 def gemini_bridge_text_request_supported(
     source: GeminiRequestContentStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
 ) -> Bool:
     var input = gemini_bridge_request_object_member(
         source, root[0], root[1], StringSlice("input")
@@ -3567,7 +3569,7 @@ def gemini_bridge_text_request_supported(
 
 def gemini_bridge_text_content_nonempty(
     source: GeminiRequestContentStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if bounds[0] < 0:
         return False
@@ -3586,7 +3588,7 @@ def gemini_bridge_text_content_nonempty(
         )
         if value_end < 0:
             return False
-        var text = InlineArray[Int64, 2](fill=-1)
+        var text = Array[Int64, 2](fill=-1)
         if gemini_request_content_byte(source, index) == 34:
             text[0] = index
             text[1] = value_end
@@ -3606,7 +3608,7 @@ def gemini_bridge_text_content_nonempty(
 
 def gemini_bridge_text_write_parts(
     source: GeminiRequestContentStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
 ) -> Bool:
     if not gemini_request_content_put_byte(writer, 91):
@@ -3636,7 +3638,7 @@ def gemini_bridge_text_write_parts(
         )
         if value_end < 0:
             return False
-        var text = InlineArray[Int64, 2](fill=-1)
+        var text = Array[Int64, 2](fill=-1)
         if gemini_request_content_byte(source, index) == 34:
             text[0] = index
             text[1] = value_end
@@ -3666,7 +3668,7 @@ def gemini_bridge_text_write_parts(
 
 def gemini_bridge_text_write_system_instruction(
     source: GeminiRequestContentStringView,
-    input: InlineArray[Int64, 2],
+    input: Array[Int64, 2],
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
 ) -> Bool:
     var has_system = False
@@ -3732,7 +3734,7 @@ def gemini_bridge_text_write_system_instruction(
 
 def gemini_bridge_text_write_contents(
     source: GeminiRequestContentStringView,
-    input: InlineArray[Int64, 2],
+    input: Array[Int64, 2],
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
 ) -> Bool:
     if not gemini_request_content_put_byte(writer, 91):
@@ -3909,7 +3911,7 @@ def gemini_bridge_validation_put_plan(
 
 def gemini_bridge_validation_media_type(
     source: GeminiRequestContentStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if bounds[0] < 0 or gemini_request_content_byte(source, bounds[0]) != 34:
         return False
@@ -4317,7 +4319,7 @@ def gemini_bridge_request_validate_translator(
 
 def gemini_translator_response_format_kind(
     source: GeminiRequestContentStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
 ) -> Int64:
     var response_format = gemini_bridge_request_object_member(
         source, root[0], root[1], StringSlice("response_format")
@@ -4349,7 +4351,7 @@ def gemini_translator_response_format_kind(
 
 def gemini_translator_write_response_format(
     source: GeminiRequestContentStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
     kind: Int64,
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
     first: Pointer[mut=True, Bool, _],
@@ -4658,7 +4660,7 @@ def gemini_translator_write_computer_tool(
             source, environment[0], environment[1]
         )
     ):
-        environment = InlineArray[Int64, 2](fill=-1)
+        environment = Array[Int64, 2](fill=-1)
 
     var excluded = gemini_bridge_request_object_member(
         source,
@@ -4755,7 +4757,7 @@ def gemini_translator_write_function_declaration(
 
 def gemini_translator_write_tools_field(
     source: GeminiRequestContentStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
     first_field: Pointer[mut=True, Bool, _],
 ) -> Bool:

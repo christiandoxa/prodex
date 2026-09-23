@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from json_view import (
@@ -134,11 +136,11 @@ def ping_classify_failure(view: ProdexRichStringView) -> Int64:
         return PING_STATUS_TIMEOUT
     return PING_STATUS_PROCESS_FAILED
 
-def ping_bounds_present(bounds: InlineArray[Int64, 2]) -> Bool:
+def ping_bounds_present(bounds: Array[Int64, 2]) -> Bool:
     return bounds[0] >= 0 and bounds[1] > bounds[0]
 
 def ping_json_string_nonempty(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if not ping_bounds_present(bounds):
         return False
@@ -180,8 +182,8 @@ def ping_validate_item(
     object_start: Int64,
     object_end: Int64,
     event_completed: Bool,
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=0)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=0)
     var item = deepseek_json_object_member(
         view, object_start, object_end, StringSlice("item")
     )

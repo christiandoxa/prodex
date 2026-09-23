@@ -6,7 +6,7 @@ description = "Multi-provider Codex wrapper with OpenAI quota-aware routing and 
 license = "Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/christiandoxa/prodex"
-rust-version = "1.98.0"
+rust-version = "1.98.1"
 
 [workspace]
 members = [
@@ -59,7 +59,7 @@ version = "0.431.1"
 edition = "2024"
 license = "Apache-2.0"
 repository = "https://github.com/christiandoxa/prodex"
-rust-version = "1.98.0"
+rust-version = "1.98.1"
 
 [profile.release]
 lto = "thin"

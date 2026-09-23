@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 
@@ -56,7 +58,7 @@ struct ProdexRichContextResult(Copyable):
     var issue_kind: Int64
     var issue_offset: Int64
     var issue_length: Int64
-    var counts: InlineArray[Int64, 7]
+    var counts: Array[Int64, 7]
     var noise_lines: Int64
     var signal_lines: Int64
     var token_count: Int64
@@ -87,7 +89,7 @@ struct ProdexRichRouteRecord(Copyable):
     var eligible: Int64
     var reason: Int64
     var score: Int64
-    var components: InlineArray[Int64, 7]
+    var components: Array[Int64, 7]
     var weighted_total: Int64
     var input_index: Int64
     var duplicate_of: Int64
@@ -239,14 +241,14 @@ struct RouteCandidate(Copyable):
     var capability_mask: Int64
     var eligible: Int64
     var score: Int64
-    var components: InlineArray[Int64, 7]
+    var components: Array[Int64, 7]
     var weighted_total: Int64
     var input_index: Int64
 
 
 @fieldwise_init
 struct RouteScore(Copyable):
-    var components: InlineArray[Int64, 7]
+    var components: Array[Int64, 7]
     var weighted_total: Int64
     var score: Int64
 
