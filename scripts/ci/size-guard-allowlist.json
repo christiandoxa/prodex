@@ -56,8 +56,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-    "maxLines": 1918,
-    "reason": "Upstream transport remains capped at the current audited size after extracting native first-event error classification and removing its obsolete provider argument."
+    "maxLines": 1917,
+    "reason": "Upstream transport remains capped at the current audited size after extracting native first-event error classification, removing its obsolete provider argument, and dropping the stale test import."
   },
   {
     "file": "crates/prodex-app/src/runtime_proxy/presidio/tests.rs",
