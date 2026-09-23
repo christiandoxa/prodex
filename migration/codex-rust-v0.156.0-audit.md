@@ -114,6 +114,8 @@ Validation added for this hotfix:
 - The official Codex 0.156.0 Linux binary and a synthetic ChatGPT auth/mock
   backend reproduce the old projection failure exactly with JSON-RPC code
   `-32603`.
+  The sanitized run record is stored in
+  `migration/codex-rust-v0.156.0-workspace-routing-repro.json`.
 - The runtime-launch regression requires the new projection to omit loopback
   `chatgpt_base_url`/`openai_base_url`, preserve an explicit user HTTPS
   `chatgpt_base_url`, select the authenticated Prodex provider, and preserve the
