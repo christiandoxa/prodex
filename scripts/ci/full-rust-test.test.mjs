@@ -224,7 +224,7 @@ test("release validates the Kiro pin before build fan-out", () => {
   assert.ok(verifyCi, "release CI verification job missing");
   assert.ok(build, "release build job missing");
   assert.match(build, /timeout-minutes:\s*180/);
-  assert.match(workflow, /KIRO_CLI_VERSION:\s*"2\.23\.0"/);
+  assert.match(workflow, /KIRO_CLI_VERSION:\s*"2\.23\.1"/);
   assert.match(verifyCi, /Verify pinned Kiro CLI release/);
   assert.match(verifyCi, /manifest_version[\s\S]*KIRO_CLI_VERSION/);
   assert.match(build, /needs:\s*[\s\S]*?- verify-ci/);
