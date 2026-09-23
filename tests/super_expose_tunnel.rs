@@ -41,6 +41,10 @@ if [ "$1" = "--version" ]; then
   printf '%s\n' '{}'
   exit 0
 fi
+if [ "$1" = "run" ] && [ "$2" = "--help" ]; then
+  printf '%s\n' 'usage: tunnel-client run'
+  exit 0
+fi
 exit 97
 "#,
             version_line
@@ -64,6 +68,10 @@ fn long_lived_fake_tunnel_client(
             r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
   printf '%s\n' '{}'
+  exit 0
+fi
+if [ "$1" = "run" ] && [ "$2" = "--help" ]; then
+  printf '%s\n' 'usage: tunnel-client run'
   exit 0
 fi
 health_url_file=
@@ -148,37 +156,41 @@ fn start_health_server() -> (String, mpsc::Sender<()>, thread::JoinHandle<()>) {
 
 #[cfg(unix)]
 #[test]
-fn expose_exec_accepts_latest_and_v0013_tunnel_client_metadata() {
+fn expose_exec_accepts_minimum_latest_and_future_stable_tunnel_client_metadata() {
     for version_line in [
         LATEST_VERSION_LINE,
         "0.0.13+4b5267f823be0b046bb883aacb51603cfde3a0ea (git sha: 4b5267f823be0b046bb883aacb51603cfde3a0ea)",
+        "0.0.15+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
     ] {
         let output = probe_expose(version_line);
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success());
         assert!(
             stderr.contains("requires CONTROL_PLANE_API_KEY in noninteractive mode"),
-            "supported tunnel-client metadata was rejected: {stderr}"
+            "compatible tunnel-client metadata was rejected: {stderr}"
         );
         assert!(
-            !stderr.contains("did not report a supported official version"),
-            "supported tunnel-client metadata was rejected: {stderr}"
+            !stderr.contains("did not report a compatible official stable build"),
+            "compatible tunnel-client metadata was rejected: {stderr}"
         );
     }
 }
 
 #[cfg(unix)]
 #[test]
-fn expose_exec_rejects_unvetted_tunnel_client_metadata() {
-    let output = probe_expose(
-        "0.0.13+0000000000000000000000000000000000000000 (git sha: 0000000000000000000000000000000000000000)",
-    );
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(!output.status.success());
-    assert!(
-        stderr.contains("did not report a supported official version"),
-        "unexpected stderr: {stderr}"
-    );
+fn expose_exec_rejects_old_or_malformed_tunnel_client_metadata() {
+    for version_line in [
+        "0.0.12+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+        "0.0.15+1111111111111111111111111111111111111111 (git sha: 2222222222222222222222222222222222222222)",
+    ] {
+        let output = probe_expose(version_line);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(!output.status.success());
+        assert!(
+            stderr.contains("did not report a compatible official stable build"),
+            "unexpected stderr: {stderr}"
+        );
+    }
 }
 
 #[cfg(target_os = "linux")]

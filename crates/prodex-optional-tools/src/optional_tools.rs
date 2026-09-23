@@ -458,6 +458,9 @@ pub(super) fn playwright_probe_failure(error: anyhow::Error) -> ToolHealth {
     if normalized.contains("npx canceled due to missing packages")
         || normalized.contains("package is not installed")
         || normalized.contains("could not determine executable to run")
+        || normalized.contains("health check timed out after")
+        || normalized.contains("version check timed out after")
+        || normalized.contains("failed to execute")
     {
         return ToolHealth::missing(
             OptionalToolId::PlaywrightMcp,
@@ -473,16 +476,16 @@ pub(super) fn playwright_probe_failure(error: anyhow::Error) -> ToolHealth {
 
 fn find_path_command(command: &str) -> Option<PathBuf> {
     for root in path_dirs_from_env() {
-        let candidate = root.join(command);
-        if candidate.is_file() {
-            return Some(candidate);
-        }
         #[cfg(windows)]
         for suffix in ["exe", "cmd", "bat"] {
             let candidate = root.join(format!("{command}.{suffix}"));
             if candidate.is_file() {
                 return Some(candidate);
             }
+        }
+        let candidate = root.join(command);
+        if candidate.is_file() {
+            return Some(candidate);
         }
     }
     None

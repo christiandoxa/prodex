@@ -660,11 +660,11 @@ fn expose_exec_events_render_as_tool_logs_with_command_details() {
         .map(|span| span.content.as_ref())
         .collect::<String>();
     assert!(rendered.contains("TOOL"));
-    assert!(rendered.contains("super_expose_exec_started"));
     assert!(rendered.contains("command=sh -c"));
     assert!(rendered.contains("cwd=/repo"));
     assert!(rendered.contains("timeout_ms=30000"));
     assert!(rendered.contains("duration_ms=12"));
+    assert!(rendered.contains("status=completed"));
     fs::remove_dir_all(root).unwrap();
 }
 
