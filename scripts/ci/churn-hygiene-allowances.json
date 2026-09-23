@@ -1978,5 +1978,20 @@
       "maxFileLines": 200
     },
     "reason": "Reviewed the exact post-0.431.1 stable compiler promotion: Rust 1.98.1 pins, Mojo 1.1.0 pins, the mechanical fixed-size InlineArray-to-std.collections.Array/Tuple compatibility migration, release/CI supply-chain metadata, and compiler-baseline documentation. The pre-policy range measured 37 files, 6 behavior files, 864 changed lines, and 176 lines in the largest file. These caps provide only narrow headroom for this exact policy record; global churn thresholds and all correctness, parity, no-fallback, size, supply-chain, CI, and release gates remain enforced."
+  },
+  {
+    "id": "audited-prodex-0.431.5-flexible-runtime-dependencies",
+    "requiredSubjects": [
+      "feat(compat): accept capability-compatible dependency versions",
+      "feat(log): show redacted expose exec commands",
+      "ci(churn): record audited flexible dependency campaign"
+    ],
+    "caps": {
+      "maxFiles": 32,
+      "maxBehaviorFiles": 22,
+      "maxLines": 1510,
+      "maxFileLines": 311
+    },
+    "reason": "Reviewed the bounded 0.431.5 source campaign: Codex/tunnel-client/optional-tool runtime compatibility moves from exact release pins to minimum-version plus capability validation, release qualification continues to track latest stable references, and expose exec audit logs add bounded redacted command visibility. Pre-policy range measured 31 files, 22 behavior files, 1,465 changed lines, and 311 lines in the largest file. Global churn thresholds and all compatibility, security, freshness, Mojo, logging, and release gates remain enforced."
   }
 ]
