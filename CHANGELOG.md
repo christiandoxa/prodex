@@ -56,6 +56,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
   files, 461 additions, and 77 deletions.
 - Only one of Prodex's 50 pinned critical files changed:
   `codex-rs/models-manager/models.json`.
+- The upstream workspace-routing source is byte-identical between 0.156.0 and
+  0.156.1, confirming the HTTPS bootstrap hotfix remains required.
 - Verified the official Codex 0.156.1 Linux musl asset checksum and
   `codex-cli 0.156.1`.
 - An isolated official `model/list` smoke returned visible GPT-6 Sol and
