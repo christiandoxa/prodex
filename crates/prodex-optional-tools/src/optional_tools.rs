@@ -45,7 +45,6 @@ pub(crate) fn manifest_tree_sha256_supported(
     value == vetted || value == legacy_manifest
 }
 
-
 fn valid_git_sha(value: &str) -> bool {
     value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
@@ -59,16 +58,15 @@ fn parsed_probe_semver(value: &str) -> Option<Version> {
         .split_whitespace()
         .map(|token| {
             token
-                .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '-' | '+'))
+                .trim_matches(|ch: char| {
+                    !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '-' | '+')
+                })
                 .trim_start_matches('v')
         })
         .find_map(|token| Version::parse(token).ok())
 }
 
-fn validate_minimum_probe_version(
-    id: OptionalToolId,
-    version_line: &str,
-) -> Result<Version> {
+fn validate_minimum_probe_version(id: OptionalToolId, version_line: &str) -> Result<Version> {
     let found = parsed_probe_semver(version_line).with_context(|| {
         format!("{id} did not report a recognizable semantic version: {version_line}")
     })?;
@@ -683,7 +681,10 @@ fn ponytail_candidate() -> Result<Option<(PathBuf, PathBuf)>> {
             if !version.pre.is_empty() {
                 continue;
             }
-            if newest.as_ref().is_none_or(|(current, _)| version > *current) {
+            if newest
+                .as_ref()
+                .is_none_or(|(current, _)| version > *current)
+            {
                 newest = Some((version, entry.path()));
             }
         }
@@ -901,21 +902,19 @@ mod tests {
         ));
     }
 
-
     #[test]
     fn command_version_policy_accepts_minimum_and_future_stable_releases() {
-        assert!(
-            validate_minimum_probe_version(OptionalToolId::Rtk, "rtk 0.46.0").is_ok()
-        );
-        assert!(
-            validate_minimum_probe_version(OptionalToolId::Rtk, "rtk 9.1.0").is_ok()
-        );
+        assert!(validate_minimum_probe_version(OptionalToolId::Rtk, "rtk 0.46.0").is_ok());
+        assert!(validate_minimum_probe_version(OptionalToolId::Rtk, "rtk 9.1.0").is_ok());
         assert!(
             validate_minimum_probe_version(OptionalToolId::PlaywrightMcp, "Version 3.4.5").is_ok()
         );
-        let error =
-            validate_minimum_probe_version(OptionalToolId::Rtk, "rtk 0.45.9").unwrap_err();
-        assert!(error.to_string().contains("Update rtk to the latest stable release"));
+        let error = validate_minimum_probe_version(OptionalToolId::Rtk, "rtk 0.45.9").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Update rtk to the latest stable release")
+        );
     }
 
     #[test]
@@ -937,12 +936,19 @@ mod tests {
             r#"{"name":"ponytail","version":"4.11.0"}"#,
         )
         .unwrap();
-        fs::write(candidate.join("hooks/claude-codex-hooks.json"), "{}
-").unwrap();
-        fs::write(candidate.join("skills/README.md"), "# future
-").unwrap();
-        let digest =
-            crate::tree::tree_sha256(&candidate, b"prodex-ponytail-tree-v1\0").unwrap();
+        fs::write(
+            candidate.join("hooks/claude-codex-hooks.json"),
+            "{}
+",
+        )
+        .unwrap();
+        fs::write(
+            candidate.join("skills/README.md"),
+            "# future
+",
+        )
+        .unwrap();
+        let digest = crate::tree::tree_sha256(&candidate, b"prodex-ponytail-tree-v1\0").unwrap();
         fs::write(
             candidate.join(TOOL_MANIFEST),
             serde_json::to_vec(&serde_json::json!({

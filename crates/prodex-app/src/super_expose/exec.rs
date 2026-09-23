@@ -187,24 +187,34 @@ fn exec_log_command_preview(request: &ExecRequest) -> String {
 }
 
 fn exec_log_secret_flag(value: &str) -> bool {
-    let key = value
+    let compact = value
         .split_once('=')
         .map_or(value, |(key, _)| key)
-        .to_ascii_lowercase();
+        .trim_start_matches('-')
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect::<String>();
     matches!(
-        key.as_str(),
-        "--api-key"
-            | "--apikey"
-            | "--auth-token"
-            | "--authorization"
-            | "--client-secret"
-            | "--password"
-            | "--secret"
-            | "--token"
-            | "-p"
-    ) || key.ends_with("_token")
-        || key.ends_with("_secret")
-        || key.ends_with("_password")
+        compact.as_str(),
+        "apikey"
+            | "authtoken"
+            | "authorization"
+            | "clientsecret"
+            | "password"
+            | "secret"
+            | "token"
+            | "header"
+            | "cookie"
+            | "proxyuser"
+            | "h"
+            | "b"
+            | "u"
+            | "p"
+    ) || compact.ends_with("token")
+        || compact.ends_with("secret")
+        || compact.ends_with("password")
+        || compact.ends_with("apikey")
 }
 
 fn exec_log_argument(value: &str, quote: bool) -> String {
