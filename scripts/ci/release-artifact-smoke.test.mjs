@@ -46,6 +46,10 @@ test("standalone release runs the downloaded artifact smoke before SBOM preparat
   assert.match(smoke, /codex-purity-guard\.mjs package-lock\.json install\.sh install\.ps1 artifact/u);
   assert.match(smoke, /npm-package-smoke\.mjs --binary-dir artifact/u);
   assert.doesNotMatch(source, /target\/(?:debug|release)/u);
+  assert.match(source, /fake-codex-rpc\.py/u);
+  assert.match(source, /method == "hooks\/list"/u);
+  assert.match(source, /method == "config\/batchWrite"/u);
+  assert.match(source, /trustStatus.*trusted.*untrusted/u);
 });
 
 test("artifact smoke follows current prodex log contracts", () => {
