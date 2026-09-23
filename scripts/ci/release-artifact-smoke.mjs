@@ -294,6 +294,7 @@ async function main() {
     const fakeBin = path.join(smokeRoot, "fake-bin");
     const fakeCodex = path.join(fakeBin, "codex");
     const fakeCodexArgs = path.join(smokeRoot, "codex-args.log");
+    const fakeCodexRpcServer = path.join(smokeRoot, "fake-codex-rpc.py");
     await fs.mkdir(profileHome, { recursive: true });
     await fs.mkdir(runtimeLogDir, { recursive: true });
     await fs.mkdir(path.join(smokeRoot, "home"), { recursive: true });
@@ -318,6 +319,53 @@ async function main() {
     );
     await fs.chmod(path.join(profileHome, "auth.json"), 0o600);
     await fs.writeFile(
+      fakeCodexRpcServer,
+      String.raw`import json
+import sys
+
+trusted = False
+for line in sys.stdin:
+    try:
+        request = json.loads(line)
+    except Exception:
+        continue
+    request_id = request.get("id")
+    method = request.get("method")
+    params = request.get("params") or {}
+    if method == "initialize":
+        response = {"jsonrpc": "2.0", "id": request_id, "result": {"userAgent": "codex_cli_rs/0.153.4"}}
+    elif method == "hooks/list":
+        cwds = params.get("cwds") or [""]
+        hook = {
+            "key": "artifact-smoke:hook:0",
+            "currentHash": "sha256:artifact-smoke-hook",
+            "trustStatus": "trusted" if trusted else "untrusted",
+        }
+        response = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "data": [{
+                    "cwd": cwds[0],
+                    "hooks": [hook],
+                    "warnings": [],
+                    "errors": [],
+                }]
+            },
+        }
+    elif method == "config/batchWrite":
+        trusted = True
+        response = {"jsonrpc": "2.0", "id": request_id, "result": {"status": "ok"}}
+    else:
+        response = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {"code": -32601, "message": "method not found"},
+        }
+    print(json.dumps(response, separators=(",", ":")), flush=True)
+`,
+    );
+    await fs.writeFile(
       fakeCodex,
       `#!/bin/sh
 set -eu
@@ -333,6 +381,11 @@ if [ "\${1:-}" = "app-server" ] && [ "\${2:-}" = "--help" ]; then
   printf '%s\\n' 'Codex app-server'
   exit 0
 fi
+case " $* " in
+  *" app-server --stdio "*)
+    exec python3 "$SMOKE_CODEX_RPC_SERVER"
+    ;;
+esac
 if [ "\${1:-}" = "app-server" ] && [ "\${2:-}" = "--listen" ]; then
   listen="\${3:-}"
   if [ "$listen" = "unix://" ]; then
@@ -395,6 +448,7 @@ printf '%s\\n' '{"type":"turn.completed","usage":{"input_tokens":10,"output_toke
       PRODEX_RUNTIME_LOG_DIR: runtimeLogDir,
       PRODEX_RUNTIME_LOG_FORMAT: "json",
       SMOKE_CODEX_ARGS: fakeCodexArgs,
+      SMOKE_CODEX_RPC_SERVER: fakeCodexRpcServer,
       TERM: "xterm-256color",
     };
 
