@@ -2,74 +2,95 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.431.4 - 2026-09-23
+## 0.431.5 - 2026-09-23
 
-- No grouped changes.
-# Prodex 0.431.4
+### Misc
+
+- Treat missing Playwright as optional (`7675cee`)
+- Show redacted expose exec commands (`da3ad15`)
+- Accept capability-compatible dependency versions (`2d2bb48`)
+# Prodex 0.431.5
 
 ## New Features
 
-- Retire the remaining OpenCodex browser-control-center integration artifacts
-  now that Codex Desktop provides the native cross-platform desktop frontend.
-- Keep `prodex s gui` as the Codex Desktop native frontend passthrough.
-- Preserve the current qualified compatibility baseline:
-  Codex `rust-v0.156.1`, Rust 1.98.1, and Mojo 1.1.0.
+- Make runtime dependency compatibility version-flexible instead of exact-version pinned.
+- Codex runtime compatibility now accepts stable Codex CLI `0.153.2` or newer when the required
+  `app-server` capability probe succeeds. The release-qualified latest-stable reference remains
+  Codex `rust-v0.156.1` at this release cut.
+- OpenAI Secure MCP Tunnel now accepts official stable `tunnel-client` `0.0.13` or newer when
+  the reported build metadata is self-consistent and the required `run` capability probe
+  succeeds. The release-qualified latest-stable reference is `0.0.14`.
+- Optional tools now separate **minimum supported versions** from **latest-stable release
+  references**. Compatible future stable releases can work without a Prodex release as long as
+  their required version/capability/manifest contracts still pass.
+- Add release-cut freshness gates for Codex, tunnel-client, and all six optional tools so Prodex
+  continues to qualify against the latest stable upstream releases without rejecting compatible
+  user installations merely because they are newer.
+- Improve `prodex log` visibility for `prodex s expose exec`: direct-exec start/completion
+  entries now include a bounded redacted command preview, cwd, argument/environment counts,
+  stdin byte count, timeout, duration, status, and exit metadata.
 
 ## Bug Fixes
 
-- Remove the stale top-level `prodex gui` and `prodex dashboard` parser
-  compatibility path. These retired browser UI names now fail closed instead
-  of being silently rewritten into `prodex run`.
-- Remove the orphan dashboard CLI test file left behind after the browser
-  control center was retired.
-- Remove `THIRD_PARTY_NOTICES.md` because the OpenCodex-adapted browser
-  control-center code no longer exists in the active source tree.
-- Stop copying the removed notice into Docker images.
-- Remove the historical active churn allowance that existed only for the
-  retired OpenCodex GUI promotion.
+- Distinguish an optional tool that is missing from one that is installed but incompatible.
+  Missing optional tools remain optional; an installed tool below the supported minimum or
+  missing a required capability now fails with a clear upgrade instruction.
+- Keep Playwright MCP optional when the offline `npx --no-install @playwright/mcp` probe cannot
+  establish that the package is installed, while still rejecting an installed Playwright MCP
+  version below the supported minimum.
+- Prefer executable Windows command shims such as `npx.cmd` over extensionless package files.
+- Keep Caveman and Ponytail tamper checks while allowing newer compatible stable managed
+  versions: official source, strict manifest shape, version-directory match, Git commit shape,
+  required files, and recomputed tree digest must still validate.
+- Allow newer official Presidio analyzer/anonymizer image versions through explicit overrides
+  while retaining the minimum compatible version and digest-pinned release defaults.
+- Preserve secret-safe expose logging: environment values, stdin contents, captured stdout/stderr,
+  capability URLs/tokens, and secret-bearing flag values are not written to runtime logs.
 
-## Super Runtime Contract
+## Compatibility Policy
 
-- `prodex s` keeps the workspace automatically trusted.
-- Super hooks remain trusted by exact Codex hook hash before launch, without
-  the global hook-bypass warning and without a hook-review prompt.
-- The five default Super optional tools remain latest stable and active:
-  Caveman 2.7.0, RTK 0.49.0, Codebase Memory MCP 0.11.0,
-  Playwright MCP 0.0.82, and Ponytail 4.10.0.
-- Presidio 2.2.364 remains default OFF with the existing interactive opt-in
-  prompt and explicit `--presidio` / `--no-presidio` overrides.
+The runtime policy in 0.431.5 is **minimum + capability based**. Latest stable versions are the
+release qualification reference, not an exact runtime allowlist.
 
-## Safety
+| Component | Minimum supported | 0.431.5 latest-stable reference |
+| --- | ---: | ---: |
+| Codex CLI | `0.153.2` + `app-server` | `0.156.1` |
+| OpenAI tunnel-client | `0.0.13` + `run` capability | `0.0.14` |
+| Caveman | `2.3.1` | `2.7.0` |
+| RTK | `0.46.0` | `0.49.0` |
+| Codebase Memory MCP | `0.9.1-rc.1` shared-daemon contract | `0.11.0` |
+| Playwright MCP | `0.0.79` | `0.0.82` |
+| Ponytail | `4.9.0` | `4.10.0` |
+| Presidio | `2.2.364` | `2.2.364` |
 
-- No active OpenCodex source, runtime, browser server, dashboard HTML, test
-  surface, Docker copy, notice, or churn-policy exception remains.
-- Historical changelog entries are retained as release history only.
-- The terminal `prodex status` dashboard and gateway admin dashboard are
-  unchanged because they are independent Prodex surfaces, not OpenCodex
-  integration.
-- Codex Desktop native frontend support remains available through the Super
-  runtime path.
+When a component is too old or fails a required capability check, Prodex reports which component
+must be updated, the minimum supported version, and the current release-qualified latest-stable
+reference.
 
 ## Validation
 
-- Exact-SHA source CI passed after removing the retired OpenCodex artifacts.
-- Prodex CLI tests passed with top-level `gui` / `dashboard` rejected and
-  `prodex s gui` still parsed as the native Codex Desktop frontend.
-- Dockerfile static validation passed after removing the notice copy.
-- Supply-chain, size, crate-boundary, churn-hygiene fixture, optional-tools
-  freshness, and optional-tools guards passed.
-- Real Mojo/parity CI completed successfully with Rust 1.98.1 and Mojo 1.1.0.
-- Active-source scanning finds no OpenCodex reference outside historical
-  changelog material.
+- Exact source SHA `6ebca95927e50dd63d330be298b6311fa970a51f` completed the full GitHub
+  check matrix with 63 successful checks, 2 intentionally skipped checks, and zero failures.
+- Real Mojo/parity completed successfully with Mojo 1.1.0.
+- Rust Clippy/Sonar quality gates, Windows/macOS/Linux test matrices, runtime stress, supply-chain,
+  static guards, optional-tool guards, and compatibility replay gates passed.
+- Runtime dependency freshness checks confirmed Codex `0.156.1`, tunnel-client `0.0.14`, and
+  all six optional-tool latest-stable references at release qualification time.
+- Regression coverage accepts future compatible stable Codex/tunnel/optional-tool versions while
+  rejecting versions below the supported minimum or malformed capability metadata.
 
 ## Changelog
 
-- Remove the retired OpenCodex browser-control-center integration and notice.
-- Fail closed for retired top-level browser UI command names.
-- Keep Codex Desktop native `prodex s gui` support and all previously
-  qualified Super trust/tooling behavior.
+- Replace exact runtime dependency pins with minimum-version and capability compatibility.
+- Add actionable dependency-upgrade errors.
+- Track latest stable upstream releases at CI/release qualification time.
+- Enrich `prodex log` with safe `prodex s expose exec` command details.
 
-Full Changelog: [0.431.3...0.431.4](https://github.com/christiandoxa/prodex/compare/0.431.3...0.431.4)
+Full Changelog: [0.431.4...0.431.5](https://github.com/christiandoxa/prodex/compare/0.431.4...0.431.5)
+
+## 0.431.4 - 2026-09-23
+
+- No grouped changes.
 
 ## 0.431.3 - 2026-09-23
 
