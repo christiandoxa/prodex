@@ -4,6 +4,8 @@ use crate::app_commands::runtime_launch::{
 };
 #[path = "runtime_tools/child_env.rs"]
 mod child_env;
+#[path = "runtime_tools/hook_trust.rs"]
+mod hook_trust;
 #[path = "runtime_tools/overlay.rs"]
 mod overlay;
 #[cfg(unix)]
@@ -331,16 +333,18 @@ mod tests {
         let root = crate::test_temp_root()
             .join(format!("prodex-session-server-plan-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
-        let (companion, socket) = build_session_app_server_companion(&strategy, &root, &[])
+        let (companion, socket) = build_session_app_server_companion(&strategy, &root, &[], false)
             .unwrap()
             .expect("plain Super needs the session app server");
         assert_eq!(
             companion.args.first().and_then(|arg| arg.to_str()),
-            Some("--dangerously-bypass-hook-trust")
-        );
-        assert_eq!(
-            companion.args.get(1).and_then(|arg| arg.to_str()),
             Some("app-server")
+        );
+        assert!(
+            !companion
+                .args
+                .iter()
+                .any(|arg| arg == "--dangerously-bypass-hook-trust")
         );
         assert!(companion.args.iter().any(|arg| arg == "--listen"));
         assert!(
@@ -393,7 +397,7 @@ mod tests {
     }
 
     #[test]
-    fn super_trusts_workspace_and_hooks_without_persisting_config() {
+    fn super_trusts_workspace_without_dangerous_hook_bypass() {
         let args = trusted_workspace_codex_args(
             Path::new("/tmp/project"),
             &[OsString::from("--dangerously-bypass-approvals-and-sandbox")],
@@ -403,7 +407,6 @@ mod tests {
             vec![
                 OsString::from("-c"),
                 OsString::from("projects={\"/tmp/project\"={trust_level=\"trusted\"}}"),
-                OsString::from("--dangerously-bypass-hook-trust"),
                 OsString::from("--dangerously-bypass-approvals-and-sandbox"),
             ]
         );

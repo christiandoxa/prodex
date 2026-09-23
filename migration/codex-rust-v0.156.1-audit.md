@@ -81,3 +81,26 @@ did not access or modify the user's real Codex credentials.
 Prodex 0.431.1 targets Codex `rust-v0.156.1`. The release combines the
 workspace-routing bootstrap fix required by both 0.156.0 and 0.156.1 with
 runtime awareness for the two newly visible GPT-6 models.
+
+## Prodex 0.431.3 Super trust behavior
+
+A real pseudo-TTY launch of the published Prodex 0.431.2 binary with official
+Codex 0.156.1 confirmed that folder trust was already bypassed, but Codex still
+showed one startup warning because Super supplied
+`--dangerously-bypass-hook-trust`.
+
+The 0.431.3 candidate keeps the workspace project at `trust_level="trusted"`
+but changes hook trust to Codex's native trust-state flow. Before starting the
+TUI, Prodex calls `hooks/list`, writes each untrusted or modified hook's
+`currentHash` into `hooks.state.<key>.trusted_hash` through
+`config/batchWrite`, and verifies a second `hooks/list` has no remaining
+review-required hooks. The global bypass flag is retained only as a compatibility
+fallback when an older Codex reports the hook-trust RPC methods as unavailable.
+
+The same real interactive smoke with the candidate reached the Codex 0.156.1
+TUI in YOLO mode with zero startup warnings, no folder-trust prompt, no
+hook-review prompt, three Ponytail hooks trusted by hash, and no global
+hook-bypass flag on either Codex child process. Codebase Memory MCP and
+Playwright MCP were running, Caveman awareness was present, RTK resolved to
+0.49.0 in the user's login-shell PATH, and Ponytail 4.10.0 remained enabled.
+Presidio's default-off interactive opt-in flow is unchanged.

@@ -293,14 +293,46 @@ pub(super) fn build_plan(
         "startup.optional_tool_activation_ms",
         stage_started,
     );
-    #[cfg(unix)]
-    let companion = prepare_session_app_server_companion(strategy, &overlay_home, &runtime_args)?;
-    let child = prepare_child_plan(
+    let mut child = prepare_child_plan(
         strategy,
         prepared,
         &overlay_home,
         &runtime_args,
         runtime_proxy,
+    )?;
+    let explicit_hook_bypass = child
+        .args
+        .iter()
+        .any(|arg| arg == "--dangerously-bypass-hook-trust");
+    let remote_launch = child
+        .args
+        .iter()
+        .any(|arg| arg == "--remote" || arg.to_string_lossy().starts_with("--remote="));
+    let legacy_hook_bypass = if strategy.args.super_mode
+        && !strategy.args.dry_run
+        && !explicit_hook_bypass
+        && !remote_launch
+    {
+        let stage_started = Instant::now();
+        let workspace = std::env::current_dir().context("failed to resolve Super workspace")?;
+        let result = super::hook_trust::trust_super_hooks(&child, &workspace)?;
+        crate::runtime_launch::emit_runtime_timing("startup.hook_trust_ms", stage_started);
+        result == super::hook_trust::HookTrustPreflight::LegacyBypass
+    } else {
+        remote_launch && strategy.args.super_mode && !explicit_hook_bypass
+    };
+    if legacy_hook_bypass {
+        child.args.insert(
+            0,
+            std::ffi::OsString::from("--dangerously-bypass-hook-trust"),
+        );
+    }
+    #[cfg(unix)]
+    let companion = prepare_session_app_server_companion(
+        strategy,
+        &overlay_home,
+        &runtime_args,
+        legacy_hook_bypass,
     )?;
     let plan = RuntimeLaunchPlan::new(child).with_cleanup_path(cleanup.keep());
     #[cfg(unix)]
@@ -422,9 +454,14 @@ fn prepare_session_app_server_companion(
     strategy: &RuntimeToolLaunchStrategy,
     overlay_home: &Path,
     runtime_args: &[std::ffi::OsString],
+    legacy_hook_bypass: bool,
 ) -> Result<Option<(prodex_runtime_launch::ChildProcessPlan, PathBuf)>> {
-    let companion =
-        super::build_session_app_server_companion(strategy, overlay_home, runtime_args)?;
+    let companion = super::build_session_app_server_companion(
+        strategy,
+        overlay_home,
+        runtime_args,
+        legacy_hook_bypass,
+    )?;
     Ok(companion)
 }
 
