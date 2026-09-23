@@ -2,6 +2,83 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.431.2 - 2026-09-23
+
+### CLI
+
+- Keep trust bypass CLI-only (`6295c79`)
+
+### Docs
+
+- Record stable 1.1 compiler baseline (`1c04046`)
+# Prodex 0.431.2
+
+## New Features
+
+- Keep Prodex on the latest stable compiler baseline verified on 2026-09-23:
+  Rust 1.98.1 and Mojo 1.1.0.
+- Revalidate all six Prodex optional tools against their latest stable releases:
+  Caveman 2.7.0, RTK 0.49.0, Codebase Memory MCP 0.11.0,
+  Playwright MCP 0.0.82, Ponytail 4.10.0, and Presidio 2.2.364.
+- Preserve Super-mode zero-prompt trust behavior on Codex 0.156.1:
+  the active workspace is marked trusted and hook trust is bypassed for the
+  invocation.
+
+## Bug Fixes
+
+- Fix `prodex s` startup warnings caused by projecting
+  `bypass_hook_trust=true` into temporary `config.toml`. Codex 0.156.1
+  treats hook-trust bypass as a session/CLI override, so Prodex now keeps
+  `--dangerously-bypass-hook-trust` on the command line only.
+- Remove the deprecated/unknown `marketplaces.ponytail.version` setting from
+  the overlay config while keeping Ponytail installed, enabled, and versioned
+  in the managed plugin cache.
+- Keep the existing trusted-project projection
+  `projects.<cwd>.trust_level="trusted"`, so Codex does not show the
+  "Trust this folder?" onboarding prompt for `prodex s`.
+- Preserve Super full-access behavior and the existing approval/sandbox bypass
+  semantics.
+
+## Safety
+
+- Hook trust bypass remains explicit and scoped to the Super invocation; it is
+  not persisted as an unsupported user config key.
+- Folder trust is written only into the temporary Prodex launch overlay and
+  does not mutate the user's shared Codex config.
+- Ponytail keeps the supported Codex 0.156.1 marketplace fields
+  `source_type` and `source`, with the plugin still enabled under
+  `plugins."ponytail@ponytail"`.
+- No optional-tool pin was advanced without a stable-release freshness check.
+- No new MCP tool, expose surface, credential format, or tunnel-client release
+  is introduced.
+
+## Validation
+
+- Official Codex 0.156.1 A/B startup smoke reproduced the old warning exactly:
+  one `configWarning` containing the two ignored keys
+  `bypass_hook_trust` and `marketplaces.ponytail.version`.
+- The new overlay with CLI hook bypass and trusted project state initialized
+  successfully with **zero strict-config warnings**.
+- Codex 0.156.1 source confirms the TUI trust screen is shown only when
+  `active_project.trust_level` is undecided; Prodex Super supplies
+  `trusted`.
+- `prodex-optional-tools`: 52/52 tests passed.
+- Focused Super overlay and workspace-trust regressions passed.
+- Clippy, optional-tools guard, freshness guard, size guard, crate-boundary
+  guard, and exact-SHA CI passed.
+- Stable compiler qualification for Rust 1.98.1 + Mojo 1.1.0 passed the real
+  Mojo/parity and platform CI matrix before this patch.
+
+## Changelog
+
+- Make `prodex s` trust handling CLI/session-correct for Codex 0.156.1.
+- Remove obsolete startup-config keys while preserving automatic trust and
+  Super access.
+- Revalidate all optional tools at latest stable releases.
+- Ship with the latest stable Rust and Mojo compiler baseline.
+
+Full Changelog: [0.431.1...0.431.2](https://github.com/christiandoxa/prodex/compare/0.431.1...0.431.2)
+
 ## 0.431.1 - 2026-09-23
 
 ### CLI
@@ -11,72 +88,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Align with Codex 0.156.1 (`6e1605d`)
-# Prodex 0.431.1
-
-## New Features
-
-- Target the official Codex `rust-v0.156.1` release.
-- Accommodate the newly visible GPT-6 Sol and GPT-6 Luna models from Codex
-  0.156.1.
-- Recognize GPT-6 Sol/Luna as 872,000-token models when Prodex derives runtime
-  context and Smart Context budgets from the upstream model catalog.
-- Preserve the upstream GPT-6 reasoning contracts: Sol supports
-  Low/Medium/High/XHigh/Max/Ultra; Luna supports Low/Medium/High/XHigh/Max.
-- Keep Codex-owned model picker and rate-limit-switch presentation opaque,
-  including the new GPT-6 Luna recommendation.
-
-## Bug Fixes
-
-- Fix `prodex s` failing during Codex 0.156.x TUI bootstrap with
-  `account/read failed: workspace backend must use an HTTPS origin without credentials`.
-- Stop replacing Codex's ChatGPT workspace bootstrap URL with the local HTTP
-  runtime proxy. Codex 0.156.0 and 0.156.1 both require that workspace-routing
-  origin to remain credential-free HTTPS.
-- Route OpenAI model traffic through Prodex using the authenticated
-  `prodex-openai-governed-http` custom provider while preserving normal
-  Responses and WebSocket proxying.
-- Keep forced-HTTP/sub-agent launches on the same governed provider with
-  WebSockets disabled.
-
-## Safety
-
-- Preserve `requires_openai_auth=true` so the local model provider continues
-  to use Codex's first-party authentication path.
-- Preserve user-supplied HTTPS `chatgpt_base_url` overrides.
-- Extend `NO_PROXY` discovery to the internal Prodex provider base URL so
-  loopback model traffic cannot be redirected through a corporate proxy.
-- Do not map GPT-6 Luna onto the legacy GPT-5.6 Luna reserve quota bucket
-  without independent upstream evidence.
-- No new MCP tool, expose surface, credential format, or tunnel-client release
-  is introduced. The existing exact tunnel-client allowlist is unchanged.
-
-## Validation
-
-- Compared exact Codex 0.156.0 and 0.156.1 tagged source archives: 21 changed
-  files, 461 additions, and 77 deletions.
-- Only one of Prodex's 50 pinned critical files changed:
-  `codex-rs/models-manager/models.json`.
-- The upstream workspace-routing source is byte-identical between 0.156.0 and
-  0.156.1, confirming the HTTPS bootstrap hotfix remains required.
-- Verified the official Codex 0.156.1 Linux musl asset checksum and
-  `codex-cli 0.156.1`.
-- An isolated official `model/list` smoke returned visible GPT-6 Sol and
-  GPT-6 Luna with the expected reasoning effort sets.
-- Reproduced the workspace bootstrap failure against the official 0.156.1
-  binary with synthetic ChatGPT auth and the former HTTP-loopback projection;
-  it still returns JSON-RPC `-32603` with the same HTTPS-origin error.
-- Runtime-launch regression tests cover both the feature-off Rust oracle and
-  the release-pinned Mojo 1.0.0 production path.
-- GPT-6 runtime context tests verify the upstream 872k maximum context contract.
-
-## Changelog
-
-- Restore `prodex s` compatibility with Codex 0.156.x workspace routing.
-- Add Codex 0.156.1 GPT-6 Sol/Luna runtime context compatibility.
-- Keep workspace bootstrap HTTPS while retaining Prodex model routing,
-  rotation, WebSocket handling, and proxy safety boundaries.
-
-Full Changelog: [0.431.0...0.431.1](https://github.com/christiandoxa/prodex/compare/0.431.0...0.431.1)
 
 ## 0.431.0 - 2026-09-23
 
