@@ -1212,7 +1212,6 @@ pub(super) fn runtime_local_rewrite_route_kind(endpoint: ProviderEndpoint) -> Ru
 
 #[cfg(test)]
 mod tests {
-    use super::super::provider_bridge::RuntimeProviderBridgeKind;
     use super::{
         RuntimeLocalRewriteAsyncResponse, RuntimeLocalRewriteBindingContext,
         RuntimeLocalRewriteContinuationReader, RuntimeLocalRewriteLiveResponse,
