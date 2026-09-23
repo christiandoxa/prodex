@@ -2,97 +2,80 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.431.4 - 2026-09-23
+
+- No grouped changes.
+# Prodex 0.431.4
+
+## New Features
+
+- Retire the remaining OpenCodex browser-control-center integration artifacts
+  now that Codex Desktop provides the native cross-platform desktop frontend.
+- Keep `prodex s gui` as the Codex Desktop native frontend passthrough.
+- Preserve the current qualified compatibility baseline:
+  Codex `rust-v0.156.1`, Rust 1.98.1, and Mojo 1.1.0.
+
+## Bug Fixes
+
+- Remove the stale top-level `prodex gui` and `prodex dashboard` parser
+  compatibility path. These retired browser UI names now fail closed instead
+  of being silently rewritten into `prodex run`.
+- Remove the orphan dashboard CLI test file left behind after the browser
+  control center was retired.
+- Remove `THIRD_PARTY_NOTICES.md` because the OpenCodex-adapted browser
+  control-center code no longer exists in the active source tree.
+- Stop copying the removed notice into Docker images.
+- Remove the historical active churn allowance that existed only for the
+  retired OpenCodex GUI promotion.
+
+## Super Runtime Contract
+
+- `prodex s` keeps the workspace automatically trusted.
+- Super hooks remain trusted by exact Codex hook hash before launch, without
+  the global hook-bypass warning and without a hook-review prompt.
+- The five default Super optional tools remain latest stable and active:
+  Caveman 2.7.0, RTK 0.49.0, Codebase Memory MCP 0.11.0,
+  Playwright MCP 0.0.82, and Ponytail 4.10.0.
+- Presidio 2.2.364 remains default OFF with the existing interactive opt-in
+  prompt and explicit `--presidio` / `--no-presidio` overrides.
+
+## Safety
+
+- No active OpenCodex source, runtime, browser server, dashboard HTML, test
+  surface, Docker copy, notice, or churn-policy exception remains.
+- Historical changelog entries are retained as release history only.
+- The terminal `prodex status` dashboard and gateway admin dashboard are
+  unchanged because they are independent Prodex surfaces, not OpenCodex
+  integration.
+- Codex Desktop native frontend support remains available through the Super
+  runtime path.
+
+## Validation
+
+- Exact-SHA source CI passed after removing the retired OpenCodex artifacts.
+- Prodex CLI tests passed with top-level `gui` / `dashboard` rejected and
+  `prodex s gui` still parsed as the native Codex Desktop frontend.
+- Dockerfile static validation passed after removing the notice copy.
+- Supply-chain, size, crate-boundary, churn-hygiene fixture, optional-tools
+  freshness, and optional-tools guards passed.
+- Real Mojo/parity CI completed successfully with Rust 1.98.1 and Mojo 1.1.0.
+- Active-source scanning finds no OpenCodex reference outside historical
+  changelog material.
+
+## Changelog
+
+- Remove the retired OpenCodex browser-control-center integration and notice.
+- Fail closed for retired top-level browser UI command names.
+- Keep Codex Desktop native `prodex s gui` support and all previously
+  qualified Super trust/tooling behavior.
+
+Full Changelog: [0.431.3...0.431.4](https://github.com/christiandoxa/prodex/compare/0.431.3...0.431.4)
+
 ## 0.431.3 - 2026-09-23
 
 ### CLI
 
 - Trust hooks by hash before launch (`1942397`)
-# Prodex 0.431.3
-
-## New Features
-
-- Use Codex's native per-hook trust state for Super launches on Codex 0.156.1.
-  Prodex discovers active hooks with `hooks/list`, records each current hook
-  hash under `hooks.state.<key>.trusted_hash`, and verifies trust before the
-  interactive TUI starts.
-- Keep the existing Super workspace projection
-  `projects.<cwd>.trust_level="trusted"`, so folder trust remains automatic
-  for `prodex s`.
-- Keep the stable toolchain baseline at Rust 1.98.1 and Mojo 1.1.0.
-- Keep the current stable optional-tool set: Caveman 2.7.0, RTK 0.49.0,
-  Codebase Memory MCP 0.11.0, Playwright MCP 0.0.82, Ponytail 4.10.0, and
-  Presidio 2.2.364.
-
-## Bug Fixes
-
-- Remove the automatic `--dangerously-bypass-hook-trust` flag from normal
-  Super launches on modern Codex. Codex 0.156.1 intentionally shows a startup
-  warning whenever that global bypass is enabled.
-- Preserve zero-prompt hook trust without the warning by trusting the exact
-  discovered hook hashes before TUI startup.
-- Keep a compatibility fallback to the legacy bypass flag only when an older
-  Codex reports that the hook-trust RPC methods are unavailable.
-- Keep the persisted Super app-server companion free of the global hook-bypass
-  flag unless that legacy fallback is actually required.
-- Preserve explicit user-provided `--dangerously-bypass-hook-trust` arguments
-  unchanged.
-
-## Super Runtime Contract
-
-- A real pseudo-TTY launch using the patched Prodex binary and the official
-  Codex 0.156.1 binary reached the Codex TUI in YOLO mode with **zero startup
-  warnings**, **no folder-trust prompt**, and **no hook-review prompt**.
-- The live launch trusted three Ponytail hooks by their current SHA-256-backed
-  hook hashes before the TUI started.
-- Neither the TUI Codex process nor its app-server companion carried the global
-  `--dangerously-bypass-hook-trust` flag.
-- Caveman 2.7.0 awareness was present in the generated overlay.
-- The live RTK wrapper resolved to `/home/doxa/.local/bin/rtk` and reported
-  RTK 0.49.0 under the user's login-shell PATH.
-- Codebase Memory MCP 0.11.0 and Playwright MCP 0.0.82 were both running as
-  live child processes of the Codex session.
-- Ponytail 4.10.0 was enabled and its hook set was trusted by hash.
-- Presidio behavior is unchanged: default OFF, interactive opt-in when no
-  explicit preference is supplied, and `--presidio` / `--no-presidio`
-  remain explicit overrides.
-
-## Safety
-
-- Hook trust is scoped to the temporary Prodex overlay used for the Super
-  invocation; the user's shared Codex config is not rewritten with global
-  hook-bypass state.
-- Hook trust is granted only to the exact hook hashes returned by Codex. A
-  modified hook receives a new hash and therefore requires a new Super
-  preflight trust write.
-- Folder trust remains scoped to the temporary launch overlay.
-- No MCP surface, expose protocol, credential format, provider routing policy,
-  tunnel-client pin, or Presidio default is changed by this patch.
-
-## Validation
-
-- The published 0.431.2 binary was exercised interactively against official
-  Codex 0.156.1 and reproduced the remaining startup warning exactly:
-  `--dangerously-bypass-hook-trust is enabled. Enabled hooks may run without
-  review for this invocation.`
-- The 0.431.3 candidate was then exercised in the same real pseudo-TTY flow
-  without sending any model prompt and completed the Super startup contract
-  with zero warnings and zero trust prompts.
-- Live overlay inspection confirmed project trust, five default Super optional
-  tools, Ponytail hook trust hashes, and the absence of obsolete config keys.
-- The launch left no patched Prodex/Codex child processes behind after
-  graceful shutdown.
-- Rust 1.98.1, Mojo 1.1.0, and all optional-tool stable pins remain unchanged
-  from their previously qualified versions.
-
-## Changelog
-
-- Trust Super hooks through Codex's native trusted-hash state instead of a
-  global bypass warning.
-- Keep `prodex s` zero-prompt for folder and hook trust on Codex 0.156.1.
-- Preserve all latest-stable optional tools and the existing Presidio opt-in
-  flow.
-
-Full Changelog: [0.431.2...0.431.3](https://github.com/christiandoxa/prodex/compare/0.431.2...0.431.3)
 
 ## 0.431.2 - 2026-09-23
 
