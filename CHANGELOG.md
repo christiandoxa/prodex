@@ -2,6 +2,63 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.431.1 - 2026-09-23
+
+### CLI
+
+- Preserve Codex workspace bootstrap URL (`98a7beb`)
+# Prodex 0.431.1
+
+## New Features
+
+- No new product features. This patch release is limited to Codex 0.156.0 workspace-routing compatibility.
+
+## Bug Fixes
+
+- Fix `prodex s` failing during Codex 0.156.0 TUI bootstrap with
+  `account/read failed: workspace backend must use an HTTPS origin without credentials`.
+- Stop replacing Codex's ChatGPT workspace bootstrap URL with the local HTTP
+  runtime proxy. Codex 0.156.0 requires that workspace-routing origin to remain
+  credential-free HTTPS.
+- Route OpenAI model traffic through Prodex using the existing authenticated
+  `prodex-openai-governed-http` custom provider instead, preserving normal
+  Responses and WebSocket proxying.
+- Keep forced-HTTP/sub-agent launches on the same governed provider with
+  WebSockets disabled.
+
+## Safety
+
+- Preserve `requires_openai_auth=true` so the local model provider continues
+  to use Codex's first-party authentication path.
+- Preserve user-supplied HTTPS `chatgpt_base_url` overrides rather than
+  replacing them with a loopback URL.
+- Extend `NO_PROXY` discovery to the internal Prodex provider base URL so
+  loopback model traffic cannot be redirected through a corporate proxy.
+- No new MCP tool, expose surface, credential format, or tunnel-client release
+  is introduced. The existing exact tunnel-client allowlist is unchanged.
+
+## Validation
+
+- Reproduced the 0.431.0 failure exactly with the official Codex 0.156.0 Linux
+  binary, synthetic ChatGPT auth, and a local mock workspace backend; the old
+  projection returns JSON-RPC `-32603` with the same HTTPS-origin error.
+- Runtime-launch regression tests cover both the feature-off Rust oracle and
+  the release-pinned Mojo 1.0.0 production path.
+- Verified the new projection omits loopback `chatgpt_base_url` and
+  `openai_base_url`, selects the authenticated Prodex provider, preserves
+  explicit HTTPS workspace bootstrap configuration, and retains the loopback
+  port in `NO_PROXY`.
+- Expanded the Codex 0.156 compatibility baseline from 49 to 50 critical source
+  files to pin the workspace-routing HTTPS validation contract.
+
+## Changelog
+
+- Restore `prodex s` compatibility with Codex 0.156.0 workspace routing.
+- Keep workspace bootstrap HTTPS while retaining Prodex model routing,
+  rotation, WebSocket handling, and proxy safety boundaries.
+
+Full Changelog: [0.431.0...0.431.1](https://github.com/christiandoxa/prodex/compare/0.431.0...0.431.1)
+
 ## 0.431.0 - 2026-09-23
 
 ### Runtime
@@ -30,82 +87,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Make Mojo authoritative for complete tool shaping (`c892781`)
 - Add complete provider tool transformation kernel (`17db154`)
 - Add versioned Codex argument planning kernel (`efef200`)
-# Prodex 0.431.0
-
-## New Features
-
-- Update the pinned upstream compatibility baseline from Codex
-  `rust-v0.155.1` to the official `rust-v0.156.0` release.
-- Preserve the upstream fixed `/responses` HTTP and WebSocket route after
-  Codex removed the previous Responses endpoint selector.
-- Treat the Responses `session_id` header as an opaque upstream affinity key.
-  Codex 0.156.0 may use prompt-cache affinity there for root agents while the
-  actual session identity remains in turn metadata and history.
-- Preserve remote compaction v2 through the normal Responses stream, including
-  `CompactionTrigger`, compaction metadata, and Codex-owned current-model
-  fallback behavior.
-- Move Codex launch argument planning and configuration-override matching into
-  authoritative Mojo kernels while preserving non-UTF-8 OS arguments in Rust.
-- Move complete Responses-to-chat request planning and provider tool shaping
-  into Mojo-backed production paths with Rust retained as the Serde/ABI host.
-- Move DeepSeek message normalization, tool-call adjacency, and response
-  metadata merging into Mojo.
-- Move complete Anthropic Messages request shaping into Mojo, including message
-  blocks, tools, web-search options, tool choice, request defaults, and the
-  existing degradation contract.
-- Keep Rust feature-off implementations as compatibility/test oracles rather
-  than silent production fallbacks.
-
-## Bug Fixes
-
-- Align explicit error classification with Codex 0.156.0:
-  `credit_balance_exhausted`, `organization_spend_limit_exceeded`, and
-  `project_spend_limit_exceeded` are quota failures, while `slow_down` is a
-  rate-limit signal rather than server overload.
-- Preserve quota snapshot observations beyond percentage-shaped values while
-  retaining validated status, route, and grace contracts.
-- Allow long valid runtime-doctor log tokens to classify as unknown markers
-  instead of failing the Mojo boundary.
-- Keep the existing OpenAI Secure MCP tunnel lifecycle fix and exact official
-  `tunnel-client` allowlist unchanged: v0.0.14 remains preferred and v0.0.13
-  remains the pinned compatibility release.
-
-## Safety
-
-- No new MCP tool or expose surface is added in 0.431.0.
-- Runtime rotation remains pre-commit only for explicit account quota failures;
-  generic HTTP 429 responses remain pass-through unless a structured supported
-  code is present.
-- `slow_down` retries the same profile as rate limiting and is not treated as
-  account quota.
-- Process, filesystem, credential, secret-store, transport, persistence, and
-  OS lifecycle ownership remains in Rust where those host boundaries are
-  required.
-
-## Validation
-
-- Audited the exact Codex 0.155.1 and 0.156.0 tagged source trees. All 49
-  Prodex critical-file assertions match the updated 0.156.0 contract.
-- Verified the official Codex 0.156.0 Linux musl release asset checksum and
-  `codex-cli 0.156.0`, and completed an isolated app-server initialize smoke.
-- Added focused quota/rate classifier coverage for the new 0.156.0 error codes
-  in both active Mojo and feature-off Rust paths.
-- Differential and boundary coverage for the Mojo ownership waves includes
-  generated launch/config, provider-tool, OpenAI chat-request, DeepSeek message,
-  and Anthropic request corpora.
-- Provider, runtime-proxy, app integration, source guards, cross-target Mojo
-  object compilation, docs lint, and compatibility replay gates were exercised
-  during development.
-
-## Changelog
-
-- Support the official Codex `rust-v0.156.0` compatibility contract.
-- Align quota and rate-limit classification with Codex 0.156.0.
-- Promote additional launch and provider semantics to authoritative Mojo
-  kernels without expanding the MCP surface.
-- Preserve existing tunnel-client compatibility and runtime safety boundaries.
-
-Full Changelog: [0.430.4...0.431.0](https://github.com/christiandoxa/prodex/compare/0.430.4...0.431.0)
 
 ## 0.430.4 - 2026-09-22
 
