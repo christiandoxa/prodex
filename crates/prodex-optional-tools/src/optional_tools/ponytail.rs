@@ -1,7 +1,6 @@
 use super::{
     OptionalToolId, ResolvedTool, TOOL_PROBE_TIMEOUT, ToolDiscoverySource, ToolHealth,
-    ToolHealthStatus, find_path_command, invalid_tool, manifest_tree_sha256_supported,
-    optional_tool_descriptor,
+    find_path_command, invalid_tool, manifest_tree_sha256_supported, optional_tool_descriptor,
 };
 use crate::discovery::managed_optimizer_roots;
 use anyhow::{Context, Result};
@@ -261,6 +260,7 @@ fn validated_managed_directory(allowed_root: &Path, candidate: &Path) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::optional_tools::ToolHealthStatus;
 
     #[test]
     fn is_missing_when_node_is_not_on_path() {
