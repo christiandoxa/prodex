@@ -549,7 +549,6 @@ fn runtime_deepseek_send_model_attempt(
             if native_messages {
                 match runtime_local_rewrite_precommit_native_first_event(
                     &mut live_response,
-                    RuntimeProviderBridgeKind::DeepSeek,
                     context
                         .shared
                         .runtime_shared
