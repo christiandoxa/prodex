@@ -1,7 +1,7 @@
 use super::docker::{
-    PRESIDIO_ANALYZER_CONTAINER, PRESIDIO_ANALYZER_IMAGE, PRESIDIO_ANONYMIZER_CONTAINER,
-    PRESIDIO_ANONYMIZER_IMAGE, PresidioContainerChange, cleanup_presidio_container,
-    docker_available, ensure_presidio_container,
+    PRESIDIO_ANALYZER_CONTAINER, PRESIDIO_ANONYMIZER_CONTAINER, PresidioContainerChange,
+    cleanup_presidio_container, docker_available, ensure_presidio_container,
+    presidio_analyzer_image, presidio_anonymizer_image,
 };
 use super::{
     DEFAULT_PRESIDIO_ANALYZER_URL, DEFAULT_PRESIDIO_ANONYMIZER_URL, PresidioHealth,
@@ -54,9 +54,13 @@ pub(super) fn start_presidio_containers(
     analyzer: &PresidioHealth,
     anonymizer: &PresidioHealth,
 ) -> Result<Vec<(&'static str, PresidioContainerChange)>> {
+    let analyzer_image = presidio_analyzer_image()?;
+    let anonymizer_image = presidio_anonymizer_image()?;
     start_presidio_containers_with(
         analyzer,
         anonymizer,
+        &analyzer_image,
+        &anonymizer_image,
         ensure_presidio_container,
         cleanup_presidio_container,
     )
@@ -65,13 +69,15 @@ pub(super) fn start_presidio_containers(
 fn start_presidio_containers_with(
     analyzer: &PresidioHealth,
     anonymizer: &PresidioHealth,
+    analyzer_image: &str,
+    anonymizer_image: &str,
     mut ensure: impl FnMut(&str, &str, &str) -> Result<Option<PresidioContainerChange>>,
     mut cleanup: impl FnMut(&str, PresidioContainerChange) -> Result<()>,
 ) -> Result<Vec<(&'static str, PresidioContainerChange)>> {
     let mut changes = Vec::new();
     if !analyzer.ok {
         print_launch_status("starting Presidio Analyzer Docker container...");
-        match ensure(PRESIDIO_ANALYZER_CONTAINER, PRESIDIO_ANALYZER_IMAGE, "5002") {
+        match ensure(PRESIDIO_ANALYZER_CONTAINER, analyzer_image, "5002") {
             Ok(Some(change)) => changes.push((PRESIDIO_ANALYZER_CONTAINER, change)),
             Ok(None) => {}
             Err(error) => return Err(error),
@@ -79,11 +85,7 @@ fn start_presidio_containers_with(
     }
     if !anonymizer.ok {
         print_launch_status("starting Presidio Anonymizer Docker container...");
-        match ensure(
-            PRESIDIO_ANONYMIZER_CONTAINER,
-            PRESIDIO_ANONYMIZER_IMAGE,
-            "5001",
-        ) {
+        match ensure(PRESIDIO_ANONYMIZER_CONTAINER, anonymizer_image, "5001") {
             Ok(Some(change)) => changes.push((PRESIDIO_ANONYMIZER_CONTAINER, change)),
             Ok(None) => {}
             Err(error) => {

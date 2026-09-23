@@ -3,6 +3,7 @@ use crate::discovery::{
     managed_optimizer_command_candidates, managed_optimizer_roots, path_dirs_from_env,
 };
 use anyhow::{Context, Result};
+use semver::Version;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -42,6 +43,55 @@ pub(crate) fn manifest_tree_sha256_supported(
     legacy_manifest: &str,
 ) -> bool {
     value == vetted || value == legacy_manifest
+}
+
+
+fn valid_git_sha(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn parsed_probe_semver(value: &str) -> Option<Version> {
+    value
+        .split_whitespace()
+        .map(|token| {
+            token
+                .trim_matches(|ch: char| !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '-' | '+'))
+                .trim_start_matches('v')
+        })
+        .find_map(|token| Version::parse(token).ok())
+}
+
+fn validate_minimum_probe_version(
+    id: OptionalToolId,
+    version_line: &str,
+) -> Result<Version> {
+    let found = parsed_probe_semver(version_line).with_context(|| {
+        format!("{id} did not report a recognizable semantic version: {version_line}")
+    })?;
+    let minimum = Version::parse(crate::optional_tool_minimum_supported_version(id))
+        .with_context(|| format!("invalid Prodex minimum version policy for {id}"))?;
+    anyhow::ensure!(
+        found >= minimum,
+        "{id} {found} is too old; Prodex requires {} or newer. Update {id} to the latest stable release (release-qualified reference: {})",
+        crate::optional_tool_minimum_supported_version(id),
+        crate::optional_tool_recommended_version(id),
+    );
+    Ok(found)
+}
+
+fn probe_version_line(program: &Path, args: &[&str]) -> Result<String> {
+    let output = crate::process::probe_command(program, args, TOOL_PROBE_TIMEOUT)?;
+    anyhow::ensure!(
+        output.status.success(),
+        "version check exited with {}: {}",
+        output.status,
+        probe_first_line(&output).unwrap_or_else(|_| "invalid UTF-8 diagnostic".to_string())
+    );
+    probe_first_line(&output)
 }
 
 #[derive(Debug, Deserialize)]
@@ -384,11 +434,8 @@ fn command_tool_status(id: OptionalToolId, command: &str) -> ToolHealth {
     )
 }
 
-fn command_probe_args(id: OptionalToolId) -> &'static [&'static str] {
-    match id {
-        OptionalToolId::CodebaseMemoryMcp => &["--help"],
-        _ => &["--version"],
-    }
+fn command_probe_args(_id: OptionalToolId) -> &'static [&'static str] {
+    &["--version"]
 }
 
 fn playwright_tool_status() -> ToolHealth {
@@ -490,9 +537,18 @@ fn resolved_command_tool(
         probe_first_line(&output).unwrap_or_else(|_| "invalid UTF-8 diagnostic".to_string())
     );
     let version = probe_first_line(&output)?;
-    if id == OptionalToolId::CodebaseMemoryMcp {
-        codebase_memory::validate_version(&version)?;
-        codebase_memory::validate_daemon(&program)?;
+    match id {
+        OptionalToolId::Rtk => {
+            validate_minimum_probe_version(id, &version)?;
+        }
+        OptionalToolId::CodebaseMemoryMcp => {
+            codebase_memory::validate_version(&version)?;
+            codebase_memory::validate_daemon(&program)?;
+        }
+        OptionalToolId::PlaywrightMcp => {
+            validate_minimum_probe_version(id, &version)?;
+        }
+        _ => {}
     }
     let digest = sha256_file(&program, MAX_EXECUTABLE_DIGEST_BYTES)?;
     Ok(ResolvedTool {
@@ -501,6 +557,33 @@ fn resolved_command_tool(
         path: Some(program.to_path_buf()),
         version: Some(version),
         digest: Some(digest),
+    })
+}
+
+pub(super) fn resolved_command_tool_for_launch(
+    id: OptionalToolId,
+    path: PathBuf,
+    source: ToolDiscoverySource,
+) -> Result<ResolvedTool> {
+    let program = validated_tool_file(&path)?;
+    let version = match id {
+        OptionalToolId::Rtk | OptionalToolId::CodebaseMemoryMcp => {
+            let line = probe_version_line(&program, &["--version"])?;
+            if id == OptionalToolId::CodebaseMemoryMcp {
+                codebase_memory::validate_version(&line)?;
+            } else {
+                validate_minimum_probe_version(id, &line)?;
+            }
+            Some(line)
+        }
+        _ => None,
+    };
+    Ok(ResolvedTool {
+        descriptor: optional_tool_descriptor(id),
+        source,
+        path: Some(program),
+        version,
+        digest: None,
     })
 }
 
@@ -540,26 +623,82 @@ fn ponytail_tool_status_with_node(node: Option<PathBuf>) -> ToolHealth {
         }
         Err(error) => return invalid_tool(id, error),
     }
-    for root in managed_optimizer_roots() {
-        let versioned = root.join("ponytail").join(crate::PONYTAIL_VETTED_VERSION);
-        let versioned_exists = match crate::tree::path_exists(&versioned) {
-            Ok(exists) => exists,
-            Err(error) => return invalid_tool(id, error),
-        };
-        if versioned_exists {
-            return validate_ponytail_install(&root, &versioned)
-                .map(ToolHealth::installed)
-                .unwrap_or_else(|error| invalid_tool(id, error));
-        }
-    }
-    ToolHealth::missing(
-        id,
-        format!(
-            "expected ponytail/{}/{} under a managed optional-tool root",
-            crate::PONYTAIL_VETTED_VERSION,
-            TOOL_MANIFEST
+    match ponytail_candidate() {
+        Ok(Some((root, candidate))) => validate_ponytail_install(&root, &candidate)
+            .map(ToolHealth::installed)
+            .unwrap_or_else(|error| invalid_tool(id, error)),
+        Ok(None) => ToolHealth::missing(
+            id,
+            format!(
+                "Ponytail {}+ was not found under a managed optional-tool root; latest stable reference is {}",
+                crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION,
+                crate::PONYTAIL_LATEST_STABLE_REFERENCE
+            ),
         ),
-    )
+        Err(error) => invalid_tool(id, error),
+    }
+}
+
+fn ponytail_candidate() -> Result<Option<(PathBuf, PathBuf)>> {
+    let minimum = Version::parse(crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION)
+        .context("invalid Ponytail minimum supported version")?;
+    for root in managed_optimizer_roots() {
+        let metadata = match fs::symlink_metadata(&root) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error).with_context(|| format!("failed to inspect {}", root.display()));
+            }
+        };
+        anyhow::ensure!(
+            metadata.is_dir() && !metadata.file_type().is_symlink(),
+            "optional-tool root {} must be a real directory",
+            root.display()
+        );
+        let tool_root = root.join("ponytail");
+        let entries = match fs::read_dir(&tool_root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to read {}", tool_root.display()));
+            }
+        };
+        let mut newest: Option<(Version, PathBuf)> = None;
+        for entry in entries {
+            let entry = entry
+                .with_context(|| format!("failed to read entry in {}", tool_root.display()))?;
+            let file_type = entry
+                .file_type()
+                .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
+            if !file_type.is_dir() || file_type.is_symlink() {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let Ok(version) = Version::parse(&name) else {
+                continue;
+            };
+            if !version.pre.is_empty() {
+                continue;
+            }
+            if newest.as_ref().is_none_or(|(current, _)| version > *current) {
+                newest = Some((version, entry.path()));
+            }
+        }
+        let Some((version, candidate)) = newest else {
+            continue;
+        };
+        anyhow::ensure!(
+            version >= minimum,
+            "installed Ponytail {version} is too old; Prodex requires {} or newer. Update Ponytail to the latest stable release (release-qualified reference: {})",
+            crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION,
+            crate::PONYTAIL_LATEST_STABLE_REFERENCE
+        );
+        return Ok(Some((root, candidate)));
+    }
+    Ok(None)
 }
 
 fn validate_ponytail_install(allowed_root: &Path, candidate: &Path) -> Result<ResolvedTool> {
@@ -576,25 +715,33 @@ fn validate_ponytail_install(allowed_root: &Path, candidate: &Path) -> Result<Re
         manifest.id == "ponytail",
         "Ponytail manifest id must be ponytail"
     );
+    let version = Version::parse(&manifest.version)
+        .with_context(|| format!("invalid Ponytail version {}", manifest.version))?;
+    let minimum = Version::parse(crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION)
+        .context("invalid Ponytail minimum supported version")?;
     anyhow::ensure!(
-        manifest.version == crate::PONYTAIL_VETTED_VERSION,
-        "Ponytail version is not vetted"
+        version.pre.is_empty() && version >= minimum,
+        "Ponytail {} is incompatible; Prodex requires {} or newer. Update Ponytail to the latest stable release (release-qualified reference: {})",
+        manifest.version,
+        crate::PONYTAIL_MINIMUM_SUPPORTED_VERSION,
+        crate::PONYTAIL_LATEST_STABLE_REFERENCE
+    );
+    anyhow::ensure!(
+        candidate.file_name().and_then(|name| name.to_str()) == Some(manifest.version.as_str()),
+        "Ponytail version directory does not match manifest version {}",
+        manifest.version
     );
     anyhow::ensure!(
         manifest.source == PONYTAIL_SOURCE,
         "unexpected Ponytail source"
     );
     anyhow::ensure!(
-        manifest.commit == crate::PONYTAIL_VETTED_COMMIT,
-        "Ponytail commit does not match vetted metadata"
+        valid_git_sha(&manifest.commit),
+        "Ponytail manifest commit must be a 40-character Git SHA"
     );
     anyhow::ensure!(
-        manifest_tree_sha256_supported(
-            &manifest.tree_sha256,
-            crate::PONYTAIL_VETTED_TREE_SHA256,
-            crate::PONYTAIL_LEGACY_MANIFEST_TREE_SHA256,
-        ),
-        "Ponytail manifest tree digest does not match current or compatible vetted metadata"
+        valid_sha256(&manifest.tree_sha256),
+        "Ponytail manifest tree digest must be SHA-256"
     );
 
     let plugin_path = candidate.join(".codex-plugin/plugin.json");
@@ -606,8 +753,8 @@ fn validate_ponytail_install(allowed_root: &Path, candidate: &Path) -> Result<Re
         "Codex plugin name must be ponytail"
     );
     anyhow::ensure!(
-        plugin.version == crate::PONYTAIL_VETTED_VERSION,
-        "Codex plugin version does not match vetted metadata"
+        plugin.version == manifest.version,
+        "Codex plugin version does not match Ponytail manifest version"
     );
     anyhow::ensure!(
         candidate.join("hooks/claude-codex-hooks.json").is_file()
@@ -615,10 +762,32 @@ fn validate_ponytail_install(allowed_root: &Path, candidate: &Path) -> Result<Re
         "Ponytail installation is incomplete"
     );
     let digest = crate::tree::tree_sha256(&candidate, b"prodex-ponytail-tree-v1\0")?;
-    anyhow::ensure!(
-        digest == crate::PONYTAIL_VETTED_TREE_SHA256,
-        "Ponytail tree digest mismatch"
-    );
+    if manifest.version == crate::PONYTAIL_LATEST_STABLE_REFERENCE {
+        anyhow::ensure!(
+            manifest.commit == crate::PONYTAIL_LATEST_STABLE_COMMIT,
+            "Ponytail latest-stable commit does not match release-qualified metadata"
+        );
+        anyhow::ensure!(
+            manifest_tree_sha256_supported(
+                &manifest.tree_sha256,
+                crate::PONYTAIL_LATEST_STABLE_TREE_SHA256,
+                crate::PONYTAIL_LEGACY_MANIFEST_TREE_SHA256,
+            ),
+            "Ponytail latest-stable manifest tree digest does not match release-qualified metadata"
+        );
+        anyhow::ensure!(
+            digest == crate::PONYTAIL_LATEST_STABLE_TREE_SHA256,
+            "Ponytail tree digest mismatch: expected {}, got {digest}",
+            crate::PONYTAIL_LATEST_STABLE_TREE_SHA256
+        );
+    } else {
+        anyhow::ensure!(
+            digest == manifest.tree_sha256,
+            "Ponytail tree digest mismatch: manifest {}, got {digest}",
+            manifest.tree_sha256
+        );
+    }
+
     Ok(ResolvedTool {
         descriptor: optional_tool_descriptor(OptionalToolId::Ponytail),
         source: ToolDiscoverySource::ManagedRoot,
@@ -730,5 +899,67 @@ mod tests {
         assert!(!manifest_tree_sha256_supported(
             "other", "current", "legacy"
         ));
+    }
+
+
+    #[test]
+    fn command_version_policy_accepts_minimum_and_future_stable_releases() {
+        assert!(
+            validate_minimum_probe_version(OptionalToolId::Rtk, "rtk 0.46.0").is_ok()
+        );
+        assert!(
+            validate_minimum_probe_version(OptionalToolId::Rtk, "rtk 9.1.0").is_ok()
+        );
+        assert!(
+            validate_minimum_probe_version(OptionalToolId::PlaywrightMcp, "Version 3.4.5").is_ok()
+        );
+        let error =
+            validate_minimum_probe_version(OptionalToolId::Rtk, "rtk 0.45.9").unwrap_err();
+        assert!(error.to_string().contains("Update rtk to the latest stable release"));
+    }
+
+    #[test]
+    fn ponytail_validation_accepts_future_stable_self_consistent_install() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let allowed_root = std::env::temp_dir().join(format!(
+            "prodex-ponytail-future-{}-{stamp}",
+            std::process::id()
+        ));
+        let candidate = allowed_root.join("ponytail/4.11.0");
+        fs::create_dir_all(candidate.join(".codex-plugin")).unwrap();
+        fs::create_dir_all(candidate.join("hooks")).unwrap();
+        fs::create_dir_all(candidate.join("skills")).unwrap();
+        fs::write(
+            candidate.join(".codex-plugin/plugin.json"),
+            r#"{"name":"ponytail","version":"4.11.0"}"#,
+        )
+        .unwrap();
+        fs::write(candidate.join("hooks/claude-codex-hooks.json"), "{}
+").unwrap();
+        fs::write(candidate.join("skills/README.md"), "# future
+").unwrap();
+        let digest =
+            crate::tree::tree_sha256(&candidate, b"prodex-ponytail-tree-v1\0").unwrap();
+        fs::write(
+            candidate.join(TOOL_MANIFEST),
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1,
+                "id": "ponytail",
+                "version": "4.11.0",
+                "source": PONYTAIL_SOURCE,
+                "commit": "1111111111111111111111111111111111111111",
+                "tree_sha256": digest,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let tool = validate_ponytail_install(&allowed_root, &candidate).unwrap();
+        assert_eq!(tool.version.as_deref(), Some("4.11.0"));
+        assert_eq!(tool.digest, Some(format!("sha256:{digest}")));
+        fs::remove_dir_all(allowed_root).unwrap();
     }
 }

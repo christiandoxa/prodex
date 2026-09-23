@@ -142,6 +142,11 @@ jobs:
             | tee "${RUNNER_TEMP}/optional-tools-freshness-B.json"
           test -s "${RUNNER_TEMP}/optional-tools-freshness-B.json"
 
+      - name: Verify runtime dependency latest-stable references
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci/runtime-dependency-freshness.sh
+
       - name: Upload optional-tool freshness evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -1274,6 +1279,11 @@ jobs:
             --check --json --checkpoint P --release-sha "${RELEASE_SHA}" \
             | tee "${RUNNER_TEMP}/optional-tools-freshness-P.json"
           test -s "${RUNNER_TEMP}/optional-tools-freshness-P.json"
+
+      - name: Reverify runtime dependency latest-stable references
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci/runtime-dependency-freshness.sh
 
       - name: Upload pre-publication freshness evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

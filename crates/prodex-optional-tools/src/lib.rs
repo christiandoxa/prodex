@@ -31,34 +31,55 @@ pub use super_optimizers::{
 };
 
 pub const PRODEX_OPTIMIZERS_HOME_ENV: &str = "PRODEX_OPTIMIZERS_HOME";
-pub const CAVEMAN_VETTED_VERSION: &str = "2.7.0";
-pub const CAVEMAN_VETTED_COMMIT: &str = "8b0c1d3699b8d83e87fe4605b378da20c41555e0";
-pub const CAVEMAN_VETTED_TREE_SHA256: &str =
+
+pub const CAVEMAN_MINIMUM_SUPPORTED_VERSION: &str = "2.3.1";
+pub const CAVEMAN_LATEST_STABLE_REFERENCE: &str = "2.7.0";
+pub const CAVEMAN_LATEST_STABLE_COMMIT: &str = "8b0c1d3699b8d83e87fe4605b378da20c41555e0";
+pub const CAVEMAN_LATEST_STABLE_TREE_SHA256: &str =
     "09127915a13a493146ed0392b6895bbbd5f620d276dda9f4e68a6722f96df950";
 pub(crate) const CAVEMAN_LEGACY_MANIFEST_TREE_SHA256: &str =
     "26d587fc179e79f76f4e2b42edec0266a7af40cf08bf15eb4609de310fabd8fb";
-pub const PONYTAIL_VETTED_VERSION: &str = "4.10.0";
-pub const PONYTAIL_VETTED_COMMIT: &str = "1d95ff7d39de12d87014ea40d4e22201bddc501b";
-pub const PONYTAIL_VETTED_TREE_SHA256: &str =
+
+pub const RTK_MINIMUM_SUPPORTED_VERSION: &str = "0.46.0";
+pub const RTK_LATEST_STABLE_REFERENCE: &str = "0.49.0";
+
+pub const CODEBASE_MEMORY_MINIMUM_SUPPORTED_VERSION: &str = "0.9.1-rc.1";
+pub const CODEBASE_MEMORY_LATEST_STABLE_REFERENCE: &str = "0.11.0";
+
+pub const PLAYWRIGHT_MCP_MINIMUM_SUPPORTED_VERSION: &str = "0.0.79";
+pub const PLAYWRIGHT_MCP_LATEST_STABLE_REFERENCE: &str = "0.0.82";
+pub(crate) const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp";
+
+pub const PONYTAIL_MINIMUM_SUPPORTED_VERSION: &str = "4.9.0";
+pub const PONYTAIL_LATEST_STABLE_REFERENCE: &str = "4.10.0";
+pub const PONYTAIL_LATEST_STABLE_COMMIT: &str = "1d95ff7d39de12d87014ea40d4e22201bddc501b";
+pub const PONYTAIL_LATEST_STABLE_TREE_SHA256: &str =
     "05fe532f2a310cc7d12a60d6b51d1638a7d1465598d82ffa9f6a3d4cbf970f48";
 pub(crate) const PONYTAIL_LEGACY_MANIFEST_TREE_SHA256: &str =
     "5443a5ee4a7248adcb59e1e102dd5bbd14af3083a9c3b4f271dd86790ac88c9c";
-pub(crate) const PLAYWRIGHT_MCP_PACKAGE: &str = "@playwright/mcp@0.0.82";
-pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.49.0";
-pub(crate) const CODEBASE_MEMORY_RECOMMENDED_VERSION: &str = "0.11.0";
-pub(crate) const PRESIDIO_RECOMMENDED_VERSION: &str = "2.2.364";
+
+pub const PRESIDIO_MINIMUM_SUPPORTED_VERSION: &str = "2.2.364";
+pub const PRESIDIO_LATEST_STABLE_REFERENCE: &str = "2.2.364";
 
 pub fn optional_tool_recommended_version(id: OptionalToolId) -> &'static str {
     match id {
-        OptionalToolId::Caveman => CAVEMAN_VETTED_VERSION,
-        OptionalToolId::Rtk => RTK_RECOMMENDED_VERSION,
-        OptionalToolId::CodebaseMemoryMcp => CODEBASE_MEMORY_RECOMMENDED_VERSION,
-        OptionalToolId::PlaywrightMcp => PLAYWRIGHT_MCP_PACKAGE
-            .rsplit_once('@')
-            .map(|(_, version)| version)
-            .unwrap_or("unknown"),
-        OptionalToolId::Ponytail => PONYTAIL_VETTED_VERSION,
-        OptionalToolId::Presidio => PRESIDIO_RECOMMENDED_VERSION,
+        OptionalToolId::Caveman => CAVEMAN_LATEST_STABLE_REFERENCE,
+        OptionalToolId::Rtk => RTK_LATEST_STABLE_REFERENCE,
+        OptionalToolId::CodebaseMemoryMcp => CODEBASE_MEMORY_LATEST_STABLE_REFERENCE,
+        OptionalToolId::PlaywrightMcp => PLAYWRIGHT_MCP_LATEST_STABLE_REFERENCE,
+        OptionalToolId::Ponytail => PONYTAIL_LATEST_STABLE_REFERENCE,
+        OptionalToolId::Presidio => PRESIDIO_LATEST_STABLE_REFERENCE,
+    }
+}
+
+pub fn optional_tool_minimum_supported_version(id: OptionalToolId) -> &'static str {
+    match id {
+        OptionalToolId::Caveman => CAVEMAN_MINIMUM_SUPPORTED_VERSION,
+        OptionalToolId::Rtk => RTK_MINIMUM_SUPPORTED_VERSION,
+        OptionalToolId::CodebaseMemoryMcp => CODEBASE_MEMORY_MINIMUM_SUPPORTED_VERSION,
+        OptionalToolId::PlaywrightMcp => PLAYWRIGHT_MCP_MINIMUM_SUPPORTED_VERSION,
+        OptionalToolId::Ponytail => PONYTAIL_MINIMUM_SUPPORTED_VERSION,
+        OptionalToolId::Presidio => PRESIDIO_MINIMUM_SUPPORTED_VERSION,
     }
 }
 

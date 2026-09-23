@@ -4,12 +4,14 @@ use crate::optional_tools::{
     OptionalToolId, ResolvedTool, ToolDiscoverySource, ToolHealth, ToolHealthStatus,
     optional_tool_descriptor,
 };
-use crate::tree::{path_exists, read_bounded_file, tree_sha256};
+use crate::tree::{read_bounded_file, tree_sha256};
 use crate::{
-    CAVEMAN_LEGACY_MANIFEST_TREE_SHA256, CAVEMAN_VETTED_COMMIT, CAVEMAN_VETTED_TREE_SHA256,
-    CAVEMAN_VETTED_VERSION,
+    CAVEMAN_LEGACY_MANIFEST_TREE_SHA256, CAVEMAN_LATEST_STABLE_COMMIT,
+    CAVEMAN_LATEST_STABLE_REFERENCE, CAVEMAN_LATEST_STABLE_TREE_SHA256,
+    CAVEMAN_MINIMUM_SUPPORTED_VERSION,
 };
 use anyhow::{Context, Result, bail, ensure};
+use semver::Version;
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -37,16 +39,10 @@ struct ClaudePluginManifest {
 pub fn resolve_caveman() -> Result<ResolvedTool> {
     let Some((allowed_root, candidate)) = caveman_candidate()? else {
         bail!(
-            "Caveman {CAVEMAN_VETTED_VERSION} is not installed; run `prodex capability super-doctor` and install it under a managed optional-tool root"
+            "Caveman is not installed; install version {CAVEMAN_MINIMUM_SUPPORTED_VERSION} or newer under a managed optional-tool root (latest stable reference: {CAVEMAN_LATEST_STABLE_REFERENCE})"
         );
     };
-    validate_caveman_install(
-        &allowed_root,
-        &candidate,
-        CAVEMAN_VETTED_VERSION,
-        CAVEMAN_VETTED_COMMIT,
-        CAVEMAN_VETTED_TREE_SHA256,
-    )
+    validate_caveman_install(&allowed_root, &candidate)
 }
 
 pub fn resolve_caveman_claude_plugin_dir() -> Result<PathBuf> {
@@ -86,17 +82,11 @@ pub(crate) fn caveman_tool_status() -> ToolHealth {
         return ToolHealth::missing(
             OptionalToolId::Caveman,
             format!(
-                "expected caveman/{CAVEMAN_VETTED_VERSION}/{TOOL_MANIFEST} under a managed optional-tool root"
+                "Caveman {CAVEMAN_MINIMUM_SUPPORTED_VERSION}+ was not found under a managed optional-tool root; latest stable reference is {CAVEMAN_LATEST_STABLE_REFERENCE}"
             ),
         );
     };
-    match validate_caveman_install(
-        &allowed_root,
-        &candidate,
-        CAVEMAN_VETTED_VERSION,
-        CAVEMAN_VETTED_COMMIT,
-        CAVEMAN_VETTED_TREE_SHA256,
-    ) {
+    match validate_caveman_install(&allowed_root, &candidate) {
         Ok(tool) => ToolHealth::installed(tool),
         Err(error) => invalid_health(Some(candidate), error),
     }
@@ -116,6 +106,8 @@ fn invalid_health(path: Option<PathBuf>, error: anyhow::Error) -> ToolHealth {
 }
 
 fn caveman_candidate() -> Result<Option<(PathBuf, PathBuf)>> {
+    let minimum = Version::parse(CAVEMAN_MINIMUM_SUPPORTED_VERSION)
+        .context("invalid Caveman minimum supported version")?;
     for root in managed_optimizer_roots() {
         let metadata = match fs::symlink_metadata(&root) {
             Ok(metadata) => metadata,
@@ -129,21 +121,59 @@ fn caveman_candidate() -> Result<Option<(PathBuf, PathBuf)>> {
             "optional-tool root {} must be a real directory",
             root.display()
         );
-        let versioned = root.join("caveman").join(CAVEMAN_VETTED_VERSION);
-        if path_exists(&versioned)? {
-            return Ok(Some((root, versioned)));
+        let tool_root = root.join("caveman");
+        let entries = match fs::read_dir(&tool_root) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("failed to read {}", tool_root.display()));
+            }
+        };
+        let mut newest: Option<(Version, PathBuf)> = None;
+        for entry in entries {
+            let entry = entry
+                .with_context(|| format!("failed to read entry in {}", tool_root.display()))?;
+            let file_type = entry
+                .file_type()
+                .with_context(|| format!("failed to inspect {}", entry.path().display()))?;
+            if !file_type.is_dir() || file_type.is_symlink() {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            let Ok(version) = Version::parse(&name) else {
+                continue;
+            };
+            if !version.pre.is_empty() {
+                continue;
+            }
+            if newest.as_ref().is_none_or(|(current, _)| version > *current) {
+                newest = Some((version, entry.path()));
+            }
         }
+        let Some((version, candidate)) = newest else {
+            continue;
+        };
+        ensure!(
+            version >= minimum,
+            "installed Caveman {version} is too old; Prodex requires {CAVEMAN_MINIMUM_SUPPORTED_VERSION} or newer. Update Caveman to the latest stable release (release-qualified reference: {CAVEMAN_LATEST_STABLE_REFERENCE})"
+        );
+        return Ok(Some((root, candidate)));
     }
     Ok(None)
 }
 
-fn validate_caveman_install(
-    allowed_root: &Path,
-    candidate: &Path,
-    expected_version: &str,
-    expected_commit: &str,
-    expected_tree_sha256: &str,
-) -> Result<ResolvedTool> {
+fn valid_git_sha(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn valid_sha256(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn validate_caveman_install(allowed_root: &Path, candidate: &Path) -> Result<ResolvedTool> {
     let candidate_metadata = fs::symlink_metadata(candidate)
         .with_context(|| format!("failed to inspect {}", candidate.display()))?;
     ensure!(
@@ -168,47 +198,67 @@ fn validate_caveman_install(
     let manifest: CavemanInstallManifest =
         serde_json::from_slice(&read_bounded_file(&manifest_path, 64 * 1024)?)
             .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
+    ensure!(manifest.schema_version == 1, "unsupported Caveman manifest schema");
+    ensure!(manifest.id == "caveman", "Caveman manifest id must be caveman");
+
+    let version = Version::parse(&manifest.version)
+        .with_context(|| format!("invalid Caveman version {}", manifest.version))?;
+    let minimum = Version::parse(CAVEMAN_MINIMUM_SUPPORTED_VERSION)
+        .context("invalid Caveman minimum supported version")?;
     ensure!(
-        manifest.schema_version == 1,
-        "unsupported Caveman manifest schema"
+        version.pre.is_empty() && version >= minimum,
+        "Caveman {} is incompatible; Prodex requires {} or newer. Update Caveman to the latest stable release (release-qualified reference: {})",
+        manifest.version,
+        CAVEMAN_MINIMUM_SUPPORTED_VERSION,
+        CAVEMAN_LATEST_STABLE_REFERENCE
     );
     ensure!(
-        manifest.id == "caveman",
-        "Caveman manifest id must be caveman"
-    );
-    ensure!(
-        manifest.version == expected_version,
-        "Caveman version {} is not vetted version {expected_version}",
+        candidate.file_name().and_then(|name| name.to_str()) == Some(manifest.version.as_str()),
+        "Caveman version directory does not match manifest version {}",
         manifest.version
     );
+    ensure!(manifest.source == CAVEMAN_SOURCE, "unexpected Caveman source");
     ensure!(
-        manifest.source == CAVEMAN_SOURCE,
-        "unexpected Caveman source"
+        valid_git_sha(&manifest.commit),
+        "Caveman manifest commit must be a 40-character Git SHA"
     );
     ensure!(
-        manifest.commit == expected_commit,
-        "Caveman commit does not match vetted metadata"
-    );
-    ensure!(
-        crate::optional_tools::manifest_tree_sha256_supported(
-            &manifest.tree_sha256,
-            expected_tree_sha256,
-            CAVEMAN_LEGACY_MANIFEST_TREE_SHA256,
-        ),
-        "Caveman manifest tree digest does not match current or compatible vetted metadata"
+        valid_sha256(&manifest.tree_sha256),
+        "Caveman manifest tree digest must be SHA-256"
     );
 
     validate_required_files(&candidate)?;
     let actual_digest = tree_sha256(&candidate, b"prodex-caveman-tree-v1\0")?;
-    ensure!(
-        actual_digest == expected_tree_sha256,
-        "Caveman tree digest mismatch: expected {expected_tree_sha256}, got {actual_digest}"
-    );
+    if manifest.version == CAVEMAN_LATEST_STABLE_REFERENCE {
+        ensure!(
+            manifest.commit == CAVEMAN_LATEST_STABLE_COMMIT,
+            "Caveman latest-stable commit does not match release-qualified metadata"
+        );
+        ensure!(
+            crate::optional_tools::manifest_tree_sha256_supported(
+                &manifest.tree_sha256,
+                CAVEMAN_LATEST_STABLE_TREE_SHA256,
+                CAVEMAN_LEGACY_MANIFEST_TREE_SHA256,
+            ),
+            "Caveman latest-stable manifest tree digest does not match release-qualified metadata"
+        );
+        ensure!(
+            actual_digest == CAVEMAN_LATEST_STABLE_TREE_SHA256,
+            "Caveman tree digest mismatch: expected {CAVEMAN_LATEST_STABLE_TREE_SHA256}, got {actual_digest}"
+        );
+    } else {
+        ensure!(
+            actual_digest == manifest.tree_sha256,
+            "Caveman tree digest mismatch: manifest {}, got {actual_digest}",
+            manifest.tree_sha256
+        );
+    }
+
     Ok(ResolvedTool {
         descriptor: optional_tool_descriptor(OptionalToolId::Caveman),
         source: ToolDiscoverySource::ManagedRoot,
         path: Some(candidate),
-        version: Some(expected_version.to_string()),
+        version: Some(manifest.version),
         digest: Some(format!("sha256:{actual_digest}")),
     })
 }
@@ -267,7 +317,7 @@ mod tests {
     #[test]
     fn install_validation_accepts_exact_manifest_and_rejects_changed_content() {
         let allowed_root = temp_dir("install");
-        let candidate = allowed_root.join("caveman/1.2.3");
+        let candidate = allowed_root.join("caveman/2.3.1");
         fs::create_dir_all(candidate.join("skills/caveman")).unwrap();
         fs::create_dir_all(candidate.join(".claude-plugin")).unwrap();
         fs::write(candidate.join("AGENTS.md"), "@./skills/caveman/SKILL.md\n").unwrap();
@@ -283,7 +333,7 @@ mod tests {
             serde_json::to_vec(&serde_json::json!({
                 "schema_version": 1,
                 "id": "caveman",
-                "version": "1.2.3",
+                "version": "2.3.1",
                 "source": CAVEMAN_SOURCE,
                 "commit": "0123456789abcdef0123456789abcdef01234567",
                 "tree_sha256": digest,
@@ -292,14 +342,7 @@ mod tests {
         )
         .unwrap();
 
-        let tool = validate_caveman_install(
-            &allowed_root,
-            &candidate,
-            "1.2.3",
-            "0123456789abcdef0123456789abcdef01234567",
-            &digest,
-        )
-        .unwrap();
+        let tool = validate_caveman_install(&allowed_root, &candidate).unwrap();
         assert_eq!(
             tool.path.as_deref(),
             Some(candidate.canonicalize().unwrap().as_path())
@@ -307,14 +350,7 @@ mod tests {
 
         fs::write(candidate.join("skills/caveman/SKILL.md"), "changed\n").unwrap();
         assert!(
-            validate_caveman_install(
-                &allowed_root,
-                &candidate,
-                "1.2.3",
-                "0123456789abcdef0123456789abcdef01234567",
-                &digest,
-            )
-            .unwrap_err()
+            validate_caveman_install(&allowed_root, &candidate)\n                .unwrap_err()
             .to_string()
             .contains("tree digest mismatch")
         );

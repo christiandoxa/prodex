@@ -759,6 +759,10 @@ jobs:
 
       - name: Check official optional-tool releases
         run: node scripts/ci/optional-tools-freshness.mjs --check
+      - name: Check Codex and tunnel-client latest-stable references
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/ci/runtime-dependency-freshness.sh
 
   rust-quality:
     name: SonarQube Rust quality gate

@@ -43,6 +43,19 @@ pub(crate) fn resolve_runtime_optional_tool_plan(
         .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
         .collect();
     let plan = prodex_optional_tools::resolve_optional_tools_for_launch(&selected, &required);
+    if let Some(incompatible) = plan
+        .unavailable
+        .iter()
+        .find(|health| health.status == prodex_optional_tools::ToolHealthStatus::Invalid)
+    {
+        bail!(
+            "installed optional tool {} is incompatible: {}; update it to the latest stable release (minimum supported: {}, release-qualified reference: {}) or remove the incompatible installation",
+            incompatible.id,
+            redaction_redact_secret_like_text(&incompatible.detail),
+            prodex_optional_tools::optional_tool_minimum_supported_version(incompatible.id),
+            prodex_optional_tools::optional_tool_recommended_version(incompatible.id),
+        );
+    }
     if let Some(unavailable) = plan
         .unavailable
         .iter()

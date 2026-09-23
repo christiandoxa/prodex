@@ -10,6 +10,7 @@ use std::process::Command;
 
 const CODEX_COMMAND: &str = "codex";
 const MINIMUM_CODEX_VERSION: (u64, u64, u64) = (0, 153, 2);
+const MINIMUM_CODEX_VERSION_TEXT: &str = "0.153.2";
 const LEGACY_BUNDLED_CODEX_SHA256: &[&str] = &[
     "31b366ac32f41988056f56ce299d84489b90a18623fa8419dcfd2d39065dd252",
     "61303e421811460cc8f5a86d765c5b2bbc1578ef8ff606103ef22da0fd74de05",
@@ -19,9 +20,10 @@ const LEGACY_BUNDLED_CODEX_SHA256: &[&str] = &[
     "9f5a4e4fbbd784a18e4a46f977aaeb957510e4f6e1b97ef9a31091151b42df71",
 ];
 const CODEX_INSTALL_GUIDANCE: &str = concat!(
-    "Install the official Codex CLI with `npm install -g @openai/codex` ",
+    "Install or update the official Codex CLI with `npm install -g @openai/codex@latest` ",
     "(https://developers.openai.com/codex/cli), verify `codex --version`, ",
-    "or set PRODEX_CODEX_BIN to its executable path."
+    "or set PRODEX_CODEX_BIN to its executable path. Prodex accepts compatible Codex releases ",
+    "at or above its minimum capability baseline; the latest stable release is recommended."
 );
 
 pub(crate) fn codex_bin() -> OsString {
@@ -103,7 +105,7 @@ fn validate_codex_binary(binary: &OsStr) -> Result<()> {
     })?;
     if version < MINIMUM_CODEX_VERSION {
         bail!(
-            "Codex CLI at {} reports {}.{}.{}; Prodex requires 0.153.2 or newer. \
+            "Codex CLI at {} reports {}.{}.{}; Prodex requires {MINIMUM_CODEX_VERSION_TEXT} or newer. \
              {CODEX_INSTALL_GUIDANCE}",
             path.display(),
             version.0,
@@ -336,6 +338,12 @@ mod tests {
         write_executable(
             &codex,
             "#!/bin/sh\ncase \"$*\" in\n  --version) echo 'codex-cli 0.153.4';;\n  'app-server --help') echo 'Codex app-server';;\n  *) exit 2;;\nesac\n",
+        );
+        validate_codex_binary(codex.as_os_str()).unwrap();
+
+        write_executable(
+            &codex,
+            "#!/bin/sh\ncase \"$*\" in\n  --version) echo 'codex-cli 9.0.0';;\n  'app-server --help') echo 'Codex app-server';;\n  *) exit 2;;\nesac\n",
         );
         validate_codex_binary(codex.as_os_str()).unwrap();
 

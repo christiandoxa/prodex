@@ -94,9 +94,14 @@ fn fast_playwright_tool_status() -> ToolHealth {
     let Some(npx) = find_path_command("npx") else {
         return ToolHealth::missing(id, "npx was not found on PATH");
     };
-    fast_resolved_command(id, npx, ToolDiscoverySource::Path)
-        .map(ToolHealth::installed)
-        .unwrap_or_else(|error| invalid_tool(id, error))
+    resolved_command_tool(
+        id,
+        npx,
+        ToolDiscoverySource::Path,
+        &PLAYWRIGHT_MCP_PROBE_ARGS,
+    )
+    .map(ToolHealth::installed)
+    .unwrap_or_else(|error| invalid_tool(id, error))
 }
 
 fn fast_resolved_managed_command(
@@ -112,7 +117,7 @@ fn fast_resolved_managed_command(
         root.display()
     );
     let root = root.canonicalize()?;
-    let tool = fast_resolved_command(id, path, ToolDiscoverySource::ManagedRoot)?;
+    let tool = resolved_command_tool_for_launch(id, path, ToolDiscoverySource::ManagedRoot)?;
     anyhow::ensure!(
         tool.path
             .as_deref()
@@ -128,12 +133,5 @@ fn fast_resolved_command(
     path: PathBuf,
     source: ToolDiscoverySource,
 ) -> Result<ResolvedTool> {
-    let path = validated_tool_file(&path)?;
-    Ok(ResolvedTool {
-        descriptor: optional_tool_descriptor(id),
-        source,
-        version: None,
-        digest: None,
-        path: Some(path),
-    })
+    resolved_command_tool_for_launch(id, path, source)
 }

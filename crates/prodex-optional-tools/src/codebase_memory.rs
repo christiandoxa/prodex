@@ -1,14 +1,13 @@
 use std::path::Path;
 use std::time::Duration;
 
-const SHARED_DAEMON_MIN_VERSION: &str = "0.9.1-rc.1";
 const DAEMON_STATUS_ARGS: [&str; 2] = ["daemon", "status"];
 const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub(super) fn validate_version(version_line: &str) -> anyhow::Result<()> {
     anyhow::ensure!(
         has_shared_daemon(version_line),
-        "codebase-memory-mcp lacks shared daemon coordination; update to {SHARED_DAEMON_MIN_VERSION} or newer"
+        "codebase-memory-mcp lacks shared daemon coordination; Prodex requires {crate::CODEBASE_MEMORY_MINIMUM_SUPPORTED_VERSION} or newer. Update to the latest stable release (release-qualified reference: {crate::CODEBASE_MEMORY_LATEST_STABLE_REFERENCE})"
     );
     Ok(())
 }
@@ -33,7 +32,7 @@ fn has_shared_daemon(version_line: &str) -> bool {
     }
     let (Ok(version), Ok(minimum)) = (
         semver::Version::parse(version),
-        semver::Version::parse(SHARED_DAEMON_MIN_VERSION),
+        semver::Version::parse(crate::CODEBASE_MEMORY_MINIMUM_SUPPORTED_VERSION),
     ) else {
         return false;
     };

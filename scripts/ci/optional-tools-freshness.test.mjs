@@ -7,7 +7,7 @@ import {
   latestStableReleaseTag,
   parseArgs,
   runFreshnessCheck,
-  runtimePinnedVersions,
+  runtimeReferenceVersions,
 } from "./optional-tools-freshness.mjs";
 
 const auditPath = "migration/optional-tools-audit.json";
@@ -19,8 +19,8 @@ async function auditedFixture() {
     audit.tools.map((tool) => [tool.id, tool.latest_stable]),
   );
   const inventorySource = await fs.readFile("crates/prodex-optional-tools/src/lib.rs", "utf8");
-  const pinned = runtimePinnedVersions(inventorySource);
-  return { audit, inventorySource, observed, pinned };
+  const references = runtimeReferenceVersions(inventorySource);
+  return { audit, inventorySource, observed, references };
 }
 
 function outputBuffer() {
@@ -109,11 +109,11 @@ test("inconsistent registry versions fail closed", async () => {
   );
 });
 
-test("runtime pin drift fails even when online and audit versions agree", async () => {
+test("runtime latest-stable reference drift fails even when online and audit versions agree", async () => {
   const { inventorySource, observed } = await auditedFixture();
   const staleInventory = inventorySource.replace(
-    'pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.49.0";',
-    'pub(crate) const RTK_RECOMMENDED_VERSION: &str = "0.48.0";',
+    'pub const RTK_LATEST_STABLE_REFERENCE: &str = "0.49.0";',
+    'pub const RTK_LATEST_STABLE_REFERENCE: &str = "0.48.0";',
   );
   await assert.rejects(
     runFreshnessCheck({

@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
+use semver::Version;
 use std::ffi::OsString;
 use std::fmt;
 use std::fs;
@@ -11,18 +12,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
-const OPENAI_TUNNEL_CLIENT_RELEASE: &str = "v0.0.14";
-const OPENAI_TUNNEL_CLIENT_VERSION: &str = "0.0.14";
-const OPENAI_TUNNEL_CLIENT_COMMIT: &str = "0f870e50a973fa820d4c409000059e181e8d242b";
-const OPENAI_TUNNEL_CLIENT_COMPAT_VERSION: &str = "0.0.13";
-const OPENAI_TUNNEL_CLIENT_COMPAT_COMMIT: &str = "4b5267f823be0b046bb883aacb51603cfde3a0ea";
-const OPENAI_TUNNEL_CLIENT_SUPPORTED_RELEASES: [(&str, &str); 2] = [
-    (OPENAI_TUNNEL_CLIENT_VERSION, OPENAI_TUNNEL_CLIENT_COMMIT),
-    (
-        OPENAI_TUNNEL_CLIENT_COMPAT_VERSION,
-        OPENAI_TUNNEL_CLIENT_COMPAT_COMMIT,
-    ),
-];
+const OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION: &str = "0.0.13";
+const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.14";
+const OPENAI_TUNNEL_CLIENT_RELEASE_URL: &str =
+    "https://github.com/openai/tunnel-client/releases/latest";
 const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(all(test, windows)) {
     Duration::from_secs(10)
 } else if cfg!(test) {
@@ -191,11 +184,25 @@ pub(super) fn ensure_openai_tunnel_available(tunnel_id: &str) -> Result<String> 
         .map_err(|_| openai_tunnel_install_error())?;
     if !output.status.success() {
         bail!(
-            "tunnel-client --version failed; install the official openai/tunnel-client {OPENAI_TUNNEL_CLIENT_RELEASE} release"
+            "tunnel-client --version failed; update the official openai/tunnel-client to the latest stable release from {OPENAI_TUNNEL_CLIENT_RELEASE_URL}"
         )
     }
-    safe_client_version(&output)
-        .context("tunnel-client did not report a supported official version (v0.0.14 or v0.0.13)")
+    let version = safe_client_version(&output).ok_or_else(|| {
+        anyhow::anyhow!(
+            "tunnel-client did not report a compatible official stable build; Prodex requires {OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION} or newer. Update to the latest stable release (release-qualified reference: {OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE}) from {OPENAI_TUNNEL_CLIENT_RELEASE_URL}"
+        )
+    })?;
+    let mut capability = openai_tunnel_client_command()?;
+    capability.args(["run", "--help"]);
+    remove_inherited_tunnel_configuration(&mut capability);
+    let output = crate::command_probe_output(&mut capability, "tunnel-client run capability probe")
+        .map_err(|_| openai_tunnel_install_error())?;
+    if !output.status.success() {
+        bail!(
+            "tunnel-client {version} does not expose the required run capability; update to the latest stable release from {OPENAI_TUNNEL_CLIENT_RELEASE_URL}"
+        )
+    }
+    Ok(version)
 }
 
 pub(super) fn openai_tunnel_credentials_from_env(
@@ -305,7 +312,7 @@ impl Drop for OpenAiTunnel {
 
 fn openai_tunnel_install_error() -> anyhow::Error {
     anyhow::anyhow!(
-        "tunnel-client is required for OpenAI Secure MCP Tunnel mode; install the official openai/tunnel-client {OPENAI_TUNNEL_CLIENT_RELEASE} release ({OPENAI_TUNNEL_CLIENT_COMMIT}) from https://platform.openai.com/settings/organization/tunnels or set PRODEX_TUNNEL_CLIENT_BIN"
+        "tunnel-client is required for OpenAI Secure MCP Tunnel mode; install or update the official openai/tunnel-client to the latest stable release from {OPENAI_TUNNEL_CLIENT_RELEASE_URL} (minimum supported: {OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION}; release-qualified reference: {OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE}), or set PRODEX_TUNNEL_CLIENT_BIN"
     )
 }
 
@@ -406,8 +413,7 @@ fn yaml_quote(value: &str) -> String {
 
 fn safe_client_version(output: &Output) -> Option<String> {
     let text = format!(
-        "{}
-{}",
+        "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
@@ -415,34 +421,41 @@ fn safe_client_version(output: &Output) -> Option<String> {
     #[cfg(feature = "mojo-core")]
     {
         let valid = prodex_mojo_core::rich::super_expose_tunnel_client_version_output_valid(&text)
-            .unwrap_or_else(|error| panic!("Mojo tunnel-client version policy failed: {error:?}"));
+            .unwrap_or_else(|error| {
+                panic!("Mojo tunnel-client version format policy failed: {error:?}")
+            });
         if !valid {
             return None;
         }
     }
-    Some(version.to_owned())
+    Some(version.to_string())
 }
 
-fn supported_client_version_from_text(text: &str) -> Option<&'static str> {
-    OPENAI_TUNNEL_CLIENT_SUPPORTED_RELEASES
-        .into_iter()
-        .find_map(|(version, commit)| {
-            let expected = format!("{version}+{commit} (git sha: {commit})");
-            text.lines()
-                .any(|line| line.trim() == expected)
-                .then_some(version)
-        })
+fn supported_client_version_from_text(text: &str) -> Option<Version> {
+    let minimum = Version::parse(OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION).ok()?;
+    text.lines().find_map(|line| {
+        let line = line.trim();
+        let (version_and_sha, sha_suffix) = line.rsplit_once(" (git sha: ")?;
+        let sha_suffix = sha_suffix.strip_suffix(')')?;
+        let (version, build_sha) = version_and_sha.split_once('+')?;
+        if build_sha != sha_suffix || !valid_git_sha(build_sha) {
+            return None;
+        }
+        let version = Version::parse(version).ok()?;
+        (version.pre.is_empty() && version.build.is_empty() && version >= minimum)
+            .then_some(version)
+    })
+}
+
+fn valid_git_sha(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
 fn safe_version_label(value: &str) -> String {
-    if OPENAI_TUNNEL_CLIENT_SUPPORTED_RELEASES
-        .iter()
-        .any(|(version, _)| *version == value)
-    {
-        value.to_owned()
-    } else {
-        "unknown".to_string()
-    }
+    Version::parse(value)
+        .ok()
+        .filter(|version| version.pre.is_empty())
+        .map_or_else(|| "unknown".to_string(), |version| version.to_string())
 }
 
 fn wait_for_openai_tunnel_ready(
@@ -590,5 +603,50 @@ fn stop_child(child: &mut std::process::Child) {
     if child.try_wait().ok().flatten().is_none() {
         let _ = child.kill();
         let _ = child.wait();
+    }
+}
+
+#[cfg(test)]
+mod version_policy_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_minimum_latest_and_future_stable_official_builds() {
+        for (value, expected) in [
+            (
+                "0.0.13+4b5267f823be0b046bb883aacb51603cfde3a0ea (git sha: 4b5267f823be0b046bb883aacb51603cfde3a0ea)",
+                "0.0.13",
+            ),
+            (
+                "0.0.14+0f870e50a973fa820d4c409000059e181e8d242b (git sha: 0f870e50a973fa820d4c409000059e181e8d242b)",
+                "0.0.14",
+            ),
+            (
+                "0.0.15+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+                "0.0.15",
+            ),
+        ] {
+            assert_eq!(
+                supported_client_version_from_text(value)
+                    .unwrap()
+                    .to_string(),
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_old_prerelease_or_malformed_tunnel_client_versions() {
+        for value in [
+            "0.0.12+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+            "0.0.15-rc.1+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+            "0.0.15+1111111111111111111111111111111111111111 (git sha: 2222222222222222222222222222222222222222)",
+            "0.0.15",
+        ] {
+            assert!(
+                supported_client_version_from_text(value).is_none(),
+                "{value}"
+            );
+        }
     }
 }
