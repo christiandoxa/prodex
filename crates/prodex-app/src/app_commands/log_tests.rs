@@ -630,6 +630,45 @@ fn human_stream_adds_correlated_operational_events_without_exposing_urls() {
 }
 
 #[test]
+fn expose_exec_events_render_as_tool_logs_with_command_details() {
+    let root = env::temp_dir().join(format!(
+        "prodex-log-expose-exec-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let path = root.join("runtime.log");
+    fs::write(
+        &path,
+        concat!(
+            "{\"timestamp\":\"2026-09-23T12:00:00Z\",\"event\":\"super_expose_exec_started\",\"fields\":{\"program\":\"sh\",\"command\":\"sh -c \\\"printf visible\\\"\",\"cwd\":\"/repo\",\"arg_count\":\"2\",\"env_count\":\"0\",\"stdin_bytes\":\"0\",\"timeout_ms\":\"30000\"}}\n",
+            "{\"timestamp\":\"2026-09-23T12:00:01Z\",\"event\":\"super_expose_exec_completed\",\"fields\":{\"program\":\"sh\",\"command\":\"sh -c \\\"printf visible\\\"\",\"success\":\"true\",\"status\":\"completed\",\"exit_status\":\"0\",\"duration_ms\":\"12\"}}\n"
+        ),
+    )
+    .unwrap();
+
+    let items =
+        collect_new_runtime_log_stream_items(&path, &mut FollowedLog::default(), true).unwrap();
+    assert_eq!(items.len(), 2);
+    let rendered = log_stream_tui_text(&VecDeque::from(items), 20, 160)
+        .lines
+        .iter()
+        .flat_map(|line| line.spans.iter())
+        .map(|span| span.content.as_ref())
+        .collect::<String>();
+    assert!(rendered.contains("TOOL"));
+    assert!(rendered.contains("super_expose_exec_started"));
+    assert!(rendered.contains("command=sh -c"));
+    assert!(rendered.contains("cwd=/repo"));
+    assert!(rendered.contains("timeout_ms=30000"));
+    assert!(rendered.contains("duration_ms=12"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn json_stream_keeps_repeated_load_observations_raw() {
     let root = env::temp_dir().join(format!(
         "prodex-log-load-json-{}-{}",

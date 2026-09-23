@@ -1,4 +1,4 @@
-use super::{EXEC_MAX_OUTPUT_BYTES, execute_tool};
+use super::{EXEC_MAX_OUTPUT_BYTES, exec_log_command_preview, execute_tool, parse_request};
 use serde_json::{Value, json};
 use std::fs;
 use std::path::Path;
@@ -177,4 +177,23 @@ fn invalid_requests_and_no_session_dependency_fail_or_succeed_locally() {
     assert_eq!(result["success"], true);
     assert!(result.get("run_id").is_none());
     assert!(result.get("thread_id").is_none());
+}
+
+#[test]
+fn exec_log_preview_shows_command_without_secret_flag_values() {
+    let request = parse_request(
+        &json!({
+            "program": "sh",
+            "args": ["-c", "echo visible", "--api-key", "secret-value", "--token=another-secret"]
+        }),
+        Path::new("."),
+    )
+    .unwrap();
+    let preview = exec_log_command_preview(&request);
+    assert!(preview.contains("sh"));
+    assert!(preview.contains("echo visible"));
+    assert!(preview.contains("--api-key <redacted>"));
+    assert!(preview.contains("--token=<redacted>"));
+    assert!(!preview.contains("secret-value"));
+    assert!(!preview.contains("another-secret"));
 }

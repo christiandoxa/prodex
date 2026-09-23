@@ -127,7 +127,14 @@ fn operational_event_source_for_display(
         | "upstream_tls_handshake_error" => Some("error"),
         "runtime_log_gap" | "runtime_proxy_async_log_dropped" => Some("error"),
         event if event.contains("compact") || event.contains("compaction") => Some("compact"),
-        event if event.contains("mcp") || event.starts_with("expose_") => Some("mcp"),
+        event if event.starts_with("super_expose_exec_") => Some("tool"),
+        event
+            if event.contains("mcp")
+                || event.starts_with("expose_")
+                || event.starts_with("super_expose_") =>
+        {
+            Some("mcp")
+        }
         event if event.contains("sub_agent") || event.contains("subagent") => Some("agent"),
         event if event.starts_with("local_rewrite_") && event.contains("retry") => Some("retry"),
         event if event.starts_with("local_rewrite_") && event.contains("error") => Some("error"),

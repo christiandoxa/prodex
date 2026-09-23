@@ -21,6 +21,7 @@ pub(super) const EXEC_MAX_ENV_KEY_BYTES: usize = 256;
 pub(super) const EXEC_MAX_ENV_VALUE_BYTES: usize = 16 * 1024;
 pub(super) const EXEC_MAX_STDIN_BYTES: usize = 256 * 1024;
 pub(super) const EXEC_MAX_OUTPUT_BYTES: usize = 128 * 1024;
+const EXEC_LOG_COMMAND_MAX_BYTES: usize = 2 * 1024;
 
 struct ExecRequest {
     program: String,
@@ -41,40 +42,178 @@ pub(super) fn execute_direct(
     default_cwd: &Path,
     audit: &ExposeAuditLog,
 ) -> std::result::Result<Value, String> {
-    let program = arguments
-        .get("program")
-        .and_then(Value::as_str)
+    let request = match parse_request(arguments, default_cwd) {
+        Ok(request) => request,
+        Err(error) => {
+            audit.event(
+                "super_expose_exec_rejected",
+                [
+                    crate::runtime_proxy_log_field(
+                        "program",
+                        safe_program_label(arguments.get("program").and_then(Value::as_str)),
+                    ),
+                    crate::runtime_proxy_log_field(
+                        "reason",
+                        crate::redaction_redact_secret_like_text(&error),
+                    ),
+                ],
+            );
+            return Err(error);
+        }
+    };
+    let program = safe_program_label(Some(&request.program));
+    let command = exec_log_command_preview(&request);
+    let cwd = bounded_text(
+        &crate::redaction_redact_secret_like_text(&request.cwd.to_string_lossy()),
+        EXEC_MAX_CWD_BYTES,
+    );
+    audit.event(
+        "super_expose_exec_started",
+        [
+            crate::runtime_proxy_log_field("program", program.clone()),
+            crate::runtime_proxy_log_field("command", command.clone()),
+            crate::runtime_proxy_log_field("cwd", cwd),
+            crate::runtime_proxy_log_field("arg_count", request.args.len().to_string()),
+            crate::runtime_proxy_log_field("env_count", request.env.len().to_string()),
+            crate::runtime_proxy_log_field("stdin_bytes", request.stdin.len().to_string()),
+            crate::runtime_proxy_log_field("timeout_ms", request.timeout.as_millis().to_string()),
+        ],
+    );
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let result = run(request, &shutdown);
+    let fields = match result.as_ref() {
+        Ok(value) => vec![
+            crate::runtime_proxy_log_field("program", program),
+            crate::runtime_proxy_log_field("command", command),
+            crate::runtime_proxy_log_field(
+                "success",
+                value
+                    .get("success")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    .to_string(),
+            ),
+            crate::runtime_proxy_log_field(
+                "status",
+                value
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .unwrap_or("unknown"),
+            ),
+            crate::runtime_proxy_log_field(
+                "exit_status",
+                value
+                    .get("exit_status")
+                    .map(Value::to_string)
+                    .unwrap_or_else(|| "null".to_string()),
+            ),
+            crate::runtime_proxy_log_field(
+                "duration_ms",
+                value
+                    .get("duration_ms")
+                    .and_then(Value::as_u64)
+                    .unwrap_or_default()
+                    .to_string(),
+            ),
+            crate::runtime_proxy_log_field(
+                "stdout_truncated",
+                value
+                    .get("stdout_truncated")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    .to_string(),
+            ),
+            crate::runtime_proxy_log_field(
+                "stderr_truncated",
+                value
+                    .get("stderr_truncated")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                    .to_string(),
+            ),
+        ],
+        Err(error) => vec![
+            crate::runtime_proxy_log_field("program", program),
+            crate::runtime_proxy_log_field("command", command),
+            crate::runtime_proxy_log_field("success", "false"),
+            crate::runtime_proxy_log_field(
+                "reason",
+                crate::redaction_redact_secret_like_text(error),
+            ),
+        ],
+    };
+    audit.event("super_expose_exec_completed", fields);
+    result
+}
+
+fn safe_program_label(program: Option<&str>) -> String {
+    program
         .and_then(|program| {
             Path::new(program)
                 .file_name()
                 .and_then(|name| name.to_str())
         })
         .unwrap_or("program")
-        .to_string();
-    audit.event(
-        "super_expose_exec_started",
-        [
-            crate::runtime_proxy_log_field("program", program.clone()),
-            crate::runtime_proxy_log_field(
-                "arg_count",
-                arguments
-                    .get("args")
-                    .and_then(Value::as_array)
-                    .map_or(0, Vec::len)
-                    .to_string(),
-            ),
-        ],
-    );
-    let shutdown = Arc::new(AtomicBool::new(false));
-    let result = execute_tool(arguments, &shutdown, default_cwd);
-    audit.event(
-        "super_expose_exec_completed",
-        [
-            crate::runtime_proxy_log_field("program", program),
-            crate::runtime_proxy_log_field("success", result.is_ok().to_string()),
-        ],
-    );
-    result
+        .to_string()
+}
+
+fn exec_log_command_preview(request: &ExecRequest) -> String {
+    let mut rendered = Vec::with_capacity(request.args.len().saturating_add(1));
+    rendered.push(exec_log_argument(&request.program, false));
+    let mut redact_next = false;
+    for argument in &request.args {
+        let raw = argument.to_string_lossy();
+        if redact_next {
+            rendered.push("<redacted>".to_string());
+            redact_next = false;
+            continue;
+        }
+        if exec_log_secret_flag(&raw) {
+            if raw.contains('=') {
+                let key = raw.split_once('=').map_or(raw.as_ref(), |(key, _)| key);
+                rendered.push(format!("{key}=<redacted>"));
+            } else {
+                rendered.push(raw.to_string());
+                redact_next = true;
+            }
+            continue;
+        }
+        rendered.push(exec_log_argument(&raw, true));
+    }
+    bounded_text(
+        &crate::redaction_redact_secret_like_text(&rendered.join(" ")),
+        EXEC_LOG_COMMAND_MAX_BYTES,
+    )
+}
+
+fn exec_log_secret_flag(value: &str) -> bool {
+    let key = value
+        .split_once('=')
+        .map_or(value, |(key, _)| key)
+        .to_ascii_lowercase();
+    matches!(
+        key.as_str(),
+        "--api-key"
+            | "--apikey"
+            | "--auth-token"
+            | "--authorization"
+            | "--client-secret"
+            | "--password"
+            | "--secret"
+            | "--token"
+            | "-p"
+    ) || key.ends_with("_token")
+        || key.ends_with("_secret")
+        || key.ends_with("_password")
+}
+
+fn exec_log_argument(value: &str, quote: bool) -> String {
+    let redacted = crate::redaction_redact_secret_like_text(value);
+    if quote && redacted.chars().any(char::is_whitespace) {
+        serde_json::to_string(&redacted).unwrap_or_else(|_| "\"<redacted>\"".to_string())
+    } else {
+        redacted
+    }
 }
 
 pub(super) fn execute_tool(
