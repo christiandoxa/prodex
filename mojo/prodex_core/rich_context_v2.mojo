@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from rich_text import (
@@ -826,7 +828,7 @@ def prodex_mojo_rich_context_analyze_v2(
     result[].issue_kind = 0
     result[].issue_offset = -1
     result[].issue_length = 0
-    result[].counts = InlineArray[Int64, 7](fill=0)
+    result[].counts = Array[Int64, 7](fill=0)
     result[].noise_lines = 0
     result[].signal_lines = 0
     result[].token_count = 0

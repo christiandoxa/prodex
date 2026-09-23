@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from context_text import (
@@ -187,8 +189,8 @@ def context_command_output_short_status_line(
 
 def context_command_output_next_line(
     ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=end)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=end)
     var line_end = start
     while line_end < end and ptr[unsafe_offset=line_end] != 10:
         line_end += 1
@@ -464,7 +466,7 @@ def context_command_output_copy_branch(
     ptr: Pointer[mut=False, UInt8, _],
     start: Int64,
     end: Int64,
-    branch: Pointer[mut=True, InlineArray[Int64, 2], _],
+    branch: Pointer[mut=True, Array[Int64, 2], _],
 ) -> Bool:
     var bounds = context_text_trim_bounds(ptr, start, end)
     var offset = scratch[].written

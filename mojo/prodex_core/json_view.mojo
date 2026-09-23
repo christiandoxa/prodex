@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from rich_text import rich_view_ptr
 from rich_types import ProdexRichStringView
 
@@ -111,8 +113,8 @@ def deepseek_json_object_member(
     object_start: Int64,
     object_end: Int64,
     key: StringSlice,
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     if object_start < 0 or object_end > Int64(view.len) or object_end <= object_start + 1:
         return result^
     if deepseek_json_byte(view, object_start) != 123 or deepseek_json_byte(view, object_end - 1) != 125:
@@ -122,14 +124,14 @@ def deepseek_json_object_member(
         var key_start = index
         var key_end = deepseek_json_string_end(view, key_start, object_end - 1)
         if key_end < 0:
-            return InlineArray[Int64, 2](fill=-1)^
+            return Array[Int64, 2](fill=-1)^
         index = deepseek_json_skip_ws(view, key_end, object_end - 1)
         if index >= object_end - 1 or deepseek_json_byte(view, index) != 58:
-            return InlineArray[Int64, 2](fill=-1)^
+            return Array[Int64, 2](fill=-1)^
         var value_start = deepseek_json_skip_ws(view, index + 1, object_end - 1)
         var value_end = deepseek_json_value_end(view, value_start, object_end - 1, 0)
         if value_end < 0:
-            return InlineArray[Int64, 2](fill=-1)^
+            return Array[Int64, 2](fill=-1)^
         if deepseek_json_raw_equals(view, key_start, key_end, key):
             result[0] = value_start
             result[1] = value_end
@@ -139,7 +141,7 @@ def deepseek_json_object_member(
             continue
         if index == object_end - 1:
             break
-        return InlineArray[Int64, 2](fill=-1)^
+        return Array[Int64, 2](fill=-1)^
     return result^
 
 

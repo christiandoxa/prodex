@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from rich_text import rich_view_ptr, rich_view_valid
@@ -216,8 +218,8 @@ def gemini_config_json_value_end(
 
 def gemini_config_json_key_value(
     view: ProdexRichStringView, key: StringSlice
-) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     if not rich_view_valid(view, 4_194_304) or view.len < 2:
         return result^
     var ptr = rich_view_ptr(view)

@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 
@@ -1122,7 +1124,7 @@ comptime SUMMARY_DIAGNOSIS_NO_RECENT_FAILURE: Int64 = 62
 
 @fieldwise_init
 struct ProdexRuntimeDoctorSummaryPlanInput(Copyable):
-    var marker_counts: InlineArray[Int64, 128]
+    var marker_counts: Array[Int64, 128]
     var line_count: Int64
     var pointer_exists: Int64
     var log_exists: Int64

@@ -72,7 +72,7 @@ async function fixture(
           `version\t${version}`,
           `commit\t${"0".repeat(40)}`,
           "target\tasset\timplementation\tmojo_version\tmojo_features\truntime_bundle\tminimum_glibc",
-          `${target}\t${asset}\t${manifestImplementation}\t${manifestImplementation === "mojo-compiled-in" ? "1.0.0" : ""}\t${manifestImplementation === "mojo-compiled-in" ? "mojo-core" : ""}\tfalse\t`,
+          `${target}\t${asset}\t${manifestImplementation}\t${manifestImplementation === "mojo-compiled-in" ? "1.1.0" : ""}\t${manifestImplementation === "mojo-compiled-in" ? "mojo-core" : ""}\tfalse\t`,
           "",
         ].join("\n");
   const digest = validChecksum

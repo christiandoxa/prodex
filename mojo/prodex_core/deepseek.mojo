@@ -1,3 +1,5 @@
+from std.collections import Array
+
 from std.memory import Pointer
 
 from rich_text import rich_view_ptr, rich_view_valid
@@ -304,7 +306,7 @@ def deepseek_put_request_raw_member(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     key: StringSlice,
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     first: Pointer[mut=True, Bool, _],
 ) -> Bool:
     if bounds[0] < 0 or bounds[1] < bounds[0]:
@@ -620,7 +622,7 @@ def deepseek_put_projection_raw_member(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     key: StringSlice,
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     first: Pointer[mut=True, Bool, _],
 ) -> Bool:
     if bounds[0] < 0 or bounds[1] < bounds[0]:
@@ -633,8 +635,8 @@ def deepseek_put_projection_raw_member(
     )
 
 
-def deepseek_input_object_bounds(input: ProdexRichStringView) -> InlineArray[Int64, 2]:
-    var result = InlineArray[Int64, 2](fill=-1)
+def deepseek_input_object_bounds(input: ProdexRichStringView) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
     if not deepseek_json_fragment_valid(input):
         return result^
     var start = deepseek_json_skip_ws(input, 0, Int64(input.len))
@@ -658,14 +660,14 @@ def deepseek_put_stream_tool_call_delta(
     var index = deepseek_json_object_member(source, root[0], root[1], StringSlice("index"))
     var call_id = deepseek_json_object_member(source, root[0], root[1], StringSlice("id"))
     var function = deepseek_json_object_member(source, root[0], root[1], StringSlice("function"))
-    var name = InlineArray[Int64, 2](fill=-1)
-    var arguments = InlineArray[Int64, 2](fill=-1)
+    var name = Array[Int64, 2](fill=-1)
+    var arguments = Array[Int64, 2](fill=-1)
     if function[0] >= 0:
         name = deepseek_json_object_member(source, function[0], function[1], StringSlice("name"))
         arguments = deepseek_json_object_member(source, function[0], function[1], StringSlice("arguments"))
     var extra = deepseek_json_object_member(source, root[0], root[1], StringSlice("extra_content"))
-    var google = InlineArray[Int64, 2](fill=-1)
-    var signature = InlineArray[Int64, 2](fill=-1)
+    var google = Array[Int64, 2](fill=-1)
+    var signature = Array[Int64, 2](fill=-1)
     if extra[0] >= 0:
         google = deepseek_json_object_member(source, extra[0], extra[1], StringSlice("google"))
     if google[0] >= 0:
@@ -857,7 +859,7 @@ def deepseek_put_primitive_request_fields(
         return False
     if not deepseek_put_request_raw_member(writer, StringSlice('"top_p":'), source, top_p, first_ptr):
         return False
-    var max_bounds = InlineArray[Int64, 2](fill=-1)
+    var max_bounds = Array[Int64, 2](fill=-1)
     max_bounds[0] = max_start
     max_bounds[1] = max_end
     if not deepseek_put_request_raw_member(writer, StringSlice('"max_tokens":'), source, max_bounds, first_ptr):
@@ -1030,38 +1032,38 @@ def deepseek_policy_set(
     output[unsafe_offset=2] = end
 
 
-def deepseek_json_is_true(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+def deepseek_json_is_true(view: ProdexRichStringView, bounds: Array[Int64, 2]) -> Bool:
     if bounds[0] < 0 or bounds[1] - bounds[0] != 4:
         return False
     var ptr = rich_view_ptr(view)
     return ptr[unsafe_offset=bounds[0]] == 116 and ptr[unsafe_offset=bounds[0] + 1] == 114 and ptr[unsafe_offset=bounds[0] + 2] == 117 and ptr[unsafe_offset=bounds[0] + 3] == 101
 
 
-def deepseek_json_is_false(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+def deepseek_json_is_false(view: ProdexRichStringView, bounds: Array[Int64, 2]) -> Bool:
     if bounds[0] < 0 or bounds[1] - bounds[0] != 5:
         return False
     var ptr = rich_view_ptr(view)
     return ptr[unsafe_offset=bounds[0]] == 102 and ptr[unsafe_offset=bounds[0] + 1] == 97 and ptr[unsafe_offset=bounds[0] + 2] == 108 and ptr[unsafe_offset=bounds[0] + 3] == 115 and ptr[unsafe_offset=bounds[0] + 4] == 101
 
 
-def deepseek_json_is_null(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+def deepseek_json_is_null(view: ProdexRichStringView, bounds: Array[Int64, 2]) -> Bool:
     if bounds[0] < 0 or bounds[1] - bounds[0] != 4:
         return False
     var ptr = rich_view_ptr(view)
     return ptr[unsafe_offset=bounds[0]] == 110 and ptr[unsafe_offset=bounds[0] + 1] == 117 and ptr[unsafe_offset=bounds[0] + 2] == 108 and ptr[unsafe_offset=bounds[0] + 3] == 108
 
 
-def deepseek_json_is_bool(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+def deepseek_json_is_bool(view: ProdexRichStringView, bounds: Array[Int64, 2]) -> Bool:
     return deepseek_json_is_true(view, bounds) or deepseek_json_is_false(view, bounds)
 
 
 def deepseek_json_bounds_is_kind(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2], opening: UInt8
+    view: ProdexRichStringView, bounds: Array[Int64, 2], opening: UInt8
 ) -> Bool:
     return bounds[0] >= 0 and bounds[1] > bounds[0] and deepseek_json_byte(view, bounds[0]) == opening
 
 
-def deepseek_json_string_nonempty(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+def deepseek_json_string_nonempty(view: ProdexRichStringView, bounds: Array[Int64, 2]) -> Bool:
     if not deepseek_json_bounds_is_kind(view, bounds, 34):
         return False
     var ptr = rich_view_ptr(view)
@@ -1079,7 +1081,7 @@ def deepseek_json_string_nonempty(view: ProdexRichStringView, bounds: InlineArra
 
 def deepseek_policy_object_only_key(
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     allowed: StringSlice,
     output: Pointer[mut=True, Int64, _],
     error_tag: Int64,
@@ -1113,7 +1115,7 @@ def deepseek_policy_object_only_key(
 
 
 def deepseek_policy_array_all_text(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if not deepseek_json_bounds_is_kind(view, bounds, 91):
         return False
@@ -1132,7 +1134,7 @@ def deepseek_policy_array_all_text(
     return True
 
 def deepseek_policy_json_number(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if bounds[0] < 0 or bounds[1] <= bounds[0]:
         return False
@@ -1141,7 +1143,7 @@ def deepseek_policy_json_number(
 
 
 def deepseek_policy_positive_integer(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if bounds[0] < 0 or bounds[1] <= bounds[0]:
         return False
@@ -1157,7 +1159,7 @@ def deepseek_policy_positive_integer(
 
 def deepseek_policy_small_uint(
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     maximum: Int64,
 ) -> Int64:
     if bounds[0] < 0 or bounds[1] <= bounds[0]:
@@ -1339,7 +1341,7 @@ def deepseek_simple_content_item(
 
 
 def deepseek_simple_content(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if bounds[0] < 0:
         return True
@@ -1410,7 +1412,7 @@ def deepseek_simple_has_any_string_id(
 
 
 def deepseek_simple_string_array(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     if not deepseek_json_bounds_is_kind(view, bounds, 91):
         return False
@@ -1467,7 +1469,7 @@ def deepseek_simple_input_item(
         return False
     return deepseek_simple_content(view, deepseek_json_object_member(view, start, end, StringSlice("content")))
 
-def deepseek_simple_tools(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+def deepseek_simple_tools(view: ProdexRichStringView, bounds: Array[Int64, 2]) -> Bool:
     if not deepseek_json_bounds_is_kind(view, bounds, 91):
         return False
     var index = deepseek_json_skip_ws(view, bounds[0] + 1, bounds[1] - 1)
@@ -1492,7 +1494,7 @@ def deepseek_simple_tools(view: ProdexRichStringView, bounds: InlineArray[Int64,
     return True
 
 
-def deepseek_simple_tool_choice(view: ProdexRichStringView, bounds: InlineArray[Int64, 2]) -> Bool:
+def deepseek_simple_tool_choice(view: ProdexRichStringView, bounds: Array[Int64, 2]) -> Bool:
     if bounds[0] < 0 or deepseek_json_is_null(view, bounds):
         return True
     if deepseek_json_bounds_is_kind(view, bounds, 34):
@@ -1778,7 +1780,7 @@ def deepseek_web_search_options_plan(
                 )
                 if value_end < 0:
                     return False
-                var value = InlineArray[Int64, 2](fill=-1)
+                var value = Array[Int64, 2](fill=-1)
                 value[0] = index
                 value[1] = value_end
                 if not deepseek_json_string_nonempty(view, value):
@@ -1894,7 +1896,7 @@ def deepseek_web_search_context_plan(
 
 def deepseek_policy_string_starts_with(
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     prefix: StringSlice,
 ) -> Bool:
     if not deepseek_json_bounds_is_kind(view, bounds, 34):
@@ -1915,7 +1917,7 @@ def deepseek_policy_tool_name(
     view: ProdexRichStringView,
     start: Int64,
     end: Int64,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     var name = deepseek_json_object_member(view, start, end, StringSlice("name"))
     if deepseek_json_string_nonempty(view, name):
         return name^
@@ -1928,7 +1930,7 @@ def deepseek_policy_tool_name(
         )
         if deepseek_json_string_nonempty(view, name):
             return name^
-    return InlineArray[Int64, 2](fill=-1)^
+    return Array[Int64, 2](fill=-1)^
 
 
 def deepseek_policy_optional_member_bad(
@@ -1944,7 +1946,7 @@ def deepseek_policy_optional_member_bad(
 
 def deepseek_policy_core_tool_type_supported(
     view: ProdexRichStringView,
-    kind: InlineArray[Int64, 2],
+    kind: Array[Int64, 2],
 ) -> Bool:
     return (
         deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("function"))
@@ -1962,7 +1964,7 @@ def deepseek_policy_core_tool_type_supported(
 
 def deepseek_policy_gemini_tool_type_supported(
     view: ProdexRichStringView,
-    kind: InlineArray[Int64, 2],
+    kind: Array[Int64, 2],
 ) -> Bool:
     return (
         deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("web_fetch"))
@@ -1983,7 +1985,7 @@ def deepseek_policy_gemini_tool_type_supported(
 
 def deepseek_policy_tool_type_supported(
     view: ProdexRichStringView,
-    kind: InlineArray[Int64, 2],
+    kind: Array[Int64, 2],
     gemini_compat: Bool,
 ) -> Bool:
     if not deepseek_json_bounds_is_kind(view, kind, 34):
@@ -1996,7 +1998,7 @@ def deepseek_policy_tool_type_supported(
 
 def deepseek_policy_array_has_nonempty_string(
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if not deepseek_json_bounds_is_kind(view, bounds, 91):
         return False
@@ -2005,7 +2007,7 @@ def deepseek_policy_array_has_nonempty_string(
         var value_end = deepseek_json_value_end(view, index, bounds[1] - 1, 0)
         if value_end < 0:
             return False
-        var item = InlineArray[Int64, 2](fill=-1)
+        var item = Array[Int64, 2](fill=-1)
         item[0] = index
         item[1] = value_end
         if deepseek_json_string_nonempty(view, item):
@@ -2022,7 +2024,7 @@ def deepseek_policy_configs_have_enabled(
     view: ProdexRichStringView,
     tool_start: Int64,
     tool_end: Int64,
-    configs: InlineArray[Int64, 2],
+    configs: Array[Int64, 2],
 ) -> Bool:
     if not deepseek_json_bounds_is_kind(view, configs, 123):
         return False
@@ -2050,7 +2052,7 @@ def deepseek_policy_configs_have_enabled(
         var value_end = deepseek_json_value_end(view, value_start, configs[1] - 1, 0)
         if value_end < 0:
             return False
-        var enabled_value = InlineArray[Int64, 2](fill=-1)
+        var enabled_value = Array[Int64, 2](fill=-1)
         if deepseek_json_byte(view, value_start) == 123:
             enabled_value = deepseek_json_object_member(
                 view, value_start, value_end, StringSlice("enabled")
@@ -2734,11 +2736,11 @@ def deepseek_kernel_v1(
 comptime DEEPSEEK_RAW_REQUEST_RESPONSE_FORMAT_NONE: Int64 = 0
 comptime DEEPSEEK_RAW_REQUEST_RESPONSE_FORMAT_JSON_OBJECT: Int64 = 1
 
-def deepseek_raw_present(bounds: InlineArray[Int64, 2]) -> Bool:
+def deepseek_raw_present(bounds: Array[Int64, 2]) -> Bool:
     return bounds[0] >= 0 and bounds[1] > bounds[0]
 
-def deepseek_raw_root(view: ProdexRichStringView) -> InlineArray[Int64, 2]:
-    var missing = InlineArray[Int64, 2](fill=-1)
+def deepseek_raw_root(view: ProdexRichStringView) -> Array[Int64, 2]:
+    var missing = Array[Int64, 2](fill=-1)
     var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
     var end = deepseek_json_value_end(view, start, Int64(view.len), 0)
     if (
@@ -2747,20 +2749,20 @@ def deepseek_raw_root(view: ProdexRichStringView) -> InlineArray[Int64, 2]:
         or deepseek_json_byte(view, start) != 123
     ):
         return missing^
-    var root = InlineArray[Int64, 2](fill=-1)
+    var root = Array[Int64, 2](fill=-1)
     root[0] = start
     root[1] = end
     return root^
 
 def deepseek_raw_member(
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
     key: StringSlice,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     return deepseek_json_object_member(view, root[0], root[1], key)
 
 def deepseek_raw_string_nonempty(
-    view: ProdexRichStringView, bounds: InlineArray[Int64, 2]
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
 ) -> Bool:
     return (
         deepseek_raw_present(bounds)
@@ -2771,7 +2773,7 @@ def deepseek_raw_string_nonempty(
 def deepseek_raw_put_default_or_string(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
     default_value: StringSlice,
 ) -> Bool:
     if deepseek_raw_present(bounds) and deepseek_json_byte(view, bounds[0]) == 34:
@@ -2780,11 +2782,11 @@ def deepseek_raw_put_default_or_string(
 
 def deepseek_raw_first_of(
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
     first: StringSlice,
     second: StringSlice,
     third: StringSlice,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     var value = deepseek_raw_member(view, root, first)
     if deepseek_raw_present(value):
         return value^
@@ -2797,9 +2799,9 @@ def deepseek_raw_put_message(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     role: StringSlice,
     view: ProdexRichStringView,
-    content: InlineArray[Int64, 2],
-    call_id: InlineArray[Int64, 2],
-    tool_calls: InlineArray[Int64, 2],
+    content: Array[Int64, 2],
+    call_id: Array[Int64, 2],
+    tool_calls: Array[Int64, 2],
 ) -> Bool:
     if (
         not deepseek_put_literal(writer, StringSlice('{"role":"'))
@@ -2834,7 +2836,7 @@ def deepseek_raw_put_message(
 def deepseek_raw_text_from_content(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if not deepseek_raw_present(bounds):
         return deepseek_put_literal(writer, StringSlice('""'))
@@ -2850,7 +2852,7 @@ def deepseek_raw_text_from_content(
         var item_end = deepseek_json_value_end(view, cursor, bounds[1] - 1, 0)
         if item_end < 0:
             return False
-        var text = InlineArray[Int64, 2](fill=-1)
+        var text = Array[Int64, 2](fill=-1)
         if deepseek_json_byte(view, cursor) == 34:
             text[0] = cursor
             text[1] = item_end
@@ -2882,7 +2884,7 @@ def deepseek_raw_text_from_content(
     return deepseek_put_byte(writer, 34)
 
 def deepseek_raw_function_tool_count(
-    view: ProdexRichStringView, tools: InlineArray[Int64, 2]
+    view: ProdexRichStringView, tools: Array[Int64, 2]
 ) -> Int64:
     if not deepseek_raw_present(tools) or deepseek_json_byte(view, tools[0]) != 91:
         return 0
@@ -2912,7 +2914,7 @@ def deepseek_raw_function_tool_count(
 def deepseek_raw_put_function_tools(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    tools: InlineArray[Int64, 2],
+    tools: Array[Int64, 2],
 ) -> Bool:
     if not deepseek_put_byte(writer, 91):
         return False
@@ -2946,7 +2948,7 @@ def deepseek_raw_put_function_tools(
 def deepseek_raw_put_common_messages(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
     normalized_instructions: ProdexRichStringView,
     instructions_present: Bool,
 ) -> Bool:
@@ -2997,7 +2999,7 @@ def deepseek_raw_put_common_messages(
 def deepseek_raw_put_tool_choice(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    choice: InlineArray[Int64, 2],
+    choice: Array[Int64, 2],
 ) -> Bool:
     if not deepseek_raw_present(choice):
         return False
@@ -3041,7 +3043,7 @@ def deepseek_raw_put_optional_member(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
     key: StringSlice,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if not deepseek_raw_present(bounds):
         return True
@@ -3165,11 +3167,11 @@ def deepseek_raw_common_request(
 
 def deepseek_raw_first_member3(
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
     first: StringSlice,
     second: StringSlice,
     third: StringSlice,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     var value = deepseek_raw_member(view, root, first)
     if deepseek_raw_present(value):
         return value^
@@ -3180,18 +3182,18 @@ def deepseek_raw_first_member3(
 
 def deepseek_raw_function_member(
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
+    root: Array[Int64, 2],
     key: StringSlice,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     var function = deepseek_raw_member(view, root, StringSlice("function"))
     if not deepseek_raw_present(function) or deepseek_json_byte(view, function[0]) != 123:
-        return InlineArray[Int64, 2](fill=-1)^
+        return Array[Int64, 2](fill=-1)^
     return deepseek_raw_member(view, function, key)
 
 def deepseek_raw_thought_signature(
     view: ProdexRichStringView,
-    root: InlineArray[Int64, 2],
-) -> InlineArray[Int64, 2]:
+    root: Array[Int64, 2],
+) -> Array[Int64, 2]:
     for key in [
         StringSlice("gemini_thought_signature"),
         StringSlice("thought_signature"),
@@ -3218,12 +3220,12 @@ def deepseek_raw_thought_signature(
             )
             if deepseek_raw_string_nonempty(view, value):
                 return value^
-    return InlineArray[Int64, 2](fill=-1)^
+    return Array[Int64, 2](fill=-1)^
 
 def deepseek_raw_put_argument_string(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if not deepseek_raw_present(bounds):
         return deepseek_put_literal(writer, StringSlice('"{}"'))
@@ -3234,7 +3236,7 @@ def deepseek_raw_put_argument_string(
 def deepseek_raw_put_tool_call_message_from_item(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    item: InlineArray[Int64, 2],
+    item: Array[Int64, 2],
 ) -> Bool:
     var call_id = deepseek_raw_first_member3(
         view,
@@ -3287,7 +3289,7 @@ def deepseek_raw_put_tool_call_message_from_item(
 def deepseek_raw_put_tool_output_message_from_item(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    item: InlineArray[Int64, 2],
+    item: Array[Int64, 2],
 ) -> Bool:
     var call_id = deepseek_raw_first_member3(
         view,
@@ -3330,7 +3332,7 @@ def deepseek_raw_put_array_separator(
 def deepseek_raw_put_generic_input_message(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    item: InlineArray[Int64, 2],
+    item: Array[Int64, 2],
 ) -> Bool:
     var role = deepseek_raw_member(view, item, StringSlice("role"))
     var content = deepseek_raw_member(view, item, StringSlice("content"))
@@ -3372,7 +3374,7 @@ def deepseek_raw_put_generic_input_message(
     return deepseek_put_byte(writer, 125)
 
 def deepseek_raw_mcp_has_result(
-    view: ProdexRichStringView, item: InlineArray[Int64, 2]
+    view: ProdexRichStringView, item: Array[Int64, 2]
 ) -> Bool:
     return (
         deepseek_raw_present(
@@ -3392,7 +3394,7 @@ def deepseek_raw_mcp_has_result(
 def deepseek_raw_put_input_items(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    items: InlineArray[Int64, 2],
+    items: Array[Int64, 2],
     has_prefix: Bool,
 ) -> Bool:
     var first = not has_prefix
@@ -3404,7 +3406,7 @@ def deepseek_raw_put_input_items(
             return False
         if deepseek_json_byte(view, cursor) != 123:
             return False
-        var item = InlineArray[Int64, 2](fill=-1)
+        var item = Array[Int64, 2](fill=-1)
         item[0] = cursor
         item[1] = item_end
         var kind = deepseek_raw_member(view, item, StringSlice("type"))
@@ -3508,7 +3510,7 @@ def deepseek_raw_put_input_items(
 def deepseek_raw_put_mcp_output_message_from_item(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    item: InlineArray[Int64, 2],
+    item: Array[Int64, 2],
 ) -> Bool:
     var call_id = deepseek_raw_first_member3(
         view,
@@ -3682,7 +3684,7 @@ def deepseek_put_request_metadata(
 def deepseek_raw_put_content_text_string(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if not deepseek_raw_present(bounds):
         return deepseek_put_literal(writer, StringSlice('""'))
@@ -3698,7 +3700,7 @@ def deepseek_raw_put_content_text_string(
         var item_end = deepseek_json_value_end(view, cursor, bounds[1] - 1, 0)
         if item_end < 0:
             return False
-        var text = InlineArray[Int64, 2](fill=-1)
+        var text = Array[Int64, 2](fill=-1)
         if deepseek_json_byte(view, cursor) == 34:
             text[0] = cursor
             text[1] = item_end
@@ -3742,7 +3744,7 @@ def deepseek_put_backslashes(
 def deepseek_raw_put_nested_string_from_json_string(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if (
         not deepseek_raw_present(bounds)
@@ -3791,7 +3793,7 @@ def deepseek_raw_put_nested_string_from_json_string(
 def deepseek_raw_put_nested_raw_json_token(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if not deepseek_raw_present(bounds):
         return True
@@ -3815,7 +3817,7 @@ def deepseek_raw_put_nested_raw_json_token(
 def deepseek_raw_put_nested_string_from_raw_json(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    bounds: InlineArray[Int64, 2],
+    bounds: Array[Int64, 2],
 ) -> Bool:
     if not deepseek_raw_present(bounds):
         return True
@@ -3839,7 +3841,7 @@ def deepseek_raw_put_nested_string_from_raw_json(
 def deepseek_raw_put_custom_tool_call_message_from_item(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    item: InlineArray[Int64, 2],
+    item: Array[Int64, 2],
 ) -> Bool:
     var call_id = deepseek_raw_first_member3(
         view,
@@ -3904,16 +3906,16 @@ def deepseek_raw_put_custom_tool_call_message_from_item(
 
 def deepseek_raw_shell_value(
     view: ProdexRichStringView,
-    item: InlineArray[Int64, 2],
+    item: Array[Int64, 2],
     key: StringSlice,
-) -> InlineArray[Int64, 2]:
+) -> Array[Int64, 2]:
     var value = deepseek_raw_member(view, item, key)
     if deepseek_raw_present(value):
         return value^
     var action = deepseek_raw_member(view, item, StringSlice("action"))
     if deepseek_raw_present(action) and deepseek_json_byte(view, action[0]) == 123:
         return deepseek_raw_member(view, action, key)
-    return InlineArray[Int64, 2](fill=-1)^
+    return Array[Int64, 2](fill=-1)^
 
 
 def deepseek_raw_put_nested_key(
@@ -3933,7 +3935,7 @@ def deepseek_raw_put_nested_key(
 def deepseek_raw_put_nested_shell_command(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    item: InlineArray[Int64, 2],
+    item: Array[Int64, 2],
 ) -> Bool:
     var command = deepseek_raw_shell_value(
         view, item, StringSlice("command")
@@ -3957,7 +3959,7 @@ def deepseek_raw_put_nested_shell_command(
                 if part_end < 0:
                     return False
                 if deepseek_json_byte(view, cursor) == 34:
-                    var part = InlineArray[Int64, 2](fill=-1)
+                    var part = Array[Int64, 2](fill=-1)
                     part[0] = cursor
                     part[1] = part_end
                     if not first and not deepseek_put_byte(writer, 32):
@@ -3993,7 +3995,7 @@ def deepseek_raw_put_nested_shell_command(
 def deepseek_raw_put_nested_shell_optional(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    item: InlineArray[Int64, 2],
+    item: Array[Int64, 2],
     key: StringSlice,
 ) -> Bool:
     var value = deepseek_raw_shell_value(view, item, key)
@@ -4011,7 +4013,7 @@ def deepseek_raw_put_nested_shell_optional(
 def deepseek_raw_put_local_shell_call_message_from_item(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    item: InlineArray[Int64, 2],
+    item: Array[Int64, 2],
 ) -> Bool:
     var call_id = deepseek_raw_first_member3(
         view,
@@ -4057,7 +4059,7 @@ def deepseek_raw_put_local_shell_call_message_from_item(
 def deepseek_raw_put_generic_tool_calls(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    calls: InlineArray[Int64, 2],
+    calls: Array[Int64, 2],
 ) -> Bool:
     if not deepseek_raw_present(calls) or deepseek_json_byte(view, calls[0]) != 91:
         return True
@@ -4113,7 +4115,7 @@ def deepseek_raw_put_generic_tool_calls(
 
 def deepseek_raw_bridge_role_code(
     view: ProdexRichStringView,
-    item: InlineArray[Int64, 2],
+    item: Array[Int64, 2],
 ) -> Int64:
     var role = deepseek_raw_member(view, item, StringSlice("role"))
     if deepseek_raw_present(role):
@@ -4131,7 +4133,7 @@ def deepseek_raw_bridge_role_code(
 def deepseek_raw_put_bridge_message(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
-    item: InlineArray[Int64, 2],
+    item: Array[Int64, 2],
 ) -> Bool:
     var role_code = deepseek_raw_bridge_role_code(view, item)
     var content = deepseek_raw_member(view, item, StringSlice("content"))
