@@ -280,7 +280,9 @@ fn runtime_launch_openai_model(codex_home: &Path, args: &[OsString]) -> Result<O
 
 fn runtime_launch_openai_model_uses_large_context(model: &str) -> bool {
     let model = model.trim().to_ascii_lowercase();
-    model.starts_with("gpt-5") || model == "codex-auto-review"
+    model.starts_with("gpt-5")
+        || matches!(model.as_str(), "gpt-6-sol" | "gpt-6-luna")
+        || model == "codex-auto-review"
 }
 
 fn runtime_launch_openai_model_context_from_models_cache(
@@ -314,7 +316,7 @@ fn runtime_launch_openai_model_context_from_models_cache(
                     .or_else(|| entry.get("max_context_window_tokens"));
                 let context_window = if matches!(
                     expected.as_str(),
-                    "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna"
+                    "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | "gpt-6-sol" | "gpt-6-luna"
                 ) {
                     max_context_window.or(context_window)
                 } else {

@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.156.0 release",
+      "baseline_source": "openai/codex rust-v0.156.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -139,15 +139,21 @@
         },
         {
           "path": "codex-rs/models-manager/models.json",
-          "reason": "Owns bundled GPT-5.6 Sol, Terra, and Luna instructions and context-window metadata. Prodex must preserve these upstream values while patching unrelated model entries.",
+          "reason": "Owns bundled GPT-5.6 plus Codex 0.156.1 GPT-6 Sol/Luna model metadata and context-window contracts. Prodex preserves these upstream values while keeping its provider catalogs independently governed.",
           "required_contains": [
+            "\"display_name\": \"GPT-6-Luna\"",
+            "\"display_name\": \"GPT-6-Sol\"",
+            "\"slug\": \"gpt-6-luna\"",
+            "\"slug\": \"gpt-6-sol\"",
             "\"slug\": \"gpt-5.6-sol\"",
             "\"slug\": \"gpt-5.6-terra\"",
             "\"slug\": \"gpt-5.6-luna\"",
             "\"context_window\": 272000",
             "\"max_context_window\": 872000",
             "\"model_messages\":",
-            "\"instructions_template\":"
+            "\"instructions_template\":",
+            "\"effort\": \"max\"",
+            "\"effort\": \"ultra\""
           ]
         },
         {
@@ -1616,9 +1622,25 @@
             "client_version",
             "etag"
           ]
+        },
+        {
+          "id": "models-manager.gpt-6-sol-luna",
+          "kind": "model_catalog",
+          "file": "codex-rs/models-manager/models.json",
+          "reason": "Codex 0.156.1 exposes GPT-6 Sol and GPT-6 Luna in the picker with a 272,000 base context window and 872,000 maximum context window; Sol supports Ultra while Luna tops out at Max.",
+          "file_contains_all": [
+            "\"slug\": \"gpt-6-sol\"",
+            "\"display_name\": \"GPT-6-Sol\"",
+            "\"slug\": \"gpt-6-luna\"",
+            "\"display_name\": \"GPT-6-Luna\"",
+            "\"context_window\": 272000",
+            "\"max_context_window\": 872000",
+            "\"effort\": \"ultra\"",
+            "\"effort\": \"max\""
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.156.0",
+      "tested_codex_release": "rust-v0.156.1",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1790,6 +1812,23 @@
           ],
           "prodex_action": "Align explicit quota/rate classification with Codex 0.156, preserve /responses and WebSocket payload/header transparency, treat session_id as an opaque affinity key, keep chatgpt_base_url Codex-owned and HTTPS for account/read workspace routing, route Prodex model traffic through an authenticated custom model provider, retain legacy /responses/compact support for older clients, and keep upstream daemon/workspace/provider semantics external.",
           "compatibility_evidence": "Exact 0.155.1 and 0.156.0 tagged source archives, official release/tag metadata, 50 critical-file assertion replay checks including the workspace-routing HTTPS boundary, an exact official-0.156 synthetic account/read reproduction of the former HTTP-origin failure, official Linux binary smoke, upstream baseline guard, capture replay, and focused runtime/provider compatibility tests are recorded in migration/codex-rust-v0.156.0-audit.md."
+        },
+        {
+          "from": "rust-v0.156.0",
+          "to": "rust-v0.156.1",
+          "upstream_commit": "b412ff32c417f855c2b2d1581b77058eed87c84b",
+          "upstream_tag_object": "81e8e29b2956dfe9b092c63953a9ed282781e77c",
+          "upstream_release_date": "2026-09-23T02:41:36Z",
+          "tree_comparison": "exact tagged source archives; 21 changed files, 461 additions, 77 deletions",
+          "runtime_changes": [
+            "Bundled model metadata adds visible gpt-6-sol and gpt-6-luna entries to the Codex model picker.",
+            "GPT-6 Sol supports low/medium/high/xhigh/max/ultra reasoning with medium as the default; GPT-6 Luna supports low/medium/high/xhigh/max with medium as the default.",
+            "Both GPT-6 Sol and GPT-6 Luna declare a 272,000 base context window and an 872,000 maximum context window.",
+            "GPT-5.6 Sol receives an upgrade target to gpt-6-sol, and the rate-limit switch prompt recommends GPT-6 Luna.",
+            "Responses routing, provider authentication, account/read workspace-routing HTTPS validation, compaction, and app-server transport contracts are unchanged from 0.156.0."
+          ],
+          "prodex_action": "Retain the 0.431.1 workspace-routing hotfix, preserve upstream model-list metadata opaquely, and recognize GPT-6 Sol/Luna as 872,000-token models when Prodex derives runtime and Smart Context budgets. No quota-reserve remapping is inferred for GPT-6 Luna.",
+          "compatibility_evidence": "Exact 0.156.0 and 0.156.1 tagged source archives, official release/tag metadata, official Linux binary checksum and model/list smoke, repeated synthetic account/read workspace-routing failure reproduction, upstream baseline replay, and focused GPT-6 context tests are recorded in migration/codex-rust-v0.156.1-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -1812,18 +1851,18 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.156.0",
-      "name": "0.156.0",
-      "published_at": "2026-09-22T19:51:01Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.156.0",
+      "tag_name": "rust-v0.156.1",
+      "name": "0.156.1",
+      "published_at": "2026-09-23T02:41:36Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.156.1",
       "body_head": [
         "## New Features",
         "",
-        "- Choose an optional fullscreen UI with `/tui` for your next launch, including transcript search, mouse selection, and right-click copying. (#46732, #46734, #46883, #46895)",
-        "- Voice conversations are enabled by default, with an F8 toggle, a `/voice settings` picker, and bundled audio runtimes for Linux and Windows. (#44921, #46071, #44622, #44714, #44922)",
-        "- Explore account usage, token totals, and plugin and skill activity through the `/usage` analytics dashboard. (#45764, #45769)",
-        "- Filter tasks by status and create worktree sessions from the agent command center; worktree support is now enabled by default. (#46839, #45276, #44870)",
-        "- Customize the terminal with six new themes and view supported Mermaid diagrams and display equations directly in responses. (#46504, #46054, #45612)"
+        "- Choose GPT-6 Sol or GPT-6 Luna from the model picker. The rate-limit switch prompt now recommends GPT-6 Luna. (#47405)",
+        "",
+        "## Changelog",
+        "",
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.156.0...rust-v0.156.1"
       ]
     }
   },

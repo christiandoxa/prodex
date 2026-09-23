@@ -4,7 +4,7 @@ import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
 const DEFAULT_BASELINE_PATH = path.join(repoRoot, "scripts/compat/upstream-baseline.json");
-const EXPECTED_CODEX_RELEASE = "rust-v0.156.0";
+const EXPECTED_CODEX_RELEASE = "rust-v0.156.1";
 
 const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/client.rs",
@@ -189,11 +189,17 @@ const REQUIRED_FILE_CONTAINS = {
     "has_stable_account",
   ],
   "codex-rs/models-manager/models.json": [
+    "\"slug\": \"gpt-6-sol\"",
+    "\"display_name\": \"GPT-6-Sol\"",
+    "\"slug\": \"gpt-6-luna\"",
+    "\"display_name\": \"GPT-6-Luna\"",
     "\"slug\": \"gpt-5.6-sol\"",
     "\"slug\": \"gpt-5.6-terra\"",
     "\"slug\": \"gpt-5.6-luna\"",
     "\"context_window\": 272000",
     "\"max_context_window\": 872000",
+    "\"effort\": \"max\"",
+    "\"effort\": \"ultra\"",
     "\"model_messages\":",
     "\"instructions_template\":",
   ],

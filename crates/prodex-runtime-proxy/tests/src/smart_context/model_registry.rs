@@ -14,11 +14,14 @@ fn model_registry_resolves_known_models_after_normalization() {
 }
 
 #[test]
-fn model_registry_resolves_only_catalogued_gpt_5_6_window() {
-    assert_eq!(
-        smart_context_model_context_window(Some("gpt-5.6-luna")).map(|window| window.tokens),
-        Some(872_000)
-    );
+fn model_registry_resolves_catalogued_openai_windows() {
+    for model in ["gpt-5.6-luna", "gpt-6-sol", "gpt-6-luna"] {
+        assert_eq!(
+            smart_context_model_context_window(Some(model)).map(|window| window.tokens),
+            Some(872_000),
+            "{model}"
+        );
+    }
     assert_eq!(
         smart_context_model_context_window(Some("local-gpt-5.6-luna")),
         None
