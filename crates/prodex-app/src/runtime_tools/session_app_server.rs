@@ -10,13 +10,14 @@ pub(super) fn build_session_app_server_companion(
     strategy: &RuntimeToolLaunchStrategy,
     overlay_home: &Path,
     runtime_args: &[std::ffi::OsString],
+    legacy_hook_bypass: bool,
 ) -> Result<Option<(ChildProcessPlan, PathBuf)>> {
     if !super::session_app_server_companion_eligible(strategy, runtime_args) {
         return Ok(None);
     }
     let socket = session_app_server_socket(overlay_home);
     let mut args = Vec::with_capacity(runtime_args.len() + 4);
-    if strategy.args.super_mode {
+    if legacy_hook_bypass {
         args.push(std::ffi::OsString::from("--dangerously-bypass-hook-trust"));
     }
     args.extend([
