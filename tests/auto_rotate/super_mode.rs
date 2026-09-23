@@ -28,10 +28,7 @@ fn super_dry_run_presidio_flag_reports_redaction_enabled() {
         stdout.contains("Presidio redaction: enabled"),
         "dry-run should report Presidio redaction, stdout: {stdout}"
     );
-    for expected in [
-        "--dangerously-bypass-approvals-and-sandbox",
-        "trust_level",
-    ] {
+    for expected in ["--dangerously-bypass-approvals-and-sandbox", "trust_level"] {
         assert!(
             stdout.contains(expected),
             "Super dry-run should expose {expected}, stdout: {stdout}"
