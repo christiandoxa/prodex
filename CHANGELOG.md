@@ -2,57 +2,62 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.431.5 - 2026-09-23
+## 0.431.6 - 2026-09-23
 
-### Misc
+### CLI
 
-- Treat missing Playwright as optional (`7675cee`)
-- Show redacted expose exec commands (`da3ad15`)
-- Accept capability-compatible dependency versions (`2d2bb48`)
-# Prodex 0.431.5
+- Report incompatible optional tools as info (`c6c9df5`)
+- Skip incompatible optional tools by default (`b39fe11`)
+# Prodex 0.431.6
 
 ## New Features
 
-- Make runtime dependency compatibility version-flexible instead of exact-version pinned.
-- Codex runtime compatibility now accepts stable Codex CLI `0.153.2` or newer when the required
-  `app-server` capability probe succeeds. The release-qualified latest-stable reference remains
-  Codex `rust-v0.156.1` at this release cut.
-- OpenAI Secure MCP Tunnel now accepts official stable `tunnel-client` `0.0.13` or newer when
-  the reported build metadata is self-consistent and the required `run` capability probe
-  succeeds. The release-qualified latest-stable reference is `0.0.14`.
-- Optional tools now separate **minimum supported versions** from **latest-stable release
-  references**. Compatible future stable releases can work without a Prodex release as long as
-  their required version/capability/manifest contracts still pass.
-- Add release-cut freshness gates for Codex, tunnel-client, and all six optional tools so Prodex
-  continues to qualify against the latest stable upstream releases without rejecting compatible
-  user installations merely because they are newer.
-- Improve `prodex log` visibility for `prodex s expose exec`: direct-exec start/completion
-  entries now include a bounded redacted command preview, cwd, argument/environment counts,
-  stdin byte count, timeout, duration, status, and exit metadata.
+- Make incompatible **default optional tools informational instead of fatal** during `prodex s`.
+- When a default optional tool is installed but below the supported minimum or otherwise fails
+  compatibility validation, Prodex now skips that tool for the current launch, shows an
+  `Optional Tools` information panel with the reason and update recommendation, and continues
+  launching Super.
+- Preserve version-flexible compatibility from 0.431.5: runtime compatibility remains
+  minimum-version/capability based, while latest stable upstream releases remain the release
+  qualification reference.
 
 ## Bug Fixes
 
-- Distinguish an optional tool that is missing from one that is installed but incompatible.
-  Missing optional tools remain optional; an installed tool below the supported minimum or
-  missing a required capability now fails with a clear upgrade instruction.
-- Keep Playwright MCP optional when the offline `npx --no-install @playwright/mcp` probe cannot
-  establish that the package is installed, while still rejecting an installed Playwright MCP
-  version below the supported minimum.
-- Prefer executable Windows command shims such as `npx.cmd` over extensionless package files.
-- Keep Caveman and Ponytail tamper checks while allowing newer compatible stable managed
-  versions: official source, strict manifest shape, version-directory match, Git commit shape,
-  required files, and recomputed tree digest must still validate.
-- Allow newer official Presidio analyzer/anonymizer image versions through explicit overrides
-  while retaining the minimum compatible version and digest-pinned release defaults.
-- Preserve secret-safe expose logging: environment values, stdin contents, captured stdout/stderr,
-  capability URLs/tokens, and secret-bearing flag values are not written to runtime logs.
+- Fix `prodex s` being blocked by an outdated optional tool such as RTK 0.45.0 even though the
+  tool is optional.
+- Keep explicitly required tools strict: `--require-tool <tool>` still fails when that tool is
+  missing or incompatible, because the user explicitly requested it as a hard requirement.
+- Keep dry-run behavior non-blocking for default optional incompatibilities; the report shows the
+  affected tool as `skipped` instead of returning an error.
+- Preserve all 0.431.5 dependency compatibility and logging improvements, including flexible
+  Codex/tunnel-client/optional-tool version handling and redacted `prodex s expose exec` command
+  details in `prodex log`.
+
+## Runtime Behavior
+
+For normal Super defaults:
+
+```text
+Optional Tools
+rtk: skipped for this launch; rtk 0.45.0 is too old; Prodex requires 0.46.0 or newer.
+Update when convenient (minimum supported: 0.46.0, release-qualified reference: 0.49.0).
+```
+
+The launch continues without RTK.
+
+For an explicit requirement such as:
+
+```bash
+prodex s --require-tool rtk
+```
+
+an incompatible RTK remains a launch error.
 
 ## Compatibility Policy
 
-The runtime policy in 0.431.5 is **minimum + capability based**. Latest stable versions are the
-release qualification reference, not an exact runtime allowlist.
+The runtime policy remains **minimum + capability based** rather than exact-version pinned.
 
-| Component | Minimum supported | 0.431.5 latest-stable reference |
+| Component | Minimum supported | 0.431.6 latest-stable reference |
 | --- | ---: | ---: |
 | Codex CLI | `0.153.2` + `app-server` | `0.156.1` |
 | OpenAI tunnel-client | `0.0.13` + `run` capability | `0.0.14` |
@@ -63,30 +68,35 @@ release qualification reference, not an exact runtime allowlist.
 | Ponytail | `4.9.0` | `4.10.0` |
 | Presidio | `2.2.364` | `2.2.364` |
 
-When a component is too old or fails a required capability check, Prodex reports which component
-must be updated, the minimum supported version, and the current release-qualified latest-stable
-reference.
+Default optional tools that do not satisfy their compatibility contract are skipped with
+informational guidance. Explicitly required tools remain fail-closed.
 
 ## Validation
 
-- Exact source SHA `6ebca95927e50dd63d330be298b6311fa970a51f` completed the full GitHub
-  check matrix with 63 successful checks, 2 intentionally skipped checks, and zero failures.
+- Exact source SHA `c6c9df54b091305670669c4fdaf5c740eaefeb60` completed the full GitHub
+  source CI with **62 successful jobs, 2 intentionally skipped jobs, and zero failures**.
 - Real Mojo/parity completed successfully with Mojo 1.1.0.
-- Rust Clippy/Sonar quality gates, Windows/macOS/Linux test matrices, runtime stress, supply-chain,
-  static guards, optional-tool guards, and compatibility replay gates passed.
-- Runtime dependency freshness checks confirmed Codex `0.156.1`, tunnel-client `0.0.14`, and
-  all six optional-tool latest-stable references at release qualification time.
-- Regression coverage accepts future compatible stable Codex/tunnel/optional-tool versions while
-  rejecting versions below the supported minimum or malformed capability metadata.
+- Windows, macOS, and Linux test matrices completed successfully.
+- Deterministic regression coverage verifies that an incompatible default RTK is informational
+  and skipped, while the same RTK remains fatal when listed in `--require-tool`.
+- Rust compile, Clippy, static guards, runtime stress, supply-chain, compatibility replay, and
+  optional-tool policy gates passed.
 
 ## Changelog
 
-- Replace exact runtime dependency pins with minimum-version and capability compatibility.
-- Add actionable dependency-upgrade errors.
-- Track latest stable upstream releases at CI/release qualification time.
-- Enrich `prodex log` with safe `prodex s expose exec` command details.
+- Stop blocking `prodex s` on incompatible default optional tools.
+- Show update guidance as information and continue without the affected optional tool.
+- Preserve strict behavior only for explicitly required tools.
 
-Full Changelog: [0.431.4...0.431.5](https://github.com/christiandoxa/prodex/compare/0.431.4...0.431.5)
+Full Changelog: [0.431.5...0.431.6](https://github.com/christiandoxa/prodex/compare/0.431.5...0.431.6)
+
+## 0.431.5 - 2026-09-23
+
+### Misc
+
+- Treat missing Playwright as optional (`7675cee`)
+- Show redacted expose exec commands (`da3ad15`)
+- Accept capability-compatible dependency versions (`2d2bb48`)
 
 ## 0.431.4 - 2026-09-23
 
