@@ -391,6 +391,8 @@ pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
             | "super"
             | "s"
             | "gateway"
+            | "gui"
+            | "dashboard"
             | "claude"
             | "help"
             | "__super-expose"

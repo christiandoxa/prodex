@@ -7,7 +7,7 @@ COPY src ./src
 COPY crates ./crates
 COPY examples ./examples
 COPY benches ./benches
-COPY install.sh install.ps1 THIRD_PARTY_NOTICES.md ./
+COPY install.sh install.ps1 ./
 
 RUN cargo build --locked --release
 
