@@ -179,3 +179,179 @@ fn quota_capacity_keeps_unknown_reserve_non_routable() {
     assert!(!candidates[1].output.routing_eligible);
     assert!(!openai_quota_has_ready_limit(&usage));
 }
+#[test]
+fn openai_model_kind_matches_rust_normalization_oracle() {
+    let normalize = |value: &str| {
+        value
+            .trim()
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .collect::<String>()
+    };
+    let rust_kind = |value: Option<&str>| match value.map(normalize).as_deref() {
+        None => prodex_mojo_core::quota::QUOTA_MODEL_KIND_NONE,
+        Some("luna" | "gpt56luna") => prodex_mojo_core::quota::QUOTA_MODEL_KIND_LUNA,
+        Some("spark" | "gpt53codexspark" | "gpt53spark") => {
+            prodex_mojo_core::quota::QUOTA_MODEL_KIND_RETIRED_SPARK
+        }
+        Some(_) => prodex_mojo_core::quota::QUOTA_MODEL_KIND_OTHER,
+    };
+
+    let samples = [
+        None,
+        Some(""),
+        Some(" luna "),
+        Some("L-U_N.A"),
+        Some("gpt-5.6-luna"),
+        Some("GPT_5 6_LUNA"),
+        Some("spark"),
+        Some("GPT-5.3-CODEX-SPARK"),
+        Some("gpt 5.3 spark"),
+        Some("gpt-5.6-sol"),
+        Some("λ-gpt-5.6-luna-🔥"),
+    ];
+    for sample in samples {
+        assert_eq!(
+            crate::mojo::openai_model_kind(sample),
+            rust_kind(sample),
+            "model={sample:?}"
+        );
+    }
+}
+
+#[test]
+fn luna_reserve_identifier_matches_rust_oracle() {
+    let normalize = |value: &str| {
+        value
+            .trim()
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|ch| ch.is_ascii_alphanumeric())
+            .collect::<String>()
+    };
+    let rust = |model_slug: Option<&str>,
+                limit_id: Option<&str>,
+                limit_name: Option<&str>,
+                metered_feature: Option<&str>| {
+        model_slug.is_some_and(|slug| normalize(slug) == "gpt56luna")
+            && [limit_id, limit_name, metered_feature]
+                .into_iter()
+                .flatten()
+                .any(|value| {
+                    let normalized = normalize(value);
+                    normalized == "gptreserve"
+                        || (normalized.contains("luna") && normalized.contains("reserve"))
+                })
+    };
+
+    let cases = [
+        (
+            Some("gpt-5.6-luna"),
+            Some("base_model_inference"),
+            Some("gpt-reserve"),
+            None,
+        ),
+        (Some("gpt-5.6-luna"), None, Some("Luna Reserve"), None),
+        (
+            Some(" GPT_5.6_LUNA "),
+            None,
+            None,
+            Some("future-luna__reserve"),
+        ),
+        (
+            Some("gpt-5.6-sol"),
+            Some("gpt-reserve"),
+            Some("Luna Reserve"),
+            Some("luna_reserve"),
+        ),
+        (Some("gpt-5.6-luna"), None, None, Some("reserve_only")),
+        (None, Some("gpt-reserve"), None, None),
+    ];
+    for (model_slug, limit_id, limit_name, metered_feature) in cases {
+        assert_eq!(
+            crate::mojo::luna_reserve_identifier(model_slug, limit_id, limit_name, metered_feature,),
+            rust(model_slug, limit_id, limit_name, metered_feature),
+            "case={model_slug:?}/{limit_id:?}/{limit_name:?}/{metered_feature:?}"
+        );
+    }
+}
+
+#[test]
+fn openai_model_capacity_plan_matches_exhaustive_boolean_oracle() {
+    use prodex_mojo_core::quota::{
+        OpenAiModelCapacityInput, QUOTA_MODEL_KIND_LUNA, QUOTA_MODEL_KIND_NONE,
+        QUOTA_MODEL_KIND_OTHER, QUOTA_MODEL_KIND_RETIRED_SPARK, QUOTA_MODEL_PAIR_DEFAULT,
+        QUOTA_MODEL_PAIR_NONE, QUOTA_MODEL_PAIR_REGULAR, QUOTA_MODEL_PAIR_RESERVE,
+    };
+
+    for model_kind in [
+        QUOTA_MODEL_KIND_NONE,
+        QUOTA_MODEL_KIND_LUNA,
+        QUOTA_MODEL_KIND_RETIRED_SPARK,
+        QUOTA_MODEL_KIND_OTHER,
+    ] {
+        for bits in 0_u16..512 {
+            let bit = |index| bits & (1_u16 << index) != 0_u16;
+            let input = OpenAiModelCapacityInput {
+                model_kind,
+                regular_present: bit(0),
+                regular_ready: bit(1),
+                generic_ready: bit(2),
+                reserve_ready: bit(3),
+                regular_blocked: bit(4),
+                any_unknown_window: bit(5),
+                any_exhausted_window: bit(6),
+                include_code_review: bit(7),
+                code_review_ready: bit(8),
+            };
+            let unknown_luna_capacity = input.regular_present
+                && !input.regular_blocked
+                && !input.regular_ready
+                && input.any_unknown_window
+                && !input.any_exhausted_window;
+            let (selected_pair, ready) = match model_kind {
+                QUOTA_MODEL_KIND_NONE => (QUOTA_MODEL_PAIR_DEFAULT, input.generic_ready),
+                QUOTA_MODEL_KIND_RETIRED_SPARK => (QUOTA_MODEL_PAIR_NONE, false),
+                QUOTA_MODEL_KIND_LUNA => {
+                    let selected = if input.regular_ready {
+                        QUOTA_MODEL_PAIR_REGULAR
+                    } else if input.reserve_ready {
+                        QUOTA_MODEL_PAIR_RESERVE
+                    } else if input.regular_present {
+                        QUOTA_MODEL_PAIR_REGULAR
+                    } else {
+                        QUOTA_MODEL_PAIR_NONE
+                    };
+                    (selected, input.regular_ready || input.reserve_ready)
+                }
+                QUOTA_MODEL_KIND_OTHER => (
+                    if input.regular_present {
+                        QUOTA_MODEL_PAIR_REGULAR
+                    } else {
+                        QUOTA_MODEL_PAIR_NONE
+                    },
+                    input.regular_ready,
+                ),
+                _ => unreachable!(),
+            };
+            let mut supports =
+                ready || (model_kind == QUOTA_MODEL_KIND_LUNA && unknown_luna_capacity);
+            if input.include_code_review && !input.code_review_ready {
+                supports = false;
+            }
+
+            let actual = crate::mojo::openai_model_capacity_plan(input);
+            assert_eq!(
+                actual.selected_pair, selected_pair,
+                "kind={model_kind} bits={bits}"
+            );
+            assert_eq!(actual.ready, ready, "kind={model_kind} bits={bits}");
+            assert_eq!(actual.supports, supports, "kind={model_kind} bits={bits}");
+            assert_eq!(
+                actual.unknown_luna_capacity, unknown_luna_capacity,
+                "kind={model_kind} bits={bits}"
+            );
+        }
+    }
+}

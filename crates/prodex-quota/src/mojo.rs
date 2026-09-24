@@ -62,3 +62,29 @@ pub(super) fn quota_window_pressure(
 ) -> Result<i64, prodex_mojo_core::MojoError> {
     prodex_mojo_core::quota::quota_window_pressure(remaining_percent, reset_at, now)
 }
+pub(super) fn openai_model_kind(model: Option<&str>) -> i64 {
+    prodex_mojo_core::quota::openai_model_kind(model)
+        .expect("Mojo OpenAI model classification failed")
+}
+
+pub(super) fn luna_reserve_identifier(
+    model_slug: Option<&str>,
+    limit_id: Option<&str>,
+    limit_name: Option<&str>,
+    metered_feature: Option<&str>,
+) -> bool {
+    prodex_mojo_core::quota::luna_reserve_identifier(
+        model_slug,
+        limit_id,
+        limit_name,
+        metered_feature,
+    )
+    .expect("Mojo Luna reserve identifier classification failed")
+}
+
+pub(super) fn openai_model_capacity_plan(
+    input: prodex_mojo_core::quota::OpenAiModelCapacityInput,
+) -> prodex_mojo_core::quota::OpenAiModelCapacityPlan {
+    prodex_mojo_core::quota::openai_model_capacity_plan(input)
+        .expect("Mojo OpenAI model capacity planning failed")
+}

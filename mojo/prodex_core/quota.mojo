@@ -475,3 +475,238 @@ def prodex_quota_capacity_batch(
             raw_total, scale_bps
         )
     return 0
+# OpenAI model-capacity policy. Rust owns JSON acquisition and pointer reconstruction;
+# Mojo owns normalized model identity and the deterministic capacity decision.
+
+comptime QUOTA_MODEL_KIND_NONE: Int64 = 0
+comptime QUOTA_MODEL_KIND_LUNA: Int64 = 1
+comptime QUOTA_MODEL_KIND_RETIRED_SPARK: Int64 = 2
+comptime QUOTA_MODEL_KIND_OTHER: Int64 = 3
+
+comptime QUOTA_MODEL_PAIR_NONE: Int64 = 0
+comptime QUOTA_MODEL_PAIR_REGULAR: Int64 = 1
+comptime QUOTA_MODEL_PAIR_RESERVE: Int64 = 2
+comptime QUOTA_MODEL_PAIR_DEFAULT: Int64 = 3
+
+comptime QUOTA_MODEL_CAPACITY_FIELD_COUNT: Int64 = 10
+
+
+def quota_ascii_lower(value: UInt8) -> UInt8:
+    if value >= 65 and value <= 90:
+        return value + 32
+    return value
+
+
+def quota_ascii_alphanumeric(value: UInt8) -> Bool:
+    var lowered = quota_ascii_lower(value)
+    return (lowered >= 97 and lowered <= 122) or (lowered >= 48 and lowered <= 57)
+
+
+def quota_text_ptr(address: UInt) -> Pointer[mut=False, UInt8, ImmUntrackedOrigin]:
+    return Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+
+
+def quota_normalized_equals(
+    address: UInt,
+    length: Int64,
+    expected: StringSlice,
+) -> Bool:
+    if length <= 0 or address == 0:
+        return False
+    var source = quota_text_ptr(address)
+    var target = expected.unsafe_ptr()
+    var target_length = Int64(expected.byte_length())
+    var target_index: Int64 = 0
+    for index in range(length):
+        var value = source[unsafe_offset=index]
+        if not quota_ascii_alphanumeric(value):
+            continue
+        if target_index >= target_length:
+            return False
+        if quota_ascii_lower(value) != quota_ascii_lower(target[unsafe_offset=target_index]):
+            return False
+        target_index += 1
+    return target_index == target_length
+
+
+def quota_normalized_contains(
+    address: UInt,
+    length: Int64,
+    expected: StringSlice,
+) -> Bool:
+    if length <= 0 or address == 0:
+        return False
+    var source = quota_text_ptr(address)
+    var target = expected.unsafe_ptr()
+    var target_length = Int64(expected.byte_length())
+    if target_length <= 0:
+        return True
+
+    # The identifiers here are tiny. A bounded restart scan keeps the ABI allocation-free
+    # while matching Rust's "normalize then contains" semantics exactly for ASCII tokens.
+    for raw_start in range(length):
+        var first = source[unsafe_offset=raw_start]
+        if not quota_ascii_alphanumeric(first):
+            continue
+        var target_index: Int64 = 0
+        var raw_index = raw_start
+        while raw_index < length and target_index < target_length:
+            var value = source[unsafe_offset=raw_index]
+            raw_index += 1
+            if not quota_ascii_alphanumeric(value):
+                continue
+            if quota_ascii_lower(value) != quota_ascii_lower(target[unsafe_offset=target_index]):
+                break
+            target_index += 1
+        if target_index == target_length:
+            return True
+    return False
+
+
+@export("prodex_quota_openai_model_kind")
+def prodex_quota_openai_model_kind(
+    address: UInt,
+    length: Int64,
+    present: Int64,
+) abi("C") -> Int64:
+    if present == 0:
+        return QUOTA_MODEL_KIND_NONE
+    if present != 1 or length < 0 or (length > 0 and address == 0):
+        return -1
+    if quota_normalized_equals(address, length, StringSlice("luna")) or quota_normalized_equals(
+        address, length, StringSlice("gpt56luna")
+    ):
+        return QUOTA_MODEL_KIND_LUNA
+    if (
+        quota_normalized_equals(address, length, StringSlice("spark"))
+        or quota_normalized_equals(address, length, StringSlice("gpt53codexspark"))
+        or quota_normalized_equals(address, length, StringSlice("gpt53spark"))
+    ):
+        return QUOTA_MODEL_KIND_RETIRED_SPARK
+    return QUOTA_MODEL_KIND_OTHER
+
+
+def quota_luna_reserve_identifier_matches(address: UInt, length: Int64) -> Bool:
+    return quota_normalized_equals(address, length, StringSlice("gptreserve")) or (
+        quota_normalized_contains(address, length, StringSlice("luna"))
+        and quota_normalized_contains(address, length, StringSlice("reserve"))
+    )
+
+@export("prodex_quota_luna_reserve_identifier")
+def prodex_quota_luna_reserve_identifier(
+    model_slug_address: UInt,
+    model_slug_length: Int64,
+    limit_id_address: UInt,
+    limit_id_length: Int64,
+    limit_name_address: UInt,
+    limit_name_length: Int64,
+    metered_feature_address: UInt,
+    metered_feature_length: Int64,
+) abi("C") -> Int64:
+    if (
+        model_slug_length < 0
+        or limit_id_length < 0
+        or limit_name_length < 0
+        or metered_feature_length < 0
+    ):
+        return -1
+    if not quota_normalized_equals(
+        model_slug_address, model_slug_length, StringSlice("gpt56luna")
+    ):
+        return 0
+
+    if (
+        quota_luna_reserve_identifier_matches(limit_id_address, limit_id_length)
+        or quota_luna_reserve_identifier_matches(limit_name_address, limit_name_length)
+        or quota_luna_reserve_identifier_matches(
+            metered_feature_address, metered_feature_length
+        )
+    ):
+        return 1
+    return 0
+
+
+def quota_model_capacity_field(
+    fields: Pointer[mut=False, Int64, _], field: Int64
+) -> Int64:
+    return fields[unsafe_offset=field]
+
+
+@export("prodex_quota_openai_model_capacity_plan")
+def prodex_quota_openai_model_capacity_plan(
+    fields_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if fields_address == 0 or output_address == 0:
+        return 1
+    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+
+    var model_kind = quota_model_capacity_field(fields, 0)
+    if model_kind < QUOTA_MODEL_KIND_NONE or model_kind > QUOTA_MODEL_KIND_OTHER:
+        return 2
+    var field: Int64 = 1
+    while field < QUOTA_MODEL_CAPACITY_FIELD_COUNT:
+        var value = quota_model_capacity_field(fields, field)
+        if value != 0 and value != 1:
+            return 2
+        field += 1
+
+    var regular_present = quota_model_capacity_field(fields, 1)
+    var regular_ready = quota_model_capacity_field(fields, 2)
+    var generic_ready = quota_model_capacity_field(fields, 3)
+    var reserve_ready = quota_model_capacity_field(fields, 4)
+    var regular_blocked = quota_model_capacity_field(fields, 5)
+    var any_unknown_window = quota_model_capacity_field(fields, 6)
+    var any_exhausted_window = quota_model_capacity_field(fields, 7)
+    var include_code_review = quota_model_capacity_field(fields, 8)
+    var code_review_ready = quota_model_capacity_field(fields, 9)
+
+    var unknown_luna: Int64 = 0
+    if (
+        regular_present == 1
+        and regular_blocked == 0
+        and regular_ready == 0
+        and any_unknown_window == 1
+        and any_exhausted_window == 0
+    ):
+        unknown_luna = 1
+
+    var selected_pair = QUOTA_MODEL_PAIR_NONE
+    var ready: Int64 = 0
+    if model_kind == QUOTA_MODEL_KIND_NONE:
+        selected_pair = QUOTA_MODEL_PAIR_DEFAULT
+        ready = generic_ready
+    elif model_kind == QUOTA_MODEL_KIND_RETIRED_SPARK:
+        selected_pair = QUOTA_MODEL_PAIR_NONE
+        ready = 0
+    elif model_kind == QUOTA_MODEL_KIND_LUNA:
+        ready = 1 if regular_ready == 1 or reserve_ready == 1 else 0
+        if regular_ready == 1:
+            selected_pair = QUOTA_MODEL_PAIR_REGULAR
+        elif reserve_ready == 1:
+            selected_pair = QUOTA_MODEL_PAIR_RESERVE
+        elif regular_present == 1:
+            selected_pair = QUOTA_MODEL_PAIR_REGULAR
+    else:
+        ready = regular_ready
+        if regular_present == 1:
+            selected_pair = QUOTA_MODEL_PAIR_REGULAR
+
+    var supports = ready
+    if model_kind == QUOTA_MODEL_KIND_LUNA and unknown_luna == 1:
+        supports = 1
+    if include_code_review == 1 and code_review_ready == 0:
+        supports = 0
+
+    output[unsafe_offset=0] = selected_pair
+    output[unsafe_offset=1] = ready
+    output[unsafe_offset=2] = supports
+    output[unsafe_offset=3] = unknown_luna
+    return 0
