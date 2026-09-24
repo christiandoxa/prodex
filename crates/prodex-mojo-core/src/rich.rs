@@ -15,6 +15,9 @@ const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>()
 
 mod routing;
 pub use routing::{WebsocketEventKind, websocket_event_kind};
+#[path = "rich/log_parser.rs"]
+mod log_parser;
+pub use log_parser::{LogFieldSpan, LogParsePlan, parse_log_message};
 mod context_plan;
 pub use context_plan::{ContextPlan, ContextPlanAction, ContextPlanItem, plan_context_items};
 mod context;

@@ -378,3 +378,19 @@ second Rust production implementation was retained for the migrated policy decis
 
 The canonical broad inventory at this checkpoint is 48,959 reachable Mojo LOC and 196,711 Rust
 production LOC, or 19.928766% Mojo. The 75% project target remains a forward migration goal.
+
+## Runtime log parser Mojo wave
+
+Structured runtime-log tokenization now runs in a dedicated Mojo parser. Mojo owns event-token
+selection, key/value boundary detection, quoted-value scanning, escape handling, whitespace
+skipping, and field-span planning. Rust retains owned-string construction, JSON unescaping,
+redaction, and rendering. The old Rust tokenizer is isolated to the explicit non-Mojo compatibility
+build and is not used by the Mojo production path.
+
+A forced fresh Mojo archive build verified the new parser export. Feature-on expectation tests cover
+quoted/escaped values, Unicode, empty values, malformed field values, and event-only parsing; the
+feature-off structured-log tests remain green. All-target Clippy, production-share, ownership,
+authority, no-fallback, and size guards pass with Mojo 1.1.0.
+
+The canonical broad inventory at this checkpoint is 49,076 reachable Mojo LOC and 196,723 Rust
+production LOC, or 19.965907% Mojo. The 75% project target remains a forward migration goal.
