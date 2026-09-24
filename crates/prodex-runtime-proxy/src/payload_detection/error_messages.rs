@@ -145,7 +145,7 @@ pub fn runtime_proxy_value_is_invalid_previous_response_id(value: &serde_json::V
             .and_then(serde_json::Value::as_str)
             .or_else(|| map.get("detail").and_then(serde_json::Value::as_str))
             .or_else(|| map.get("error").and_then(serde_json::Value::as_str));
-        (runtime_previous_response_structured_class(error_type, code, param, message)
+        (runtime_previous_response_class(true, error_type, code, param, message)
             == PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID)
             .then_some(())
     })
@@ -178,7 +178,7 @@ fn extract_runtime_proxy_previous_response_message_candidate(
     let error_type = map.get("type").and_then(serde_json::Value::as_str);
     let param = map.get("param").and_then(serde_json::Value::as_str);
 
-    match runtime_previous_response_structured_class(error_type, code, param, message) {
+    match runtime_previous_response_class(true, error_type, code, param, message) {
         PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND => Some(
             message
                 .unwrap_or("Previous response could not be found on the selected Codex account.")
@@ -197,57 +197,38 @@ pub fn extract_runtime_proxy_previous_response_message_from_text(text: &str) -> 
     if trimmed.is_empty() {
         return None;
     }
-    (runtime_previous_response_text_class(trimmed) != PREVIOUS_RESPONSE_ERROR_CLASS_NONE)
+    (runtime_previous_response_class(false, None, None, None, Some(trimmed))
+        != PREVIOUS_RESPONSE_ERROR_CLASS_NONE)
         .then(|| trimmed.to_string())
 }
 
-pub fn runtime_proxy_tool_context_missing_message(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("no tool call found") || lower.contains("no function call found")
-}
-
-#[cfg(feature = "mojo")]
-fn runtime_previous_response_structured_class(
+fn runtime_previous_response_class(
+    structured: bool,
     error_type: Option<&str>,
     code: Option<&str>,
     param: Option<&str>,
     message: Option<&str>,
 ) -> i64 {
-    prodex_mojo_core::rich::previous_response_error_class(
-        prodex_mojo_core::rich::PREVIOUS_RESPONSE_ERROR_MODE_STRUCTURED,
-        error_type,
-        code,
-        param,
-        message,
-    )
-    .expect("Mojo previous-response structured classifier returned an invalid result")
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_previous_response_structured_class(
-    error_type: Option<&str>,
-    code: Option<&str>,
-    param: Option<&str>,
-    message: Option<&str>,
-) -> i64 {
-    rust_oracle::structured_class(error_type, code, param, message)
-}
-
-#[cfg(feature = "mojo")]
-fn runtime_previous_response_text_class(text: &str) -> i64 {
-    prodex_mojo_core::rich::previous_response_error_class(
-        prodex_mojo_core::rich::PREVIOUS_RESPONSE_ERROR_MODE_TEXT,
-        None,
-        None,
-        None,
-        Some(text),
-    )
-    .expect("Mojo previous-response text classifier returned an invalid result")
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_previous_response_text_class(text: &str) -> i64 {
-    rust_oracle::text_class(text)
+    #[cfg(feature = "mojo")]
+    {
+        let mode = if structured {
+            prodex_mojo_core::rich::PREVIOUS_RESPONSE_ERROR_MODE_STRUCTURED
+        } else {
+            prodex_mojo_core::rich::PREVIOUS_RESPONSE_ERROR_MODE_TEXT
+        };
+        prodex_mojo_core::rich::previous_response_error_class(
+            mode, error_type, code, param, message,
+        )
+        .expect("Mojo previous-response classifier returned an invalid result")
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        if structured {
+            rust_oracle::structured_class(error_type, code, param, message)
+        } else {
+            rust_oracle::text_class(message.unwrap_or_default())
+        }
+    }
 }
 
 #[cfg(any(not(feature = "mojo"), test))]
@@ -268,7 +249,7 @@ mod rust_oracle {
         {
             return PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID;
         }
-        if message.is_some_and(runtime_proxy_tool_context_missing_message)
+        if message.is_some_and(tool_context_missing_message)
             && (error_type == Some("invalid_request_error") || param == Some("input"))
         {
             return PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT;
@@ -287,12 +268,17 @@ mod rust_oracle {
         } else if (lower.starts_with("invalid_request_error:")
             || lower.starts_with("no tool call found")
             || lower.starts_with("no function call found"))
-            && runtime_proxy_tool_context_missing_message(text)
+            && tool_context_missing_message(text)
         {
             PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT
         } else {
             PREVIOUS_RESPONSE_ERROR_CLASS_NONE
         }
+    }
+
+    fn tool_context_missing_message(message: &str) -> bool {
+        let lower = message.to_ascii_lowercase();
+        lower.contains("no tool call found") || lower.contains("no function call found")
     }
 
     fn invalid_previous_response_id_message(message: &str) -> bool {
@@ -349,7 +335,7 @@ mod mojo_parity_tests {
         ];
         for (error_type, code, param, message) in structured {
             assert_eq!(
-                runtime_previous_response_structured_class(error_type, code, param, message),
+                runtime_previous_response_class(true, error_type, code, param, message),
                 rust_oracle::structured_class(error_type, code, param, message),
                 "structured={error_type:?}/{code:?}/{param:?}/{message:?}"
             );
@@ -365,7 +351,7 @@ mod mojo_parity_tests {
             "No tool call found is documented here but not at the prefix",
         ] {
             assert_eq!(
-                runtime_previous_response_text_class(text),
+                runtime_previous_response_class(false, None, None, None, Some(text)),
                 rust_oracle::text_class(text),
                 "text={text:?}"
             );

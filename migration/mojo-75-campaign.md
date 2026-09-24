@@ -437,3 +437,17 @@ no-fallback, and size guards pass.
 
 The canonical broad inventory at this checkpoint is 49,241 reachable Mojo LOC and 196,662 Rust
 production LOC, or 20.024563% Mojo. The 75% project target remains a forward migration goal.
+
+## Previous-response classifier Rust cleanup wave
+
+The previous-response error classifier was tightened after its Mojo migration. Structured and text
+classification now share one production adapter, and the leftover Rust tool-context string matcher
+was removed from the Mojo production path and kept only inside the explicit feature-off/test
+compatibility oracle. No second production classifier remains beside the Mojo owner.
+
+Focused feature-on parity, feature-off invalid-previous-response tests, all-target runtime-proxy
+Clippy, and production-share, ownership, authority, no-fallback, and size guards pass with Mojo
+1.1.0.
+
+The canonical broad inventory at this checkpoint is 49,241 reachable Mojo LOC and 196,646 Rust
+production LOC, or 20.025866% Mojo. The 75% project target remains a forward migration goal.
