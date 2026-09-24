@@ -247,3 +247,15 @@ pass with JSON output and `-D warnings`, preserving the Sonar artifact and warni
 while removing the duplicate compilation. Intentional conditional jobs such as scheduled
 optional-tool freshness and path-gated benchmark smoke remain conditional rather than being
 deleted merely because they appear as skipped on ordinary pushes.
+## Quota status classification wave
+
+Quota error and blocked-limit status classification now run in `quota.mojo`. Mojo owns
+the historical classification precedence for unavailable/configuration, transport, auth,
+rate-limit and response errors, plus the 5h/weekly/generic exhausted ordering used by the
+compact quota status. Rust keeps first-line extraction, provider-owned text and final
+user-facing string allocation.
+
+The real-Mojo quota suite covers the public rendering behavior and direct classifier fixtures,
+including precedence collisions such as server-plus-timeout and TLS-plus-proxy. Feature-off
+Rust behavior remains the compatibility oracle. The canonical broad inventory at this
+checkpoint is 47,778 Mojo LOC and 196,186 Rust production LOC, or 19.584037% Mojo.

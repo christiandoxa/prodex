@@ -355,3 +355,49 @@ fn openai_model_capacity_plan_matches_exhaustive_boolean_oracle() {
         }
     }
 }
+#[test]
+fn quota_error_summary_kind_preserves_rust_precedence() {
+    use prodex_mojo_core::quota::*;
+    for (message, expected) in [
+        ("quota unavailable", QUOTA_ERROR_KIND_UNAVAILABLE),
+        ("missing server config", QUOTA_ERROR_KIND_CONFIG),
+        ("HTTP 503 timeout", QUOTA_ERROR_KIND_SERVER),
+        ("request timed out", QUOTA_ERROR_KIND_TIMEOUT),
+        ("TLS proxy failure", QUOTA_ERROR_KIND_NETWORK),
+        ("proxy handshake", QUOTA_ERROR_KIND_PROXY),
+        ("connection refused", QUOTA_ERROR_KIND_CONNECTION),
+        ("invalid token <redacted>", QUOTA_ERROR_KIND_INVALID_AUTH),
+        ("HTTP 429 rate limit", QUOTA_ERROR_KIND_RATE_LIMIT),
+        ("invalid json decode", QUOTA_ERROR_KIND_PARSE),
+        ("empty response", QUOTA_ERROR_KIND_EMPTY),
+        ("request cancelled", QUOTA_ERROR_KIND_CANCELLED),
+        ("HTTP 403 forbidden", QUOTA_ERROR_KIND_FORBIDDEN),
+        ("HTTP 404 not found", QUOTA_ERROR_KIND_NOT_FOUND),
+        ("opaque provider failure", QUOTA_ERROR_KIND_OTHER),
+        ("", QUOTA_ERROR_KIND_UNKNOWN),
+    ] {
+        assert_eq!(
+            crate::mojo::quota_error_summary_kind(message),
+            expected,
+            "message={message:?}"
+        );
+    }
+}
+
+#[test]
+fn blocked_limit_kind_preserves_status_priority() {
+    use prodex_mojo_core::quota::*;
+    for (message, expected) in [
+        ("5h exhausted until tomorrow", QUOTA_BLOCKED_KIND_FIVE_HOUR),
+        ("weekly exhausted until Friday", QUOTA_BLOCKED_KIND_WEEKLY),
+        ("custom exhausted bucket", QUOTA_BLOCKED_KIND_EXHAUSTED),
+        ("5h quota unknown", QUOTA_BLOCKED_KIND_NONE),
+        ("", QUOTA_BLOCKED_KIND_NONE),
+    ] {
+        assert_eq!(
+            crate::mojo::blocked_limit_kind(message),
+            expected,
+            "message={message:?}"
+        );
+    }
+}
