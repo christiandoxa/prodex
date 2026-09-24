@@ -2601,6 +2601,7 @@ name = "prodex-cli"
 version = "0.431.7"
 dependencies = [
  "clap",
+ "prodex-mojo-core",
  "prodex-optional-tools",
  "prodex-provider-core",
  "serde",
