@@ -7,16 +7,86 @@ use crate::{
     runtime_sse_finish_pending,
 };
 
+#[cfg(any(not(feature = "mojo"), test))]
+mod rust_oracle {
+    pub(super) fn should_skip_response_header(name: &str) -> bool {
+        let name = name.trim();
+        matches!(
+            name.to_ascii_lowercase().as_str(),
+            "connection"
+                | "content-length"
+                | "keep-alive"
+                | "proxy-authenticate"
+                | "proxy-authorization"
+                | "te"
+                | "trailer"
+                | "transfer-encoding"
+                | "upgrade"
+        )
+    }
+
+    pub(super) fn response_content_type_is_sse(content_type: Option<&str>) -> bool {
+        content_type.is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"))
+    }
+
+    pub(super) fn token_usage_event_is_loggable(event_type: Option<&str>) -> bool {
+        match event_type {
+            None => true,
+            Some("response.completed" | "response.failed") => true,
+            Some(kind) => kind.ends_with(".completed"),
+        }
+    }
+
+    pub(super) fn response_event_is_generation_start(event_type: Option<&str>) -> bool {
+        matches!(
+            event_type,
+            Some(
+                "response.output_text.delta"
+                    | "response.refusal.delta"
+                    | "response.reasoning_summary_text.delta"
+                    | "response.reasoning_text.delta"
+                    | "response.function_call_arguments.delta"
+                    | "response.mcp_call_arguments.delta"
+                    | "response.custom_tool_call_input.delta"
+            )
+        )
+    }
+}
+
+#[cfg(feature = "mojo")]
+unsafe extern "C" {
+    fn prodex_runtime_response_forwarding_classify_v1(
+        operation: i64,
+        address: u64,
+        length: i64,
+        present: i64,
+        numeric: u64,
+    ) -> i64;
+}
+
+#[cfg(feature = "mojo")]
+fn response_forwarding_mojo_bool(operation: i64, value: Option<&str>, numeric: u64) -> bool {
+    let present = value.is_some();
+    let value = value.unwrap_or_default();
+    let result = unsafe {
+        prodex_runtime_response_forwarding_classify_v1(
+            operation,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).unwrap_or(i64::MAX),
+            i64::from(present),
+            numeric,
+        )
+    };
+    assert!(
+        matches!(result, 0 | 1),
+        "Mojo response-forwarding classifier returned invalid output"
+    );
+    result == 1
+}
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeResponseForwardingBodyKind {
     Unary,
     Sse,
-}
-
-impl RuntimeResponseForwardingBodyKind {
-    pub fn is_sse(self) -> bool {
-        matches!(self, Self::Sse)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,19 +103,14 @@ pub struct RuntimeSseForwardingCommitDetail {
 }
 
 pub fn should_skip_runtime_response_header(name: &str) -> bool {
-    let name = name.trim();
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "connection"
-            | "content-length"
-            | "keep-alive"
-            | "proxy-authenticate"
-            | "proxy-authorization"
-            | "te"
-            | "trailer"
-            | "transfer-encoding"
-            | "upgrade"
-    )
+    #[cfg(feature = "mojo")]
+    {
+        response_forwarding_mojo_bool(0, Some(name), 0)
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracle::should_skip_response_header(name)
+    }
 }
 
 pub fn runtime_forward_text_response_header(name: &str, value: &str) -> Option<(String, String)> {
@@ -105,7 +170,7 @@ pub fn runtime_response_content_type_from_binary_headers<'a>(
 pub fn runtime_response_forwarding_body_kind(
     content_type: Option<&str>,
 ) -> RuntimeResponseForwardingBodyKind {
-    if content_type.is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream")) {
+    if runtime_response_content_type_is_sse(content_type) {
         RuntimeResponseForwardingBodyKind::Sse
     } else {
         RuntimeResponseForwardingBodyKind::Unary
@@ -113,7 +178,14 @@ pub fn runtime_response_forwarding_body_kind(
 }
 
 pub fn runtime_response_content_type_is_sse(content_type: Option<&str>) -> bool {
-    runtime_response_forwarding_body_kind(content_type).is_sse()
+    #[cfg(feature = "mojo")]
+    {
+        response_forwarding_mojo_bool(1, content_type, 0)
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracle::response_content_type_is_sse(content_type)
+    }
 }
 
 pub fn runtime_response_header_value<'a>(
@@ -160,10 +232,13 @@ pub fn runtime_sse_forwarding_commit_detail(
 }
 
 pub fn runtime_token_usage_event_is_loggable(event_type: Option<&str>) -> bool {
-    match event_type {
-        None => true,
-        Some("response.completed" | "response.failed") => true,
-        Some(kind) => kind.ends_with(".completed"),
+    #[cfg(feature = "mojo")]
+    {
+        response_forwarding_mojo_bool(2, event_type, 0)
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracle::token_usage_event_is_loggable(event_type)
     }
 }
 
@@ -173,18 +248,14 @@ pub fn runtime_token_usage_event_is_loggable(event_type: Option<&str>) -> bool {
 /// returned boundary is used only for output-throughput timing; it does not affect commit or
 /// retry decisions.
 pub fn runtime_response_event_is_generation_start(event_type: Option<&str>) -> bool {
-    matches!(
-        event_type,
-        Some(
-            "response.output_text.delta"
-                | "response.refusal.delta"
-                | "response.reasoning_summary_text.delta"
-                | "response.reasoning_text.delta"
-                | "response.function_call_arguments.delta"
-                | "response.mcp_call_arguments.delta"
-                | "response.custom_tool_call_input.delta"
-        )
-    )
+    #[cfg(feature = "mojo")]
+    {
+        response_forwarding_mojo_bool(3, event_type, 0)
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracle::response_event_is_generation_start(event_type)
+    }
 }
 
 /// Measures elapsed generation time with a positive millisecond floor.
@@ -433,6 +504,63 @@ impl RuntimeSseTapState {
             } else {
                 effects.push(RuntimeSseTapEffect::LogTokenUsage(token_usage));
             }
+        }
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_classifier_tests {
+    use super::*;
+
+    #[test]
+    fn response_forwarding_classifiers_match_feature_off_oracle() {
+        for name in [
+            "Connection",
+            " content-length ",
+            "Keep-Alive",
+            "TRANSFER-ENCODING",
+            "x-codex-turn-state",
+            "",
+        ] {
+            assert_eq!(
+                should_skip_runtime_response_header(name),
+                rust_oracle::should_skip_response_header(name),
+                "header={name:?}"
+            );
+        }
+        for content_type in [
+            None,
+            Some("text/event-stream; charset=utf-8"),
+            Some("TEXT/EVENT-STREAM"),
+            Some("application/json"),
+            Some(""),
+        ] {
+            assert_eq!(
+                runtime_response_content_type_is_sse(content_type),
+                rust_oracle::response_content_type_is_sse(content_type),
+                "content_type={content_type:?}"
+            );
+        }
+        for event_type in [
+            None,
+            Some("response.completed"),
+            Some("response.failed"),
+            Some("response.output_item.completed"),
+            Some("response.output_text.delta"),
+            Some("response.function_call_arguments.delta"),
+            Some("response.created"),
+            Some("RESPONSE.COMPLETED"),
+        ] {
+            assert_eq!(
+                runtime_token_usage_event_is_loggable(event_type),
+                rust_oracle::token_usage_event_is_loggable(event_type),
+                "loggable={event_type:?}"
+            );
+            assert_eq!(
+                runtime_response_event_is_generation_start(event_type),
+                rust_oracle::response_event_is_generation_start(event_type),
+                "generation={event_type:?}"
+            );
         }
     }
 }
