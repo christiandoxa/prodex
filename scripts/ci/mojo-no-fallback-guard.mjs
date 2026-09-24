@@ -40,6 +40,8 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/catalog.rs",
   "crates/prodex-provider-core/src/models.rs",
   "crates/prodex-runtime-quota/src/pressure.rs",
+  "crates/prodex-runtime-store/src/continuations/status.rs",
+  "crates/prodex-runtime-store/src/continuations/status/mojo.rs",
 ];
 
 const FORBIDDEN_MARKERS = [

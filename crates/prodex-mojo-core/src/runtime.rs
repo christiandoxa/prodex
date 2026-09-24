@@ -4,6 +4,7 @@ pub use crate::runtime_decisions::*;
 mod auto_redeem;
 mod candidate_plan;
 mod compatibility_surface;
+mod continuation_status;
 mod profile_health;
 mod profile_rotation;
 mod prompt_cache_affinity;
@@ -15,6 +16,15 @@ pub use auto_redeem::{
     auto_redeem_plan_self_test,
 };
 pub use compatibility_surface::compatibility_surface_plan;
+pub use continuation_status::{
+    CONTINUATION_DEAD_PLAN, CONTINUATION_DEAD_SHADOWED, CONTINUATION_EVIDENCE_KEY,
+    CONTINUATION_RECENTLY_SUSPECT, CONTINUATION_RETAIN_WITH_BINDING,
+    CONTINUATION_RETAIN_WITHOUT_BINDING, CONTINUATION_RETENTION_KEY,
+    CONTINUATION_SHOULD_PERSIST_TOUCH, CONTINUATION_SHOULD_REFRESH_VERIFIED,
+    CONTINUATION_SHOULD_REPLACE, CONTINUATION_STALE_VERIFIED, CONTINUATION_SUSPECT_PLAN,
+    CONTINUATION_TERMINAL_STATUS, CONTINUATION_TOUCH_PLAN, CONTINUATION_TOUCH_SHOULD_PERSIST,
+    CONTINUATION_VERIFY_PLAN, continuation_status_transition,
+};
 pub use profile_health::{
     ProfileBackoffSoftening, ProfileHealthBumpInput, ProfileHealthBumpPlan,
     ProfileHealthRecoveryPlan, ProfileHealthScoreInput, RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT,
