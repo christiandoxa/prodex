@@ -740,3 +740,72 @@ authority, no-fallback, production-share, size, and churn guards pass.
 The canonical broad inventory is 50,541 reachable Mojo LOC and 196,879 Rust
 production LOC, or 20.43% Mojo. The 75% project target remains unmet; 540,096
 additional Mojo LOC are estimated at current Rust volume.
+
+## OpenAI chat response translation wave
+
+`translate_chat_response_to_responses` now sends the parsed completion tree
+through one `openai_chat_response.mojo` operation. Mojo owns first-choice
+selection, content extraction and fallback order, tool-call naming and argument
+wrapping, usage aliases and defaults, and the Responses body. Rust retains
+Serde parsing, clock acquisition, the result contract, and the feature-off Rust
+implementation and test oracle. A Mojo boundary error does not trigger Rust
+recomputation.
+
+Validation passes with Mojo 1.1.0: the feature-on provider suite (248 passed,
+two manual benchmarks ignored), the feature-off provider suite (216 passed),
+5,000 generated Mojo-versus-Rust responses plus sparse/content/tool/usage edge
+cases, and the `prodex-mojo-core` suite including three response ABI tests.
+Workspace all-target Clippy, formatting, compatibility baseline and offline
+replay, docs, changed tests, Mojo ownership/authority/no-fallback, size, churn,
+and production-share guards pass.
+
+The canonical broad inventory is 50,935 reachable Mojo LOC and 196,761 Rust
+production LOC, or 20.563513338931593% Mojo. The 75% project target remains
+unmet; 539,348 additional Mojo LOC are estimated at current Rust volume.
+
+## OpenAI chat-compatible SSE event selection wave
+
+The chat-compatible SSE bridge now passes each parsed event tree to operation
+1 of prodex_mojo_openai_chat_response_v1. Mojo owns first-choice and
+first-tool-delta selection, tool-over-text precedence, completion detection,
+RTK argument wrapping, and Responses SSE serialization. Rust retains framing,
+UTF-8 decoding, Serde parsing, [DONE] detection, result mapping, and the
+feature-off implementation and differential oracle. Unsupported JSON events
+remain unsupported; Mojo errors do not trigger Rust recomputation.
+
+Validation passes with Mojo 1.1.0: 5,000 generated stream events and sparse,
+precedence, malformed-field, and transport-boundary cases match the Rust
+oracle byte-for-byte through both the Mojo ABI and provider translator. The
+provider-core suites pass in feature-off and feature-on modes, the Mojo JSON
+boundary suite passes, workspace all-target/all-feature Clippy passes, and the
+ownership, authority, no-fallback, and production-share guards pass.
+
+The canonical broad inventory is 51,019 reachable Mojo LOC and 196,735 Rust
+production LOC, or 20.59% Mojo. The 75% project target remains unmet; 539,186
+additional Mojo LOC are estimated at current Rust volume.
+
+## DeepSeek chat-compatible SSE event selection wave
+
+DeepSeek chat SSE events now pass their parsed JSON tree through operation 2 of
+`prodex_mojo_openai_chat_response_v1`. Mojo owns first-choice and first-tool
+delta selection, tool-over-text precedence, call-ID inclusion, and complete
+Responses SSE event serialization. Rust retains framing, UTF-8 decoding, JSON
+parsing, `[DONE]` handling, result mapping, and the feature-off Rust oracle.
+Invalid first tool deltas remain unsupported without text fallback; missing
+text remains an empty text delta. Mojo errors do not trigger Rust recomputation.
+
+The feature-on provider tests compare 5,000 generated events and sparse,
+precedence, malformed-field, and transport-boundary cases against the Rust
+oracle byte-for-byte through both the Mojo ABI and provider translator. The
+provider-core suite passes with Mojo enabled (254 passed, two ignored) and
+disabled (216 passed).
+
+Validation passes: `cargo fmt --all -- --check`, `npm run docs`,
+`npm run test:changed`, `rtk cargo clippy --locked --workspace --all-targets
+--all-features -- -D warnings`, `npm run mojo:ownership`,
+`npm run mojo:authority`, `node scripts/ci/mojo-no-fallback-guard.mjs`,
+`node scripts/ci/mojo-production-share.mjs --check`, and `git diff --check`.
+
+The canonical broad inventory is 51,082 reachable Mojo LOC and 196,707 Rust
+production LOC, or 20.62% Mojo. The 75% project target remains unmet; 539,039
+additional Mojo LOC are estimated at current Rust volume.

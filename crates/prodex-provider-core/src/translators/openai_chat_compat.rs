@@ -1,6 +1,6 @@
 use crate::translator::{ProviderTransformInput, ProviderTransformResult};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 #[path = "openai_chat_compat_params.rs"]
 mod openai_chat_compat_params;
@@ -25,10 +25,8 @@ use self::openai_chat_compat_request::{
 pub(crate) use self::openai_chat_compat_response::{
     translate_chat_response_to_responses, translate_chat_stream_event_to_responses,
 };
-use self::openai_chat_compat_util::{
-    chat_usage_to_responses_usage, message_content_to_output_content, rtk_wrapped_tool_arguments,
-    split_flat_namespace_tool_name, stringify_arguments,
-};
+#[cfg(any(not(feature = "mojo"), test))]
+use self::openai_chat_compat_util::stringify_arguments;
 #[cfg(any(not(feature = "mojo"), test))]
 use self::openai_chat_compat_util::{copy_first_if_present, copy_if_present, value_to_text};
 

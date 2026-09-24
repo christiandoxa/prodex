@@ -80,6 +80,56 @@ impl<'a> Document<'a> {
         self.nodes[0].raw_length = self.raw.len();
     }
 
+    pub(crate) fn openai_chat_context(
+        &mut self,
+        response: &'a Value,
+        fallback_created_at: Option<u64>,
+    ) {
+        self.nodes.push(JsonNode {
+            kind: JsonKind::Object,
+            first_child: None,
+            next_sibling: None,
+            parent: None,
+            key: "",
+            text: "",
+            raw_start: 0,
+            raw_length: 0,
+        });
+        self.raw.push(b'{');
+        let mut previous = None;
+
+        if let Some(fallback_created_at) = fallback_created_at {
+            serde_json::to_writer(&mut self.raw, "fallback_created_at")
+                .expect("in-memory JSON key serialization");
+            self.raw.push(b':');
+            let start = self.raw.len();
+            serde_json::to_writer(&mut self.raw, &fallback_created_at)
+                .expect("in-memory JSON number serialization");
+            let fallback = self.nodes.len();
+            self.nodes.push(JsonNode {
+                kind: JsonKind::Number,
+                first_child: None,
+                next_sibling: None,
+                parent: Some(0),
+                key: "fallback_created_at",
+                text: "",
+                raw_start: start,
+                raw_length: self.raw.len() - start,
+            });
+            self.link(0, &mut previous, fallback);
+        }
+
+        if previous.is_some() {
+            self.raw.push(b',');
+        }
+        serde_json::to_writer(&mut self.raw, "response").expect("in-memory JSON key serialization");
+        self.raw.push(b':');
+        let response_node = self.push(response, Some(0), "response");
+        self.link(0, &mut previous, response_node);
+        self.raw.push(b'}');
+        self.nodes[0].raw_length = self.raw.len();
+    }
+
     fn push_string(&mut self, text: &'a str, parent: Option<usize>, key: &'a str) -> usize {
         let index = self.nodes.len();
         let start = self.raw.len();

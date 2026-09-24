@@ -163,7 +163,7 @@ pub(super) fn deepseek_transform_stream_event(
             );
         }
     };
-    let Some((event_name, transformed)) = deepseek_stream_event_from_chat_value(&value) else {
+    let Some(body) = deepseek_stream_event_from_chat_value(&value) else {
         return ProviderTransformResult::unsupported(
             provider,
             input.endpoint,
@@ -172,12 +172,15 @@ pub(super) fn deepseek_transform_stream_event(
             "DeepSeek SSE event does not contain a supported text or function-call delta",
         );
     };
-    let body = format!("event: {event_name}\ndata: {}\n\n", transformed);
     ProviderTransformResult::lossless(
         provider,
         input.endpoint,
         ProviderWireFormat::OpenAiChatCompletions,
         ProviderWireFormat::OpenAiResponses,
-        body.into_bytes(),
+        body,
     )
 }
+
+#[cfg(all(test, feature = "mojo"))]
+#[path = "stream/mojo_tests.rs"]
+mod mojo_tests;
