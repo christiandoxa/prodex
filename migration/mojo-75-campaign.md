@@ -364,3 +364,17 @@ production-share, authority, and no-fallback guards pass with Mojo 1.1.0.
 
 The canonical broad inventory at this checkpoint is 48,959 reachable Mojo LOC and 196,734 Rust
 production LOC, or 19.926901% Mojo. The 75% project target remains a forward migration goal.
+
+## Smart Context duplicate Rust cleanup wave
+
+Smart Context token accounting now keeps the feature-on production path free of helper policy that
+Mojo already owns. Rust-only pressure-band, estimator-confidence, and safety-floor helpers are gated
+to the explicit feature-off/test compatibility path; duplicate feature-gated memory-capsule wrappers
+were collapsed; and the shared result-assembly adapter was separated from the Rust oracle module.
+
+Focused feature-on and feature-off token-accounting tests pass, all-target runtime-proxy Clippy is
+clean, and production-share, authority, no-fallback, and size guards pass with Mojo 1.1.0. No
+second Rust production implementation was retained for the migrated policy decisions.
+
+The canonical broad inventory at this checkpoint is 48,959 reachable Mojo LOC and 196,711 Rust
+production LOC, or 19.928766% Mojo. The 75% project target remains a forward migration goal.
