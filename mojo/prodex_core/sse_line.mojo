@@ -63,3 +63,58 @@ def prodex_runtime_sse_line_plan_v1(
     output[unsafe_offset=1] = value_start
     output[unsafe_offset=2] = end
     return 0
+
+
+comptime SSE_INSPECTION_CONTINUE: Int64 = 0
+comptime SSE_INSPECTION_QUOTA_BLOCKED: Int64 = 1
+comptime SSE_INSPECTION_RATE_LIMITED: Int64 = 2
+comptime SSE_INSPECTION_OVERLOADED: Int64 = 3
+comptime SSE_INSPECTION_PREVIOUS_RESPONSE_NOT_FOUND: Int64 = 4
+
+
+@export("prodex_runtime_sse_inspection_step_v1")
+def prodex_runtime_sse_inspection_step_v1(
+    committed: Int64,
+    quota_blocked: Int64,
+    rate_limited: Int64,
+    overloaded: Int64,
+    previous_response_not_found: Int64,
+    precommit_hold: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        committed < 0
+        or committed > 1
+        or quota_blocked < 0
+        or quota_blocked > 1
+        or rate_limited < 0
+        or rate_limited > 1
+        or overloaded < 0
+        or overloaded > 1
+        or previous_response_not_found < 0
+        or previous_response_not_found > 1
+        or precommit_hold < 0
+        or precommit_hold > 1
+        or output_address == 0
+    ):
+        return 1
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var action = SSE_INSPECTION_CONTINUE
+    if committed == 0:
+        if quota_blocked == 1:
+            action = SSE_INSPECTION_QUOTA_BLOCKED
+        elif rate_limited == 1:
+            action = SSE_INSPECTION_RATE_LIMITED
+        elif overloaded == 1:
+            action = SSE_INSPECTION_OVERLOADED
+        elif previous_response_not_found == 1:
+            action = SSE_INSPECTION_PREVIOUS_RESPONSE_NOT_FOUND
+
+    output[unsafe_offset=0] = action
+    output[unsafe_offset=1] = committed
+    if action == SSE_INSPECTION_CONTINUE and precommit_hold == 0:
+        output[unsafe_offset=1] = 1
+    return 0
