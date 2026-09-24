@@ -451,3 +451,19 @@ Clippy, and production-share, ownership, authority, no-fallback, and size guards
 
 The canonical broad inventory at this checkpoint is 49,241 reachable Mojo LOC and 196,646 Rust
 production LOC, or 20.025866% Mojo. The 75% project target remains a forward migration goal.
+
+## SSE line planning Mojo wave
+
+Runtime SSE line classification now executes in a dedicated Mojo kernel. Mojo owns CR/LF trimming,
+blank/comment detection, `data` field recognition, separator scanning, optional leading-space
+handling, and the byte-span plan consumed by the Rust stream accumulator. The former production
+Rust splitter/trimmer logic was removed; only the explicit non-Mojo compatibility implementation
+remains isolated outside the Mojo production path.
+
+Feature-on expectation tests cover LF/CRLF, comments, empty `data`, spaced values, ignored fields,
+and invalid UTF-8 payload bytes. The full payload-detection suite passes with and without Mojo,
+all-target runtime-proxy Clippy is clean, and production-share, ownership, authority, no-fallback,
+and size guards pass with Mojo 1.1.0.
+
+The canonical broad inventory at this checkpoint is 49,294 reachable Mojo LOC and 196,666 Rust
+production LOC, or 20.041470% Mojo. The 75% project target remains a forward migration goal.
