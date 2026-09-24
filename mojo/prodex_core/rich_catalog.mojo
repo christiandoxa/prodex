@@ -20,6 +20,7 @@ comptime CATALOG_MAX_MODELS: Int64 = 1_024
 comptime CATALOG_MAX_INPUT_MODELS: Int64 = 65_536
 comptime CATALOG_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime CATALOG_MAX_QUERY_BYTES: Int64 = 65_536
+comptime CATALOG_MAX_MERGE_QUERY_BYTES: Int64 = 9_223_372_036_854_775_807
 comptime CATALOG_MAX_CHOICES: Int64 = 1_024
 comptime RICH_STATUS_OK: Int64 = 0
 comptime RICH_STATUS_INVALID: Int64 = 1
@@ -1693,7 +1694,7 @@ def prodex_mojo_rich_catalog_merge_v1(
     if not catalog_valid_views(model_ids, model_count, aliases, alias_models, alias_count):
         return RICH_STATUS_UTF8
     for additional_index in range(additional_count):
-        if not rich_view_valid(additional[unsafe_offset=additional_index], CATALOG_MAX_QUERY_BYTES):
+        if not rich_view_valid(additional[unsafe_offset=additional_index], CATALOG_MAX_MERGE_QUERY_BYTES):
             return RICH_STATUS_UTF8
     var accepted = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(accepted_indices_address)

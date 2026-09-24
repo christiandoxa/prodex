@@ -30,6 +30,9 @@
       "production_reachability_test": "crates/prodex-context/src/critical_signal.rs",
       "mojo_source": "mojo/prodex_core/context_critical_signal.mojo"
     },
+    "provider_catalog_merge_dedup": {
+      "production_reachability_test": "crates/prodex-app/src/runtime_external_provider_config/catalog_merge_tests.rs"
+    },
     "log_event_classification": {
       "expanded_in": "0.427.0"
     },

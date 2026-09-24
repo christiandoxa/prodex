@@ -1,11 +1,9 @@
-use crate::profile_commands::KIRO_MODEL_CATALOG_FILE;
 use crate::runtime_catalog_config::{parse_catalog_u64, toml_string_literal};
 use crate::{
     codex_cli_config_override_value, codex_effective_config_exact_value,
     codex_effective_config_value,
 };
 use anyhow::{Context, Result, bail};
-use catalog_model::external_catalog_model;
 use prodex_cli::{
     SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW,
     SUPER_ANTHROPIC_DEFAULT_MODEL, SUPER_ANTHROPIC_PROVIDER_ID,
@@ -16,12 +14,13 @@ use prodex_cli::{
 };
 use prodex_provider_core::ProviderId;
 use serde_json::json;
-use std::collections::BTreeSet;
 use std::ffi::OsString;
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+mod catalog_merge_tests;
 mod catalog_model;
 
 const EXTERNAL_MODEL_CATALOG_FILE: &str = "prodex-external-provider-model-catalog.json";
@@ -198,7 +197,7 @@ fn write_external_model_catalog(
     prodex_shared_codex_fs::create_codex_home_if_missing(codex_home)?;
     let catalog_path = codex_home.join(EXTERNAL_MODEL_CATALOG_FILE);
     let catalog = json!({
-        "models": external_catalog_models(
+        "models": catalog_model::external_catalog_models(
             codex_home,
             provider,
             model,
@@ -213,165 +212,6 @@ fn write_external_model_catalog(
         .map_err(anyhow::Error::new)
         .with_context(|| format!("failed to write {}", catalog_path.display()))?;
     Ok(catalog_path)
-}
-
-fn external_catalog_models(
-    codex_home: &Path,
-    provider: ExternalCatalogProvider,
-    launch_model: &str,
-    context_window: u64,
-    auto_compact_token_limit: u64,
-) -> Result<Vec<serde_json::Value>> {
-    let dynamic_models = external_dynamic_catalog_models(codex_home, provider)?;
-    let mut models = Vec::with_capacity(provider.models().len() + dynamic_models.len() + 1);
-    let mut seen = BTreeSet::new();
-    let launch_model_context_window = dynamic_models
-        .iter()
-        .find(|model| model.slug.eq_ignore_ascii_case(launch_model))
-        .and_then(|model| model.context_window)
-        .or_else(|| provider.model_prompt_token_limit(launch_model));
-    let default_compact_limit = auto_compact_token_limit;
-    for slug in std::iter::once((launch_model, launch_model_context_window))
-        .chain(dynamic_models.iter().map(|model| {
-            (
-                model.slug.as_str(),
-                model
-                    .context_window
-                    .or_else(|| provider.model_prompt_token_limit(&model.slug)),
-            )
-        }))
-        .chain(
-            provider
-                .models()
-                .iter()
-                .map(|model| (model.0, provider.model_prompt_token_limit(model.0))),
-        )
-    {
-        let (slug, per_model_context_window) = slug;
-        let slug = slug.trim();
-        if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
-            continue;
-        }
-        if models.len() >= prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-            bail!(
-                "provider model catalog exceeds the hard limit of {} entries",
-                prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
-            );
-        }
-        let priority = models.len() + 1;
-        let dynamic_model = dynamic_models
-            .iter()
-            .find(|model| model.slug.eq_ignore_ascii_case(slug));
-        let (fallback_display_name, fallback_description) = provider.model_metadata(slug);
-        let display_name = dynamic_model
-            .and_then(|model| model.display_name.as_deref())
-            .unwrap_or(fallback_display_name);
-        let description = dynamic_model
-            .and_then(|model| model.description.as_deref())
-            .unwrap_or(fallback_description);
-        let model_context_window = per_model_context_window.unwrap_or(context_window);
-        let model_compact_limit = per_model_context_window
-            .map(|cw| cw.saturating_mul(95).saturating_div(100))
-            .unwrap_or(default_compact_limit)
-            .min(model_context_window.saturating_sub(1));
-        models.push(external_catalog_model(
-            provider,
-            slug,
-            display_name,
-            description,
-            priority,
-            model_context_window,
-            model_compact_limit,
-        ));
-    }
-    Ok(models)
-}
-
-#[derive(Clone, Debug)]
-struct ExternalDynamicCatalogModel {
-    slug: String,
-    display_name: Option<String>,
-    description: Option<String>,
-    context_window: Option<u64>,
-}
-
-fn external_dynamic_catalog_models(
-    codex_home: &Path,
-    provider: ExternalCatalogProvider,
-) -> Result<Vec<ExternalDynamicCatalogModel>> {
-    let catalog_file = match provider {
-        ExternalCatalogProvider::Copilot => COPILOT_RUNTIME_MODEL_CATALOG_FILE,
-        ExternalCatalogProvider::Kiro => KIRO_MODEL_CATALOG_FILE,
-        ExternalCatalogProvider::Anthropic => return Ok(Vec::new()),
-    };
-    let catalog_path = codex_home.join(catalog_file);
-    let Some(contents) = read_provider_model_catalog_text(&catalog_path)? else {
-        return Ok(Vec::new());
-    };
-    let value = catalog_model::read_external_model_catalog(provider, &contents)?;
-    let models = value
-        .get("models")
-        .and_then(serde_json::Value::as_array)
-        .context("provider model catalog is missing models array")?;
-    if models.len() > prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-        bail!(
-            "provider model catalog exceeds the hard limit of {} entries",
-            prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
-        );
-    }
-    let mut seen = BTreeSet::new();
-    Ok(models
-        .iter()
-        .filter_map(|model| {
-            let slug = model
-                .get("id")
-                .or_else(|| model.get("slug"))
-                .or_else(|| model.get("model"))
-                .and_then(serde_json::Value::as_str)?
-                .trim();
-            let context_window = copilot_catalog_entry_prompt_token_limit(model)
-                .or_else(|| {
-                    model
-                        .get("context_window_tokens")
-                        .and_then(serde_json::Value::as_u64)
-                })
-                .or_else(|| {
-                    model
-                        .get("context_window")
-                        .and_then(serde_json::Value::as_u64)
-                })
-                .filter(|cw| *cw > 1);
-            if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
-                return None;
-            }
-            Some(ExternalDynamicCatalogModel {
-                slug: slug.to_string(),
-                display_name: model
-                    .get("name")
-                    .or_else(|| model.get("model_name"))
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
-                description: model
-                    .get("description")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_string),
-                context_window,
-            })
-        })
-        .collect())
-}
-
-fn copilot_catalog_entry_prompt_token_limit(model: &serde_json::Value) -> Option<u64> {
-    model
-        .get("max_prompt_tokens")
-        .or_else(|| {
-            model
-                .get("capabilities")
-                .and_then(|c| c.get("limits"))
-                .and_then(|l| l.get("max_prompt_tokens"))
-        })
-        .and_then(serde_json::Value::as_u64)
-        .filter(|tokens| *tokens > 1)
 }
 
 impl ExternalCatalogProvider {
@@ -615,6 +455,7 @@ impl ExternalCatalogProvider {
 
 #[cfg(test)]
 mod tests {
+    use crate::profile_commands::KIRO_MODEL_CATALOG_FILE;
     use std::time::{SystemTime, UNIX_EPOCH};
     use {super::*, crate::test_support::test_temp_root};
 
