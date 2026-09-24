@@ -132,30 +132,21 @@ pub(crate) fn pressure_band_for_route(
 ) -> Result<RuntimeSelectionQuotaPressureBand, prodex_mojo_core::MojoError> {
     let five_hour = five_hour.map(|window| (window.remaining_percent, 1));
     let weekly = weekly.map(|window| (window.remaining_percent, 1));
-    match prodex_mojo_core::runtime::pressure_band_for_route(
+    quota_band_from_tag(prodex_mojo_core::runtime::pressure_band_for_route(
         five_hour,
         weekly,
         route_kind_tag(route_kind),
-    )? {
-        0 => Ok(RuntimeSelectionQuotaPressureBand::Healthy),
-        1 => Ok(RuntimeSelectionQuotaPressureBand::Thin),
-        2 => Ok(RuntimeSelectionQuotaPressureBand::Critical),
-        3 => Ok(RuntimeSelectionQuotaPressureBand::Exhausted),
-        4 => Ok(RuntimeSelectionQuotaPressureBand::Unknown),
-        _ => Err(prodex_mojo_core::MojoError::InvalidOutput),
-    }
+    )?)
 }
 
 pub(crate) fn window_status(
     remaining_percent: i64,
 ) -> Result<RuntimeSelectionQuotaWindowStatus, prodex_mojo_core::MojoError> {
-    match prodex_mojo_core::quota::window_status(remaining_percent, true) {
-        0 => Ok(RuntimeSelectionQuotaWindowStatus::Ready),
-        1 => Ok(RuntimeSelectionQuotaWindowStatus::Thin),
-        2 => Ok(RuntimeSelectionQuotaWindowStatus::Critical),
-        3 => Ok(RuntimeSelectionQuotaWindowStatus::Exhausted),
-        _ => Err(prodex_mojo_core::MojoError::InvalidOutput),
+    let status = prodex_mojo_core::quota::window_status(remaining_percent, true);
+    if status == 4 {
+        return Err(prodex_mojo_core::MojoError::InvalidOutput);
     }
+    quota_status_from_tag(status)
 }
 
 pub(crate) fn quota_score_batch(
@@ -179,38 +170,22 @@ pub(crate) fn quota_score_batch(
             }
         })
         .collect::<Vec<_>>();
-    prodex_mojo_core::runtime::quota_score_batch(
-        &inputs,
-        match route_kind {
-            RuntimeRouteKind::Responses => 0,
-            RuntimeRouteKind::Compact => 1,
-            RuntimeRouteKind::Websocket => 2,
-            RuntimeRouteKind::Standard => 3,
-        },
-    )?
-    .into_iter()
-    .map(|score| {
-        let pressure_band = match score.pressure_band {
-            0 => RuntimeSelectionQuotaPressureBand::Healthy,
-            1 => RuntimeSelectionQuotaPressureBand::Thin,
-            2 => RuntimeSelectionQuotaPressureBand::Critical,
-            3 => RuntimeSelectionQuotaPressureBand::Exhausted,
-            4 => RuntimeSelectionQuotaPressureBand::Unknown,
-            _ => return Err(prodex_mojo_core::MojoError::InvalidOutput),
-        };
-        Ok(RuntimeProxyQuotaScore {
-            pressure_band,
-            total_pressure: score.total_pressure,
-            weekly_pressure: score.weekly_pressure,
-            five_hour_pressure: score.five_hour_pressure,
-            reserve_floor: score.reserve_floor,
-            weekly_remaining: score.weekly_remaining,
-            five_hour_remaining: score.five_hour_remaining,
-            weekly_reset_at: score.weekly_reset_at,
-            five_hour_reset_at: score.five_hour_reset_at,
+    prodex_mojo_core::runtime::quota_score_batch(&inputs, route_kind_tag(route_kind))?
+        .into_iter()
+        .map(|score| {
+            Ok(RuntimeProxyQuotaScore {
+                pressure_band: quota_band_from_tag(score.pressure_band)?,
+                total_pressure: score.total_pressure,
+                weekly_pressure: score.weekly_pressure,
+                five_hour_pressure: score.five_hour_pressure,
+                reserve_floor: score.reserve_floor,
+                weekly_remaining: score.weekly_remaining,
+                five_hour_remaining: score.five_hour_remaining,
+                weekly_reset_at: score.weekly_reset_at,
+                five_hour_reset_at: score.five_hour_reset_at,
+            })
         })
-    })
-    .collect()
+        .collect()
 }
 
 pub(crate) fn smart_context_estimate_tokens_from_body_bytes(body_bytes: u64) -> u64 {
@@ -289,10 +264,7 @@ pub(crate) fn runtime_response_candidate_plan_batch(
         fields.push(candidate.quota_sort_key.6.0);
         fields.push(candidate.quota_sort_key.7);
         fields.push(candidate.quota_sort_key.8);
-        fields.push(match candidate.quota_source {
-            crate::RuntimeSelectionQuotaSource::LiveProbe => 0,
-            crate::RuntimeSelectionQuotaSource::PersistedSnapshot => 1,
-        });
+        fields.push(quota_source_tag(Some(candidate.quota_source)));
         push_usize(&mut fields, candidate.inflight_count)?;
         fields.push(i64::from(candidate.health_sort_key));
         fields.push(i64::from(prompt_cache_affinity_sort_key.0));
@@ -306,20 +278,9 @@ pub(crate) fn runtime_response_candidate_plan_batch(
         fields.push(candidate.backoff_sort_key.2);
         fields.push(candidate.backoff_sort_key.3);
         fields.push(i64::from(candidate.auth_failure_active));
-        fields.push(match candidate.quota_summary.five_hour.status {
-            crate::RuntimeSelectionQuotaWindowStatus::Ready => 0,
-            crate::RuntimeSelectionQuotaWindowStatus::Thin => 1,
-            crate::RuntimeSelectionQuotaWindowStatus::Critical => 2,
-            crate::RuntimeSelectionQuotaWindowStatus::Exhausted => 3,
-            crate::RuntimeSelectionQuotaWindowStatus::Unknown => 4,
-        });
+        fields.push(quota_status_tag(candidate.quota_summary.five_hour.status));
     }
-    let route_kind = match options.route_kind {
-        RuntimeRouteKind::Responses => 0,
-        RuntimeRouteKind::Compact => 1,
-        RuntimeRouteKind::Websocket => 2,
-        RuntimeRouteKind::Standard => 3,
-    };
+    let route_kind = route_kind_tag(options.route_kind);
     let excluded = vec![0_i64; candidates.len()];
     prodex_mojo_core::runtime::runtime_candidate_plan_batch(
         &fields,
