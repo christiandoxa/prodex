@@ -206,7 +206,12 @@ fn print_initial_token_usage_events(
 ) -> Result<()> {
     let items = initial_log_stream_items_with_live(live_source, None)?;
     if items.is_empty() {
-        eprintln!("Waiting for transcript, upstream payload, or token usage events...");
+        let message = "Waiting for transcript, upstream payload, or token events.".to_string();
+        crate::app_commands::print_user_stderr_panel(
+            "Prodex Log",
+            std::slice::from_ref(&message),
+            std::slice::from_ref(&message),
+        )?;
         return Ok(());
     }
     for item in items {
@@ -460,7 +465,12 @@ fn print_log_snapshot(
     }
 
     if transcript.is_none() && upstream_payload.is_none() && token_usage.is_none() {
-        println!("No transcript, upstream payload, or token usage events found.");
+        let message = "No transcript, upstream payload, or token events found.".to_string();
+        crate::app_commands::print_user_stdout_panel(
+            "Prodex Log",
+            &[("Status".to_string(), "no events found".to_string())],
+            std::slice::from_ref(&message),
+        )?;
         return Ok(());
     }
     if let Some(event) = transcript {
