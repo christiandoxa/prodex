@@ -349,3 +349,18 @@ also consolidates repeated previous-response planning inputs through one semanti
 
 The canonical broad inventory at this checkpoint is 48,959 reachable Mojo LOC and 196,854 Rust
 production LOC, or 19.917173% Mojo. The 75% target remains a forward migration goal.
+
+## Runtime health duplicate Rust deletion wave
+
+The runtime profile health map-backed scoring paths now delegate directly to the already
+Mojo-authoritative by-key scoring path. The duplicate Rust implementations for map-backed
+coupling, performance, aggregate sort-key scoring, and their map-only effective-score helpers
+were deleted rather than retained as a second production implementation.
+
+Feature-on tests now verify the map adapter produces the same result as the canonical by-key Mojo
+path, while the remaining feature-off compatibility implementation is limited to the explicit
+non-Mojo build path. Focused Mojo/default tests, all-target runtime-proxy Clippy, size guard,
+production-share, authority, and no-fallback guards pass with Mojo 1.1.0.
+
+The canonical broad inventory at this checkpoint is 48,959 reachable Mojo LOC and 196,734 Rust
+production LOC, or 19.926901% Mojo. The 75% project target remains a forward migration goal.

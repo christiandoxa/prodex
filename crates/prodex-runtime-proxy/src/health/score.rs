@@ -50,33 +50,6 @@ fn runtime_profile_effective_score_rust<T: RuntimeProfileHealthEntry>(
 }
 
 #[cfg(any(not(feature = "mojo"), test))]
-fn runtime_profile_effective_health_score_from_map_rust<T: RuntimeProfileHealthEntry>(
-    profile_health: &BTreeMap<String, T>,
-    key: &str,
-    now: i64,
-) -> u32 {
-    profile_health
-        .get(key)
-        .map(|entry| {
-            runtime_profile_effective_score_rust(entry, now, RUNTIME_PROFILE_HEALTH_DECAY_SECONDS)
-        })
-        .unwrap_or(0)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_profile_effective_score_from_map_rust<T: RuntimeProfileHealthEntry>(
-    profile_health: &BTreeMap<String, T>,
-    key: &str,
-    now: i64,
-    decay_seconds: i64,
-) -> u32 {
-    profile_health
-        .get(key)
-        .map(|entry| runtime_profile_effective_score_rust(entry, now, decay_seconds))
-        .unwrap_or(0)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
 fn runtime_profile_effective_health_score_by_key_rust<F>(
     health_entry: F,
     key: &str,
@@ -159,62 +132,20 @@ pub fn runtime_profile_route_coupling_score_from_map<T: RuntimeProfileHealthEntr
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    #[cfg(feature = "mojo")]
-    {
-        profile_health_coupling_score_mojo(
-            profile_health_score_input(
-                |key| {
-                    profile_health.get(key).map(|entry| {
-                        (
-                            entry.runtime_profile_health_score(),
-                            entry.runtime_profile_health_updated_at(),
-                        )
-                    })
-                },
-                profile_name,
-                route_kind,
-            ),
-            now,
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    runtime_profile_route_coupling_score_from_map_rust(
-        profile_health,
+    runtime_profile_route_coupling_score_by_key(
+        |key| {
+            profile_health
+                .get(key)
+                .map(|entry| RuntimeProfileHealthSnapshot {
+                    score: entry.runtime_profile_health_score(),
+                    updated_at: entry.runtime_profile_health_updated_at(),
+                })
+        },
         profile_name,
         now,
         route_kind,
     )
 }
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_profile_route_coupling_score_from_map_rust<T: RuntimeProfileHealthEntry>(
-    profile_health: &BTreeMap<String, T>,
-    profile_name: &str,
-    now: i64,
-    route_kind: RuntimeRouteKind,
-) -> u32 {
-    runtime_route_coupled_kinds(route_kind)
-        .iter()
-        .copied()
-        .map(|coupled_kind| {
-            let route_score = runtime_profile_effective_health_score_from_map_rust(
-                profile_health,
-                &runtime_profile_route_health_key(profile_name, coupled_kind),
-                now,
-            );
-            let bad_pairing_score = runtime_profile_effective_score_from_map_rust(
-                profile_health,
-                &runtime_profile_route_bad_pairing_key(profile_name, coupled_kind),
-                now,
-                RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-            );
-            route_score
-                .saturating_add(bad_pairing_score)
-                .saturating_div(2)
-        })
-        .fold(0, u32::saturating_add)
-}
-
 pub fn runtime_profile_route_coupling_score_by_key<F>(
     health_entry: F,
     profile_name: &str,
@@ -277,57 +208,20 @@ pub fn runtime_profile_route_performance_score<T: RuntimeProfileHealthEntry>(
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    #[cfg(feature = "mojo")]
-    {
-        profile_health_performance_score_mojo(
-            profile_health_score_input(
-                |key| {
-                    profile_health.get(key).map(|entry| {
-                        (
-                            entry.runtime_profile_health_score(),
-                            entry.runtime_profile_health_updated_at(),
-                        )
-                    })
-                },
-                profile_name,
-                route_kind,
-            ),
-            now,
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    runtime_profile_route_performance_score_rust(profile_health, profile_name, now, route_kind)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_profile_route_performance_score_rust<T: RuntimeProfileHealthEntry>(
-    profile_health: &BTreeMap<String, T>,
-    profile_name: &str,
-    now: i64,
-    route_kind: RuntimeRouteKind,
-) -> u32 {
-    let route_score = runtime_profile_effective_score_from_map_rust(
-        profile_health,
-        &runtime_profile_route_performance_key(profile_name, route_kind),
+    runtime_profile_route_performance_score_by_key(
+        |key| {
+            profile_health
+                .get(key)
+                .map(|entry| RuntimeProfileHealthSnapshot {
+                    score: entry.runtime_profile_health_score(),
+                    updated_at: entry.runtime_profile_health_updated_at(),
+                })
+        },
+        profile_name,
         now,
-        RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
-    );
-    let coupled_score = runtime_route_coupled_kinds(route_kind)
-        .iter()
-        .copied()
-        .map(|coupled_kind| {
-            runtime_profile_effective_score_from_map_rust(
-                profile_health,
-                &runtime_profile_route_performance_key(profile_name, coupled_kind),
-                now,
-                RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
-            )
-            .saturating_div(2)
-        })
-        .fold(0, u32::saturating_add);
-    route_score.saturating_add(coupled_score)
+        route_kind,
+    )
 }
-
 pub fn runtime_profile_route_performance_score_by_key<F>(
     health_entry: F,
     profile_name: &str,
@@ -390,64 +284,20 @@ pub fn runtime_profile_health_sort_key<T: RuntimeProfileHealthEntry>(
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    #[cfg(feature = "mojo")]
-    {
-        runtime_profile_health_sort_key_mojo(
-            profile_health_score_input(
-                |key| {
-                    profile_health.get(key).map(|entry| {
-                        (
-                            entry.runtime_profile_health_score(),
-                            entry.runtime_profile_health_updated_at(),
-                        )
-                    })
-                },
-                profile_name,
-                route_kind,
-            ),
-            now,
-        )
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        runtime_profile_health_sort_key_rust(profile_name, profile_health, now, route_kind)
-    }
+    runtime_profile_health_sort_key_by_key(
+        profile_name,
+        |key| {
+            profile_health
+                .get(key)
+                .map(|entry| RuntimeProfileHealthSnapshot {
+                    score: entry.runtime_profile_health_score(),
+                    updated_at: entry.runtime_profile_health_updated_at(),
+                })
+        },
+        now,
+        route_kind,
+    )
 }
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_profile_health_sort_key_rust<T: RuntimeProfileHealthEntry>(
-    profile_name: &str,
-    profile_health: &BTreeMap<String, T>,
-    now: i64,
-    route_kind: RuntimeRouteKind,
-) -> u32 {
-    runtime_profile_effective_health_score_from_map_rust(profile_health, profile_name, now)
-        .saturating_add(runtime_profile_effective_health_score_from_map_rust(
-            profile_health,
-            &runtime_profile_route_health_key(profile_name, route_kind),
-            now,
-        ))
-        .saturating_add(runtime_profile_effective_score_from_map_rust(
-            profile_health,
-            &runtime_profile_route_bad_pairing_key(profile_name, route_kind),
-            now,
-            RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-        ))
-        .saturating_add(runtime_profile_route_coupling_score_from_map(
-            profile_health,
-            profile_name,
-            now,
-            route_kind,
-        ))
-        .saturating_add(runtime_profile_route_performance_score(
-            profile_health,
-            profile_name,
-            now,
-            route_kind,
-        ))
-}
-
 pub fn runtime_profile_health_sort_key_by_key<F>(
     profile_name: &str,
     health_entry: F,
@@ -624,7 +474,7 @@ mod mojo_parity_tests {
     use super::*;
 
     #[test]
-    fn health_sort_key_feature_path_matches_rust_oracle_for_all_routes() {
+    fn health_sort_key_map_adapter_matches_by_key_path_for_all_routes() {
         let now = 100;
         let mut health = BTreeMap::from([(
             "alpha".to_string(),
@@ -664,16 +514,16 @@ mod mojo_parity_tests {
         }
 
         for (route_kind, _, _, _) in routes {
-            assert_eq!(
-                runtime_profile_health_sort_key("alpha", &health, now, route_kind),
-                runtime_profile_health_sort_key_rust("alpha", &health, now, route_kind),
-                "map route: {route_kind:?}"
-            );
             let health_entry = |key: &str| health.get(key).copied();
             assert_eq!(
-                runtime_profile_health_sort_key_by_key("alpha", health_entry, now, route_kind,),
-                runtime_profile_health_sort_key_by_key_rust("alpha", health_entry, now, route_kind,),
-                "callback route: {route_kind:?}"
+                runtime_profile_health_sort_key("alpha", &health, now, route_kind),
+                runtime_profile_health_sort_key_by_key("alpha", health_entry, now, route_kind),
+                "map/by-key route: {route_kind:?}"
+            );
+            assert_eq!(
+                runtime_profile_health_sort_key_by_key("alpha", health_entry, now, route_kind),
+                runtime_profile_health_sort_key_by_key_rust("alpha", health_entry, now, route_kind),
+                "Mojo/Rust-oracle route: {route_kind:?}"
             );
         }
     }
@@ -731,15 +581,15 @@ mod mojo_parity_tests {
             RuntimeRouteKind::Compact,
             RuntimeRouteKind::Standard,
         ] {
+            let lookup = |key: &str| health.get(key).copied();
             assert_eq!(
                 runtime_profile_route_coupling_score_from_map(&health, "p", now, route),
-                runtime_profile_route_coupling_score_from_map_rust(&health, "p", now, route),
+                runtime_profile_route_coupling_score_by_key(lookup, "p", now, route),
             );
             assert_eq!(
                 runtime_profile_route_performance_score(&health, "p", now, route),
-                runtime_profile_route_performance_score_rust(&health, "p", now, route),
+                runtime_profile_route_performance_score_by_key(lookup, "p", now, route),
             );
-            let lookup = |key: &str| health.get(key).copied();
             assert_eq!(
                 runtime_profile_route_coupling_score_by_key(lookup, "p", now, route),
                 runtime_profile_route_coupling_score_by_key_rust(lookup, "p", now, route),
