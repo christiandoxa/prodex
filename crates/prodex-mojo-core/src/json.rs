@@ -293,6 +293,14 @@ pub fn transform_openai_chat_stream_event(
     transform_json(nodes, raw, 1, false, prodex_mojo_openai_chat_response_v1)
 }
 
+/// Convert one parsed DeepSeek chat-completion SSE event to a Responses event.
+pub fn transform_deepseek_chat_stream_event(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+) -> Result<Option<Vec<u8>>, MojoError> {
+    transform_json(nodes, raw, 2, false, prodex_mojo_openai_chat_response_v1)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AnthropicChatRequestTransform {
     Body(Vec<u8>),

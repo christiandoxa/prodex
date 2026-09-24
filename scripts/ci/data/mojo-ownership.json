@@ -541,7 +541,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "openai_chat_compat_response_translation"
+          "openai_chat_compat_response_translation",
+          "deepseek_chat_stream_event_translation"
         ]
       }
     ],
@@ -563,7 +564,8 @@
     "gemini_tool_call_indexing",
     "gemini_request_content_kernel",
     "gemini_bridge_request_kernel",
-    "command_output_text_kernel"
+    "command_output_text_kernel",
+    "deepseek_chat_stream_event_translation"
   ],
   "authoritative_operations": [
     {
@@ -1213,14 +1215,16 @@
       "mojo_abi_version": 1,
       "mojo_operation_ids": {
         "responses_body": 0,
-        "stream_event": 1
+        "stream_event": 1,
+        "deepseek_stream_event": 2
       },
       "mojo_source": "mojo/prodex_core/openai_chat_response.mojo",
       "consumer": "crates/prodex-provider-core/src/translators/openai_chat_compat_response.rs",
       "consumer_marker": "transform_openai_chat_response",
       "production_consumers": [
         "crates/prodex-provider-core/src/translators/openai_chat_compat_response.rs",
-        "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs"
+        "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
+        "crates/prodex-provider-core/src/translators/deepseek/response.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream/mojo_tests.rs",
       "rust_owner_before": "OpenAI chat-completion Responses body and SSE event selection and serialization",
@@ -1784,6 +1788,21 @@
       "production_consumer": "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
       "parity_test": "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream/mojo_tests.rs",
       "performance": "one measured two-pass JSON-tree transform"
+    },
+    {
+      "file": "crates/prodex-provider-core/src/translators/deepseek/response.rs",
+      "symbol": "deepseek_stream_event_from_chat_value",
+      "operation": "deepseek_chat_stream_event_translation",
+      "previous_responsibility": "first-choice and first-tool delta selection and complete Responses SSE event serialization",
+      "final_state": "adapter-only",
+      "rust_before": "Serde field selection and SSE event assembly",
+      "rust_after": "Mojo-enabled path sends the parsed event tree once; feature-off Rust implementation remains available",
+      "mojo_owner": "mojo/prodex_core/openai_chat_response.mojo::prodex_mojo_openai_chat_response_v1 operation 2",
+      "mojo_source": "mojo/prodex_core/openai_chat_response.mojo",
+      "mojo_entry": "prodex_mojo_openai_chat_response_v1",
+      "production_consumer": "crates/prodex-provider-core/src/translators/deepseek/response.rs",
+      "parity_test": "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
+      "performance": "one two-pass JSON-tree transform per parsed chat event"
     }
   ],
   "deleted_authoritative_operations": [
