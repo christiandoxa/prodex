@@ -44,13 +44,44 @@ pub enum RuntimeSseInspectionProgress {
     PreviousResponseNotFound,
 }
 
-pub fn runtime_sse_trimmed_line_bytes(line: &[u8]) -> &[u8] {
-    let mut end = line.len();
-    while end > 0 && matches!(line.get(end - 1), Some(b'\r' | b'\n')) {
-        end -= 1;
-    }
-    &line[..end]
+const RUNTIME_SSE_LINE_BLANK: i64 = 0;
+const RUNTIME_SSE_LINE_DATA: i64 = 2;
+
+#[cfg(feature = "mojo")]
+unsafe extern "C" {
+    fn prodex_runtime_sse_line_plan_v1(address: u64, length: i64, output_address: u64) -> i64;
 }
+
+fn runtime_sse_line_plan(line: &[u8]) -> (i64, usize, usize) {
+    #[cfg(feature = "mojo")]
+    {
+        let mut output = [0_i64; 3];
+        let status = unsafe {
+            prodex_runtime_sse_line_plan_v1(
+                line.as_ptr() as usize as u64,
+                i64::try_from(line.len()).unwrap_or(i64::MAX),
+                output.as_mut_ptr() as usize as u64,
+            )
+        };
+        assert_eq!(status, 0, "Mojo SSE line planner returned invalid status");
+        let start = usize::try_from(output[1]).expect("validated Mojo SSE value start");
+        let end = usize::try_from(output[2]).expect("validated Mojo SSE value end");
+        assert!(
+            start <= end && end <= line.len(),
+            "Mojo SSE line span is invalid"
+        );
+        (output[0], start, end)
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracle::sse_line_plan(line)
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+#[path = "sse/rust_oracle.rs"]
+mod rust_oracle;
 
 fn runtime_sse_event_marked_invalid(data_lines: &[String]) -> bool {
     matches!(
@@ -62,18 +93,6 @@ fn runtime_sse_event_marked_invalid(data_lines: &[String]) -> bool {
 fn runtime_sse_mark_invalid(data_lines: &mut Vec<String>) {
     data_lines.clear();
     data_lines.push(RUNTIME_SSE_INVALID_DATA_MARKER.to_string());
-}
-
-fn runtime_sse_split_field(line: &[u8]) -> (&[u8], Option<&[u8]>) {
-    let Some(separator) = line.iter().position(|byte| *byte == b':') else {
-        return (line, None);
-    };
-
-    let mut value = &line[separator + 1..];
-    if value.first() == Some(&b' ') {
-        value = &value[1..];
-    }
-    (&line[..separator], Some(value))
 }
 
 type RuntimeSseEventParser = fn(&[String]) -> RuntimeParsedSseEvent;
@@ -104,39 +123,20 @@ fn runtime_sse_finish_line<F>(
 ) where
     F: FnMut(RuntimeParsedSseEvent),
 {
-    let trimmed = runtime_sse_trimmed_line_bytes(line);
-    if trimmed.is_empty() {
+    let (kind, value_start, value_end) = runtime_sse_line_plan(line);
+    if kind == RUNTIME_SSE_LINE_BLANK {
         runtime_sse_emit_event(data_lines, parse_event, on_event);
-        line.clear();
-        return;
-    }
-
-    if trimmed.starts_with(b":") {
-        line.clear();
-        return;
-    }
-
-    let (field, value) = runtime_sse_split_field(trimmed);
-    if field == b"data" {
-        match value {
-            Some(bytes) => match std::str::from_utf8(bytes) {
-                Ok(text) => {
-                    if !runtime_sse_event_marked_invalid(data_lines) {
-                        data_lines.push(text.to_owned());
-                    }
-                }
-                Err(_) => runtime_sse_mark_invalid(data_lines),
-            },
-            None => {
-                if !runtime_sse_event_marked_invalid(data_lines) {
-                    data_lines.push(String::new());
-                }
+    } else if kind == RUNTIME_SSE_LINE_DATA {
+        match std::str::from_utf8(&line[value_start..value_end]) {
+            Ok(text) if !runtime_sse_event_marked_invalid(data_lines) => {
+                data_lines.push(text.to_owned());
             }
+            Ok(_) => {}
+            Err(_) => runtime_sse_mark_invalid(data_lines),
         }
     }
     line.clear();
 }
-
 pub fn runtime_sse_consume_chunk<F>(
     line: &mut Vec<u8>,
     data_lines: &mut Vec<String>,
@@ -360,4 +360,29 @@ pub fn runtime_sse_body_is_invalid_previous_response_id(body: &[u8]) -> bool {
         invalid |= event.invalid_previous_response_id;
     });
     invalid
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_line_tests {
+    use super::*;
+
+    #[test]
+    fn sse_line_planner_handles_sse_field_shapes() {
+        type Case = (&'static [u8], (i64, usize, usize));
+        let cases: &[Case] = &[
+            (b"\n", (RUNTIME_SSE_LINE_BLANK, 0, 0)),
+            (b"\r\n", (RUNTIME_SSE_LINE_BLANK, 0, 0)),
+            (b": ping\n", (1, 6, 6)),
+            (b"data\n", (RUNTIME_SSE_LINE_DATA, 4, 4)),
+            (b"data:\n", (RUNTIME_SSE_LINE_DATA, 5, 5)),
+            (b"data: hello\r\n", (RUNTIME_SSE_LINE_DATA, 6, 11)),
+            (b"data:  hello\n", (RUNTIME_SSE_LINE_DATA, 6, 12)),
+            (b"event: message\n", (1, 14, 14)),
+            (b"database: nope\n", (1, 14, 14)),
+            (b"data:\xff\n", (RUNTIME_SSE_LINE_DATA, 5, 6)),
+        ];
+        for (line, expected) in cases {
+            assert_eq!(runtime_sse_line_plan(line), *expected, "line={line:?}");
+        }
+    }
 }
