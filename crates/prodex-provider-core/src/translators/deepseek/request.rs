@@ -1,3 +1,4 @@
+#[cfg(not(feature = "mojo"))]
 use self::params::{
     deepseek_insert_primitive_request_fields, deepseek_stop_from_request,
     deepseek_top_logprobs_from_request, deepseek_user_id_from_request,
@@ -12,6 +13,10 @@ use std::collections::BTreeMap;
 #[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
 
+#[cfg(all(test, feature = "mojo"))]
+#[path = "request/mojo_parity_tests.rs"]
+mod mojo_parity_tests;
+#[cfg(any(not(feature = "mojo"), test))]
 #[path = "request/params.rs"]
 mod params;
 
@@ -55,11 +60,14 @@ fn deepseek_common_request_body_from_responses_mojo(
     obj: &serde_json::Map<String, Value>,
     value: &Value,
 ) -> Result<DeepSeekRequestBody, String> {
-    let mut validated = serde_json::Map::new();
-    deepseek_insert_primitive_request_fields(value, &mut validated)?;
-    let _ = deepseek_top_logprobs_from_request(value)?;
-    let _ = deepseek_stop_from_request(value)?;
-    let user_id = deepseek_user_id_from_request(value)?;
+    let canonical = serde_json::to_string(value)
+        .map_err(|error| format!("DeepSeek request serialization failed: {error}"))?;
+    crate::deepseek_bridge::deepseek_provider_core_validate_responses_request_params(
+        &canonical, "DeepSeek",
+    )?;
+    let user_id = crate::deepseek_bridge::deepseek_provider_core_user_id_from_responses_request(
+        value, "DeepSeek",
+    )?;
 
     let mut degraded = None;
     let response_format_mode = if let Some(response_format) = obj.get("response_format") {
@@ -92,8 +100,6 @@ fn deepseek_common_request_body_from_responses_mojo(
         .get("instructions")
         .and_then(Value::as_str)
         .filter(|text| !text.trim().is_empty());
-    let canonical = serde_json::to_string(value)
-        .map_err(|error| format!("DeepSeek request serialization failed: {error}"))?;
     let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::RawCommonRequest);
     input.input = Some(&canonical);
     input.content = user_id.as_deref();

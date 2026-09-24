@@ -40,6 +40,8 @@ pub use self::messages::{
     deepseek_provider_core_repair_tool_call_adjacency,
 };
 pub use self::request_messages::deepseek_provider_core_messages_from_responses_request;
+#[cfg(feature = "mojo")]
+pub(crate) use self::request_params::deepseek_provider_core_validate_responses_request_params;
 pub use self::request_params::{
     deepseek_provider_core_apply_reasoning_from_responses_request,
     deepseek_provider_core_ensure_json_prompt_instruction,
@@ -88,5 +90,8 @@ pub fn deepseek_provider_core_rtk_wrapped_tool_arguments(name: &str, arguments: 
     deepseek_rtk_wrapped_tool_arguments(name, arguments)
 }
 
+#[cfg(all(test, feature = "mojo"))]
+#[path = "deepseek_bridge/request_params_tests.rs"]
+mod request_params_tests;
 #[cfg(test)]
 mod tests;

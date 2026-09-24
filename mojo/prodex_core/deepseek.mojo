@@ -963,6 +963,18 @@ def deepseek_put_user_id(
         return False
     var start = deepseek_trim_start(input.input)
     var end = deepseek_trim_end(input.input, start)
+    if end - start > 512:
+        return deepseek_put_literal(writer, StringSlice("null"))
+    for index in range(start, end):
+        var value = deepseek_json_byte(input.input, index)
+        if not (
+            (value >= 48 and value <= 57)
+            or (value >= 65 and value <= 90)
+            or (value >= 97 and value <= 122)
+            or value == 45
+            or value == 95
+        ):
+            return deepseek_put_literal(writer, StringSlice("null"))
     return deepseek_put_json_string_range(writer, input.input, start, end)
 
 
@@ -1022,6 +1034,7 @@ comptime DEEPSEEK_POLICY_TOOL_CHOICE: Int64 = 8
 comptime DEEPSEEK_POLICY_WEB_SEARCH_OPTIONS: Int64 = 9
 comptime DEEPSEEK_POLICY_WEB_SEARCH_CONTEXT: Int64 = 10
 comptime DEEPSEEK_POLICY_TOOLS_SHAPE: Int64 = 11
+comptime DEEPSEEK_POLICY_RESPONSES_REQUEST_PARAMS: Int64 = 12
 
 
 def deepseek_policy_set(
@@ -1672,6 +1685,25 @@ def deepseek_stop_plan(
         if index == stop[1] - 1:
             break
         return False
+    return True
+
+
+def deepseek_responses_request_params_plan(
+    view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    if not deepseek_primitive_core_plan(view, output):
+        return False
+    if output[unsafe_offset=0] != 0:
+        return True
+    if not deepseek_top_logprobs_plan(view, output):
+        return False
+    if output[unsafe_offset=0] != 0:
+        output[unsafe_offset=0] += 6
+        return True
+    if not deepseek_stop_plan(view, output):
+        return False
+    if output[unsafe_offset=0] != 0:
+        output[unsafe_offset=0] += 9
     return True
 
 
@@ -2364,6 +2396,8 @@ def deepseek_request_policy_v1(
         ok = deepseek_web_search_context_plan(view, output)
     elif operation == DEEPSEEK_POLICY_TOOLS_SHAPE:
         ok = deepseek_tools_shape_plan(view, flag == 1, output)
+    elif operation == DEEPSEEK_POLICY_RESPONSES_REQUEST_PARAMS:
+        ok = deepseek_responses_request_params_plan(view, output)
     else:
         return DEEPSEEK_KERNEL_STATUS_INVALID
     return DEEPSEEK_KERNEL_STATUS_OK if ok else DEEPSEEK_KERNEL_STATUS_INVALID

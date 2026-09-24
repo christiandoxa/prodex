@@ -625,3 +625,30 @@ size, churn, and production-share guards pass.
 
 The canonical broad inventory is 50,207 reachable Mojo LOC and 196,702 Rust
 production LOC, or 20.334212200% Mojo. The 75% project target remains unmet.
+
+## DeepSeek Responses request parameter Mojo wave
+
+DeepSeek Responses translation now validates primitive generation fields,
+`top_logprobs`, and stop sequences through one `ResponsesRequestParams` plan in
+the existing `deepseek_request_policy_v1` kernel. The plan composes the existing
+Mojo validators and preserves Rust's validation order. The `UserId` kernel now
+owns the allowed ASCII identifier characters and 512-byte limit; Rust retains
+Serde acquisition, Unicode trimming, typed result handling, and error text.
+
+The active consumer is
+`crates/prodex-provider-core/src/translators/deepseek/request.rs`, reachable
+through `prodex-app/mojo-core -> prodex-provider-core/mojo`. Feature-off Rust
+validation remains for Rust-only builds; feature-on parity tests use it only as
+a test oracle. Mojo failures become request errors and never trigger Rust
+recomputation. The `UserId` output buffer stays fixed at 514 bytes, even when
+the accepted kernel input reaches its 4 MiB bound.
+
+With Mojo 1.1.0 and `PRODEX_MOJO_REQUIRED=1`, the provider-core feature-on suite
+passes 245 tests with 2 ignored, including request-boundary cases against the
+Rust parameter oracle and user-ID output-capacity, 512/513-byte, non-ASCII, and
+Unicode-trim edges. The feature-off provider-core suite passes 215 tests. The
+Mojo core suite passes 81 tests; workspace all-target/all-feature Clippy and ownership,
+authority, no-fallback, size, formatting, and diff checks pass.
+
+The canonical broad inventory is 50,336 reachable Mojo LOC and 196,656 Rust
+production LOC, or 20.37960743667811% Mojo. The 75% project target remains unmet.

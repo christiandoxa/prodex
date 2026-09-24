@@ -241,4 +241,42 @@ mod tests {
         ));
         assert!(result.body.is_none());
     }
+
+    #[test]
+    fn request_transform_rejects_invalid_parameters_with_stable_reasons() {
+        for (request, expected) in [
+            (
+                json!({"input": "hello", "temperature": "warm"}),
+                "DeepSeek temperature must be a number",
+            ),
+            (
+                json!({"input": "hello", "max_tokens": 0}),
+                "DeepSeek max_tokens must be a positive integer",
+            ),
+            (
+                json!({"input": "hello", "top_logprobs": 21, "logprobs": true}),
+                "DeepSeek top_logprobs must be <= 20",
+            ),
+            (
+                json!({"input": "hello", "stop": ["END", 1]}),
+                "DeepSeek stop sequences must be strings",
+            ),
+            (
+                json!({"input": "hello", "user_id": "bad!"}),
+                "DeepSeek user_id must use only letters, numbers, underscores, or dashes and be at most 512 bytes",
+            ),
+        ] {
+            let result = deepseek_transform_request(
+                ProviderId::DeepSeek,
+                ProviderTransformInput::new(
+                    ProviderEndpoint::Responses,
+                    serde_json::to_vec(&request).expect("request serializes"),
+                ),
+            );
+            let ProviderTransformLoss::Rejected { reason } = result.loss else {
+                panic!("request should be rejected: {request}");
+            };
+            assert_eq!(reason, expected, "request: {request}");
+        }
+    }
 }
