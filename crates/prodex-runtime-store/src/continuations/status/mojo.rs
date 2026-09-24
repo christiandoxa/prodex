@@ -1,7 +1,7 @@
 use super::*;
 use prodex_mojo_core::runtime::{
-    CONTINUATION_DEAD_PLAN, CONTINUATION_DEAD_SHADOWED, CONTINUATION_EVIDENCE_KEY,
-    CONTINUATION_RECENTLY_SUSPECT, CONTINUATION_RETAIN_WITH_BINDING,
+    CONTINUATION_BINDING_RETENTION_KEY, CONTINUATION_BINDING_SHOULD_RETAIN, CONTINUATION_DEAD_PLAN,
+    CONTINUATION_DEAD_SHADOWED, CONTINUATION_RECENTLY_SUSPECT, CONTINUATION_RETAIN_WITH_BINDING,
     CONTINUATION_RETAIN_WITHOUT_BINDING, CONTINUATION_RETENTION_KEY,
     CONTINUATION_SHOULD_PERSIST_TOUCH, CONTINUATION_SHOULD_REFRESH_VERIFIED,
     CONTINUATION_SHOULD_REPLACE, CONTINUATION_STALE_VERIFIED, CONTINUATION_SUSPECT_PLAN,
@@ -248,27 +248,6 @@ mark_status!(
     suspect_not_found_streak_limit,
 );
 
-pub fn runtime_continuation_status_evidence_sort_key(
-    status: &RuntimeContinuationBindingStatus,
-    policy: RuntimeContinuationCompactionPolicy,
-) -> (u8, u32, u32, u32, u8, i64, i64, i64) {
-    let out = call::<8>(
-        CONTINUATION_EVIDENCE_KEY,
-        status,
-        &[i64::from(policy.confidence_max)],
-    );
-    (
-        u8::try_from(out[0]).expect("continuation lifecycle rank"),
-        u32::try_from(out[1]).expect("continuation confidence"),
-        u32::try_from(out[2]).expect("continuation successes"),
-        u32::try_from(out[3]).expect("continuation inverse streak"),
-        u8::try_from(out[4]).expect("continuation route evidence"),
-        out[5],
-        out[6],
-        out[7],
-    )
-}
-
 macro_rules! compare_bool {
     ($name:ident, $op:ident, $($field:ident),+ $(,)?) => {
         pub fn $name(
@@ -318,6 +297,60 @@ compaction_bool!(
     suspect_not_found_streak_limit,
     dead_grace_seconds
 );
+
+pub fn runtime_continuation_binding_should_retain(
+    binding: &ResponseProfileBinding,
+    status: Option<&RuntimeContinuationBindingStatus>,
+    now: i64,
+    policy: RuntimeContinuationCompactionPolicy,
+) -> bool {
+    let present = status.is_some();
+    let default = RuntimeContinuationBindingStatus::default();
+    boolean(
+        call::<1>(
+            CONTINUATION_BINDING_SHOULD_RETAIN,
+            status.unwrap_or(&default),
+            &[
+                i64::from(present),
+                i64::from(is_hard_binding_conflict_profile(&binding.profile_name)),
+                binding.bound_at,
+                now,
+                policy.suspect_grace_seconds,
+                i64::from(policy.suspect_not_found_streak_limit),
+            ],
+        )[0],
+    )
+}
+
+pub fn runtime_continuation_binding_retention_sort_key(
+    binding: &ResponseProfileBinding,
+    status: Option<&RuntimeContinuationBindingStatus>,
+    policy: RuntimeContinuationCompactionPolicy,
+) -> (u8, u32, u32, u32, u8, i64, i64, i64, i64) {
+    let present = status.is_some();
+    let default = RuntimeContinuationBindingStatus::default();
+    let out = call::<9>(
+        CONTINUATION_BINDING_RETENTION_KEY,
+        status.unwrap_or(&default),
+        &[
+            i64::from(present),
+            i64::from(is_hard_binding_conflict_profile(&binding.profile_name)),
+            binding.bound_at,
+            i64::from(policy.confidence_max),
+        ],
+    );
+    (
+        u8::try_from(out[0]).expect("continuation lifecycle rank"),
+        u32::try_from(out[1]).expect("continuation confidence"),
+        u32::try_from(out[2]).expect("continuation successes"),
+        u32::try_from(out[3]).expect("continuation inverse streak"),
+        u8::try_from(out[4]).expect("continuation route evidence"),
+        out[5],
+        out[6],
+        out[7],
+        out[8],
+    )
+}
 
 pub fn runtime_continuation_dead_status_shadowed_by_binding(
     binding: &ResponseProfileBinding,

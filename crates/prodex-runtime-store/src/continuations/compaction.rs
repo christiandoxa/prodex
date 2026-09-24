@@ -27,59 +27,6 @@ pub fn prune_runtime_continuation_status_map(
     }
 }
 
-pub fn runtime_continuation_binding_should_retain(
-    binding: &ResponseProfileBinding,
-    status: Option<&RuntimeContinuationBindingStatus>,
-    now: i64,
-    policy: RuntimeContinuationCompactionPolicy,
-) -> bool {
-    if is_hard_binding_conflict_profile(&binding.profile_name) {
-        return true;
-    }
-    match status {
-        Some(status) if runtime_continuation_dead_status_shadowed_by_binding(binding, status) => {
-            true
-        }
-        Some(status) if runtime_continuation_status_is_terminal(status, policy) => false,
-        Some(status) => runtime_continuation_status_should_retain_with_binding(status, now, policy),
-        None => binding.bound_at <= now,
-    }
-}
-
-pub fn runtime_continuation_binding_retention_sort_key(
-    binding: &ResponseProfileBinding,
-    status: Option<&RuntimeContinuationBindingStatus>,
-    policy: RuntimeContinuationCompactionPolicy,
-) -> (u8, u32, u32, u32, u8, i64, i64, i64, i64) {
-    if is_hard_binding_conflict_profile(&binding.profile_name) {
-        return (
-            u8::MAX,
-            u32::MAX,
-            u32::MAX,
-            u32::MAX,
-            u8::MAX,
-            i64::MAX,
-            i64::MAX,
-            i64::MAX,
-            binding.bound_at,
-        );
-    }
-    let evidence = status
-        .map(|status| runtime_continuation_status_evidence_sort_key(status, policy))
-        .unwrap_or((0, 0, 0, 0, 0, i64::MIN, i64::MIN, i64::MIN));
-    (
-        evidence.0,
-        evidence.1,
-        evidence.2,
-        evidence.3,
-        evidence.4,
-        evidence.5,
-        evidence.6,
-        evidence.7,
-        binding.bound_at,
-    )
-}
-
 pub fn prune_runtime_continuation_response_bindings(
     bindings: &mut BTreeMap<String, ResponseProfileBinding>,
     statuses: &BTreeMap<String, RuntimeContinuationBindingStatus>,
