@@ -28,6 +28,8 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
         ..QuotaPoolAggregate::default()
     };
     let mut main_quota_rows = Vec::new();
+    #[cfg(feature = "mojo")]
+    let mut openai_quota_rows = Vec::new();
 
     for report in reports {
         aggregate.last_updated_at = Some(
@@ -43,7 +45,30 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
         }
         match snapshot {
             ProviderQuotaSnapshot::OpenAi(usage) => {
-                aggregate_openai_quota(usage, &mut aggregate);
+                let five_hour = required_main_window_snapshot(usage, "5h");
+                let weekly = required_main_window_snapshot(usage, "weekly");
+                if five_hour.is_none() && weekly.is_none() {
+                    continue;
+                }
+                let ready = openai_quota_has_ready_limit(usage);
+                #[cfg(feature = "mojo")]
+                openai_quota_rows.push(prodex_mojo_core::quota_pool::OpenAiQuotaPoolInput {
+                    five_hour: five_hour.map(|window| {
+                        prodex_mojo_core::quota_pool::QuotaPoolWindowInput {
+                            remaining_percent: window.remaining_percent,
+                            reset_at: window.reset_at,
+                        }
+                    }),
+                    weekly: weekly.map(|window| {
+                        prodex_mojo_core::quota_pool::QuotaPoolWindowInput {
+                            remaining_percent: window.remaining_percent,
+                            reset_at: window.reset_at,
+                        }
+                    }),
+                    ready,
+                });
+                #[cfg(not(feature = "mojo"))]
+                aggregate_openai_quota(five_hour, weekly, ready, &mut aggregate);
             }
             ProviderQuotaSnapshot::Gemini(info) => main_quota_rows.push((
                 super::gemini_main_remaining_percent(info),
@@ -71,12 +96,34 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
         aggregate_main_quota(remaining_percent, reset_at, &mut aggregate);
     }
 
+    #[cfg(feature = "mojo")]
+    {
+        let openai = crate::mojo::openai_quota_pool_aggregate(&openai_quota_rows)
+            .expect("Mojo OpenAI quota-pool aggregation rejected normalized rows");
+        aggregate.profiles_with_data = openai.profiles_with_data;
+        aggregate.ready_profiles_with_data = openai.ready_profiles_with_data;
+        aggregate.five_hour_profiles_with_data = openai.five_hour_profiles_with_data;
+        aggregate.weekly_profiles_with_data = openai.weekly_profiles_with_data;
+        aggregate.ready_five_hour_profiles_with_data = openai.ready_five_hour_profiles_with_data;
+        aggregate.ready_weekly_profiles_with_data = openai.ready_weekly_profiles_with_data;
+        aggregate.five_hour_pool_remaining = openai.five_hour_pool_remaining;
+        aggregate.weekly_pool_remaining = openai.weekly_pool_remaining;
+        aggregate.ready_five_hour_pool_remaining = openai.ready_five_hour_pool_remaining;
+        aggregate.ready_weekly_pool_remaining = openai.ready_weekly_pool_remaining;
+        aggregate.earliest_five_hour_reset_at = openai.earliest_five_hour_reset_at;
+        aggregate.earliest_weekly_reset_at = openai.earliest_weekly_reset_at;
+    }
+
     aggregate
 }
 
-fn aggregate_openai_quota(usage: &UsageResponse, aggregate: &mut QuotaPoolAggregate) {
-    let five_hour = required_main_window_snapshot(usage, "5h");
-    let weekly = required_main_window_snapshot(usage, "weekly");
+#[cfg(not(feature = "mojo"))]
+fn aggregate_openai_quota(
+    five_hour: Option<MainWindowSnapshot>,
+    weekly: Option<MainWindowSnapshot>,
+    ready: bool,
+    aggregate: &mut QuotaPoolAggregate,
+) {
     if five_hour.is_none() && weekly.is_none() {
         return;
     }
@@ -94,7 +141,7 @@ fn aggregate_openai_quota(usage: &UsageResponse, aggregate: &mut QuotaPoolAggreg
         &mut aggregate.weekly_pool_remaining,
         &mut aggregate.earliest_weekly_reset_at,
     );
-    if openai_quota_has_ready_limit(usage) {
+    if ready {
         aggregate.ready_profiles_with_data += 1;
         add_ready_pool_window(
             five_hour,
@@ -129,6 +176,7 @@ fn aggregate_main_quota(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn add_pool_window(
     window: Option<MainWindowSnapshot>,
     profiles: &mut usize,
@@ -146,6 +194,7 @@ fn add_pool_window(
     }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn add_ready_pool_window(
     window: Option<MainWindowSnapshot>,
     profiles: &mut usize,

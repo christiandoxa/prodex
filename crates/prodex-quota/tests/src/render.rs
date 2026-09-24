@@ -118,6 +118,8 @@ fn sorted_names_by(reports: &[QuotaReport], sort: QuotaReportSort) -> Vec<String
 mod additional;
 #[path = "render/model_capacity.rs"]
 mod model_capacity;
+#[path = "render/quota_pool.rs"]
+mod quota_pool;
 #[test]
 fn labels_standard_windows() {
     assert_eq!(window_label(Some(18_000)), "5h");
@@ -364,21 +366,6 @@ fn quota_summary_marks_exhausted_window() {
         RuntimeQuotaWindowStatus::Exhausted
     );
     assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Exhausted);
-}
-
-#[test]
-fn quota_pool_available_count_excludes_blocked_profiles() {
-    let reports = vec![
-        openai_report("ready", main_windows(80, 1_700_001_800, 95, 1_700_259_200)),
-        openai_report("blocked", main_windows(0, 1_700_003_600, 80, 1_700_086_400)),
-    ];
-
-    let output = render_quota_reports_with_layout(&reports, true, None, 90);
-
-    assert!(output.contains("Available:"));
-    assert!(output.contains("1/2 profile"));
-    assert!(output.contains("Usable now:"));
-    assert!(output.contains("5h 80% | weekly 95% across 1 ready profile(s)"));
 }
 
 #[test]

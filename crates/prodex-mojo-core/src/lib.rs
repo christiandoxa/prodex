@@ -104,6 +104,8 @@ pub mod provider_constraints;
 pub mod provider_registry;
 #[cfg(feature = "mojo-quota")]
 pub mod quota;
+#[cfg(feature = "mojo-quota")]
+pub mod quota_pool;
 #[cfg(feature = "mojo-rich")]
 pub mod rich;
 #[cfg(feature = "mojo-routing")]

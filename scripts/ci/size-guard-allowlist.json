@@ -30,11 +30,6 @@
     "reason": "Profile import regression fixtures cover cross-provider identity handling and transactional rollback; lifecycle and committed-journal recovery cases moved to a focused sibling module."
   },
   {
-    "file": "crates/prodex-quota/tests/src/render.rs",
-    "maxLines": 861,
-    "reason": "Quota renderer coverage keeps provider panels, compact/detail layouts, and error snapshots in one fixture matrix; additional metadata tests live in a sibling module."
-  },
-  {
     "file": "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",
     "maxLines": 1207,
     "reason": "DeepSeek bridge request, response, stream, tool-call, usage, and error conformance regressions remain colocated with the compatibility bridge until split by fixture family."
