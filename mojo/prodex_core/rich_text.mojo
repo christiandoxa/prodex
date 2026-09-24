@@ -74,7 +74,7 @@ def rich_codepoint(
 
 
 def rich_unicode_space(codepoint: Int64) -> Bool:
-    return codepoint >= 0x1C and codepoint <= 0x1F or codepoint == 9 or codepoint == 10 or codepoint == 11 or codepoint == 12 or codepoint == 13 or codepoint == 32 or codepoint == 0x85 or codepoint == 0xA0 or codepoint == 0x1680 or codepoint >= 0x2000 and codepoint <= 0x200A or codepoint == 0x2028 or codepoint == 0x2029 or codepoint == 0x202F or codepoint == 0x205F or codepoint == 0x3000
+    return codepoint == 9 or codepoint == 10 or codepoint == 11 or codepoint == 12 or codepoint == 13 or codepoint == 32 or codepoint == 0x85 or codepoint == 0xA0 or codepoint == 0x1680 or codepoint >= 0x2000 and codepoint <= 0x200A or codepoint == 0x2028 or codepoint == 0x2029 or codepoint == 0x202F or codepoint == 0x205F or codepoint == 0x3000
 
 
 def rich_trim_bounds(view: ProdexRichStringView) -> Tuple[Int64, Int64]:

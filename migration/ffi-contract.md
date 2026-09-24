@@ -513,6 +513,13 @@ does not retain Rust pointers, and Rust never receives a Mojo object pointer. Ob
 cross as indices and `RichSlice` offsets; generated strings are copied into a Rust-allocated byte
 arena and validated as UTF-8 before reconstruction.
 
+`prodex_mojo_rich_catalog_merge_v1` accepts up to 65,536 additional borrowed UTF-8 IDs. It trims
+Unicode whitespace, compares IDs with ASCII case folding, and returns first-unique input indices in
+order. Merge IDs can use the full `i64::MAX` byte range representable by Rust strings; catalog
+models and aliases keep their existing 4,096-byte limit. External provider launch catalogs pass an
+empty canonical model list, so only ordered ID deduplication applies; provider-core callers also
+resolve canonical IDs and aliases.
+
 The v5 C entry points represent every caller-owned pointer, including pointers nested in records,
 as fixed-width `UInt`/`u64` addresses, with `0` meaning null. Even the input records themselves
 are passed by address rather than by value, avoiding platform-specific C ABI lowering differences.

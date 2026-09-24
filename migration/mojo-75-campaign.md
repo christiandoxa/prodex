@@ -715,3 +715,28 @@ worktree-churn checks pass.
 The canonical broad inventory is 50,540 reachable Mojo LOC and 196,886 Rust
 production LOC, or 20.43% Mojo. The 75% target remains unmet; 540,118 additional
 Mojo LOC are estimated at current Rust volume.
+
+## External provider launch catalog merge
+
+`external_catalog_models` now sends launch, dynamic, and provider IDs through the
+existing `prodex_mojo_rich_catalog_merge_v1` operation. Mojo owns ordered,
+non-empty, ASCII-case-insensitive ID deduplication. Rust retains catalog file
+reading and parsing, metadata lookup, context limits, model JSON construction,
+and a feature-off Rust oracle. Dynamic duplicates remain available to first-match
+metadata lookup, while the Mojo index plan keeps the first model in output order.
+
+The merge ABI accepts IDs across Rust's representable string range, including
+values longer than 65,536 bytes. Its candidate count remains capped at 65,536;
+external model catalogs stay within their existing 512-entry dynamic limit plus
+the bounded static provider list.
+
+Validation passes: strict Mojo core tests (84); the long-ID Rust differential;
+end-to-end duplicate metadata/order tests in Mojo and feature-off builds; and
+seven external-provider catalog tests in both feature modes. `rtk cargo clippy
+--locked --workspace --all-targets --all-features -- -D warnings`, `cargo fmt
+--all -- --check`, `npm run docs`, `npm run test:changed`, Mojo ownership,
+authority, no-fallback, production-share, size, and churn guards pass.
+
+The canonical broad inventory is 50,541 reachable Mojo LOC and 196,879 Rust
+production LOC, or 20.43% Mojo. The 75% project target remains unmet; 540,096
+additional Mojo LOC are estimated at current Rust volume.
