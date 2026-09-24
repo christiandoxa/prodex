@@ -220,3 +220,30 @@ Upgrade evidence before promotion included the complete `prodex-mojo-core`
 suite, runtime-launch Mojo tests, provider-core Mojo tests, all-feature Clippy
 for the core runtime/provider/app consumers, a compiled-in root binary, and all
 Mojo authority/no-fallback/source-size/supply-chain guards.
+## Model-aware quota capacity wave
+
+OpenAI model classification and model-aware quota routing now use a production-authoritative
+Mojo policy in `quota.mojo`. The kernel owns normalized Luna/Spark identity, Luna-reserve
+identifier matching, regular-versus-reserve selection, unknown-Luna-capacity classification,
+ready-limit decisions, and the code-review gate. Rust retains provider JSON acquisition,
+borrowed `WindowPair` reconstruction, account-identity comparison, and the feature-off oracle.
+
+The boundary is exercised by the existing quota integration suite plus new direct parity
+coverage: normalized identifier fixtures, Luna-reserve identity cases, and all 2,048
+combinations of four model classes across the nine boolean capacity inputs. Both the real-Mojo
+68-test quota suite and the 59-test feature-off suite pass, as does focused all-target Clippy
+with warnings denied.
+
+At this checkpoint the canonical broad inventory reports 47,626 reachable Mojo LOC and
+196,196 Rust production LOC, or 19.533102% Mojo. The previous pushed checkpoint after CI
+cleanup measured 19.480578%; this is incremental progress toward the 75% objective, not a
+target-completion claim.
+
+## CI consolidation during the campaign
+
+The main Rust quality lane previously compiled Clippy twice: once as a production JSON report
+for Sonar and again as an all-target warning gate. The lane now performs one all-target Clippy
+pass with JSON output and `-D warnings`, preserving the Sonar artifact and warning enforcement
+while removing the duplicate compilation. Intentional conditional jobs such as scheduled
+optional-tool freshness and path-gated benchmark smoke remain conditional rather than being
+deleted merely because they appear as skipped on ordinary pushes.

@@ -7,6 +7,38 @@ pub const QUOTA_CAPACITY_LANE_MAIN: i64 = 0;
 pub const QUOTA_CAPACITY_LANE_MODEL_SPECIFIC: i64 = 1;
 pub const QUOTA_CAPACITY_LANE_UNKNOWN_ADDITIONAL: i64 = 2;
 
+pub const QUOTA_MODEL_KIND_NONE: i64 = 0;
+pub const QUOTA_MODEL_KIND_LUNA: i64 = 1;
+pub const QUOTA_MODEL_KIND_RETIRED_SPARK: i64 = 2;
+pub const QUOTA_MODEL_KIND_OTHER: i64 = 3;
+
+pub const QUOTA_MODEL_PAIR_NONE: i64 = 0;
+pub const QUOTA_MODEL_PAIR_REGULAR: i64 = 1;
+pub const QUOTA_MODEL_PAIR_RESERVE: i64 = 2;
+pub const QUOTA_MODEL_PAIR_DEFAULT: i64 = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenAiModelCapacityInput {
+    pub model_kind: i64,
+    pub regular_present: bool,
+    pub regular_ready: bool,
+    pub generic_ready: bool,
+    pub reserve_ready: bool,
+    pub regular_blocked: bool,
+    pub any_unknown_window: bool,
+    pub any_exhausted_window: bool,
+    pub include_code_review: bool,
+    pub code_review_ready: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OpenAiModelCapacityPlan {
+    pub selected_pair: i64,
+    pub ready: bool,
+    pub supports: bool,
+    pub unknown_luna_capacity: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct MainQuotaAggregationInput {
     pub remaining_percent: Option<i64>,
@@ -198,6 +230,142 @@ unsafe extern "C" {
         count: i64,
     ) -> i64;
     fn prodex_quota_window_pressure(remaining_percent: i64, reset_at: i64, now: i64) -> i64;
+    fn prodex_quota_openai_model_kind(address: u64, length: i64, present: i64) -> i64;
+    fn prodex_quota_luna_reserve_identifier(
+        model_slug_address: u64,
+        model_slug_length: i64,
+        limit_id_address: u64,
+        limit_id_length: i64,
+        limit_name_address: u64,
+        limit_name_length: i64,
+        metered_feature_address: u64,
+        metered_feature_length: i64,
+    ) -> i64;
+    fn prodex_quota_openai_model_capacity_plan(fields_address: u64, output_address: u64) -> i64;
+}
+
+fn quota_text_address(value: Option<&str>) -> (u64, i64) {
+    match value {
+        Some(value) => (
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).unwrap_or(i64::MAX),
+        ),
+        None => (0, 0),
+    }
+}
+
+pub fn openai_model_kind(model: Option<&str>) -> Result<i64, crate::MojoError> {
+    let (address, length) = quota_text_address(model);
+    if length == i64::MAX {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let kind =
+        unsafe { prodex_quota_openai_model_kind(address, length, i64::from(model.is_some())) };
+    if matches!(
+        kind,
+        QUOTA_MODEL_KIND_NONE
+            | QUOTA_MODEL_KIND_LUNA
+            | QUOTA_MODEL_KIND_RETIRED_SPARK
+            | QUOTA_MODEL_KIND_OTHER
+    ) {
+        Ok(kind)
+    } else {
+        Err(crate::MojoError::InvalidOutput)
+    }
+}
+
+pub fn luna_reserve_identifier(
+    model_slug: Option<&str>,
+    limit_id: Option<&str>,
+    limit_name: Option<&str>,
+    metered_feature: Option<&str>,
+) -> Result<bool, crate::MojoError> {
+    let (model_slug_address, model_slug_length) = quota_text_address(model_slug);
+    let (limit_id_address, limit_id_length) = quota_text_address(limit_id);
+    let (limit_name_address, limit_name_length) = quota_text_address(limit_name);
+    let (metered_feature_address, metered_feature_length) = quota_text_address(metered_feature);
+    if [
+        model_slug_length,
+        limit_id_length,
+        limit_name_length,
+        metered_feature_length,
+    ]
+    .contains(&i64::MAX)
+    {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let result = unsafe {
+        prodex_quota_luna_reserve_identifier(
+            model_slug_address,
+            model_slug_length,
+            limit_id_address,
+            limit_id_length,
+            limit_name_address,
+            limit_name_length,
+            metered_feature_address,
+            metered_feature_length,
+        )
+    };
+    match result {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn openai_model_capacity_plan(
+    input: OpenAiModelCapacityInput,
+) -> Result<OpenAiModelCapacityPlan, crate::MojoError> {
+    if !matches!(
+        input.model_kind,
+        QUOTA_MODEL_KIND_NONE
+            | QUOTA_MODEL_KIND_LUNA
+            | QUOTA_MODEL_KIND_RETIRED_SPARK
+            | QUOTA_MODEL_KIND_OTHER
+    ) {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let fields = [
+        input.model_kind,
+        i64::from(input.regular_present),
+        i64::from(input.regular_ready),
+        i64::from(input.generic_ready),
+        i64::from(input.reserve_ready),
+        i64::from(input.regular_blocked),
+        i64::from(input.any_unknown_window),
+        i64::from(input.any_exhausted_window),
+        i64::from(input.include_code_review),
+        i64::from(input.code_review_ready),
+    ];
+    let mut output = [0_i64; 4];
+    let status = unsafe {
+        prodex_quota_openai_model_capacity_plan(
+            fields.as_ptr() as usize as u64,
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    if status != 0
+        || !matches!(
+            output[0],
+            QUOTA_MODEL_PAIR_NONE
+                | QUOTA_MODEL_PAIR_REGULAR
+                | QUOTA_MODEL_PAIR_RESERVE
+                | QUOTA_MODEL_PAIR_DEFAULT
+        )
+        || !matches!((output[1], output[2], output[3]), (0 | 1, 0 | 1, 0 | 1))
+    {
+        return Err(if status == 1 {
+            crate::MojoError::InvalidInput
+        } else {
+            crate::MojoError::InvalidOutput
+        });
+    }
+    Ok(OpenAiModelCapacityPlan {
+        selected_pair: output[0],
+        ready: output[1] == 1,
+        supports: output[2] == 1,
+        unknown_luna_capacity: output[3] == 1,
+    })
 }
 
 pub fn round_f64(value: f64) -> i64 {
