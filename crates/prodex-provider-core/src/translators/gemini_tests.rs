@@ -683,3 +683,93 @@ fn gemini_provider_core_extracts_stream_candidate_parts() {
     ));
     assert!(gemini_provider_core_stream_candidate_parts(&json!({})).is_none());
 }
+
+fn transformed_gemini_sse_value(body: &[u8]) -> (&str, serde_json::Value) {
+    let body = std::str::from_utf8(body).expect("transformed Gemini SSE is UTF-8");
+    let mut lines = body.lines();
+    let event = lines
+        .next()
+        .and_then(|line| line.strip_prefix("event: "))
+        .expect("transformed Gemini SSE has event line");
+    let data = lines
+        .next()
+        .and_then(|line| line.strip_prefix("data: "))
+        .expect("transformed Gemini SSE has data line");
+    (
+        event,
+        serde_json::from_str(data).expect("transformed Gemini SSE data is JSON"),
+    )
+}
+
+#[test]
+fn gemini_provider_core_transforms_raw_stream_events() {
+    let translator = GeminiTranslator;
+
+    let text = translator.transform_stream_event(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        br#"data: {"candidates":[{"content":{"parts":[{"text":"hello"}]}}]}
+
+"#,
+    ));
+    let text_body = text.body.as_deref().expect("text stream transform body");
+    let (event, value) = transformed_gemini_sse_value(text_body);
+    assert_eq!(event, "response.output_text.delta");
+    assert_eq!(value["type"], "response.output_text.delta");
+    assert_eq!(value["delta"], "hello");
+
+    let reasoning = translator.transform_stream_event(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        br#"data: {"candidates":[{"content":{"parts":[{"text":"think","thought":true}]}}]}
+
+"#,
+    ));
+    let reasoning_body = reasoning
+        .body
+        .as_deref()
+        .expect("reasoning stream transform body");
+    let (event, value) = transformed_gemini_sse_value(reasoning_body);
+    assert_eq!(event, "response.reasoning_summary_text.delta");
+    assert_eq!(value["delta"], "think");
+
+    let tool = translator.transform_stream_event(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        br#"data: {"candidates":[{"content":{"parts":[{"functionCall":{"id":"call_1","name":"shell","args":{"cmd":"pwd"}}}]}}]}
+
+"#,
+    ));
+    let tool_body = tool.body.as_deref().expect("tool stream transform body");
+    let (event, value) = transformed_gemini_sse_value(tool_body);
+    assert_eq!(event, "response.function_call_arguments.delta");
+    assert_eq!(value["call_id"], "call_1");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(
+            value["delta"].as_str().expect("tool delta is JSON text")
+        )
+        .expect("tool delta JSON"),
+        json!({"cmd":"pwd"})
+    );
+}
+
+#[test]
+fn gemini_provider_core_stream_transform_rejects_invalid_and_unsupported_events() {
+    let translator = GeminiTranslator;
+    let invalid = translator.transform_stream_event(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        b"data: {not-json}\n\n".to_vec(),
+    ));
+    assert!(matches!(
+        invalid.status(),
+        crate::translator::TransformStatus::Rejected { .. }
+    ));
+
+    let unsupported = translator.transform_stream_event(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        br#"data: {"candidates":[{"content":{"parts":[{"inlineData":{"mimeType":"image/png"}}]}}]}
+
+"#,
+    ));
+    assert!(matches!(
+        unsupported.status(),
+        crate::translator::TransformStatus::Unsupported { .. }
+    ));
+}
