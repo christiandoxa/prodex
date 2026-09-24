@@ -3,6 +3,7 @@ pub use crate::runtime_decisions::*;
 
 mod auto_redeem;
 mod candidate_plan;
+mod compatibility_surface;
 mod profile_health;
 mod profile_rotation;
 mod prompt_cache_affinity;
@@ -13,6 +14,7 @@ pub use auto_redeem::{
     AutoRedeemCandidateInput, RUNTIME_AUTO_REDEEM_PLAN_MAX_COUNT, auto_redeem_plan_batch,
     auto_redeem_plan_self_test,
 };
+pub use compatibility_surface::compatibility_surface_plan;
 pub use profile_health::{
     ProfileBackoffSoftening, ProfileHealthBumpInput, ProfileHealthBumpPlan,
     ProfileHealthRecoveryPlan, ProfileHealthScoreInput, RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT,
