@@ -152,8 +152,12 @@ fn run_hook_trust_preflight(
         else {
             return Ok(HookTrustPreflight::LegacyBypass);
         };
-        if written.get("status").and_then(Value::as_str) != Some("ok") {
-            bail!("Codex hook-trust config write did not report status=ok");
+        if !hook_trust_config_write_succeeded(&written) {
+            let status = written
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("<missing>");
+            bail!("Codex hook-trust config write did not report a successful status: {status}");
         }
     }
 
@@ -296,6 +300,13 @@ fn expect_rpc_result(reply: RpcReply, operation: &str) -> Result<Value> {
     }
 }
 
+fn hook_trust_config_write_succeeded(result: &Value) -> bool {
+    matches!(
+        result.get("status").and_then(Value::as_str),
+        Some("ok" | "okOverridden")
+    )
+}
+
 fn hook_trust_updates(listed: &Value) -> Result<serde_json::Map<String, Value>> {
     validate_hook_list_diagnostics(listed)?;
     let mut updates = serde_json::Map::new();
@@ -381,6 +392,18 @@ fn validate_hook_list_diagnostics(listed: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hook_trust_config_write_accepts_codex_success_statuses() {
+        assert!(hook_trust_config_write_succeeded(&json!({"status": "ok"})));
+        assert!(hook_trust_config_write_succeeded(
+            &json!({"status": "okOverridden"})
+        ));
+        assert!(!hook_trust_config_write_succeeded(
+            &json!({"status": "error"})
+        ));
+        assert!(!hook_trust_config_write_succeeded(&json!({})));
+    }
 
     #[test]
     fn hook_trust_updates_include_only_untrusted_or_modified_hooks() {

@@ -355,7 +355,16 @@ for line in sys.stdin:
         }
     elif method == "config/batchWrite":
         trusted = True
-        response = {"jsonrpc": "2.0", "id": request_id, "result": {"status": "ok"}}
+        response = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "status": "okOverridden",
+                "overriddenMetadata": {
+                    "message": "Overridden by session flags",
+                },
+            },
+        }
     else:
         response = {
             "jsonrpc": "2.0",
