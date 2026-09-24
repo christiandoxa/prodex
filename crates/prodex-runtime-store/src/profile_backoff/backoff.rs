@@ -217,37 +217,13 @@ pub fn runtime_profile_backoff_sort_key(
         .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
         .copied()
         .filter(|until| *until > now);
-
-    match (circuit_until, transport_until, retry_until) {
-        (None, None, None) => (0, 0, 0, 0),
-        (Some(circuit_until), None, None) => (1, circuit_until, 0, 0),
-        (None, Some(transport_until), None) => (2, transport_until, 0, 0),
-        (None, None, Some(retry_until)) => (3, retry_until, 0, 0),
-        (Some(circuit_until), Some(transport_until), None) => (
-            4,
-            circuit_until.min(transport_until),
-            circuit_until.max(transport_until),
-            0,
-        ),
-        (Some(circuit_until), None, Some(retry_until)) => (
-            5,
-            circuit_until.min(retry_until),
-            circuit_until.max(retry_until),
-            0,
-        ),
-        (None, Some(transport_until), Some(retry_until)) => (
-            6,
-            transport_until.min(retry_until),
-            transport_until.max(retry_until),
-            0,
-        ),
-        (Some(circuit_until), Some(transport_until), Some(retry_until)) => (
-            7,
-            circuit_until.min(transport_until.min(retry_until)),
-            circuit_until.max(transport_until.max(retry_until)),
-            retry_until,
-        ),
-    }
+    prodex_mojo_core::runtime::profile_backoff_sort_key(
+        circuit_until,
+        transport_until,
+        retry_until,
+        now,
+    )
+    .unwrap_or_else(|error| panic!("Mojo profile backoff sort key failed: {error:?}"))
 }
 
 pub fn runtime_soften_persisted_backoff_map_for_startup(
@@ -255,48 +231,41 @@ pub fn runtime_soften_persisted_backoff_map_for_startup(
     now: i64,
     max_future_seconds: i64,
 ) -> bool {
-    let max_until = now.saturating_add(max_future_seconds.max(0));
     let mut changed = false;
     backoffs.retain(|_, until| {
-        if *until <= now {
-            changed = true;
-            return false;
-        }
-        let next_until = (*until).min(max_until);
-        if next_until != *until {
-            changed = true;
-        }
-        *until = next_until;
-        true
+        let softened = prodex_mojo_core::runtime::profile_soften_backoff_until(
+            *until,
+            now,
+            max_future_seconds,
+        )
+        .unwrap_or_else(|error| panic!("Mojo profile backoff softening failed: {error:?}"));
+        changed |= softened.changed;
+        *until = softened.until;
+        softened.keep
     });
     changed
 }
 
 pub fn runtime_profile_circuit_open_seconds(score: u32, reopen_stage: u32) -> i64 {
-    let multiplier = 1_i64
-        .checked_shl(
-            score
-                .saturating_sub(crate::RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD)
-                .min(3)
-                .saturating_add(reopen_stage.min(crate::RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE)),
-        )
-        .unwrap_or(i64::MAX);
-    crate::RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS
-        .saturating_mul(multiplier)
-        .min(crate::RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS)
+    prodex_mojo_core::runtime::profile_circuit_open_seconds(
+        score,
+        reopen_stage,
+        crate::RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
+        crate::RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE,
+        crate::RUNTIME_PROFILE_CIRCUIT_OPEN_SECONDS,
+        crate::RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS,
+    )
+    .unwrap_or_else(|error| panic!("Mojo circuit-open timing failed: {error:?}"))
 }
 
 pub fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 {
-    let multiplier = 1_i64
-        .checked_shl(
-            score
-                .saturating_sub(crate::RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD)
-                .min(3),
-        )
-        .unwrap_or(i64::MAX);
-    crate::RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS
-        .saturating_mul(multiplier)
-        .min(crate::RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS)
+    prodex_mojo_core::runtime::profile_circuit_half_open_seconds(
+        score,
+        crate::RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
+        crate::RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS,
+        crate::RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS,
+    )
+    .unwrap_or_else(|error| panic!("Mojo half-open circuit timing failed: {error:?}"))
 }
 
 pub fn runtime_profile_route_circuit_probe_seconds(

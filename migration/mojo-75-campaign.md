@@ -559,3 +559,21 @@ with production-share, authority, no-fallback, size, and diff guards.
 
 The canonical broad inventory is 50,203 reachable Mojo LOC and 196,769 Rust
 production LOC, or 20.327406% Mojo.
+
+## Runtime backoff duplicate Rust deletion wave
+
+Profile backoff sort-key ordering, startup softening, and circuit timing now have one
+production authority in the existing `runtime_health.mojo` kernel. Both
+`prodex-runtime-proxy` and `prodex-runtime-store` delegate to the same Mojo primitives;
+the former feature-off/test Rust oracle implementations and duplicate store arithmetic
+were deleted rather than retained as fallbacks.
+
+`prodex-runtime-proxy` now links `prodex_mojo_core/mojo-runtime` as a normal dependency
+for these health/backoff semantics; its broader `mojo` feature still controls the
+additional quota/rich surfaces. The no-fallback guard now covers both promoted backoff
+files.
+
+Focused validation passed with Mojo 1.1.0: 27 runtime-store tests, 316 runtime-proxy
+library tests, and all-target Clippy with warnings denied for both crates. The canonical
+broad inventory is 50,203 reachable Mojo LOC and 196,676 Rust production LOC, or
+20.335063% Mojo.

@@ -16,15 +16,13 @@ path = "src/lib.rs"
 [features]
 default = []
 mojo = [
-    "dep:prodex_mojo_core",
     "prodex_mojo_core/mojo-quota",
-    "prodex_mojo_core/mojo-runtime",
     "prodex_mojo_core/mojo-rich",
 ]
 
 [dependencies]
 base64 = { workspace = true }
-prodex_mojo_core = { workspace = true, optional = true }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
 prodex_runtime_tuning = { workspace = true }
 prodex_runtime_state = { workspace = true }
 redaction = { workspace = true }
