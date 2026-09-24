@@ -2688,3 +2688,423 @@ def prodex_mojo_observability_plan_label_spec_v1(
     else:
         return OBSERVABILITY_STATUS_INVALID
     return OBSERVABILITY_STATUS_OK
+
+comptime OPERATIONAL_EVENT_SOURCE_NONE: Int64 = 0
+comptime OPERATIONAL_EVENT_SOURCE_REQUEST: Int64 = 1
+comptime OPERATIONAL_EVENT_SOURCE_MCP: Int64 = 2
+comptime OPERATIONAL_EVENT_SOURCE_AGENT: Int64 = 3
+comptime OPERATIONAL_EVENT_SOURCE_ROUTE: Int64 = 4
+comptime OPERATIONAL_EVENT_SOURCE_QUOTA: Int64 = 5
+comptime OPERATIONAL_EVENT_SOURCE_RETRY: Int64 = 6
+comptime OPERATIONAL_EVENT_SOURCE_BACKOFF: Int64 = 7
+comptime OPERATIONAL_EVENT_SOURCE_HEALTH: Int64 = 8
+comptime OPERATIONAL_EVENT_SOURCE_ERROR: Int64 = 9
+comptime OPERATIONAL_EVENT_SOURCE_MODEL: Int64 = 10
+comptime OPERATIONAL_EVENT_SOURCE_UPSTREAM: Int64 = 11
+comptime OPERATIONAL_EVENT_SOURCE_STREAM: Int64 = 12
+comptime OPERATIONAL_EVENT_SOURCE_RESPONSE: Int64 = 13
+comptime OPERATIONAL_EVENT_SOURCE_TERMINAL: Int64 = 14
+comptime OPERATIONAL_EVENT_SOURCE_TOOL: Int64 = 15
+comptime OPERATIONAL_EVENT_SOURCE_LOAD: Int64 = 16
+comptime OPERATIONAL_EVENT_SOURCE_SMART: Int64 = 17
+comptime OPERATIONAL_EVENT_SOURCE_COMPACT: Int64 = 18
+comptime OPERATIONAL_EVENT_SOURCE_EVENT: Int64 = 19
+
+comptime OPERATIONAL_EVENT_MAX_BYTES: Int64 = 65_536
+
+
+def operational_text_valid(address: UInt, length: Int64) -> Bool:
+    return length >= 0 and length <= OPERATIONAL_EVENT_MAX_BYTES and (
+        length == 0 or address != 0
+    )
+
+
+def operational_text_equals(
+    address: UInt, length: Int64, literal: StringSlice
+) -> Bool:
+    if length != Int64(literal.byte_length()):
+        return False
+    if length == 0:
+        return True
+    if address == 0:
+        return False
+    var left = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    var right = literal.unsafe_ptr()
+    for index in range(length):
+        if left[unsafe_offset=index] != right[unsafe_offset=index]:
+            return False
+    return True
+
+
+def operational_text_starts_with(
+    address: UInt, length: Int64, literal: StringSlice
+) -> Bool:
+    var expected = Int64(literal.byte_length())
+    if expected > length or address == 0:
+        return False
+    var left = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    var right = literal.unsafe_ptr()
+    for index in range(expected):
+        if left[unsafe_offset=index] != right[unsafe_offset=index]:
+            return False
+    return True
+
+
+def operational_text_contains(
+    address: UInt, length: Int64, literal: StringSlice
+) -> Bool:
+    var expected = Int64(literal.byte_length())
+    if expected == 0:
+        return True
+    if expected > length or address == 0:
+        return False
+    var left = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    var right = literal.unsafe_ptr()
+    var start: Int64 = 0
+    while start + expected <= length:
+        var matched = True
+        for offset in range(expected):
+            if left[unsafe_offset=start + offset] != right[unsafe_offset=offset]:
+                matched = False
+                break
+        if matched:
+            return True
+        start += 1
+    return False
+
+
+def operational_field_not_literal(
+    present: Int64,
+    address: UInt,
+    length: Int64,
+    literal: StringSlice,
+) -> Bool:
+    return present == 1 and not operational_text_equals(address, length, literal)
+
+
+def operational_event_exact_source(event_address: UInt, event_length: Int64) -> Int64:
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("route_decision"))
+        or operational_text_equals(event_address, event_length, StringSlice("selection_plan"))
+        or operational_text_equals(event_address, event_length, StringSlice("selection_pick"))
+        or operational_text_equals(event_address, event_length, StringSlice("selection_keep_affinity"))
+        or operational_text_equals(event_address, event_length, StringSlice("selection_keep_current"))
+        or operational_text_equals(event_address, event_length, StringSlice("selection_skip_current"))
+        or operational_text_equals(event_address, event_length, StringSlice("selection_skip_affinity"))
+        or operational_text_equals(event_address, event_length, StringSlice("selection_skip_sync_probe"))
+        or operational_text_equals(event_address, event_length, StringSlice("local_selection_blocked"))
+        or operational_text_equals(event_address, event_length, StringSlice("route_affinity_recompute"))
+        or operational_text_equals(event_address, event_length, StringSlice("route_affinity_recompute_result"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_commit"))
+        or operational_text_equals(event_address, event_length, StringSlice("previous_response_owner"))
+        or operational_text_equals(event_address, event_length, StringSlice("previous_response_not_found"))
+        or operational_text_equals(event_address, event_length, StringSlice("previous_response_negative_cache"))
+        or operational_text_equals(event_address, event_length, StringSlice("previous_response_fresh_fallback"))
+        or operational_text_equals(event_address, event_length, StringSlice("previous_response_fresh_fallback_blocked"))
+        or operational_text_equals(event_address, event_length, StringSlice("previous_response_turn_state_rehydrated"))
+        or operational_text_equals(event_address, event_length, StringSlice("session_rotation_release_affinity"))
+        or operational_text_equals(event_address, event_length, StringSlice("binding_prompt_cache"))
+        or operational_text_equals(event_address, event_length, StringSlice("upgrade"))
+        or operational_text_equals(event_address, event_length, StringSlice("upgraded"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_ROUTE
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("profile_quota_exhausted"))
+        or operational_text_equals(event_address, event_length, StringSlice("quota_exhausted"))
+        or operational_text_equals(event_address, event_length, StringSlice("quota_blocked"))
+        or operational_text_equals(event_address, event_length, StringSlice("quota_critical_floor_before_send"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_quota_quarantine"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_probe_refresh_start"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_probe_refresh_ok"))
+        or operational_text_equals(event_address, event_length, StringSlice("compact_pre_send_allow_quota_exhausted"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_usage_limit_passthrough"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_overload_passthrough"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_QUOTA
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("profile_retry_backoff"))
+        or operational_text_equals(event_address, event_length, StringSlice("compact_retryable_failure"))
+        or operational_text_equals(event_address, event_length, StringSlice("compact_overload_conservative_retry"))
+        or operational_text_equals(event_address, event_length, StringSlice("local_rewrite_gemini_quota_rotate"))
+        or operational_text_equals(event_address, event_length, StringSlice("local_rewrite_gemini_rate_limit_retry"))
+        or operational_text_equals(event_address, event_length, StringSlice("local_rewrite_gemini_invalid_stream_retry"))
+        or operational_text_equals(event_address, event_length, StringSlice("websocket_reuse_owner_fresh_retry"))
+        or operational_text_equals(event_address, event_length, StringSlice("websocket_reuse_nonreplayable_fresh_retry"))
+        or operational_text_equals(event_address, event_length, StringSlice("websocket_reuse_locked_affinity_owner_fresh_retry"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_RETRY
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("profile_transport_backoff"))
+        or operational_text_equals(event_address, event_length, StringSlice("rotation_waiting_for_recovery"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_circuit_open"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_circuit_half_open_probe"))
+        or operational_text_equals(event_address, event_length, StringSlice("websocket_reuse_watchdog_timeout"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_auth_backoff"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_BACKOFF
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("profile_transport_failure"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_health"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_bad_pairing"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_HEALTH
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("profile_auth_recovery_failed"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_auth_background_refresh_failed"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_ERROR
+    if operational_text_equals(event_address, event_length, StringSlice("profile_auth_recovered")):
+        return OPERATIONAL_EVENT_SOURCE_MODEL
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("upstream_start"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_response"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_async_start"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_async_response"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_connect_start"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_connect_ok"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_connect_error"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_UPSTREAM
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("first_upstream_chunk"))
+        or operational_text_equals(event_address, event_length, StringSlice("first_local_chunk"))
+        or operational_text_equals(event_address, event_length, StringSlice("stream_complete"))
+        or operational_text_equals(event_address, event_length, StringSlice("committed"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_STREAM
+    if operational_text_equals(event_address, event_length, StringSlice("buffered_response_complete")):
+        return OPERATIONAL_EVENT_SOURCE_RESPONSE
+    if operational_text_equals(event_address, event_length, StringSlice("terminal_event")):
+        return OPERATIONAL_EVENT_SOURCE_TERMINAL
+    if operational_text_equals(event_address, event_length, StringSlice("local_rewrite_gemini_builtin_tool_fallback")):
+        return OPERATIONAL_EVENT_SOURCE_TOOL
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("runtime_proxy_queue_overloaded"))
+        or operational_text_equals(event_address, event_length, StringSlice("runtime_proxy_active_limit_reached"))
+        or operational_text_equals(event_address, event_length, StringSlice("runtime_proxy_lane_limit_reached"))
+        or operational_text_equals(event_address, event_length, StringSlice("runtime_proxy_overload_backoff"))
+        or operational_text_equals(event_address, event_length, StringSlice("runtime_proxy_admission_wait_exhausted"))
+        or operational_text_equals(event_address, event_length, StringSlice("runtime_proxy_queue_wait_exhausted"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_inflight_saturated"))
+        or operational_text_equals(event_address, event_length, StringSlice("websocket_dns_overflow_reject"))
+        or operational_text_equals(event_address, event_length, StringSlice("websocket_connect_overflow_reject"))
+        or operational_text_equals(event_address, event_length, StringSlice("websocket_connect_overflow_rejected"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_LOAD
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("smart_context_autopilot"))
+        or operational_text_equals(event_address, event_length, StringSlice("smart_context_prepare_error"))
+        or operational_text_equals(event_address, event_length, StringSlice("smart_context_disabled"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_SMART
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("local_rewrite_request_detail"))
+        or operational_text_equals(event_address, event_length, StringSlice("local_rewrite_provider_model_fallback"))
+        or operational_text_equals(event_address, event_length, StringSlice("local_rewrite_provider_auth_failure"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_MODEL
+    if (
+        operational_text_equals(event_address, event_length, StringSlice("websocket_precommit_frame_timeout"))
+        or operational_text_equals(event_address, event_length, StringSlice("websocket_precommit_hold_timeout"))
+        or operational_text_equals(event_address, event_length, StringSlice("websocket_dns_resolve_timeout"))
+        or operational_text_equals(event_address, event_length, StringSlice("websocket_proxy_tunnel_failure"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_connect_timeout"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_connect_dns_error"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_tls_handshake_error"))
+        or operational_text_equals(event_address, event_length, StringSlice("runtime_log_gap"))
+        or operational_text_equals(event_address, event_length, StringSlice("runtime_proxy_async_log_dropped"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_read_error"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_send_error"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_stream_error"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_close_before_completed"))
+        or operational_text_equals(event_address, event_length, StringSlice("upstream_connection_closed"))
+        or operational_text_equals(event_address, event_length, StringSlice("stream_read_error"))
+        or operational_text_equals(event_address, event_length, StringSlice("local_writer_error"))
+        or operational_text_equals(event_address, event_length, StringSlice("invalid_previous_response_id"))
+        or operational_text_equals(event_address, event_length, StringSlice("session_error"))
+        or operational_text_equals(event_address, event_length, StringSlice("local_connection_closed"))
+        or operational_text_equals(event_address, event_length, StringSlice("profile_probe_refresh_error"))
+        or operational_text_equals(event_address, event_length, StringSlice("smart_context_token_calibration_save_error"))
+    ):
+        return OPERATIONAL_EVENT_SOURCE_ERROR
+    return -1
+
+
+@export("prodex_mojo_operational_event_plan_v1")
+def prodex_mojo_operational_event_plan_v1(
+    abi_version: Int64,
+    event_address: UInt,
+    event_length: Int64,
+    tool_surface_address: UInt,
+    tool_surface_length: Int64,
+    tool_surface_present: Int64,
+    continuation_address: UInt,
+    continuation_length: Int64,
+    continuation_present: Int64,
+    family_address: UInt,
+    family_length: Int64,
+    family_present: Int64,
+    decision_address: UInt,
+    decision_length: Int64,
+    decision_present: Int64,
+    source_address: UInt,
+    interesting_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OBSERVABILITY_LABEL_ABI_VERSION:
+        return OBSERVABILITY_STATUS_ABI
+    if (
+        source_address == 0
+        or interesting_address == 0
+        or event_address == 0
+        or event_length <= 0
+        or not operational_text_valid(event_address, event_length)
+        or not operational_text_valid(tool_surface_address, tool_surface_length)
+        or not operational_text_valid(continuation_address, continuation_length)
+        or not operational_text_valid(family_address, family_length)
+        or not operational_text_valid(decision_address, decision_length)
+        or (tool_surface_present != 0 and tool_surface_present != 1)
+        or (continuation_present != 0 and continuation_present != 1)
+        or (family_present != 0 and family_present != 1)
+        or (decision_present != 0 and decision_present != 1)
+    ):
+        return OBSERVABILITY_STATUS_INVALID
+
+    var source = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(source_address)
+    )
+    var interesting = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(interesting_address)
+    )
+    source[] = OPERATIONAL_EVENT_SOURCE_EVENT
+    interesting[] = 1
+
+    if operational_text_equals(event_address, event_length, StringSlice("request_captured")):
+        source[] = OPERATIONAL_EVENT_SOURCE_REQUEST
+        return OBSERVABILITY_STATUS_OK
+
+    if operational_text_equals(event_address, event_length, StringSlice("compat_request_surface")):
+        var has_tool_surface = tool_surface_present == 1
+        var is_interesting = (
+            operational_field_not_literal(
+                tool_surface_present,
+                tool_surface_address,
+                tool_surface_length,
+                StringSlice("none"),
+            )
+            or operational_field_not_literal(
+                continuation_present,
+                continuation_address,
+                continuation_length,
+                StringSlice("none"),
+            )
+            or operational_field_not_literal(
+                family_present,
+                family_address,
+                family_length,
+                StringSlice("codex"),
+            )
+        )
+        interesting[] = 1 if is_interesting else 0
+        if (
+            has_tool_surface
+            and operational_text_contains(
+                tool_surface_address, tool_surface_length, StringSlice("mcp")
+            )
+        ):
+            source[] = OPERATIONAL_EVENT_SOURCE_MCP
+        elif (
+            has_tool_surface
+            and (
+                operational_text_contains(
+                    tool_surface_address,
+                    tool_surface_length,
+                    StringSlice("sub_agent"),
+                )
+                or operational_text_contains(
+                    tool_surface_address,
+                    tool_surface_length,
+                    StringSlice("subagent"),
+                )
+            )
+        ):
+            source[] = OPERATIONAL_EVENT_SOURCE_AGENT
+        elif is_interesting:
+            source[] = OPERATIONAL_EVENT_SOURCE_REQUEST
+        else:
+            source[] = OPERATIONAL_EVENT_SOURCE_NONE
+        return OBSERVABILITY_STATUS_OK
+
+    var exact_source = operational_event_exact_source(event_address, event_length)
+    if exact_source >= 0:
+        source[] = exact_source
+        return OBSERVABILITY_STATUS_OK
+
+    if operational_text_equals(
+        event_address, event_length, StringSlice("smart_context_prepare_fallback")
+    ):
+        var smart = (
+            decision_present == 1
+            and not operational_text_equals(
+                decision_address, decision_length, StringSlice("pass_through")
+            )
+        )
+        source[] = (
+            OPERATIONAL_EVENT_SOURCE_SMART
+            if smart
+            else OPERATIONAL_EVENT_SOURCE_EVENT
+        )
+        interesting[] = (
+            1
+            if decision_present == 0
+            or not operational_text_equals(
+                decision_address, decision_length, StringSlice("pass_through")
+            )
+            else 0
+        )
+        return OBSERVABILITY_STATUS_OK
+
+    if (
+        operational_text_contains(event_address, event_length, StringSlice("compact"))
+        or operational_text_contains(event_address, event_length, StringSlice("compaction"))
+    ):
+        source[] = OPERATIONAL_EVENT_SOURCE_COMPACT
+    elif operational_text_starts_with(
+        event_address, event_length, StringSlice("super_expose_exec_")
+    ):
+        source[] = OPERATIONAL_EVENT_SOURCE_TOOL
+    elif (
+        operational_text_contains(event_address, event_length, StringSlice("mcp"))
+        or operational_text_starts_with(
+            event_address, event_length, StringSlice("expose_")
+        )
+        or operational_text_starts_with(
+            event_address, event_length, StringSlice("super_expose_")
+        )
+    ):
+        source[] = OPERATIONAL_EVENT_SOURCE_MCP
+    elif (
+        operational_text_contains(event_address, event_length, StringSlice("sub_agent"))
+        or operational_text_contains(event_address, event_length, StringSlice("subagent"))
+    ):
+        source[] = OPERATIONAL_EVENT_SOURCE_AGENT
+    elif (
+        operational_text_starts_with(
+            event_address, event_length, StringSlice("local_rewrite_")
+        )
+        and operational_text_contains(event_address, event_length, StringSlice("retry"))
+    ):
+        source[] = OPERATIONAL_EVENT_SOURCE_RETRY
+    elif (
+        operational_text_starts_with(
+            event_address, event_length, StringSlice("local_rewrite_")
+        )
+        and operational_text_contains(event_address, event_length, StringSlice("error"))
+    ):
+        source[] = OPERATIONAL_EVENT_SOURCE_ERROR
+    return OBSERVABILITY_STATUS_OK
