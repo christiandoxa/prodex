@@ -17,6 +17,28 @@ pub const QUOTA_MODEL_PAIR_REGULAR: i64 = 1;
 pub const QUOTA_MODEL_PAIR_RESERVE: i64 = 2;
 pub const QUOTA_MODEL_PAIR_DEFAULT: i64 = 3;
 
+pub const QUOTA_ERROR_KIND_UNKNOWN: i64 = 0;
+pub const QUOTA_ERROR_KIND_UNAVAILABLE: i64 = 1;
+pub const QUOTA_ERROR_KIND_CONFIG: i64 = 2;
+pub const QUOTA_ERROR_KIND_SERVER: i64 = 3;
+pub const QUOTA_ERROR_KIND_TIMEOUT: i64 = 4;
+pub const QUOTA_ERROR_KIND_NETWORK: i64 = 5;
+pub const QUOTA_ERROR_KIND_PROXY: i64 = 6;
+pub const QUOTA_ERROR_KIND_CONNECTION: i64 = 7;
+pub const QUOTA_ERROR_KIND_INVALID_AUTH: i64 = 8;
+pub const QUOTA_ERROR_KIND_RATE_LIMIT: i64 = 9;
+pub const QUOTA_ERROR_KIND_PARSE: i64 = 10;
+pub const QUOTA_ERROR_KIND_EMPTY: i64 = 11;
+pub const QUOTA_ERROR_KIND_CANCELLED: i64 = 12;
+pub const QUOTA_ERROR_KIND_FORBIDDEN: i64 = 13;
+pub const QUOTA_ERROR_KIND_NOT_FOUND: i64 = 14;
+pub const QUOTA_ERROR_KIND_OTHER: i64 = 15;
+
+pub const QUOTA_BLOCKED_KIND_NONE: i64 = 0;
+pub const QUOTA_BLOCKED_KIND_EXHAUSTED: i64 = 1;
+pub const QUOTA_BLOCKED_KIND_WEEKLY: i64 = 2;
+pub const QUOTA_BLOCKED_KIND_FIVE_HOUR: i64 = 3;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OpenAiModelCapacityInput {
     pub model_kind: i64,
@@ -242,6 +264,8 @@ unsafe extern "C" {
         metered_feature_length: i64,
     ) -> i64;
     fn prodex_quota_openai_model_capacity_plan(fields_address: u64, output_address: u64) -> i64;
+    fn prodex_quota_error_summary_kind(address: u64, length: i64) -> i64;
+    fn prodex_quota_blocked_limit_kind(address: u64, length: i64) -> i64;
 }
 
 fn quota_text_address(value: Option<&str>) -> (u64, i64) {
@@ -366,6 +390,32 @@ pub fn openai_model_capacity_plan(
         supports: output[2] == 1,
         unknown_luna_capacity: output[3] == 1,
     })
+}
+
+pub fn quota_error_summary_kind(value: &str) -> Result<i64, crate::MojoError> {
+    let (address, length) = quota_text_address(Some(value));
+    if length == i64::MAX {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let kind = unsafe { prodex_quota_error_summary_kind(address, length) };
+    if (QUOTA_ERROR_KIND_UNKNOWN..=QUOTA_ERROR_KIND_OTHER).contains(&kind) {
+        Ok(kind)
+    } else {
+        Err(crate::MojoError::InvalidOutput)
+    }
+}
+
+pub fn blocked_limit_kind(value: &str) -> Result<i64, crate::MojoError> {
+    let (address, length) = quota_text_address(Some(value));
+    if length == i64::MAX {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let kind = unsafe { prodex_quota_blocked_limit_kind(address, length) };
+    if (QUOTA_BLOCKED_KIND_NONE..=QUOTA_BLOCKED_KIND_FIVE_HOUR).contains(&kind) {
+        Ok(kind)
+    } else {
+        Err(crate::MojoError::InvalidOutput)
+    }
 }
 
 pub fn round_f64(value: f64) -> i64 {

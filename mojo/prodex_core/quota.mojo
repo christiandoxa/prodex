@@ -710,3 +710,171 @@ def prodex_quota_openai_model_capacity_plan(
     output[unsafe_offset=2] = supports
     output[unsafe_offset=3] = unknown_luna
     return 0
+# Human-facing quota status classification. Rust keeps ownership of provider strings and
+# final allocation; Mojo owns deterministic classification and precedence.
+
+comptime QUOTA_ERROR_KIND_UNKNOWN: Int64 = 0
+comptime QUOTA_ERROR_KIND_UNAVAILABLE: Int64 = 1
+comptime QUOTA_ERROR_KIND_CONFIG: Int64 = 2
+comptime QUOTA_ERROR_KIND_SERVER: Int64 = 3
+comptime QUOTA_ERROR_KIND_TIMEOUT: Int64 = 4
+comptime QUOTA_ERROR_KIND_NETWORK: Int64 = 5
+comptime QUOTA_ERROR_KIND_PROXY: Int64 = 6
+comptime QUOTA_ERROR_KIND_CONNECTION: Int64 = 7
+comptime QUOTA_ERROR_KIND_INVALID_AUTH: Int64 = 8
+comptime QUOTA_ERROR_KIND_RATE_LIMIT: Int64 = 9
+comptime QUOTA_ERROR_KIND_PARSE: Int64 = 10
+comptime QUOTA_ERROR_KIND_EMPTY: Int64 = 11
+comptime QUOTA_ERROR_KIND_CANCELLED: Int64 = 12
+comptime QUOTA_ERROR_KIND_FORBIDDEN: Int64 = 13
+comptime QUOTA_ERROR_KIND_NOT_FOUND: Int64 = 14
+comptime QUOTA_ERROR_KIND_OTHER: Int64 = 15
+
+comptime QUOTA_BLOCKED_KIND_NONE: Int64 = 0
+comptime QUOTA_BLOCKED_KIND_EXHAUSTED: Int64 = 1
+comptime QUOTA_BLOCKED_KIND_WEEKLY: Int64 = 2
+comptime QUOTA_BLOCKED_KIND_FIVE_HOUR: Int64 = 3
+
+
+def quota_text_contains_ascii_case_insensitive(
+    address: UInt,
+    length: Int64,
+    expected: StringSlice,
+) -> Bool:
+    if length <= 0 or address == 0:
+        return False
+    var target_length = Int64(expected.byte_length())
+    if target_length <= 0:
+        return True
+    if target_length > length:
+        return False
+    var source = quota_text_ptr(address)
+    var target = expected.unsafe_ptr()
+    for start in range(length - target_length + 1):
+        var matched = True
+        for offset in range(target_length):
+            if quota_ascii_lower(source[unsafe_offset=start + offset]) != quota_ascii_lower(
+                target[unsafe_offset=offset]
+            ):
+                matched = False
+                break
+        if matched:
+            return True
+    return False
+
+
+@export("prodex_quota_error_summary_kind")
+def prodex_quota_error_summary_kind(
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if length < 0 or (length > 0 and address == 0):
+        return -1
+    if length == 0:
+        return QUOTA_ERROR_KIND_UNKNOWN
+
+    if quota_text_contains_ascii_case_insensitive(
+        address, length, StringSlice("unavailable")
+    ):
+        return QUOTA_ERROR_KIND_UNAVAILABLE
+    if (
+        quota_text_contains_ascii_case_insensitive(address, length, StringSlice("missing"))
+        or quota_text_contains_ascii_case_insensitive(
+            address, length, StringSlice("not configured")
+        )
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("config"))
+    ):
+        return QUOTA_ERROR_KIND_CONFIG
+
+    if (
+        quota_text_contains_ascii_case_insensitive(address, length, StringSlice("500"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("502"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("503"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("504"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("server"))
+    ):
+        return QUOTA_ERROR_KIND_SERVER
+    if (
+        quota_text_contains_ascii_case_insensitive(address, length, StringSlice("timeout"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("timed out"))
+    ):
+        return QUOTA_ERROR_KIND_TIMEOUT
+    if (
+        quota_text_contains_ascii_case_insensitive(address, length, StringSlice("dns"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("tls"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("certificate"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("network"))
+    ):
+        return QUOTA_ERROR_KIND_NETWORK
+    if quota_text_contains_ascii_case_insensitive(address, length, StringSlice("proxy")):
+        return QUOTA_ERROR_KIND_PROXY
+    if (
+        quota_text_contains_ascii_case_insensitive(address, length, StringSlice("refused"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("connect"))
+    ):
+        return QUOTA_ERROR_KIND_CONNECTION
+
+    if (
+        quota_text_contains_ascii_case_insensitive(address, length, StringSlice("invalid auth"))
+        or quota_text_contains_ascii_case_insensitive(
+            address, length, StringSlice("invalid token")
+        )
+        or quota_text_contains_ascii_case_insensitive(
+            address, length, StringSlice("bad credentials")
+        )
+        or quota_text_contains_ascii_case_insensitive(
+            address, length, StringSlice("credential")
+        )
+    ):
+        return QUOTA_ERROR_KIND_INVALID_AUTH
+    if (
+        quota_text_contains_ascii_case_insensitive(address, length, StringSlice("429"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("rate limit"))
+    ):
+        return QUOTA_ERROR_KIND_RATE_LIMIT
+
+    if (
+        quota_text_contains_ascii_case_insensitive(address, length, StringSlice("parse"))
+        or quota_text_contains_ascii_case_insensitive(
+            address, length, StringSlice("deserialize")
+        )
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("decode"))
+        or quota_text_contains_ascii_case_insensitive(
+            address, length, StringSlice("invalid json")
+        )
+    ):
+        return QUOTA_ERROR_KIND_PARSE
+    if quota_text_contains_ascii_case_insensitive(address, length, StringSlice("empty")):
+        return QUOTA_ERROR_KIND_EMPTY
+    if quota_text_contains_ascii_case_insensitive(address, length, StringSlice("cancel")):
+        return QUOTA_ERROR_KIND_CANCELLED
+    if (
+        quota_text_contains_ascii_case_insensitive(address, length, StringSlice("403"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("forbidden"))
+    ):
+        return QUOTA_ERROR_KIND_FORBIDDEN
+    if (
+        quota_text_contains_ascii_case_insensitive(address, length, StringSlice("404"))
+        or quota_text_contains_ascii_case_insensitive(address, length, StringSlice("not found"))
+    ):
+        return QUOTA_ERROR_KIND_NOT_FOUND
+    return QUOTA_ERROR_KIND_OTHER
+
+
+@export("prodex_quota_blocked_limit_kind")
+def prodex_quota_blocked_limit_kind(
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if length < 0 or (length > 0 and address == 0):
+        return -1
+    var exhausted = quota_text_contains_ascii_case_insensitive(
+        address, length, StringSlice("exhausted")
+    )
+    if not exhausted:
+        return QUOTA_BLOCKED_KIND_NONE
+    if quota_text_contains_ascii_case_insensitive(address, length, StringSlice("5h")):
+        return QUOTA_BLOCKED_KIND_FIVE_HOUR
+    if quota_text_contains_ascii_case_insensitive(address, length, StringSlice("weekly")):
+        return QUOTA_BLOCKED_KIND_WEEKLY
+    return QUOTA_BLOCKED_KIND_EXHAUSTED
