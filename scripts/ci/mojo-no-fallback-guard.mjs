@@ -42,6 +42,8 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-quota/src/pressure.rs",
   "crates/prodex-runtime-store/src/continuations/status.rs",
   "crates/prodex-runtime-store/src/continuations/status/mojo.rs",
+  "crates/prodex-runtime-store/src/profile_backoff/backoff.rs",
+  "crates/prodex-runtime-proxy/src/health/backoff.rs",
 ];
 
 const FORBIDDEN_MARKERS = [
