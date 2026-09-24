@@ -367,6 +367,17 @@ unsafe extern "C" {
     ) -> i64;
     fn prodex_runtime_websocket_event_kind_v1(abi_version: i64, kind: u64, output: *mut i64)
     -> i64;
+    fn prodex_provider_error_classify_v1(
+        status: i64,
+        status_present: i64,
+        code_address: u64,
+        code_length: i64,
+        code_present: i64,
+        text_address: u64,
+        text_length: i64,
+        text_present: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_mojo_rich_context_plan_v2(
         abi_version: i64,
         items: u64,
@@ -485,6 +496,48 @@ fn slice(output: &[u8], value: RichSlice) -> Result<&[u8], MojoError> {
 
 fn ensure_rich_abi() -> Result<(), MojoError> {
     rich_abi_ready().then_some(()).ok_or(MojoError::AbiMismatch)
+}
+
+pub fn provider_error_classify(
+    status: Option<u16>,
+    code: Option<&str>,
+    text: Option<&str>,
+) -> Result<(i64, u64), MojoError> {
+    ensure_rich_abi()?;
+    let parts = |value: Option<&str>| -> Result<(u64, i64, i64), MojoError> {
+        let Some(value) = value else {
+            return Ok((0, 0, 0));
+        };
+        Ok((
+            mojo_pointer_address(value.as_ptr()),
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            1,
+        ))
+    };
+    let (code_address, code_length, code_present) = parts(code)?;
+    let (text_address, text_length, text_present) = parts(text)?;
+    let mut output = [0_i64; 2];
+    let result = unsafe {
+        prodex_provider_error_classify_v1(
+            i64::from(status.unwrap_or_default()),
+            i64::from(status.is_some()),
+            code_address,
+            code_length,
+            code_present,
+            text_address,
+            text_length,
+            text_present,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+        )
+    };
+    if result != 0 || !(0..=5).contains(&output[0]) || output[1] < 0 {
+        return Err(if result == 1 {
+            MojoError::InvalidInput
+        } else {
+            MojoError::InvalidOutput
+        });
+    }
+    Ok((output[0], output[1] as u64))
 }
 
 pub fn rich_self_test() -> bool {

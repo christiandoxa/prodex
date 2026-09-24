@@ -509,3 +509,18 @@ authority, no-fallback, and size guards are green locally.
 
 The canonical broad inventory at this checkpoint is 49,480 reachable Mojo LOC and 196,722 Rust
 production LOC, or 20.097318% Mojo. The 75% project target remains a forward migration goal.
+
+## Provider error classification Mojo wave
+
+Provider error classification now executes in Mojo for the production feature path. Mojo owns
+status/code/text normalization and the auth, quota, rate-limit, not-found, transient, and fallback
+classification precedence together with cooldown selection. Rust retains provider body/token
+acquisition, classification materialization, and the explicit feature-off compatibility branch.
+
+Focused Mojo classifier cases cover authentication, spend/quota limits, rate limits, unsupported
+models, transient overloads, and generic 429 pass-through. Feature-on and feature-off provider
+error tests pass, all-target provider-core Clippy is clean, and ownership, authority, no-fallback,
+and size guards pass with Mojo 1.1.0.
+
+The canonical broad inventory at this checkpoint is 49,645 reachable Mojo LOC and 196,796 Rust
+production LOC, or 20.144781% Mojo. The 75% project target remains a forward migration goal.
