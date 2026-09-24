@@ -5,8 +5,10 @@ use super::{
     ProviderWireFormat, Value,
 };
 
-#[cfg(not(feature = "mojo"))]
-use super::json;
+#[cfg(any(not(feature = "mojo"), test))]
+use super::super::openai_chat_compat_util::rtk_wrapped_tool_arguments_rust;
+#[cfg(any(not(feature = "mojo"), test))]
+use serde_json::json;
 
 #[cfg(feature = "mojo")]
 fn stream_event_body(
@@ -89,6 +91,51 @@ pub(crate) fn translate_chat_stream_event_to_responses(
         }
     };
 
+    #[cfg(feature = "mojo")]
+    {
+        let mut document = crate::mojo_json::Document::default();
+        document.openai_chat_context(&value, None);
+        let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+        match prodex_mojo_core::json::transform_openai_chat_stream_event(&document.nodes, raw) {
+            Ok(Some(body)) => ProviderTransformResult::lossless(
+                provider,
+                input.endpoint,
+                ProviderWireFormat::OpenAiChatCompletions,
+                ProviderWireFormat::OpenAiResponses,
+                body,
+            ),
+            Ok(None) => ProviderTransformResult::unsupported(
+                provider,
+                input.endpoint,
+                ProviderWireFormat::OpenAiChatCompletions,
+                ProviderWireFormat::OpenAiResponses,
+                "chat completions SSE event does not contain a supported text delta",
+            ),
+            Err(error) => panic!("Mojo OpenAI compatibility stream event failed: {error:?}"),
+        }
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    match translate_chat_stream_value_to_responses_rust(&value) {
+        Some(body) => ProviderTransformResult::lossless(
+            provider,
+            input.endpoint,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::OpenAiResponses,
+            body,
+        ),
+        None => ProviderTransformResult::unsupported(
+            provider,
+            input.endpoint,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::OpenAiResponses,
+            "chat completions SSE event does not contain a supported text delta",
+        ),
+    }
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn translate_chat_stream_value_to_responses_rust(value: &Value) -> Option<Vec<u8>> {
     let choice = value
         .get("choices")
         .and_then(Value::as_array)
@@ -109,46 +156,10 @@ pub(crate) fn translate_chat_stream_event_to_responses(
         .and_then(|choice| choice.get("finish_reason"))
         .is_some_and(|finish_reason| !finish_reason.is_null());
 
-    #[cfg(feature = "mojo")]
-    {
-        let body = match prodex_mojo_core::rich::OpenAiCompatKernelOperation::stream_event_from_chat(
-            tool_call
-                .and_then(|tool_call| tool_call.get("id"))
-                .and_then(Value::as_str),
-            tool_call
-                .and_then(|tool_call| tool_call.get("function"))
-                .and_then(|function| function.get("name"))
-                .and_then(Value::as_str),
-            arguments,
-            text,
-            finished,
-        ) {
-            Ok(body) if body.is_empty() => {
-                return ProviderTransformResult::unsupported(
-                    provider,
-                    input.endpoint,
-                    ProviderWireFormat::OpenAiChatCompletions,
-                    ProviderWireFormat::OpenAiResponses,
-                    "chat completions SSE event does not contain a supported text delta",
-                );
-            }
-            Ok(body) => body,
-            Err(error) => panic!("Mojo OpenAI compatibility stream event failed: {error:?}"),
-        };
-        ProviderTransformResult::lossless(
-            provider,
-            input.endpoint,
-            ProviderWireFormat::OpenAiChatCompletions,
-            ProviderWireFormat::OpenAiResponses,
-            body,
-        )
-    }
-
-    #[cfg(not(feature = "mojo"))]
     if let (Some(tool_call), Some(arguments)) = (tool_call, arguments) {
         let mut payload = json!({
             "type": "response.function_call_arguments.delta",
-            "delta": super::super::openai_chat_compat_util::rtk_wrapped_tool_arguments(
+            "delta": rtk_wrapped_tool_arguments_rust(
                 tool_call
                     .get("function")
                     .and_then(|function| function.get("name"))
@@ -160,52 +171,25 @@ pub(crate) fn translate_chat_stream_event_to_responses(
         if let Some(call_id) = tool_call.get("id").and_then(Value::as_str) {
             payload["call_id"] = Value::String(call_id.to_string());
         }
-        let body = format!(
-            "event: response.function_call_arguments.delta\ndata: {}\n\n",
-            payload
-        );
-        return ProviderTransformResult::lossless(
-            provider,
-            input.endpoint,
-            ProviderWireFormat::OpenAiChatCompletions,
-            ProviderWireFormat::OpenAiResponses,
-            body.into_bytes(),
+        return Some(
+            format!("event: response.function_call_arguments.delta\ndata: {payload}\n\n")
+                .into_bytes(),
         );
     }
 
-    #[cfg(not(feature = "mojo"))]
     if let Some(text) = text {
-        let body = format!(
-            "event: response.output_text.delta\ndata: {}\n\n",
-            json!({"type": "response.output_text.delta", "delta": text})
-        );
-        return ProviderTransformResult::lossless(
-            provider,
-            input.endpoint,
-            ProviderWireFormat::OpenAiChatCompletions,
-            ProviderWireFormat::OpenAiResponses,
-            body.into_bytes(),
+        return Some(
+            format!(
+                "event: response.output_text.delta\ndata: {}\n\n",
+                json!({"type": "response.output_text.delta", "delta": text})
+            )
+            .into_bytes(),
         );
     }
 
-    #[cfg(not(feature = "mojo"))]
-    if finished {
-        let body = b"event: response.completed\ndata: {}\n\n".to_vec();
-        return ProviderTransformResult::lossless(
-            provider,
-            input.endpoint,
-            ProviderWireFormat::OpenAiChatCompletions,
-            ProviderWireFormat::OpenAiResponses,
-            body,
-        );
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    return ProviderTransformResult::unsupported(
-        provider,
-        input.endpoint,
-        ProviderWireFormat::OpenAiChatCompletions,
-        ProviderWireFormat::OpenAiResponses,
-        "chat completions SSE event does not contain a supported text delta",
-    );
+    finished.then(|| b"event: response.completed\ndata: {}\n\n".to_vec())
 }
+
+#[cfg(all(test, feature = "mojo"))]
+#[path = "stream/mojo_tests.rs"]
+mod mojo_tests;

@@ -71,6 +71,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         for source in [
             "../../mojo/prodex_core/rich_types.mojo",
             "../../mojo/prodex_core/rich_text.mojo",
+            "../../mojo/prodex_core/openai_compat.mojo",
             "../../mojo/prodex_core/kiro.mojo",
             "../../mojo/prodex_core/gemini_response.mojo",
             "../../mojo/prodex_core/gemini_sse_state.mojo",
@@ -331,6 +332,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/rich_abi.mojo");
         sources.push("../../mojo/prodex_core/chat_tools.mojo");
         sources.push("../../mojo/prodex_core/openai_chat_request.mojo");
+        sources.push("../../mojo/prodex_core/openai_chat_response.mojo");
         sources.push("../../mojo/prodex_core/anthropic_chat_request.mojo");
         sources.push("../../mojo/prodex_core/deepseek_messages.mojo");
         sources.push("../../mojo/prodex_core/rich_context_v2.mojo");
