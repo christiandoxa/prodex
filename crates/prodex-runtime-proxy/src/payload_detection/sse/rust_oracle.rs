@@ -28,3 +28,25 @@ pub(super) fn sse_line_plan(line: &[u8]) -> (i64, usize, usize) {
     }
     (RUNTIME_SSE_LINE_DATA, start, end)
 }
+
+pub(super) fn sse_inspection_step(
+    committed: bool,
+    quota_blocked: bool,
+    rate_limited: bool,
+    overloaded: bool,
+    previous_response_not_found: bool,
+    precommit_hold: bool,
+) -> (i64, bool) {
+    let action = if !committed && quota_blocked {
+        1
+    } else if !committed && rate_limited {
+        2
+    } else if !committed && overloaded {
+        3
+    } else if !committed && previous_response_not_found {
+        4
+    } else {
+        0
+    };
+    (action, committed || (action == 0 && !precommit_hold))
+}

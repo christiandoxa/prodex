@@ -46,10 +46,24 @@ pub enum RuntimeSseInspectionProgress {
 
 const RUNTIME_SSE_LINE_BLANK: i64 = 0;
 const RUNTIME_SSE_LINE_DATA: i64 = 2;
+const RUNTIME_SSE_INSPECTION_CONTINUE: i64 = 0;
+const RUNTIME_SSE_INSPECTION_QUOTA_BLOCKED: i64 = 1;
+const RUNTIME_SSE_INSPECTION_RATE_LIMITED: i64 = 2;
+const RUNTIME_SSE_INSPECTION_OVERLOADED: i64 = 3;
+const RUNTIME_SSE_INSPECTION_PREVIOUS_RESPONSE_NOT_FOUND: i64 = 4;
 
 #[cfg(feature = "mojo")]
 unsafe extern "C" {
     fn prodex_runtime_sse_line_plan_v1(address: u64, length: i64, output_address: u64) -> i64;
+    fn prodex_runtime_sse_inspection_step_v1(
+        committed: i64,
+        quota_blocked: i64,
+        rate_limited: i64,
+        overloaded: i64,
+        previous_response_not_found: i64,
+        precommit_hold: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 fn runtime_sse_line_plan(line: &[u8]) -> (i64, usize, usize) {
@@ -82,6 +96,51 @@ fn runtime_sse_line_plan(line: &[u8]) -> (i64, usize, usize) {
 #[cfg(not(feature = "mojo"))]
 #[path = "sse/rust_oracle.rs"]
 mod rust_oracle;
+
+fn runtime_sse_inspection_step(
+    committed: bool,
+    event: &RuntimeParsedSseEvent,
+    precommit_hold: bool,
+) -> (i64, bool) {
+    #[cfg(feature = "mojo")]
+    {
+        let mut output = [0_i64; 2];
+        let status = unsafe {
+            prodex_runtime_sse_inspection_step_v1(
+                i64::from(committed),
+                i64::from(event.quota_blocked),
+                i64::from(event.rate_limited),
+                i64::from(event.overloaded),
+                i64::from(event.previous_response_not_found),
+                i64::from(precommit_hold),
+                output.as_mut_ptr() as usize as u64,
+            )
+        };
+        assert_eq!(
+            status, 0,
+            "Mojo SSE inspection planner returned invalid status"
+        );
+        assert!(
+            (RUNTIME_SSE_INSPECTION_CONTINUE..=RUNTIME_SSE_INSPECTION_PREVIOUS_RESPONSE_NOT_FOUND)
+                .contains(&output[0])
+                && matches!(output[1], 0 | 1),
+            "Mojo SSE inspection planner returned invalid output"
+        );
+        (output[0], output[1] == 1)
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        rust_oracle::sse_inspection_step(
+            committed,
+            event.quota_blocked,
+            event.rate_limited,
+            event.overloaded,
+            event.previous_response_not_found,
+            precommit_hold,
+        )
+    }
+}
 
 fn runtime_sse_event_marked_invalid(data_lines: &[String]) -> bool {
     matches!(
@@ -244,32 +303,36 @@ struct RuntimeSseInspectionState {
 
 impl RuntimeSseInspectionState {
     fn observe(&mut self, event: RuntimeParsedSseEvent) -> Option<RuntimeSseInspectionProgress> {
-        let committed = self.saw_commit_ready_event;
-        if !committed && event.quota_blocked {
-            return Some(RuntimeSseInspectionProgress::QuotaBlocked);
-        }
-        if !committed && event.rate_limited {
-            return Some(RuntimeSseInspectionProgress::RateLimited {
-                retry_after: event.retry_after,
-            });
-        }
-        if !committed && event.overloaded {
-            return Some(RuntimeSseInspectionProgress::Overloaded);
-        }
-        if !committed && event.previous_response_not_found {
-            return Some(RuntimeSseInspectionProgress::PreviousResponseNotFound);
+        let precommit_hold = event
+            .event_type
+            .as_deref()
+            .is_some_and(crate::runtime_proxy_precommit_hold_event_kind);
+        let (action, committed) =
+            runtime_sse_inspection_step(self.saw_commit_ready_event, &event, precommit_hold);
+        let terminal = match action {
+            RUNTIME_SSE_INSPECTION_CONTINUE => None,
+            RUNTIME_SSE_INSPECTION_QUOTA_BLOCKED => {
+                Some(RuntimeSseInspectionProgress::QuotaBlocked)
+            }
+            RUNTIME_SSE_INSPECTION_RATE_LIMITED => {
+                Some(RuntimeSseInspectionProgress::RateLimited {
+                    retry_after: event.retry_after,
+                })
+            }
+            RUNTIME_SSE_INSPECTION_OVERLOADED => Some(RuntimeSseInspectionProgress::Overloaded),
+            RUNTIME_SSE_INSPECTION_PREVIOUS_RESPONSE_NOT_FOUND => {
+                Some(RuntimeSseInspectionProgress::PreviousResponseNotFound)
+            }
+            _ => unreachable!("validated Mojo SSE inspection action"),
+        };
+        if terminal.is_some() {
+            return terminal;
         }
         self.response_ids.extend(event.response_ids);
         if event.turn_state.is_some() {
             self.turn_state = event.turn_state;
         }
-        if !event
-            .event_type
-            .as_deref()
-            .is_some_and(crate::runtime_proxy_precommit_hold_event_kind)
-        {
-            self.saw_commit_ready_event = true;
-        }
+        self.saw_commit_ready_event = committed;
         None
     }
 
@@ -384,5 +447,49 @@ mod mojo_line_tests {
         for (line, expected) in cases {
             assert_eq!(runtime_sse_line_plan(line), *expected, "line={line:?}");
         }
+    }
+
+    #[test]
+    fn sse_inspection_step_orders_precommit_terminal_signals() {
+        let mut event = RuntimeParsedSseEvent {
+            quota_blocked: true,
+            rate_limited: true,
+            overloaded: true,
+            previous_response_not_found: true,
+            ..RuntimeParsedSseEvent::default()
+        };
+        assert_eq!(
+            runtime_sse_inspection_step(false, &event, true),
+            (RUNTIME_SSE_INSPECTION_QUOTA_BLOCKED, false)
+        );
+        event.quota_blocked = false;
+        assert_eq!(
+            runtime_sse_inspection_step(false, &event, true),
+            (RUNTIME_SSE_INSPECTION_RATE_LIMITED, false)
+        );
+        event.rate_limited = false;
+        assert_eq!(
+            runtime_sse_inspection_step(false, &event, true),
+            (RUNTIME_SSE_INSPECTION_OVERLOADED, false)
+        );
+        event.overloaded = false;
+        assert_eq!(
+            runtime_sse_inspection_step(false, &event, true),
+            (RUNTIME_SSE_INSPECTION_PREVIOUS_RESPONSE_NOT_FOUND, false)
+        );
+        event.previous_response_not_found = false;
+        assert_eq!(
+            runtime_sse_inspection_step(false, &event, true),
+            (RUNTIME_SSE_INSPECTION_CONTINUE, false)
+        );
+        assert_eq!(
+            runtime_sse_inspection_step(false, &event, false),
+            (RUNTIME_SSE_INSPECTION_CONTINUE, true)
+        );
+        event.quota_blocked = true;
+        assert_eq!(
+            runtime_sse_inspection_step(true, &event, true),
+            (RUNTIME_SSE_INSPECTION_CONTINUE, true)
+        );
     }
 }

@@ -467,3 +467,16 @@ and size guards pass with Mojo 1.1.0.
 
 The canonical broad inventory at this checkpoint is 49,294 reachable Mojo LOC and 196,666 Rust
 production LOC, or 20.041470% Mojo. The 75% project target remains a forward migration goal.
+
+## SSE inspection transition Mojo wave
+
+The precommit SSE inspection transition now runs in Mojo. Mojo owns terminal-signal precedence
+(quota, rate limit, overload, previous-response failure) and the transition from hold to commit;
+Rust retains stream accumulation, parsed event storage, retry-after transport data, and effect
+materialization. The Mojo production path no longer carries the prior inline Rust decision tree.
+
+Focused payload-detection tests and the Mojo transition corpus pass, all-target runtime-proxy
+Clippy is clean, and production-share, authority, no-fallback, and size guards pass with Mojo 1.1.0.
+
+The canonical broad inventory at this checkpoint is 49,342 reachable Mojo LOC and 196,736 Rust
+production LOC, or 20.051366% Mojo. The 75% project target remains a forward migration goal.
