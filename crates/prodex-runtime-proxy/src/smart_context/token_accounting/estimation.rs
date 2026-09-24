@@ -22,13 +22,28 @@ pub(super) fn smart_context_estimate_tokens_from_body_bytes_rust(body_bytes: usi
 }
 
 pub fn smart_context_estimate_tokens_from_body(body: &[u8]) -> u64 {
-    let Ok(text) = std::str::from_utf8(body) else {
-        return smart_context_estimate_tokens_from_body_bytes(body.len());
-    };
-    smart_context_estimate_tokens_from_text(text)
-        .max(smart_context_estimate_tokens_from_body_bytes(body.len()).saturating_div(2))
+    #[cfg(feature = "mojo")]
+    {
+        crate::quota::mojo::smart_context_estimate_tokens_from_body(body)
+            .expect("Mojo text token estimator rejected a Rust byte slice")
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        smart_context_estimate_tokens_from_body_rust(body)
+    }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
+pub(super) fn smart_context_estimate_tokens_from_body_rust(body: &[u8]) -> u64 {
+    let byte_estimate = smart_context_estimate_tokens_from_body_bytes_rust(body.len());
+    let Ok(text) = std::str::from_utf8(body) else {
+        return byte_estimate;
+    };
+    smart_context_estimate_tokens_from_text(text).max(byte_estimate.saturating_div(2))
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_estimate_tokens_from_text(text: &str) -> u64 {
     let mut tokens = 0u64;
     let mut run = String::new();
@@ -75,6 +90,7 @@ pub(in crate::smart_context) fn smart_context_estimate_tokens_from_text(text: &s
         .saturating_add(separators.saturating_add(7) / 8)
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::smart_context) enum SmartContextEstimatorRunKind {
     Word,
@@ -82,6 +98,7 @@ pub(in crate::smart_context) enum SmartContextEstimatorRunKind {
     Other,
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_estimator_run_kind(
     ch: char,
 ) -> SmartContextEstimatorRunKind {
@@ -94,6 +111,7 @@ pub(in crate::smart_context) fn smart_context_estimator_run_kind(
     }
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_estimate_run_tokens(
     run: &str,
     kind: SmartContextEstimatorRunKind,
@@ -108,4 +126,52 @@ pub(in crate::smart_context) fn smart_context_estimate_run_tokens(
         SmartContextEstimatorRunKind::Other => chars,
     }
     .max(1)
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod tests {
+    use super::{
+        smart_context_estimate_tokens_from_body, smart_context_estimate_tokens_from_body_rust,
+    };
+
+    #[test]
+    fn mojo_body_token_estimator_matches_seeded_rust_oracle() {
+        const FRAGMENTS: [&str; 27] = [
+            "a", "Z", "0", "9", "_", "-", " ", "\n", "\r", "\u{1c}", "\u{2003}", "{", "}", "[",
+            "]", ":", ",", "\"", "'", "`", "(", ")", "<", ">", "é", "界", "🙂",
+        ];
+        let mut seed = 0x4d59_5df4_d0f3_3173_u64;
+        for case in 0..128 {
+            let mut body = String::new();
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let fragments = (seed >> 58) as usize;
+            for _ in 0..fragments {
+                seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                body.push_str(FRAGMENTS[(seed as usize) % FRAGMENTS.len()]);
+            }
+            let bytes = body.as_bytes();
+            let mojo = prodex_mojo_core::runtime::smart_context_estimate_tokens_from_body(bytes)
+                .expect("valid Rust byte slice is accepted by Mojo");
+            assert_eq!(
+                mojo,
+                smart_context_estimate_tokens_from_body_rust(bytes),
+                "case={case}, body={body:?}"
+            );
+            assert_eq!(
+                smart_context_estimate_tokens_from_body(bytes),
+                mojo,
+                "case={case}, body={body:?}"
+            );
+        }
+
+        let invalid_utf8 = [0xff, b'a', 0xf0, 0x80];
+        let mojo =
+            prodex_mojo_core::runtime::smart_context_estimate_tokens_from_body(&invalid_utf8)
+                .expect("invalid UTF-8 uses the byte estimate");
+        assert_eq!(
+            mojo,
+            smart_context_estimate_tokens_from_body_rust(&invalid_utf8)
+        );
+        assert_eq!(smart_context_estimate_tokens_from_body(&invalid_utf8), mojo);
+    }
 }

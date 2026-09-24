@@ -350,6 +350,11 @@ unsafe extern "C" {
         route_kind: i64,
     ) -> i64;
     fn prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes: u64) -> u64;
+    fn prodex_smart_context_estimate_tokens_from_body_v1(
+        body_address: u64,
+        body_length: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_smart_context_pressure_snapshot(
         model_context_window_tokens: u64,
         model_context_window_has_value: i64,
@@ -653,6 +658,25 @@ pub fn profile_schedule_self_test() -> bool {
 
 pub fn smart_context_estimate_tokens_from_body_bytes(body_bytes: u64) -> u64 {
     unsafe { prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes) }
+}
+
+pub fn smart_context_estimate_tokens_from_body(body: &[u8]) -> Result<u64, crate::MojoError> {
+    let body_length = i64::try_from(body.len()).map_err(|_| crate::MojoError::InvalidInput)?;
+    let mut estimate = 0_u64;
+    let status = unsafe {
+        prodex_smart_context_estimate_tokens_from_body_v1(
+            body.as_ptr() as usize as u64,
+            body_length,
+            &mut estimate as *mut u64 as usize as u64,
+        )
+    };
+    if status == 0 {
+        Ok(estimate)
+    } else if status == 1 {
+        Err(crate::MojoError::InvalidInput)
+    } else {
+        Err(crate::MojoError::InvalidOutput)
+    }
 }
 
 pub fn smart_context_pressure_snapshot(

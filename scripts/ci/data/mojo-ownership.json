@@ -427,6 +427,14 @@
           "runtime_policy_proxy_preset_defaults"
         ]
       },
+      "mojo/prodex_core/smart_context.mojo": {
+        "operations": [
+          "smart_context_token_usage_summary",
+          "smart_context_adaptive_budget_planning",
+          "smart_context_calibrated_estimate",
+          "smart_context_text_token_estimate"
+        ]
+      },
       "mojo/prodex_core/context_text.mojo": {
         "semantic_ranges": [
           {
@@ -879,6 +887,24 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "observation acquisition and bounded DTO adapter"
+    },
+    {
+      "name": "smart_context_text_token_estimate",
+      "domain": "smart_context/accounting",
+      "introduced_in": "0.431.7",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_smart_context_estimate_tokens_from_body_v1",
+      "mojo_source": "mojo/prodex_core/smart_context.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/mojo.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::smart_context_estimate_tokens_from_body",
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
+      "rust_owner_before": "UTF-8 body token estimation, byte fallback, and conservative floor",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed byte-slice adapter; Rust formula retained as test oracle and feature-off implementation"
     },
     {
       "name": "quota_capacity_lane_planning",
