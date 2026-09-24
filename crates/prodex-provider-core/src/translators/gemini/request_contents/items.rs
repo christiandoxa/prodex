@@ -189,14 +189,27 @@ fn gemini_function_call_part(
         .and_then(Value::as_str)
         .and_then(|args| serde_json::from_str::<Value>(args).ok())
         .unwrap_or_else(|| json!({}));
-    let mut function_call = json!({
-        "name": name,
-        "args": args,
-    });
-    if !call_id.trim().is_empty() {
-        function_call["id"] = Value::String(call_id.to_string());
+    let call_id = (!call_id.trim().is_empty()).then_some(call_id);
+    #[cfg(feature = "mojo")]
+    {
+        Some(super::gemini_request_function_part(
+            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::FunctionCallPart,
+            name,
+            &args,
+            call_id,
+        ))
     }
-    Some(json!({ "functionCall": function_call }))
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut function_call = json!({
+            "name": name,
+            "args": args,
+        });
+        if let Some(call_id) = call_id {
+            function_call["id"] = Value::String(call_id.to_string());
+        }
+        Some(json!({ "functionCall": function_call }))
+    }
 }
 
 fn gemini_append_tool_content(
@@ -232,14 +245,27 @@ fn gemini_function_response_part(
         .or_else(|| tool_names_by_call_id.get(call_id).cloned())
         .unwrap_or_else(|| "tool_call".to_string());
     let response = gemini_tool_response_from_message(tool_item);
-    let mut function_response = json!({
-        "name": name,
-        "response": response,
-    });
-    if !call_id.trim().is_empty() {
-        function_response["id"] = Value::String(call_id.to_string());
+    let call_id = (!call_id.trim().is_empty()).then_some(call_id);
+    #[cfg(feature = "mojo")]
+    {
+        super::gemini_request_function_part(
+            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::FunctionResponsePart,
+            &name,
+            &response,
+            call_id,
+        )
     }
-    json!({ "functionResponse": function_response })
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut function_response = json!({
+            "name": name,
+            "response": response,
+        });
+        if let Some(call_id) = call_id {
+            function_response["id"] = Value::String(call_id.to_string());
+        }
+        json!({ "functionResponse": function_response })
+    }
 }
 
 fn gemini_append_user_content(item: &Value, contents: &mut Vec<Value>) {

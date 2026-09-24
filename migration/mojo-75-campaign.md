@@ -673,3 +673,23 @@ guards pass.
 The canonical broad inventory is 50,451 reachable Mojo LOC and 196,717 Rust
 production LOC, or 20.41162286380114% Mojo. The 75% project target remains unmet;
 the report estimates 539,700 additional Mojo LOC at current Rust volume.
+
+## Gemini Responses function-call history parts
+
+Gemini Responses history with tool calls is outside the text-only Mojo request
+kernel's supported shape, so Rust still traverses messages, parses arguments,
+and correlates call IDs with tool names. The feature-on traversal now sends
+canonical name, argument/response, and optional call-ID JSON fragments through
+the existing Mojo `FunctionCallPart` and `FunctionResponsePart` operations.
+Mojo owns those Gemini wire shapes; feature-off builds retain Rust construction.
+
+The focused parity case runs through the same text-kernel decline and contents
+dispatch as production. It verifies assistant calls, malformed-argument
+defaults, mapped tool replies, IDs, and JSON versus plain-text response values
+in both feature modes. No new ABI operation or dependency was needed.
+
+The canonical inventory is 50,451 reachable Mojo LOC and 196,738 Rust
+production LOC, or 20.409888789549697% Mojo. The existing Mojo source was already
+counted, so this wiring wave adds no Mojo LOC and raises counted Rust adapter
+volume by 21 LOC. The 75% target remains unmet; 539,763 additional Mojo LOC are
+estimated at current Rust volume.
