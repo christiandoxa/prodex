@@ -161,46 +161,21 @@ pub fn runtime_profile_route_coupling_score_from_map<T: RuntimeProfileHealthEntr
 ) -> u32 {
     #[cfg(feature = "mojo")]
     {
-        runtime_route_coupled_kinds(route_kind)
-            .iter()
-            .copied()
-            .map(|coupled_kind| {
-                let route = profile_health
-                    .get(&runtime_profile_route_health_key(
-                        profile_name,
-                        coupled_kind,
-                    ))
-                    .map(|entry| {
+        profile_health_coupling_score_mojo(
+            profile_health_score_input(
+                |key| {
+                    profile_health.get(key).map(|entry| {
                         (
                             entry.runtime_profile_health_score(),
                             entry.runtime_profile_health_updated_at(),
                         )
                     })
-                    .unwrap_or_default();
-                let bad = profile_health
-                    .get(&runtime_profile_route_bad_pairing_key(
-                        profile_name,
-                        coupled_kind,
-                    ))
-                    .map(|entry| {
-                        (
-                            entry.runtime_profile_health_score(),
-                            entry.runtime_profile_health_updated_at(),
-                        )
-                    })
-                    .unwrap_or_default();
-                prodex_mojo_core::runtime::profile_health_coupling_score(
-                    route.0,
-                    route.1,
-                    bad.0,
-                    bad.1,
-                    now,
-                    RUNTIME_PROFILE_HEALTH_DECAY_SECONDS,
-                    RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-                )
-                .unwrap_or_else(|error| panic!("Mojo profile coupling score failed: {error:?}"))
-            })
-            .fold(0, u32::saturating_add)
+                },
+                profile_name,
+                route_kind,
+            ),
+            now,
+        )
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_route_coupling_score_from_map_rust(
@@ -251,34 +226,14 @@ where
 {
     #[cfg(feature = "mojo")]
     {
-        runtime_route_coupled_kinds(route_kind)
-            .iter()
-            .copied()
-            .map(|coupled_kind| {
-                let route = health_entry(&runtime_profile_route_health_key(
-                    profile_name,
-                    coupled_kind,
-                ))
-                .map(|entry| (entry.score, entry.updated_at))
-                .unwrap_or_default();
-                let bad = health_entry(&runtime_profile_route_bad_pairing_key(
-                    profile_name,
-                    coupled_kind,
-                ))
-                .map(|entry| (entry.score, entry.updated_at))
-                .unwrap_or_default();
-                prodex_mojo_core::runtime::profile_health_coupling_score(
-                    route.0,
-                    route.1,
-                    bad.0,
-                    bad.1,
-                    now,
-                    RUNTIME_PROFILE_HEALTH_DECAY_SECONDS,
-                    RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-                )
-                .unwrap_or_else(|error| panic!("Mojo profile coupling score failed: {error:?}"))
-            })
-            .fold(0, u32::saturating_add)
+        profile_health_coupling_score_mojo(
+            profile_health_score_input(
+                |key| health_entry(key).map(|entry| (entry.score, entry.updated_at)),
+                profile_name,
+                route_kind,
+            ),
+            now,
+        )
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_route_coupling_score_by_key_rust(health_entry, profile_name, now, route_kind)
@@ -324,43 +279,21 @@ pub fn runtime_profile_route_performance_score<T: RuntimeProfileHealthEntry>(
 ) -> u32 {
     #[cfg(feature = "mojo")]
     {
-        let route = profile_health
-            .get(&runtime_profile_route_performance_key(
+        profile_health_performance_score_mojo(
+            profile_health_score_input(
+                |key| {
+                    profile_health.get(key).map(|entry| {
+                        (
+                            entry.runtime_profile_health_score(),
+                            entry.runtime_profile_health_updated_at(),
+                        )
+                    })
+                },
                 profile_name,
                 route_kind,
-            ))
-            .map(|entry| {
-                (
-                    entry.runtime_profile_health_score(),
-                    entry.runtime_profile_health_updated_at(),
-                )
-            })
-            .unwrap_or_default();
-        let coupled_kind = runtime_route_coupled_kinds(route_kind)
-            .first()
-            .copied()
-            .expect("runtime routes always have one coupled route");
-        let coupled = profile_health
-            .get(&runtime_profile_route_performance_key(
-                profile_name,
-                coupled_kind,
-            ))
-            .map(|entry| {
-                (
-                    entry.runtime_profile_health_score(),
-                    entry.runtime_profile_health_updated_at(),
-                )
-            })
-            .unwrap_or_default();
-        prodex_mojo_core::runtime::profile_health_performance_score(
-            route.0,
-            route.1,
-            coupled.0,
-            coupled.1,
+            ),
             now,
-            RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
         )
-        .unwrap_or_else(|error| panic!("Mojo profile performance score failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_route_performance_score_rust(profile_health, profile_name, now, route_kind)
@@ -406,31 +339,14 @@ where
 {
     #[cfg(feature = "mojo")]
     {
-        let route = health_entry(&runtime_profile_route_performance_key(
-            profile_name,
-            route_kind,
-        ))
-        .map(|entry| (entry.score, entry.updated_at))
-        .unwrap_or_default();
-        let coupled_kind = runtime_route_coupled_kinds(route_kind)
-            .first()
-            .copied()
-            .expect("runtime routes always have one coupled route");
-        let coupled = health_entry(&runtime_profile_route_performance_key(
-            profile_name,
-            coupled_kind,
-        ))
-        .map(|entry| (entry.score, entry.updated_at))
-        .unwrap_or_default();
-        prodex_mojo_core::runtime::profile_health_performance_score(
-            route.0,
-            route.1,
-            coupled.0,
-            coupled.1,
+        profile_health_performance_score_mojo(
+            profile_health_score_input(
+                |key| health_entry(key).map(|entry| (entry.score, entry.updated_at)),
+                profile_name,
+                route_kind,
+            ),
             now,
-            RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
         )
-        .unwrap_or_else(|error| panic!("Mojo profile performance score failed: {error:?}"))
     }
     #[cfg(not(feature = "mojo"))]
     runtime_profile_route_performance_score_by_key_rust(health_entry, profile_name, now, route_kind)
@@ -650,6 +566,39 @@ where
         coupled_performance_score,
         coupled_performance_updated_at,
     }
+}
+
+#[cfg(feature = "mojo")]
+fn profile_health_coupling_score_mojo(
+    input: prodex_mojo_core::runtime::ProfileHealthScoreInput,
+    now: i64,
+) -> u32 {
+    prodex_mojo_core::runtime::profile_health_coupling_score(
+        input.coupled_health_score,
+        input.coupled_health_updated_at,
+        input.coupled_bad_pairing_score,
+        input.coupled_bad_pairing_updated_at,
+        now,
+        RUNTIME_PROFILE_HEALTH_DECAY_SECONDS,
+        RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+    )
+    .unwrap_or_else(|error| panic!("Mojo profile coupling score failed: {error:?}"))
+}
+
+#[cfg(feature = "mojo")]
+fn profile_health_performance_score_mojo(
+    input: prodex_mojo_core::runtime::ProfileHealthScoreInput,
+    now: i64,
+) -> u32 {
+    prodex_mojo_core::runtime::profile_health_performance_score(
+        input.route_performance_score,
+        input.route_performance_updated_at,
+        input.coupled_performance_score,
+        input.coupled_performance_updated_at,
+        now,
+        RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
+    )
+    .unwrap_or_else(|error| panic!("Mojo profile performance score failed: {error:?}"))
 }
 
 #[cfg(feature = "mojo")]
