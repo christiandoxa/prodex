@@ -421,3 +421,19 @@ production-share, ownership, authority, no-fallback, and size guards pass with M
 
 The canonical broad inventory at this checkpoint is 49,076 reachable Mojo LOC and 196,659 Rust
 production LOC, or 19.971107% Mojo. The 75% project target remains a forward migration goal.
+
+## Response-forwarding classification wave
+
+Response-forwarding classification now runs in a dedicated Mojo kernel. Mojo owns hop-by-hop
+response-header classification, SSE content-type recognition, terminal/completed token-usage event
+classification, and model-generation-start event classification. The former Rust decision logic is
+removed from the Mojo production path; Rust retains transport/header acquisition, typed result
+construction, stateful timing, and the explicit feature-off compatibility implementation.
+
+A fresh Mojo 1.1.0 archive build plus feature-on/feature-off response-forwarding tests pass, including
+header casing/whitespace, SSE content types, terminal event families, generation deltas, live usage,
+and SSE tap-state behavior. All-target Clippy and production-share, ownership, authority,
+no-fallback, and size guards pass.
+
+The canonical broad inventory at this checkpoint is 49,241 reachable Mojo LOC and 196,662 Rust
+production LOC, or 20.024563% Mojo. The 75% project target remains a forward migration goal.

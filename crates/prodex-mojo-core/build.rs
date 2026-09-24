@@ -318,6 +318,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/context_command_output_search.mojo");
         sources.push("../../mojo/prodex_core/runtime_health.mojo");
         sources.push("../../mojo/prodex_core/compatibility_surface.mojo");
+        sources.push("../../mojo/prodex_core/response_forwarding.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_RICH").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
