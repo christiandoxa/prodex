@@ -257,19 +257,11 @@ pub fn deepseek_provider_core_user_id_from_responses_request(
     let Some(user_id) = user_id.as_str() else {
         return Err(format!("{provider_label} user_id must be a string"));
     };
-    let raw_user_id = user_id;
-    let user_id = raw_user_id.trim();
+    let user_id = user_id.trim();
     if user_id.is_empty() {
-        #[cfg(feature = "mojo")]
-        {
-            let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::UserId);
-            input.input = Some(raw_user_id);
-            let _ = deepseek_provider_core_mojo_value(input).map_err(|error| {
-                format!("{provider_label} user_id could not be normalized: {error}")
-            })?;
-        }
         return Ok(None);
     }
+    #[cfg(not(feature = "mojo"))]
     if user_id.len() > 512
         || !user_id
             .bytes()
@@ -282,10 +274,15 @@ pub fn deepseek_provider_core_user_id_from_responses_request(
     #[cfg(feature = "mojo")]
     {
         let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::UserId);
-        input.input = Some(raw_user_id);
+        input.input = Some(user_id);
         let normalized = deepseek_provider_core_mojo_value(input).map_err(|error| {
             format!("{provider_label} user_id could not be normalized: {error}")
         })?;
+        if normalized.is_null() {
+            return Err(format!(
+                "{provider_label} user_id must use only letters, numbers, underscores, or dashes and be at most 512 bytes"
+            ));
+        }
         normalized
             .as_str()
             .filter(|user_id| !user_id.is_empty())
@@ -294,4 +291,39 @@ pub fn deepseek_provider_core_user_id_from_responses_request(
     }
     #[cfg(not(feature = "mojo"))]
     Ok(Some(user_id.to_string()))
+}
+
+#[cfg(feature = "mojo")]
+pub(crate) fn deepseek_provider_core_validate_responses_request_params(
+    source: &str,
+    provider_label: &str,
+) -> Result<(), String> {
+    let plan = prodex_mojo_core::rich::deepseek_request_policy(
+        DeepSeekRequestPolicyOperation::ResponsesRequestParams,
+        source,
+        false,
+        0,
+    )
+    .map_err(|error| format!("{provider_label} request parameter policy failed: {error:?}"))?;
+    let error = match plan.tag {
+        0 => return Ok(()),
+        1 => "temperature must be a number",
+        2 => "top_p must be a number",
+        3 => "max_output_tokens must be a positive integer",
+        4 => "max_tokens must be a positive integer",
+        5 => "max_completion_tokens must be a positive integer",
+        6 => "logprobs must be a boolean",
+        7 => "top_logprobs must be an integer",
+        8 => "top_logprobs must be <= 20",
+        9 => "top_logprobs requires logprobs=true",
+        10 => "stop must be a string or array of strings",
+        11 => "supports at most 16 stop sequences",
+        12 => "stop sequences must be strings",
+        tag => {
+            return Err(format!(
+                "{provider_label} request parameter validation returned unknown result {tag}"
+            ));
+        }
+    };
+    Err(format!("{provider_label} {error}"))
 }

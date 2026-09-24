@@ -2,6 +2,7 @@
 
 use serde_json::Value;
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_insert_primitive_request_fields(
     value: &Value,
     request: &mut serde_json::Map<String, Value>,
@@ -31,6 +32,7 @@ pub(super) fn deepseek_insert_primitive_request_fields(
     Ok(())
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_top_logprobs_from_request(value: &Value) -> Result<Option<Value>, String> {
     let Some(top_logprobs) = value.get("top_logprobs") else {
         return Ok(None);
@@ -47,6 +49,7 @@ pub(super) fn deepseek_top_logprobs_from_request(value: &Value) -> Result<Option
     Ok(Some(top_logprobs.clone()))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_stop_from_request(value: &Value) -> Result<Option<Value>, String> {
     let Some(stop) = value
         .get("stop")
@@ -70,6 +73,7 @@ pub(super) fn deepseek_stop_from_request(value: &Value) -> Result<Option<Value>,
     Ok(Some(stop.clone()))
 }
 
+#[cfg(any(not(feature = "mojo"), test))]
 pub(super) fn deepseek_user_id_from_request(value: &Value) -> Result<Option<String>, String> {
     let Some(user_id) = value
         .get("user_id")

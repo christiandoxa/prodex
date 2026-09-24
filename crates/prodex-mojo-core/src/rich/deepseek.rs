@@ -62,6 +62,7 @@ pub enum DeepSeekRequestPolicyOperation {
     WebSearchOptions = 9,
     WebSearchContext = 10,
     ToolsShape = 11,
+    ResponsesRequestParams = 12,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -301,6 +302,19 @@ fn input_bytes(input: &DeepSeekKernelInput<'_>) -> Result<usize, MojoError> {
     })
 }
 
+fn kernel_output_capacity(
+    operation: DeepSeekKernelOperation,
+    input_bytes: usize,
+) -> Result<usize, MojoError> {
+    if operation == DeepSeekKernelOperation::UserId {
+        return Ok(512 + 2);
+    }
+    input_bytes
+        .checked_mul(8)
+        .and_then(|value| value.checked_add(2048))
+        .ok_or(MojoError::InvalidInput)
+}
+
 pub fn deepseek_request_policy(
     operation: DeepSeekRequestPolicyOperation,
     input: &str,
@@ -356,10 +370,7 @@ pub fn deepseek_kernel(input: DeepSeekKernelInput<'_>) -> Result<Vec<u8>, MojoEr
     if input_bytes > DEEPSEEK_KERNEL_MAX_BYTES {
         return Err(MojoError::InvalidInput);
     }
-    let capacity = input_bytes
-        .checked_mul(8)
-        .and_then(|value| value.checked_add(2048))
-        .ok_or(MojoError::InvalidInput)?;
+    let capacity = kernel_output_capacity(input.operation, input_bytes)?;
     let ffi_input = DeepSeekKernelFfiInput {
         operation: operation_code(input.operation),
         sequence_number: input.sequence_number,
@@ -448,4 +459,17 @@ pub fn deepseek_kernel(input: DeepSeekKernelInput<'_>) -> Result<Vec<u8>, MojoEr
     }
     output.truncate(written);
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DEEPSEEK_KERNEL_MAX_BYTES, DeepSeekKernelOperation, kernel_output_capacity};
+
+    #[test]
+    fn user_id_output_capacity_stays_bounded_for_large_inputs() {
+        assert_eq!(
+            kernel_output_capacity(DeepSeekKernelOperation::UserId, DEEPSEEK_KERNEL_MAX_BYTES),
+            Ok(514)
+        );
+    }
 }
