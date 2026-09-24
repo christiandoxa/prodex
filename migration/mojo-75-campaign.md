@@ -544,3 +544,18 @@ runtime-store Clippy with warnings denied, the `prodex-mojo-core` runtime test s
 production-share, authority, no-fallback, size, Ratatui interaction, and diff checks.
 At this checkpoint the canonical broad inventory is 50,150 reachable Mojo LOC and
 196,787 Rust production LOC, or 20.308824% Mojo.
+
+## Continuation binding compaction Mojo wave
+
+Continuation binding retention and retention-key ordering now execute in the existing
+`continuation_status.mojo` kernel. Rust keeps map traversal, bounded-key validation,
+profile-conflict string detection, and removal/materialization; Mojo owns the decision
+about whether a binding survives and the evidence tuple used to choose cold entries.
+
+The redundant Rust evidence-sort wrapper was deleted after all remaining consumers
+moved to the higher-level Mojo operations. No Rust fallback implementation was added.
+The 27-test runtime-store suite and all-target Clippy pass with Mojo 1.1.0, together
+with production-share, authority, no-fallback, size, and diff guards.
+
+The canonical broad inventory is 50,203 reachable Mojo LOC and 196,769 Rust
+production LOC, or 20.327406% Mojo.

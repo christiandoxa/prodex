@@ -3,10 +3,11 @@ use super::*;
 mod mojo;
 
 pub use mojo::{
-    runtime_binding_touch_should_persist, runtime_continuation_dead_status_shadowed_by_binding,
-    runtime_continuation_status_evidence_sort_key, runtime_continuation_status_is_stale_verified,
-    runtime_continuation_status_is_terminal, runtime_continuation_status_recently_suspect,
-    runtime_continuation_status_retention_sort_key,
+    runtime_binding_touch_should_persist, runtime_continuation_binding_retention_sort_key,
+    runtime_continuation_binding_should_retain,
+    runtime_continuation_dead_status_shadowed_by_binding,
+    runtime_continuation_status_is_stale_verified, runtime_continuation_status_is_terminal,
+    runtime_continuation_status_recently_suspect, runtime_continuation_status_retention_sort_key,
     runtime_continuation_status_should_persist_touch,
     runtime_continuation_status_should_refresh_verified,
     runtime_continuation_status_should_replace,

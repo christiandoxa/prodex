@@ -22,9 +22,10 @@ comptime OP_STALE_VERIFIED: Int64 = 12
 comptime OP_RETAIN_WITH_BINDING: Int64 = 13
 comptime OP_RETAIN_WITHOUT_BINDING: Int64 = 14
 comptime OP_DEAD_SHADOWED: Int64 = 16
-comptime OP_EVIDENCE_KEY: Int64 = 17
 comptime OP_SHOULD_REPLACE: Int64 = 18
 comptime OP_RETENTION_KEY: Int64 = 21
+comptime OP_BINDING_SHOULD_RETAIN: Int64 = 22
+comptime OP_BINDING_RETENTION_KEY: Int64 = 23
 
 
 def sat_sub_i64(left: Int64, right: Int64) -> Int64:
@@ -470,18 +471,6 @@ def prodex_runtime_continuation_status_transition_v1(
         )
         return 0
 
-    if operation == OP_EVIDENCE_KEY:
-        if field_count != 13 or output_count != 8:
-            return 1
-        var confidence_max = fields[unsafe_offset=12]
-        if confidence_max < 0 or confidence_max > UINT32_MAX:
-            return 2
-        for index in range(8):
-            output[unsafe_offset=index] = evidence_field(
-                fields, 0, confidence_max, Int64(index)
-            )
-        return 0
-
     if operation == OP_STALE_VERIFIED:
         if field_count != 14 or output_count != 1:
             return 1
@@ -538,6 +527,71 @@ def prodex_runtime_continuation_status_transition_v1(
                 output[unsafe_offset=0] = Int64(fields[unsafe_offset=12] > fields[unsafe_offset=8])
             elif fields[unsafe_offset=2] == 1:
                 output[unsafe_offset=0] = Int64(fields[unsafe_offset=12] > fields[unsafe_offset=3])
+        return 0
+
+    if operation == OP_BINDING_SHOULD_RETAIN:
+        if field_count != 18 or output_count != 1:
+            return 1
+        var present = fields[unsafe_offset=12]
+        var conflict = fields[unsafe_offset=13]
+        var suspect_limit = fields[unsafe_offset=17]
+        if not bool_field(present) or not bool_field(conflict) or suspect_limit < 0 or suspect_limit > UINT32_MAX:
+            return 2
+        if conflict == 1:
+            output[unsafe_offset=0] = 1
+            return 0
+        var bound_at = fields[unsafe_offset=14]
+        var now = fields[unsafe_offset=15]
+        if present == 0:
+            output[unsafe_offset=0] = Int64(bound_at <= now)
+            return 0
+        if fields[unsafe_offset=0] == STATE_DEAD:
+            var dead_present = fields[unsafe_offset=7]
+            var dead_at = fields[unsafe_offset=8]
+            if dead_present == 0:
+                dead_present = fields[unsafe_offset=2]
+                dead_at = fields[unsafe_offset=3]
+            if dead_present == 1 and bound_at > dead_at:
+                output[unsafe_offset=0] = 1
+                return 0
+        if terminal(fields, suspect_limit):
+            return 0
+        output[unsafe_offset=0] = Int64(retain_with_binding(fields, now, fields[unsafe_offset=16], suspect_limit))
+        return 0
+
+    if operation == OP_BINDING_RETENTION_KEY:
+        if field_count != 16 or output_count != 9:
+            return 1
+        var present = fields[unsafe_offset=12]
+        var conflict = fields[unsafe_offset=13]
+        var confidence_max = fields[unsafe_offset=15]
+        if not bool_field(present) or not bool_field(conflict) or confidence_max < 0 or confidence_max > UINT32_MAX:
+            return 2
+        var bound_at = fields[unsafe_offset=14]
+        if conflict == 1:
+            output[unsafe_offset=0] = 255
+            output[unsafe_offset=1] = UINT32_MAX
+            output[unsafe_offset=2] = UINT32_MAX
+            output[unsafe_offset=3] = UINT32_MAX
+            output[unsafe_offset=4] = 255
+            output[unsafe_offset=5] = INT64_MAX
+            output[unsafe_offset=6] = INT64_MAX
+            output[unsafe_offset=7] = INT64_MAX
+            output[unsafe_offset=8] = bound_at
+            return 0
+        if present == 1:
+            for index in range(8):
+                output[unsafe_offset=index] = evidence_field(fields, 0, confidence_max, Int64(index))
+        else:
+            output[unsafe_offset=0] = 0
+            output[unsafe_offset=1] = 0
+            output[unsafe_offset=2] = 0
+            output[unsafe_offset=3] = 0
+            output[unsafe_offset=4] = 0
+            output[unsafe_offset=5] = INT64_MIN
+            output[unsafe_offset=6] = INT64_MIN
+            output[unsafe_offset=7] = INT64_MIN
+        output[unsafe_offset=8] = bound_at
         return 0
 
     if operation == OP_RETENTION_KEY:
