@@ -524,3 +524,23 @@ and size guards pass with Mojo 1.1.0.
 
 The canonical broad inventory at this checkpoint is 49,645 reachable Mojo LOC and 196,796 Rust
 production LOC, or 20.144781% Mojo. The 75% project target remains a forward migration goal.
+
+## Continuation status policy Mojo wave
+
+Runtime continuation lifecycle policy now executes through
+`mojo/prodex_core/continuation_status.mojo`. Mojo owns monotonic event timestamps,
+verified/suspect/dead transitions, confidence and streak saturation, stale/terminal
+classification, merge replacement precedence, and retention/evidence ordering. The
+`prodex-runtime-store` Rust side retains `BTreeMap` ownership, string materialization,
+typed status reconstruction, and compaction orchestration.
+
+The former Rust decision implementation was deleted from the production source rather
+than retained as a fallback. `prodex-runtime-store` now links the Mojo runtime kernel
+as a normal dependency; its legacy `mojo` feature remains only as a compatibility
+feature name and does not select a Rust implementation.
+
+Focused validation passed with Mojo 1.1.0: the 27-test runtime-store suite, all-target
+runtime-store Clippy with warnings denied, the `prodex-mojo-core` runtime test set,
+production-share, authority, no-fallback, size, Ratatui interaction, and diff checks.
+At this checkpoint the canonical broad inventory is 50,150 reachable Mojo LOC and
+196,787 Rust production LOC, or 20.308824% Mojo.

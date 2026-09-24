@@ -317,6 +317,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/context_command_output.mojo");
         sources.push("../../mojo/prodex_core/context_command_output_search.mojo");
         sources.push("../../mojo/prodex_core/runtime_health.mojo");
+        sources.push("../../mojo/prodex_core/continuation_status.mojo");
         sources.push("../../mojo/prodex_core/compatibility_surface.mojo");
         sources.push("../../mojo/prodex_core/response_forwarding.mojo");
         sources.push("../../mojo/prodex_core/sse_line.mojo");
