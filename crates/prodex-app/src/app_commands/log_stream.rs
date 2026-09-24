@@ -312,158 +312,306 @@ fn short_request_id(request: u64) -> String {
     format!("r{:04x}", request & 0xffff)
 }
 
+#[cfg(any(not(feature = "mojo-core"), test))]
+mod summary_oracle {
+    use super::*;
+
+    pub(super) fn operational_event_summary(
+        event: &str,
+        source: &str,
+        fields: &BTreeMap<String, String>,
+    ) -> String {
+        let mut details = Vec::new();
+        match source {
+            "request" | "model" | "route" | "mcp" | "agent" | "tool" | "event" => {
+                add_log_detail(&mut details, fields, "profile", "profile");
+                add_log_detail(&mut details, fields, "route", "route");
+                add_log_detail(&mut details, fields, "provider", "provider");
+                add_log_detail(&mut details, fields, "model", "model");
+                add_log_detail(&mut details, fields, "from_model", "from");
+                add_log_detail(&mut details, fields, "to_model", "to");
+                add_log_detail(&mut details, fields, "effort", "effort");
+                add_log_detail(&mut details, fields, "transport", "transport");
+                add_log_detail(&mut details, fields, "method", "method");
+                add_log_detail(&mut details, fields, "command", "command");
+                add_log_detail(&mut details, fields, "cwd", "cwd");
+                add_log_detail(&mut details, fields, "arg_count", "args");
+                add_log_detail(&mut details, fields, "env_count", "env");
+                add_log_detail(&mut details, fields, "stdin_bytes", "stdin_bytes");
+                add_log_detail(&mut details, fields, "timeout_ms", "timeout_ms");
+                add_log_endpoint_detail(&mut details, fields, "path", "path");
+                add_log_endpoint_detail(&mut details, fields, "url", "path");
+                add_log_detail(&mut details, fields, "tool_surface", "tools");
+                add_log_detail(&mut details, fields, "continuation", "continuation");
+                add_log_detail(&mut details, fields, "status", "status");
+                add_log_detail(&mut details, fields, "class", "class");
+                add_log_detail(&mut details, fields, "event_type", "event");
+                add_log_detail(&mut details, fields, "state", "state");
+                add_log_detail(&mut details, fields, "code", "code");
+                add_log_detail(&mut details, fields, "reason", "reason");
+                add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
+                add_log_detail(&mut details, fields, "duration_ms", "duration_ms");
+                add_log_detail(&mut details, fields, "exit_code", "exit");
+                add_log_detail(&mut details, fields, "exit_status", "exit");
+                add_log_detail(&mut details, fields, "outcome", "outcome");
+                add_log_detail(&mut details, fields, "active", "active");
+                add_log_detail(&mut details, fields, "limit", "limit");
+                add_log_detail(&mut details, fields, "count", "count");
+                add_log_detail(&mut details, fields, "dropped", "dropped");
+            }
+            "quota" => {
+                add_log_detail(&mut details, fields, "profile", "profile");
+                add_log_detail(&mut details, fields, "route", "route");
+                add_log_detail(&mut details, fields, "quota_band", "band");
+                add_log_percent_detail(&mut details, fields, "five_hour_remaining", "5h");
+                add_log_percent_detail(&mut details, fields, "weekly_remaining", "week");
+                add_log_detail(&mut details, fields, "reason", "reason");
+                add_log_detail(&mut details, fields, "until", "until");
+            }
+            "retry" | "backoff" => {
+                add_log_detail(&mut details, fields, "profile", "profile");
+                add_log_detail(&mut details, fields, "route", "route");
+                add_log_detail(&mut details, fields, "provider", "provider");
+                add_log_detail(&mut details, fields, "reason", "reason");
+                add_log_detail(&mut details, fields, "class", "class");
+                add_log_detail(&mut details, fields, "attempt", "attempt");
+                add_log_detail(&mut details, fields, "retry_index", "retry");
+                add_log_detail(&mut details, fields, "seconds", "backoff_s");
+                add_log_detail(&mut details, fields, "until", "until");
+            }
+            "health" => {
+                add_log_detail(&mut details, fields, "profile", "profile");
+                add_log_detail(&mut details, fields, "route", "route");
+                add_log_detail(&mut details, fields, "score", "score");
+                add_log_detail(&mut details, fields, "delta", "delta");
+                add_log_detail(&mut details, fields, "reason", "reason");
+            }
+            "upstream" => {
+                add_log_detail(&mut details, fields, "profile", "profile");
+                add_log_detail(&mut details, fields, "route", "route");
+                add_log_detail(&mut details, fields, "transport", "transport");
+                add_log_detail(&mut details, fields, "method", "method");
+                add_log_endpoint_detail(&mut details, fields, "url", "path");
+                add_log_detail(&mut details, fields, "status", "status");
+                add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
+                add_log_detail(&mut details, fields, "reason", "reason");
+            }
+            "stream" | "response" => {
+                add_log_detail(&mut details, fields, "profile", "profile");
+                add_log_detail(&mut details, fields, "route", "route");
+                add_log_detail(&mut details, fields, "transport", "transport");
+                if event == "first_local_chunk" {
+                    add_log_detail(&mut details, fields, "elapsed_ms", "ttft_ms");
+                } else {
+                    add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
+                }
+                add_log_detail(&mut details, fields, "chunks", "chunks");
+                add_log_detail(&mut details, fields, "bytes", "bytes");
+                add_log_detail(&mut details, fields, "status", "status");
+                add_log_detail(&mut details, fields, "event_type", "event");
+            }
+            "smart" => {
+                add_log_detail(&mut details, fields, "profile", "profile");
+                add_log_detail(&mut details, fields, "route", "route");
+                add_log_detail(&mut details, fields, "decision", "decision");
+                add_log_detail(&mut details, fields, "tier", "tier");
+                add_log_detail(&mut details, fields, "rewrite_kind", "rewrite");
+                add_log_detail(&mut details, fields, "tokens_before", "tokens_before");
+                add_log_detail(&mut details, fields, "tokens_after", "tokens_after");
+                add_log_detail(&mut details, fields, "body_bytes_saved", "bytes_saved");
+                add_log_percent_detail(&mut details, fields, "rewrite_ratio_percent", "rewrite");
+                add_log_detail(
+                    &mut details,
+                    fields,
+                    "tool_outputs_condensed",
+                    "tools_condensed",
+                );
+                add_log_detail(&mut details, fields, "rehydrated_refs", "rehydrated");
+                add_log_detail(&mut details, fields, "pressure_band", "pressure");
+                add_log_detail(&mut details, fields, "self_check", "check");
+                add_log_detail(&mut details, fields, "reason", "reason");
+            }
+            "compact" => {
+                add_log_detail(&mut details, fields, "profile", "profile");
+                add_log_detail(&mut details, fields, "route", "route");
+                add_log_detail(&mut details, fields, "provider", "provider");
+                add_log_detail(&mut details, fields, "status", "status");
+                add_log_detail(&mut details, fields, "decision", "decision");
+                add_log_detail(&mut details, fields, "exit", "exit");
+                add_log_detail(&mut details, fields, "reason", "reason");
+                add_log_detail(&mut details, fields, "attempts", "attempts");
+                add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
+            }
+            "load" => {
+                add_log_detail(&mut details, fields, "route", "route");
+                add_log_detail(&mut details, fields, "lane", "lane");
+                add_log_detail(&mut details, fields, "profile", "profile");
+                add_log_detail(&mut details, fields, "active", "active");
+                add_log_detail(&mut details, fields, "limit", "limit");
+                add_log_detail(&mut details, fields, "hard_limit", "limit");
+                add_log_detail(&mut details, fields, "reason", "reason");
+            }
+            "terminal" | "error" => {
+                add_log_detail(&mut details, fields, "profile", "profile");
+                add_log_detail(&mut details, fields, "route", "route");
+                add_log_detail(&mut details, fields, "transport", "transport");
+                add_log_detail(&mut details, fields, "stage", "stage");
+                add_log_detail(&mut details, fields, "event_type", "event");
+                add_log_detail(&mut details, fields, "status", "status");
+                add_log_detail(&mut details, fields, "class", "class");
+                add_log_detail(&mut details, fields, "reason", "reason");
+                add_log_detail(&mut details, fields, "outcome", "outcome");
+                add_log_detail(&mut details, fields, "exit_code", "exit");
+                add_log_detail(&mut details, fields, "exit_status", "exit");
+                add_log_detail(&mut details, fields, "dropped", "dropped");
+            }
+            _ => {}
+        }
+        join_log_details(&human_event_name(event), details)
+    }
+}
+
+#[cfg(feature = "mojo-core")]
+#[derive(Clone, Copy)]
+enum OperationalDetailFormat {
+    Plain,
+    Percent,
+    Endpoint,
+}
+
+#[cfg(feature = "mojo-core")]
+const OPERATIONAL_DETAIL_SPECS: [(&str, &str, OperationalDetailFormat); 62] = [
+    ("profile", "profile", OperationalDetailFormat::Plain),
+    ("route", "route", OperationalDetailFormat::Plain),
+    ("provider", "provider", OperationalDetailFormat::Plain),
+    ("model", "model", OperationalDetailFormat::Plain),
+    ("from_model", "from", OperationalDetailFormat::Plain),
+    ("to_model", "to", OperationalDetailFormat::Plain),
+    ("effort", "effort", OperationalDetailFormat::Plain),
+    ("transport", "transport", OperationalDetailFormat::Plain),
+    ("method", "method", OperationalDetailFormat::Plain),
+    ("command", "command", OperationalDetailFormat::Plain),
+    ("cwd", "cwd", OperationalDetailFormat::Plain),
+    ("arg_count", "args", OperationalDetailFormat::Plain),
+    ("env_count", "env", OperationalDetailFormat::Plain),
+    ("stdin_bytes", "stdin_bytes", OperationalDetailFormat::Plain),
+    ("timeout_ms", "timeout_ms", OperationalDetailFormat::Plain),
+    ("path", "path", OperationalDetailFormat::Endpoint),
+    ("url", "path", OperationalDetailFormat::Endpoint),
+    ("tool_surface", "tools", OperationalDetailFormat::Plain),
+    (
+        "continuation",
+        "continuation",
+        OperationalDetailFormat::Plain,
+    ),
+    ("status", "status", OperationalDetailFormat::Plain),
+    ("class", "class", OperationalDetailFormat::Plain),
+    ("event_type", "event", OperationalDetailFormat::Plain),
+    ("state", "state", OperationalDetailFormat::Plain),
+    ("code", "code", OperationalDetailFormat::Plain),
+    ("reason", "reason", OperationalDetailFormat::Plain),
+    ("elapsed_ms", "latency_ms", OperationalDetailFormat::Plain),
+    ("duration_ms", "duration_ms", OperationalDetailFormat::Plain),
+    ("exit_code", "exit", OperationalDetailFormat::Plain),
+    ("exit_status", "exit", OperationalDetailFormat::Plain),
+    ("outcome", "outcome", OperationalDetailFormat::Plain),
+    ("active", "active", OperationalDetailFormat::Plain),
+    ("limit", "limit", OperationalDetailFormat::Plain),
+    ("count", "count", OperationalDetailFormat::Plain),
+    ("dropped", "dropped", OperationalDetailFormat::Plain),
+    ("quota_band", "band", OperationalDetailFormat::Plain),
+    (
+        "five_hour_remaining",
+        "5h",
+        OperationalDetailFormat::Percent,
+    ),
+    ("weekly_remaining", "week", OperationalDetailFormat::Percent),
+    ("until", "until", OperationalDetailFormat::Plain),
+    ("attempt", "attempt", OperationalDetailFormat::Plain),
+    ("retry_index", "retry", OperationalDetailFormat::Plain),
+    ("seconds", "backoff_s", OperationalDetailFormat::Plain),
+    ("score", "score", OperationalDetailFormat::Plain),
+    ("delta", "delta", OperationalDetailFormat::Plain),
+    ("chunks", "chunks", OperationalDetailFormat::Plain),
+    ("bytes", "bytes", OperationalDetailFormat::Plain),
+    ("elapsed_ms", "ttft_ms", OperationalDetailFormat::Plain),
+    ("decision", "decision", OperationalDetailFormat::Plain),
+    ("tier", "tier", OperationalDetailFormat::Plain),
+    ("rewrite_kind", "rewrite", OperationalDetailFormat::Plain),
+    (
+        "tokens_before",
+        "tokens_before",
+        OperationalDetailFormat::Plain,
+    ),
+    (
+        "tokens_after",
+        "tokens_after",
+        OperationalDetailFormat::Plain,
+    ),
+    (
+        "body_bytes_saved",
+        "bytes_saved",
+        OperationalDetailFormat::Plain,
+    ),
+    (
+        "rewrite_ratio_percent",
+        "rewrite",
+        OperationalDetailFormat::Percent,
+    ),
+    (
+        "tool_outputs_condensed",
+        "tools_condensed",
+        OperationalDetailFormat::Plain,
+    ),
+    (
+        "rehydrated_refs",
+        "rehydrated",
+        OperationalDetailFormat::Plain,
+    ),
+    ("pressure_band", "pressure", OperationalDetailFormat::Plain),
+    ("self_check", "check", OperationalDetailFormat::Plain),
+    ("exit", "exit", OperationalDetailFormat::Plain),
+    ("attempts", "attempts", OperationalDetailFormat::Plain),
+    ("lane", "lane", OperationalDetailFormat::Plain),
+    ("hard_limit", "limit", OperationalDetailFormat::Plain),
+    ("stage", "stage", OperationalDetailFormat::Plain),
+];
+
 fn operational_event_summary(
     event: &str,
     source: &str,
     fields: &BTreeMap<String, String>,
 ) -> String {
-    let mut details = Vec::new();
-    match source {
-        "request" | "model" | "route" | "mcp" | "agent" | "tool" | "event" => {
-            add_log_detail(&mut details, fields, "profile", "profile");
-            add_log_detail(&mut details, fields, "route", "route");
-            add_log_detail(&mut details, fields, "provider", "provider");
-            add_log_detail(&mut details, fields, "model", "model");
-            add_log_detail(&mut details, fields, "from_model", "from");
-            add_log_detail(&mut details, fields, "to_model", "to");
-            add_log_detail(&mut details, fields, "effort", "effort");
-            add_log_detail(&mut details, fields, "transport", "transport");
-            add_log_detail(&mut details, fields, "method", "method");
-            add_log_detail(&mut details, fields, "command", "command");
-            add_log_detail(&mut details, fields, "cwd", "cwd");
-            add_log_detail(&mut details, fields, "arg_count", "args");
-            add_log_detail(&mut details, fields, "env_count", "env");
-            add_log_detail(&mut details, fields, "stdin_bytes", "stdin_bytes");
-            add_log_detail(&mut details, fields, "timeout_ms", "timeout_ms");
-            add_log_endpoint_detail(&mut details, fields, "path", "path");
-            add_log_endpoint_detail(&mut details, fields, "url", "path");
-            add_log_detail(&mut details, fields, "tool_surface", "tools");
-            add_log_detail(&mut details, fields, "continuation", "continuation");
-            add_log_detail(&mut details, fields, "status", "status");
-            add_log_detail(&mut details, fields, "class", "class");
-            add_log_detail(&mut details, fields, "event_type", "event");
-            add_log_detail(&mut details, fields, "state", "state");
-            add_log_detail(&mut details, fields, "code", "code");
-            add_log_detail(&mut details, fields, "reason", "reason");
-            add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
-            add_log_detail(&mut details, fields, "duration_ms", "duration_ms");
-            add_log_detail(&mut details, fields, "exit_code", "exit");
-            add_log_detail(&mut details, fields, "exit_status", "exit");
-            add_log_detail(&mut details, fields, "outcome", "outcome");
-            add_log_detail(&mut details, fields, "active", "active");
-            add_log_detail(&mut details, fields, "limit", "limit");
-            add_log_detail(&mut details, fields, "count", "count");
-            add_log_detail(&mut details, fields, "dropped", "dropped");
-        }
-        "quota" => {
-            add_log_detail(&mut details, fields, "profile", "profile");
-            add_log_detail(&mut details, fields, "route", "route");
-            add_log_detail(&mut details, fields, "quota_band", "band");
-            add_log_percent_detail(&mut details, fields, "five_hour_remaining", "5h");
-            add_log_percent_detail(&mut details, fields, "weekly_remaining", "week");
-            add_log_detail(&mut details, fields, "reason", "reason");
-            add_log_detail(&mut details, fields, "until", "until");
-        }
-        "retry" | "backoff" => {
-            add_log_detail(&mut details, fields, "profile", "profile");
-            add_log_detail(&mut details, fields, "route", "route");
-            add_log_detail(&mut details, fields, "provider", "provider");
-            add_log_detail(&mut details, fields, "reason", "reason");
-            add_log_detail(&mut details, fields, "class", "class");
-            add_log_detail(&mut details, fields, "attempt", "attempt");
-            add_log_detail(&mut details, fields, "retry_index", "retry");
-            add_log_detail(&mut details, fields, "seconds", "backoff_s");
-            add_log_detail(&mut details, fields, "until", "until");
-        }
-        "health" => {
-            add_log_detail(&mut details, fields, "profile", "profile");
-            add_log_detail(&mut details, fields, "route", "route");
-            add_log_detail(&mut details, fields, "score", "score");
-            add_log_detail(&mut details, fields, "delta", "delta");
-            add_log_detail(&mut details, fields, "reason", "reason");
-        }
-        "upstream" => {
-            add_log_detail(&mut details, fields, "profile", "profile");
-            add_log_detail(&mut details, fields, "route", "route");
-            add_log_detail(&mut details, fields, "transport", "transport");
-            add_log_detail(&mut details, fields, "method", "method");
-            add_log_endpoint_detail(&mut details, fields, "url", "path");
-            add_log_detail(&mut details, fields, "status", "status");
-            add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
-            add_log_detail(&mut details, fields, "reason", "reason");
-        }
-        "stream" | "response" => {
-            add_log_detail(&mut details, fields, "profile", "profile");
-            add_log_detail(&mut details, fields, "route", "route");
-            add_log_detail(&mut details, fields, "transport", "transport");
-            if event == "first_local_chunk" {
-                add_log_detail(&mut details, fields, "elapsed_ms", "ttft_ms");
-            } else {
-                add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
+    #[cfg(feature = "mojo-core")]
+    {
+        let plan = prodex_mojo_core::observability::operational_event_detail_plan(
+            source,
+            event == "first_local_chunk",
+        )
+        .unwrap_or_else(|error| panic!("Mojo operational detail plan failed: {error:?}"));
+        let mut details = Vec::new();
+        for detail in plan {
+            let (key, label, format) = OPERATIONAL_DETAIL_SPECS
+                .get(usize::try_from(detail).expect("validated Mojo detail index"))
+                .copied()
+                .expect("validated Mojo operational detail");
+            match format {
+                OperationalDetailFormat::Plain => add_log_detail(&mut details, fields, key, label),
+                OperationalDetailFormat::Percent => {
+                    add_log_percent_detail(&mut details, fields, key, label)
+                }
+                OperationalDetailFormat::Endpoint => {
+                    add_log_endpoint_detail(&mut details, fields, key, label)
+                }
             }
-            add_log_detail(&mut details, fields, "chunks", "chunks");
-            add_log_detail(&mut details, fields, "bytes", "bytes");
-            add_log_detail(&mut details, fields, "status", "status");
-            add_log_detail(&mut details, fields, "event_type", "event");
         }
-        "smart" => {
-            add_log_detail(&mut details, fields, "profile", "profile");
-            add_log_detail(&mut details, fields, "route", "route");
-            add_log_detail(&mut details, fields, "decision", "decision");
-            add_log_detail(&mut details, fields, "tier", "tier");
-            add_log_detail(&mut details, fields, "rewrite_kind", "rewrite");
-            add_log_detail(&mut details, fields, "tokens_before", "tokens_before");
-            add_log_detail(&mut details, fields, "tokens_after", "tokens_after");
-            add_log_detail(&mut details, fields, "body_bytes_saved", "bytes_saved");
-            add_log_percent_detail(&mut details, fields, "rewrite_ratio_percent", "rewrite");
-            add_log_detail(
-                &mut details,
-                fields,
-                "tool_outputs_condensed",
-                "tools_condensed",
-            );
-            add_log_detail(&mut details, fields, "rehydrated_refs", "rehydrated");
-            add_log_detail(&mut details, fields, "pressure_band", "pressure");
-            add_log_detail(&mut details, fields, "self_check", "check");
-            add_log_detail(&mut details, fields, "reason", "reason");
-        }
-        "compact" => {
-            add_log_detail(&mut details, fields, "profile", "profile");
-            add_log_detail(&mut details, fields, "route", "route");
-            add_log_detail(&mut details, fields, "provider", "provider");
-            add_log_detail(&mut details, fields, "status", "status");
-            add_log_detail(&mut details, fields, "decision", "decision");
-            add_log_detail(&mut details, fields, "exit", "exit");
-            add_log_detail(&mut details, fields, "reason", "reason");
-            add_log_detail(&mut details, fields, "attempts", "attempts");
-            add_log_detail(&mut details, fields, "elapsed_ms", "latency_ms");
-        }
-        "load" => {
-            add_log_detail(&mut details, fields, "route", "route");
-            add_log_detail(&mut details, fields, "lane", "lane");
-            add_log_detail(&mut details, fields, "profile", "profile");
-            add_log_detail(&mut details, fields, "active", "active");
-            add_log_detail(&mut details, fields, "limit", "limit");
-            add_log_detail(&mut details, fields, "hard_limit", "limit");
-            add_log_detail(&mut details, fields, "reason", "reason");
-        }
-        "terminal" | "error" => {
-            add_log_detail(&mut details, fields, "profile", "profile");
-            add_log_detail(&mut details, fields, "route", "route");
-            add_log_detail(&mut details, fields, "transport", "transport");
-            add_log_detail(&mut details, fields, "stage", "stage");
-            add_log_detail(&mut details, fields, "event_type", "event");
-            add_log_detail(&mut details, fields, "status", "status");
-            add_log_detail(&mut details, fields, "class", "class");
-            add_log_detail(&mut details, fields, "reason", "reason");
-            add_log_detail(&mut details, fields, "outcome", "outcome");
-            add_log_detail(&mut details, fields, "exit_code", "exit");
-            add_log_detail(&mut details, fields, "exit_status", "exit");
-            add_log_detail(&mut details, fields, "dropped", "dropped");
-        }
-        _ => {}
+        join_log_details(&human_event_name(event), details)
     }
-    join_log_details(&human_event_name(event), details)
+
+    #[cfg(not(feature = "mojo-core"))]
+    {
+        summary_oracle::operational_event_summary(event, source, fields)
+    }
 }
 
 fn display_log_field<'a>(fields: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
@@ -669,4 +817,107 @@ pub(crate) fn log_event_label(source: &str) -> String {
 
 pub(crate) fn print_upstream_payload_event(event: &UpstreamPayloadEvent) -> Result<()> {
     log_upstream::print_upstream_payload_event(event, false)
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    #[test]
+    fn operational_event_summary_matches_rust_oracle() {
+        let fields = [
+            ("profile", "profile-a"),
+            ("route", "responses"),
+            ("provider", "openai"),
+            ("model", "gpt-5.6-sol"),
+            ("from_model", "from"),
+            ("to_model", "to"),
+            ("effort", "high"),
+            ("transport", "http"),
+            ("method", "POST"),
+            ("command", "echo"),
+            ("cwd", "/repo"),
+            ("arg_count", "3"),
+            ("env_count", "2"),
+            ("stdin_bytes", "9"),
+            ("timeout_ms", "1000"),
+            ("path", "/backend-api/codex/responses?secret=redacted"),
+            (
+                "url",
+                "https://example.test/backend-api/codex/responses?secret=redacted",
+            ),
+            ("tool_surface", "mcp"),
+            ("continuation", "none"),
+            ("status", "200"),
+            ("class", "ok"),
+            ("event_type", "delta"),
+            ("state", "ready"),
+            ("code", "0"),
+            ("reason", "synthetic"),
+            ("elapsed_ms", "17"),
+            ("duration_ms", "18"),
+            ("exit_code", "0"),
+            ("exit_status", "0"),
+            ("outcome", "success"),
+            ("active", "2"),
+            ("limit", "8"),
+            ("count", "4"),
+            ("dropped", "0"),
+            ("quota_band", "healthy"),
+            ("five_hour_remaining", "80"),
+            ("weekly_remaining", "70"),
+            ("until", "later"),
+            ("attempt", "1"),
+            ("retry_index", "0"),
+            ("seconds", "3"),
+            ("score", "4"),
+            ("delta", "1"),
+            ("chunks", "5"),
+            ("bytes", "1024"),
+            ("decision", "rewrite"),
+            ("tier", "safe"),
+            ("rewrite_kind", "semantic"),
+            ("tokens_before", "100"),
+            ("tokens_after", "80"),
+            ("body_bytes_saved", "20"),
+            ("rewrite_ratio_percent", "20"),
+            ("tool_outputs_condensed", "1"),
+            ("rehydrated_refs", "2"),
+            ("pressure_band", "low"),
+            ("self_check", "pass"),
+            ("exit", "committed"),
+            ("attempts", "2"),
+            ("lane", "responses"),
+            ("hard_limit", "16"),
+            ("stage", "connect"),
+        ]
+        .into_iter()
+        .map(|(key, value)| (key.to_string(), value.to_string()))
+        .collect::<BTreeMap<_, _>>();
+
+        for (event, source) in [
+            ("request_captured", "request"),
+            ("route_decision", "route"),
+            ("quota_blocked", "quota"),
+            ("profile_retry_backoff", "retry"),
+            ("profile_transport_backoff", "backoff"),
+            ("profile_health", "health"),
+            ("upstream_response", "upstream"),
+            ("first_upstream_chunk", "stream"),
+            ("first_local_chunk", "stream"),
+            ("buffered_response_complete", "response"),
+            ("smart_context_autopilot", "smart"),
+            ("compact_candidate_exhausted", "compact"),
+            ("runtime_proxy_queue_overloaded", "load"),
+            ("terminal_event", "terminal"),
+            ("upstream_read_error", "error"),
+            ("unknown_event", "unknown"),
+        ] {
+            assert_eq!(
+                operational_event_summary(event, source, &fields),
+                summary_oracle::operational_event_summary(event, source, &fields),
+                "event={event} source={source}"
+            );
+        }
+    }
 }
