@@ -521,37 +521,84 @@ pub(super) fn gemini_transform_stream_event(
             "Gemini SSE event must use data: <json> framing",
         );
     };
-    let value: Value = match serde_json::from_str(data) {
-        Ok(value) => value,
-        Err(error) => {
-            return ProviderTransformResult::rejected(
+    #[cfg(feature = "mojo")]
+    {
+        let mut kernel_input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamEventTransform);
+        kernel_input.response = Some(data);
+        let packet = gemini_mojo_value(kernel_input);
+        match packet.get("status").and_then(Value::as_str) {
+            Some("ok") => {
+                let event_name = packet
+                    .get("event")
+                    .and_then(Value::as_str)
+                    .unwrap_or_else(|| panic!("Mojo Gemini stream transform omitted event"));
+                let transformed = packet
+                    .get("value")
+                    .unwrap_or_else(|| panic!("Mojo Gemini stream transform omitted value"));
+                let body = format!("event: {event_name}\ndata: {transformed}\n\n");
+                ProviderTransformResult::lossless(
+                    ProviderId::Gemini,
+                    input.endpoint,
+                    ProviderWireFormat::GeminiGenerateContent,
+                    ProviderWireFormat::OpenAiResponses,
+                    body.into_bytes(),
+                )
+            }
+            Some("invalid") => ProviderTransformResult::rejected(
                 ProviderId::Gemini,
                 input.endpoint,
                 ProviderWireFormat::GeminiGenerateContent,
                 ProviderWireFormat::OpenAiResponses,
-                format!("failed to parse Gemini SSE JSON: {error}"),
-            );
+                "failed to parse Gemini SSE JSON",
+            ),
+            Some("unsupported") => ProviderTransformResult::unsupported(
+                ProviderId::Gemini,
+                input.endpoint,
+                ProviderWireFormat::GeminiGenerateContent,
+                ProviderWireFormat::OpenAiResponses,
+                "Gemini SSE event does not contain a supported text or function-call delta",
+            ),
+            status => panic!("Mojo Gemini stream transform returned invalid status: {status:?}"),
         }
-    };
-    let Some((event_name, transformed)) = gemini_stream_event_from_generate_value(&value) else {
-        return ProviderTransformResult::unsupported(
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        let value: Value = match serde_json::from_str(data) {
+            Ok(value) => value,
+            Err(error) => {
+                return ProviderTransformResult::rejected(
+                    ProviderId::Gemini,
+                    input.endpoint,
+                    ProviderWireFormat::GeminiGenerateContent,
+                    ProviderWireFormat::OpenAiResponses,
+                    format!("failed to parse Gemini SSE JSON: {error}"),
+                );
+            }
+        };
+        let Some((event_name, transformed)) = gemini_stream_event_from_generate_value(&value)
+        else {
+            return ProviderTransformResult::unsupported(
+                ProviderId::Gemini,
+                input.endpoint,
+                ProviderWireFormat::GeminiGenerateContent,
+                ProviderWireFormat::OpenAiResponses,
+                "Gemini SSE event does not contain a supported text or function-call delta",
+            );
+        };
+        let body = format!("event: {event_name}\ndata: {}\n\n", transformed);
+        ProviderTransformResult::lossless(
             ProviderId::Gemini,
             input.endpoint,
             ProviderWireFormat::GeminiGenerateContent,
             ProviderWireFormat::OpenAiResponses,
-            "Gemini SSE event does not contain a supported text or function-call delta",
-        );
-    };
-    let body = format!("event: {event_name}\ndata: {}\n\n", transformed);
-    ProviderTransformResult::lossless(
-        ProviderId::Gemini,
-        input.endpoint,
-        ProviderWireFormat::GeminiGenerateContent,
-        ProviderWireFormat::OpenAiResponses,
-        body.into_bytes(),
-    )
+            body.into_bytes(),
+        )
+    }
 }
 
+#[cfg(not(feature = "mojo"))]
 fn gemini_stream_event_from_generate_value(value: &Value) -> Option<(&'static str, Value)> {
     if let Some(function_call) = value.pointer("/candidates/0/content/parts/0/functionCall") {
         let args = function_call
@@ -559,16 +606,6 @@ fn gemini_stream_event_from_generate_value(value: &Value) -> Option<(&'static st
             .cloned()
             .unwrap_or_else(|| json!({}));
         let arguments = serde_json::to_string(&args).ok()?;
-        #[cfg(feature = "mojo")]
-        let transformed = {
-            let mut kernel_input = GeminiResponseKernelInput::new(
-                GeminiResponseKernelOperation::FunctionCallArgumentsDeltaWithoutSequence,
-            );
-            kernel_input.call_id = function_call.get("id").and_then(Value::as_str);
-            kernel_input.delta = Some(&arguments);
-            gemini_mojo_value(kernel_input)
-        };
-        #[cfg(not(feature = "mojo"))]
         let transformed = {
             let mut transformed = json!({
                 "type":"response.function_call_arguments.delta",
@@ -590,14 +627,6 @@ fn gemini_stream_event_from_generate_value(value: &Value) -> Option<(&'static st
             .unwrap_or(false)
     {
         let text = part.get("text").and_then(Value::as_str)?;
-        #[cfg(feature = "mojo")]
-        let transformed = {
-            let mut kernel_input =
-                GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamReasoningDelta);
-            kernel_input.delta = Some(text);
-            gemini_mojo_value(kernel_input)
-        };
-        #[cfg(not(feature = "mojo"))]
         let transformed = json!({
             "type":"response.reasoning_summary_text.delta",
             "delta":text,
@@ -607,14 +636,6 @@ fn gemini_stream_event_from_generate_value(value: &Value) -> Option<(&'static st
     let text = value
         .pointer("/candidates/0/content/parts/0/text")
         .and_then(Value::as_str)?;
-    #[cfg(feature = "mojo")]
-    let transformed = {
-        let mut kernel_input =
-            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamTextDelta);
-        kernel_input.delta = Some(text);
-        gemini_mojo_value(kernel_input)
-    };
-    #[cfg(not(feature = "mojo"))]
     let transformed = json!({
         "type":"response.output_text.delta",
         "delta":text,

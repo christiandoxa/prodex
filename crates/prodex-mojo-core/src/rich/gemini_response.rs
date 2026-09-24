@@ -52,6 +52,7 @@ pub enum GeminiResponseKernelOperation {
     StreamShouldEmitArgumentsDelta = 43,
     StreamResponseId = 44,
     RawTextResponse = 45,
+    StreamEventTransform = 46,
 }
 
 /// Inputs for one bounded Gemini response or stream JSON shape.
@@ -239,6 +240,7 @@ fn gemini_kernel_operation(operation: GeminiResponseKernelOperation) -> i64 {
         GeminiResponseKernelOperation::StreamShouldEmitArgumentsDelta => 43,
         GeminiResponseKernelOperation::StreamResponseId => 44,
         GeminiResponseKernelOperation::RawTextResponse => 45,
+        GeminiResponseKernelOperation::StreamEventTransform => 46,
     }
 }
 
