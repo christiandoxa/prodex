@@ -44,6 +44,10 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-store/src/continuations/status/mojo.rs",
   "crates/prodex-runtime-store/src/profile_backoff/backoff.rs",
   "crates/prodex-runtime-proxy/src/health/backoff.rs",
+  "crates/prodex-runtime-proxy/src/health/score.rs",
+  "crates/prodex-runtime-proxy/src/health/latency.rs",
+  "crates/prodex-runtime-proxy/src/health/inflight.rs",
+  "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
 ];
 
 const FORBIDDEN_MARKERS = [

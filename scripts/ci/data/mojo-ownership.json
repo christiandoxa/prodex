@@ -497,7 +497,9 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_profile_health_sorting"
+          "runtime_profile_health_sorting",
+          "runtime_profile_health_score_components",
+          "runtime_profile_health_policy"
         ]
       },
       {
@@ -1090,6 +1092,67 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "profile-state lookup, route-key construction, and bounded batch mapping"
+    },
+    {
+      "name": "runtime_profile_health_score_components",
+      "domain": "runtime/health-scoring",
+      "introduced_in": "0.431.7",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_health_scalar_v1",
+      "mojo_operation_ids": {
+        "effective_score": 1,
+        "coupling_score": 2,
+        "performance_score": 3
+      },
+      "mojo_source": "mojo/prodex_core/runtime_health.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/health/score.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::profile_health_effective_score",
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/health/score.rs",
+      "rust_owner_before": "profile health decay, route coupling, and performance score arithmetic in feature-off builds",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "profile-state lookup, route-key construction, and fixed-width input/output mapping",
+      "rust_test_oracle": "pre-migration formula retained only under #[cfg(test)]",
+      "mojo_abi_version": 1
+    },
+    {
+      "name": "runtime_profile_health_policy",
+      "domain": "runtime/health-policy",
+      "introduced_in": "0.431.7",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_health_policy_v2",
+      "mojo_operation_ids": {
+        "bad_pairing_next_score": 8,
+        "bump_decision": 9,
+        "recovery_decision": 10,
+        "context_weight": 11,
+        "hard_limit": 12,
+        "soft_limit": 13,
+        "latency_penalty": 14,
+        "latency_next_score": 15,
+        "latency_failure_score": 16
+      },
+      "mojo_abi_version": 2,
+      "mojo_source": "mojo/prodex_core/runtime_health.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::profile_health_bump_plan",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
+        "crates/prodex-runtime-proxy/src/health/inflight.rs",
+        "crates/prodex-runtime-proxy/src/health/latency.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
+      "rust_owner_before": "bad-pairing, health-transition, in-flight, and latency policy calculations in feature-off builds",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "pre-migration Rust formulas retained only under #[cfg(test)]",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed input mapping, route/context tag conversion, and validated result reconstruction"
     }
   ],
   "rust_semantic_reductions": [

@@ -22,21 +22,16 @@ pub fn runtime_profile_effective_score<T: RuntimeProfileHealthEntry>(
     now: i64,
     decay_seconds: i64,
 ) -> u32 {
-    #[cfg(feature = "mojo")]
-    {
-        prodex_mojo_core::runtime::profile_health_effective_score(
-            entry.runtime_profile_health_score(),
-            entry.runtime_profile_health_updated_at(),
-            now,
-            decay_seconds,
-        )
-        .unwrap_or_else(|error| panic!("Mojo profile effective health score failed: {error:?}"))
-    }
-    #[cfg(not(feature = "mojo"))]
-    runtime_profile_effective_score_rust(entry, now, decay_seconds)
+    prodex_mojo_core::runtime::profile_health_effective_score(
+        entry.runtime_profile_health_score(),
+        entry.runtime_profile_health_updated_at(),
+        now,
+        decay_seconds,
+    )
+    .unwrap_or_else(|error| panic!("Mojo profile effective health score failed: {error:?}"))
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(test)]
 fn runtime_profile_effective_score_rust<T: RuntimeProfileHealthEntry>(
     entry: &T,
     now: i64,
@@ -49,7 +44,7 @@ fn runtime_profile_effective_score_rust<T: RuntimeProfileHealthEntry>(
     entry.runtime_profile_health_score().saturating_sub(decay)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(test)]
 fn runtime_profile_effective_health_score_by_key_rust<F>(
     health_entry: F,
     key: &str,
@@ -65,7 +60,7 @@ where
         .unwrap_or(0)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(test)]
 fn runtime_profile_effective_score_by_key_rust<F>(
     health_entry: F,
     key: &str,
@@ -155,22 +150,17 @@ pub fn runtime_profile_route_coupling_score_by_key<F>(
 where
     F: Fn(&str) -> Option<RuntimeProfileHealthSnapshot> + Copy,
 {
-    #[cfg(feature = "mojo")]
-    {
-        profile_health_coupling_score_mojo(
-            profile_health_score_input(
-                |key| health_entry(key).map(|entry| (entry.score, entry.updated_at)),
-                profile_name,
-                route_kind,
-            ),
-            now,
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    runtime_profile_route_coupling_score_by_key_rust(health_entry, profile_name, now, route_kind)
+    profile_health_coupling_score_mojo(
+        profile_health_score_input(
+            |key| health_entry(key).map(|entry| (entry.score, entry.updated_at)),
+            profile_name,
+            route_kind,
+        ),
+        now,
+    )
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(test)]
 fn runtime_profile_route_coupling_score_by_key_rust<F>(
     health_entry: F,
     profile_name: &str,
@@ -231,22 +221,17 @@ pub fn runtime_profile_route_performance_score_by_key<F>(
 where
     F: Fn(&str) -> Option<RuntimeProfileHealthSnapshot> + Copy,
 {
-    #[cfg(feature = "mojo")]
-    {
-        profile_health_performance_score_mojo(
-            profile_health_score_input(
-                |key| health_entry(key).map(|entry| (entry.score, entry.updated_at)),
-                profile_name,
-                route_kind,
-            ),
-            now,
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    runtime_profile_route_performance_score_by_key_rust(health_entry, profile_name, now, route_kind)
+    profile_health_performance_score_mojo(
+        profile_health_score_input(
+            |key| health_entry(key).map(|entry| (entry.score, entry.updated_at)),
+            profile_name,
+            route_kind,
+        ),
+        now,
+    )
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(test)]
 fn runtime_profile_route_performance_score_by_key_rust<F>(
     health_entry: F,
     profile_name: &str,
@@ -307,25 +292,17 @@ pub fn runtime_profile_health_sort_key_by_key<F>(
 where
     F: Fn(&str) -> Option<RuntimeProfileHealthSnapshot> + Copy,
 {
-    #[cfg(feature = "mojo")]
-    {
-        runtime_profile_health_sort_key_mojo(
-            profile_health_score_input(
-                |key| health_entry(key).map(|entry| (entry.score, entry.updated_at)),
-                profile_name,
-                route_kind,
-            ),
-            now,
-        )
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        runtime_profile_health_sort_key_by_key_rust(profile_name, health_entry, now, route_kind)
-    }
+    runtime_profile_health_sort_key_mojo(
+        profile_health_score_input(
+            |key| health_entry(key).map(|entry| (entry.score, entry.updated_at)),
+            profile_name,
+            route_kind,
+        ),
+        now,
+    )
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(test)]
 fn runtime_profile_health_sort_key_by_key_rust<F>(
     profile_name: &str,
     health_entry: F,
@@ -347,13 +324,13 @@ where
             now,
             RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
         ))
-        .saturating_add(runtime_profile_route_coupling_score_by_key(
+        .saturating_add(runtime_profile_route_coupling_score_by_key_rust(
             health_entry,
             profile_name,
             now,
             route_kind,
         ))
-        .saturating_add(runtime_profile_route_performance_score_by_key(
+        .saturating_add(runtime_profile_route_performance_score_by_key_rust(
             health_entry,
             profile_name,
             now,
@@ -361,7 +338,6 @@ where
         ))
 }
 
-#[cfg(feature = "mojo")]
 fn profile_health_score_input<F>(
     health_entry: F,
     profile_name: &str,
@@ -418,7 +394,6 @@ where
     }
 }
 
-#[cfg(feature = "mojo")]
 fn profile_health_coupling_score_mojo(
     input: prodex_mojo_core::runtime::ProfileHealthScoreInput,
     now: i64,
@@ -435,7 +410,6 @@ fn profile_health_coupling_score_mojo(
     .unwrap_or_else(|error| panic!("Mojo profile coupling score failed: {error:?}"))
 }
 
-#[cfg(feature = "mojo")]
 fn profile_health_performance_score_mojo(
     input: prodex_mojo_core::runtime::ProfileHealthScoreInput,
     now: i64,
@@ -451,7 +425,6 @@ fn profile_health_performance_score_mojo(
     .unwrap_or_else(|error| panic!("Mojo profile performance score failed: {error:?}"))
 }
 
-#[cfg(feature = "mojo")]
 fn runtime_profile_health_sort_key_mojo(
     input: prodex_mojo_core::runtime::ProfileHealthScoreInput,
     now: i64,
@@ -469,7 +442,7 @@ fn runtime_profile_health_sort_key_mojo(
     .unwrap_or(u32::MAX)
 }
 
-#[cfg(all(test, feature = "mojo"))]
+#[cfg(test)]
 mod mojo_parity_tests {
     use super::*;
 
@@ -598,6 +571,133 @@ mod mojo_parity_tests {
                 runtime_profile_route_performance_score_by_key(lookup, "p", now, route),
                 runtime_profile_route_performance_score_by_key_rust(lookup, "p", now, route),
             );
+        }
+    }
+
+    #[test]
+    fn health_scores_match_rust_oracles_over_full_width_inputs() {
+        let mut seed = 0x6a09_e667_f3bc_c909_u64;
+        let time_boundaries = [i64::MIN, -1, 0, 1, i64::MAX];
+        for score in [0_u32, u32::MAX] {
+            for updated_at in time_boundaries {
+                for now in time_boundaries {
+                    for decay_seconds in time_boundaries {
+                        let entry = RuntimeProfileHealthSnapshot { score, updated_at };
+                        assert_eq!(
+                            runtime_profile_effective_score(&entry, now, decay_seconds),
+                            runtime_profile_effective_score_rust(&entry, now, decay_seconds),
+                            "boundary score={score} updated={updated_at} now={now} decay={decay_seconds}"
+                        );
+                    }
+                }
+            }
+        }
+
+        for _ in 0..10_000 {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let score = seed as u32;
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let updated_at = seed as i64;
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let now = seed as i64;
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let decay_seconds = seed as i64;
+            let entry = RuntimeProfileHealthSnapshot { score, updated_at };
+            assert_eq!(
+                runtime_profile_effective_score(&entry, now, decay_seconds),
+                runtime_profile_effective_score_rust(&entry, now, decay_seconds),
+                "score={score} updated={updated_at} now={now} decay={decay_seconds}"
+            );
+        }
+
+        let mut health = BTreeMap::new();
+        for index in 0..128 {
+            let profile = format!("profile-{index}");
+            let mut observation = || {
+                seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                let score = seed as u32;
+                seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+                RuntimeProfileHealthSnapshot {
+                    score,
+                    updated_at: seed as i64,
+                }
+            };
+            health.insert(profile.clone(), observation());
+            for route in [
+                RuntimeRouteKind::Responses,
+                RuntimeRouteKind::Compact,
+                RuntimeRouteKind::Websocket,
+                RuntimeRouteKind::Standard,
+            ] {
+                health.insert(
+                    runtime_profile_route_health_key(&profile, route),
+                    observation(),
+                );
+                health.insert(
+                    runtime_profile_route_bad_pairing_key(&profile, route),
+                    observation(),
+                );
+                health.insert(
+                    runtime_profile_route_performance_key(&profile, route),
+                    observation(),
+                );
+            }
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let now = seed as i64;
+            let lookup = |key: &str| health.get(key).copied();
+            for route in [
+                RuntimeRouteKind::Responses,
+                RuntimeRouteKind::Compact,
+                RuntimeRouteKind::Websocket,
+                RuntimeRouteKind::Standard,
+            ] {
+                assert_eq!(
+                    runtime_profile_route_coupling_score_by_key(lookup, &profile, now, route),
+                    runtime_profile_route_coupling_score_by_key_rust(lookup, &profile, now, route),
+                    "coupling profile={profile} route={route:?}"
+                );
+                assert_eq!(
+                    runtime_profile_route_performance_score_by_key(lookup, &profile, now, route),
+                    runtime_profile_route_performance_score_by_key_rust(
+                        lookup, &profile, now, route
+                    ),
+                    "performance profile={profile} route={route:?}"
+                );
+                assert_eq!(
+                    runtime_profile_health_sort_key_by_key(&profile, lookup, now, route),
+                    runtime_profile_health_sort_key_by_key_rust(&profile, lookup, now, route),
+                    "sort profile={profile} route={route:?}"
+                );
+            }
+        }
+
+        let profile = "profile-0";
+        let lookup = |key: &str| health.get(key).copied();
+        for now in time_boundaries {
+            for route in [
+                RuntimeRouteKind::Responses,
+                RuntimeRouteKind::Compact,
+                RuntimeRouteKind::Websocket,
+                RuntimeRouteKind::Standard,
+            ] {
+                assert_eq!(
+                    runtime_profile_route_coupling_score_by_key(lookup, profile, now, route),
+                    runtime_profile_route_coupling_score_by_key_rust(lookup, profile, now, route),
+                    "boundary coupling now={now} route={route:?}"
+                );
+                assert_eq!(
+                    runtime_profile_route_performance_score_by_key(lookup, profile, now, route),
+                    runtime_profile_route_performance_score_by_key_rust(
+                        lookup, profile, now, route
+                    ),
+                    "boundary performance now={now} route={route:?}"
+                );
+                assert_eq!(
+                    runtime_profile_health_sort_key_by_key(profile, lookup, now, route),
+                    runtime_profile_health_sort_key_by_key_rust(profile, lookup, now, route),
+                    "boundary sort now={now} route={route:?}"
+                );
+            }
         }
     }
 }
