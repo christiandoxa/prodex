@@ -303,3 +303,18 @@ new export is present in the linked archive. Focused all-target Clippy for `prod
 The canonical broad inventory at this checkpoint is 48,471 reachable Mojo LOC and 196,151 Rust
 production LOC, or 19.814653% Mojo. Adapter cost remains in the Rust denominator; the 75% target is
 not yet met.
+
+## Retry-after numeric policy wave
+
+Runtime retry-after numeric policy now executes in the reachable rich Mojo kernel under the
+production `mojo` feature. Rust retains HTTP/header acquisition, UTF-8 validation, phrase/suffix
+boundary extraction, and a feature-off/test oracle; Mojo owns bounded integer parsing, fractional
+millisecond rounding, overflow rejection, zero rejection, and the 300-second cap.
+
+The differential corpus covers u64/u128 boundaries, overflow, leading zeroes, fractional
+millisecond rounding, second rounding, zero values, malformed decimal forms, and cap behavior.
+Focused runtime-proxy tests pass with and without Mojo, and all-target Clippy for both
+`prodex-runtime-proxy` and `prodex-mojo-core` passes with the local Mojo 1.1.0 compiler.
+
+The canonical broad inventory at this checkpoint is 48,602 reachable Mojo LOC and 196,561 Rust
+production LOC, or 19.824362% Mojo. The 75% target remains a forward migration goal.
