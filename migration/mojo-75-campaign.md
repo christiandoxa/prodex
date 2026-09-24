@@ -334,3 +334,18 @@ and previous-response warning behavior. Feature-off compatibility tests and all-
 
 The canonical broad inventory at this checkpoint is 48,790 reachable Mojo LOC and 196,782 Rust
 production LOC, or 19.867900% Mojo. The 75% target remains a forward migration goal.
+
+## Previous-response error classification wave
+
+Previous-response failure classification now runs through the existing rich Mojo error-policy
+kernel. Rust retains JSON traversal, UTF-8 acquisition, message ownership, and feature-off/test
+oracles; Mojo owns exact `previous_response_not_found`, invalid `previous_response_id`, and missing
+tool/function-call classification for both structured error fields and bounded text payloads.
+
+Focused feature-on differential tests cover exact and near-match structured/text cases, while the
+existing payload-detection and failure-response suites pass with and without Mojo. All-target
+Clippy for `prodex-runtime-proxy` and `prodex-mojo-core` passes with Mojo 1.1.0. The same checkpoint
+also consolidates repeated previous-response planning inputs through one semantic default adapter.
+
+The canonical broad inventory at this checkpoint is 48,959 reachable Mojo LOC and 196,854 Rust
+production LOC, or 19.917173% Mojo. The 75% target remains a forward migration goal.

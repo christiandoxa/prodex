@@ -219,19 +219,13 @@ pub fn runtime_previous_response_fresh_fallback_policy(
     {
         let plan = prodex_mojo_core::rich::previous_response_plan(
             prodex_mojo_core::rich::PreviousResponsePlanInput {
-                route: 0,
                 previous_response_present: input.has_previous_response_context,
-                has_turn_state_retry: false,
                 request_requires_previous_response_affinity: input
                     .request_requires_locked_previous_response_affinity,
-                trusted_previous_response_affinity: false,
-                request_turn_state_present: false,
-                previous_response_fresh_fallback_used: false,
                 fresh_fallback_shape: runtime_previous_response_fallback_shape_tag(
                     input.fresh_fallback_shape,
                 ),
-                retry_index: 0,
-                has_session_affinity: false,
+                ..Default::default()
             },
         )
         .expect("Mojo previous-response fallback planning returned an invalid result");
@@ -334,16 +328,10 @@ pub fn runtime_previous_response_fresh_fallback_shape_with_session(
     {
         let plan = prodex_mojo_core::rich::previous_response_plan(
             prodex_mojo_core::rich::PreviousResponsePlanInput {
-                route: 0,
                 previous_response_present: shape.is_some(),
-                has_turn_state_retry: false,
-                request_requires_previous_response_affinity: false,
-                trusted_previous_response_affinity: false,
-                request_turn_state_present: false,
-                previous_response_fresh_fallback_used: false,
                 fresh_fallback_shape: runtime_previous_response_fallback_shape_tag(shape),
-                retry_index: 0,
                 has_session_affinity,
+                ..Default::default()
             },
         )
         .expect("Mojo previous-response shape planning returned an invalid result");
@@ -392,20 +380,16 @@ pub fn runtime_previous_response_not_found_fallback_policy(
     {
         let plan = prodex_mojo_core::rich::previous_response_plan(
             prodex_mojo_core::rich::PreviousResponsePlanInput {
-                route: 0,
                 previous_response_present: request.previous_response_id.is_some(),
                 has_turn_state_retry: request.has_turn_state_retry,
                 request_requires_previous_response_affinity: request
                     .request_requires_locked_previous_response_affinity,
-                trusted_previous_response_affinity: false,
-                request_turn_state_present: false,
                 previous_response_fresh_fallback_used: request
                     .previous_response_fresh_fallback_used,
                 fresh_fallback_shape: runtime_previous_response_fallback_shape_tag(
                     request.fresh_fallback_shape,
                 ),
-                retry_index: 0,
-                has_session_affinity: false,
+                ..Default::default()
             },
         )
         .expect("Mojo previous-response policy planning returned an invalid result");
@@ -451,14 +435,10 @@ pub fn runtime_websocket_request_requires_locked_previous_response_affinity(
             prodex_mojo_core::rich::PreviousResponsePlanInput {
                 route: 1,
                 previous_response_present: previous_response_id.is_some(),
-                has_turn_state_retry: false,
                 request_requires_previous_response_affinity,
                 trusted_previous_response_affinity,
                 request_turn_state_present: request_turn_state.is_some(),
-                previous_response_fresh_fallback_used: false,
-                fresh_fallback_shape: -1,
-                retry_index: 0,
-                has_session_affinity: false,
+                ..Default::default()
             },
         )
         .expect("Mojo websocket locked-affinity planning returned an invalid result")
@@ -555,7 +535,7 @@ pub fn runtime_previous_response_not_found_decision(
                     input.fresh_fallback_shape,
                 ),
                 retry_index: input.retry_index,
-                has_session_affinity: false,
+                ..Default::default()
             },
         )
         .expect("Mojo previous-response attempt planning returned an invalid result");
