@@ -61,6 +61,33 @@ pub(crate) fn print_user_stderr_panel(
     Ok(())
 }
 
+pub(crate) fn print_user_stdout_text_panel(title: &str, body: &str) -> Result<()> {
+    if io::stdout().is_terminal()
+        && env::var_os("CODEX_CI").is_none()
+        && terminal_ui::print_text_panel(title, body).is_ok()
+    {
+        return Ok(());
+    }
+    for line in body.lines() {
+        terminal_ui::print_stdout_line(line)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn print_user_stderr_text_panel(title: &str, body: &str) -> Result<()> {
+    let messages = body.lines().map(str::to_string).collect::<Vec<_>>();
+    if io::stderr().is_terminal()
+        && env::var_os("CODEX_CI").is_none()
+        && terminal_ui::print_stderr_panel(title, &messages).is_ok()
+    {
+        return Ok(());
+    }
+    for line in body.lines() {
+        terminal_ui::print_stderr_line(line)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn print_launch_status(message: &str) {
     LAUNCH_STATUS_TUI.with(|state| {
         let mut state = state.borrow_mut();

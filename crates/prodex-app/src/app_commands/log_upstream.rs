@@ -48,8 +48,15 @@ pub(super) fn stream_upstream_payload_events(json: bool) -> Result<()> {
 
     if let Some(event) = latest_upstream_payload_event() {
         print_upstream_payload_event(&event, json)?;
-    } else {
+    } else if json {
         eprintln!("Waiting for processed upstream payload events...");
+    } else {
+        let message = "Waiting for processed upstream payload events...".to_string();
+        crate::app_commands::print_user_stderr_panel(
+            "Prodex Upstream Log",
+            std::slice::from_ref(&message),
+            std::slice::from_ref(&message),
+        )?;
     }
     let mut live_source = LiveRuntimeLogSource::new();
     for event in live_upstream_payload_events_with_throughput(&mut live_source, None)? {
