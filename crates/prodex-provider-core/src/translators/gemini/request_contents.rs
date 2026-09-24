@@ -32,6 +32,27 @@ pub(crate) fn gemini_request_content_mojo_value(
 }
 
 #[cfg(feature = "mojo")]
+fn gemini_request_function_part(
+    operation: prodex_mojo_core::provider_constraints::GeminiRequestContentOperation,
+    name: &str,
+    value: &Value,
+    call_id: Option<&str>,
+) -> Value {
+    let name = serde_json::to_vec(name).expect("Gemini function name serializes");
+    let value = serde_json::to_vec(value).expect("Gemini function value serializes");
+    let call_id = call_id
+        .map(|call_id| serde_json::to_vec(call_id).expect("Gemini function call ID serializes"));
+    gemini_request_content_mojo_value(
+        operation,
+        Some(&name),
+        Some(&value),
+        call_id.as_deref(),
+        None,
+        0,
+    )
+}
+
+#[cfg(feature = "mojo")]
 pub(crate) fn gemini_text_contents_from_request_mojo(
     value: &Value,
 ) -> Option<(Option<Value>, Vec<Value>)> {

@@ -361,7 +361,7 @@ fn gemini_apply_tools(
 
 #[cfg(test)]
 mod tests {
-    use super::gemini_transform_request;
+    use super::{gemini_request_contents, gemini_transform_request};
     use crate::translator::{ProviderTransformInput, ProviderTransformLoss};
     use crate::{ProviderEndpoint, ProviderId};
     use serde_json::json;
@@ -379,6 +379,80 @@ mod tests {
             panic!("request should be rejected");
         };
         reason
+    }
+
+    #[test]
+    fn request_contents_preserve_tool_history_when_text_kernel_declines() {
+        let request = json!({
+            "input": [
+                {
+                    "role": "assistant",
+                    "content": "Looking up records.",
+                    "tool_calls": [
+                        {
+                            "id": "call-1",
+                            "function": {
+                                "name": "lookup",
+                                "arguments": "{\"query\":\"synthetic\"}"
+                            }
+                        },
+                        {
+                            "id": "call-2",
+                            "function": {
+                                "name": "count",
+                                "arguments": "not-json"
+                            }
+                        }
+                    ]
+                },
+                {"role": "tool", "tool_call_id": "call-1", "content": "{\"found\":true}"},
+                {"role": "tool", "tool_call_id": "call-2", "content": "plain result"}
+            ]
+        });
+
+        #[cfg(feature = "mojo")]
+        assert!(
+            super::super::request_contents::gemini_text_contents_from_request_mojo(&request)
+                .is_none()
+        );
+
+        let (_, contents) = gemini_request_contents(&request);
+        assert_eq!(
+            serde_json::Value::Array(contents),
+            json!([
+                {
+                    "role": "model",
+                    "parts": [
+                        {"text": "Looking up records."},
+                        {"functionCall": {
+                            "name": "lookup",
+                            "args": {"query": "synthetic"},
+                            "id": "call-1"
+                        }},
+                        {"functionCall": {
+                            "name": "count",
+                            "args": {},
+                            "id": "call-2"
+                        }}
+                    ]
+                },
+                {
+                    "role": "user",
+                    "parts": [
+                        {"functionResponse": {
+                            "name": "lookup",
+                            "response": {"found": true},
+                            "id": "call-1"
+                        }},
+                        {"functionResponse": {
+                            "name": "count",
+                            "response": {"output": "plain result"},
+                            "id": "call-2"
+                        }}
+                    ]
+                }
+            ])
+        );
     }
 
     #[test]
