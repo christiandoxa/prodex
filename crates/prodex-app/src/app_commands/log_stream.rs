@@ -21,7 +21,7 @@ use std::time::Instant;
 mod event_source;
 #[path = "log_stream/operational.rs"]
 mod operational;
-use event_source::operational_event_source;
+use event_source::operational_event_plan;
 
 #[derive(Debug, Clone)]
 pub(crate) enum LogStreamItem {
@@ -239,10 +239,11 @@ fn operational_event_from_runtime_line(line: &str) -> Result<Option<ParsedOperat
     ) {
         return Ok(None);
     }
-    if !operational_event_is_interesting(event, &parsed.fields) {
+    let event_plan = operational_event_plan(event, &parsed.fields)?;
+    if !event_plan.interesting {
         return Ok(None);
     }
-    let Some(source) = operational_event_source(event, &parsed.fields)? else {
+    let Some(source) = event_plan.source else {
         return Ok(None);
     };
     let source = if source == "load" && !is_routine_load_event(event) {
@@ -305,23 +306,6 @@ fn operational_event_from_runtime_line(line: &str) -> Result<Option<ParsedOperat
         run_id: request.map(short_request_id),
     });
     Ok(Some(ParsedOperationalEvent { transcript, load }))
-}
-
-fn operational_event_is_interesting(event: &str, fields: &BTreeMap<String, String>) -> bool {
-    if event == "compat_request_surface" {
-        let tool_surface = fields.get("tool_surface").map(String::as_str);
-        return tool_surface.is_some_and(|value| value != "none")
-            || fields
-                .get("continuation")
-                .is_some_and(|value| value != "none")
-            || fields.get("family").is_some_and(|value| value != "codex");
-    }
-    if event == "smart_context_prepare_fallback" {
-        return fields
-            .get("decision")
-            .is_none_or(|decision| decision != "pass_through");
-    }
-    true
 }
 
 fn short_request_id(request: u64) -> String {

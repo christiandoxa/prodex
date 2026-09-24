@@ -270,3 +270,20 @@ both map-backed and callback-backed callers.
 Focused Mojo parity tests and all-target runtime-proxy Clippy pass. This removes 51 net Rust
 production lines without adding a duplicate policy implementation. The canonical broad
 inventory is now 47,778 Mojo LOC and 196,131 Rust production LOC, or 19.588453% Mojo.
+
+## Operational log event classification wave
+
+Operational runtime-log source and interest classification now has one production-authoritative
+Mojo plan in `observability_labels.mojo`. The kernel owns the exact event catalog, dynamic
+compact/MCP/sub-agent/local-rewrite classifications, compatibility-surface precedence, and the
+`smart_context_prepare_fallback` interest decision. Rust retains parsed field acquisition,
+redaction, human rendering, load coalescing, and a feature-off/test oracle.
+
+Focused parity exercises representative exact and dynamic event families plus the compatibility
+and Smart Context edge cases in both `mojo-core` and feature-off builds. The production Rust
+oracle is isolated behind the feature-off module instead of remaining in the broad production
+count. Focused all-target `prodex-app` Clippy with warnings denied, real-Mojo linkage, the
+production-share check, ownership check, and authority guard pass.
+
+The canonical broad inventory at this checkpoint is 48,175 reachable Mojo LOC and 196,124 Rust
+production LOC, or 19.719688% Mojo. The 75% project target remains a forward migration goal.
