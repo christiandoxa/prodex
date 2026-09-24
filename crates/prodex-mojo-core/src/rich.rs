@@ -31,6 +31,9 @@ pub use anthropic_request::{
 };
 mod fallback;
 pub use fallback::{
+    PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID, PREVIOUS_RESPONSE_ERROR_CLASS_NONE,
+    PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND, PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT,
+    PREVIOUS_RESPONSE_ERROR_MODE_STRUCTURED, PREVIOUS_RESPONSE_ERROR_MODE_TEXT,
     PreviousResponsePlan, PreviousResponsePlanInput, RUNTIME_ERROR_MODE_CODE_OVERLOAD,
     RUNTIME_ERROR_MODE_CODE_QUOTA, RUNTIME_ERROR_MODE_CODE_RATE, RUNTIME_ERROR_MODE_HTTP,
     RUNTIME_ERROR_MODE_JSON_OVERLOAD, RUNTIME_ERROR_MODE_JSON_PROFILE,
@@ -39,7 +42,8 @@ pub use fallback::{
     RUNTIME_ERROR_MODE_TEXT_PROFILE, RUNTIME_ERROR_MODE_TEXT_QUOTA, RUNTIME_ERROR_MODE_TEXT_RATE,
     RUNTIME_ERROR_MODE_TEXT_WORKSPACE, RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS,
     RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS, RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS,
-    model_fallback_chain, model_fallback_plan, previous_response_plan, runtime_retry_after_millis,
+    model_fallback_chain, model_fallback_plan, previous_response_error_class,
+    previous_response_plan, runtime_retry_after_millis,
 };
 mod catalog;
 pub use catalog::{

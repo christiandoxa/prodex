@@ -19,6 +19,13 @@ pub const RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS: i64 = 0;
 pub const RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS: i64 = 1;
 pub const RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS: i64 = 2;
 const RUNTIME_RETRY_AFTER_CAP_MILLIS: i64 = 300_000;
+pub const PREVIOUS_RESPONSE_ERROR_MODE_STRUCTURED: i64 = 0;
+pub const PREVIOUS_RESPONSE_ERROR_MODE_TEXT: i64 = 1;
+pub const PREVIOUS_RESPONSE_ERROR_CLASS_NONE: i64 = 0;
+pub const PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND: i64 = 1;
+pub const PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID: i64 = 2;
+pub const PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT: i64 = 3;
+const PREVIOUS_RESPONSE_ERROR_MAX_BYTES: usize = 65_536;
 pub const PREVIOUS_RESPONSE_PLAN_OUTPUT_COUNT: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,6 +40,23 @@ pub struct PreviousResponsePlanInput {
     pub fresh_fallback_shape: i64,
     pub retry_index: usize,
     pub has_session_affinity: bool,
+}
+
+impl Default for PreviousResponsePlanInput {
+    fn default() -> Self {
+        Self {
+            route: 0,
+            previous_response_present: false,
+            has_turn_state_retry: false,
+            request_requires_previous_response_affinity: false,
+            trusted_previous_response_affinity: false,
+            request_turn_state_present: false,
+            previous_response_fresh_fallback_used: false,
+            fresh_fallback_shape: -1,
+            retry_index: 0,
+            has_session_affinity: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -94,6 +118,18 @@ unsafe extern "C" {
         number_address: u64,
         number_length: i64,
     ) -> i64;
+    fn prodex_mojo_previous_response_error_class_v1(
+        abi_version: i64,
+        mode: i64,
+        error_type_address: u64,
+        error_type_length: i64,
+        code_address: u64,
+        code_length: i64,
+        param_address: u64,
+        param_length: i64,
+        message_address: u64,
+        message_length: i64,
+    ) -> i64;
     fn prodex_runtime_previous_response_plan_v1(
         route: i64,
         previous_response_present: i64,
@@ -129,6 +165,59 @@ pub fn runtime_retry_after_millis(mode: i64, number: &str) -> Result<Option<u64>
         -1 => Ok(None),
         1..=RUNTIME_RETRY_AFTER_CAP_MILLIS => Ok(Some(value as u64)),
         -2 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+fn previous_response_error_text_parts(value: Option<&str>) -> Result<(u64, i64), MojoError> {
+    match value {
+        Some(value) if value.len() <= PREVIOUS_RESPONSE_ERROR_MAX_BYTES => Ok((
+            mojo_pointer_address(value.as_ptr()),
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+        )),
+        Some(_) => Err(MojoError::InvalidInput),
+        None => Ok((0, 0)),
+    }
+}
+
+pub fn previous_response_error_class(
+    mode: i64,
+    error_type: Option<&str>,
+    code: Option<&str>,
+    param: Option<&str>,
+    message: Option<&str>,
+) -> Result<i64, MojoError> {
+    ensure_rich_abi()?;
+    if !(PREVIOUS_RESPONSE_ERROR_MODE_STRUCTURED..=PREVIOUS_RESPONSE_ERROR_MODE_TEXT)
+        .contains(&mode)
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let (error_type_address, error_type_length) = previous_response_error_text_parts(error_type)?;
+    let (code_address, code_length) = previous_response_error_text_parts(code)?;
+    let (param_address, param_length) = previous_response_error_text_parts(param)?;
+    let (message_address, message_length) = previous_response_error_text_parts(message)?;
+    let value = unsafe {
+        prodex_mojo_previous_response_error_class_v1(
+            RICH_ABI_VERSION,
+            mode,
+            error_type_address,
+            error_type_length,
+            code_address,
+            code_length,
+            param_address,
+            param_length,
+            message_address,
+            message_length,
+        )
+    };
+    match value {
+        PREVIOUS_RESPONSE_ERROR_CLASS_NONE
+        | PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND
+        | PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID
+        | PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT => Ok(value),
+        -2 => Err(MojoError::AbiMismatch),
+        -1 => Err(MojoError::InvalidInput),
         _ => Err(MojoError::InvalidOutput),
     }
 }

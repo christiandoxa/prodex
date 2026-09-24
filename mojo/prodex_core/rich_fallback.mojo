@@ -1282,6 +1282,195 @@ def prodex_mojo_rich_retry_after_millis_v1(
         millis = RUNTIME_RETRY_AFTER_CAP_MILLIS
     return Int64(millis)
 
+
+comptime PREVIOUS_RESPONSE_ERROR_MODE_STRUCTURED: Int64 = 0
+comptime PREVIOUS_RESPONSE_ERROR_MODE_TEXT: Int64 = 1
+comptime PREVIOUS_RESPONSE_ERROR_CLASS_NONE: Int64 = 0
+comptime PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND: Int64 = 1
+comptime PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID: Int64 = 2
+comptime PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT: Int64 = 3
+comptime PREVIOUS_RESPONSE_ERROR_MAX_BYTES: Int64 = 65_536
+
+
+def previous_response_error_ptr(
+    address: UInt,
+) -> Pointer[mut=False, UInt8, ImmUntrackedOrigin]:
+    return Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+
+
+def previous_response_error_prefix(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var literal_len = Int64(literal.byte_length())
+    return end - start >= literal_len and runtime_error_range_matches(
+        ptr, start, start + literal_len, literal, True
+    )
+
+
+def previous_response_invalid_id_message(
+    ptr: Pointer[mut=False, UInt8, _],
+    length: Int64,
+) -> Bool:
+    if length <= 0:
+        return False
+    var start = runtime_error_skip_space(ptr, 0, length)
+    var end = runtime_error_trim_end(ptr, start, length)
+    return runtime_error_range_matches(
+        ptr,
+        start,
+        end,
+        StringSlice("invalid `previous_response_id`."),
+        True,
+    )
+
+
+def previous_response_tool_context_missing(
+    ptr: Pointer[mut=False, UInt8, _],
+    length: Int64,
+) -> Bool:
+    return length > 0 and (
+        runtime_error_contains(ptr, 0, length, StringSlice("no tool call found"))
+        or runtime_error_contains(
+            ptr, 0, length, StringSlice("no function call found")
+        )
+    )
+
+
+def previous_response_structured_class(
+    error_type_address: UInt,
+    error_type_length: Int64,
+    code_address: UInt,
+    code_length: Int64,
+    param_address: UInt,
+    param_length: Int64,
+    message_address: UInt,
+    message_length: Int64,
+) -> Int64:
+    if code_length > 0:
+        var code = previous_response_error_ptr(code_address)
+        if runtime_error_range_matches(
+            code,
+            0,
+            code_length,
+            StringSlice("previous_response_not_found"),
+            False,
+        ):
+            return PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND
+
+    var invalid_request = False
+    if error_type_length > 0:
+        var error_type = previous_response_error_ptr(error_type_address)
+        invalid_request = runtime_error_range_matches(
+            error_type,
+            0,
+            error_type_length,
+            StringSlice("invalid_request_error"),
+            False,
+        )
+
+    if message_length > 0:
+        var message = previous_response_error_ptr(message_address)
+        if invalid_request and previous_response_invalid_id_message(
+            message, message_length
+        ):
+            return PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID
+        if previous_response_tool_context_missing(message, message_length):
+            var input_param = False
+            if param_length > 0:
+                var param = previous_response_error_ptr(param_address)
+                input_param = runtime_error_range_matches(
+                    param, 0, param_length, StringSlice("input"), False
+                )
+            if invalid_request or input_param:
+                return PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT
+    return PREVIOUS_RESPONSE_ERROR_CLASS_NONE
+
+
+def previous_response_text_class(
+    text_address: UInt,
+    text_length: Int64,
+) -> Int64:
+    if text_length <= 0:
+        return PREVIOUS_RESPONSE_ERROR_CLASS_NONE
+    var text = previous_response_error_ptr(text_address)
+    if previous_response_invalid_id_message(text, text_length):
+        return PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID
+    if previous_response_error_prefix(
+        text, 0, text_length, StringSlice("previous_response_not_found")
+    ):
+        return PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND
+    if previous_response_error_prefix(
+        text, 0, text_length, StringSlice("previous response")
+    ) and runtime_error_contains(
+        text, 0, text_length, StringSlice("not found")
+    ):
+        return PREVIOUS_RESPONSE_ERROR_CLASS_NOT_FOUND
+    if previous_response_tool_context_missing(text, text_length) and (
+        previous_response_error_prefix(
+            text, 0, text_length, StringSlice("invalid_request_error:")
+        )
+        or previous_response_error_prefix(
+            text, 0, text_length, StringSlice("no tool call found")
+        )
+        or previous_response_error_prefix(
+            text, 0, text_length, StringSlice("no function call found")
+        )
+    ):
+        return PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT
+    return PREVIOUS_RESPONSE_ERROR_CLASS_NONE
+
+
+@export("prodex_mojo_previous_response_error_class_v1")
+def prodex_mojo_previous_response_error_class_v1(
+    abi_version: Int64,
+    mode: Int64,
+    error_type_address: UInt,
+    error_type_length: Int64,
+    code_address: UInt,
+    code_length: Int64,
+    param_address: UInt,
+    param_length: Int64,
+    message_address: UInt,
+    message_length: Int64,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return -2
+    if (
+        mode < PREVIOUS_RESPONSE_ERROR_MODE_STRUCTURED
+        or mode > PREVIOUS_RESPONSE_ERROR_MODE_TEXT
+        or error_type_length < 0
+        or code_length < 0
+        or param_length < 0
+        or message_length < 0
+        or error_type_length > PREVIOUS_RESPONSE_ERROR_MAX_BYTES
+        or code_length > PREVIOUS_RESPONSE_ERROR_MAX_BYTES
+        or param_length > PREVIOUS_RESPONSE_ERROR_MAX_BYTES
+        or message_length > PREVIOUS_RESPONSE_ERROR_MAX_BYTES
+        or (error_type_length > 0 and error_type_address == 0)
+        or (code_length > 0 and code_address == 0)
+        or (param_length > 0 and param_address == 0)
+        or (message_length > 0 and message_address == 0)
+    ):
+        return -1
+    if mode == PREVIOUS_RESPONSE_ERROR_MODE_TEXT:
+        return previous_response_text_class(message_address, message_length)
+    return previous_response_structured_class(
+        error_type_address,
+        error_type_length,
+        code_address,
+        code_length,
+        param_address,
+        param_length,
+        message_address,
+        message_length,
+    )
+
+
 comptime PREVIOUS_RESPONSE_ROUTE_RESPONSES: Int64 = 0
 comptime PREVIOUS_RESPONSE_ROUTE_WEBSOCKET: Int64 = 1
 comptime PREVIOUS_RESPONSE_SHAPE_NONE: Int64 = -1
