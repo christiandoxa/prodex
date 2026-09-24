@@ -408,3 +408,16 @@ authority, no-fallback, and size guards are green with Mojo 1.1.0.
 
 The canonical broad inventory at this checkpoint is 49,076 reachable Mojo LOC and 196,698 Rust
 production LOC, or 19.967938% Mojo. The 75% project target remains a forward migration goal.
+
+## Runtime Mojo adapter deduplication wave
+
+The runtime-proxy Mojo adapter now reuses one canonical route/status/band/source conversion layer
+across quota snapshots, pressure scoring, candidate planning, and window classification. Repeated
+Rust enum/tag matches that merely re-encoded already-Mojo-owned decisions were deleted instead of
+being kept beside the migrated kernels.
+
+Focused Mojo quota/candidate tests pass, all-target runtime-proxy Clippy is clean, and
+production-share, ownership, authority, no-fallback, and size guards pass with Mojo 1.1.0.
+
+The canonical broad inventory at this checkpoint is 49,076 reachable Mojo LOC and 196,659 Rust
+production LOC, or 19.971107% Mojo. The 75% project target remains a forward migration goal.
