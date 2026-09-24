@@ -15,6 +15,10 @@ pub const RUNTIME_ERROR_MODE_TEXT_RATE: i64 = 8;
 pub const RUNTIME_ERROR_MODE_TEXT_PROFILE: i64 = 9;
 pub const RUNTIME_ERROR_MODE_TEXT_OVERLOAD: i64 = 10;
 pub const RUNTIME_ERROR_MODE_TEXT_WORKSPACE: i64 = 11;
+pub const RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS: i64 = 0;
+pub const RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS: i64 = 1;
+pub const RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS: i64 = 2;
+const RUNTIME_RETRY_AFTER_CAP_MILLIS: i64 = 300_000;
 pub const PREVIOUS_RESPONSE_PLAN_OUTPUT_COUNT: usize = 10;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +88,12 @@ unsafe extern "C" {
         output_capacity: i64,
         result: u64,
     ) -> i64;
+    fn prodex_mojo_rich_retry_after_millis_v1(
+        abi_version: i64,
+        mode: i64,
+        number_address: u64,
+        number_length: i64,
+    ) -> i64;
     fn prodex_runtime_previous_response_plan_v1(
         route: i64,
         previous_response_present: i64,
@@ -97,6 +107,30 @@ unsafe extern "C" {
         has_session_affinity: i64,
         output: *mut i64,
     ) -> i64;
+}
+
+pub fn runtime_retry_after_millis(mode: i64, number: &str) -> Result<Option<u64>, MojoError> {
+    ensure_rich_abi()?;
+    if !(RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS..=RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS)
+        .contains(&mode)
+        || number.is_empty()
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let value = unsafe {
+        prodex_mojo_rich_retry_after_millis_v1(
+            RICH_ABI_VERSION,
+            mode,
+            mojo_pointer_address(number.as_ptr()),
+            i64::try_from(number.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match value {
+        -1 => Ok(None),
+        1..=RUNTIME_RETRY_AFTER_CAP_MILLIS => Ok(Some(value as u64)),
+        -2 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn previous_response_plan(

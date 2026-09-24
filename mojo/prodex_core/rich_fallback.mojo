@@ -1135,6 +1135,153 @@ def prodex_mojo_rich_runtime_error_policy_v1(
     return RICH_STATUS_OK
 
 
+
+comptime RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS: Int64 = 0
+comptime RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS: Int64 = 1
+comptime RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS: Int64 = 2
+comptime RUNTIME_RETRY_AFTER_CAP_MILLIS: UInt128 = 300_000
+comptime RUNTIME_RETRY_AFTER_U64_MAX: UInt128 = 18_446_744_073_709_551_615
+comptime RUNTIME_RETRY_AFTER_U128_MAX: UInt128 = 340_282_366_920_938_463_463_374_607_431_768_211_455
+comptime RUNTIME_RETRY_AFTER_U128_SECONDS_QUOTIENT: UInt128 = 340_282_366_920_938_463_463_374_607_431_768_211
+comptime RUNTIME_RETRY_AFTER_U128_SECONDS_REMAINDER: UInt128 = 455
+
+
+def runtime_retry_after_parse_whole(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt128, _],
+) -> Bool:
+    if start >= end:
+        return False
+    var value: UInt128 = 0
+    for index in range(start, end):
+        var byte = ptr[unsafe_offset=index]
+        if byte < 48 or byte > 57:
+            return False
+        var digit = UInt128(byte - 48)
+        if value > (RUNTIME_RETRY_AFTER_U128_MAX - digit) // UInt128(10):
+            return False
+        value = value * UInt128(10) + digit
+    output[] = value
+    return True
+
+
+def runtime_retry_after_fraction_millis(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt128, _],
+    any_nonzero: Pointer[mut=True, Bool, _],
+) -> Bool:
+    var millis: UInt128 = 0
+    var digits: Int64 = 0
+    var rounded = False
+    for index in range(start, end):
+        var byte = ptr[unsafe_offset=index]
+        if byte < 48 or byte > 57:
+            return False
+        var digit = UInt128(byte - 48)
+        if digit != 0:
+            any_nonzero[] = True
+        if digits < 3:
+            millis = millis * UInt128(10) + digit
+        elif digit != 0:
+            rounded = True
+        digits += 1
+    while digits < 3:
+        millis *= UInt128(10)
+        digits += 1
+    if rounded:
+        millis += UInt128(1)
+    output[] = millis
+    return True
+
+
+@export("prodex_mojo_rich_retry_after_millis_v1")
+def prodex_mojo_rich_retry_after_millis_v1(
+    abi_version: Int64,
+    mode: Int64,
+    number_address: UInt,
+    number_length: Int64,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return -2
+    if (
+        mode < RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS
+        or mode > RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS
+        or number_length <= 0
+        or number_address == 0
+    ):
+        return -2
+
+    var ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(number_address)
+    )
+    var dot: Int64 = -1
+    for index in range(number_length):
+        var byte = ptr[unsafe_offset=index]
+        if byte == 46:
+            if dot >= 0:
+                return -1
+            dot = index
+        elif byte < 48 or byte > 57:
+            return -1
+
+    if mode == RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS and dot >= 0:
+        return -1
+
+    var whole_end = number_length
+    if dot >= 0:
+        whole_end = dot
+    var whole: UInt128 = 0
+    if not runtime_retry_after_parse_whole(ptr, 0, whole_end, Pointer(to=whole)):
+        return -1
+
+    if mode == RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS:
+        if whole == 0 or whole > RUNTIME_RETRY_AFTER_U64_MAX:
+            return -1
+        var millis = whole * UInt128(1000)
+        if millis > RUNTIME_RETRY_AFTER_CAP_MILLIS:
+            millis = RUNTIME_RETRY_AFTER_CAP_MILLIS
+        return Int64(millis)
+
+    var fraction_start = number_length
+    if dot >= 0:
+        fraction_start = dot + 1
+    var fraction_millis: UInt128 = 0
+    var fraction_nonzero = False
+    if not runtime_retry_after_fraction_millis(
+        ptr,
+        fraction_start,
+        number_length,
+        Pointer(to=fraction_millis),
+        Pointer(to=fraction_nonzero),
+    ):
+        return -1
+
+    var millis: UInt128 = 0
+    if mode == RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS:
+        var increment = UInt128(1) if fraction_nonzero else UInt128(0)
+        if whole == RUNTIME_RETRY_AFTER_U128_MAX and increment != 0:
+            return -1
+        millis = whole + increment
+    else:
+        if whole > RUNTIME_RETRY_AFTER_U128_SECONDS_QUOTIENT:
+            return -1
+        if (
+            whole == RUNTIME_RETRY_AFTER_U128_SECONDS_QUOTIENT
+            and fraction_millis > RUNTIME_RETRY_AFTER_U128_SECONDS_REMAINDER
+        ):
+            return -1
+        millis = whole * UInt128(1000) + fraction_millis
+
+    if millis == 0:
+        return -1
+    if millis > RUNTIME_RETRY_AFTER_CAP_MILLIS:
+        millis = RUNTIME_RETRY_AFTER_CAP_MILLIS
+    return Int64(millis)
+
 comptime PREVIOUS_RESPONSE_ROUTE_RESPONSES: Int64 = 0
 comptime PREVIOUS_RESPONSE_ROUTE_WEBSOCKET: Int64 = 1
 comptime PREVIOUS_RESPONSE_SHAPE_NONE: Int64 = -1
