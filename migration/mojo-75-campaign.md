@@ -259,3 +259,14 @@ The real-Mojo quota suite covers the public rendering behavior and direct classi
 including precedence collisions such as server-plus-timeout and TLS-plus-proxy. Feature-off
 Rust behavior remains the compatibility oracle. The canonical broad inventory at this
 checkpoint is 47,778 Mojo LOC and 196,186 Rust production LOC, or 19.584037% Mojo.
+## Runtime health adapter consolidation
+
+Runtime profile coupling and performance scoring now reuse one normalized
+`ProfileHealthScoreInput` projection instead of rebuilding route/coupled-route state in four
+separate feature-on Rust paths. The actual decay, coupling, performance, and aggregate sort
+arithmetic remains Mojo-authoritative; Rust is reduced to one state-observation adapter for
+both map-backed and callback-backed callers.
+
+Focused Mojo parity tests and all-target runtime-proxy Clippy pass. This removes 51 net Rust
+production lines without adding a duplicate policy implementation. The canonical broad
+inventory is now 47,778 Mojo LOC and 196,131 Rust production LOC, or 19.588453% Mojo.
