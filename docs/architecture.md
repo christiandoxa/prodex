@@ -150,6 +150,7 @@ Observability rules:
 - Prodex-owned screens may print before launching Codex or in standalone commands.
 - Runtime notices while Codex TUI runs go to log files only.
 - If runtime stalls, inspect latest runtime log markers before changing selection or transport behavior.
+- `prodex-observability/mojo` routes `TelemetryAttribute::as_metric_label` through a bounded Mojo privacy validator. Rust retains the strings; Mojo receives borrowed bytes and returns only a validation tag. Feature-off Rust builds use the separate compatibility implementation, never a runtime fallback after a Mojo error.
 - `prodex log` is the canonical short form of `prodex log stream`; both use one live handler.
   `prodex log upstream` remains the explicit upstream-payload mode. All three share the human TUI
   title `Prodex Log`. Their right-aligned t/s field is output tokens per active generation second,

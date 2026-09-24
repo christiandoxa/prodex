@@ -25,13 +25,23 @@ impl TelemetryAttribute {
     }
 
     pub fn as_metric_label(&self) -> Result<(&str, &str), TelemetryAttributeError> {
-        if invalid_label_key(&self.key) {
-            return Err(TelemetryAttributeError::InvalidKey);
+        #[cfg(feature = "mojo-observability")]
+        {
+            use prodex_mojo_core::observability::TelemetryMetricLabelValidation as Validation;
+
+            match prodex_mojo_core::observability::validate_telemetry_metric_label(
+                &self.key,
+                &self.value,
+            ) {
+                Ok(Validation::Valid) => Ok((&self.key, &self.value)),
+                Ok(Validation::InvalidKey) => Err(TelemetryAttributeError::InvalidKey),
+                // Preserve the public error type and fail closed on boundary errors.
+                Ok(Validation::InvalidValue) | Err(_) => Err(TelemetryAttributeError::InvalidValue),
+            }
         }
-        if invalid_label_value(&self.value) {
-            return Err(TelemetryAttributeError::InvalidValue);
-        }
-        Ok((&self.key, &self.value))
+        #[cfg(not(feature = "mojo-observability"))]
+        validate_telemetry_metric_label_rust(&self.key, &self.value)
+            .map(|()| (self.key.as_str(), self.value.as_str()))
     }
 }
 
@@ -48,6 +58,21 @@ impl fmt::Display for TelemetryAttributeError {
 }
 impl Error for TelemetryAttributeError {}
 
+#[cfg(any(not(feature = "mojo-observability"), test))]
+fn validate_telemetry_metric_label_rust(
+    key: &str,
+    value: &str,
+) -> Result<(), TelemetryAttributeError> {
+    if invalid_label_key(key) {
+        Err(TelemetryAttributeError::InvalidKey)
+    } else if invalid_label_value(value) {
+        Err(TelemetryAttributeError::InvalidValue)
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(any(not(feature = "mojo-observability"), test))]
 fn invalid_label_key(key: &str) -> bool {
     if key.is_empty() || key.len() > 128 || key.chars().any(|c| !c.is_ascii_graphic()) {
         return true;
@@ -67,6 +92,7 @@ fn invalid_label_key(key: &str) -> bool {
     .any(|blocked| normalized.contains(blocked))
 }
 
+#[cfg(any(not(feature = "mojo-observability"), test))]
 fn invalid_label_value(value: &str) -> bool {
     if value.is_empty() || value.len() > 128 || value.chars().any(|c| !c.is_ascii_graphic()) {
         return true;
@@ -81,3 +107,7 @@ fn invalid_label_value(value: &str) -> bool {
     let hex_id = bytes.len() == 32 && bytes.iter().all(u8::is_ascii_hexdigit);
     uuid || hex_id
 }
+
+#[cfg(all(test, feature = "mojo-observability"))]
+#[path = "observability/mojo_parity_tests.rs"]
+mod mojo_parity_tests;
