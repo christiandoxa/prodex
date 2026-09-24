@@ -13,7 +13,11 @@ path = "src/lib.rs"
 [features]
 default = []
 # Kept as a compatibility feature name; Mojo is now the only planner authority.
-mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-observability"]
+mojo = [
+    "dep:prodex_mojo_core",
+    "prodex_domain/mojo-observability",
+    "prodex_mojo_core/mojo-observability",
+]
 
 [dependencies]
 prodex_mojo_core = { workspace = true, optional = true }

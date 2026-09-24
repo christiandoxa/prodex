@@ -52,3 +52,12 @@ fn debug_output_redacts_metric_value() {
     assert!(!rendered.contains("openai"));
     assert!(rendered.contains("<redacted>"));
 }
+
+#[cfg(feature = "mojo-observability")]
+#[test]
+fn telemetry_metric_label_validation_uses_compiled_mojo() {
+    assert_eq!(
+        TelemetryAttribute::metric_label("provider", "openai").as_metric_label(),
+        Ok(("provider", "openai"))
+    );
+}

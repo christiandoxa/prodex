@@ -24,6 +24,14 @@ pub const OPERATIONAL_EVENT_SOURCE_SMART: i64 = 17;
 pub const OPERATIONAL_EVENT_SOURCE_COMPACT: i64 = 18;
 pub const OPERATIONAL_EVENT_SOURCE_EVENT: i64 = 19;
 
+/// The result of checking a metric key and value against label privacy rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelemetryMetricLabelValidation {
+    Valid,
+    InvalidKey,
+    InvalidValue,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OperationalEventPlan {
     pub source: i64,
@@ -53,6 +61,14 @@ unsafe extern "C" {
         output: u64,
         output_capacity: i64,
         output_length: u64,
+    ) -> i64;
+    fn prodex_mojo_observability_metric_label_validate_v1(
+        abi_version: i64,
+        key_address: u64,
+        key_length: i64,
+        value_address: u64,
+        value_length: i64,
+        output_tag: u64,
     ) -> i64;
     fn prodex_mojo_operational_event_plan_v1(
         abi_version: i64,
@@ -223,6 +239,42 @@ pub fn label(kind: i64, value: i64) -> Result<String, MojoError> {
         return Err(MojoError::InvalidOutput);
     }
     String::from_utf8(output[..length].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+/// Applies bounded privacy checks to borrowed metric key and value strings.
+///
+/// The Mojo kernel only reads the strings and returns a validation tag. It
+/// never copies or returns their contents.
+pub fn validate_telemetry_metric_label(
+    key: &str,
+    value: &str,
+) -> Result<TelemetryMetricLabelValidation, MojoError> {
+    let key_length = i64::try_from(key.len()).map_err(|_| MojoError::InvalidInput)?;
+    let value_length = i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?;
+    let mut output_tag = -1_i64;
+    let status = unsafe {
+        prodex_mojo_observability_metric_label_validate_v1(
+            OBSERVABILITY_LABEL_ABI_VERSION,
+            key.as_ptr() as usize as u64,
+            key_length,
+            value.as_ptr() as usize as u64,
+            value_length,
+            (&mut output_tag as *mut i64) as usize as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    match output_tag {
+        0 => Ok(TelemetryMetricLabelValidation::Valid),
+        1 => Ok(TelemetryMetricLabelValidation::InvalidKey),
+        2 => Ok(TelemetryMetricLabelValidation::InvalidValue),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn metric_name(plan: i64, slot: i64) -> Result<String, MojoError> {

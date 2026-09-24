@@ -2643,6 +2643,7 @@ dependencies = [
 name = "prodex-domain"
 version = "0.431.7"
 dependencies = [
+ "prodex-mojo-core",
  "serde",
  "serde_json",
  "uuid",

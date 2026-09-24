@@ -652,3 +652,24 @@ authority, no-fallback, size, formatting, and diff checks pass.
 
 The canonical broad inventory is 50,336 reachable Mojo LOC and 196,656 Rust
 production LOC, or 20.37960743667811% Mojo. The 75% project target remains unmet.
+
+## Telemetry metric-label privacy wave
+
+`prodex-observability/mojo` now enables Mojo validation through
+`prodex-domain/mojo-observability`. The production consumer is
+`TelemetryAttribute::as_metric_label`; the Mojo kernel receives borrowed key/value
+bytes and returns only a validation tag. Rust retains both strings and maps the
+tag to the existing domain errors. Feature-off builds keep the separate Rust
+implementation, and a Mojo boundary error fails closed without Rust recomputation.
+
+Mojo preserves the existing byte bounds, printable-ASCII rules, normalized
+privacy-sensitive key checks, and UUID/hex-ID value rejection. Differential tests
+cover normalization, blocked substrings, ASCII and length boundaries, identifiers,
+and every byte value. Feature-off and strict Mojo domain and observability tests
+pass with Mojo 1.1.0; all-target workspace Clippy, formatting, docs, changed tests,
+and Mojo ownership, authority, no-fallback, size, churn, and production-share
+guards pass.
+
+The canonical broad inventory is 50,451 reachable Mojo LOC and 196,717 Rust
+production LOC, or 20.41162286380114% Mojo. The 75% project target remains unmet;
+the report estimates 539,700 additional Mojo LOC at current Rust volume.
