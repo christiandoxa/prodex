@@ -27,10 +27,23 @@ pub(crate) fn handle_gateway(args: GatewayArgs) -> Result<()> {
     let Some(endpoint) = prepared.runtime_proxy.as_ref() else {
         bail!("gateway provider does not expose an OpenAI-compatible proxy");
     };
-    println!(
-        "Prodex gateway listening on http://{}{}",
+    let gateway_url = format!(
+        "http://{}{}",
         endpoint.listen_addr, endpoint.openai_mount_path
     );
+    print_user_stdout_panel(
+        "Prodex Gateway",
+        &[
+            ("Status".to_string(), "listening".to_string()),
+            ("Endpoint".to_string(), gateway_url.clone()),
+            (
+                "Provider".to_string(),
+                provider.unwrap_or("openai").to_string(),
+            ),
+            ("Stop".to_string(), "Ctrl-C".to_string()),
+        ],
+        &[format!("Prodex gateway listening on {gateway_url}")],
+    )?;
     wait_for_gateway_signal()?;
     drop(prepared);
     Ok(())

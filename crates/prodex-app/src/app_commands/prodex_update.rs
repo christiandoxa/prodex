@@ -19,14 +19,26 @@ fn prepare_prodex_update() -> Result<Option<ProdexUpdatePreparation>> {
     let target_version = prodex_update_notice::latest_prodex_version_for_update(&paths)?;
     match prodex_update_decision(current_version, &target_version)? {
         ProdexUpdateDecision::UpToDate => {
-            println!("Prodex {current_version} is already up to date.");
+            print_update_panel(
+                "up to date",
+                current_version,
+                &target_version,
+                &[format!("Prodex {current_version} is already up to date.")],
+            )?;
             Ok(None)
         }
         ProdexUpdateDecision::LocalNewer(_) => {
-            println!(
-                "Installed Prodex {current_version} is newer than latest stable {target_version}."
-            );
-            println!("No changes made.");
+            print_update_panel(
+                "local version is newer",
+                current_version,
+                &target_version,
+                &[
+                    format!(
+                        "Installed Prodex {current_version} is newer than latest stable {target_version}."
+                    ),
+                    "No changes made.".to_string(),
+                ],
+            )?;
             Ok(None)
         }
         ProdexUpdateDecision::UpdateAvailable(_) => {
@@ -34,18 +46,37 @@ fn prepare_prodex_update() -> Result<Option<ProdexUpdatePreparation>> {
             let installed_version = prodex_version_from_binary(&running_exe)?;
             match prodex_update_decision(&installed_version, &target_version)? {
                 ProdexUpdateDecision::UpToDate => {
-                    println!("Prodex {installed_version} is already up to date.");
+                    print_update_panel(
+                        "up to date",
+                        &installed_version,
+                        &target_version,
+                        &[format!("Prodex {installed_version} is already up to date.")],
+                    )?;
                     Ok(None)
                 }
                 ProdexUpdateDecision::LocalNewer(_) => {
-                    println!(
-                        "Installed Prodex {installed_version} is newer than latest stable {target_version}."
-                    );
-                    println!("No changes made.");
+                    print_update_panel(
+                        "local version is newer",
+                        &installed_version,
+                        &target_version,
+                        &[
+                            format!(
+                                "Installed Prodex {installed_version} is newer than latest stable {target_version}."
+                            ),
+                            "No changes made.".to_string(),
+                        ],
+                    )?;
                     Ok(None)
                 }
                 ProdexUpdateDecision::UpdateAvailable(_) => {
-                    println!("Updating Prodex {installed_version} → {target_version}...");
+                    print_update_panel(
+                        "updating",
+                        &installed_version,
+                        &target_version,
+                        &[format!(
+                            "Updating Prodex {installed_version} → {target_version}..."
+                        )],
+                    )?;
                     Ok(Some(ProdexUpdatePreparation {
                         running_exe,
                         target_version,
@@ -55,6 +86,23 @@ fn prepare_prodex_update() -> Result<Option<ProdexUpdatePreparation>> {
             }
         }
     }
+}
+
+fn print_update_panel(
+    status: &str,
+    installed_version: &str,
+    target_version: &str,
+    fallback_lines: &[String],
+) -> Result<()> {
+    super::print_user_stdout_panel(
+        "Prodex Update",
+        &[
+            ("Installed".to_string(), installed_version.to_string()),
+            ("Latest".to_string(), target_version.to_string()),
+            ("Status".to_string(), status.to_string()),
+        ],
+        fallback_lines,
+    )
 }
 
 fn prodex_version_from_binary(path: &Path) -> Result<String> {

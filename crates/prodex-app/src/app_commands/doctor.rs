@@ -54,7 +54,11 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let mut state = AppState::load(&paths)?;
     if args.repair_session_index {
         repair_session_index(&paths, &state)?;
-        eprintln!("Prodex doctor: session index repair completed.");
+        print_user_stderr_panel(
+            "Prodex Doctor",
+            &["Session index repair completed.".to_string()],
+            &["Prodex doctor: session index repair completed.".to_string()],
+        )?;
     }
     let repaired_import_auth_journals = if args.repair_import_auth_journals {
         let repaired = repair_profile_import_auth_journals(&paths, &mut state)?;
