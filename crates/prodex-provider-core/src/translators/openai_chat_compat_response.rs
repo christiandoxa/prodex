@@ -59,7 +59,7 @@ fn translate_chat_response_to_responses_at(
     #[cfg(feature = "mojo")]
     let body = {
         let mut document = Document::default();
-        document.openai_chat_response_context(&value, now_secs);
+        document.openai_chat_context(&value, Some(now_secs));
         let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
         prodex_mojo_core::json::transform_openai_chat_response(&document.nodes, raw)
             .unwrap_or_else(|error| panic!("Mojo OpenAI chat response transform failed: {error:?}"))

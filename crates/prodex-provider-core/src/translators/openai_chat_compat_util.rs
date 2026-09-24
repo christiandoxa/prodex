@@ -183,8 +183,3 @@ pub(super) fn rtk_wrapped_tool_arguments_rust(name: &str, arguments: &str) -> St
     }
     wrap_json_string_arg_with(arguments, &["cmd"], prefix_command_with_rtk)
 }
-
-#[cfg(not(feature = "mojo"))]
-pub(super) fn rtk_wrapped_tool_arguments(name: &str, arguments: &str) -> String {
-    rtk_wrapped_tool_arguments_rust(name, arguments)
-}

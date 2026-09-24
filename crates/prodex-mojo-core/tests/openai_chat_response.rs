@@ -3,7 +3,9 @@
 
 use prodex_mojo_core::{
     MojoError,
-    json::{JsonKind, JsonNode, transform_openai_chat_response},
+    json::{
+        JsonKind, JsonNode, transform_openai_chat_response, transform_openai_chat_stream_event,
+    },
 };
 
 fn response_document() -> (Vec<JsonNode<'static>>, &'static str) {
@@ -76,6 +78,12 @@ fn complete_response_boundary_rejects_invalid_tree_before_policy() {
         transform_openai_chat_response(&nodes, raw),
         Err(MojoError::InvalidInput)
     );
+}
+
+#[test]
+fn stream_boundary_reports_unsupported_event_without_output() {
+    let (nodes, raw) = response_document();
+    assert_eq!(transform_openai_chat_stream_event(&nodes, raw), Ok(None));
 }
 
 #[repr(C)]
