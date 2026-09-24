@@ -8,29 +8,6 @@ use crate::{
 #[path = "compatibility_surface/rust_oracle.rs"]
 mod rust_oracle;
 
-#[cfg(feature = "mojo")]
-const COMPAT_TOOL_TOOLS: i64 = 1;
-#[cfg(feature = "mojo")]
-const COMPAT_TOOL_WEB: i64 = 2;
-#[cfg(feature = "mojo")]
-const COMPAT_TOOL_MCP: i64 = 4;
-#[cfg(feature = "mojo")]
-const COMPAT_TOOL_COMPUTER: i64 = 8;
-#[cfg(feature = "mojo")]
-const COMPAT_TOOL_SHELL: i64 = 16;
-#[cfg(feature = "mojo")]
-const COMPAT_TOOL_APPROVAL: i64 = 32;
-#[cfg(feature = "mojo")]
-const COMPAT_CONTINUATION_PREVIOUS_RESPONSE: i64 = 1;
-#[cfg(feature = "mojo")]
-const COMPAT_CONTINUATION_TURN_STATE: i64 = 2;
-#[cfg(feature = "mojo")]
-const COMPAT_CONTINUATION_SESSION: i64 = 4;
-#[cfg(feature = "mojo")]
-const COMPAT_WARNING_UNKNOWN_CLIENT: i64 = 1;
-#[cfg(feature = "mojo")]
-const COMPAT_WARNING_WEBSOCKET_PREVIOUS_RESPONSE_WITHOUT_TURN_STATE: i64 = 2;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRequestCompatibilitySurface {
     pub stage: &'static str,
@@ -117,7 +94,12 @@ fn runtime_detect_request_compatibility_surface_mojo(
         .and_then(serde_json::Value::as_bool);
     let plan = prodex_mojo_core::runtime::compatibility_surface_plan(
         [
-            route_kind_tag(route),
+            match route {
+                "responses" => 0,
+                "compact" => 1,
+                "chat_completions" => 2,
+                _ => 3,
+            },
             i64::from(transport == "websocket"),
             i64::from(codex_headers),
             i64::from(subagent_header),
@@ -135,115 +117,86 @@ fn runtime_detect_request_compatibility_surface_mojo(
 
     RuntimeRequestCompatibilitySurface {
         stage,
-        family: family_label(plan[0]),
-        client: client_label(plan[1]),
+        family: compatibility_tag_label(&["unknown", "codex", "openai_compatible"], plan[0]),
+        client: compatibility_tag_label(
+            &[
+                "unknown",
+                "codex_subagent",
+                "codex_cli",
+                "chat_completions_client",
+                "responses_client",
+            ],
+            plan[1],
+        ),
         route,
         transport,
-        stream: stream_label(plan[2]),
-        tool_surface: tool_surface_label(plan[3]),
-        continuation: continuation_label(plan[4]),
-        request_origin: request_origin_label(plan[6]),
-        approval: plan[3] & COMPAT_TOOL_APPROVAL != 0,
+        stream: compatibility_tag_label(&["unary", "streaming"], plan[2]),
+        tool_surface: compatibility_flag_string(
+            plan[3],
+            &[
+                (32, "approval"),
+                (8, "computer"),
+                (4, "mcp"),
+                (16, "shell"),
+                (1, "tools"),
+                (2, "web"),
+            ],
+            "none",
+        ),
+        continuation: compatibility_flag_string(
+            plan[4],
+            &[(1, "previous_response"), (4, "session"), (2, "turn_state")],
+            "none",
+        ),
+        request_origin: compatibility_tag_label(&["external", "internal"], plan[6]),
+        approval: plan[3] & 32 != 0,
         user_agent: user_agent
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .unwrap_or("-")
             .to_string(),
-        warnings: warning_labels(plan[5]),
+        warnings: compatibility_flag_labels(
+            plan[5],
+            &[
+                (1, "unknown_client_family"),
+                (2, "websocket_previous_response_without_turn_state"),
+            ],
+        ),
     }
 }
 
 #[cfg(feature = "mojo")]
-fn route_kind_tag(route: &str) -> i64 {
-    match route {
-        "responses" => 0,
-        "compact" => 1,
-        "chat_completions" => 2,
-        _ => 3,
-    }
+fn compatibility_tag_label(labels: &'static [&'static str], tag: i64) -> &'static str {
+    usize::try_from(tag)
+        .ok()
+        .and_then(|index| labels.get(index))
+        .copied()
+        .unwrap_or(labels[0])
 }
 
 #[cfg(feature = "mojo")]
-fn family_label(value: i64) -> &'static str {
-    match value {
-        1 => "codex",
-        2 => "openai_compatible",
-        _ => "unknown",
-    }
+fn compatibility_flag_labels(
+    flags: i64,
+    labels: &'static [(i64, &'static str)],
+) -> Vec<&'static str> {
+    labels
+        .iter()
+        .filter_map(|(flag, label)| (flags & flag != 0).then_some(*label))
+        .collect()
 }
 
 #[cfg(feature = "mojo")]
-fn client_label(value: i64) -> &'static str {
-    match value {
-        1 => "codex_subagent",
-        2 => "codex_cli",
-        3 => "chat_completions_client",
-        4 => "responses_client",
-        _ => "unknown",
-    }
-}
-
-#[cfg(feature = "mojo")]
-fn stream_label(value: i64) -> &'static str {
-    if value == 1 { "streaming" } else { "unary" }
-}
-
-#[cfg(feature = "mojo")]
-fn tool_surface_label(flags: i64) -> String {
-    let mut labels = Vec::new();
-    for (flag, label) in [
-        (COMPAT_TOOL_APPROVAL, "approval"),
-        (COMPAT_TOOL_COMPUTER, "computer"),
-        (COMPAT_TOOL_MCP, "mcp"),
-        (COMPAT_TOOL_SHELL, "shell"),
-        (COMPAT_TOOL_TOOLS, "tools"),
-        (COMPAT_TOOL_WEB, "web"),
-    ] {
-        if flags & flag != 0 {
-            labels.push(label);
-        }
-    }
+fn compatibility_flag_string(
+    flags: i64,
+    labels: &'static [(i64, &'static str)],
+    empty: &'static str,
+) -> String {
+    let labels = compatibility_flag_labels(flags, labels);
     if labels.is_empty() {
-        "none".to_string()
+        empty.to_string()
     } else {
         labels.join("+")
     }
-}
-
-#[cfg(feature = "mojo")]
-fn continuation_label(flags: i64) -> String {
-    let mut labels = Vec::new();
-    for (flag, label) in [
-        (COMPAT_CONTINUATION_PREVIOUS_RESPONSE, "previous_response"),
-        (COMPAT_CONTINUATION_SESSION, "session"),
-        (COMPAT_CONTINUATION_TURN_STATE, "turn_state"),
-    ] {
-        if flags & flag != 0 {
-            labels.push(label);
-        }
-    }
-    if labels.is_empty() {
-        "none".to_string()
-    } else {
-        labels.join("+")
-    }
-}
-
-#[cfg(feature = "mojo")]
-fn request_origin_label(value: i64) -> &'static str {
-    if value == 1 { "internal" } else { "external" }
-}
-
-#[cfg(feature = "mojo")]
-fn warning_labels(flags: i64) -> Vec<&'static str> {
-    let mut warnings = Vec::new();
-    if flags & COMPAT_WARNING_UNKNOWN_CLIENT != 0 {
-        warnings.push("unknown_client_family");
-    }
-    if flags & COMPAT_WARNING_WEBSOCKET_PREVIOUS_RESPONSE_WITHOUT_TURN_STATE != 0 {
-        warnings.push("websocket_previous_response_without_turn_state");
-    }
-    warnings
 }
 
 fn route_label(request: &RuntimeProxyRequest) -> &'static str {
