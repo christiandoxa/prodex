@@ -5,6 +5,7 @@ from parsed_json import (
     ParsedJsonNode,
     JSON_ARRAY,
     JSON_OBJECT,
+    JSON_NULL,
     JSON_NUMBER,
     JSON_STRING,
     pj_child,
@@ -359,6 +360,81 @@ def ocr_response_write(
     return openai_compat_put_byte(writer, 125)
 
 
+def ocr_response_stream_event_write(
+    writer: Pointer[mut=True, OpenAiCompatWriter, _],
+    tree: ParsedJson,
+    response: Int64,
+) -> Tuple[Bool, Bool]:
+    var choices = pj_field(tree, response, StringSlice("choices"))
+    var choice = pj_child(tree, choices) if pj_kind(tree, choices) == JSON_ARRAY else -1
+    if choice < 0:
+        return (False, True)
+    var delta = pj_field(tree, choice, StringSlice("delta"))
+    var tool_calls = pj_field(tree, delta, StringSlice("tool_calls"))
+    var tool_call = pj_child(tree, tool_calls) if pj_kind(tree, tool_calls) == JSON_ARRAY else -1
+    var function = pj_field(tree, tool_call, StringSlice("function"))
+    var arguments = pj_field(tree, function, StringSlice("arguments"))
+    if pj_kind(tree, arguments) == JSON_STRING:
+        if not openai_compat_put_literal(
+            writer,
+            StringSlice(
+                'event: response.function_call_arguments.delta\ndata: {'
+            ),
+        ):
+            return (True, False)
+        var call_id = pj_string_field(tree, tool_call, StringSlice("id"))
+        if call_id >= 0:
+            if not openai_compat_put_literal(writer, StringSlice('"call_id":')):
+                return (True, False)
+            if not openai_compat_put_json_string(writer, pj_text(tree, call_id)):
+                return (True, False)
+            if not openai_compat_put_byte(writer, 44):
+                return (True, False)
+        var name = pj_string_field(tree, function, StringSlice("name"))
+        var flat_name = pj_text(tree, name) if name >= 0 else pj_literal(StringSlice(""))
+        return (
+            True,
+            openai_compat_put_literal(writer, StringSlice('"delta":'))
+            and openai_compat_put_json_string_with_rtk_value(
+                writer, flat_name, pj_text(tree, arguments)
+            )
+            and openai_compat_put_literal(
+                writer,
+                StringSlice(
+                    ',"type":"response.function_call_arguments.delta"}\n\n'
+                ),
+            ),
+        )
+
+    var text = pj_string_field(tree, delta, StringSlice("content"))
+    if text >= 0:
+        return (
+            True,
+            openai_compat_put_literal(
+                writer,
+                StringSlice('event: response.output_text.delta\ndata: {"delta":'),
+            )
+            and openai_compat_put_json_string(writer, pj_text(tree, text))
+            and openai_compat_put_literal(
+                writer,
+                StringSlice(
+                    ',"type":"response.output_text.delta"}\n\n'
+                ),
+            ),
+        )
+
+    var finish_reason = pj_field(tree, choice, StringSlice("finish_reason"))
+    if finish_reason >= 0 and pj_kind(tree, finish_reason) != JSON_NULL:
+        return (
+            True,
+            openai_compat_put_literal(
+                writer,
+                StringSlice('event: response.completed\ndata: {}\n\n'),
+            ),
+        )
+    return (False, True)
+
+
 @export("prodex_mojo_openai_chat_response_v1")
 def prodex_mojo_openai_chat_response_v1(
     abi: Int64, operation: Int64, flag: Int64,
@@ -370,7 +446,7 @@ def prodex_mojo_openai_chat_response_v1(
 ) abi("C") -> Int64:
     if abi != OPENAI_CHAT_RESPONSE_ABI:
         return 4
-    if operation != 0 or flag != 0 or measuring < 0 or measuring > 1 or raw_length < 0:
+    if operation < 0 or operation > 1 or flag != 0 or measuring < 0 or measuring > 1 or raw_length < 0:
         return 1
     if (
         capacity < 0
@@ -395,24 +471,36 @@ def prodex_mojo_openai_chat_response_v1(
     )
     if not pj_valid(tree) or pj_kind(tree, 0) != JSON_OBJECT:
         return 1
-    var default_node = pj_field(tree, 0, StringSlice("fallback_created_at"))
-    var fallback = ocr_response_u64(tree, default_node)
     var response = pj_field(tree, 0, StringSlice("response"))
-    if not fallback[0] or response < 0:
+    if response < 0:
         return 1
+    var default_created_at: UInt64 = 0
+    if operation == 0:
+        var default_node = pj_field(tree, 0, StringSlice("fallback_created_at"))
+        var fallback = ocr_response_u64(tree, default_node)
+        if not fallback[0]:
+            return 1
+        default_created_at = fallback[1]
 
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
     var writer = OpenAiCompatWriter(output, capacity, 0, measuring == 1)
     var writer_ptr = Pointer(to=writer)
-    var success = ocr_response_write(writer_ptr, tree, response, fallback[1])
+    var present = True
+    var success = True
+    if operation == 0:
+        success = ocr_response_write(writer_ptr, tree, response, default_created_at)
+    else:
+        var event = ocr_response_stream_event_write(writer_ptr, tree, response)
+        present = event[0]
+        success = event[1]
     var status = openai_compat_writer_status(writer_ptr, success)
     if status != 0:
         return status
     var meta = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(metadata_address)
     )
-    meta[unsafe_offset=0] = 1
+    meta[unsafe_offset=0] = Int64(present)
     meta[unsafe_offset=1] = writer.written
     return 0

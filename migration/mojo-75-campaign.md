@@ -762,3 +762,24 @@ and production-share guards pass.
 The canonical broad inventory is 50,935 reachable Mojo LOC and 196,761 Rust
 production LOC, or 20.563513338931593% Mojo. The 75% project target remains
 unmet; 539,348 additional Mojo LOC are estimated at current Rust volume.
+
+## OpenAI chat-compatible SSE event selection wave
+
+The chat-compatible SSE bridge now passes each parsed event tree to operation
+1 of prodex_mojo_openai_chat_response_v1. Mojo owns first-choice and
+first-tool-delta selection, tool-over-text precedence, completion detection,
+RTK argument wrapping, and Responses SSE serialization. Rust retains framing,
+UTF-8 decoding, Serde parsing, [DONE] detection, result mapping, and the
+feature-off implementation and differential oracle. Unsupported JSON events
+remain unsupported; Mojo errors do not trigger Rust recomputation.
+
+Validation passes with Mojo 1.1.0: 5,000 generated stream events and sparse,
+precedence, malformed-field, and transport-boundary cases match the Rust
+oracle byte-for-byte through both the Mojo ABI and provider translator. The
+provider-core suites pass in feature-off and feature-on modes, the Mojo JSON
+boundary suite passes, workspace all-target/all-feature Clippy passes, and the
+ownership, authority, no-fallback, and production-share guards pass.
+
+The canonical broad inventory is 51,019 reachable Mojo LOC and 196,735 Rust
+production LOC, or 20.59% Mojo. The 75% project target remains unmet; 539,186
+additional Mojo LOC are estimated at current Rust volume.
