@@ -5,6 +5,7 @@ import { parsePositiveInteger, runStepsParallel } from "./main-internal-test-run
 const steps = [
   ["rust-size", "scripts/ci/size-guard.mjs"],
   ["rust-allow", "scripts/ci/allow-attribute-guard.mjs"],
+  ["ratatui-interaction", "scripts/ci/ratatui-interaction-guard.mjs"],
   ["mojo-no-fallback-self-test", "scripts/ci/mojo-no-fallback-guard.mjs", "--self-test"],
   ["mojo-no-fallback", "scripts/ci/mojo-no-fallback-guard.mjs"],
   ["mojo-ownership", "scripts/ci/mojo-ownership.mjs", "--check"],
