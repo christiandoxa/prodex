@@ -1,5 +1,4 @@
 mod body;
-
 use self::body::provider_error_codes;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -19,6 +18,37 @@ pub struct ProviderErrorClassification {
 }
 
 pub fn classify_provider_error(
+    status: Option<u16>,
+    code: Option<&str>,
+    text: Option<&str>,
+) -> ProviderErrorClassification {
+    #[cfg(feature = "mojo")]
+    {
+        let (class, cooldown_ms) =
+            prodex_mojo_core::rich::provider_error_classify(status, code, text)
+                .expect("Mojo provider error classifier returned invalid output");
+        ProviderErrorClassification {
+            class: match class {
+                0 => ProviderErrorClass::Auth,
+                1 => ProviderErrorClass::Quota,
+                2 => ProviderErrorClass::RateLimit,
+                3 => ProviderErrorClass::Transient,
+                4 => ProviderErrorClass::NotFound,
+                5 => ProviderErrorClass::Other,
+                _ => unreachable!("validated Mojo provider error class"),
+            },
+            cooldown_ms,
+        }
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    {
+        classify_provider_error_rust(status, code, text)
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn classify_provider_error_rust(
     status: Option<u16>,
     code: Option<&str>,
     text: Option<&str>,
@@ -61,7 +91,7 @@ pub fn classify_provider_error(
         };
     }
     if status == Some(404)
-        || matches!(normalized_code.as_str(), "model_not_supported")
+        || normalized_code == "model_not_supported"
         || normalized_text.contains("model is not supported")
     {
         return ProviderErrorClassification {
@@ -224,6 +254,91 @@ fn provider_error_classification_rank(class: ProviderErrorClass) -> u8 {
         ProviderErrorClass::NotFound => 3,
         ProviderErrorClass::Transient => 4,
         ProviderErrorClass::Other => 5,
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_classifier_tests {
+    use super::*;
+
+    #[test]
+    fn provider_error_classifier_mojo_matches_expected_policy() {
+        let cases = [
+            (Some(401), None, None, ProviderErrorClass::Auth, 0_u64),
+            (Some(403), None, None, ProviderErrorClass::Auth, 0),
+            (
+                None,
+                Some(" UNAUTHENTICATED "),
+                None,
+                ProviderErrorClass::Auth,
+                0,
+            ),
+            (
+                None,
+                Some("organization_spend_limit_exceeded"),
+                None,
+                ProviderErrorClass::Quota,
+                300_000,
+            ),
+            (
+                Some(429),
+                Some("rate_limit_exceeded"),
+                None,
+                ProviderErrorClass::RateLimit,
+                60_000,
+            ),
+            (
+                None,
+                Some("slow_down"),
+                None,
+                ProviderErrorClass::RateLimit,
+                60_000,
+            ),
+            (Some(404), None, None, ProviderErrorClass::NotFound, 0),
+            (
+                None,
+                Some("model_not_supported"),
+                None,
+                ProviderErrorClass::NotFound,
+                0,
+            ),
+            (
+                None,
+                None,
+                Some("The selected MODEL IS NOT SUPPORTED here"),
+                ProviderErrorClass::NotFound,
+                0,
+            ),
+            (Some(503), None, None, ProviderErrorClass::Transient, 10_000),
+            (
+                None,
+                None,
+                Some("backend currently OVERLOADED"),
+                ProviderErrorClass::Transient,
+                10_000,
+            ),
+            (
+                Some(429),
+                None,
+                Some("too many requests"),
+                ProviderErrorClass::Other,
+                0,
+            ),
+            (
+                None,
+                Some("unknown"),
+                Some("ordinary error"),
+                ProviderErrorClass::Other,
+                0,
+            ),
+        ];
+        for (status, code, text, class, cooldown_ms) in cases {
+            assert_eq!(
+                classify_provider_error(status, code, text),
+                ProviderErrorClassification { class, cooldown_ms },
+                "status={status:?} code={code:?} text={text:?}"
+            );
+        }
     }
 }
 
