@@ -809,3 +809,33 @@ Validation passes: `cargo fmt --all -- --check`, `npm run docs`,
 The canonical broad inventory is 51,082 reachable Mojo LOC and 196,707 Rust
 production LOC, or 20.62% Mojo. The 75% project target remains unmet; 539,039
 additional Mojo LOC are estimated at current Rust volume.
+
+## Super override CLI argument-classification wave
+
+Operation 10 of `prodex_mojo_launch_args_v1` now classifies Prodex flags in the
+Codex argument tail, recognizes split and `--name=value` forms, and plans
+separate-value consumption. The `--` boundary, known-flag value protection,
+and non-UTF-8 passthrough match the previous scanner. Mojo returns only
+override tags and argument indices. Rust keeps `OsString` ownership, typed
+value validation, and `SuperArgs` updates. The feature-off Rust scanner remains
+the oracle; a Mojo failure returns an error without recomputing in Rust.
+
+Feature-on differential coverage compares every override kind and aliases,
+empty and invalid values, unknown flags, `--`, and opaque arguments against the
+Rust oracle. CLI tests pass with Mojo off (135 tests) and on (136 tests). The
+frozen ownership inventory does not include `super_tail_extract.rs`, so this
+wave adds no unsupported migration-volume claim.
+
+Validation passes: `cargo fmt --all -- --check`,
+`cargo test --locked -q -p prodex-cli`,
+`PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-cli --features
+mojo-core -- --test-threads=1`,
+`PRODEX_MOJO_VERSION=1.1.0 cargo check --locked -q -p prodex-app --features
+mojo-core`, `PRODEX_MOJO_VERSION=1.1.0 cargo clippy --locked --workspace
+--all-targets --all-features -- -D warnings`, `npm run docs`,
+`npm run test:changed`, the crate-boundary, secret-boundary, Mojo ownership,
+authority, no-fallback, and production-share guards, and `git diff --check`.
+
+The canonical broad inventory is 51,375 reachable Mojo LOC and 196,826 Rust
+production LOC, or 20.70% Mojo. The 75% project target remains unmet; 539,103
+additional Mojo LOC are estimated at current Rust volume.

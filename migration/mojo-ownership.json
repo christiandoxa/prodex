@@ -544,6 +544,22 @@
           "openai_chat_compat_response_translation",
           "deepseek_chat_stream_event_translation"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/launch_args.mojo",
+        "language": "mojo",
+        "classification": "MIXED",
+        "semantic_ranges": [
+          {
+            "start": 35,
+            "end": 228
+          }
+        ],
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "super_override_argument_classification"
+        ]
       }
     ],
     "removed": [
@@ -1234,6 +1250,32 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde parsing, clock and SSE framing, caller-owned JSON-tree construction, typed result mapping"
+    },
+    {
+      "name": "super_override_argument_classification",
+      "domain": "cli/super-arguments",
+      "introduced_in": "0.431.7",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_launch_args_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "super_override_scan": 10
+      },
+      "mojo_source": "mojo/prodex_core/launch_args.mojo",
+      "consumer": "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
+      "consumer_marker": "prodex_mojo_core::launch::scan_super_overrides",
+      "production_consumers": [
+        "crates/prodex-cli/src/runtime_args/super_tail_extract.rs"
+      ],
+      "production_reachability_test": "crates/prodex-cli/src/runtime_args/super_tail_extract/mojo_tests.rs",
+      "rust_owner_before": "Prodex option classification, inline values, and paired value boundaries",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "feature-off Rust scanner plus feature-on differential test; Mojo errors do not trigger recomputation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "OsString preservation, typed value parsing, and SuperArgs mutation"
     }
   ],
   "rust_semantic_reductions": [

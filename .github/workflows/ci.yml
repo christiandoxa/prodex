@@ -1970,6 +1970,7 @@ jobs:
           run_test runtime-policy cargo test --locked -q -p prodex-runtime-policy --features mojo -- --test-threads=1
           run_test gateway-constraints cargo test --locked -q -p prodex-app --features mojo-core --lib resolved_gateway_request_constraints -- --test-threads=1
           run_test smart-context-rehydrate cargo test --locked -q -p prodex-app --features mojo-core --lib smart_context_auto_rehydrate_plan_defers_over_budget_refs -- --test-threads=1
+          run_test mojo-cli cargo test --locked -q -p prodex-cli --features mojo-core -- --test-threads=1
           run_test mojo-core cargo test --locked -q -p prodex-mojo-core --features mojo-core -- --test-threads=1
 
           status=0

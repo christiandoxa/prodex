@@ -1,3 +1,4 @@
+#[cfg(any(not(feature = "mojo-core"), test))]
 use std::ffi::OsString;
 
 use super::{
@@ -9,13 +10,18 @@ use crate::{
     SubAgentReasoningEffort, parse_sub_agent_max_concurrency, parse_sub_agent_model,
     parse_sub_agent_provider, parse_sub_agent_reasoning_effort, parse_sub_agent_url,
 };
+#[cfg(feature = "mojo-core")]
+use prodex_mojo_core::launch::{ScannedSuperOverride, SuperOverrideKind};
 use prodex_optional_tools::OptionalToolId;
+
+const API_KEY_OPTION: &str = "--api-key";
 
 struct ScannedValue<'a> {
     value: Option<&'a str>,
     consumed_count: usize,
 }
 
+#[derive(Debug, PartialEq)]
 enum SuperOverride {
     Provider(super::SuperExternalProvider),
     Cli(SuperCliAgent),
@@ -52,6 +58,7 @@ enum SuperOverride {
     RespectSystemProxy(bool),
 }
 
+#[derive(Debug, PartialEq)]
 enum ScanOutcome {
     Apply {
         value: SuperOverride,
@@ -75,6 +82,22 @@ fn extract_super_overrides_from_codex_args_inner(
     validate_sub_agent: bool,
 ) -> Result<(), String> {
     let codex_args = std::mem::take(&mut args.codex_args);
+    #[cfg(feature = "mojo-core")]
+    let scan_result = {
+        let views: Vec<_> = codex_args
+            .iter()
+            .map(|argument| argument.to_str())
+            .collect();
+        prodex_mojo_core::launch::scan_super_overrides(&views)
+    };
+    #[cfg(feature = "mojo-core")]
+    let override_plan = match scan_result {
+        Ok(plan) => plan,
+        Err(_) => {
+            args.codex_args = codex_args;
+            return Err("Mojo Super argument scan failed".to_string());
+        }
+    };
     let mut remaining = Vec::with_capacity(codex_args.len());
     let mut index = 0;
     while index < codex_args.len() {
@@ -82,7 +105,17 @@ fn extract_super_overrides_from_codex_args_inner(
             remaining.extend(codex_args[index..].iter().cloned());
             break;
         }
-        match scan_override(&codex_args, index) {
+        let outcome = {
+            #[cfg(feature = "mojo-core")]
+            {
+                scan_mojo_override(override_plan[index])
+            }
+            #[cfg(not(feature = "mojo-core"))]
+            {
+                scan_override_rust(&codex_args, index)
+            }
+        };
+        match outcome {
             Ok(ScanOutcome::Apply {
                 value,
                 consumed_count,
@@ -108,7 +141,8 @@ fn extract_super_overrides_from_codex_args_inner(
     Ok(())
 }
 
-fn scan_override(args: &[OsString], index: usize) -> Result<ScanOutcome, String> {
+#[cfg(any(not(feature = "mojo-core"), test))]
+fn scan_override_rust(args: &[OsString], index: usize) -> Result<ScanOutcome, String> {
     let Some(argument) = args[index].to_str() else {
         return Ok(ScanOutcome::Unknown);
     };
@@ -130,6 +164,158 @@ fn scan_override(args: &[OsString], index: usize) -> Result<ScanOutcome, String>
     Ok(ScanOutcome::Unknown)
 }
 
+#[cfg(feature = "mojo-core")]
+fn scan_mojo_override(directive: Option<ScannedSuperOverride<'_>>) -> Result<ScanOutcome, String> {
+    let Some(directive) = directive else {
+        return Ok(ScanOutcome::Unknown);
+    };
+    let scanned = ScannedValue {
+        value: directive.value,
+        consumed_count: directive.consumed_count,
+    };
+    use SuperOverrideKind as Kind;
+    match directive.kind {
+        Kind::Provider => parse_required(
+            scanned,
+            parse_super_external_provider,
+            SuperOverride::Provider,
+            "--provider",
+        ),
+        Kind::Cli => parse_required(
+            scanned,
+            |value| {
+                match value {
+                "agy" => Ok(SuperCliAgent::Agy),
+                _ => Err("only --cli agy is retained; use --provider gemini|copilot|kiro for other providers".to_string()),
+            }
+            },
+            SuperOverride::Cli,
+            "--cli",
+        ),
+        Kind::ApiKey => parse_required_string(scanned, SuperOverride::ApiKey, API_KEY_OPTION),
+        Kind::SubAgentProvider => parse_required(
+            scanned,
+            parse_sub_agent_provider,
+            SuperOverride::SubAgentProvider,
+            "--sub-agent-provider",
+        ),
+        Kind::SubAgentModel => parse_required(
+            scanned,
+            parse_sub_agent_model,
+            SuperOverride::SubAgentModel,
+            "--sub-agent-model",
+        ),
+        Kind::SubAgentReasoningEffort => parse_required(
+            scanned,
+            parse_sub_agent_reasoning_effort,
+            SuperOverride::SubAgentReasoningEffort,
+            "--sub-agent-model-reasoning-effort",
+        ),
+        Kind::SubAgentUrl => parse_required(
+            scanned,
+            parse_sub_agent_url,
+            SuperOverride::SubAgentUrl,
+            "--sub-agent-url",
+        ),
+        Kind::SubAgentMaxConcurrency => parse_required(
+            scanned,
+            parse_sub_agent_max_concurrency,
+            SuperOverride::SubAgentMaxConcurrency,
+            "--sub-agent-max-concurrency",
+        ),
+        Kind::LocalModel => parse_required_string(scanned, SuperOverride::LocalModel, "--model"),
+        Kind::Profile => parse_required_string(scanned, SuperOverride::Profile, "--profile"),
+        Kind::BaseUrl => parse_required(
+            scanned,
+            parse_runtime_base_url,
+            SuperOverride::BaseUrl,
+            "--base-url",
+        ),
+        Kind::Url => parse_required(scanned, parse_super_local_url, SuperOverride::Url, "--url"),
+        Kind::LocalContextWindow => parse_required(
+            scanned,
+            str::parse::<usize>,
+            SuperOverride::LocalContextWindow,
+            "--context-window",
+        ),
+        Kind::LocalAutoCompactTokenLimit => parse_required(
+            scanned,
+            str::parse::<usize>,
+            SuperOverride::LocalAutoCompactTokenLimit,
+            "--auto-compact-token-limit",
+        ),
+        Kind::Tool => parse_required(
+            scanned,
+            str::parse::<OptionalToolId>,
+            SuperOverride::Tool,
+            "--tool",
+        ),
+        Kind::RequiredTool => parse_required(
+            scanned,
+            str::parse::<OptionalToolId>,
+            SuperOverride::RequiredTool,
+            "--require-tool",
+        ),
+        Kind::WebSearch => parse_required(
+            scanned,
+            parse_web_search_mode,
+            SuperOverride::WebSearch,
+            "--web-search",
+        ),
+        Kind::RolloutBudgetTokens => parse_required(
+            scanned,
+            str::parse::<u64>,
+            SuperOverride::RolloutBudgetTokens,
+            "--rollout-budget-tokens",
+        ),
+        Kind::RolloutBudgetReminders => parse_required(
+            scanned,
+            parse_rollout_budget_reminders,
+            SuperOverride::RolloutBudgetReminders,
+            "--rollout-budget-reminders",
+        ),
+        Kind::RolloutBudgetSamplingWeight => parse_required(
+            scanned,
+            str::parse::<f64>,
+            SuperOverride::RolloutBudgetSamplingWeight,
+            "--rollout-budget-sampling-weight",
+        ),
+        Kind::RolloutBudgetPrefillWeight => parse_required(
+            scanned,
+            str::parse::<f64>,
+            SuperOverride::RolloutBudgetPrefillWeight,
+            "--rollout-budget-prefill-weight",
+        ),
+        Kind::CurrentTimeReminderInterval => parse_required(
+            scanned,
+            str::parse::<u64>,
+            SuperOverride::CurrentTimeReminderInterval,
+            "--current-time-reminder-interval",
+        ),
+        Kind::CurrentTimeClockSource => parse_required(
+            scanned,
+            parse_current_time_clock_source,
+            SuperOverride::CurrentTimeClockSource,
+            "--current-time-clock-source",
+        ),
+        Kind::NoAutoRotate => Ok(apply(1, SuperOverride::AutoRotate(false))),
+        Kind::AutoRotate => Ok(apply(1, SuperOverride::AutoRotate(true))),
+        Kind::AutoRedeem => Ok(apply(1, SuperOverride::AutoRedeem)),
+        Kind::SkipQuotaCheck => Ok(apply(1, SuperOverride::SkipQuotaCheck)),
+        Kind::DryRun => Ok(apply(1, SuperOverride::DryRun)),
+        Kind::NoProxy => Ok(apply(1, SuperOverride::NoProxy)),
+        Kind::Presidio => Ok(apply(1, SuperOverride::Presidio(true))),
+        Kind::NoPresidio => Ok(apply(1, SuperOverride::Presidio(false))),
+        Kind::SubAgent => Ok(apply(1, SuperOverride::SubAgent(true))),
+        Kind::NoSubAgent => Ok(apply(1, SuperOverride::SubAgent(false))),
+        Kind::FullAccess => Ok(apply(1, SuperOverride::FullAccess)),
+        Kind::CurrentTimeReminder => Ok(apply(1, SuperOverride::CurrentTimeReminder)),
+        Kind::RespectSystemProxy => Ok(apply(1, SuperOverride::RespectSystemProxy(true))),
+        Kind::NoRespectSystemProxy => Ok(apply(1, SuperOverride::RespectSystemProxy(false))),
+    }
+}
+
+#[cfg(any(not(feature = "mojo-core"), test))]
 fn scan_identity_override(args: &[OsString], index: usize) -> Option<Result<ScanOutcome, String>> {
     if let Some(scanned) = scan_value(args, index, &["--provider"]) {
         return Some(parse_required(
@@ -152,11 +338,11 @@ fn scan_identity_override(args: &[OsString], index: usize) -> Option<Result<Scan
             "--cli",
         ));
     }
-    if let Some(scanned) = scan_value(args, index, &["--api-key"]) {
+    if let Some(scanned) = scan_value(args, index, &[API_KEY_OPTION]) {
         return Some(parse_required_string(
             scanned,
             SuperOverride::ApiKey,
-            "--api-key",
+            API_KEY_OPTION,
         ));
     }
     if let Some(scanned) = scan_value(args, index, &["--sub-agent-provider"]) {
@@ -216,6 +402,7 @@ fn scan_identity_override(args: &[OsString], index: usize) -> Option<Result<Scan
     None
 }
 
+#[cfg(any(not(feature = "mojo-core"), test))]
 fn scan_boolean_override(argument: &str) -> Option<SuperOverride> {
     match argument {
         "--no-auto-rotate" => Some(SuperOverride::AutoRotate(false)),
@@ -233,6 +420,7 @@ fn scan_boolean_override(argument: &str) -> Option<SuperOverride> {
     }
 }
 
+#[cfg(any(not(feature = "mojo-core"), test))]
 fn scan_runtime_override(args: &[OsString], index: usize) -> Option<Result<ScanOutcome, String>> {
     if let Some(scanned) = scan_value(args, index, &["--base-url"]) {
         return Some(parse_required(
@@ -293,6 +481,7 @@ fn scan_runtime_override(args: &[OsString], index: usize) -> Option<Result<ScanO
     None
 }
 
+#[cfg(any(not(feature = "mojo-core"), test))]
 fn scan_feature_value_override(
     args: &[OsString],
     index: usize,
@@ -356,6 +545,7 @@ fn scan_feature_value_override(
     None
 }
 
+#[cfg(any(not(feature = "mojo-core"), test))]
 fn scan_feature_boolean_override(argument: &str) -> Option<SuperOverride> {
     match argument {
         "--current-time-reminder" => Some(SuperOverride::CurrentTimeReminder),
@@ -365,6 +555,7 @@ fn scan_feature_boolean_override(argument: &str) -> Option<SuperOverride> {
     }
 }
 
+#[cfg(any(not(feature = "mojo-core"), test))]
 fn scan_value<'a>(args: &'a [OsString], index: usize, names: &[&str]) -> Option<ScannedValue<'a>> {
     let argument = args[index].to_str()?;
     if names.contains(&argument) {
@@ -503,6 +694,7 @@ fn apply_override(args: &mut SuperArgs, value: SuperOverride) {
     }
 }
 
+#[cfg(any(not(feature = "mojo-core"), test))]
 fn is_known_super_flag(value: &str) -> bool {
     let name = value.split_once('=').map_or(value, |(name, _)| name);
     matches!(
@@ -598,3 +790,7 @@ mod tests {
         assert_eq!(args, before);
     }
 }
+
+#[cfg(all(test, feature = "mojo-core"))]
+#[path = "super_tail_extract/mojo_tests.rs"]
+mod mojo_tests;

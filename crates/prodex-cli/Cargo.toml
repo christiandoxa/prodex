@@ -10,8 +10,13 @@ repository.workspace = true
 name = "prodex_cli"
 path = "src/lib.rs"
 
+[features]
+default = []
+mojo-core = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-runtime"]
+
 [dependencies]
 clap = { workspace = true }
+prodex_mojo_core = { workspace = true, optional = true }
 prodex_optional_tools = { workspace = true }
 prodex_provider_core = { workspace = true }
 url = { workspace = true }
