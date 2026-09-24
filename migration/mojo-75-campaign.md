@@ -318,3 +318,19 @@ Focused runtime-proxy tests pass with and without Mojo, and all-target Clippy fo
 
 The canonical broad inventory at this checkpoint is 48,602 reachable Mojo LOC and 196,561 Rust
 production LOC, or 19.824362% Mojo. The 75% target remains a forward migration goal.
+
+## Request compatibility surface wave
+
+Request compatibility-surface classification now has a production Mojo plan. Rust keeps HTTP
+header/path acquisition, bounded JSON acquisition, owned string rendering, and a feature-off/test
+oracle; Mojo owns Codex-vs-compatible client classification, streaming semantics, continuation
+flags, tool-capability classification, request origin, approval detection, and compatibility
+warning decisions.
+
+Focused feature-on differential tests compare HTTP and WebSocket fixtures against the Rust oracle,
+including Codex headers, sub-agent detection, chat completions, unknown routes, tools, streaming,
+and previous-response warning behavior. Feature-off compatibility tests and all-target Clippy for
+`prodex-runtime-proxy` and the `mojo-runtime` core pass with Mojo 1.1.0.
+
+The canonical broad inventory at this checkpoint is 48,790 reachable Mojo LOC and 196,782 Rust
+production LOC, or 19.867900% Mojo. The 75% target remains a forward migration goal.
