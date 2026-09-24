@@ -1622,3 +1622,60 @@ def prodex_runtime_previous_response_plan_v1(
     output[unsafe_offset=8] = effective_shape
     output[unsafe_offset=9] = Int64(websocket_requires_affinity)
     return RICH_STATUS_OK
+
+
+
+def rate_limit_header_matches(
+    view: ProdexRichStringView,
+    literal: StringSlice,
+) -> Bool:
+    var bounds = rich_trim_bounds(view)
+    var length = bounds[1] - bounds[0]
+    if length != Int64(literal.byte_length()):
+        return False
+    if length == 0:
+        return True
+    if view.ptr == 0:
+        return False
+    var source = rich_view_ptr(view)
+    var target = literal.unsafe_ptr()
+    for index in range(length):
+        var value = source[unsafe_offset=bounds[0] + index]
+        if value >= 65 and value <= 90:
+            value += 32
+        if value != target[unsafe_offset=index]:
+            return False
+    return True
+
+
+comptime RATE_LIMIT_HEADER_CLASS_NONE: Int64 = 0
+comptime RATE_LIMIT_HEADER_CLASS_RATE: Int64 = 1
+comptime RATE_LIMIT_HEADER_CLASS_QUOTA: Int64 = 2
+
+
+@export("prodex_mojo_rate_limit_header_class_v1")
+def prodex_mojo_rate_limit_header_class_v1(
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if length < 0 or (length > 0 and address == 0):
+        return -1
+    var view = ProdexRichStringView(address, UInt(length))
+    if rate_limit_header_matches(view, StringSlice("rate_limit_reached")):
+        return RATE_LIMIT_HEADER_CLASS_RATE
+    if (
+        rate_limit_header_matches(
+            view, StringSlice("workspace_owner_credits_depleted")
+        )
+        or rate_limit_header_matches(
+            view, StringSlice("workspace_member_credits_depleted")
+        )
+        or rate_limit_header_matches(
+            view, StringSlice("workspace_owner_usage_limit_reached")
+        )
+        or rate_limit_header_matches(
+            view, StringSlice("workspace_member_usage_limit_reached")
+        )
+    ):
+        return RATE_LIMIT_HEADER_CLASS_QUOTA
+    return RATE_LIMIT_HEADER_CLASS_NONE

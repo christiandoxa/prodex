@@ -480,3 +480,17 @@ Clippy is clean, and production-share, authority, no-fallback, and size guards p
 
 The canonical broad inventory at this checkpoint is 49,342 reachable Mojo LOC and 196,736 Rust
 production LOC, or 20.051366% Mojo. The 75% project target remains a forward migration goal.
+
+## Rate-limit header Mojo wave
+
+Official Codex `x-codex-rate-limit-reached-type` classification now executes in the rich Mojo
+kernel. Rust retains header acquisition, UTF-8 validation, and policy-object materialization; the
+case-insensitive rate-limit/quota discriminator and workspace-limit catalog are Mojo-owned in the
+production path.
+
+Focused feature-on and feature-off header-policy tests pass, all-target runtime-proxy Clippy is
+clean, and production-share, ownership, authority, no-fallback, and size guards pass with Mojo
+1.1.0.
+
+The canonical broad inventory at this checkpoint is 49,391 reachable Mojo LOC and 196,752 Rust
+production LOC, or 20.065978% Mojo. The 75% project target remains a forward migration goal.

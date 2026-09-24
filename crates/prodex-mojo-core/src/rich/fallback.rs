@@ -130,6 +130,7 @@ unsafe extern "C" {
         message_address: u64,
         message_length: i64,
     ) -> i64;
+    fn prodex_mojo_rate_limit_header_class_v1(address: u64, length: i64) -> i64;
     fn prodex_runtime_previous_response_plan_v1(
         route: i64,
         previous_response_present: i64,
@@ -143,6 +144,27 @@ unsafe extern "C" {
         has_session_affinity: i64,
         output: *mut i64,
     ) -> i64;
+}
+
+pub const RATE_LIMIT_HEADER_CLASS_NONE: i64 = 0;
+pub const RATE_LIMIT_HEADER_CLASS_RATE: i64 = 1;
+pub const RATE_LIMIT_HEADER_CLASS_QUOTA: i64 = 2;
+
+pub fn rate_limit_header_class(value: &str) -> Result<i64, MojoError> {
+    ensure_rich_abi()?;
+    let result = unsafe {
+        prodex_mojo_rate_limit_header_class_v1(
+            mojo_pointer_address(value.as_ptr()),
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match result {
+        RATE_LIMIT_HEADER_CLASS_NONE
+        | RATE_LIMIT_HEADER_CLASS_RATE
+        | RATE_LIMIT_HEADER_CLASS_QUOTA => Ok(result),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn runtime_retry_after_millis(mode: i64, number: &str) -> Result<Option<u64>, MojoError> {
