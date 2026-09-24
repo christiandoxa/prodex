@@ -7,32 +7,49 @@ pub fn runtime_profile_latency_penalty(
     route_kind: RuntimeRouteKind,
     stage: &str,
 ) -> u32 {
-    #[cfg(feature = "mojo")]
-    {
-        let route_kind = match route_kind {
-            RuntimeRouteKind::Responses => 0,
-            RuntimeRouteKind::Compact => 1,
-            RuntimeRouteKind::Websocket => 2,
-            RuntimeRouteKind::Standard => 3,
-        };
-        let stage_kind = match stage {
-            "ttfb" => 1,
-            "connect" => 2,
-            _ => 0,
-        };
-        prodex_mojo_core::runtime::profile_latency_penalty(
-            elapsed_ms,
-            route_kind,
-            stage_kind,
-            RUNTIME_PROFILE_LATENCY_PENALTY_MAX,
-        )
-        .unwrap_or_else(|error| panic!("Mojo latency penalty failed: {error:?}"))
-    }
-    #[cfg(not(feature = "mojo"))]
-    runtime_profile_latency_penalty_rust(elapsed_ms, route_kind, stage)
+    let route_kind = match route_kind {
+        RuntimeRouteKind::Responses => 0,
+        RuntimeRouteKind::Compact => 1,
+        RuntimeRouteKind::Websocket => 2,
+        RuntimeRouteKind::Standard => 3,
+    };
+    let stage_kind = match stage {
+        "ttfb" => 1,
+        "connect" => 2,
+        _ => 0,
+    };
+    prodex_mojo_core::runtime::profile_latency_penalty(
+        elapsed_ms,
+        route_kind,
+        stage_kind,
+        RUNTIME_PROFILE_LATENCY_PENALTY_MAX,
+    )
+    .unwrap_or_else(|error| panic!("Mojo latency penalty failed: {error:?}"))
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
+pub fn runtime_profile_latency_observation_next_score(
+    current_score: u32,
+    elapsed_ms: u64,
+    route_kind: RuntimeRouteKind,
+    stage: &str,
+) -> u32 {
+    let observed = runtime_profile_latency_penalty(elapsed_ms, route_kind, stage);
+    prodex_mojo_core::runtime::profile_latency_next_score(current_score, observed)
+        .unwrap_or_else(|error| panic!("Mojo latency next score failed: {error:?}"))
+}
+
+pub fn runtime_profile_latency_failure_next_score(current_score: u32) -> u32 {
+    prodex_mojo_core::runtime::profile_latency_failure_score(
+        current_score,
+        crate::RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
+        RUNTIME_PROFILE_LATENCY_PENALTY_MAX,
+    )
+    .unwrap_or_else(|error| panic!("Mojo latency failure score failed: {error:?}"))
+}
+
+// Test-only pre-migration Rust oracle retained for direct Mojo parity checks.
+
+#[cfg(test)]
 fn runtime_profile_latency_penalty_rust(
     elapsed_ms: u64,
     route_kind: RuntimeRouteKind,
@@ -54,23 +71,7 @@ fn runtime_profile_latency_penalty_rust(
     }
 }
 
-pub fn runtime_profile_latency_observation_next_score(
-    current_score: u32,
-    elapsed_ms: u64,
-    route_kind: RuntimeRouteKind,
-    stage: &str,
-) -> u32 {
-    let observed = runtime_profile_latency_penalty(elapsed_ms, route_kind, stage);
-    #[cfg(feature = "mojo")]
-    {
-        prodex_mojo_core::runtime::profile_latency_next_score(current_score, observed)
-            .unwrap_or_else(|error| panic!("Mojo latency next score failed: {error:?}"))
-    }
-    #[cfg(not(feature = "mojo"))]
-    runtime_profile_latency_observation_next_score_rust(current_score, observed)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(test)]
 fn runtime_profile_latency_observation_next_score_rust(current_score: u32, observed: u32) -> u32 {
     if observed == 0 {
         current_score.saturating_sub(2)
@@ -79,28 +80,14 @@ fn runtime_profile_latency_observation_next_score_rust(current_score: u32, obser
     }
 }
 
-pub fn runtime_profile_latency_failure_next_score(current_score: u32) -> u32 {
-    #[cfg(feature = "mojo")]
-    {
-        prodex_mojo_core::runtime::profile_latency_failure_score(
-            current_score,
-            crate::RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
-            RUNTIME_PROFILE_LATENCY_PENALTY_MAX,
-        )
-        .unwrap_or_else(|error| panic!("Mojo latency failure score failed: {error:?}"))
-    }
-    #[cfg(not(feature = "mojo"))]
-    runtime_profile_latency_failure_next_score_rust(current_score)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
+#[cfg(test)]
 fn runtime_profile_latency_failure_next_score_rust(current_score: u32) -> u32 {
     current_score
         .saturating_add(crate::RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY)
         .min(RUNTIME_PROFILE_LATENCY_PENALTY_MAX)
 }
 
-#[cfg(all(test, feature = "mojo"))]
+#[cfg(test)]
 mod mojo_parity_tests {
     use super::*;
 
@@ -135,6 +122,69 @@ mod mojo_parity_tests {
                 runtime_profile_latency_failure_next_score(current),
                 runtime_profile_latency_failure_next_score_rust(current),
             );
+        }
+    }
+
+    #[test]
+    fn latency_matches_rust_oracle_for_full_u64_corpus_and_threshold_edges() {
+        let mut seed = 0x3c6e_f372_fe94_f82b_u64;
+        let mut elapsed_values = vec![
+            0,
+            79,
+            80,
+            81,
+            119,
+            120,
+            121,
+            179,
+            180,
+            181,
+            249,
+            250,
+            251,
+            299,
+            300,
+            301,
+            399,
+            400,
+            401,
+            599,
+            600,
+            601,
+            699,
+            700,
+            701,
+            899,
+            900,
+            901,
+            1_199,
+            1_200,
+            1_201,
+            1_499,
+            1_500,
+            1_501,
+            u64::MAX,
+        ];
+        for _ in 0..10_000 {
+            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            elapsed_values.push(seed);
+        }
+        for route in [
+            RuntimeRouteKind::Responses,
+            RuntimeRouteKind::Compact,
+            RuntimeRouteKind::Websocket,
+            RuntimeRouteKind::Standard,
+        ] {
+            for stage in ["ttfb", "connect", "other"] {
+                for elapsed in &elapsed_values {
+                    let observed = runtime_profile_latency_penalty_rust(*elapsed, route, stage);
+                    assert_eq!(
+                        runtime_profile_latency_penalty(*elapsed, route, stage),
+                        observed,
+                        "elapsed={elapsed} route={route:?} stage={stage}"
+                    );
+                }
+            }
         }
     }
 }

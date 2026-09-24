@@ -577,3 +577,27 @@ Focused validation passed with Mojo 1.1.0: 27 runtime-store tests, 316 runtime-p
 library tests, and all-target Clippy with warnings denied for both crates. The canonical
 broad inventory is 50,203 reachable Mojo LOC and 196,676 Rust production LOC, or
 20.335063% Mojo.
+
+## Runtime health Rust-oracle deletion wave
+
+The runtime-proxy health scorer, latency policy, inflight limits, and bump/recovery
+decisions now use their existing `runtime_health.mojo` owners unconditionally. The
+feature-off Rust implementations were removed; the exact pre-migration Rust formulas
+remain under `#[cfg(test)]` as direct Mojo differential oracles.
+
+`prodex_mojo_core/mojo-runtime` is already a mandatory runtime-proxy dependency after
+the preceding backoff wave, so these paths no longer need a feature-gated fallback.
+The runtime health policy ABI is now version 2 and uses unsigned 64-bit records. The
+full-width differential corpus found that version 1 rejected `u64::MAX` elapsed time
+and `usize::MAX` inflight limits even though the old Rust policy returned valid scores
+and limits; version 2 preserves their exact outputs. The no-fallback guard covers all four files.
+
+The pre-wave `HEAD` oracle suite passed 345 tests with `PRODEX_MOJO_REQUIRED=1` and
+`--features mojo`. After migration, the default runtime-proxy suite passed 325 tests
+and the feature-on suite passed 349 tests; the differential cases include 10,000 full-
+width health-score, health-transition, and latency inputs plus all route/stage threshold
+edges and `usize`/`u64` maximum boundaries. `cargo fmt --all -- --check` passed.
+
+The canonical inventory moved from 50,203 Mojo LOC and 196,676 Rust LOC
+(20.335062925562724%) to 50,205 Mojo LOC and 196,642 Rust LOC (20.33850927902709%),
+for a net reduction of 34 Rust production LOC.

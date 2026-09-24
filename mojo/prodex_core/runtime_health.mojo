@@ -334,9 +334,10 @@ comptime RUNTIME_HEALTH_SCALAR_INFLIGHT_SOFT_LIMIT: Int64 = 13
 comptime RUNTIME_HEALTH_SCALAR_LATENCY_PENALTY: Int64 = 14
 comptime RUNTIME_HEALTH_SCALAR_LATENCY_NEXT_SCORE: Int64 = 15
 comptime RUNTIME_HEALTH_SCALAR_LATENCY_FAILURE_SCORE: Int64 = 16
+comptime RUNTIME_HEALTH_POLICY_ABI_VERSION: Int64 = 2
 
-@export("prodex_runtime_health_policy_v1")
-def prodex_runtime_health_policy_v1(
+@export("prodex_runtime_health_policy_v2")
+def prodex_runtime_health_policy_v2(
     abi_version: Int64,
     operation: Int64,
     fields_address: UInt,
@@ -344,16 +345,16 @@ def prodex_runtime_health_policy_v1(
     output_address: UInt,
     output_count: Int64,
 ) abi("C") -> Int64:
-    if abi_version != RUNTIME_HEALTH_SCALAR_ABI_VERSION:
+    if abi_version != RUNTIME_HEALTH_POLICY_ABI_VERSION:
         return 4
     if field_count < 0 or field_count > 12 or output_count < 1 or output_count > 5:
         return 1
     if fields_address == 0 or output_address == 0:
         return 1
-    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+    var fields = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
         unsafe_from_address=Int(fields_address)
     )
-    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
     for index in range(output_count):
@@ -365,14 +366,13 @@ def prodex_runtime_health_policy_v1(
         var current = fields[unsafe_offset=0]
         var delta = fields[unsafe_offset=1]
         var maximum = fields[unsafe_offset=2]
-        if current < 0 or delta < 0 or maximum < 0:
+        if (
+            current > UInt64(UINT32_MAX)
+            or delta > UInt64(UINT32_MAX)
+            or maximum > UInt64(UINT32_MAX)
+        ):
             return 2
-        var next = current
-        if delta > INT64_MAX - current:
-            next = INT64_MAX
-        else:
-            next = current + delta
-        output[unsafe_offset=0] = min(next, maximum)
+        output[unsafe_offset=0] = min(current + delta, maximum)
         return 0
 
     if operation == RUNTIME_HEALTH_SCALAR_BUMP_DECISION:
@@ -388,40 +388,36 @@ def prodex_runtime_health_policy_v1(
         var base_seconds = fields[unsafe_offset=7]
         var max_seconds = fields[unsafe_offset=8]
         if (
-            current < 0
-            or delta < 0
-            or maximum < 0
-            or threshold < 0
-            or already_open < 0
+            current > UInt64(UINT32_MAX)
+            or delta > UInt64(UINT32_MAX)
+            or maximum > UInt64(UINT32_MAX)
+            or threshold > UInt64(UINT32_MAX)
             or already_open > 1
-            or current_stage < 0
-            or max_stage < 0
-            or base_seconds < 0
-            or max_seconds < 0
+            or current_stage > UInt64(UINT32_MAX)
+            or max_stage > UInt64(UINT32_MAX)
+            or base_seconds > UInt64(INT64_MAX)
+            or max_seconds > UInt64(INT64_MAX)
         ):
             return 2
-        var next = current
-        if delta > INT64_MAX - current:
-            next = INT64_MAX
-        else:
-            next = current + delta
-        next = min(next, maximum)
+        var next = min(current + delta, maximum)
         output[unsafe_offset=0] = next
         if next < threshold:
             return 0
-        var stage: Int64 = 0
+        var stage: UInt64 = 0
         if already_open == 1:
             stage = min(current_stage + 1, max_stage)
         output[unsafe_offset=1] = 1
         output[unsafe_offset=2] = stage
-        var exponent = max(next - threshold, 0)
+        var exponent = max(next - threshold, UInt64(0))
         if exponent > 3:
             exponent = 3
         exponent += min(stage, max_stage)
-        var multiplier = runtime_health_saturating_shift_multiplier(exponent)
+        var multiplier = runtime_health_saturating_shift_multiplier(Int64(exponent))
         var seconds = max_seconds
-        if multiplier != INT64_MAX and (base_seconds == 0 or multiplier <= INT64_MAX / base_seconds):
-            seconds = min(base_seconds * multiplier, max_seconds)
+        if multiplier != INT64_MAX and (
+            base_seconds == 0 or UInt64(multiplier) <= UInt64(INT64_MAX) / base_seconds
+        ):
+            seconds = min(base_seconds * UInt64(multiplier), max_seconds)
         output[unsafe_offset=3] = 1
         output[unsafe_offset=4] = seconds
         return 0
@@ -435,22 +431,25 @@ def prodex_runtime_health_policy_v1(
         var max_streak = fields[unsafe_offset=3]
         var recovery_base = fields[unsafe_offset=4]
         if (
-            current_present < 0
-            or current_present > 1
-            or current_score < 0
-            or current_streak < 0
-            or max_streak < 0
-            or recovery_base < 0
+            current_present > 1
+            or current_score > UInt64(UINT32_MAX)
+            or current_streak > UInt64(UINT32_MAX)
+            or max_streak > UInt64(UINT32_MAX)
+            or recovery_base > UInt64(UINT32_MAX)
         ):
             return 2
         if current_present == 0:
             return 0
         var next_streak = min(current_streak + 1, max_streak)
-        var extra = max(next_streak - 1, 0)
+        var extra: UInt64 = 0
+        if next_streak > 1:
+            extra = next_streak - 1
         if extra > 1:
             extra = 1
         var recovery = recovery_base + extra
-        var next_score = max(current_score - recovery, 0)
+        var next_score: UInt64 = 0
+        if current_score > recovery:
+            next_score = current_score - recovery
         if next_score == 0:
             return 0
         output[unsafe_offset=0] = 1
@@ -468,7 +467,7 @@ def prodex_runtime_health_policy_v1(
     if operation == RUNTIME_HEALTH_SCALAR_INFLIGHT_HARD_LIMIT:
         if field_count != 2:
             return 1
-        if fields[unsafe_offset=0] < 0 or fields[unsafe_offset=1] < 1:
+        if fields[unsafe_offset=1] == 0:
             return 2
         output[unsafe_offset=0] = max(fields[unsafe_offset=0], fields[unsafe_offset=1])
         return 0
@@ -479,16 +478,19 @@ def prodex_runtime_health_policy_v1(
         var route_kind = fields[unsafe_offset=0]
         var pressure_mode = fields[unsafe_offset=1]
         var base = fields[unsafe_offset=2]
-        if route_kind < 0 or route_kind > 3 or pressure_mode < 0 or pressure_mode > 1 or base < 0:
+        if route_kind > 3 or pressure_mode > 1:
             return 2
-        base = max(base, 1)
+        base = max(base, UInt64(1))
         if pressure_mode == 0:
             output[unsafe_offset=0] = base
             return 0
-        var reduction: Int64 = 2
+        var reduction: UInt64 = 2
         if route_kind == 0 or route_kind == 2:
             reduction = 1
-        output[unsafe_offset=0] = max(base - reduction, 1)
+        var reduced_base: UInt64 = 1
+        if base > reduction:
+            reduced_base = base - reduction
+        output[unsafe_offset=0] = reduced_base
         return 0
 
     if operation == RUNTIME_HEALTH_SCALAR_LATENCY_PENALTY:
@@ -498,12 +500,12 @@ def prodex_runtime_health_policy_v1(
         var route_kind = fields[unsafe_offset=1]
         var stage_kind = fields[unsafe_offset=2]
         var maximum = fields[unsafe_offset=3]
-        if elapsed < 0 or route_kind < 0 or route_kind > 3 or stage_kind < 0 or stage_kind > 2 or maximum < 0:
+        if route_kind > 3 or stage_kind > 2 or maximum > UInt64(UINT32_MAX):
             return 2
-        var good: Int64 = 100
-        var warn: Int64 = 250
-        var poor: Int64 = 600
-        var severe: Int64 = 1200
+        var good: UInt64 = 100
+        var warn: UInt64 = 250
+        var poor: UInt64 = 600
+        var severe: UInt64 = 1200
         if (route_kind == 0 and stage_kind == 1) or (route_kind == 2 and stage_kind == 2):
             good = 120
             warn = 300
@@ -531,10 +533,11 @@ def prodex_runtime_health_policy_v1(
             return 1
         var current = fields[unsafe_offset=0]
         var observed = fields[unsafe_offset=1]
-        if current < 0 or observed < 0:
+        if current > UInt64(UINT32_MAX) or observed > UInt64(UINT32_MAX):
             return 2
         if observed == 0:
-            output[unsafe_offset=0] = max(current - 2, 0)
+            if current > 2:
+                output[unsafe_offset=0] = current - 2
         else:
             output[unsafe_offset=0] = ((current * 2) + observed + 2) / 3
         return 0
@@ -545,14 +548,13 @@ def prodex_runtime_health_policy_v1(
         var current = fields[unsafe_offset=0]
         var penalty = fields[unsafe_offset=1]
         var maximum = fields[unsafe_offset=2]
-        if current < 0 or penalty < 0 or maximum < 0:
+        if (
+            current > UInt64(UINT32_MAX)
+            or penalty > UInt64(UINT32_MAX)
+            or maximum > UInt64(UINT32_MAX)
+        ):
             return 2
-        var next = current
-        if penalty > INT64_MAX - current:
-            next = INT64_MAX
-        else:
-            next = current + penalty
-        output[unsafe_offset=0] = min(next, maximum)
+        output[unsafe_offset=0] = min(current + penalty, maximum)
         return 0
 
     return 1

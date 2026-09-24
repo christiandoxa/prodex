@@ -34,7 +34,7 @@ unsafe extern "C" {
         output: u64,
         output_count: i64,
     ) -> i64;
-    fn prodex_runtime_health_policy_v1(
+    fn prodex_runtime_health_policy_v2(
         abi_version: i64,
         operation: i64,
         fields: u64,
@@ -305,12 +305,12 @@ const RUNTIME_HEALTH_POLICY_LATENCY_FAILURE_SCORE: i64 = 16;
 
 fn runtime_health_policy<const N: usize, const M: usize>(
     operation: i64,
-    fields: [i64; N],
-) -> Result<[i64; M], crate::MojoError> {
-    let mut output = [0_i64; M];
+    fields: [u64; N],
+) -> Result<[u64; M], crate::MojoError> {
+    let mut output = [0_u64; M];
     let status = unsafe {
-        prodex_runtime_health_policy_v1(
-            1,
+        prodex_runtime_health_policy_v2(
+            2,
             operation,
             fields.as_ptr() as u64,
             i64::try_from(N).map_err(|_| crate::MojoError::InvalidInput)?,
@@ -336,9 +336,9 @@ pub fn profile_bad_pairing_next_score(
     let [score] = runtime_health_policy::<3, 1>(
         RUNTIME_HEALTH_POLICY_BAD_PAIRING_NEXT,
         [
-            i64::from(current_score),
-            i64::from(delta),
-            i64::from(max_score),
+            u64::from(current_score),
+            u64::from(delta),
+            u64::from(max_score),
         ],
     )?;
     u32::try_from(score).map_err(|_| crate::MojoError::InvalidOutput)
@@ -370,15 +370,17 @@ pub fn profile_health_bump_plan(
     let output = runtime_health_policy::<9, 5>(
         RUNTIME_HEALTH_POLICY_BUMP_DECISION,
         [
-            i64::from(input.current_score),
-            i64::from(input.delta),
-            i64::from(input.max_score),
-            i64::from(input.circuit_open_threshold),
-            i64::from(input.circuit_already_open),
-            i64::from(input.current_reopen_stage),
-            i64::from(input.max_reopen_stage),
-            input.circuit_open_seconds,
-            input.circuit_open_max_seconds,
+            u64::from(input.current_score),
+            u64::from(input.delta),
+            u64::from(input.max_score),
+            u64::from(input.circuit_open_threshold),
+            u64::from(input.circuit_already_open),
+            u64::from(input.current_reopen_stage),
+            u64::from(input.max_reopen_stage),
+            u64::try_from(input.circuit_open_seconds)
+                .map_err(|_| crate::MojoError::InvalidInput)?,
+            u64::try_from(input.circuit_open_max_seconds)
+                .map_err(|_| crate::MojoError::InvalidInput)?,
         ],
     )?;
     if !matches!(output[1], 0 | 1) || !matches!(output[3], 0 | 1) {
@@ -389,7 +391,9 @@ pub fn profile_health_bump_plan(
         circuit_reopen_stage: (output[1] == 1)
             .then(|| u32::try_from(output[2]).map_err(|_| crate::MojoError::InvalidOutput))
             .transpose()?,
-        circuit_open_seconds: (output[3] == 1).then_some(output[4]),
+        circuit_open_seconds: (output[3] == 1)
+            .then(|| i64::try_from(output[4]).map_err(|_| crate::MojoError::InvalidOutput))
+            .transpose()?,
     })
 }
 
@@ -408,11 +412,11 @@ pub fn profile_health_recovery_plan(
     let output = runtime_health_policy::<5, 4>(
         RUNTIME_HEALTH_POLICY_RECOVERY_DECISION,
         [
-            i64::from(current_score.is_some()),
-            i64::from(current_score.unwrap_or(0)),
-            i64::from(current_success_streak),
-            i64::from(max_success_streak),
-            i64::from(recovery_score),
+            u64::from(current_score.is_some()),
+            u64::from(current_score.unwrap_or(0)),
+            u64::from(current_success_streak),
+            u64::from(max_success_streak),
+            u64::from(recovery_score),
         ],
     )?;
     if !matches!(output[0], 0 | 1) || !matches!(output[2], 0 | 1) {
@@ -431,7 +435,7 @@ pub fn profile_health_recovery_plan(
 pub fn profile_inflight_weight(heavy_context: bool) -> Result<usize, crate::MojoError> {
     let [value] = runtime_health_policy::<1, 1>(
         RUNTIME_HEALTH_POLICY_INFLIGHT_WEIGHT,
-        [i64::from(heavy_context)],
+        [u64::from(heavy_context)],
     )?;
     usize::try_from(value).map_err(|_| crate::MojoError::InvalidOutput)
 }
@@ -442,10 +446,7 @@ pub fn profile_inflight_effective_hard_limit(
 ) -> Result<usize, crate::MojoError> {
     let [value] = runtime_health_policy::<2, 1>(
         RUNTIME_HEALTH_POLICY_INFLIGHT_HARD_LIMIT,
-        [
-            i64::try_from(configured_limit).map_err(|_| crate::MojoError::InvalidInput)?,
-            i64::try_from(weight).map_err(|_| crate::MojoError::InvalidInput)?,
-        ],
+        [configured_limit as u64, weight as u64],
     )?;
     usize::try_from(value).map_err(|_| crate::MojoError::InvalidOutput)
 }
@@ -458,9 +459,9 @@ pub fn profile_inflight_soft_limit(
     let [value] = runtime_health_policy::<3, 1>(
         RUNTIME_HEALTH_POLICY_INFLIGHT_SOFT_LIMIT,
         [
-            route_kind,
-            i64::from(pressure_mode),
-            i64::try_from(base_limit).map_err(|_| crate::MojoError::InvalidInput)?,
+            u64::try_from(route_kind).map_err(|_| crate::MojoError::InvalidInput)?,
+            u64::from(pressure_mode),
+            base_limit as u64,
         ],
     )?;
     usize::try_from(value).map_err(|_| crate::MojoError::InvalidOutput)
@@ -475,10 +476,10 @@ pub fn profile_latency_penalty(
     let [value] = runtime_health_policy::<4, 1>(
         RUNTIME_HEALTH_POLICY_LATENCY_PENALTY,
         [
-            i64::try_from(elapsed_ms).map_err(|_| crate::MojoError::InvalidInput)?,
-            route_kind,
-            stage_kind,
-            i64::from(max_penalty),
+            elapsed_ms,
+            u64::try_from(route_kind).map_err(|_| crate::MojoError::InvalidInput)?,
+            u64::try_from(stage_kind).map_err(|_| crate::MojoError::InvalidInput)?,
+            u64::from(max_penalty),
         ],
     )?;
     u32::try_from(value).map_err(|_| crate::MojoError::InvalidOutput)
@@ -490,7 +491,7 @@ pub fn profile_latency_next_score(
 ) -> Result<u32, crate::MojoError> {
     let [value] = runtime_health_policy::<2, 1>(
         RUNTIME_HEALTH_POLICY_LATENCY_NEXT_SCORE,
-        [i64::from(current_score), i64::from(observed_penalty)],
+        [u64::from(current_score), u64::from(observed_penalty)],
     )?;
     u32::try_from(value).map_err(|_| crate::MojoError::InvalidOutput)
 }
@@ -503,9 +504,9 @@ pub fn profile_latency_failure_score(
     let [value] = runtime_health_policy::<3, 1>(
         RUNTIME_HEALTH_POLICY_LATENCY_FAILURE_SCORE,
         [
-            i64::from(current_score),
-            i64::from(failure_penalty),
-            i64::from(max_penalty),
+            u64::from(current_score),
+            u64::from(failure_penalty),
+            u64::from(max_penalty),
         ],
     )?;
     u32::try_from(value).map_err(|_| crate::MojoError::InvalidOutput)
