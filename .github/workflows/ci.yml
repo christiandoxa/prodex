@@ -798,15 +798,12 @@ jobs:
         with:
           cache-bin: false
 
-      - name: Generate production Clippy JSON report
+      - name: Generate Clippy quality report and enforce warnings
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p target/sonar
-          cargo clippy --locked --workspace --exclude prodex-bench-support --lib --bins --message-format=json -- -D warnings > target/sonar/clippy-report.json
-
-      - name: Run clippy warning gate
-        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+          cargo clippy --locked --workspace --all-targets --message-format=json -- -D warnings > target/sonar/clippy-report.json
 
       - name: Create ephemeral local Sonar token
         shell: bash
