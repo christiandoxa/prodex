@@ -73,6 +73,15 @@ unsafe extern "C" {
         source: u64,
         interesting: u64,
     ) -> i64;
+    fn prodex_mojo_operational_event_detail_plan_v1(
+        abi_version: i64,
+        source_address: u64,
+        source_length: i64,
+        first_local_chunk: i64,
+        output_address: u64,
+        output_capacity: i64,
+        output_count_address: u64,
+    ) -> i64;
 }
 
 fn optional_text_parts(value: Option<&str>) -> Result<(u64, i64, i64), MojoError> {
@@ -142,6 +151,47 @@ pub fn operational_event_plan(
         source,
         interesting: interesting == 1,
     })
+}
+
+pub fn operational_event_detail_plan(
+    source: &str,
+    first_local_chunk: bool,
+) -> Result<Vec<i64>, MojoError> {
+    const MAX_DETAILS: usize = 64;
+    if source.is_empty() {
+        return Err(MojoError::InvalidInput);
+    }
+    let source_length = i64::try_from(source.len()).map_err(|_| MojoError::InvalidInput)?;
+    let mut output = [0_i64; MAX_DETAILS];
+    let mut output_count = 0_i64;
+    let status = unsafe {
+        prodex_mojo_operational_event_detail_plan_v1(
+            OBSERVABILITY_LABEL_ABI_VERSION,
+            source.as_ptr() as usize as u64,
+            source_length,
+            i64::from(first_local_chunk),
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut output_count as *mut i64) as usize as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            2 => MojoError::Capacity,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    let output_count = usize::try_from(output_count).map_err(|_| MojoError::InvalidOutput)?;
+    if output_count > output.len()
+        || output[..output_count]
+            .iter()
+            .any(|value| !(0..=61).contains(value))
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(output[..output_count].to_vec())
 }
 
 pub fn label(kind: i64, value: i64) -> Result<String, MojoError> {

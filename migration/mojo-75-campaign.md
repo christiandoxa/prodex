@@ -287,3 +287,19 @@ production-share check, ownership check, and authority guard pass.
 
 The canonical broad inventory at this checkpoint is 48,175 reachable Mojo LOC and 196,124 Rust
 production LOC, or 19.719688% Mojo. The 75% project target remains a forward migration goal.
+
+## Operational log detail planning wave
+
+The operational transcript detail policy now delegates source-specific field ordering and the
+first-local-chunk latency/TTFT distinction to the same reachable observability Mojo kernel. Rust
+retains field acquisition, safety redaction, endpoint sanitization, bounded rendering, and the
+feature-off/test oracle; the production path consumes only validated detail-plan indices.
+
+Focused feature-on and feature-off differential tests compare every rendered source family against
+the Rust oracle with a complete synthetic field set. A forced fresh Mojo-core rebuild verified the
+new export is present in the linked archive. Focused all-target Clippy for `prodex-app` and
+`prodex-mojo-core`, production-share, ownership, authority, and no-fallback checks pass.
+
+The canonical broad inventory at this checkpoint is 48,471 reachable Mojo LOC and 196,151 Rust
+production LOC, or 19.814653% Mojo. Adapter cost remains in the Rust denominator; the 75% target is
+not yet met.

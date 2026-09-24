@@ -3108,3 +3108,306 @@ def prodex_mojo_operational_event_plan_v1(
     ):
         source[] = OPERATIONAL_EVENT_SOURCE_ERROR
     return OBSERVABILITY_STATUS_OK
+
+comptime OPERATIONAL_DETAIL_PROFILE: Int64 = 0
+comptime OPERATIONAL_DETAIL_ROUTE: Int64 = 1
+comptime OPERATIONAL_DETAIL_PROVIDER: Int64 = 2
+comptime OPERATIONAL_DETAIL_MODEL: Int64 = 3
+comptime OPERATIONAL_DETAIL_FROM_MODEL: Int64 = 4
+comptime OPERATIONAL_DETAIL_TO_MODEL: Int64 = 5
+comptime OPERATIONAL_DETAIL_EFFORT: Int64 = 6
+comptime OPERATIONAL_DETAIL_TRANSPORT: Int64 = 7
+comptime OPERATIONAL_DETAIL_METHOD: Int64 = 8
+comptime OPERATIONAL_DETAIL_COMMAND: Int64 = 9
+comptime OPERATIONAL_DETAIL_CWD: Int64 = 10
+comptime OPERATIONAL_DETAIL_ARG_COUNT: Int64 = 11
+comptime OPERATIONAL_DETAIL_ENV_COUNT: Int64 = 12
+comptime OPERATIONAL_DETAIL_STDIN_BYTES: Int64 = 13
+comptime OPERATIONAL_DETAIL_TIMEOUT_MS: Int64 = 14
+comptime OPERATIONAL_DETAIL_PATH: Int64 = 15
+comptime OPERATIONAL_DETAIL_URL: Int64 = 16
+comptime OPERATIONAL_DETAIL_TOOL_SURFACE: Int64 = 17
+comptime OPERATIONAL_DETAIL_CONTINUATION: Int64 = 18
+comptime OPERATIONAL_DETAIL_STATUS: Int64 = 19
+comptime OPERATIONAL_DETAIL_CLASS: Int64 = 20
+comptime OPERATIONAL_DETAIL_EVENT_TYPE: Int64 = 21
+comptime OPERATIONAL_DETAIL_STATE: Int64 = 22
+comptime OPERATIONAL_DETAIL_CODE: Int64 = 23
+comptime OPERATIONAL_DETAIL_REASON: Int64 = 24
+comptime OPERATIONAL_DETAIL_ELAPSED_LATENCY: Int64 = 25
+comptime OPERATIONAL_DETAIL_DURATION_MS: Int64 = 26
+comptime OPERATIONAL_DETAIL_EXIT_CODE: Int64 = 27
+comptime OPERATIONAL_DETAIL_EXIT_STATUS: Int64 = 28
+comptime OPERATIONAL_DETAIL_OUTCOME: Int64 = 29
+comptime OPERATIONAL_DETAIL_ACTIVE: Int64 = 30
+comptime OPERATIONAL_DETAIL_LIMIT: Int64 = 31
+comptime OPERATIONAL_DETAIL_COUNT: Int64 = 32
+comptime OPERATIONAL_DETAIL_DROPPED: Int64 = 33
+comptime OPERATIONAL_DETAIL_QUOTA_BAND: Int64 = 34
+comptime OPERATIONAL_DETAIL_FIVE_HOUR_REMAINING: Int64 = 35
+comptime OPERATIONAL_DETAIL_WEEKLY_REMAINING: Int64 = 36
+comptime OPERATIONAL_DETAIL_UNTIL: Int64 = 37
+comptime OPERATIONAL_DETAIL_ATTEMPT: Int64 = 38
+comptime OPERATIONAL_DETAIL_RETRY_INDEX: Int64 = 39
+comptime OPERATIONAL_DETAIL_SECONDS: Int64 = 40
+comptime OPERATIONAL_DETAIL_SCORE: Int64 = 41
+comptime OPERATIONAL_DETAIL_DELTA: Int64 = 42
+comptime OPERATIONAL_DETAIL_CHUNKS: Int64 = 43
+comptime OPERATIONAL_DETAIL_BYTES: Int64 = 44
+comptime OPERATIONAL_DETAIL_ELAPSED_TTFT: Int64 = 45
+comptime OPERATIONAL_DETAIL_DECISION: Int64 = 46
+comptime OPERATIONAL_DETAIL_TIER: Int64 = 47
+comptime OPERATIONAL_DETAIL_REWRITE_KIND: Int64 = 48
+comptime OPERATIONAL_DETAIL_TOKENS_BEFORE: Int64 = 49
+comptime OPERATIONAL_DETAIL_TOKENS_AFTER: Int64 = 50
+comptime OPERATIONAL_DETAIL_BODY_BYTES_SAVED: Int64 = 51
+comptime OPERATIONAL_DETAIL_REWRITE_RATIO: Int64 = 52
+comptime OPERATIONAL_DETAIL_TOOL_OUTPUTS_CONDENSED: Int64 = 53
+comptime OPERATIONAL_DETAIL_REHYDRATED_REFS: Int64 = 54
+comptime OPERATIONAL_DETAIL_PRESSURE_BAND: Int64 = 55
+comptime OPERATIONAL_DETAIL_SELF_CHECK: Int64 = 56
+comptime OPERATIONAL_DETAIL_EXIT: Int64 = 57
+comptime OPERATIONAL_DETAIL_ATTEMPTS: Int64 = 58
+comptime OPERATIONAL_DETAIL_LANE: Int64 = 59
+comptime OPERATIONAL_DETAIL_HARD_LIMIT: Int64 = 60
+comptime OPERATIONAL_DETAIL_STAGE: Int64 = 61
+comptime OPERATIONAL_DETAIL_MAX_COUNT: Int64 = 64
+
+
+def operational_detail_push(
+    output: Pointer[mut=True, Int64, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    value: Int64,
+) -> Bool:
+    if written[] < 0 or written[] >= capacity:
+        return False
+    output[unsafe_offset=written[]] = value
+    written[] += 1
+    return True
+
+
+@export("prodex_mojo_operational_event_detail_plan_v1")
+def prodex_mojo_operational_event_detail_plan_v1(
+    abi_version: Int64,
+    source_address: UInt,
+    source_length: Int64,
+    first_local_chunk: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    output_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OBSERVABILITY_LABEL_ABI_VERSION:
+        return OBSERVABILITY_STATUS_ABI
+    if (
+        source_address == 0
+        or source_length <= 0
+        or not operational_text_valid(source_address, source_length)
+        or (first_local_chunk != 0 and first_local_chunk != 1)
+        or output_address == 0
+        or output_count_address == 0
+        or output_capacity < OPERATIONAL_DETAIL_MAX_COUNT
+    ):
+        return OBSERVABILITY_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_count_address)
+    )
+    written[] = 0
+
+    if (
+            operational_text_equals(source_address, source_length, StringSlice("request"))
+            or operational_text_equals(source_address, source_length, StringSlice("model"))
+            or operational_text_equals(source_address, source_length, StringSlice("route"))
+            or operational_text_equals(source_address, source_length, StringSlice("mcp"))
+            or operational_text_equals(source_address, source_length, StringSlice("agent"))
+            or operational_text_equals(source_address, source_length, StringSlice("tool"))
+            or operational_text_equals(source_address, source_length, StringSlice("event"))
+        ):
+        var detail = OPERATIONAL_DETAIL_PROFILE
+        while detail <= OPERATIONAL_DETAIL_DROPPED:
+            if not operational_detail_push(output, output_capacity, written, detail):
+                return OBSERVABILITY_STATUS_CAPACITY
+            detail += 1
+    elif operational_text_equals(source_address, source_length, StringSlice("quota")):
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PROFILE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ROUTE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_QUOTA_BAND):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_FIVE_HOUR_REMAINING):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_WEEKLY_REMAINING):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_REASON):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_UNTIL):
+            return OBSERVABILITY_STATUS_CAPACITY
+    elif (
+            operational_text_equals(source_address, source_length, StringSlice("retry"))
+            or operational_text_equals(source_address, source_length, StringSlice("backoff"))
+        ):
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PROFILE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ROUTE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PROVIDER):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_REASON):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_CLASS):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ATTEMPT):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_RETRY_INDEX):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_SECONDS):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_UNTIL):
+            return OBSERVABILITY_STATUS_CAPACITY
+    elif operational_text_equals(source_address, source_length, StringSlice("health")):
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PROFILE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ROUTE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_SCORE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_DELTA):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_REASON):
+            return OBSERVABILITY_STATUS_CAPACITY
+    elif operational_text_equals(source_address, source_length, StringSlice("upstream")):
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PROFILE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ROUTE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_TRANSPORT):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_METHOD):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_URL):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_STATUS):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ELAPSED_LATENCY):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_REASON):
+            return OBSERVABILITY_STATUS_CAPACITY
+    elif operational_text_equals(source_address, source_length, StringSlice("smart")):
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PROFILE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ROUTE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_DECISION):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_TIER):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_REWRITE_KIND):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_TOKENS_BEFORE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_TOKENS_AFTER):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_BODY_BYTES_SAVED):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_REWRITE_RATIO):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_TOOL_OUTPUTS_CONDENSED):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_REHYDRATED_REFS):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PRESSURE_BAND):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_SELF_CHECK):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_REASON):
+            return OBSERVABILITY_STATUS_CAPACITY
+    elif operational_text_equals(source_address, source_length, StringSlice("compact")):
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PROFILE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ROUTE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PROVIDER):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_STATUS):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_DECISION):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_EXIT):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_REASON):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ATTEMPTS):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ELAPSED_LATENCY):
+            return OBSERVABILITY_STATUS_CAPACITY
+    elif operational_text_equals(source_address, source_length, StringSlice("load")):
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ROUTE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_LANE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PROFILE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ACTIVE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_LIMIT):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_HARD_LIMIT):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_REASON):
+            return OBSERVABILITY_STATUS_CAPACITY
+    elif (
+            operational_text_equals(source_address, source_length, StringSlice("terminal"))
+            or operational_text_equals(source_address, source_length, StringSlice("error"))
+        ):
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PROFILE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ROUTE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_TRANSPORT):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_STAGE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_EVENT_TYPE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_STATUS):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_CLASS):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_REASON):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_OUTCOME):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_EXIT_CODE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_EXIT_STATUS):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_DROPPED):
+            return OBSERVABILITY_STATUS_CAPACITY
+    elif (
+            operational_text_equals(source_address, source_length, StringSlice("stream"))
+            or operational_text_equals(source_address, source_length, StringSlice("response"))
+        ):
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_PROFILE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_ROUTE):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_TRANSPORT):
+            return OBSERVABILITY_STATUS_CAPACITY
+        var elapsed_detail = OPERATIONAL_DETAIL_ELAPSED_LATENCY
+        if first_local_chunk == 1:
+            elapsed_detail = OPERATIONAL_DETAIL_ELAPSED_TTFT
+        if not operational_detail_push(output, output_capacity, written, elapsed_detail):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_CHUNKS):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_BYTES):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_STATUS):
+            return OBSERVABILITY_STATUS_CAPACITY
+        if not operational_detail_push(output, output_capacity, written, OPERATIONAL_DETAIL_EVENT_TYPE):
+            return OBSERVABILITY_STATUS_CAPACITY
+    return OBSERVABILITY_STATUS_OK
