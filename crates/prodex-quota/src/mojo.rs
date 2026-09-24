@@ -48,6 +48,12 @@ pub(crate) fn main_quota_aggregate(
     ))
 }
 
+pub(crate) fn openai_quota_pool_aggregate(
+    inputs: &[prodex_mojo_core::quota_pool::OpenAiQuotaPoolInput],
+) -> Result<prodex_mojo_core::quota_pool::OpenAiQuotaPoolAggregation, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::quota_pool::openai_quota_pool_aggregate(inputs)
+}
+
 pub(crate) fn quota_capacity_batch(
     inputs: &[prodex_mojo_core::quota::QuotaCapacityInput],
     route_kind: i64,

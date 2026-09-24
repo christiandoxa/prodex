@@ -511,6 +511,16 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/quota_pool.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "quota_aggregation_kernel"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/context_critical_signal.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",

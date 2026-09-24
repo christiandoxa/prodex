@@ -361,6 +361,14 @@ rows and returns a saturating remaining sum plus an optional earliest reset. Run
 returns seven bounded integer defaults in one call; user overrides and environment parsing remain
 Rust.
 
+`prodex_quota_openai_pool_aggregate_v1` accepts row-major records with seven `Int64` fields:
+five-hour remaining/present/reset, weekly remaining/present/reset, and profile readiness. It has no
+profile-count cap; Rust sizes the input buffer from the report slice. Output slots 0–5 contain
+profile, ready-profile, five-hour, weekly, ready-five-hour, and ready-weekly counts; slots 6–9
+contain the matching sums. Slots 10–13 contain five-hour reset, presence, weekly reset, and
+presence. `i64::MAX` reset values mean no known reset and do not participate in earliest-reset
+selection.
+
 Provider constraints use decision tags `Compatible=0`, `EndpointUnsupported=1`,
 `RequiredCapabilityMissing=2`, `CatalogEntryUnavailable=3`, `ContextWindowUnknown=4`,
 `ContextWindowExceeded=5`, `OutputLimitUnknown=6`, `RequestedOutputExceedsModelLimit=7`,

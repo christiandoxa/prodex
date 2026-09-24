@@ -693,3 +693,25 @@ production LOC, or 20.409888789549697% Mojo. The existing Mojo source was alread
 counted, so this wiring wave adds no Mojo LOC and raises counted Rust adapter
 volume by 21 LOC. The 75% target remains unmet; 539,763 additional Mojo LOC are
 estimated at current Rust volume.
+
+## OpenAI quota pool aggregation wave
+
+The quota renderer now sends normalized OpenAI window rows to
+`prodex_quota_openai_pool_aggregate_v1` in the new production owner
+`quota_pool.mojo`. Mojo owns profile and per-window counts, remaining sums,
+ready-window totals, and earliest-reset selection. Rust retains report
+acquisition, window normalization, readiness evaluation, and rendering.
+`i64::MAX` remains the no-reset sentinel. The OpenAI batch has no profile-count
+cap; the existing 1,024-row limit remains specific to Gemini/Copilot main-quota
+aggregation. Feature-off builds retain their Rust-only implementation.
+
+With Mojo 1.1.0 and `PRODEX_MOJO_REQUIRED=1`, the Mojo core suite passes 7 tests
+and the quota suite passes 71 tests; the Rust-only quota suite passes 59 tests.
+The OpenAI aggregation boundary matches a Rust oracle over 2,000 generated
+batches, and the renderer test aggregates 1,025 profiles. Workspace Clippy,
+formatting, docs, ownership, authority, no-fallback, production-share, size, and
+worktree-churn checks pass.
+
+The canonical broad inventory is 50,540 reachable Mojo LOC and 196,886 Rust
+production LOC, or 20.43% Mojo. The 75% target remains unmet; 540,118 additional
+Mojo LOC are estimated at current Rust volume.
