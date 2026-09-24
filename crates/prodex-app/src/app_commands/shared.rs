@@ -17,7 +17,46 @@ pub(crate) fn audit_log_event(
     details: serde_json::Value,
 ) -> Result<()> {
     if append_audit_event(component, action, outcome, details).is_err() {
-        eprintln!("Warning: failed to persist local audit event {component}/{action}.");
+        let message = format!("Warning: failed to persist local audit event {component}/{action}.");
+        let _ = print_user_stderr_panel(
+            "Prodex Warning",
+            std::slice::from_ref(&message),
+            std::slice::from_ref(&message),
+        );
+    }
+    Ok(())
+}
+
+pub(crate) fn print_user_stdout_panel(
+    title: &str,
+    fields: &[(String, String)],
+    fallback_lines: &[String],
+) -> Result<()> {
+    if io::stdout().is_terminal()
+        && env::var_os("CODEX_CI").is_none()
+        && terminal_ui::print_panel(title, fields).is_ok()
+    {
+        return Ok(());
+    }
+    for line in fallback_lines {
+        terminal_ui::print_stdout_line(line)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn print_user_stderr_panel(
+    title: &str,
+    messages: &[String],
+    fallback_lines: &[String],
+) -> Result<()> {
+    if io::stderr().is_terminal()
+        && env::var_os("CODEX_CI").is_none()
+        && terminal_ui::print_stderr_panel(title, messages).is_ok()
+    {
+        return Ok(());
+    }
+    for line in fallback_lines {
+        terminal_ui::print_stderr_line(line)?;
     }
     Ok(())
 }
@@ -27,7 +66,11 @@ pub(crate) fn print_launch_status(message: &str) {
         let mut state = state.borrow_mut();
         match state.render(message) {
             Ok(()) => {}
-            Err(_) => eprintln!("Prodex launch: {message}"),
+            Err(_) => {
+                let fallback = format!("Prodex launch: {message}");
+                let _ =
+                    print_user_stderr_panel("Prodex Launch", &[message.to_string()], &[fallback]);
+            }
         }
     });
 }

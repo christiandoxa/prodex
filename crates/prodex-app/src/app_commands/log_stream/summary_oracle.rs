@@ -1,4 +1,3 @@
-
 use super::*;
 
 pub(super) fn operational_event_summary(

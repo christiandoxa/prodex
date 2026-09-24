@@ -31,9 +31,22 @@ pub(crate) fn handle_super_native_agy(args: SuperArgs) -> Result<()> {
     }
 
     if args.dry_run {
-        println!(
-            "Prodex dry run: launch diagnostics\nFlow: native-cli\nProvider: antigravity\nProfile: (native CLI owned)\nRuntime proxy: disabled\n"
-        );
+        print_user_stdout_panel(
+            "Prodex Dry Run",
+            &[
+                ("Flow".to_string(), "native-cli".to_string()),
+                ("Provider".to_string(), "antigravity".to_string()),
+                ("Profile".to_string(), "(native CLI owned)".to_string()),
+                ("Runtime proxy".to_string(), "disabled".to_string()),
+            ],
+            &[
+                "Prodex dry run: launch diagnostics".to_string(),
+                "Flow: native-cli".to_string(),
+                "Provider: antigravity".to_string(),
+                "Profile: (native CLI owned)".to_string(),
+                "Runtime proxy: disabled".to_string(),
+            ],
+        )?;
         return Ok(());
     }
 

@@ -69,7 +69,7 @@ impl McpRateLimit {
 pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
     let (openai_tunnel_id, listen) = prepare_super_expose(&mut expose)?;
     if expose.super_args.dry_run {
-        print_super_expose_dry_run(&expose, openai_tunnel_id.as_deref());
+        print_super_expose_dry_run(&expose, openai_tunnel_id.as_deref())?;
         return Ok(());
     }
     if super_expose_ui::should_confirm_from_tui() && !super_expose_ui::confirm(&expose)? {
@@ -172,15 +172,28 @@ fn prepare_super_expose(expose: &mut SuperExposeArgs) -> Result<(Option<String>,
     Ok((openai_tunnel_id, listen))
 }
 
-fn print_super_expose_dry_run(expose: &SuperExposeArgs, tunnel_id: Option<&str>) {
+fn print_super_expose_dry_run(expose: &SuperExposeArgs, tunnel_id: Option<&str>) -> Result<()> {
     let label = expose_label(expose);
-    match tunnel_id {
-        Some(tunnel_id) => println!(
+    let tunnel = tunnel_id
+        .map(|value| format!("OpenAI Secure MCP Tunnel {value}"))
+        .unwrap_or_else(|| "disabled (local only)".to_string());
+    let fallback = match tunnel_id {
+        Some(tunnel_id) => vec![format!(
             "{label}: OpenAI Secure MCP Tunnel {tunnel_id} -> local MCP on {}",
             expose.listen
-        ),
-        None => println!("{label}: local MCP on {}", expose.listen),
-    }
+        )],
+        None => vec![format!("{label}: local MCP on {}", expose.listen)],
+    };
+    crate::app_commands::print_user_stdout_panel(
+        label,
+        &[
+            ("Mode".to_string(), expose.mode.as_str().to_string()),
+            ("Listen".to_string(), expose.listen.clone()),
+            ("Tunnel".to_string(), tunnel),
+            ("Status".to_string(), "dry run".to_string()),
+        ],
+        &fallback,
+    )
 }
 
 fn expose_label(expose: &SuperExposeArgs) -> &'static str {
@@ -232,7 +245,16 @@ fn start_openai_tunnel_async(
             let _ = sender.send(result);
         })
         .context("failed to start OpenAI tunnel readiness worker")?;
-    eprintln!("OpenAI Secure MCP Tunnel starting for {tunnel_id}.");
+    crate::app_commands::print_user_stderr_panel(
+        "Prodex Super Expose",
+        &[
+            format!("Tunnel: {tunnel_id}"),
+            "Status: starting OpenAI Secure MCP Tunnel".to_string(),
+        ],
+        &[format!(
+            "OpenAI Secure MCP Tunnel starting for {tunnel_id}."
+        )],
+    )?;
     Ok(Some(receiver))
 }
 
@@ -243,8 +265,28 @@ fn announce_super_expose(
     port: u16,
     audit: &logging::ExposeAuditLog,
 ) -> Result<()> {
-    println!("{} ({display_name}): {endpoint}", expose_label(expose));
-    eprintln!("Capability URL: keep it secret; Ctrl-C stops the endpoint.");
+    crate::app_commands::print_user_stdout_panel(
+        expose_label(expose),
+        &[
+            ("Workspace".to_string(), display_name.to_string()),
+            ("Mode".to_string(), expose.mode.as_str().to_string()),
+            ("Endpoint".to_string(), endpoint.to_string()),
+            (
+                "Safety".to_string(),
+                "Capability URL is secret; local loopback only.".to_string(),
+            ),
+            ("Stop".to_string(), "Ctrl-C".to_string()),
+        ],
+        &[format!(
+            "{} ({display_name}): {endpoint}",
+            expose_label(expose)
+        )],
+    )?;
+    crate::app_commands::print_user_stderr_panel(
+        "Prodex Super Expose",
+        &["Capability URL is secret; Ctrl-C stops the endpoint.".to_string()],
+        &["Capability URL: keep it secret; Ctrl-C stops the endpoint.".to_string()],
+    )?;
     audit.event(
         "super_expose_started",
         [
@@ -276,10 +318,17 @@ fn poll_openai_tunnel(
                     ),
                 ],
             );
-            eprintln!(
-                "OpenAI Secure MCP Tunnel ready: {} (client {}).",
-                ready.status.tunnel_id, ready.status.client_version
-            );
+            crate::app_commands::print_user_stderr_panel(
+                "Prodex Super Expose",
+                &[
+                    format!("Tunnel: {}", ready.status.tunnel_id),
+                    format!("Status: ready (client {})", ready.status.client_version),
+                ],
+                &[format!(
+                    "OpenAI Secure MCP Tunnel ready: {} (client {}).",
+                    ready.status.tunnel_id, ready.status.client_version
+                )],
+            )?;
             *tunnel = Some(ready);
             *receiver = None;
             audit.flush()?;
