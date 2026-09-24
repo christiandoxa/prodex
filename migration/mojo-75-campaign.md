@@ -394,3 +394,17 @@ authority, no-fallback, and size guards pass with Mojo 1.1.0.
 
 The canonical broad inventory at this checkpoint is 49,076 reachable Mojo LOC and 196,723 Rust
 production LOC, or 19.965907% Mojo. The 75% project target remains a forward migration goal.
+
+## Compatibility adapter minimization wave
+
+The request compatibility-surface adapter was tightened after the Mojo ownership migration. The
+Rust production path no longer duplicates per-tag constants and one-off label mappers; it now uses
+compact table-driven tag/flag adapters around the Mojo plan. Client-family, stream, continuation,
+tool-capability, approval, origin, and warning decisions remain Mojo-owned.
+
+Feature-on differential tests against the feature-off compatibility implementation and default
+compatibility tests pass. All-target runtime-proxy Clippy plus production-share, ownership,
+authority, no-fallback, and size guards are green with Mojo 1.1.0.
+
+The canonical broad inventory at this checkpoint is 49,076 reachable Mojo LOC and 196,698 Rust
+production LOC, or 19.967938% Mojo. The 75% project target remains a forward migration goal.
