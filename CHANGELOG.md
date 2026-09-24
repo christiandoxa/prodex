@@ -2,93 +2,80 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.431.7 - 2026-09-24
+
+### CLI
+
+- Accept overridden hook trust writes (`be65261`)
+# Prodex 0.431.7
+
+## New Features
+
+- No new user-facing features in this patch release; 0.431.7 is a focused regression fix for direct Super session resume.
+
+## Bug Fixes
+
+- Fix a Super resume regression where launching an existing Codex session directly with
+  `prodex s <session-uuid>` could abort during quota preflight with
+  `Codex hook-trust config write did not report status=ok`.
+- Accept Codex `config/batchWrite` success status `okOverridden` in the Super hook-trust
+  preflight. Codex returns this status when the trust write is effective but a higher-priority
+  session flag also contributes to the resulting `hooks.state` value.
+- Keep the existing post-write `hooks/list` verification as the authority for whether every
+  discovered hook is actually trusted. A write that does not result in trusted hooks still
+  fails closed before the Codex TUI starts.
+- Cover the regression in the hook-trust unit tests and release artifact smoke path so both
+  `ok` and `okOverridden` success responses remain supported.
+
+## Affected Flow
+
+The regression was specific to direct Super resume with automatic profile rotation enabled:
+
+```bash
+prodex s <session-uuid>
+```
+
+The runtime usage-limit monitor adds a session-scoped `hooks.state` override so it can safely
+track the resumed session. Codex 0.156.1 can therefore report a successful hook trust write as
+`okOverridden`. Prodex 0.431.3 through 0.431.6 accepted only the literal `ok` status and treated
+that successful response as fatal.
+
+Starting `prodex s` first and then using `/resume` did not exercise the same launch-time
+configuration path.
+
+## Safety
+
+- No global hook-trust bypass is reintroduced.
+- Super still trusts only exact hook hashes returned by Codex.
+- The second `hooks/list` call remains mandatory and rejects any hook that is still
+  `untrusted` or `modified`.
+- Workspace trust, profile rotation, optional tools, provider routing, and Presidio defaults
+  are unchanged.
+
+## Validation
+
+- Added a focused Rust regression test for Codex hook-trust write statuses `ok` and
+  `okOverridden`, including rejection of unknown or missing statuses.
+- Updated the standalone release artifact smoke app-server fixture to return
+  `okOverridden` with session-flag override metadata.
+- `cargo fmt --all -- --check` passed.
+- The focused `prodex-app` hook-trust regression test passed.
+- `node --test scripts/ci/release-artifact-smoke.test.mjs` passed.
+
+## Changelog
+
+- Restore direct `prodex s <session-uuid>` resume on Codex 0.156.1 when Super's
+  session-scoped hook trust state is present.
+- Preserve exact-hash verification and fail-closed hook trust semantics.
+
+Full Changelog: [0.431.6...0.431.7](https://github.com/christiandoxa/prodex/compare/0.431.6...0.431.7)
+
 ## 0.431.6 - 2026-09-23
 
 ### CLI
 
 - Report incompatible optional tools as info (`c6c9df5`)
 - Skip incompatible optional tools by default (`b39fe11`)
-# Prodex 0.431.6
-
-## New Features
-
-- Make incompatible **default optional tools informational instead of fatal** during `prodex s`.
-- When a default optional tool is installed but below the supported minimum or otherwise fails
-  compatibility validation, Prodex now skips that tool for the current launch, shows an
-  `Optional Tools` information panel with the reason and update recommendation, and continues
-  launching Super.
-- Preserve version-flexible compatibility from 0.431.5: runtime compatibility remains
-  minimum-version/capability based, while latest stable upstream releases remain the release
-  qualification reference.
-
-## Bug Fixes
-
-- Fix `prodex s` being blocked by an outdated optional tool such as RTK 0.45.0 even though the
-  tool is optional.
-- Keep explicitly required tools strict: `--require-tool <tool>` still fails when that tool is
-  missing or incompatible, because the user explicitly requested it as a hard requirement.
-- Keep dry-run behavior non-blocking for default optional incompatibilities; the report shows the
-  affected tool as `skipped` instead of returning an error.
-- Preserve all 0.431.5 dependency compatibility and logging improvements, including flexible
-  Codex/tunnel-client/optional-tool version handling and redacted `prodex s expose exec` command
-  details in `prodex log`.
-
-## Runtime Behavior
-
-For normal Super defaults:
-
-```text
-Optional Tools
-rtk: skipped for this launch; rtk 0.45.0 is too old; Prodex requires 0.46.0 or newer.
-Update when convenient (minimum supported: 0.46.0, release-qualified reference: 0.49.0).
-```
-
-The launch continues without RTK.
-
-For an explicit requirement such as:
-
-```bash
-prodex s --require-tool rtk
-```
-
-an incompatible RTK remains a launch error.
-
-## Compatibility Policy
-
-The runtime policy remains **minimum + capability based** rather than exact-version pinned.
-
-| Component | Minimum supported | 0.431.6 latest-stable reference |
-| --- | ---: | ---: |
-| Codex CLI | `0.153.2` + `app-server` | `0.156.1` |
-| OpenAI tunnel-client | `0.0.13` + `run` capability | `0.0.14` |
-| Caveman | `2.3.1` | `2.7.0` |
-| RTK | `0.46.0` | `0.49.0` |
-| Codebase Memory MCP | `0.9.1-rc.1` shared-daemon contract | `0.11.0` |
-| Playwright MCP | `0.0.79` | `0.0.82` |
-| Ponytail | `4.9.0` | `4.10.0` |
-| Presidio | `2.2.364` | `2.2.364` |
-
-Default optional tools that do not satisfy their compatibility contract are skipped with
-informational guidance. Explicitly required tools remain fail-closed.
-
-## Validation
-
-- Exact source SHA `c6c9df54b091305670669c4fdaf5c740eaefeb60` completed the full GitHub
-  source CI with **62 successful jobs, 2 intentionally skipped jobs, and zero failures**.
-- Real Mojo/parity completed successfully with Mojo 1.1.0.
-- Windows, macOS, and Linux test matrices completed successfully.
-- Deterministic regression coverage verifies that an incompatible default RTK is informational
-  and skipped, while the same RTK remains fatal when listed in `--require-tool`.
-- Rust compile, Clippy, static guards, runtime stress, supply-chain, compatibility replay, and
-  optional-tool policy gates passed.
-
-## Changelog
-
-- Stop blocking `prodex s` on incompatible default optional tools.
-- Show update guidance as information and continue without the affected optional tool.
-- Preserve strict behavior only for explicitly required tools.
-
-Full Changelog: [0.431.5...0.431.6](https://github.com/christiandoxa/prodex/compare/0.431.5...0.431.6)
 
 ## 0.431.5 - 2026-09-23
 
