@@ -494,3 +494,18 @@ clean, and production-share, ownership, authority, no-fallback, and size guards 
 
 The canonical broad inventory at this checkpoint is 49,391 reachable Mojo LOC and 196,752 Rust
 production LOC, or 20.065978% Mojo. The 75% project target remains a forward migration goal.
+
+## Gemini stream event transform Mojo wave
+
+Gemini GenerateContent SSE event conversion now executes as one raw-input Mojo operation. Mojo
+owns candidate/part discovery, function-call argument shaping, reasoning-vs-text delta selection,
+and the normalized Responses event/value packet. The Rust Mojo production path now only handles
+SSE framing and transform-result materialization; the prior inline production decision tree was
+removed from that path.
+
+Focused Gemini stream tests pass with Mojo 1.1.0, the complete Gemini unit subset passes with and
+without the feature, and all-target provider-core Clippy plus production-share, ownership,
+authority, no-fallback, and size guards are green locally.
+
+The canonical broad inventory at this checkpoint is 49,480 reachable Mojo LOC and 196,722 Rust
+production LOC, or 20.097318% Mojo. The 75% project target remains a forward migration goal.

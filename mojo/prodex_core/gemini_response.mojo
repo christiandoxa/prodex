@@ -66,6 +66,7 @@ comptime GEMINI_STREAM_FALLBACK_TOOL_CALL_ID: Int64 = 42
 comptime GEMINI_STREAM_SHOULD_EMIT_ARGUMENTS_DELTA: Int64 = 43
 comptime GEMINI_STREAM_RESPONSE_ID: Int64 = 44
 comptime GEMINI_RAW_TEXT_RESPONSE: Int64 = 45
+comptime GEMINI_STREAM_EVENT_TRANSFORM: Int64 = 46
 
 
 @fieldwise_init
@@ -314,7 +315,7 @@ def gemini_put_event_prefix(
 def gemini_views_valid(input: ProdexGeminiResponseKernelInput) -> Bool:
     return (
         input.operation >= GEMINI_RESPONSE_CREATED
-        and input.operation <= GEMINI_RAW_TEXT_RESPONSE
+        and input.operation <= GEMINI_STREAM_EVENT_TRANSFORM
         and input.response_id_present >= 0
         and input.response_id_present <= 1
         and input.call_id_present >= 0
@@ -1135,6 +1136,105 @@ def gemini_put_raw_text_response(
         return False
     return gemini_put_byte(writer, 125)
 
+
+def gemini_raw_string_present(
+    view: ProdexRichStringView,
+    bounds: Array[Int64, 2],
+) -> Bool:
+    return (
+        gemini_raw_bounds_present(bounds)
+        and bounds[1] - bounds[0] >= 2
+        and deepseek_json_byte(view, bounds[0]) == 34
+        and deepseek_json_byte(view, bounds[1] - 1) == 34
+    )
+
+
+def gemini_put_stream_transform_status(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    status: StringSlice,
+) -> Bool:
+    return (
+        gemini_put_literal(writer, StringSlice('{"status":"'))
+        and gemini_put_literal(writer, status)
+        and gemini_put_literal(writer, StringSlice('"}'))
+    )
+
+
+def gemini_put_stream_transform_event_prefix(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    event_type: StringSlice,
+) -> Bool:
+    return (
+        gemini_put_literal(writer, StringSlice('{"status":"ok","event":"'))
+        and gemini_put_literal(writer, event_type)
+        and gemini_put_literal(writer, StringSlice('","value":{"type":"'))
+        and gemini_put_literal(writer, event_type)
+        and gemini_put_byte(writer, 34)
+    )
+
+
+def gemini_put_raw_stream_event_transform(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if input.response.len == 0:
+        return gemini_put_stream_transform_status(writer, StringSlice("invalid"))
+    var source = input.response.copy()
+    var root = gemini_raw_root(source)
+    if not gemini_raw_bounds_present(root):
+        return gemini_put_stream_transform_status(writer, StringSlice("invalid"))
+
+    var candidates = gemini_raw_member(source, root, StringSlice("candidates"))
+    var candidate = gemini_raw_first_array_item(source, candidates)
+    var content = gemini_raw_member(source, candidate, StringSlice("content"))
+    var parts = gemini_raw_member(source, content, StringSlice("parts"))
+    var part = gemini_raw_first_array_item(source, parts)
+    if not gemini_raw_bounds_present(part) or deepseek_json_byte(source, part[0]) != 123:
+        return gemini_put_stream_transform_status(writer, StringSlice("unsupported"))
+
+    var function_call = gemini_raw_member(source, part, StringSlice("functionCall"))
+    if gemini_raw_bounds_present(function_call):
+        if not gemini_put_stream_transform_event_prefix(
+            writer, StringSlice("response.function_call_arguments.delta")
+        ):
+            return False
+        var call_id = gemini_raw_member(source, function_call, StringSlice("id"))
+        if gemini_raw_string_present(source, call_id):
+            if (
+                not gemini_put_literal(writer, StringSlice(',"call_id":'))
+                or not gemini_put_view_range(writer, source, call_id[0], call_id[1])
+            ):
+                return False
+        if not gemini_put_literal(writer, StringSlice(',"delta":')):
+            return False
+        var args = gemini_raw_member(source, function_call, StringSlice("args"))
+        if gemini_raw_bounds_present(args):
+            if not gemini_put_json_string_range(writer, source, args[0], args[1]):
+                return False
+        elif not gemini_put_literal(writer, StringSlice('"{}"')):
+            return False
+        return gemini_put_literal(writer, StringSlice("}}"))
+
+    var text = gemini_raw_member(source, part, StringSlice("text"))
+    if not gemini_raw_string_present(source, text):
+        return gemini_put_stream_transform_status(writer, StringSlice("unsupported"))
+
+    if gemini_raw_part_is_thought(source, part[0], part[1]):
+        if not gemini_put_stream_transform_event_prefix(
+            writer, StringSlice("response.reasoning_summary_text.delta")
+        ):
+            return False
+    elif not gemini_put_stream_transform_event_prefix(
+        writer, StringSlice("response.output_text.delta")
+    ):
+        return False
+    return (
+        gemini_put_literal(writer, StringSlice(',"delta":'))
+        and gemini_put_view_range(writer, source, text[0], text[1])
+        and gemini_put_literal(writer, StringSlice("}}"))
+    )
+
+
 def gemini_write_operation(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     input: ProdexGeminiResponseKernelInput,
@@ -1410,6 +1510,8 @@ def gemini_write_operation(
         return gemini_put_literal(writer, StringSlice("null"))
     if operation == GEMINI_RAW_TEXT_RESPONSE:
         return gemini_put_raw_text_response(writer, input)
+    if operation == GEMINI_STREAM_EVENT_TRANSFORM:
+        return gemini_put_raw_stream_event_transform(writer, input)
     return False
 
 
