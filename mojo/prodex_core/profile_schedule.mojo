@@ -73,23 +73,25 @@ def prodex_runtime_profile_rotation_order_batch(
                 offset, count, current_index
             )
 
-    for position in range(total_count):
-        var best = position
-        for candidate in range(position + 1, total_count):
-            var candidate_index = ordered_indices[unsafe_offset=candidate]
-            var best_index = ordered_indices[unsafe_offset=best]
-            if runtime_profile_rotation_priority(
-                priorities, candidate_index, count
-            ) < runtime_profile_rotation_priority(
-                priorities, best_index, count
+    # ponytail: O(n²) insertion sort is bounded by 256 profiles; use a stable
+    # O(n log n) sort if that cap increases.
+    var position: Int64 = 1
+    while position < total_count:
+        var selected = ordered_indices[unsafe_offset=position]
+        var selected_priority = runtime_profile_rotation_priority(
+            priorities, selected, count
+        )
+        var insertion = position
+        while insertion > 0:
+            var previous = ordered_indices[unsafe_offset=insertion - 1]
+            if selected_priority >= runtime_profile_rotation_priority(
+                priorities, previous, count
             ):
-                best = candidate
-        if best != position:
-            var selected = ordered_indices[unsafe_offset=best]
-            ordered_indices[unsafe_offset=best] = ordered_indices[
-                unsafe_offset=position
-            ]
-            ordered_indices[unsafe_offset=position] = selected
+                break
+            ordered_indices[unsafe_offset=insertion] = previous
+            insertion -= 1
+        ordered_indices[unsafe_offset=insertion] = selected
+        position += 1
     ordered_count[unsafe_offset=0] = total_count
     return 0
 
@@ -109,17 +111,21 @@ def prodex_runtime_profile_provider_order_batch(
         if priorities[unsafe_offset=order_index] < 0:
             return 2
         ordered_indices[unsafe_offset=index] = order_index
-    for position in range(count):
-        var best = position
-        for candidate in range(position + 1, count):
-            var candidate_index = ordered_indices[unsafe_offset=candidate]
-            var best_index = ordered_indices[unsafe_offset=best]
-            if priorities[unsafe_offset=candidate_index] < priorities[unsafe_offset=best_index]:
-                best = candidate
-        if best != position:
-            var selected = ordered_indices[unsafe_offset=best]
-            ordered_indices[unsafe_offset=best] = ordered_indices[unsafe_offset=position]
-            ordered_indices[unsafe_offset=position] = selected
+    # ponytail: O(n²) insertion sort is bounded by 256 profiles; use a stable
+    # O(n log n) sort if that cap increases.
+    var position: Int64 = 1
+    while position < count:
+        var selected = ordered_indices[unsafe_offset=position]
+        var selected_priority = priorities[unsafe_offset=selected]
+        var insertion = position
+        while insertion > 0:
+            var previous = ordered_indices[unsafe_offset=insertion - 1]
+            if selected_priority >= priorities[unsafe_offset=previous]:
+                break
+            ordered_indices[unsafe_offset=insertion] = previous
+            insertion -= 1
+        ordered_indices[unsafe_offset=insertion] = selected
+        position += 1
     return 0
 
 

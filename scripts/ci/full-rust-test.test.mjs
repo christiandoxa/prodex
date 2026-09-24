@@ -82,7 +82,12 @@ test("no-prodex-app mode excludes prodex-app from workspace execution", () => {
 
 test("scheduled full suite runs disjoint workspace and prodex-app partitions in parallel", () => {
   const workflow = readFileSync(".github/workflows/full-test.yml", "utf8");
+  const archive = workflow.match(/\n  mojo-runtime-linux-archive:\n([\s\S]*?)\n  full_test_shards:/)?.[1];
 
+  assert.ok(archive, "full-test Mojo runtime archive job missing");
+  assert.match(archive, /PRODEX_MOJO_REQUIRED=1/);
+  assert.match(workflow, /needs: \[full_test_shards, mojo-runtime-linux-archive\]/);
+  assert.match(workflow, /name: Download runtime Mojo archive/);
   assert.match(workflow, /name: Full tests \(\$\{\{ matrix\.label \}\}\)/);
   assert.match(workflow, /full_test_shards:/);
   assert.match(workflow, /--full-test-matrix/);
@@ -95,14 +100,28 @@ test("scheduled full suite runs disjoint workspace and prodex-app partitions in 
   assert.doesNotMatch(workflow, /if \[ "\$\{status\}" -ne 0 \]; then\n\s+break/);
 });
 
-test("generic CI stays compiler-free while the strict Mojo lane owns all-feature lint", () => {
+test("fresh benchmark compiles required Mojo runtime with the pinned toolchain", () => {
+  const workflow = readFileSync(".github/workflows/bench-calibration.yml", "utf8");
+
+  assert.match(workflow, /MOJO_VERSION: "1\.1\.0"/);
+  assert.match(workflow, /Install pinned Mojo toolchain[\s\S]*?mojo==\$\{MOJO_VERSION\}/);
+  assert.match(workflow, /"PRODEX_MOJO_REQUIRED=1"/);
+  assert.match(workflow, /"PRODEX_MOJO_VERSION=\$\{MOJO_VERSION\}"/);
+});
+
+test("native builds link strict runtime archives while the real Mojo lane owns all-feature lint", () => {
   const ci = readFileSync(".github/workflows/ci.yml", "utf8");
   const full = readFileSync(".github/workflows/full-test.yml", "utf8");
   const mojoJob = ci.match(/\n  real-mojo:\n([\s\S]*?)\n  ci-duration-telemetry:/);
+  const linuxArchive = ci.match(/\n  mojo-runtime-linux-archive:\n([\s\S]*?)\n  mojo-runtime-platform-archives:/);
 
   assert.ok(mojoJob, "real-mojo job missing");
+  assert.ok(linuxArchive, "Linux runtime archive job missing");
   assert.doesNotMatch(ci.replace(mojoJob[0], ""), /--all-features/);
   assert.doesNotMatch(full, /--all-features/);
+  assert.match(linuxArchive[0], /PRODEX_MOJO_REQUIRED=1/);
+  assert.match(linuxArchive[0], /cargo build --release --locked --target .* -p prodex-mojo-core/);
+  assert.match(ci, /PRODEX_MOJO_ARCHIVE: \$\{\{ github\.workspace \}\}\/target\/mojo-runtime\//);
   assert.match(mojoJob[0], /name: Real Mojo \/ parity/);
   assert.match(mojoJob[0], /Install pinned Mojo toolchain/);
   assert.match(mojoJob[0], /cargo clippy .* --all-features -- -D warnings/);
@@ -282,7 +301,7 @@ test("runtime proxy matrix is generated before fan-out without a runner barrier"
   assert.ok(runtimeProxy, "main-internal-runtime-proxy job missing");
   assert.match(changes, /runtime_proxy_matrix: \$\{\{ steps\.runtime-matrix\.outputs\.matrix \}\}/);
   assert.match(changes, /node scripts\/ci\/runtime-proxy-ci-matrix\.mjs --github-matrix/);
-  assert.match(runtimeProxy, /needs: changes/);
+  assert.match(runtimeProxy, /needs: \[changes, mojo-runtime-linux-archive\]/);
   assert.match(runtimeProxy, /fromJSON\(needs\.changes\.outputs\.runtime_proxy_matrix\)/);
   assert.doesNotMatch(workflow, /\n  runtime-proxy-shard-matrix:/);
 });

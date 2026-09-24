@@ -65,6 +65,8 @@ jobs:
     timeout-minutes: 45
     env:
       GH_TOKEN: ${{ github.token }}
+      MOJO_VERSION: "1.1.0"
+      UV_VERSION: "0.11.7"
 
     steps:
       - name: Check out repository
@@ -81,6 +83,22 @@ jobs:
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
         with:
           toolchain: 1.98.1
+
+      - name: Install pinned uv
+        if: ${{ inputs.log_source == 'fresh-benchmark' }}
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install pinned Mojo toolchain
+        if: ${{ inputs.log_source == 'fresh-benchmark' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
+          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
 
       - name: Cache Rust dependencies
         if: ${{ inputs.log_source == 'fresh-benchmark' }}
@@ -109,6 +127,9 @@ jobs:
           case "${LOG_SOURCE_INPUT}" in
             fresh-benchmark)
               bench_env=(
+                "PRODEX_MOJO_REQUIRED=1"
+                "PRODEX_MOJO_VERSION=${MOJO_VERSION}"
+                "PRODEX_MOJO_TARGET_CPU=x86-64"
                 "PRODEX_RUNTIME_PROXY_BENCH_CHECK=1"
               )
               if [ -n "${THRESHOLD_CONFIG_PATH_INPUT}" ]; then

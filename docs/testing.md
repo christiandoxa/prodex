@@ -93,15 +93,19 @@ If a runtime test needs parallel coverage, prefer a separate process with isolat
 
 ## Commands
 
-### Rust-only and real Mojo validation
+### Default and real Mojo validation
 
-Normal Rust development does not require Mojo:
+The default runtime-quota build uses the compiled Mojo scoring and profile-order kernels. Install
+the pinned Mojo compiler (`mojo==1.1.0`) or provide a target-matched archive through
+`PRODEX_MOJO_ARCHIVE` before running Cargo commands that build `prodex-runtime-quota` or its
+dependents. Its Rust parity oracle compiles only for tests.
 
 ```bash
 cargo test --locked
 ```
 
-Rust-only development omits Mojo features; enabling a Mojo feature requires the compiler:
+Other Mojo surfaces remain opt-in. The runtime-quota `mojo` feature also enables the runtime
+proxy's wider Mojo features:
 
 ```bash
 cargo test --locked -p prodex-quota --features mojo
@@ -122,7 +126,7 @@ PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
 PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -p prodex-runtime-proxy --features mojo -- --test-threads=1
 PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
-  cargo test --locked -p prodex-runtime-quota --features mojo -- --test-threads=1
+  cargo test --locked -p prodex-runtime-quota -- --test-threads=1
 PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \
   cargo test --locked -p prodex-provider-spi --features mojo -- --test-threads=1
 PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 \

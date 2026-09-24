@@ -20,6 +20,63 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  mojo-runtime-linux-archive:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      MOJO_VERSION: "1.1.0"
+      UV_VERSION: "0.11.7"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: 1.98.1
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: false
+
+      - name: Install pinned Mojo toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python "mojo==${MOJO_VERSION}"
+          echo "${GITHUB_WORKSPACE}/.venv/bin" >> "${GITHUB_PATH}"
+
+      - name: Build strict runtime Mojo archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=x86_64-unknown-linux-gnu
+          target_dir="${GITHUB_WORKSPACE}/target/mojo-runtime-build/${target}"
+          PRODEX_MOJO_REQUIRED=1 \
+          PRODEX_MOJO_VERSION="${MOJO_VERSION}" \
+          PRODEX_MOJO_TARGET="${target}" \
+          PRODEX_MOJO_TARGET_CPU=x86-64 \
+          CARGO_TARGET_DIR="${target_dir}" \
+            cargo build --release --locked --target "${target}" -p prodex-mojo-core \
+              --features mojo-runtime,mojo-quota,mojo-rich
+          archive="$(find "${target_dir}/${target}/release/build" -type f \
+            -name libprodex_mojo_core.a -print -quit)"
+          test -s "${archive}"
+          mkdir -p "target/mojo-runtime/${target}"
+          cp "${archive}" "target/mojo-runtime/${target}/libprodex_mojo_core.a"
+
+      - name: Upload Linux runtime Mojo archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: mojo-runtime-archive-x86_64-unknown-linux-gnu
+          path: target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+          if-no-files-found: error
+
   full_test_shards:
     name: Generate full-test shard plan
     runs-on: ubuntu-latest
@@ -47,11 +104,12 @@ jobs:
 
   full-test:
     name: Full tests (${{ matrix.label }})
-    needs: full_test_shards
+    needs: [full_test_shards, mojo-runtime-linux-archive]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
       RUSTC_WRAPPER: sccache
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.full_test_shards.outputs.matrix) }}
@@ -59,6 +117,12 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Download runtime Mojo archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: mojo-runtime-archive-x86_64-unknown-linux-gnu
+          path: target/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable

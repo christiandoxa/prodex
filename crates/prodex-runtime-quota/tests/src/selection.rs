@@ -1,10 +1,8 @@
 use super::*;
-#[cfg(feature = "mojo")]
 use prodex_mojo_core::runtime::{
     QuotaRouteScoreInput, QuotaScoreInput, quota_route_score_batch, quota_score_batch,
 };
 use prodex_quota::AuthSummary;
-#[cfg(feature = "mojo")]
 use prodex_quota::{scale_quota_pressure_for_plan, usage_plan_capacity_pressure_scale_bps};
 use prodex_shared_types::{ReadyProfileCandidate, RunProfileProbeReport, RuntimeQuotaSource};
 use std::collections::BTreeMap;
@@ -239,7 +237,6 @@ fn runtime_selection_does_not_route_retired_model_from_additional_bucket() {
     }
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn route_score_contract_matches_shared_score_for_normalized_input() {
     let now = 1_700_000_000;
@@ -307,7 +304,6 @@ fn route_score_contract_marks_incomplete_window_unknown() {
     assert_eq!(score.total_pressure, i64::MAX);
     assert_eq!(score.five_hour_pressure, i64::MAX);
 
-    #[cfg(feature = "mojo")]
     {
         let weekly = required_main_window_snapshot_at(&usage, "weekly", now).unwrap();
         let route_score = quota_route_score_batch(

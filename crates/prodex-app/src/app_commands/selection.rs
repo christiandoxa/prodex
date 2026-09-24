@@ -11,7 +11,43 @@ use crate::{
 };
 
 #[cfg(test)]
-pub(crate) use prodex_runtime_quota::ready_profile_sort_key;
+type ReadyProfileSortKey = (
+    usize,
+    i64,
+    i64,
+    i64,
+    std::cmp::Reverse<i64>,
+    std::cmp::Reverse<i64>,
+    std::cmp::Reverse<i64>,
+    i64,
+    i64,
+    usize,
+    usize,
+    usize,
+);
+
+#[cfg(test)]
+pub(crate) fn ready_profile_sort_key(candidate: &ReadyProfileCandidate) -> ReadyProfileSortKey {
+    let score = prodex_runtime_quota::ready_profile_score(candidate);
+    (
+        candidate.provider_priority,
+        score.total_pressure,
+        score.weekly_pressure,
+        score.five_hour_pressure,
+        std::cmp::Reverse(score.reserve_floor),
+        std::cmp::Reverse(score.weekly_remaining),
+        std::cmp::Reverse(score.five_hour_remaining),
+        score.weekly_reset_at,
+        score.five_hour_reset_at,
+        prodex_runtime_quota::runtime_quota_source_sort_key(
+            prodex_runtime_state::RuntimeRouteKind::Responses,
+            candidate.quota_source,
+        ),
+        if candidate.preferred { 0 } else { 1 },
+        candidate.order_index,
+    )
+}
+
 pub(crate) use prodex_runtime_quota::{
     ProfileSelectionView, RuntimeProfileSelectionCatalog, RuntimeRouteSelectionCatalog,
     RuntimeRouteSelectionCatalogView, RuntimeRouteSelectionEntry, RuntimeSelectionProfileEntry,
