@@ -97,14 +97,18 @@ struct OpenAiCompatWriter(Copyable):
     var output: Pointer[mut=True, UInt8, MutUntrackedOrigin]
     var capacity: Int64
     var written: Int64
+    var measuring: Bool
 
 
 def openai_compat_put_byte(
     writer: Pointer[mut=True, OpenAiCompatWriter, _], value: UInt8
 ) -> Bool:
-    if writer[].written < 0 or writer[].written >= writer[].capacity:
+    if writer[].written < 0 or writer[].written == 0x7FFFFFFFFFFFFFFF:
         return False
-    writer[].output[unsafe_offset=writer[].written] = value
+    if not writer[].measuring:
+        if writer[].written >= writer[].capacity:
+            return False
+        writer[].output[unsafe_offset=writer[].written] = value
     writer[].written += 1
     return True
 
@@ -416,13 +420,24 @@ def openai_compat_write_usage(
     var total = input.total_tokens
     if input.total_tokens_present == 0:
         total = input.input_tokens + input.output_tokens
+    return openai_compat_write_usage_values(
+        writer, input.input_tokens, input.output_tokens, total
+    )
+
+
+def openai_compat_write_usage_values(
+    writer: Pointer[mut=True, OpenAiCompatWriter, _],
+    input_tokens: UInt64,
+    output_tokens: UInt64,
+    total_tokens: UInt64,
+) -> Bool:
     return (
         openai_compat_put_literal(writer, StringSlice('{"input_tokens":'))
-        and openai_compat_put_u64(writer, input.input_tokens)
+        and openai_compat_put_u64(writer, input_tokens)
         and openai_compat_put_literal(writer, StringSlice(',"output_tokens":'))
-        and openai_compat_put_u64(writer, input.output_tokens)
+        and openai_compat_put_u64(writer, output_tokens)
         and openai_compat_put_literal(writer, StringSlice(',"total_tokens":'))
-        and openai_compat_put_u64(writer, total)
+        and openai_compat_put_u64(writer, total_tokens)
         and openai_compat_put_byte(writer, 125)
     )
 
@@ -437,21 +452,30 @@ def openai_compat_find_dot(view: ProdexRichStringView) -> Int64:
     return -1
 
 
+def openai_compat_split_tool_name_parts(
+    view: ProdexRichStringView,
+) -> Tuple[Bool, ProdexRichStringView, ProdexRichStringView]:
+    var dot = openai_compat_find_dot(view)
+    if dot < 0:
+        return (False, ProdexRichStringView(0, 0), view.copy())
+    var prefix = ProdexRichStringView(view.ptr, UInt(dot))
+    var bounds = rich_trim_bounds(prefix)
+    var rest_start = dot + 1
+    if bounds[0] == bounds[1] or rest_start >= Int64(view.len):
+        return (False, ProdexRichStringView(0, 0), view.copy())
+    return (
+        True,
+        ProdexRichStringView(prefix.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])),
+        ProdexRichStringView(view.ptr + UInt(rest_start), view.len - UInt(rest_start)),
+    )
+
+
 def openai_compat_write_split_tool_name(
     writer: Pointer[mut=True, OpenAiCompatWriter, _],
     input: ProdexOpenAiCompatKernelInput,
 ) -> Bool:
-    var dot = openai_compat_find_dot(input.name)
-    if dot < 0:
-        return (
-            openai_compat_put_literal(writer, StringSlice('{"name":'))
-            and openai_compat_put_json_string(writer, input.name)
-            and openai_compat_put_byte(writer, 125)
-        )
-    var prefix = ProdexRichStringView(input.name.ptr, UInt(dot))
-    var prefix_bounds = rich_trim_bounds(prefix)
-    var rest_start = dot + 1
-    if prefix_bounds[0] == prefix_bounds[1] or rest_start >= Int64(input.name.len):
+    var parts = openai_compat_split_tool_name_parts(input.name)
+    if not parts[0]:
         return (
             openai_compat_put_literal(writer, StringSlice('{"name":'))
             and openai_compat_put_json_string(writer, input.name)
@@ -459,13 +483,10 @@ def openai_compat_write_split_tool_name(
         )
     return (
         openai_compat_put_literal(writer, StringSlice('{"name":'))
-        and openai_compat_put_byte(writer, 34)
-        and openai_compat_put_json_escaped_range(writer, input.name, rest_start, Int64(input.name.len))
-        and openai_compat_put_byte(writer, 34)
+        and openai_compat_put_json_string(writer, parts[2])
         and openai_compat_put_literal(writer, StringSlice(',"namespace":'))
-        and openai_compat_put_byte(writer, 34)
-        and openai_compat_put_json_escaped_range(writer, prefix, prefix_bounds[0], prefix_bounds[1])
-        and openai_compat_put_literal(writer, StringSlice('"}'))
+        and openai_compat_put_json_string(writer, parts[1])
+        and openai_compat_put_byte(writer, 125)
     )
 
 
@@ -994,7 +1015,7 @@ def openai_compat_kernel_v1(
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    var writer = OpenAiCompatWriter(output, output_capacity, 0)
+    var writer = OpenAiCompatWriter(output, output_capacity, 0, False)
     var writer_ptr = Pointer(to=writer)
     var status = openai_compat_write_operation(writer_ptr, input[].copy())
     written[] = writer.written

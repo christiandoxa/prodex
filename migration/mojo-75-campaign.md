@@ -740,3 +740,25 @@ authority, no-fallback, production-share, size, and churn guards pass.
 The canonical broad inventory is 50,541 reachable Mojo LOC and 196,879 Rust
 production LOC, or 20.43% Mojo. The 75% project target remains unmet; 540,096
 additional Mojo LOC are estimated at current Rust volume.
+
+## OpenAI chat response translation wave
+
+`translate_chat_response_to_responses` now sends the parsed completion tree
+through one `openai_chat_response.mojo` operation. Mojo owns first-choice
+selection, content extraction and fallback order, tool-call naming and argument
+wrapping, usage aliases and defaults, and the Responses body. Rust retains
+Serde parsing, clock acquisition, the result contract, and the feature-off Rust
+implementation and test oracle. A Mojo boundary error does not trigger Rust
+recomputation.
+
+Validation passes with Mojo 1.1.0: the feature-on provider suite (248 passed,
+two manual benchmarks ignored), the feature-off provider suite (216 passed),
+5,000 generated Mojo-versus-Rust responses plus sparse/content/tool/usage edge
+cases, and the `prodex-mojo-core` suite including three response ABI tests.
+Workspace all-target Clippy, formatting, compatibility baseline and offline
+replay, docs, changed tests, Mojo ownership/authority/no-fallback, size, churn,
+and production-share guards pass.
+
+The canonical broad inventory is 50,935 reachable Mojo LOC and 196,761 Rust
+production LOC, or 20.563513338931593% Mojo. The 75% project target remains
+unmet; 539,348 additional Mojo LOC are estimated at current Rust volume.

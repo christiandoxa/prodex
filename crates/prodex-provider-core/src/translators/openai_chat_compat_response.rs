@@ -2,18 +2,33 @@
 mod stream;
 
 pub(crate) use self::stream::translate_chat_stream_event_to_responses;
-use super::openai_chat_compat_util::chat_response_body;
+#[cfg(any(not(feature = "mojo"), test))]
+use super::openai_chat_compat_util::{
+    chat_response_body_rust, chat_usage_to_responses_usage_rust,
+    message_content_to_output_content_rust, rtk_wrapped_tool_arguments_rust,
+    split_flat_namespace_tool_name_rust, stringify_arguments,
+};
 use super::{
     ProviderEndpoint, ProviderId, ProviderTransformInput, ProviderTransformResult,
-    ProviderWireFormat, Value, chat_usage_to_responses_usage, json,
-    message_content_to_output_content, rtk_wrapped_tool_arguments, split_flat_namespace_tool_name,
-    stringify_arguments,
+    ProviderWireFormat, Value,
 };
+#[cfg(feature = "mojo")]
+use crate::mojo_json::Document;
+#[cfg(any(not(feature = "mojo"), test))]
+use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(crate) fn translate_chat_response_to_responses(
     provider: ProviderId,
     input: ProviderTransformInput,
+) -> ProviderTransformResult {
+    translate_chat_response_to_responses_at(provider, input, unix_now_secs())
+}
+
+fn translate_chat_response_to_responses_at(
+    provider: ProviderId,
+    input: ProviderTransformInput,
+    now_secs: u64,
 ) -> ProviderTransformResult {
     if input.endpoint != ProviderEndpoint::Responses {
         return ProviderTransformResult::unsupported(
@@ -41,6 +56,28 @@ pub(crate) fn translate_chat_response_to_responses(
         }
     };
 
+    #[cfg(feature = "mojo")]
+    let body = {
+        let mut document = Document::default();
+        document.openai_chat_response_context(&value, now_secs);
+        let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+        prodex_mojo_core::json::transform_openai_chat_response(&document.nodes, raw)
+            .unwrap_or_else(|error| panic!("Mojo OpenAI chat response transform failed: {error:?}"))
+    };
+    #[cfg(not(feature = "mojo"))]
+    let body = translate_chat_response_body_rust(&value, now_secs);
+
+    ProviderTransformResult::lossless(
+        provider,
+        input.endpoint,
+        ProviderWireFormat::OpenAiChatCompletions,
+        ProviderWireFormat::OpenAiResponses,
+        body,
+    )
+}
+
+#[cfg(any(not(feature = "mojo"), test))]
+fn translate_chat_response_body_rust(value: &Value, now_secs: u64) -> Vec<u8> {
     let mut output = Vec::new();
     if let Some(message) = value
         .get("choices")
@@ -52,8 +89,7 @@ pub(crate) fn translate_chat_response_to_responses(
             .get("role")
             .and_then(Value::as_str)
             .unwrap_or("assistant");
-
-        let content_items = message_content_to_output_content(message.get("content"));
+        let content_items = message_content_to_output_content_rust(message.get("content"));
         if !content_items.is_empty() {
             output.push(json!({
                 "type": "message",
@@ -61,7 +97,6 @@ pub(crate) fn translate_chat_response_to_responses(
                 "content": content_items,
             }));
         }
-
         if let Some(tool_calls) = message.get("tool_calls").and_then(Value::as_array) {
             for tool_call in tool_calls {
                 let Some(function) = tool_call.get("function") else {
@@ -74,7 +109,7 @@ pub(crate) fn translate_chat_response_to_responses(
                     .get("arguments")
                     .map(stringify_arguments)
                     .unwrap_or_else(|| "{}".to_string());
-                let (namespace, name) = split_flat_namespace_tool_name(flat_name);
+                let (namespace, name) = split_flat_namespace_tool_name_rust(flat_name);
                 let mut item = json!({
                     "type": "function_call",
                     "call_id": tool_call
@@ -82,7 +117,7 @@ pub(crate) fn translate_chat_response_to_responses(
                         .and_then(Value::as_str)
                         .unwrap_or("call_prodex"),
                     "name": name,
-                    "arguments": rtk_wrapped_tool_arguments(flat_name, &arguments),
+                    "arguments": rtk_wrapped_tool_arguments_rust(flat_name, &arguments),
                 });
                 if let Some(namespace) = namespace {
                     item["namespace"] = Value::String(namespace);
@@ -99,20 +134,13 @@ pub(crate) fn translate_chat_response_to_responses(
     let created_at = value
         .get("created")
         .and_then(Value::as_u64)
-        .unwrap_or_else(unix_now_secs);
+        .unwrap_or(now_secs);
     let model = value
         .get("model")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
-    let usage = chat_usage_to_responses_usage(value.get("usage"));
-
-    ProviderTransformResult::lossless(
-        provider,
-        input.endpoint,
-        ProviderWireFormat::OpenAiChatCompletions,
-        ProviderWireFormat::OpenAiResponses,
-        chat_response_body(response_id, created_at, model, &output, usage.as_ref()),
-    )
+    let usage = chat_usage_to_responses_usage_rust(value.get("usage"));
+    chat_response_body_rust(response_id, created_at, model, &output, usage.as_ref())
 }
 
 fn unix_now_secs() -> u64 {
@@ -121,6 +149,10 @@ fn unix_now_secs() -> u64 {
         .map(|duration| duration.as_secs())
         .unwrap_or(0)
 }
+
+#[cfg(all(test, feature = "mojo"))]
+#[path = "openai_chat_compat_response/mojo_tests.rs"]
+mod mojo_tests;
 
 #[cfg(test)]
 mod tests {
