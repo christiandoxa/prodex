@@ -18,8 +18,8 @@ const KICS_IMAGE =
   "docker.io/checkmarx/kics:v2.1.20@sha256:3e5a268eb8adda2e5a483c9359ddfc4cd520ab856a7076dc0b1d8784a37e2602";
 const KICS_NON_ACTIONABLE_QUERY_IDS =
   "e84eaf4d-2f45-47b2-abe8-e581b06deb66,8c978947-0ff6-485c-b0c2-0bfca6026466";
-const PRODUCTION_CLIPPY_COMMAND =
-  "cargo clippy --locked --workspace --exclude prodex-bench-support --lib --bins --message-format=json -- -D warnings";
+const CLIPPY_QUALITY_COMMAND =
+  "cargo clippy --locked --workspace --all-targets --message-format=json -- -D warnings";
 const SONAR_EXCLUSIONS = [
   "**/test/**",
   "**/tests/**",
@@ -110,10 +110,9 @@ export function validateSonarConfiguration(workflowContents, properties) {
     'SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"',
     "SONAR_HOST_URL: http://127.0.0.1:9000",
     "- 9000:9000",
-    PRODUCTION_CLIPPY_COMMAND,
+    CLIPPY_QUALITY_COMMAND,
     "mkdir -p target/sonar",
     "> target/sonar/clippy-report.json",
-    "cargo clippy --locked --workspace --all-targets -- -D warnings",
     "Create ephemeral local Sonar token",
     'local_admin="admin"',
     "base64 --wrap=0",
@@ -148,7 +147,7 @@ export function validateSonarConfiguration(workflowContents, properties) {
   if (/^    (?:if|needs):/mu.test(job)) {
     violations.push(".github/workflows/ci.yml: rust-quality must run on every commit");
   }
-  if (supplyChainJob?.includes(PRODUCTION_CLIPPY_COMMAND)) {
+  if (supplyChainJob?.includes(CLIPPY_QUALITY_COMMAND)) {
     violations.push(".github/workflows/ci.yml: production Clippy must run in parallel rust-quality job");
   }
   for (const marker of [
@@ -723,8 +722,7 @@ function selfTest() {
     steps:
       - run: |
           mkdir -p target/sonar
-          ${PRODUCTION_CLIPPY_COMMAND} > target/sonar/clippy-report.json
-      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+          ${CLIPPY_QUALITY_COMMAND} > target/sonar/clippy-report.json
       - name: Create ephemeral local Sonar token
         run: |
           local_admin="admin"
@@ -835,7 +833,7 @@ sonar.qualitygate.wait=true
     1,
   );
   assert.equal(
-    validateSonarConfiguration(sonarWorkflow.replace(PRODUCTION_CLIPPY_COMMAND, "cargo clippy --locked --workspace --all-targets --all-features --message-format=json -- -D warnings"), sonarProperties).length,
+    validateSonarConfiguration(sonarWorkflow.replace(CLIPPY_QUALITY_COMMAND, "cargo clippy --locked --workspace --all-targets --all-features --message-format=json -- -D warnings"), sonarProperties).length,
     1,
   );
   assert.equal(
