@@ -129,6 +129,38 @@ pub fn runtime_proxy_structured_log_message<'a>(
 }
 
 pub fn runtime_proxy_parse_log_message(message: &str) -> RuntimeProxyParsedLogMessage {
+    #[cfg(feature = "mojo")]
+    {
+        runtime_proxy_parse_log_message_mojo(message)
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        runtime_proxy_parse_log_message_rust(message)
+    }
+}
+
+#[cfg(feature = "mojo")]
+fn runtime_proxy_parse_log_message_mojo(message: &str) -> RuntimeProxyParsedLogMessage {
+    let plan = prodex_mojo_core::rich::parse_log_message(message)
+        .expect("Mojo runtime log parser returned invalid spans");
+    let event = plan
+        .event
+        .map(|(start, end)| message[start..end].to_string());
+    let fields = plan
+        .fields
+        .into_iter()
+        .map(|span| RuntimeProxyLogField {
+            key: Cow::Owned(message[span.key_start..span.key_end].to_string()),
+            value: Cow::Owned(runtime_proxy_parse_log_field_value(
+                &message[span.value_start..span.value_end],
+            )),
+        })
+        .collect();
+    RuntimeProxyParsedLogMessage { event, fields }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn runtime_proxy_parse_log_message_rust(message: &str) -> RuntimeProxyParsedLogMessage {
     let mut parsed = RuntimeProxyParsedLogMessage {
         event: None,
         fields: Vec::new(),
@@ -161,6 +193,7 @@ pub fn runtime_proxy_parse_log_message(message: &str) -> RuntimeProxyParsedLogMe
     parsed
 }
 
+#[cfg(not(feature = "mojo"))]
 fn runtime_proxy_parse_log_field(
     message: &str,
     key_start: usize,
@@ -208,6 +241,20 @@ pub fn runtime_proxy_log_event(message: &str) -> Option<&str> {
 }
 
 fn runtime_proxy_log_event_span(message: &str) -> Option<(usize, usize)> {
+    #[cfg(feature = "mojo")]
+    {
+        prodex_mojo_core::rich::parse_log_message(message)
+            .expect("Mojo runtime log parser returned invalid event span")
+            .event
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        runtime_proxy_log_event_span_rust(message)
+    }
+}
+
+#[cfg(not(feature = "mojo"))]
+fn runtime_proxy_log_event_span_rust(message: &str) -> Option<(usize, usize)> {
     let bytes = message.as_bytes();
     let mut index = 0;
     while index < bytes.len() {
@@ -229,6 +276,7 @@ fn runtime_proxy_log_event_span(message: &str) -> Option<(usize, usize)> {
     None
 }
 
+#[cfg(not(feature = "mojo"))]
 fn runtime_proxy_skip_log_key_or_token(message: &str, mut index: usize) -> usize {
     let bytes = message.as_bytes();
     while index < bytes.len() && !bytes[index].is_ascii_whitespace() && bytes[index] != b'=' {
@@ -237,6 +285,7 @@ fn runtime_proxy_skip_log_key_or_token(message: &str, mut index: usize) -> usize
     index
 }
 
+#[cfg(not(feature = "mojo"))]
 fn runtime_proxy_skip_log_token(message: &str, mut index: usize) -> usize {
     let bytes = message.as_bytes();
     while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
@@ -398,6 +447,7 @@ fn runtime_proxy_log_field_value_needs_quotes(value: &str) -> bool {
         || value.contains('\\')
 }
 
+#[cfg(not(feature = "mojo"))]
 fn runtime_proxy_skip_log_whitespace(message: &str, mut index: usize) -> usize {
     let bytes = message.as_bytes();
     while index < bytes.len() && bytes[index].is_ascii_whitespace() {
@@ -406,6 +456,7 @@ fn runtime_proxy_skip_log_whitespace(message: &str, mut index: usize) -> usize {
     index
 }
 
+#[cfg(not(feature = "mojo"))]
 fn runtime_proxy_skip_log_field_value(message: &str, mut index: usize) -> usize {
     let bytes = message.as_bytes();
     if index >= bytes.len() {
@@ -447,5 +498,48 @@ fn runtime_proxy_parse_log_field_value(raw_value: &str) -> String {
             .unwrap_or_else(|_| raw_value.trim_matches('"').to_string())
     } else {
         raw_value.trim_matches('"').to_string()
+    }
+}
+
+#[cfg(all(test, feature = "mojo"))]
+mod mojo_parser_tests {
+    use super::*;
+
+    #[test]
+    fn mojo_log_parser_preserves_event_and_quoted_fields() {
+        let parsed = runtime_proxy_parse_log_message(
+            "  stream_read_error request=7 profile=\"alpha beta\" empty=\"\" note=\"bad \\\"quote\\\" \\\\ slash\" ",
+        );
+        assert_eq!(parsed.event(), Some("stream_read_error"));
+        assert_eq!(
+            parsed
+                .fields()
+                .iter()
+                .map(|field| (field.key(), field.value()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("request", "7"),
+                ("profile", "alpha beta"),
+                ("empty", ""),
+                ("note", "bad \"quote\" \\ slash"),
+            ]
+        );
+    }
+
+    #[test]
+    fn mojo_log_parser_handles_unicode_and_malformed_values() {
+        let parsed =
+            runtime_proxy_parse_log_message("évent clé=valeur another=\"é space\" key= tail");
+        assert_eq!(parsed.event(), Some("évent"));
+        assert_eq!(
+            parsed
+                .fields()
+                .iter()
+                .map(|field| (field.key(), field.value()))
+                .collect::<Vec<_>>(),
+            vec![("clé", "valeur"), ("another", "é space")]
+        );
+        assert_eq!(runtime_proxy_log_event("  event key=1"), Some("event"));
+        assert_eq!(runtime_proxy_log_event("key=value"), None);
     }
 }
