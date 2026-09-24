@@ -1,0 +1,100 @@
+
+use super::*;
+
+#[test]
+fn operational_event_summary_matches_rust_oracle() {
+    let fields = [
+        ("profile", "profile-a"),
+        ("route", "responses"),
+        ("provider", "openai"),
+        ("model", "gpt-5.6-sol"),
+        ("from_model", "from"),
+        ("to_model", "to"),
+        ("effort", "high"),
+        ("transport", "http"),
+        ("method", "POST"),
+        ("command", "echo"),
+        ("cwd", "/repo"),
+        ("arg_count", "3"),
+        ("env_count", "2"),
+        ("stdin_bytes", "9"),
+        ("timeout_ms", "1000"),
+        ("path", "/backend-api/codex/responses?secret=redacted"),
+        (
+            "url",
+            "https://example.test/backend-api/codex/responses?secret=redacted",
+        ),
+        ("tool_surface", "mcp"),
+        ("continuation", "none"),
+        ("status", "200"),
+        ("class", "ok"),
+        ("event_type", "delta"),
+        ("state", "ready"),
+        ("code", "0"),
+        ("reason", "synthetic"),
+        ("elapsed_ms", "17"),
+        ("duration_ms", "18"),
+        ("exit_code", "0"),
+        ("exit_status", "0"),
+        ("outcome", "success"),
+        ("active", "2"),
+        ("limit", "8"),
+        ("count", "4"),
+        ("dropped", "0"),
+        ("quota_band", "healthy"),
+        ("five_hour_remaining", "80"),
+        ("weekly_remaining", "70"),
+        ("until", "later"),
+        ("attempt", "1"),
+        ("retry_index", "0"),
+        ("seconds", "3"),
+        ("score", "4"),
+        ("delta", "1"),
+        ("chunks", "5"),
+        ("bytes", "1024"),
+        ("decision", "rewrite"),
+        ("tier", "safe"),
+        ("rewrite_kind", "semantic"),
+        ("tokens_before", "100"),
+        ("tokens_after", "80"),
+        ("body_bytes_saved", "20"),
+        ("rewrite_ratio_percent", "20"),
+        ("tool_outputs_condensed", "1"),
+        ("rehydrated_refs", "2"),
+        ("pressure_band", "low"),
+        ("self_check", "pass"),
+        ("exit", "committed"),
+        ("attempts", "2"),
+        ("lane", "responses"),
+        ("hard_limit", "16"),
+        ("stage", "connect"),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), value.to_string()))
+    .collect::<BTreeMap<_, _>>();
+
+    for (event, source) in [
+        ("request_captured", "request"),
+        ("route_decision", "route"),
+        ("quota_blocked", "quota"),
+        ("profile_retry_backoff", "retry"),
+        ("profile_transport_backoff", "backoff"),
+        ("profile_health", "health"),
+        ("upstream_response", "upstream"),
+        ("first_upstream_chunk", "stream"),
+        ("first_local_chunk", "stream"),
+        ("buffered_response_complete", "response"),
+        ("smart_context_autopilot", "smart"),
+        ("compact_candidate_exhausted", "compact"),
+        ("runtime_proxy_queue_overloaded", "load"),
+        ("terminal_event", "terminal"),
+        ("upstream_read_error", "error"),
+        ("unknown_event", "unknown"),
+    ] {
+        assert_eq!(
+            operational_event_summary(event, source, &fields),
+            summary_oracle::operational_event_summary(event, source, &fields),
+            "event={event} source={source}"
+        );
+    }
+}
