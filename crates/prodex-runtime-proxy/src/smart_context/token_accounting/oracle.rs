@@ -1,39 +1,10 @@
 use super::super::*;
-use super::{SmartContextTokenAccountingDecision, observed};
+use super::{
+    SmartContextTokenAccountingDecision, observed,
+    smart_context_observed_token_accounting_from_decision,
+};
 #[cfg(any(not(feature = "mojo"), test))]
 use super::{calibration, estimation};
-
-pub(super) fn smart_context_observed_token_accounting_from_decision(
-    input: SmartContextObservedTokenAccountingInput,
-    usage_totals: observed::SmartContextObservedUsageTotals,
-    estimated_current_request_tokens: u64,
-    decision: SmartContextTokenAccountingDecision,
-    pressure: SmartContextPressureSnapshot,
-) -> SmartContextObservedTokenAccounting {
-    SmartContextObservedTokenAccounting {
-        model_context_window_tokens: input.model_context_window_tokens,
-        observed_turns: input.observed_usage.len(),
-        observed_input_tokens: usage_totals.input_tokens,
-        observed_cached_input_tokens: usage_totals.cached_input_tokens,
-        observed_uncached_input_tokens: decision.observed_uncached_input_tokens,
-        observed_output_tokens: usage_totals.output_tokens,
-        observed_reasoning_tokens: usage_totals.reasoning_tokens,
-        observed_total_tokens: decision.observed_total_tokens,
-        observed_context_tokens: decision.observed_context_tokens,
-        last_input_tokens: usage_totals.last_input_tokens,
-        last_accounted_input_tokens: usage_totals.last_accounted_input_tokens,
-        last_observed_context_tokens: usage_totals.last_observed_context_tokens,
-        current_request_body_bytes: input.current_request_body_bytes,
-        estimated_current_request_tokens,
-        current_request_accounted_tokens: decision.current_request_accounted_tokens,
-        effective_input_tokens: decision.effective_input_tokens,
-        effective_input_source: decision.effective_input_source,
-        reserved_output_tokens: input.reserved_output_tokens,
-        available_context_tokens: decision.available_context_tokens,
-        accounting_risks: decision.accounting_risks,
-        pressure,
-    }
-}
 
 #[cfg(any(not(feature = "mojo"), test))]
 pub(in crate::smart_context) fn smart_context_observed_token_accounting_rust(
