@@ -78,14 +78,16 @@ The `Real Mojo / parity` job in `.github/workflows/ci.yml` compiles the checked-
 `.mojo` sources, links their archives into Rust, runs the Mojo-backed UTF-8 context pipeline,
 quota, Smart Context pressure, runtime candidate ordering, provider-routing, and
 capability-negotiation tests, and runs the built `prodex --version` binary. The lane uses
-`PRODEX_MOJO_REQUIRED=1`; `prodex_mojo_active` is asserted by tests. Rust-only CI omits
-the Mojo feature and does not satisfy this evidence contract.
+`PRODEX_MOJO_REQUIRED=1`; `prodex_mojo_active` is asserted by tests. Native CI test lanes link
+strictly built, target-matched runtime archives; they do not replace this source-compilation
+evidence.
 
 ## Shared core and release evidence
 
-The current production feature set is `mojo-core`, composed of `mojo-quota`, `mojo-runtime`,
-and `mojo-routing`. It compiles the quota, runtime, Smart Context, routing, and bounded log
-classification sources into one
+Runtime-quota scoring and profile order use Mojo in every build through the mandatory
+`mojo-runtime` dependency. The broader production feature set is `mojo-core`, composed of
+`mojo-quota`, `mojo-runtime`, and `mojo-routing`. It compiles the quota, runtime, Smart Context,
+routing, and bounded log classification sources into one
 static archive. Real Mojo CI executes quota, runtime quota, Smart Context byte estimation and
 pressure snapshot, runtime candidate ordering, profile scheduling order, context signal
 arithmetic, provider score/routing-plan batching, and provider capability matching through their

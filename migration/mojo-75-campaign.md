@@ -601,3 +601,27 @@ edges and `usize`/`u64` maximum boundaries. `cargo fmt --all -- --check` passed.
 The canonical inventory moved from 50,203 Mojo LOC and 196,676 Rust LOC
 (20.335062925562724%) to 50,205 Mojo LOC and 196,642 Rust LOC (20.33850927902709%),
 for a net reduction of 34 Rust production LOC.
+
+## Runtime quota scoring and profile ordering Mojo wave
+
+Mojo now owns runtime quota scoring and pressure bands, ready-profile scheduling,
+provider-priority ordering, and current-relative profile rotation. Production paths
+call the Mojo kernels unconditionally. Rust retains quota-window observation,
+profile-state reads, typed ABI mapping, and validated result reconstruction; the
+pre-migration scoring and ordering implementations remain only as test oracles.
+
+Provider-priority ties now use stable insertion ordering in Mojo, matching Rust's
+stable sort behavior. The existing 256-profile bound keeps this sort bounded. The
+runtime-quota crate links `mojo-runtime` by default. CI builds strict Mojo 1.1.0
+archives for native targets, the scheduled full suite links its Linux archive, and
+fresh benchmark calibration installs the pinned compiler and rejects fallback.
+
+With `PRODEX_MOJO_REQUIRED=1` and Mojo 1.1.0, the default and `--features mojo`
+runtime-quota suites each pass 30 tests; the profile-schedule ABI suite passes 3
+tests, and the app profile-ranking test passes. Workspace Clippy passes with all
+targets and features and warnings denied. `npm run test:changed`, docs lint,
+workflow YAML parsing, full-Rust workflow tests, ownership, authority, no-fallback,
+size, churn, and production-share guards pass.
+
+The canonical broad inventory is 50,207 reachable Mojo LOC and 196,702 Rust
+production LOC, or 20.334212200% Mojo. The 75% project target remains unmet.

@@ -137,7 +137,8 @@ prodex-app command handler
 Key crates:
 
 - `prodex-quota`: quota API models, auth helpers, and quota rendering helpers.
-- `prodex-runtime-quota`: runtime quota snapshots, summaries, adapter helpers, and sort keys.
+- `prodex-runtime-quota`: runtime quota snapshots and summaries; Mojo owns scoring, scheduling,
+  provider order, and profile rotation while Rust retains state and time normalization.
 - `prodex-runtime-doctor`: runtime diagnostics parsing, summaries, suggestions, and rendering.
 - `prodex-runtime-log`: runtime log path and marker helpers.
 - `prodex-runtime-broker`, `prodex-runtime-broker-log`, `prodex-runtime-metrics`: broker registry DTOs, log parsing, and Prometheus rendering.

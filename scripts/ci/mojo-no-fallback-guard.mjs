@@ -31,6 +31,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-quota/src/selection/scoring.rs",
+  "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
   "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
   "crates/prodex-observability/src/lib.rs",
   "crates/prodex-observability/src/mojo.rs",
@@ -50,6 +51,12 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
 ];
 
+const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-runtime-quota/src/selection/scoring.rs",
+  "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
+]);
+const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"mojo"\s*\)/u;
+
 const FORBIDDEN_MARKERS = [
   "prodex_mojo_fallback",
   "use_rust_fallback",
@@ -58,11 +65,17 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
-  return files.flatMap(([filePath, contents]) =>
+  const markerViolations = files.flatMap(([filePath, contents]) =>
     FORBIDDEN_MARKERS.filter((marker) => contents.includes(marker)).map(
       (marker) => `${filePath}: promoted Mojo code contains ${marker}`,
     ),
   );
+  const featureOffViolations = files
+    .filter(([filePath, contents]) =>
+      UNCONDITIONAL_MOJO_FILES.has(filePath) && FEATURE_OFF_RUST_PATH.test(contents),
+    )
+    .map(([filePath]) => `${filePath}: Mojo-owned quota scoring cannot have a feature-off Rust path`);
+  return [...markerViolations, ...featureOffViolations];
 }
 
 async function promotedFiles() {
@@ -77,6 +90,13 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  assert.equal(
+    findViolations([[
+      "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
+      '#[cfg(not(feature = "mojo"))] fn rust_order() {}',
+    ]]).length,
+    1,
+  );
 }
 
 async function main() {
