@@ -1,5 +1,13 @@
 from std.memory import Pointer
-from rich_text import rich_view_valid, rich_views_equal, rich_view_ptr
+from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_unicode_space,
+    rich_utf8_valid,
+    rich_view_valid,
+    rich_views_equal,
+    rich_view_ptr,
+)
 from rich_types import ProdexRichStringView
 
 comptime UINT64_MAX: UInt64 = 18446744073709551615
@@ -736,11 +744,113 @@ def prodex_smart_context_token_accounting_v1(
     return 0
 
 
-@export("prodex_smart_context_estimate_tokens_from_body_bytes")
-def prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes: UInt64) abi("C") -> UInt64:
+def smart_context_estimate_tokens_from_body_bytes(body_bytes: UInt64) -> UInt64:
     if body_bytes > 18446744073709551612:
         return 4611686018427387903
     return (body_bytes + 3) / 4
+
+
+@export("prodex_smart_context_estimate_tokens_from_body_bytes")
+def prodex_smart_context_estimate_tokens_from_body_bytes(body_bytes: UInt64) abi("C") -> UInt64:
+    return smart_context_estimate_tokens_from_body_bytes(body_bytes)
+
+
+def smart_context_text_run_tokens(length: UInt64, kind: Int64) -> UInt64:
+    if length == 0:
+        return 0
+    if kind == 1:
+        return (length + 3) / 4
+    if kind == 2:
+        return (length + 2) / 3
+    return length
+
+
+def smart_context_unicode_space(codepoint: Int64) -> Bool:
+    if codepoint >= 0x1C and codepoint <= 0x1F:
+        return False
+    return rich_unicode_space(codepoint)
+
+
+def smart_context_estimate_tokens_from_text_bytes(
+    body: Pointer[mut=False, UInt8, _], body_length: Int64, byte_estimate: UInt64
+) -> UInt64:
+    var tokens: UInt64 = 0
+    var run_length: UInt64 = 0
+    var run_kind: Int64 = 0
+    var structural: UInt64 = 0
+    var separators: UInt64 = 0
+    var index: Int64 = 0
+    while index < body_length:
+        var width = rich_codepoint_width(body[unsafe_offset=index])
+        var codepoint = rich_codepoint(body, index, width)
+        var kind: Int64 = 0
+        if codepoint >= 65 and codepoint <= 90 or codepoint >= 97 and codepoint <= 122 or codepoint == 95 or codepoint == 45:
+            kind = 1
+        elif codepoint >= 48 and codepoint <= 57:
+            kind = 2
+
+        if kind != 0:
+            if kind != run_kind:
+                tokens = smart_context_saturating_add(
+                    tokens, smart_context_text_run_tokens(run_length, run_kind)
+                )
+                run_length = 0
+                run_kind = kind
+            run_length += 1
+        else:
+            tokens = smart_context_saturating_add(
+                tokens, smart_context_text_run_tokens(run_length, run_kind)
+            )
+            run_length = 0
+            run_kind = 0
+            if smart_context_unicode_space(codepoint):
+                if codepoint == 10:
+                    separators = smart_context_saturating_add(separators, 1)
+            elif codepoint == 123 or codepoint == 125 or codepoint == 91 or codepoint == 93 or codepoint == 58 or codepoint == 44 or codepoint == 34 or codepoint == 39 or codepoint == 96 or codepoint == 40 or codepoint == 41 or codepoint == 60 or codepoint == 62:
+                structural = smart_context_saturating_add(structural, 1)
+            else:
+                tokens = smart_context_saturating_add(tokens, 1)
+        index += width
+
+    tokens = smart_context_saturating_add(
+        tokens, smart_context_text_run_tokens(run_length, run_kind)
+    )
+    tokens = smart_context_saturating_add(tokens, (structural + 3) / 4)
+    tokens = smart_context_saturating_add(tokens, (separators + 7) / 8)
+    var byte_floor = byte_estimate / 2
+    if tokens < byte_floor:
+        return byte_floor
+    return tokens
+
+
+@export("prodex_smart_context_estimate_tokens_from_body_v1")
+def prodex_smart_context_estimate_tokens_from_body_v1(
+    body_address: UInt64, body_length: Int64, output_address: UInt64
+) abi("C") -> Int64:
+    if body_length < 0 or output_address == 0:
+        return 1
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    if body_length > 0 and body_address == 0:
+        return 1
+    var byte_estimate = smart_context_estimate_tokens_from_body_bytes(
+        UInt64(body_length)
+    )
+    if body_length == 0:
+        output[unsafe_offset=0] = byte_estimate
+        return 0
+    var body = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(body_address)
+    )
+    if not rich_utf8_valid(body, body_length):
+        output[unsafe_offset=0] = byte_estimate
+        return 0
+    output[unsafe_offset=0] = smart_context_estimate_tokens_from_text_bytes(
+        body, body_length, byte_estimate
+    )
+    return 0
 
 
 @export("prodex_smart_context_exactness_plan_v1")
