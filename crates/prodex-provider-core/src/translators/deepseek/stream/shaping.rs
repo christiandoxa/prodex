@@ -2,12 +2,14 @@ use super::{
     DeepSeekProviderCoreStreamChoiceDelta, DeepSeekProviderCoreStreamChoiceMetadata,
     DeepSeekProviderCoreStreamChunkMetadata, DeepSeekProviderCoreStreamToolCallDelta,
 };
+use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
 #[cfg(feature = "mojo")]
 use serde::de::DeserializeOwned;
 use serde_json::Value;
 
-#[cfg(feature = "mojo")]
-use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
+#[cfg(test)]
+#[path = "shaping_tests.rs"]
+mod tests;
 
 #[cfg(feature = "mojo")]
 fn deepseek_provider_core_stream_projection<T: DeserializeOwned>(
@@ -25,24 +27,12 @@ pub fn deepseek_provider_core_response_completed_event(
     created_at: u64,
     response: &Value,
 ) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let response = serde_json::to_string(response).expect("DeepSeek response serializes");
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ResponseCompletedEvent);
-        input.sequence_number = sequence_number;
-        input.created_at = created_at;
-        input.response = Some(&response);
-        super::super::deepseek_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        serde_json::json!({
-            "type": "response.completed",
-            "sequence_number": sequence_number,
-            "created_at": created_at,
-            "response": response,
-        })
-    }
+    let response = serde_json::to_string(response).expect("DeepSeek response serializes");
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ResponseCompletedEvent);
+    input.sequence_number = sequence_number;
+    input.created_at = created_at;
+    input.response = Some(&response);
+    super::super::deepseek_mojo_value(input)
 }
 
 pub fn deepseek_provider_core_response_created_event(
@@ -50,23 +40,11 @@ pub fn deepseek_provider_core_response_created_event(
     created_at: u64,
     response_id: &str,
 ) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ResponseCreatedEvent);
-        input.sequence_number = sequence_number;
-        input.created_at = created_at;
-        input.response_id = Some(response_id);
-        super::super::deepseek_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        serde_json::json!({
-            "type": "response.created",
-            "sequence_number": sequence_number,
-            "created_at": created_at,
-            "response": {"id": response_id},
-        })
-    }
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ResponseCreatedEvent);
+    input.sequence_number = sequence_number;
+    input.created_at = created_at;
+    input.response_id = Some(response_id);
+    super::super::deepseek_mojo_value(input)
 }
 
 pub fn deepseek_provider_core_chat_stream_error(value: &Value) -> Option<(String, String)> {
@@ -428,74 +406,31 @@ pub fn deepseek_provider_core_stream_response_metadata(
 }
 
 pub fn deepseek_provider_core_stream_output_text_item(text: &str) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputTextItem);
-        input.delta = Some(text);
-        super::super::deepseek_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        serde_json::json!({
-            "type": "message",
-            "role": "assistant",
-            "content": [{
-                "type": "output_text",
-                "text": text,
-            }],
-        })
-    }
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputTextItem);
+    input.delta = Some(text);
+    super::super::deepseek_mojo_value(input)
 }
 
 pub fn deepseek_provider_core_stream_tool_call_added_item(
     call_id: &str,
     flat_name: &str,
 ) -> Option<Value> {
-    #[cfg(feature = "mojo")]
-    {
-        if flat_name == "tool_search" {
-            return None;
-        }
-        if flat_name == "apply_patch" {
-            let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::CustomToolCallItem);
-            input.call_id = Some(call_id);
-            input.name = Some(flat_name);
-            input.input = Some("");
-            return Some(super::super::deepseek_mojo_value(input));
-        }
-        let (namespace, name) =
-            crate::bridge::provider_core_split_flat_namespace_tool_name(flat_name);
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::AddedFunctionCallItem);
+    if flat_name == "tool_search" {
+        return None;
+    }
+    if flat_name == "apply_patch" {
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::CustomToolCallItem);
         input.call_id = Some(call_id);
-        input.name = Some(&name);
-        input.namespace = namespace.as_deref();
-        Some(super::super::deepseek_mojo_value(input))
+        input.name = Some(flat_name);
+        input.input = Some("");
+        return Some(super::super::deepseek_mojo_value(input));
     }
-    #[cfg(not(feature = "mojo"))]
-    {
-        if flat_name == "tool_search" {
-            return None;
-        }
-        if flat_name == "apply_patch" {
-            return Some(serde_json::json!({
-                "type": "custom_tool_call",
-                "call_id": call_id,
-                "name": flat_name,
-                "input": "",
-            }));
-        }
-        let (namespace, name) =
-            crate::bridge::provider_core_split_flat_namespace_tool_name(flat_name);
-        let mut item = serde_json::json!({
-            "type": "function_call",
-            "call_id": call_id,
-            "name": name,
-        });
-        if let Some(namespace) = namespace {
-            item["namespace"] = Value::String(namespace);
-        }
-        Some(item)
-    }
+    let (namespace, name) = crate::bridge::provider_core_split_flat_namespace_tool_name(flat_name);
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::AddedFunctionCallItem);
+    input.call_id = Some(call_id);
+    input.name = Some(&name);
+    input.namespace = namespace.as_deref();
+    Some(super::super::deepseek_mojo_value(input))
 }
 
 pub fn deepseek_provider_core_stream_tool_call_item(
@@ -504,142 +439,58 @@ pub fn deepseek_provider_core_stream_tool_call_item(
     arguments: &str,
     thought_signature: Option<&str>,
 ) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        if flat_name == "tool_search" {
-            let arguments =
-                serde_json::from_str::<Value>(arguments).unwrap_or_else(|_| serde_json::json!({}));
-            let arguments =
-                serde_json::to_string(&arguments).expect("DeepSeek tool arguments serialize");
-            let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ToolSearchItem);
-            input.call_id = Some(call_id);
-            input.arguments = Some(&arguments);
-            return super::super::deepseek_mojo_value(input);
-        }
-        if flat_name == "apply_patch" {
-            let input_value =
-                crate::gemini_bridge::gemini_provider_core_custom_tool_input_from_arguments(
-                    arguments,
-                );
-            let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::CustomToolCallItem);
-            input.call_id = Some(call_id);
-            input.name = Some(flat_name);
-            input.input = Some(&input_value);
-            return super::super::deepseek_mojo_value(input);
-        }
-        let (namespace, name) =
-            crate::bridge::provider_core_split_flat_namespace_tool_name(flat_name);
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::FunctionCallItem);
+    if flat_name == "tool_search" {
+        let arguments =
+            serde_json::from_str::<Value>(arguments).unwrap_or_else(|_| serde_json::json!({}));
+        let arguments =
+            serde_json::to_string(&arguments).expect("DeepSeek tool arguments serialize");
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ToolSearchItem);
         input.call_id = Some(call_id);
-        input.name = Some(&name);
-        input.arguments = Some(arguments);
-        input.namespace = namespace.as_deref();
-        input.signature = thought_signature;
-        super::super::deepseek_mojo_value(input)
+        input.arguments = Some(&arguments);
+        return super::super::deepseek_mojo_value(input);
     }
-    #[cfg(not(feature = "mojo"))]
-    {
-        if flat_name == "tool_search" {
-            let arguments =
-                serde_json::from_str::<Value>(arguments).unwrap_or_else(|_| serde_json::json!({}));
-            return serde_json::json!({
-                "type": "tool_search_call",
-                "call_id": call_id,
-                "execution": "client",
-                "arguments": arguments,
-            });
-        }
-        if flat_name == "apply_patch" {
-            return serde_json::json!({
-                "type": "custom_tool_call",
-                "call_id": call_id,
-                "name": flat_name,
-                "input": crate::gemini_bridge::gemini_provider_core_custom_tool_input_from_arguments(arguments),
-            });
-        }
-        let (namespace, name) =
-            crate::bridge::provider_core_split_flat_namespace_tool_name(flat_name);
-        let mut item = serde_json::json!({
-            "type": "function_call",
-            "call_id": call_id,
-            "name": name,
-            "arguments": arguments,
-        });
-        if let Some(namespace) = namespace {
-            item["namespace"] = Value::String(namespace);
-        }
-        if let Some(signature) = thought_signature {
-            item["gemini_thought_signature"] = Value::String(signature.to_string());
-        }
-        item
+    if flat_name == "apply_patch" {
+        let input_value =
+            crate::gemini_bridge::gemini_provider_core_custom_tool_input_from_arguments(arguments);
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::CustomToolCallItem);
+        input.call_id = Some(call_id);
+        input.name = Some(flat_name);
+        input.input = Some(&input_value);
+        return super::super::deepseek_mojo_value(input);
     }
+    let (namespace, name) = crate::bridge::provider_core_split_flat_namespace_tool_name(flat_name);
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::FunctionCallItem);
+    input.call_id = Some(call_id);
+    input.name = Some(&name);
+    input.arguments = Some(arguments);
+    input.namespace = namespace.as_deref();
+    input.signature = thought_signature;
+    super::super::deepseek_mojo_value(input)
 }
 
 pub fn deepseek_provider_core_stream_function_call_arguments_delta_source(
     call_id: &str,
     arguments: &str,
 ) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let mut input =
-            DeepSeekKernelInput::new(DeepSeekKernelOperation::FunctionCallArgumentsDeltaSource);
-        input.call_id = Some(call_id);
-        input.arguments = Some(arguments);
-        super::super::deepseek_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        serde_json::json!({
-            "choices": [{
-                "delta": {
-                    "tool_calls": [{
-                        "id": call_id,
-                        "function": {
-                            "arguments": arguments,
-                        }
-                    }]
-                }
-            }]
-        })
-    }
+    let mut input =
+        DeepSeekKernelInput::new(DeepSeekKernelOperation::FunctionCallArgumentsDeltaSource);
+    input.call_id = Some(call_id);
+    input.arguments = Some(arguments);
+    super::super::deepseek_mojo_value(input)
 }
 
 pub fn deepseek_provider_core_stream_text_delta_source(text: &str) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::TextDeltaSource);
-        input.delta = Some(text);
-        super::super::deepseek_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        serde_json::json!({
-            "choices": [{
-                "delta": {
-                    "content": text,
-                }
-            }]
-        })
-    }
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::TextDeltaSource);
+    input.delta = Some(text);
+    super::super::deepseek_mojo_value(input)
 }
 
 pub fn deepseek_provider_core_output_item_added_event(sequence_number: u64, item: &Value) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let item = serde_json::to_string(item).expect("DeepSeek output item serializes");
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputItemAddedEvent);
-        input.sequence_number = sequence_number;
-        input.item = Some(&item);
-        super::super::deepseek_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        serde_json::json!({
-            "type": "response.output_item.added",
-            "sequence_number": sequence_number,
-            "item": item,
-        })
-    }
+    let item = serde_json::to_string(item).expect("DeepSeek output item serializes");
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputItemAddedEvent);
+    input.sequence_number = sequence_number;
+    input.item = Some(&item);
+    super::super::deepseek_mojo_value(input)
 }
 
 pub fn deepseek_provider_core_function_call_arguments_delta_event(
@@ -647,24 +498,12 @@ pub fn deepseek_provider_core_function_call_arguments_delta_event(
     call_id: &str,
     arguments: &str,
 ) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let mut input =
-            DeepSeekKernelInput::new(DeepSeekKernelOperation::FunctionCallArgumentsDeltaEvent);
-        input.sequence_number = sequence_number;
-        input.call_id = Some(call_id);
-        input.delta = Some(arguments);
-        super::super::deepseek_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        serde_json::json!({
-            "type": "response.function_call_arguments.delta",
-            "sequence_number": sequence_number,
-            "call_id": call_id,
-            "delta": arguments,
-        })
-    }
+    let mut input =
+        DeepSeekKernelInput::new(DeepSeekKernelOperation::FunctionCallArgumentsDeltaEvent);
+    input.sequence_number = sequence_number;
+    input.call_id = Some(call_id);
+    input.delta = Some(arguments);
+    super::super::deepseek_mojo_value(input)
 }
 
 pub fn deepseek_provider_core_output_text_delta_event(
@@ -673,42 +512,18 @@ pub fn deepseek_provider_core_output_text_delta_event(
     response_id: &str,
     delta: &str,
 ) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputTextDeltaEvent);
-        input.sequence_number = sequence_number;
-        input.created_at = created_at;
-        input.response_id = Some(response_id);
-        input.delta = Some(delta);
-        super::super::deepseek_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        serde_json::json!({
-            "type": "response.output_text.delta",
-            "sequence_number": sequence_number,
-            "created_at": created_at,
-            "response_id": response_id,
-            "delta": delta,
-        })
-    }
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputTextDeltaEvent);
+    input.sequence_number = sequence_number;
+    input.created_at = created_at;
+    input.response_id = Some(response_id);
+    input.delta = Some(delta);
+    super::super::deepseek_mojo_value(input)
 }
 
 pub fn deepseek_provider_core_output_item_done_event(sequence_number: u64, item: &Value) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let item = serde_json::to_string(item).expect("DeepSeek output item serializes");
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputItemDoneEvent);
-        input.sequence_number = sequence_number;
-        input.item = Some(&item);
-        super::super::deepseek_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        serde_json::json!({
-            "type": "response.output_item.done",
-            "sequence_number": sequence_number,
-            "item": item,
-        })
-    }
+    let item = serde_json::to_string(item).expect("DeepSeek output item serializes");
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::OutputItemDoneEvent);
+    input.sequence_number = sequence_number;
+    input.item = Some(&item);
+    super::super::deepseek_mojo_value(input)
 }
