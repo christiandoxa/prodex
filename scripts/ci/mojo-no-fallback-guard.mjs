@@ -88,6 +88,8 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/stream.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response/status.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response/metadata.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
@@ -124,6 +126,8 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/stream.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response/status.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response/metadata.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
@@ -197,6 +201,8 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/stream.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response/status.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response/metadata.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
@@ -220,6 +226,7 @@ const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_acco
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
 const GEMINI_SCHEMA_FILE = "crates/prodex-provider-core/src/translators/gemini/request/schema.rs";
 const GEMINI_TOOLS_FILE = "crates/prodex-provider-core/src/translators/gemini/request/tools.rs";
+const GEMINI_STATUS_FILE = "crates/prodex-provider-core/src/translators/gemini/response/status.rs";
 const RESPONSE_FORWARDING_FILE = "crates/prodex-runtime-proxy/src/response_forwarding.rs";
 const QUOTA_POOL_FILE = "crates/prodex-quota/src/render/pool.rs";
 const QUOTA_MODEL_CAPACITY_FILE = "crates/prodex-quota/src/render/model_capacity.rs";
@@ -344,6 +351,7 @@ export function findViolations(files) {
       [SUPER_OVERRIDE_FILE, /\bfn\s+(?:scan_override_rust|scan_identity_override|scan_boolean_override|scan_runtime_override|scan_feature_value_override|scan_feature_boolean_override)\s*\(/u],
       [GEMINI_SCHEMA_FILE, /\bfn\s+(?:schema_type|supported_schema_type|sanitized_enum|sanitized_properties|sanitized_required)\s*\(/u],
       [GEMINI_TOOLS_FILE, /\bfn\s+gemini_tool_config_from_request_oracle\s*\(/u],
+      [GEMINI_STATUS_FILE, /\bfn\s+gemini_(?:finish_reason_(?:failure|incomplete)|prompt_feedback_failure)_oracle\s*\(/u],
       [RESPONSE_FORWARDING_FILE, /\bfn\s+(?:should_skip_response_header|response_content_type_is_sse|token_usage_event_is_loggable|response_event_is_generation_start)\s*\(/u],
       [QUOTA_POOL_FILE, /\bfn\s+(?:aggregate_openai_quota|aggregate_main_quota|add_pool_window|add_ready_pool_window)\s*\(/u],
       [QUOTA_MODEL_CAPACITY_FILE, /\bfn\s+(?:normalized_identifier|is_luna_reserve_identifier|openai_usage_advertises_luna_reserve)\s*\(/u],
@@ -473,6 +481,13 @@ function selfTest() {
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn old_stream() {}']])[0], /feature-off Rust path/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/response/status.rs",
+    '#[cfg(not(feature = "mojo"))] fn old_status() {}']])[0], /feature-off Rust path/u);
+  assert.match(findViolations([[GEMINI_STATUS_FILE,
+    "fn gemini_finish_reason_failure_oracle() {}"]]).join("\n"),
+    /replaced Rust semantic implementation/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/response/metadata.rs",
+    "fn response_usage_rust() {}"]]).join("\n"), /Rust semantic oracle or copy/u);
   assert.match(findViolations([[GEMINI_TOOL_CALLS_FILE,
     "fn gemini_split_flat_namespace_tool_name() {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);

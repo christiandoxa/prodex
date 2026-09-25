@@ -41,13 +41,10 @@ pub(crate) fn gemini_prompt_feedback_failure(value: &Value) -> Option<(String, S
         .get("blockReason")
         .and_then(Value::as_str)
         .filter(|reason| !reason.trim().is_empty())?;
-    #[cfg(feature = "mojo")]
-    return gemini_status_pair(
+    gemini_status_pair(
         prodex_mojo_core::rich::GeminiResponseKernelOperation::PromptFeedbackFailure,
         reason,
-    );
-    #[cfg(not(feature = "mojo"))]
-    gemini_prompt_feedback_failure_oracle(reason)
+    )
 }
 
 pub(crate) fn gemini_finish_reason(value: &Value) -> Option<String> {
@@ -62,68 +59,19 @@ pub(crate) fn gemini_finish_reason(value: &Value) -> Option<String> {
 }
 
 pub(crate) fn gemini_finish_reason_failure(reason: &str) -> Option<(String, String)> {
-    #[cfg(feature = "mojo")]
-    return gemini_status_pair(
+    gemini_status_pair(
         prodex_mojo_core::rich::GeminiResponseKernelOperation::FinishReasonFailure,
         reason,
-    );
-    #[cfg(not(feature = "mojo"))]
-    gemini_finish_reason_failure_oracle(reason)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn gemini_finish_reason_failure_oracle(reason: &str) -> Option<(String, String)> {
-    let code = match reason {
-        "MALFORMED_FUNCTION_CALL" => "gemini_malformed_function_call",
-        "UNEXPECTED_TOOL_CALL" => "gemini_unexpected_tool_call",
-        "OTHER" => "gemini_finish_other",
-        "NO_IMAGE" => "gemini_no_image",
-        "SAFETY"
-        | "RECITATION"
-        | "LANGUAGE"
-        | "BLOCKLIST"
-        | "PROHIBITED_CONTENT"
-        | "SPII"
-        | "IMAGE_SAFETY"
-        | "IMAGE_PROHIBITED_CONTENT" => "invalid_prompt",
-        _ => return None,
-    };
-    Some((
-        code.to_string(),
-        format!("Gemini ended the stream with finishReason={reason}"),
-    ))
+    )
 }
 
 pub(crate) fn gemini_finish_reason_incomplete(reason: &str) -> Option<(String, String)> {
-    #[cfg(feature = "mojo")]
-    return gemini_status_pair(
+    gemini_status_pair(
         prodex_mojo_core::rich::GeminiResponseKernelOperation::FinishReasonIncomplete,
         reason,
-    );
-    #[cfg(not(feature = "mojo"))]
-    gemini_finish_reason_incomplete_oracle(reason)
+    )
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
-fn gemini_finish_reason_incomplete_oracle(reason: &str) -> Option<(String, String)> {
-    match reason {
-        "MAX_TOKENS" => Some((
-            "max_output_tokens".to_string(),
-            "Gemini stopped because it reached the maximum output token limit.".to_string(),
-        )),
-        _ => None,
-    }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn gemini_prompt_feedback_failure_oracle(reason: &str) -> Option<(String, String)> {
-    Some((
-        "gemini_prompt_blocked".to_string(),
-        format!("Gemini blocked the prompt: {reason}"),
-    ))
-}
-
-#[cfg(feature = "mojo")]
 fn gemini_status_pair(
     operation: prodex_mojo_core::rich::GeminiResponseKernelOperation,
     reason: &str,
@@ -138,47 +86,113 @@ fn gemini_status_pair(
     ))
 }
 
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_parity_tests {
+#[cfg(test)]
+mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
-    fn finish_reason_mapping_matches_rust_oracle() {
-        for reason in [
-            "MAX_TOKENS",
-            "MALFORMED_FUNCTION_CALL",
-            "UNEXPECTED_TOOL_CALL",
-            "OTHER",
-            "NO_IMAGE",
-            "SAFETY",
-            "RECITATION",
-            "LANGUAGE",
-            "BLOCKLIST",
-            "PROHIBITED_CONTENT",
-            "SPII",
-            "IMAGE_SAFETY",
-            "IMAGE_PROHIBITED_CONTENT",
-            "STOP",
-            "安全🙂",
-            "",
+    fn finish_reasons_have_expected_status_mappings() {
+        for (reason, code) in [
+            ("MALFORMED_FUNCTION_CALL", "gemini_malformed_function_call"),
+            ("UNEXPECTED_TOOL_CALL", "gemini_unexpected_tool_call"),
+            ("OTHER", "gemini_finish_other"),
+            ("NO_IMAGE", "gemini_no_image"),
+            ("SAFETY", "invalid_prompt"),
+            ("RECITATION", "invalid_prompt"),
+            ("LANGUAGE", "invalid_prompt"),
+            ("BLOCKLIST", "invalid_prompt"),
+            ("PROHIBITED_CONTENT", "invalid_prompt"),
+            ("SPII", "invalid_prompt"),
+            ("IMAGE_SAFETY", "invalid_prompt"),
+            ("IMAGE_PROHIBITED_CONTENT", "invalid_prompt"),
         ] {
             assert_eq!(
                 gemini_finish_reason_failure(reason),
-                gemini_finish_reason_failure_oracle(reason)
-            );
-            assert_eq!(
-                gemini_finish_reason_incomplete(reason),
-                gemini_finish_reason_incomplete_oracle(reason)
-            );
-        }
-        for reason in ["blocked", "安全🙂", ""] {
-            assert_eq!(
-                gemini_status_pair(
-                    prodex_mojo_core::rich::GeminiResponseKernelOperation::PromptFeedbackFailure,
-                    reason,
-                ),
-                gemini_prompt_feedback_failure_oracle(reason),
+                Some((
+                    code.to_string(),
+                    format!("Gemini ended the stream with finishReason={reason}"),
+                ))
             );
         }
+        assert_eq!(
+            gemini_finish_reason_incomplete("MAX_TOKENS"),
+            Some((
+                "max_output_tokens".to_string(),
+                "Gemini stopped because it reached the maximum output token limit.".to_string(),
+            ))
+        );
+        for reason in ["MAX_TOKENS", "STOP", "UNKNOWN", "安全🙂", "", "  "] {
+            assert_eq!(gemini_finish_reason_failure(reason), None);
+        }
+        for reason in ["STOP", "UNKNOWN", "安全🙂", "", "  "] {
+            assert_eq!(gemini_finish_reason_incomplete(reason), None);
+        }
+    }
+
+    #[test]
+    fn prompt_feedback_mapping_preserves_unicode_and_block_precedence() {
+        let reason = "地域ポリシー 🚫";
+        let value = json!({
+            "promptFeedback": {"blockReason": reason},
+            "candidates": [{"finishReason": "STOP"}],
+        });
+        assert_eq!(
+            gemini_prompt_feedback_failure(&value),
+            Some((
+                "gemini_prompt_blocked".to_string(),
+                format!("Gemini blocked the prompt: {reason}"),
+            ))
+        );
+        assert_eq!(
+            gemini_prompt_feedback_failure(&json!({
+                "promptFeedback": {"blockReason": " "},
+            })),
+            None
+        );
+        assert_eq!(
+            gemini_prompt_feedback_failure(&json!({
+                "promptFeedback": {"blockReason": "  "},
+            })),
+            None
+        );
+    }
+
+    #[test]
+    fn empty_and_unknown_finish_reasons_keep_response_status_behavior() {
+        assert_eq!(
+            gemini_response_status(
+                &json!({
+                    "candidates": [{"finishReason": "NOT_RECOGNIZED"}],
+                }),
+                false
+            ),
+            Some(GeminiResponseStatus::Failed {
+                code: "gemini_empty_response".to_string(),
+                message: "Gemini returned no visible response content. finishReason=NOT_RECOGNIZED"
+                    .to_string(),
+            })
+        );
+        assert_eq!(
+            gemini_response_status(
+                &json!({
+                    "candidates": [{"finishReason": " "}],
+                }),
+                false
+            ),
+            Some(GeminiResponseStatus::Failed {
+                code: "gemini_empty_response".to_string(),
+                message: "Gemini returned no visible response content.".to_string(),
+            })
+        );
+        assert_eq!(
+            gemini_response_status(
+                &json!({
+                    "candidates": [{"finishReason": "NOT_RECOGNIZED"}],
+                }),
+                true
+            ),
+            None
+        );
     }
 }
