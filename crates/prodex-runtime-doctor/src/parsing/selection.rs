@@ -4,7 +4,6 @@ use crate::RuntimeDoctorSummary;
 
 use super::request_timeline::runtime_doctor_request_timeline_detail;
 
-#[cfg(feature = "mojo")]
 fn runtime_doctor_selection_bucket(marker: &str) -> Option<&'static str> {
     let semantics = prodex_mojo_core::rich::runtime_doctor_marker_semantics(marker)
         .expect("Mojo runtime-doctor marker semantics returned invalid output");
@@ -15,30 +14,6 @@ fn runtime_doctor_selection_bucket(marker: &str) -> Option<&'static str> {
         prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_SELECTION_BLOCKED => Some("blocked"),
         prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_SELECTION_NONE => None,
         _ => unreachable!("validated Mojo selection bucket"),
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_doctor_selection_bucket(marker: &str) -> Option<&'static str> {
-    runtime_doctor_selection_bucket_rust(marker)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_doctor_selection_bucket_rust(marker: &str) -> Option<&'static str> {
-    match marker {
-        "selection_pick" => Some("picked"),
-        "selection_keep_affinity" | "selection_keep_current" => Some("kept"),
-        "selection_skip_current" | "selection_skip_affinity" | "selection_skip_sync_probe" => {
-            Some("skipped")
-        }
-        "local_selection_blocked"
-        | "responses_pre_send_skip"
-        | "websocket_pre_send_skip"
-        | "quota_critical_floor_before_send"
-        | "precommit_budget_exhausted"
-        | "compact_precommit_budget_exhausted"
-        | "compact_candidate_exhausted" => Some("blocked"),
-        _ => None,
     }
 }
 
@@ -115,21 +90,49 @@ pub(super) fn runtime_doctor_record_selection_summary(
     });
 }
 
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_semantics_parity_tests {
-    use super::*;
-    use crate::markers::RuntimeDoctorMarker;
+#[cfg(all(test, feature = "runtime-log-mojo"))]
+mod expected_marker_buckets {
+    use super::runtime_doctor_selection_bucket;
 
     #[test]
-    fn selection_bucket_matches_rust_oracle_for_every_marker() {
-        for marker in RuntimeDoctorMarker::ALL {
-            let marker = marker.as_str();
-            assert_eq!(
-                runtime_doctor_selection_bucket(marker),
-                runtime_doctor_selection_bucket_rust(marker),
-                "{marker}"
-            );
+    fn selection_bucket_matches_fixed_cases() {
+        for (bucket, markers) in [
+            ("picked", &["selection_pick"][..]),
+            (
+                "kept",
+                &["selection_keep_affinity", "selection_keep_current"][..],
+            ),
+            (
+                "skipped",
+                &[
+                    "selection_skip_current",
+                    "selection_skip_affinity",
+                    "selection_skip_sync_probe",
+                ][..],
+            ),
+            (
+                "blocked",
+                &[
+                    "local_selection_blocked",
+                    "responses_pre_send_skip",
+                    "websocket_pre_send_skip",
+                    "quota_critical_floor_before_send",
+                    "precommit_budget_exhausted",
+                    "compact_precommit_budget_exhausted",
+                    "compact_candidate_exhausted",
+                ][..],
+            ),
+        ] {
+            for marker in markers {
+                assert_eq!(
+                    runtime_doctor_selection_bucket(marker),
+                    Some(bucket),
+                    "{marker}"
+                );
+            }
         }
-        assert_eq!(runtime_doctor_selection_bucket("unknown_marker"), None);
+        for marker in ["selection_plan", "first_upstream_chunk", "unknown_marker"] {
+            assert_eq!(runtime_doctor_selection_bucket(marker), None, "{marker}");
+        }
     }
 }

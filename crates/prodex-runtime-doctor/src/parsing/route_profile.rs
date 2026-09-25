@@ -6,7 +6,6 @@ use super::request_timeline::runtime_doctor_request_timeline_detail;
 
 const RUNTIME_DOCTOR_ROUTE_PROFILE_MAX_EVENTS: usize = 20;
 
-#[cfg(feature = "mojo")]
 fn runtime_doctor_route_profile_action(marker: &str) -> Option<&'static str> {
     let semantics = prodex_mojo_core::rich::runtime_doctor_marker_semantics(marker)
         .expect("Mojo runtime-doctor marker semantics returned invalid output");
@@ -26,50 +25,6 @@ fn runtime_doctor_route_profile_action(marker: &str) -> Option<&'static str> {
         prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_ROUTE_QUOTA => Some("quota"),
         prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_ROUTE_NONE => None,
         _ => unreachable!("validated Mojo route-profile action"),
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_doctor_route_profile_action(marker: &str) -> Option<&'static str> {
-    runtime_doctor_route_profile_action_rust(marker)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_doctor_route_profile_action_rust(marker: &str) -> Option<&'static str> {
-    match marker {
-        "selection_keep_affinity" | "selection_keep_current" | "selection_pick" => Some("selected"),
-        "selection_skip_current" | "selection_skip_affinity" | "selection_skip_sync_probe" => {
-            Some("selection_skip")
-        }
-        "local_selection_blocked"
-        | "responses_pre_send_skip"
-        | "websocket_pre_send_skip"
-        | "quota_critical_floor_before_send" => Some("blocked"),
-        "profile_health" | "profile_latency" | "profile_bad_pairing" => Some("health"),
-        "profile_transport_backoff"
-        | "profile_transport_failure"
-        | "profile_circuit_open"
-        | "profile_circuit_half_open_probe" => Some("transport_health"),
-        "stream_read_error"
-        | "upstream_connect_timeout"
-        | "upstream_connect_dns_error"
-        | "upstream_tls_handshake_error"
-        | "upstream_connect_error"
-        | "upstream_connect_http"
-        | "upstream_close_before_completed"
-        | "upstream_connection_closed"
-        | "upstream_read_error"
-        | "upstream_send_error"
-        | "upstream_stream_error"
-        | "compact_transport_failure"
-        | "websocket_precommit_frame_timeout"
-        | "websocket_precommit_hold_timeout" => Some("transport_failure"),
-        "quota_blocked"
-        | "profile_retry_backoff"
-        | "profile_quota_quarantine"
-        | "compact_retryable_failure"
-        | "compact_quota_unclassified" => Some("quota"),
-        _ => None,
     }
 }
 
@@ -108,21 +63,95 @@ pub(super) fn runtime_doctor_record_route_profile_event(
     }
 }
 
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_semantics_parity_tests {
-    use super::*;
-    use crate::markers::RuntimeDoctorMarker;
+#[cfg(all(test, feature = "runtime-log-mojo"))]
+mod expected_route_profile_actions {
+    use super::runtime_doctor_route_profile_action;
 
     #[test]
-    fn route_profile_action_matches_rust_oracle_for_every_marker() {
-        for marker in RuntimeDoctorMarker::ALL {
-            let marker = marker.as_str();
+    fn route_profile_action_matches_fixed_cases() {
+        for (action, markers) in [
+            (
+                "selected",
+                &[
+                    "selection_keep_affinity",
+                    "selection_keep_current",
+                    "selection_pick",
+                ][..],
+            ),
+            (
+                "selection_skip",
+                &[
+                    "selection_skip_current",
+                    "selection_skip_affinity",
+                    "selection_skip_sync_probe",
+                ][..],
+            ),
+            (
+                "blocked",
+                &[
+                    "local_selection_blocked",
+                    "responses_pre_send_skip",
+                    "websocket_pre_send_skip",
+                    "quota_critical_floor_before_send",
+                ][..],
+            ),
+            (
+                "health",
+                &["profile_health", "profile_latency", "profile_bad_pairing"][..],
+            ),
+            (
+                "transport_health",
+                &[
+                    "profile_transport_backoff",
+                    "profile_transport_failure",
+                    "profile_circuit_open",
+                    "profile_circuit_half_open_probe",
+                ][..],
+            ),
+            (
+                "transport_failure",
+                &[
+                    "stream_read_error",
+                    "upstream_connect_timeout",
+                    "upstream_connect_dns_error",
+                    "upstream_tls_handshake_error",
+                    "upstream_connect_error",
+                    "upstream_connect_http",
+                    "upstream_close_before_completed",
+                    "upstream_connection_closed",
+                    "upstream_read_error",
+                    "upstream_send_error",
+                    "upstream_stream_error",
+                    "compact_transport_failure",
+                    "websocket_precommit_frame_timeout",
+                    "websocket_precommit_hold_timeout",
+                ][..],
+            ),
+            (
+                "quota",
+                &[
+                    "quota_blocked",
+                    "profile_retry_backoff",
+                    "profile_quota_quarantine",
+                    "compact_retryable_failure",
+                    "compact_quota_unclassified",
+                ][..],
+            ),
+        ] {
+            for marker in markers {
+                assert_eq!(
+                    runtime_doctor_route_profile_action(marker),
+                    Some(action),
+                    "{marker}"
+                );
+            }
+        }
+        for marker in ["selection_plan", "first_upstream_chunk", "unknown_marker"] {
             assert_eq!(
                 runtime_doctor_route_profile_action(marker),
-                runtime_doctor_route_profile_action_rust(marker),
+                None,
                 "{marker}"
             );
         }
-        assert_eq!(runtime_doctor_route_profile_action("unknown_marker"), None);
     }
 }

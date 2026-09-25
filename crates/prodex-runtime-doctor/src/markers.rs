@@ -379,15 +379,10 @@ pub fn runtime_doctor_marker_descriptor(value: &str) -> Option<RuntimeDoctorMark
     })
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(feature = "runtime-log-mojo")]
 pub(crate) fn runtime_doctor_marker_is_known(value: &str) -> bool {
     prodex_mojo_core::rich::runtime_doctor_marker_known(value)
         .expect("Mojo runtime-doctor marker classifier returned invalid output")
-}
-
-#[cfg(not(feature = "mojo"))]
-pub(crate) fn runtime_doctor_marker_is_known(value: &str) -> bool {
-    RuntimeDoctorMarker::from_name(value).is_some()
 }
 
 #[cfg(any(not(feature = "mojo"), test))]

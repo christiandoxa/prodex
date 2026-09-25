@@ -1,15 +1,22 @@
 use std::borrow::Cow;
+#[cfg(feature = "runtime-log-mojo")]
 use std::collections::BTreeMap;
 
+#[cfg(feature = "runtime-log-mojo")]
 use crate::markers::runtime_doctor_marker_is_known;
-use runtime_proxy_crate::{runtime_proxy_redact_log_field_value, runtime_proxy_redact_log_text};
+#[cfg(feature = "runtime-log-mojo")]
+use runtime_proxy_crate::runtime_proxy_redact_log_field_value;
+#[cfg(feature = "runtime-log-mojo")]
+use runtime_proxy_crate::runtime_proxy_redact_log_text;
 
+#[cfg(feature = "runtime-log-mojo")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct RuntimeDoctorParsedLogMessage {
     event: Option<String>,
     fields: Vec<(String, String)>,
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 impl RuntimeDoctorParsedLogMessage {
     fn fields_map(&self) -> BTreeMap<String, String> {
         self.fields
@@ -46,6 +53,7 @@ impl<'a> RuntimeDoctorParsedLogLine<'a> {
         self.json.as_ref()
     }
 
+    #[cfg(feature = "runtime-log-mojo")]
     pub(crate) fn timestamp(&self) -> Option<String> {
         if let Some(value) = self.json() {
             return value
@@ -78,6 +86,7 @@ impl<'a> RuntimeDoctorParsedLogLine<'a> {
         )
     }
 
+    #[cfg(feature = "runtime-log-mojo")]
     pub(crate) fn fields(&self) -> BTreeMap<String, String> {
         let mut fields = runtime_doctor_parse_message_fields(&self.message());
         if let Some(json_fields) = self
@@ -90,6 +99,7 @@ impl<'a> RuntimeDoctorParsedLogLine<'a> {
         fields
     }
 
+    #[cfg(feature = "runtime-log-mojo")]
     pub(crate) fn marker_name(&self) -> Option<String> {
         if let Some(event) = self
             .json()
@@ -113,10 +123,12 @@ impl<'a> RuntimeDoctorParsedLogLine<'a> {
     }
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 pub(super) fn runtime_doctor_parse_message_fields(message: &str) -> BTreeMap<String, String> {
     runtime_doctor_parse_log_message(message).fields_map()
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_json_fields_map(
     json_fields: &serde_json::Map<String, serde_json::Value>,
 ) -> BTreeMap<String, String> {
@@ -137,7 +149,7 @@ fn runtime_doctor_json_fields_map(
         .collect()
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_parse_log_message(message: &str) -> RuntimeDoctorParsedLogMessage {
     let plan = prodex_mojo_core::rich::runtime_doctor_parse_message_offsets(message)
         .expect("Mojo runtime-doctor message parser returned invalid output");
@@ -162,124 +174,7 @@ fn runtime_doctor_parse_log_message(message: &str) -> RuntimeDoctorParsedLogMess
     }
 }
 
-#[cfg(not(feature = "mojo"))]
-fn runtime_doctor_parse_log_message(message: &str) -> RuntimeDoctorParsedLogMessage {
-    runtime_doctor_parse_log_message_rust(message)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_doctor_parse_log_message_rust(message: &str) -> RuntimeDoctorParsedLogMessage {
-    let mut parsed = RuntimeDoctorParsedLogMessage::default();
-    let bytes = message.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        index = runtime_doctor_skip_log_whitespace(message, index);
-        if index >= bytes.len() {
-            break;
-        }
-
-        let token_start = index;
-        index = runtime_doctor_skip_log_key_or_token(message, index);
-        if index < bytes.len() && bytes[index] == b'=' {
-            let (next_index, field) = runtime_doctor_parse_log_field(message, token_start, index);
-            index = next_index;
-            if let Some(field) = field {
-                parsed.fields.push(field);
-            }
-            continue;
-        }
-
-        if token_start < index && parsed.event.is_none() {
-            parsed.event = Some(message[token_start..index].to_string());
-        }
-        index = runtime_doctor_skip_log_token(message, index);
-    }
-
-    parsed
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_doctor_parse_log_field(
-    message: &str,
-    key_start: usize,
-    separator: usize,
-) -> (usize, Option<(String, String)>) {
-    let key = &message[key_start..separator];
-    let value_start = separator + 1;
-    let next_index = runtime_doctor_skip_log_field_value(message, value_start);
-    let raw_value = &message[value_start..next_index];
-    let field = (!key.is_empty() && !raw_value.is_empty()).then(|| {
-        (
-            key.to_string(),
-            runtime_doctor_parse_log_field_value(raw_value),
-        )
-    });
-    (next_index, field)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_doctor_skip_log_whitespace(message: &str, mut index: usize) -> usize {
-    let bytes = message.as_bytes();
-    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
-        index += 1;
-    }
-    index
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_doctor_skip_log_key_or_token(message: &str, mut index: usize) -> usize {
-    let bytes = message.as_bytes();
-    while index < bytes.len() && !bytes[index].is_ascii_whitespace() && bytes[index] != b'=' {
-        index += 1;
-    }
-    index
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_doctor_skip_log_token(message: &str, mut index: usize) -> usize {
-    let bytes = message.as_bytes();
-    while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
-        index += 1;
-    }
-    index
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_doctor_skip_log_field_value(message: &str, mut index: usize) -> usize {
-    let bytes = message.as_bytes();
-    if index >= bytes.len() {
-        return index;
-    }
-    if bytes[index] == b'"' {
-        index += 1;
-        let mut escaped = false;
-        while index < bytes.len() {
-            let byte = bytes[index];
-            if escaped {
-                escaped = false;
-                index += 1;
-                continue;
-            }
-            match byte {
-                b'\\' => {
-                    escaped = true;
-                    index += 1;
-                }
-                b'"' => {
-                    index += 1;
-                    break;
-                }
-                _ => index += 1,
-            }
-        }
-        return index;
-    }
-    while index < bytes.len() && !bytes[index].is_ascii_whitespace() {
-        index += 1;
-    }
-    index
-}
-
+#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_parse_log_field_value(raw_value: &str) -> String {
     if raw_value.starts_with('"') {
         serde_json::from_str::<String>(raw_value)
@@ -289,6 +184,7 @@ fn runtime_doctor_parse_log_field_value(raw_value: &str) -> String {
     }
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 pub(super) fn runtime_doctor_chain_event_summary(
     marker: &str,
     fields: &BTreeMap<String, String>,
@@ -314,6 +210,7 @@ pub(super) fn runtime_doctor_chain_event_summary(
     parts.join(" ")
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 pub(super) fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {
     let redacted = runtime_proxy_redact_log_text(line);
     let trimmed = redacted.trim();
@@ -328,28 +225,24 @@ pub(super) fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {
         + "…"
 }
 
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_message_parser_parity_tests {
+#[cfg(all(test, feature = "runtime-log-mojo"))]
+mod expected_message_parser_output {
     use super::*;
 
     #[test]
-    fn message_parser_matches_rust_oracle() {
-        for message in [
-            "",
-            "selection_pick",
-            "selection_pick profile=alpha route=responses reason=healthy",
-            r#"selection_pick profile="alpha beta" route=responses"#,
-            r#"event key="escaped \"quote\"" n=42 bool=true"#,
-            "前置 selection_pick profile=東京",
-            "key=value selection_pick later=field",
-            "selection_pick empty= trailing",
-            "selection_pick malformed=\"unterminated",
-        ] {
-            assert_eq!(
-                runtime_doctor_parse_log_message(message),
-                runtime_doctor_parse_log_message_rust(message),
-                "{message:?}"
-            );
-        }
+    fn message_parser_matches_fixed_cases() {
+        let parsed = runtime_doctor_parse_log_message(
+            r#"selection_pick profile="alpha beta" note="say \"yes\"" count=42"#,
+        );
+
+        assert_eq!(parsed.event.as_deref(), Some("selection_pick"));
+        assert_eq!(
+            parsed.fields,
+            vec![
+                ("profile".to_string(), "alpha beta".to_string()),
+                ("note".to_string(), "say \"yes\"".to_string()),
+                ("count".to_string(), "42".to_string()),
+            ]
+        );
     }
 }

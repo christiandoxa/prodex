@@ -25,7 +25,9 @@ pub use markers::{
 pub use markers::{
     RuntimeDoctorLogFacet, RuntimeDoctorMarkerDescriptor, runtime_doctor_marker_descriptor,
 };
-pub use parsing::{read_runtime_log_tail, summarize_runtime_log_tail};
+pub use parsing::read_runtime_log_tail;
+#[cfg(feature = "runtime-log-mojo")]
+pub use parsing::summarize_runtime_log_tail;
 pub use render::{
     runtime_doctor_fields_for_summary, runtime_doctor_json_value,
     runtime_doctor_json_value_with_policy_suggestions,
