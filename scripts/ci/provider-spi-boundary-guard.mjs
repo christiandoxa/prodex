@@ -42,14 +42,13 @@ const FORBIDDEN_SOURCE_PATTERNS = Object.freeze([
   { name: "provider SDK", pattern: /\b(openai|anthropic|gemini|copilot)\s*::/u },
 ]);
 const REQUIRED_SOURCE_SNIPPETS = Object.freeze([
-  "pub enum ProviderRetryDecisionStatus",
-  "pub struct ProviderRetryDecisionResponsePlan",
-  "pub fn plan_provider_retry_decision_response(",
-  "ProviderRetryDecision::Allowed => None",
-  "code: \"provider_retry_not_safe\"",
-  "message: \"provider retry is not safe\"",
-  "code: \"provider_retry_budget_exhausted\"",
-  "message: \"provider retry budget is exhausted\"",
+  "pub enum ProviderRetryDecision",
+  "pub struct ProviderRetryPlan",
+  "pub fn plan_provider_retry(",
+  "ProviderRetryDecision::Allowed",
+  "ProviderRetryDecision::DeniedCommitted",
+  "ProviderRetryDecision::DeniedBudgetExhausted",
+  "ProviderRetryDecision::DeniedNotRetryable",
 ]);
 
 function sorted(values) {
@@ -188,31 +187,30 @@ prodex_provider_core = { workspace = true }
     validateProviderSpiSource("use std::fmt;\nuse prodex_domain::TenantId;", "good.rs").length === 0,
     "safe source rejected",
   );
-  const validRetryResponse = `
-pub enum ProviderRetryDecisionStatus {}
-pub struct ProviderRetryDecisionResponsePlan {}
-pub fn plan_provider_retry_decision_response() {
-    ProviderRetryDecision::Allowed => None;
-    code: "provider_retry_not_safe";
-    message: "provider retry is not safe";
-    code: "provider_retry_budget_exhausted";
-    message: "provider retry budget is exhausted";
+  const validRetryPlan = `
+pub enum ProviderRetryDecision { Allowed, DeniedCommitted, DeniedBudgetExhausted, DeniedNotRetryable }
+pub struct ProviderRetryPlan {}
+pub fn plan_provider_retry() {
+    ProviderRetryDecision::Allowed;
+    ProviderRetryDecision::DeniedCommitted;
+    ProviderRetryDecision::DeniedBudgetExhausted;
+    ProviderRetryDecision::DeniedNotRetryable;
 }
 `;
   assertSelfTest(
-    validateProviderSpiSource(`#![forbid(unsafe_code)]\n${validRetryResponse}`, SPI_LIB).length === 0,
-    "valid provider retry response contract rejected",
+    validateProviderSpiSource(`#![forbid(unsafe_code)]\n${validRetryPlan}`, SPI_LIB).length === 0,
+    "valid provider retry plan contract rejected",
   );
   assertSelfTest(
-    validateProviderSpiSource(validRetryResponse, SPI_LIB).some((error) => error.includes("forbid unsafe code")),
+    validateProviderSpiSource(validRetryPlan, SPI_LIB).some((error) => error.includes("forbid unsafe code")),
     "crate root without unsafe forbid accepted",
   );
   assertSelfTest(
     validateProviderSpiSource(
-      `#![forbid(unsafe_code)]\n${validRetryResponse.replace('message: "provider retry is not safe";', "")}`,
+      `#![forbid(unsafe_code)]\n${validRetryPlan.replace('    ProviderRetryDecision::DeniedCommitted;', "")}`,
       SPI_LIB,
-    ).some((error) => error.includes("provider retry is not safe")),
-    "missing provider retry safe response accepted",
+    ).some((error) => error.includes("ProviderRetryDecision::DeniedCommitted")),
+    "missing committed retry decision accepted",
   );
 }
 
