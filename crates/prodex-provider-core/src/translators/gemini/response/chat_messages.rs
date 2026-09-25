@@ -5,7 +5,8 @@ use serde_json::{Value, json};
 use super::gemini_function_call_id;
 use super::response_media::{gemini_media_content_item_from_part, gemini_text_from_special_part};
 use super::response_metadata::gemini_response_metadata;
-use super::response_tool_calls::gemini_chat_assistant_tool_call_item_with_call_id;
+use super::response_tool_calls::gemini_chat_assistant_tool_call_with_call_id;
+use crate::GeminiProviderCoreStreamToolCall;
 use crate::{GeminiProviderCoreResponsePartInput, gemini_provider_core_response_part_plan};
 
 pub(crate) fn gemini_chat_assistant_messages_from_generate_value(
@@ -27,7 +28,7 @@ pub(crate) fn gemini_chat_assistant_messages_from_generate_value(
     let mut reasoning_content = String::new();
     let mut gemini_content = Vec::new();
     let mut native_parts = Vec::new();
-    let mut tool_calls = Vec::new();
+    let mut tool_calls = Vec::<GeminiProviderCoreStreamToolCall>::new();
     let suppress_visible_text = parts.iter().any(|part| part.get("functionCall").is_some());
     for (index, part) in parts.iter().enumerate() {
         let visible_text = crate::gemini_bridge::gemini_provider_core_visible_text_from_part(part);
@@ -134,7 +135,7 @@ fn gemini_append_chat_response_tool_call(
     request_id: u64,
     index: usize,
     text: &mut String,
-    tool_calls: &mut Vec<Value>,
+    tool_calls: &mut Vec<GeminiProviderCoreStreamToolCall>,
     blocked_tool_call_message: &mut impl FnMut(&str, &Value) -> Option<String>,
 ) {
     if !plan.emit_function {
@@ -159,7 +160,7 @@ fn gemini_append_chat_response_tool_call(
         text.push_str(&blocked);
         return;
     }
-    tool_calls.push(gemini_chat_assistant_tool_call_item_with_call_id(
+    tool_calls.push(gemini_chat_assistant_tool_call_with_call_id(
         part,
         function_call,
         Some(&call_id),
@@ -172,43 +173,16 @@ fn gemini_chat_assistant_message(
     reasoning_content: String,
     gemini_content: Vec<Value>,
     native_parts: Vec<Value>,
-    tool_calls: Vec<Value>,
+    tool_calls: Vec<GeminiProviderCoreStreamToolCall>,
 ) -> Option<Value> {
-    if text.is_empty()
-        && reasoning_content.is_empty()
-        && gemini_content.is_empty()
-        && tool_calls.is_empty()
-    {
-        return None;
-    }
-    let mut assistant = json!({
-        "role": "assistant",
-        "content": gemini_chat_assistant_content(&text, &tool_calls),
-    });
-    if !reasoning_content.is_empty() {
-        assistant["reasoning_content"] = Value::String(reasoning_content);
-    }
-    if !gemini_content.is_empty() {
-        assistant["gemini_media_content"] = Value::Array(gemini_content);
-    }
-    if !native_parts.is_empty() {
-        assistant["gemini_native_parts"] = Value::Array(native_parts);
-    }
-    if !tool_calls.is_empty() {
-        assistant["tool_calls"] = Value::Array(tool_calls);
-    }
-    if let Some(metadata) = gemini_response_metadata(value) {
-        assistant["gemini_metadata"] = metadata;
-    }
-    Some(assistant)
-}
-
-fn gemini_chat_assistant_content(text: &str, tool_calls: &[Value]) -> Value {
-    if !text.is_empty() {
-        Value::String(text.to_string())
-    } else if tool_calls.is_empty() {
-        Value::Null
-    } else {
-        Value::String(String::new())
-    }
+    let metadata = gemini_response_metadata(value);
+    super::super::gemini_provider_core_stream_chat_assistant_message(
+        &text,
+        &reasoning_content,
+        &gemini_content,
+        &native_parts,
+        &[],
+        metadata.as_ref(),
+        &tool_calls,
+    )
 }

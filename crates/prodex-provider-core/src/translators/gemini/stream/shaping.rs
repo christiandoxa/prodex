@@ -126,7 +126,7 @@ pub fn gemini_provider_core_stream_function_call_delta(
 }
 
 #[cfg(feature = "mojo")]
-pub(super) fn gemini_provider_core_stream_chat_tool_call_item(
+pub(crate) fn gemini_provider_core_stream_chat_tool_call_item(
     tool_call: &GeminiProviderCoreStreamToolCall,
 ) -> Value {
     let mut input =
