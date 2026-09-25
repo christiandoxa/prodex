@@ -11,9 +11,10 @@ name = "prodex_runtime_doctor"
 path = "src/lib.rs"
 
 [features]
-default = ["runtime-log-mojo"]
-mojo = ["runtime-log-mojo", "runtime_proxy_crate/mojo"]
+default = ["runtime-log-mojo", "state-summary-mojo"]
+mojo = ["runtime-log-mojo", "runtime_proxy_crate/mojo", "state-summary-mojo"]
 runtime-log-mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-rich"]
+state-summary-mojo = ["runtime-log-mojo"]
 
 [dependencies]
 anyhow = { workspace = true }

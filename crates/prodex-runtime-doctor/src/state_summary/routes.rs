@@ -20,6 +20,7 @@ fn runtime_doctor_route_key_parts<'a>(key: &'a str, prefix: &str) -> Option<(&'a
     Some((route, profile_name))
 }
 
+#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_route_health_key(
     profile_name: &str,
     route_kind: RuntimeDoctorRouteKind,
@@ -30,6 +31,7 @@ pub(super) fn runtime_doctor_route_health_key(
     )
 }
 
+#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_route_bad_pairing_key(
     profile_name: &str,
     route_kind: RuntimeDoctorRouteKind,
@@ -40,6 +42,7 @@ pub(super) fn runtime_doctor_route_bad_pairing_key(
     )
 }
 
+#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_route_performance_key(
     profile_name: &str,
     route_kind: RuntimeDoctorRouteKind,
@@ -50,6 +53,7 @@ pub(super) fn runtime_doctor_route_performance_key(
     )
 }
 
+#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_route_circuit_key(
     profile_name: &str,
     route_kind: RuntimeDoctorRouteKind,
@@ -60,6 +64,7 @@ pub(super) fn runtime_doctor_route_circuit_key(
     )
 }
 
+#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_transport_backoff_key(
     profile_name: &str,
     route_kind: RuntimeDoctorRouteKind,
@@ -72,12 +77,6 @@ pub(super) fn runtime_doctor_transport_backoff_key(
 
 fn runtime_doctor_transport_backoff_key_parts(key: &str) -> Option<(&str, &str)> {
     runtime_doctor_route_key_parts(key, "__route_transport_backoff__:")
-}
-
-pub(super) fn runtime_doctor_transport_backoff_profile_name(key: &str) -> &str {
-    runtime_doctor_transport_backoff_key_parts(key)
-        .map(|(_, profile_name)| profile_name)
-        .unwrap_or(key)
 }
 
 #[cfg(not(feature = "mojo"))]
@@ -119,32 +118,6 @@ pub(super) fn runtime_doctor_effective_health_score(
     config: RuntimeDoctorStateSummaryConfig,
 ) -> u32 {
     runtime_doctor_effective_score(entry, now, config.health_decay_seconds)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(super) fn runtime_doctor_effective_health_score_from_map(
-    scores: &BTreeMap<String, RuntimeDoctorHealthScore>,
-    key: &str,
-    now: i64,
-    config: RuntimeDoctorStateSummaryConfig,
-) -> u32 {
-    scores
-        .get(key)
-        .map(|entry| runtime_doctor_effective_health_score(entry, now, config))
-        .unwrap_or(0)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(super) fn runtime_doctor_effective_score_from_map(
-    scores: &BTreeMap<String, RuntimeDoctorHealthScore>,
-    key: &str,
-    now: i64,
-    decay_seconds: i64,
-) -> u32 {
-    scores
-        .get(key)
-        .map(|entry| runtime_doctor_effective_score(entry, now, decay_seconds))
-        .unwrap_or(0)
 }
 
 fn runtime_doctor_push_route_circuits(

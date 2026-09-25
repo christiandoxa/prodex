@@ -48,6 +48,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
   "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
+  "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
   "crates/prodex-provider-core/src/fallback/chains.rs",
   "crates/prodex-provider-core/src/fallback/chains/gemini.rs",
   "crates/prodex-provider-core/src/catalog.rs",
@@ -78,8 +79,9 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
   "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
+  "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
 ]);
-const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|runtime-log-mojo)"\s*\)/u;
+const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|runtime-log-mojo|state-summary-mojo)"\s*\)/u;
 const ANTHROPIC_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs";
 const ANTHROPIC_MESSAGES_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages.rs";
 const ANTHROPIC_WEB_SEARCH_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs";
@@ -112,11 +114,12 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
   "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
+  "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
 ]);
 const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-app/Cargo.toml", "mojo-core"],
   ["crates/prodex-quota/Cargo.toml", "mojo"],
-  ["crates/prodex-runtime-doctor/Cargo.toml", "runtime-log-mojo"],
+  ["crates/prodex-runtime-doctor/Cargo.toml", "state-summary-mojo"],
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
@@ -298,7 +301,10 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-runtime-launch/src/args_resume.rs",
     "fn retarget_codex_tui_resume_args() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-runtime-doctor/Cargo.toml",
-    '[features]\ndefault = []\nruntime-log-mojo = []']])[0], /default features must include runtime-log-mojo/u);
+    '[features]\ndefault = []\nstate-summary-mojo = []']])[0], /default features must include state-summary-mojo/u);
+  assert.match(findViolations([["crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+    '#[cfg(not(feature = "state-summary-mojo"))] fn rust_summary() {}']])[0],
+    /feature-off Rust path/u);
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
     "fn quota_error_summary_basic(lower: &str) {}"]])[0], /Rust quota error classifier/u);
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,

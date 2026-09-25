@@ -5,6 +5,7 @@ use crate::RuntimeDoctorBindingProfileSummary;
 
 mod bindings;
 mod identity;
+#[cfg(feature = "state-summary-mojo")]
 mod profiles;
 mod quota;
 mod routes;
@@ -12,6 +13,7 @@ mod runtime_adapters;
 
 pub use bindings::*;
 pub use identity::runtime_doctor_runtime_broker_mismatch_reason;
+#[cfg(feature = "state-summary-mojo")]
 pub use profiles::{runtime_doctor_profile_summaries, runtime_doctor_route_circuit_state};
 pub use quota::runtime_doctor_quota_freshness_label;
 pub use routes::{runtime_doctor_degraded_routes, runtime_doctor_route_kind_label};
