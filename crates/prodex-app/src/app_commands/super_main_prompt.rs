@@ -330,7 +330,9 @@ fn current_main_selection(
             .codex_args
             .splice(0..0, ["-c".into(), "model_provider=\"openai\"".into()]);
     }
-    let runtime_args = preference_args.into_runtime_tool_args_with_presidio(false);
+    let runtime_args = preference_args
+        .into_runtime_tool_args_with_presidio(false)
+        .ok()?;
     let model = crate::codex_effective_config_value(&codex_home, &runtime_args.codex_args, "model")
         .ok()
         .flatten()?;

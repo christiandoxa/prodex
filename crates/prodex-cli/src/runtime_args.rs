@@ -1,4 +1,4 @@
-use crate::CodexRuntimeFeatureArgs;
+use crate::{CodexRuntimeFeatureArgs, RuntimeFeaturePlanError};
 use clap::Args;
 use prodex_provider_core::{ProviderId, ProviderRuntimeMetadata, provider_runtime_metadata};
 use std::ffi::OsString;
@@ -86,15 +86,15 @@ pub struct SubAgentExecArgs {
 fn codex_args_with_feature_overrides(
     codex_args: &[OsString],
     features: &CodexRuntimeFeatureArgs,
-) -> Vec<OsString> {
-    let overrides = features.to_codex_config_args();
+) -> Result<Vec<OsString>, RuntimeFeaturePlanError> {
+    let overrides = features.to_codex_config_args()?;
     if overrides.is_empty() {
-        return codex_args.to_vec();
+        return Ok(codex_args.to_vec());
     }
     let mut args = Vec::with_capacity(codex_args.len() + overrides.len());
     args.extend(codex_args.iter().cloned());
     args.extend(overrides);
-    args
+    Ok(args)
 }
 
 pub use prodex_provider_core::{

@@ -367,7 +367,9 @@ impl SuperArgs {
 }
 
 impl RunArgs {
-    pub fn codex_args_with_feature_overrides(&self) -> Vec<OsString> {
+    pub fn codex_args_with_feature_overrides(
+        &self,
+    ) -> Result<Vec<OsString>, super::RuntimeFeaturePlanError> {
         codex_args_with_feature_overrides(&self.codex_args, &self.codex_features)
     }
 }

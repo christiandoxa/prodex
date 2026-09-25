@@ -2,14 +2,16 @@ use super::*;
 use prodex_cli::SuperExternalProvider;
 use std::ffi::OsString;
 
-pub(super) fn build_child_args(args: &SuperArgs) -> Vec<OsString> {
+pub(super) fn build_child_args(
+    args: &SuperArgs,
+) -> Result<Vec<OsString>, prodex_cli::RuntimeFeaturePlanError> {
     let mut output = vec![OsString::from("s"), OsString::from("--full-access")];
     append_profile_args(&mut output, args);
     append_sub_agent_args(&mut output, args);
     append_tool_args(&mut output, args);
     append_target_args(&mut output, args);
-    append_frontend_args(&mut output, args);
-    output
+    append_frontend_args(&mut output, args)?;
+    Ok(output)
 }
 
 fn append_profile_args(output: &mut Vec<OsString>, args: &SuperArgs) {
@@ -91,12 +93,15 @@ fn append_target_args(output: &mut Vec<OsString>, args: &SuperArgs) {
     }
 }
 
-fn append_frontend_args(output: &mut Vec<OsString>, args: &SuperArgs) {
+fn append_frontend_args(
+    output: &mut Vec<OsString>,
+    args: &SuperArgs,
+) -> Result<(), prodex_cli::RuntimeFeaturePlanError> {
     if args.cli.is_none() {
-        output.extend(args.codex_features.to_codex_config_args());
+        output.extend(args.codex_features.to_codex_config_args()?);
         output.extend(args.codex_args.iter().cloned());
         output.extend([OsString::from("exec"), OsString::from("-")]);
-        return;
+        return Ok(());
     }
     let mut native_args = args.codex_args.clone();
     for key in ["model_provider", "model_reasoning_effort"] {
@@ -106,6 +111,7 @@ fn append_frontend_args(output: &mut Vec<OsString>, args: &SuperArgs) {
         ) {}
     }
     output.extend(native_args);
+    Ok(())
 }
 
 fn append_flag(output: &mut Vec<OsString>, name: &str, enabled: bool) {

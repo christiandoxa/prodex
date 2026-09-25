@@ -70,7 +70,7 @@ pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
         super_prompt::prompt_super_main_agent_configuration,
         super_prompt::prompt_super_sub_agent_configuration,
     )?;
-    let args = runtime_launch::resolved_super_runtime_tool_args(args, use_presidio);
+    let args = runtime_launch::resolved_super_runtime_tool_args(args, use_presidio)?;
     handle_super_runtime_tools(args, sub_agent)
 }
 

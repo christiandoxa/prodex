@@ -112,7 +112,9 @@ fn super_command_parses_as_distinct_subcommand_with_yolo_access_default() {
     };
     assert_eq!(args.profile.as_deref(), Some("main"));
 
-    let args = args.into_runtime_tool_args();
+    let args = args
+        .into_runtime_tool_args()
+        .expect("Codex feature plan should succeed");
     assert_eq!(args.profile.as_deref(), Some("main"));
     assert!(args.full_access);
     let tools = args.selected_tool_set();
@@ -165,7 +167,9 @@ fn super_command_url_keeps_v1_path_when_provided() {
         panic!("expected super command");
     };
 
-    let args = args.into_runtime_tool_args();
+    let args = args
+        .into_runtime_tool_args()
+        .expect("Codex feature plan should succeed");
     let rendered = args
         .codex_args
         .iter()
@@ -198,7 +202,9 @@ fn super_command_url_accepts_local_context_overrides() {
         panic!("expected super command");
     };
 
-    let args = args.into_runtime_tool_args();
+    let args = args
+        .into_runtime_tool_args()
+        .expect("Codex feature plan should succeed");
     let rendered = args
         .codex_args
         .iter()
@@ -315,7 +321,9 @@ fn super_command_url_expands_to_local_openai_provider_config() {
     assert_eq!(args.url.as_deref(), Some("http://127.0.0.1:8131"));
     assert_eq!(args.local_model.as_deref(), Some("local/qwen"));
 
-    let args = args.into_runtime_tool_args();
+    let args = args
+        .into_runtime_tool_args()
+        .expect("Codex feature plan should succeed");
     assert!(args.full_access);
     assert!(args.skip_quota_check);
 

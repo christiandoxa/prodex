@@ -35,7 +35,11 @@ fn run_command_renders_codex_runtime_feature_overrides() {
         panic!("expected run command");
     };
 
-    let rendered = rendered_os_args(&args.codex_args_with_feature_overrides());
+    let rendered = rendered_os_args(
+        &args
+            .codex_args_with_feature_overrides()
+            .expect("runtime feature plan should succeed"),
+    );
     assert!(rendered.contains(&"web_search=\"indexed\"".to_string()));
     assert!(rendered.contains(&"features.rollout_budget.enabled=true".to_string()));
     assert!(rendered.contains(&"features.rollout_budget.limit_tokens=100000".to_string()));
@@ -62,7 +66,11 @@ fn run_command_renders_respect_system_proxy_disable_override() {
         panic!("expected run command");
     };
 
-    let rendered = rendered_os_args(&args.codex_args_with_feature_overrides());
+    let rendered = rendered_os_args(
+        &args
+            .codex_args_with_feature_overrides()
+            .expect("runtime feature plan should succeed"),
+    );
     assert!(rendered.contains(&"features.respect_system_proxy=false".to_string()));
 }
 
@@ -81,7 +89,11 @@ fn rollout_budget_uses_valid_default_reminder_thresholds() {
         panic!("expected run command");
     };
 
-    let rendered = rendered_os_args(&args.codex_args_with_feature_overrides());
+    let rendered = rendered_os_args(
+        &args
+            .codex_args_with_feature_overrides()
+            .expect("runtime feature plan should succeed"),
+    );
     assert!(rendered.contains(
         &"features.rollout_budget.reminder_at_remaining_tokens=[75000,50000,25000]".to_string()
     ));

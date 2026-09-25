@@ -124,7 +124,9 @@ fn codex_01491_image_budget_override_reaches_each_codex_launch_once() {
         panic!("expected Super command");
     };
     assert_eq!(
-        args.into_runtime_tool_args().codex_args,
+        args.into_runtime_tool_args()
+            .expect("Codex feature plan should succeed")
+            .codex_args,
         os_args(&[
             "-c",
             "features.apps=false",
@@ -158,6 +160,7 @@ fn codex_01491_provider_defaults_precede_explicit_image_budget_overrides() {
     };
     let rendered = args
         .into_runtime_tool_args()
+        .expect("Codex feature plan should succeed")
         .codex_args
         .into_iter()
         .map(|arg| arg.to_string_lossy().into_owned())
@@ -194,10 +197,16 @@ fn codex_01491_provider_defaults_precede_explicit_image_budget_overrides() {
     let Commands::Super(args) = command else {
         panic!("expected Super command");
     };
-    assert!(args.into_runtime_tool_args().codex_args.iter().all(|arg| {
-        !arg.to_string_lossy()
-            .starts_with("features.compaction_image_budget=")
-    }));
+    assert!(
+        args.into_runtime_tool_args()
+            .expect("Codex feature plan should succeed")
+            .codex_args
+            .iter()
+            .all(|arg| {
+                !arg.to_string_lossy()
+                    .starts_with("features.compaction_image_budget=")
+            })
+    );
 }
 
 #[test]
@@ -244,6 +253,7 @@ fn codex_01501_explicit_image_budget_values_are_preserved() {
         };
         let rendered = args
             .into_runtime_tool_args()
+            .expect("Codex feature plan should succeed")
             .codex_args
             .into_iter()
             .map(|arg| arg.to_string_lossy().into_owned())

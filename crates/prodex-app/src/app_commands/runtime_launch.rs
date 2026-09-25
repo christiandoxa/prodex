@@ -63,7 +63,10 @@ pub(crate) fn handle_run(args: RunArgs) -> Result<()> {
         }
     }
 }
-pub(crate) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) -> RuntimeToolArgs {
+pub(crate) fn resolved_super_runtime_tool_args(
+    args: SuperArgs,
+    presidio: bool,
+) -> Result<RuntimeToolArgs, prodex_cli::RuntimeFeaturePlanError> {
     let normalized = prodex_runtime_launch::normalize_run_codex_args(&args.codex_args);
     let is_resume = prodex_runtime_launch::codex_resume_requested(&normalized);
     let model_is_explicit = args.local_model.is_some()
@@ -73,7 +76,7 @@ pub(crate) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) 
     let session_settings = is_resume
         .then(|| runtime_resume_session_settings_from_codex_args(&normalized))
         .flatten();
-    let mut runtime_args = args.into_runtime_tool_args_with_presidio(presidio);
+    let mut runtime_args = args.into_runtime_tool_args_with_presidio(presidio)?;
     if !model_is_explicit {
         remove_first_codex_config_override_pair(&mut runtime_args.codex_args, "model");
     }
@@ -88,7 +91,7 @@ pub(crate) fn resolved_super_runtime_tool_args(args: SuperArgs, presidio: bool) 
         model_is_explicit,
         effort_is_explicit,
     );
-    runtime_args
+    Ok(runtime_args)
 }
 
 pub(crate) fn resolve_super_dry_run_main_agent(args: &mut SuperArgs) -> Result<()> {

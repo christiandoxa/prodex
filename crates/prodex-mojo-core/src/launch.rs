@@ -1,5 +1,12 @@
 //! Versioned, caller-owned Codex argument plans. No native OS string or heap
 //! object crosses the boundary; opaque non-UTF-8 values remain Rust-owned.
+#[path = "launch/runtime_feature_plan.rs"]
+mod runtime_feature_plan;
+pub use runtime_feature_plan::{
+    RuntimeFeatureClockSource, RuntimeFeatureConfigInput, RuntimeFeatureConfigPlan,
+    RuntimeFeatureWebSearchMode, plan_runtime_feature_config,
+};
+
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
