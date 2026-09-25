@@ -237,7 +237,7 @@ fn quota_admission_uses_expected_upstream_flags() {
 
 #[cfg(not(feature = "mojo"))]
 #[test]
-fn quota_capacity_fails_closed_without_mojo() {
+fn quota_capacity_stays_fail_closed_without_feature() {
     let pair = WindowPair {
         allowed: None,
         limit_reached: None,
@@ -275,9 +275,40 @@ fn quota_capacity_fails_closed_without_mojo() {
         &usage,
         Some("gpt-5.6-luna")
     ));
+    assert!(openai_model_is_luna(Some("gpt-5.6-luna")));
+    assert!(openai_model_is_retired_spark(Some("gpt-5.3-codex-spark")));
+    assert!(std::ptr::eq(
+        openai_quota_runtime_window_pair_for_model(&usage, Some("gpt-5.6-luna")).unwrap(),
+        usage.rate_limit.as_ref().unwrap()
+    ));
+
+    let mut reserve = additional.clone();
+    reserve.limit_name = Some("Luna Reserve".to_string());
+    reserve.extra.insert(
+        "normalModelSlug".to_string(),
+        serde_json::json!("gpt-5.6-luna"),
+    );
+    assert!(additional_rate_limit_is_luna_reserve(&reserve));
+
     assert!(!openai_usage_has_unknown_luna_capacity(&usage));
     assert!(!openai_usage_supports_model(
         &usage,
+        false,
+        Some("gpt-5.6-luna")
+    ));
+
+    let mut unknown_usage = usage.clone();
+    unknown_usage
+        .rate_limit
+        .as_mut()
+        .unwrap()
+        .primary_window
+        .as_mut()
+        .unwrap()
+        .used_percent = None;
+    assert!(!openai_usage_has_unknown_luna_capacity(&unknown_usage));
+    assert!(!openai_usage_supports_model(
+        &unknown_usage,
         false,
         Some("gpt-5.6-luna")
     ));

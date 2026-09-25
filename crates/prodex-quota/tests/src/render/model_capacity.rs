@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn model_classification_has_expected_aliases() {
+    for model in ["luna", "gpt-5.6-luna", "GPT_5 6_LUNA"] {
+        assert!(openai_model_is_luna(Some(model)), "model={model:?}");
+    }
+    for model in ["spark", "gpt-5.3-codex-spark", "gpt-5.3-spark"] {
+        assert!(
+            openai_model_is_retired_spark(Some(model)),
+            "model={model:?}"
+        );
+    }
+    assert!(!openai_model_is_luna(None));
+    assert!(!openai_model_is_luna(Some("gpt-5.6-sol")));
+    assert!(!openai_model_is_retired_spark(Some("gpt-5.6-sol")));
+}
+
+#[test]
 fn missing_optional_additional_model_bucket_keeps_regular_models_ready() {
     let usage = main_windows(20, 1_700_001_800, 30, 1_700_259_200);
 
@@ -188,7 +204,7 @@ fn luna_reserve_is_model_specific_and_kept_separate_from_regular_quota() {
     reserve.metered_feature = None;
     reserve.extra.insert(
         "normalModelSlug".to_string(),
-        serde_json::json!("gpt-5.6-luna"),
+        serde_json::json!("GPT_5 6_LUNA"),
     );
     usage.rate_limit.as_mut().unwrap().extra.insert(
         "rateLimitUpsell".to_string(),
@@ -212,6 +228,66 @@ fn luna_reserve_is_model_specific_and_kept_separate_from_regular_quota() {
     assert!(!openai_quota_has_ready_limit_for_model(
         &usage,
         Some("gpt-5.6-sol")
+    ));
+}
+
+#[test]
+fn unknown_luna_capacity_supports_only_unexhausted_unknown_windows() {
+    let mut usage = main_windows(50, 1_700_001_800, 60, 1_700_259_200);
+    let regular = usage.rate_limit.as_mut().unwrap();
+    regular.primary_window.as_mut().unwrap().used_percent = None;
+    regular.secondary_window.as_mut().unwrap().used_percent = None;
+
+    assert!(!openai_quota_has_ready_limit_for_model(
+        &usage,
+        Some(OPENAI_LUNA_MODEL)
+    ));
+    assert!(openai_usage_has_unknown_luna_capacity(&usage));
+    assert!(openai_usage_supports_model(
+        &usage,
+        false,
+        Some(OPENAI_LUNA_MODEL)
+    ));
+    assert!(!openai_usage_supports_model(
+        &usage,
+        false,
+        Some("gpt-5.6-sol")
+    ));
+
+    usage
+        .rate_limit
+        .as_mut()
+        .unwrap()
+        .secondary_window
+        .as_mut()
+        .unwrap()
+        .used_percent = Some(100);
+    assert!(!openai_usage_has_unknown_luna_capacity(&usage));
+    assert!(!openai_usage_supports_model(
+        &usage,
+        false,
+        Some(OPENAI_LUNA_MODEL)
+    ));
+}
+
+#[test]
+fn exhausted_code_review_capacity_blocks_model_support() {
+    let mut usage = main_windows(50, 1_700_001_800, 60, 1_700_259_200);
+    usage.code_review_rate_limit = Some(
+        main_windows(0, 1_700_001_800, 60, 1_700_259_200)
+            .rate_limit
+            .unwrap(),
+    );
+
+    assert!(openai_usage_supports_model(
+        &usage,
+        false,
+        Some("gpt-5.3-codex")
+    ));
+    assert!(!openai_usage_supports_model(
+        &usage,
+        true,
+        Some("gpt-5.3-codex")
     ));
 }
 
