@@ -1,15 +1,13 @@
 
 from std.memory import Pointer
+from rich_text import rich_trim_bounds, rich_utf8_valid
+from rich_types import ProdexRichStringView
 
 
 comptime RESPONSE_FORWARDING_SKIP_HEADER: Int64 = 0
 comptime RESPONSE_FORWARDING_CONTENT_TYPE_SSE: Int64 = 1
 comptime RESPONSE_FORWARDING_USAGE_EVENT_LOGGABLE: Int64 = 2
 comptime RESPONSE_FORWARDING_GENERATION_START: Int64 = 3
-
-
-def response_ascii_whitespace(value: UInt8) -> Bool:
-    return value == 9 or value == 10 or value == 13 or value == 32
 
 
 def response_ascii_lower(value: UInt8) -> UInt8:
@@ -146,13 +144,11 @@ def prodex_runtime_response_forwarding_classify_v1(
     if operation == RESPONSE_FORWARDING_SKIP_HEADER:
         if present == 0:
             return 0
-        var start: Int64 = 0
-        var end = length
-        var ptr = response_text_ptr(address)
-        while start < end and response_ascii_whitespace(ptr[unsafe_offset=start]):
-            start += 1
-        while end > start and response_ascii_whitespace(ptr[unsafe_offset=end - 1]):
-            end -= 1
+        if length > 0 and not rich_utf8_valid(response_text_ptr(address), length):
+            return -1
+        var bounds = rich_trim_bounds(ProdexRichStringView(address, UInt(length)))
+        var start = bounds[0]
+        var end = bounds[1]
         if (
             response_equals_ci_range(address, start, end, StringSlice("connection"))
             or response_equals_ci_range(address, start, end, StringSlice("content-length"))
