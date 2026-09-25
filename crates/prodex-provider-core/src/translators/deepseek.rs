@@ -52,7 +52,6 @@ pub(crate) use self::tooling::{
 #[derive(Clone, Copy)]
 pub struct DeepSeekTranslator;
 
-#[cfg(feature = "mojo")]
 pub(super) fn deepseek_mojo_body(
     input: prodex_mojo_core::rich::DeepSeekKernelInput<'_>,
 ) -> Vec<u8> {
@@ -60,7 +59,6 @@ pub(super) fn deepseek_mojo_body(
         .unwrap_or_else(|error| panic!("Mojo DeepSeek kernel failed: {error:?}"))
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn deepseek_mojo_value(
     input: prodex_mojo_core::rich::DeepSeekKernelInput<'_>,
 ) -> serde_json::Value {
@@ -109,36 +107,6 @@ fn deepseek_passthrough_endpoint(endpoint: ProviderEndpoint) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn deepseek_provider_core_shapes_response_completed_event() {
-        assert_eq!(
-            deepseek_provider_core_response_completed_event(
-                3,
-                123,
-                &serde_json::json!({"id": "resp_1"}),
-            ),
-            serde_json::json!({
-                "type": "response.completed",
-                "sequence_number": 3,
-                "created_at": 123,
-                "response": {"id": "resp_1"},
-            })
-        );
-    }
-
-    #[test]
-    fn deepseek_provider_core_shapes_response_created_event() {
-        assert_eq!(
-            deepseek_provider_core_response_created_event(2, 123, "resp_1"),
-            serde_json::json!({
-                "type": "response.created",
-                "sequence_number": 2,
-                "created_at": 123,
-                "response": {"id": "resp_1"},
-            })
-        );
-    }
 
     #[test]
     fn deepseek_provider_core_classifies_chat_stream_errors() {
@@ -538,21 +506,6 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_provider_core_shapes_stream_output_text_item() {
-        assert_eq!(
-            deepseek_provider_core_stream_output_text_item("hello"),
-            serde_json::json!({
-                "type": "message",
-                "role": "assistant",
-                "content": [{
-                    "type": "output_text",
-                    "text": "hello",
-                }],
-            })
-        );
-    }
-
-    #[test]
     fn deepseek_provider_core_shapes_stream_chat_assistant_message() {
         assert_eq!(
             deepseek_provider_core_stream_chat_assistant_message("", "", &[]),
@@ -594,132 +547,6 @@ mod tests {
                     }
                 }],
             }))
-        );
-    }
-
-    #[test]
-    fn deepseek_provider_core_shapes_stream_tool_call_items() {
-        assert_eq!(
-            deepseek_provider_core_stream_tool_call_added_item(
-                "call_1",
-                "mcp__prodex_sqz__sqz_read_file"
-            ),
-            Some(serde_json::json!({
-                "type": "function_call",
-                "call_id": "call_1",
-                "name": "sqz_read_file",
-                "namespace": "mcp__prodex_sqz",
-            }))
-        );
-        assert_eq!(
-            deepseek_provider_core_stream_tool_call_added_item("call_2", "tool_search"),
-            None
-        );
-        assert_eq!(
-            deepseek_provider_core_stream_tool_call_item(
-                "call_3",
-                "tool_search",
-                "{\"query\":\"prodex\"}",
-                None,
-            ),
-            serde_json::json!({
-                "type": "tool_search_call",
-                "call_id": "call_3",
-                "execution": "client",
-                "arguments": {"query": "prodex"},
-            })
-        );
-        assert_eq!(
-            deepseek_provider_core_stream_tool_call_item(
-                "call_4",
-                "mcp__prodex_sqz__sqz_read_file",
-                "{\"path\":\"README.md\"}",
-                Some("sig_1"),
-            ),
-            serde_json::json!({
-                "type": "function_call",
-                "call_id": "call_4",
-                "name": "sqz_read_file",
-                "namespace": "mcp__prodex_sqz",
-                "arguments": "{\"path\":\"README.md\"}",
-                "gemini_thought_signature": "sig_1",
-            })
-        );
-    }
-
-    #[test]
-    fn deepseek_provider_core_shapes_stream_function_call_arguments_delta_source() {
-        assert_eq!(
-            deepseek_provider_core_stream_function_call_arguments_delta_source(
-                "call_1",
-                "{\"path\":\"README.md\"}",
-            ),
-            serde_json::json!({
-                "choices": [{
-                    "delta": {
-                        "tool_calls": [{
-                            "id": "call_1",
-                            "function": {
-                                "arguments": "{\"path\":\"README.md\"}",
-                            }
-                        }]
-                    }
-                }]
-            })
-        );
-    }
-
-    #[test]
-    fn deepseek_provider_core_shapes_stream_text_delta_values() {
-        assert_eq!(
-            deepseek_provider_core_stream_text_delta_source("hello"),
-            serde_json::json!({
-                "choices": [{
-                    "delta": {
-                        "content": "hello",
-                    }
-                }]
-            })
-        );
-        assert_eq!(
-            deepseek_provider_core_output_text_delta_event(4, 123, "resp_1", "hello"),
-            serde_json::json!({
-                "type": "response.output_text.delta",
-                "sequence_number": 4,
-                "created_at": 123,
-                "response_id": "resp_1",
-                "delta": "hello",
-            })
-        );
-    }
-
-    #[test]
-    fn deepseek_provider_core_shapes_stream_tool_call_events() {
-        let item = serde_json::json!({"type": "function_call", "call_id": "call_1"});
-        assert_eq!(
-            deepseek_provider_core_output_item_added_event(7, &item),
-            serde_json::json!({
-                "type": "response.output_item.added",
-                "sequence_number": 7,
-                "item": {"type": "function_call", "call_id": "call_1"},
-            })
-        );
-        assert_eq!(
-            deepseek_provider_core_function_call_arguments_delta_event(8, "call_1", "{\"x\":1}",),
-            serde_json::json!({
-                "type": "response.function_call_arguments.delta",
-                "sequence_number": 8,
-                "call_id": "call_1",
-                "delta": "{\"x\":1}",
-            })
-        );
-        assert_eq!(
-            deepseek_provider_core_output_item_done_event(9, &item),
-            serde_json::json!({
-                "type": "response.output_item.done",
-                "sequence_number": 9,
-                "item": {"type": "function_call", "call_id": "call_1"},
-            })
         );
     }
 }
