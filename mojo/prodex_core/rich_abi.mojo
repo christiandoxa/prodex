@@ -2,6 +2,7 @@ from std.memory import Pointer
 from std.sys.info import align_of, size_of
 
 from gemini_sse_state import gemini_response_part_plan
+from rich_text import rich_view_matches_literal
 from rich_types import (
     ProdexRichContextRecord,
     ProdexRichContextResult,
@@ -94,7 +95,14 @@ comptime ANTHROPIC_RESPONSE_PLAN_STATUS_OK: Int64 = 0
 comptime ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID: Int64 = 1
 comptime ANTHROPIC_RESPONSE_PLAN_STATUS_CAPACITY: Int64 = 3
 comptime ANTHROPIC_RESPONSE_PLAN_STATUS_ABI: Int64 = 4
-comptime ANTHROPIC_RESPONSE_PLAN_ABI_VERSION: Int64 = 6
+comptime ANTHROPIC_RESPONSE_PLAN_ABI_VERSION: Int64 = 7
+comptime ANTHROPIC_RESPONSE_PLAN_STATUS_MISSING_TYPE: Int64 = 5
+comptime ANTHROPIC_RESPONSE_PLAN_STATUS_UNSUPPORTED_TYPE: Int64 = 6
+comptime ANTHROPIC_RESPONSE_PLAN_STATUS_MISSING_TEXT: Int64 = 7
+comptime ANTHROPIC_RESPONSE_PLAN_STATUS_MISSING_TOOL_USE_ID: Int64 = 8
+comptime ANTHROPIC_RESPONSE_PLAN_STATUS_MISSING_TOOL_USE_NAME: Int64 = 9
+comptime ANTHROPIC_RESPONSE_PLAN_STATUS_MISSING_SERVER_TOOL_ID: Int64 = 10
+comptime ANTHROPIC_RESPONSE_PLAN_STATUS_UNSUPPORTED_SERVER_TOOL: Int64 = 11
 
 
 def anthropic_response_plan_append(
@@ -120,11 +128,13 @@ def anthropic_response_plan_append(
     return True
 
 
-@export("prodex_mojo_rich_anthropic_response_plan_v1")
-def prodex_mojo_rich_anthropic_response_plan_v1(
+@export("prodex_mojo_rich_anthropic_response_plan_v2")
+def prodex_mojo_rich_anthropic_response_plan_v2(
     abi_version: Int64,
-    input_kinds_address: UInt,
-    input_has_text_address: UInt,
+    input_types_address: UInt,
+    input_flags_address: UInt,
+    output_block_kinds_address: UInt,
+    output_block_has_text_address: UInt,
     output_kinds_address: UInt,
     output_starts_address: UInt,
     output_counts_address: UInt,
@@ -132,10 +142,11 @@ def prodex_mojo_rich_anthropic_response_plan_v1(
     output_capacity: Int64,
     output_count_address: UInt,
     input_count: Int64,
+    issue_index_address: UInt,
 ) abi("C") -> Int64:
     if abi_version != ANTHROPIC_RESPONSE_PLAN_ABI_VERSION:
         return ANTHROPIC_RESPONSE_PLAN_STATUS_ABI
-    if output_count_address == 0:
+    if output_count_address == 0 or issue_index_address == 0:
         return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
     if input_count < 0 or input_count > ANTHROPIC_RESPONSE_PLAN_MAX_BLOCKS:
         return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
@@ -145,12 +156,18 @@ def prodex_mojo_rich_anthropic_response_plan_v1(
     var output_count = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_count_address)
     )
+    var issue_index = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(issue_index_address)
+    )
     output_count[] = 0
+    issue_index[] = -1
     if input_count == 0:
         return ANTHROPIC_RESPONSE_PLAN_STATUS_OK
     if (
-        input_kinds_address == 0
-        or input_has_text_address == 0
+        input_types_address == 0
+        or input_flags_address == 0
+        or output_block_kinds_address == 0
+        or output_block_has_text_address == 0
         or output_kinds_address == 0
         or output_starts_address == 0
         or output_counts_address == 0
@@ -158,11 +175,17 @@ def prodex_mojo_rich_anthropic_response_plan_v1(
     ):
         return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
 
-    var input_kinds = Pointer[mut=False, Int64, ImmUntrackedOrigin](
-        unsafe_from_address=Int(input_kinds_address)
+    var input_types = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_types_address)
     )
-    var input_has_text = Pointer[mut=False, Int64, ImmUntrackedOrigin](
-        unsafe_from_address=Int(input_has_text_address)
+    var input_flags = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_flags_address)
+    )
+    var output_block_kinds = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_block_kinds_address)
+    )
+    var output_block_has_text = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_block_has_text_address)
     )
     var output_kinds = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_kinds_address)
@@ -178,20 +201,53 @@ def prodex_mojo_rich_anthropic_response_plan_v1(
     )
 
     for index in range(input_count):
-        var kind = input_kinds[unsafe_offset=index]
-        var has_text = input_has_text[unsafe_offset=index]
-        if kind < 0 or kind > 4 or has_text < 0 or has_text > 1:
+        var type_view = input_types[unsafe_offset=index].copy()
+        var flags = input_flags[unsafe_offset=index]
+        if flags < 0 or flags > 63:
             return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
-        if kind == 0 and has_text != 1:
-            return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
-        if kind != 0 and kind != 4 and has_text != 0:
-            return ANTHROPIC_RESPONSE_PLAN_STATUS_INVALID
+        if flags % 2 == 0:
+            issue_index[] = index
+            return ANTHROPIC_RESPONSE_PLAN_STATUS_MISSING_TYPE
+        var kind: Int64
+        var has_text: Int64 = 0
+        if rich_view_matches_literal["text"](type_view, False):
+            kind = 0
+            has_text = flags / 2 % 2
+            if has_text == 0:
+                issue_index[] = index
+                return ANTHROPIC_RESPONSE_PLAN_STATUS_MISSING_TEXT
+        elif rich_view_matches_literal["tool_use"](type_view, False):
+            if flags / 8 % 2 == 0:
+                issue_index[] = index
+                return ANTHROPIC_RESPONSE_PLAN_STATUS_MISSING_TOOL_USE_ID
+            if flags / 16 % 2 == 0:
+                issue_index[] = index
+                return ANTHROPIC_RESPONSE_PLAN_STATUS_MISSING_TOOL_USE_NAME
+            kind = 1
+        elif rich_view_matches_literal["server_tool_use"](type_view, False):
+            if flags / 8 % 2 == 0:
+                issue_index[] = index
+                return ANTHROPIC_RESPONSE_PLAN_STATUS_MISSING_SERVER_TOOL_ID
+            if flags / 32 % 2 == 0:
+                issue_index[] = index
+                return ANTHROPIC_RESPONSE_PLAN_STATUS_UNSUPPORTED_SERVER_TOOL
+            kind = 2
+        elif rich_view_matches_literal["web_search_tool_result"](type_view, False):
+            kind = 3
+        elif rich_view_matches_literal["thinking"](type_view, False):
+            kind = 4
+            has_text = flags / 4 % 2
+        else:
+            issue_index[] = index
+            return ANTHROPIC_RESPONSE_PLAN_STATUS_UNSUPPORTED_TYPE
+        output_block_kinds[unsafe_offset=index] = kind
+        output_block_has_text[unsafe_offset=index] = has_text
 
     var open_start: Int64 = -1
     var open_count: Int64 = 0
     for index in range(input_count):
-        var kind = input_kinds[unsafe_offset=index]
-        var has_text = input_has_text[unsafe_offset=index]
+        var kind = output_block_kinds[unsafe_offset=index]
+        var has_text = output_block_has_text[unsafe_offset=index]
         if kind == 0 and has_text == 1:
             if open_start < 0:
                 open_start = index

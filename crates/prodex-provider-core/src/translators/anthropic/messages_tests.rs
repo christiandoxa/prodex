@@ -3,31 +3,63 @@ use crate::{ProviderTransformLoss, anthropic_messages_translator};
 
 #[cfg(feature = "mojo")]
 #[test]
-fn mojo_response_envelope_matches_rust_oracle() {
+fn mojo_response_envelope_matches_expected_fixtures() {
+    let output = vec![json!({"type": "message", "content": [{"text": "x\n\u{1f980}"}]})];
     let cases = [
-        json!({}),
-        json!({
-            "id": "msg_\u{1f980}",
-            "model": "claude",
-            "usage": {
-                "input_tokens": 9,
-                "output_tokens": 4,
-                "server_tool_use": {"web_search_requests": 2},
-            },
-            "stop_reason": null,
-        }),
-        json!({
-            "id": null,
-            "model": 1,
-            "usage": {"input_tokens": u64::MAX, "output_tokens": 1},
-            "stop_reason": "end_turn",
-        }),
+        (
+            json!({}),
+            json!({
+                "id": "resp_anthropic",
+                "object": "response",
+                "created_at": 123,
+                "model": "unknown",
+                "output": output.clone(),
+            }),
+        ),
+        (
+            json!({
+                "id": "msg_\u{1f980}",
+                "model": "claude",
+                "usage": {
+                    "input_tokens": 9,
+                    "output_tokens": 4,
+                    "server_tool_use": {"web_search_requests": 2},
+                },
+                "stop_reason": null,
+            }),
+            json!({
+                "id": "msg_\u{1f980}",
+                "object": "response",
+                "created_at": 123,
+                "model": "claude",
+                "output": output.clone(),
+                "usage": {"input_tokens": 9, "output_tokens": 4, "total_tokens": 13},
+                "tool_usage": {"web_search": {"num_requests": 2}},
+                "metadata": {"anthropic": {"stop_reason": null}},
+            }),
+        ),
+        (
+            json!({
+                "id": null,
+                "model": 1,
+                "usage": {"input_tokens": u64::MAX, "output_tokens": 1},
+                "stop_reason": "end_turn",
+            }),
+            json!({
+                "id": "resp_anthropic",
+                "object": "response",
+                "created_at": 123,
+                "model": "unknown",
+                "output": output.clone(),
+                "usage": {"input_tokens": u64::MAX, "output_tokens": 1, "total_tokens": u64::MAX},
+                "metadata": {"anthropic": {"stop_reason": "end_turn"}},
+            }),
+        ),
     ];
-    for value in cases {
-        let output = vec![json!({"type": "message", "content": [{"text": "x\n\u{1f980}"}]})];
+    for (value, expected) in cases {
         assert_eq!(
             anthropic_response_envelope_mojo(&value, output.clone(), 123).unwrap(),
-            anthropic_response_envelope_rust(&value, output, 123),
+            expected,
             "{value}"
         );
     }
@@ -206,6 +238,7 @@ fn chat_request_rejects_disabled_parallel_tool_calls() {
 }
 
 #[test]
+#[cfg(feature = "mojo")]
 fn response_maps_text_tools_and_usage_to_responses() {
     let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -233,6 +266,7 @@ fn response_maps_text_tools_and_usage_to_responses() {
 }
 
 #[test]
+#[cfg(feature = "mojo")]
 fn response_maps_native_web_search_call_sources_and_usage() {
     let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -267,6 +301,7 @@ fn response_maps_native_web_search_call_sources_and_usage() {
 }
 
 #[test]
+#[cfg(feature = "mojo")]
 fn response_plan_preserves_flush_and_web_search_result_order() {
     let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -343,6 +378,7 @@ fn stream_maps_native_delta_and_tolerates_ping() {
 }
 
 #[test]
+#[cfg(feature = "mojo")]
 fn response_preserves_escaped_text_and_reasoning() {
     let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -363,6 +399,23 @@ fn response_preserves_escaped_text_and_reasoning() {
     assert_eq!(body["output"][1]["type"], "reasoning");
     assert_eq!(body["output"][1]["summary"][0]["text"], "hidden \"step\"");
     assert_eq!(body["output"][2]["content"][0]["text"], "done");
+}
+
+#[cfg(not(feature = "mojo"))]
+#[test]
+fn response_translation_is_explicitly_unsupported_without_mojo() {
+    let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        br#"{"content":[]}"#.to_vec(),
+    ));
+    assert!(matches!(
+        result.loss,
+        ProviderTransformLoss::UnsupportedUpstream { ref reason }
+            if reason == "Anthropic Messages response translation requires Mojo support"
+    ));
+    assert!(result.body.is_none());
+    assert_eq!(result.from_format, ProviderWireFormat::AnthropicMessages);
+    assert_eq!(result.to_format, ProviderWireFormat::OpenAiResponses);
 }
 
 #[test]

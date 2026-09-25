@@ -33,7 +33,10 @@ A Rust-only dependency does not justify retaining the entire surrounding
 application algorithm in Rust. Split acquisition and effects from the semantic
 plan, use typed/versioned caller-owned ABI records, validate returned indices,
 lengths and tags, and never silently recompute in Rust after a Mojo error.
-Feature-off Rust builds and test oracles are separate from the Mojo production path.
+Completed migrations delete the replaced Rust semantics, including feature-off
+copies and test oracles. Older retained copies in the inventory are cleanup work,
+not acceptable end states. When Mojo is unavailable, exclude the capability
+explicitly rather than reimplementing its decisions in Rust.
 
 Existing process, affinity, streaming, persistence and secret-safety invariants
 remain compatibility requirements. Compiler/library maturity must be established
@@ -916,3 +919,49 @@ secret-boundary guard, and `git diff --check`.
 The canonical broad inventory is 51,569 reachable Mojo LOC and 197,032 Rust
 production LOC, or 20.743681642471270% Mojo. The 75% target remains unmet;
 539,527 additional Mojo LOC are estimated at current Rust volume.
+
+## Anthropic Messages response planning wave
+
+The production consumer is `AnthropicMessagesTranslator::transform_response`
+in `crates/prodex-provider-core/src/translators/anthropic/messages.rs`. Its
+existing rich Mojo planner now classifies Anthropic response block types,
+selects text-bearing fields, and plans ordered Responses output in one bounded
+call. The `v2` operation ABI requires version 7. Rust retains Serde acquisition, typed
+result and rejection mapping, clock access, and web-search source merging.
+
+The Rust classifier, planner, response envelope, rendering copies, and test
+oracles were deleted. Without Mojo, response translation returns an explicit
+unsupported result. Independent expected-value fixtures cover all supported
+block types, empty and absent thinking text, malformed and missing fields,
+unsupported types, and tool/server-tool validation order. On a classification
+issue, Mojo returns the valid prefix so the caller materializes it before
+reporting that issue; a regression case preserves the earlier 4 MiB
+materialization error. Provider-boundary tests cover response shaping and
+web-search source attachment. The stream and request feature-off copies are
+separate remaining cleanup work.
+
+Validation passed:
+
+- `rtk cargo fmt --all --check`
+- `rtk cargo test --locked -q -p prodex-provider-core --features mojo` (255 passed, 2 ignored)
+- `rtk cargo test --locked -q -p prodex-provider-core --no-default-features` (213 passed)
+- `PRODEX_MOJO_VERSION=1.1.0 rtk cargo test --locked -q -p prodex-mojo-core --features mojo-rich response_plan_abi_rejects_stale_version_and_bad_bounds` (passed)
+- `PRODEX_MOJO_VERSION=1.1.0 rtk cargo test --locked -q -p prodex-app --features mojo-core --lib native_web_search_route_is_selected_only_for_native_modes_with_options -- --test-threads=1` (passed)
+- `rtk cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
+- `rtk npm run docs`
+- `rtk npm run test:changed -- --base HEAD --no-untracked` (passed)
+- `rtk node scripts/ci/mojo-ownership.mjs --check --json`
+- `rtk node scripts/ci/mojo-ownership.mjs --self-test --check`
+- `rtk node scripts/ci/mojo-authority-guard.mjs`
+- `rtk node scripts/ci/mojo-authority-guard.mjs --self-test`
+- `rtk node scripts/ci/mojo-no-fallback-guard.mjs`
+- `rtk node scripts/ci/mojo-no-fallback-guard.mjs --self-test`
+- `rtk node scripts/ci/mojo-production-share.mjs --check`
+- `rtk node scripts/ci/secret-boundary-guard.mjs`
+- `rtk git diff --check`
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 PRODEX_MOJO_TARGET=aarch64-apple-darwin PRODEX_MOJO_TARGET_CPU=generic rtk cargo build --release --locked --target aarch64-apple-darwin -p prodex-mojo-core --features mojo-runtime,mojo-quota,mojo-rich` (passed; GNU archive-format warning from Linux `ar`)
+
+The canonical broad inventory is 51,624 reachable Mojo LOC and 197,305 Rust
+production LOC, or 20.74% Mojo. The 7% release floor passes; the 75% project
+target remains unmet, with 540,291 additional Mojo LOC needed at the current
+Rust volume.

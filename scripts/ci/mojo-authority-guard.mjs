@@ -10,7 +10,7 @@ import { repoRoot } from "../npm/common.mjs";
 const MANIFEST_PATH = path.join(repoRoot, "migration", "mojo-ownership.json");
 const BASELINE_SHA = "2531c7a345f1607a18aa926e204b4d02cc322167";
 const RELEASE_TARGET = "0.420.0";
-const VALID_RUST_STATES = new Set(["deleted", "adapter-only", "test-only", "test-oracle-only"]);
+const VALID_RUST_STATES = new Set(["deleted", "adapter-only"]);
 const FORBIDDEN_FALLBACK_MARKERS = [
   /\bfallback_to_rust\b/iu,
   /\brust_fallback\b/iu,
@@ -106,7 +106,7 @@ function operationMetadataViolations(manifest) {
       }
     }
     if (!VALID_RUST_STATES.has(operation.rust_state_after)) {
-      violations.push(`${operation.name}: rust_state_after must be deleted, adapter-only, or test-only`);
+      violations.push(`${operation.name}: rust_state_after must be deleted or adapter-only`);
     }
     const isNew = operation.introduced_in === RELEASE_TARGET || operation.expanded_in === RELEASE_TARGET;
     if (!isNew) continue;
@@ -156,6 +156,15 @@ function selfTest() {
     rust_semantic_reductions: [{ operation: operation.name, migrated_semantic_loc: 1 }],
   };
   assert.equal(validateManifest(manifest, [["x.rs", "fn adapter() {}"]]), true);
+  for (const rustState of ["test-only", "test-oracle-only"]) {
+    assert.throws(
+      () => validateManifest({
+        ...manifest,
+        authoritative_operations: [{ ...operation, rust_state_after: rustState }],
+      }),
+      /rust_state_after must be deleted or adapter-only/u,
+    );
+  }
   assert.throws(
     () => validateManifest({ ...manifest, authoritative_operations: [{ ...operation, production_fallback: true }] }),
     /production_fallback must be false/u,

@@ -12,7 +12,12 @@ const manifestPath = path.join(repoRoot, "migration", "mojo-ownership.json");
 const COUNTING_RULES_VERSION = 1;
 const COUNTED_CLASSIFICATIONS = new Set(["DETERMINISTIC_DOMAIN", "MIXED"]);
 const SEMANTIC_ROLES = new Set(["semantic", undefined]);
-const VALID_RUST_REDUCTION_STATES = new Set(["deleted", "adapter-only", "test-oracle-only"]);
+const VALID_RUST_REDUCTION_STATES = new Set(["deleted", "adapter-only"]);
+const LEGACY_TEST_ORACLE_REDUCTIONS = new Set([
+  ["smart_context_adaptive_budget_planning", "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs", "smart_context_adaptive_budget_policy"].join("\u0000"),
+  ["smart_context_calibrated_estimate", "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs", "smart_context_observed_calibrated_request_estimate"].join("\u0000"),
+  ["smart_context_token_usage_summary", "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs", "smart_context_observed_usage_totals_rust"].join("\u0000"),
+]);
 const sourceCache = new Map();
 
 function parseArgs(argv) {
@@ -541,11 +546,21 @@ function reductionFor(reductions, file) {
   return reductions.find((reduction) => reduction.file === file);
 }
 
+function reductionKey(reduction) {
+  return [reduction.operation, reduction.file, reduction.symbol].join("\u0000");
+}
+
+function validateRustReductionState(reduction) {
+  assert(VALID_RUST_REDUCTION_STATES.has(reduction.final_state) ||
+    (reduction.final_state === "test-oracle-only" &&
+      LEGACY_TEST_ORACLE_REDUCTIONS.has(reductionKey(reduction))),
+    `${reduction.file}:${reduction.symbol} has an invalid Rust semantic reduction state`);
+}
+
 function requireReduction(reductions, file, message) {
   const reduction = reductionFor(reductions, file);
   assert(reduction, message);
-  assert(VALID_RUST_REDUCTION_STATES.has(reduction.final_state),
-    `${file} has an invalid Rust semantic reduction state`);
+  validateRustReductionState(reduction);
   return reduction;
 }
 
@@ -670,6 +685,8 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
     ...entriesFor(manifest, "baseline", "rust"),
     ...entriesFor(manifest, "baseline", "mojo"),
   ];
+  const reductions = manifest.rust_semantic_reductions ?? [];
+  for (const reduction of reductions) validateRustReductionState(reduction);
   if (releaseRevision === baselineRevision) {
     validateOperations(manifest, baselineRevision);
     return { baselineEntries, releaseEntries: baselineEntries };
@@ -683,10 +700,9 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
     !(releaseRevision === baselineRevision && !baselinePaths.has(entry.path) &&
       !sourceExists(manifest, releaseRevision, entry.path)));
   const releaseByPath = new Map(releaseEntriesAtRevision.map((entry) => [entry.path, entry]));
-  const reductions = manifest.rust_semantic_reductions ?? [];
   const reductionKeys = new Set();
   for (const reduction of reductions) {
-    const key = [reduction.operation, reduction.file, reduction.symbol].join("\u0000");
+    const key = reductionKey(reduction);
     assert(!reductionKeys.has(key),
       `duplicate Rust semantic reduction ${reduction.operation}:${reduction.file}:${reduction.symbol}`);
     reductionKeys.add(key);
@@ -723,8 +739,7 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
         baseline.path,
         `baseline production source ${baseline.path} was removed from the release manifest without a Rust reduction record`,
       );
-      assert(["deleted", "adapter-only", "test-oracle-only"].includes(reduction.final_state),
-        `${baseline.path} removal is not a declared Rust semantic reduction`);
+      validateRustReductionState(reduction);
       continue;
     }
     const releaseLoc = semanticLocAtRevision(manifest, releaseRevision, release);
@@ -770,8 +785,6 @@ function validateInventory(manifest, baselineRevision, releaseRevision) {
       `${reduction.file}:${reduction.symbol} names an unknown operation`);
     assert(typeof reduction.previous_responsibility === "string",
       `${reduction.file} Rust reduction needs its previous responsibility`);
-    assert(VALID_RUST_REDUCTION_STATES.has(reduction.final_state),
-      `${reduction.file}:${reduction.symbol} has an invalid final Rust state`);
     assert(!(reduction.migrated_semantic_loc !== undefined && reduction.cleanup_loc !== undefined),
       `${reductionLabel(reduction)} cannot mix migrated_semantic_loc and cleanup_loc`);
     if (reduction.migrated_semantic_loc !== undefined) {
@@ -900,6 +913,19 @@ export function ownershipMeetsMinimum(result, minimumPercent) {
 function selfTest() {
   assert.equal(countSemanticLines("// comment\nuse std::x;\n#[cfg(test)]\nmod tests {\nfn ignored() {}\n}\nfn production() {}\n", "rust"), 1);
   assert.equal(countSemanticLines("# comment\nfrom std import Pointer\n@export(\"x\")\ndef production():\n    return 1\n", "mojo"), 2);
+  const legacyOracle = {
+    operation: "smart_context_adaptive_budget_planning",
+    file: "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
+    symbol: "smart_context_adaptive_budget_policy",
+    final_state: "test-oracle-only",
+  };
+  assert.doesNotThrow(() => validateRustReductionState(legacyOracle));
+  assert.throws(
+    () => validateRustReductionState({ ...legacyOracle, operation: "new_operation" }),
+    /invalid Rust semantic reduction state/u,
+  );
+  assert.doesNotThrow(() => validateRustReductionState({ ...legacyOracle, final_state: "adapter-only" }));
+  assert.doesNotThrow(() => validateRustReductionState({ ...legacyOracle, final_state: "deleted" }));
   const result = calculateOwnership(
     {
       rust_deterministic_sources: [],

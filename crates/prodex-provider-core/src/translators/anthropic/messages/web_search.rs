@@ -180,6 +180,7 @@ pub(super) fn anthropic_web_search_queries(input: Option<&Value>) -> Vec<Value> 
         .unwrap_or_default()
 }
 
+#[cfg(feature = "mojo")]
 pub(super) fn merge_anthropic_web_search_result(output: &mut [Value], block: &Value) {
     let Some(tool_use_id) = block.get("tool_use_id").and_then(Value::as_str) else {
         return;
@@ -194,6 +195,7 @@ pub(super) fn merge_anthropic_web_search_result(output: &mut [Value], block: &Va
     call["action"]["sources"] = Value::Array(sources);
 }
 
+#[cfg(feature = "mojo")]
 fn anthropic_web_search_sources(block: &Value) -> Vec<Value> {
     block
         .get("content")
@@ -209,12 +211,4 @@ fn anthropic_web_search_sources(block: &Value) -> Vec<Value> {
             Some(source)
         })
         .collect()
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(super) fn anthropic_tool_usage(value: Option<&Value>) -> Option<Value> {
-    let requests = value?
-        .pointer("/server_tool_use/web_search_requests")?
-        .as_u64()?;
-    Some(json!({"web_search": {"num_requests": requests}}))
 }

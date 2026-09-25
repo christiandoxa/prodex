@@ -40,6 +40,8 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/fallback/chains.rs",
   "crates/prodex-provider-core/src/catalog.rs",
   "crates/prodex-provider-core/src/models.rs",
+  "crates/prodex-provider-core/src/translators/anthropic/messages.rs",
+  "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs",
   "crates/prodex-runtime-quota/src/pressure.rs",
   "crates/prodex-runtime-store/src/continuations/status.rs",
   "crates/prodex-runtime-store/src/continuations/status/mojo.rs",
@@ -56,6 +58,17 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
 ]);
 const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"mojo"\s*\)/u;
+const ANTHROPIC_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs";
+const ANTHROPIC_MESSAGES_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages.rs";
+const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
+  [/\bfn\s+anthropic_response_block_input\s*\(/u, "Rust response block classifier"],
+  [/\bfn\s+plan_with_rust\s*\(/u, "Rust response planner"],
+  [/\b(?:Some\s*\(\s*)?"(?:text|tool_use|server_tool_use|web_search_tool_result|thinking)"(?:\s*\))?\s*=>/u,
+    "Rust response block classification"],
+  [/\bResponsePlanItem\s*\{\s*kind\s*:\s*ResponsePlanKind\s*::/u,
+    "Rust response plan construction", true],
+  [FEATURE_OFF_RUST_PATH, "feature-off Rust response path"],
+];
 
 const FORBIDDEN_MARKERS = [
   "prodex_mojo_fallback",
@@ -75,7 +88,21 @@ export function findViolations(files) {
       UNCONDITIONAL_MOJO_FILES.has(filePath) && FEATURE_OFF_RUST_PATH.test(contents),
     )
     .map(([filePath]) => `${filePath}: Mojo-owned quota scoring cannot have a feature-off Rust path`);
-  return [...markerViolations, ...featureOffViolations];
+  const anthropicResponseViolations = files.flatMap(([filePath, contents]) =>
+    filePath !== ANTHROPIC_RESPONSE_FILE
+      ? []
+      : ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS
+        .filter(([pattern, , productionOnly]) => pattern.test(
+          productionOnly ? contents.split("#[cfg(test)]", 1)[0] : contents,
+        ))
+        .map(([, reason]) => `${filePath}: contains ${reason}`),
+  );
+  const anthropicEnvelopeViolations = files
+    .filter(([filePath, contents]) => filePath === ANTHROPIC_MESSAGES_FILE &&
+      /\bfn\s+(?:anthropic_response_envelope_rust|anthropic_usage)\s*\(/u.test(contents))
+    .map(([filePath]) => `${filePath}: contains a Rust response envelope implementation`);
+  return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
+    ...anthropicEnvelopeViolations];
 }
 
 async function promotedFiles() {
@@ -97,6 +124,36 @@ function selfTest() {
     ]]).length,
     1,
   );
+  const responseViolations = (contents) => findViolations([[ANTHROPIC_RESPONSE_FILE, contents]]);
+  assert.deepEqual(responseViolations(`
+    fn response_plan_with_mojo() {
+      let kind = classified.kind;
+      ResponsePlanItem { kind: match item.kind { _ => ResponsePlanKind::Message } }
+    }
+  `), []);
+  assert.deepEqual(responseViolations(
+    "#[cfg(test)] mod tests { assert_eq!(plan, ResponsePlanItem { kind: ResponsePlanKind::Message }); }",
+  ), []);
+  assert.match(responseViolations("fn anthropic_response_block_input() {}")[0], /Rust response block classifier/u);
+  assert.match(responseViolations("fn plan_with_rust() {}")[0], /Rust response planner/u);
+  assert.match(responseViolations("#[cfg(test)] fn plan_with_rust() {}")[0], /Rust response planner/u);
+  assert.match(responseViolations('match kind { Some("tool_use") => (), _ => () }')[0],
+    /Rust response block classification/u);
+  assert.match(responseViolations("ResponsePlanItem { kind: ResponsePlanKind::Message }")[0],
+    /Rust response plan construction/u);
+  assert.match(responseViolations('#[cfg(not(feature = "mojo"))] fn fallback() {}')[0],
+    /feature-off Rust response path/u);
+  assert.match(findViolations([[ANTHROPIC_MESSAGES_FILE,
+    "fn anthropic_response_envelope_rust() {}"]])[0], /Rust response envelope/u);
+  for (const filePath of [
+    "crates/prodex-provider-core/src/translators/anthropic/messages.rs",
+    "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
+  ]) {
+    assert.deepEqual(findViolations([[
+      filePath,
+      '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
+    ]]), []);
+  }
 }
 
 async function main() {
