@@ -144,8 +144,24 @@ export function validateSonarConfiguration(workflowContents, properties) {
       violations.push(`.github/workflows/ci.yml: rust-quality job missing ${marker}`);
     }
   }
-  if (/^    (?:if|needs):/mu.test(job)) {
+  const qualityNeeds = job.match(/^    needs:\s*([a-z0-9_-]+)\s*$/mu)?.[1] ?? null;
+  if (/^    if:/mu.test(job) ||
+      (qualityNeeds !== null && qualityNeeds !== "mojo-runtime-linux-archive")) {
     violations.push(".github/workflows/ci.yml: rust-quality must run on every commit");
+  }
+  if (qualityNeeds === "mojo-runtime-linux-archive") {
+    const archiveJob = workflowJob(workflowContents, "mojo-runtime-linux-archive");
+    const changesJob = workflowJob(workflowContents, "changes");
+    const archiveNeeds = archiveJob?.match(/^    needs:\s*([a-z0-9_-]+)\s*$/mu)?.[1] ?? null;
+    if (!archiveJob ||
+        /^    if:/mu.test(archiveJob) ||
+        archiveNeeds !== "changes" ||
+        !changesJob ||
+        /^    if:/mu.test(changesJob)) {
+      violations.push(
+        ".github/workflows/ci.yml: rust-quality Mojo archive dependency must remain unconditional",
+      );
+    }
   }
   if (supplyChainJob?.includes(CLIPPY_QUALITY_COMMAND)) {
     violations.push(".github/workflows/ci.yml: production Clippy must run in parallel rust-quality job");

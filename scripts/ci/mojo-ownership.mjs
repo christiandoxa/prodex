@@ -210,7 +210,7 @@ function deletedAuthoritativeOperations(manifest) {
 
 function operationsAtRevision(manifest, revision) {
   const operations = manifest.authoritative_operations ?? [];
-  if (revision === manifest.baseline_sha) return operations;
+  if (revision === manifest.baseline_sha) return baselineOperations(manifest);
   const overrides = manifest.release_operation_overrides ?? {};
   for (const name of Object.keys(overrides)) {
     assert(operations.some((operation) => operation.name === name),
