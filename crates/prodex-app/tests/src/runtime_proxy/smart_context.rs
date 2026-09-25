@@ -2,15 +2,18 @@ use super::*;
 use std::borrow::Cow;
 
 #[path = "smart_context/budget.rs"]
+#[cfg(feature = "mojo-quota")]
 mod budget;
 
 #[path = "smart_context/rehydrate_dedupe.rs"]
 mod rehydrate_dedupe;
 
 #[path = "smart_context/prepare.rs"]
+#[cfg(feature = "mojo-quota")]
 mod prepare;
 
 #[path = "smart_context/metadata.rs"]
+#[cfg(feature = "mojo-quota")]
 mod metadata;
 
 #[path = "smart_context/tool_outputs/prepare_fallbacks.rs"]
@@ -54,6 +57,7 @@ fn smart_context_test_state_snapshot(shared: &RuntimeRotationProxyShared) -> Str
     format!("{state:#?}")
 }
 
+#[cfg(feature = "mojo-quota")]
 fn register_persistent_runtime_smart_context_test_state(
     shared: &RuntimeRotationProxyShared,
     model_context_window_tokens: Option<u64>,
@@ -135,4 +139,32 @@ fn smart_context_test_shared(name: &str) -> RuntimeRotationProxyShared {
             standard: 8,
         }),
     }
+}
+
+#[cfg(not(feature = "mojo-quota"))]
+#[test]
+fn smart_context_preparation_is_unavailable_without_mojo() {
+    let shared = smart_context_test_shared("mojo-unavailable");
+    register_runtime_smart_context_proxy_state(&shared, true, None, None);
+    smart_context_observe_minimal_budget(&shared);
+    let repeated = "repeated tool output\n".repeat(800);
+    let request = smart_context_test_request(serde_json::json!({
+        "input": [
+            {"type": "function_call_output", "call_id": "call_1", "output": repeated},
+            {"type": "function_call_output", "call_id": "call_2", "output": repeated}
+        ]
+    }));
+    let before_state = smart_context_test_state_snapshot(&shared);
+
+    let prepared = prepare_runtime_smart_context_http_body(
+        770,
+        &request,
+        &shared,
+        RuntimeRouteKind::Responses,
+    )
+    .expect("smart context prepare");
+
+    assert!(matches!(prepared, Cow::Borrowed(_)));
+    assert_eq!(prepared.as_ref(), request.body.as_slice());
+    assert_eq!(smart_context_test_state_snapshot(&shared), before_state);
 }

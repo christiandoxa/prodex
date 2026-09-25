@@ -71,6 +71,7 @@ fn smart_context_prepare_noop_returns_original_bytes() {
 }
 
 #[test]
+#[cfg(feature = "mojo-quota")]
 fn smart_context_subthreshold_rewrite_discards_planned_state() {
     let shared = smart_context_test_shared("subthreshold-plan-discard");
     register_runtime_smart_context_proxy_state(&shared, true, None, None);
@@ -116,6 +117,7 @@ fn smart_context_prepare_passes_invalid_json_unchanged() {
 }
 
 #[test]
+#[cfg(feature = "mojo-quota")]
 fn smart_context_prepare_passes_too_deep_json_unchanged_without_panic_fallback() {
     let shared = smart_context_test_shared("prepare-too-deep-json");
     register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);

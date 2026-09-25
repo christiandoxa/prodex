@@ -89,6 +89,7 @@ fn smart_context_compact_session_body_does_not_panic() {
 }
 
 #[test]
+#[cfg(feature = "mojo-quota")]
 fn smart_context_compact_prepare_fault_falls_back_without_panic_recovery() {
     let fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_PANIC_ONCE", "1");
     let shared = smart_context_test_shared("compact-explicit-fallback");
@@ -138,6 +139,7 @@ fn smart_context_compact_prepare_fault_falls_back_without_panic_recovery() {
 }
 
 #[test]
+#[cfg(feature = "mojo-quota")]
 fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
     let fault = TestEnvVarGuard::set("PRODEX_RUNTIME_FAULT_SMART_CONTEXT_UNWIND_ONCE", "1");
     let shared = smart_context_test_shared("websocket-panic-fallback");
@@ -203,6 +205,7 @@ fn smart_context_websocket_prepare_panic_falls_back_to_original_text() {
 }
 
 #[test]
+#[cfg(feature = "mojo-quota")]
 fn smart_context_websocket_unicode_static_context_does_not_enter_panic_cooldown() {
     let shared = smart_context_test_shared("websocket-unicode-static-context");
     register_runtime_smart_context_proxy_state(&shared, true, Some(32_000), None);

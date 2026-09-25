@@ -43,10 +43,6 @@ fn observed_token_accounting_uses_real_usage_and_available_window() {
     assert_eq!(accounting.effective_input_tokens, 42_000);
     assert_eq!(accounting.available_context_tokens, Some(78_000));
     assert!(accounting.accounting_risks.is_empty());
-    assert_eq!(
-        smart_context_token_budget_tier_from_accounting(&accounting),
-        SmartContextTokenBudgetTier::Exact
-    );
 }
 
 #[test]
@@ -175,7 +171,8 @@ fn observed_token_accounting_with_calibration_preserves_unbucketed_behavior() {
             calibration_bucket_key: None,
             calibration_samples: Vec::new(),
         },
-    );
+    )
+    .expect("Smart Context accounting requires Mojo");
 
     assert_eq!(explicit, legacy);
     assert_eq!(explicit.estimated_current_request_tokens, 10_064);
@@ -225,7 +222,8 @@ fn observed_token_accounting_calibrates_separately_by_bucket() {
             calibration_bucket_key: Some(responses_bucket),
             calibration_samples: samples.clone(),
         },
-    );
+    )
+    .expect("Smart Context accounting requires Mojo");
     let compact = smart_context_observed_token_accounting_with_calibration(
         SmartContextObservedTokenAccountingCalibrationInput {
             accounting: SmartContextObservedTokenAccountingInput {
@@ -239,7 +237,8 @@ fn observed_token_accounting_calibrates_separately_by_bucket() {
             calibration_bucket_key: Some(compact_bucket),
             calibration_samples: samples,
         },
-    );
+    )
+    .expect("Smart Context accounting requires Mojo");
 
     assert_eq!(responses.estimated_current_request_tokens, 10_064);
     assert_eq!(compact.estimated_current_request_tokens, 33_814);
@@ -421,6 +420,7 @@ fn smart_context_test_calibrated_bucket_estimate(
             calibration_samples: samples,
         },
     )
+    .expect("Smart Context accounting requires Mojo")
     .estimated_current_request_tokens
 }
 

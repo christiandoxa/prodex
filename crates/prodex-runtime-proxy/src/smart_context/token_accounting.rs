@@ -1,11 +1,12 @@
+#[cfg(feature = "mojo")]
 mod calibration;
 mod estimation;
+#[cfg(feature = "mojo")]
 mod observed;
-#[cfg(any(not(feature = "mojo"), test))]
-pub(super) mod oracle;
 
 use super::*;
 use crate::RuntimeTokenUsage;
+#[cfg(feature = "mojo")]
 pub(super) use calibration::*;
 pub use estimation::{
     SMART_CONTEXT_ESTIMATED_BYTES_PER_TOKEN, smart_context_estimate_tokens_from_body,
@@ -47,7 +48,7 @@ pub const SMART_CONTEXT_MEMORY_CAPSULE_MINIMAL_TOKEN_BUDGET: usize = 256;
 pub const SMART_CONTEXT_MEMORY_CAPSULE_CONDENSED_TOKEN_BUDGET: usize = 1_024;
 pub const SMART_CONTEXT_MEMORY_CAPSULE_LARGE_TOKEN_BUDGET: usize = 4_096;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo"))]
 pub(crate) fn smart_context_select_memory_capsules_for_policy(
     capsules: impl IntoIterator<Item = SmartContextMemoryCapsule>,
     accounting: &SmartContextObservedTokenAccounting,
@@ -362,6 +363,7 @@ pub struct SmartContextObservedTokenAccounting {
     pub pressure: SmartContextPressureSnapshot,
 }
 
+#[cfg(feature = "mojo")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SmartContextTokenAccountingDecision {
     observed_uncached_input_tokens: u64,
@@ -374,7 +376,7 @@ struct SmartContextTokenAccountingDecision {
     accounting_risks: Vec<SmartContextTokenAccountingRisk>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo"))]
 pub(crate) fn smart_context_observed_token_accounting(
     input: SmartContextObservedTokenAccountingInput,
 ) -> SmartContextObservedTokenAccounting {
@@ -385,8 +387,10 @@ pub(crate) fn smart_context_observed_token_accounting(
             calibration_samples: Vec::new(),
         },
     )
+    .expect("Smart Context accounting requires Mojo")
 }
 
+#[cfg(feature = "mojo")]
 fn smart_context_observed_token_accounting_from_decision(
     input: SmartContextObservedTokenAccountingInput,
     usage_totals: observed::SmartContextObservedUsageTotals,
@@ -421,7 +425,7 @@ fn smart_context_observed_token_accounting_from_decision(
 
 pub fn smart_context_observed_token_accounting_with_calibration(
     input: SmartContextObservedTokenAccountingCalibrationInput,
-) -> SmartContextObservedTokenAccounting {
+) -> Option<SmartContextObservedTokenAccounting> {
     #[cfg(feature = "mojo")]
     {
         let SmartContextObservedTokenAccountingCalibrationInput {
@@ -480,7 +484,7 @@ pub fn smart_context_observed_token_accounting_with_calibration(
             accounting_risks: &accounting_risks,
         });
 
-        smart_context_observed_token_accounting_from_decision(
+        Some(smart_context_observed_token_accounting_from_decision(
             input,
             usage_totals,
             estimated_current_request_tokens,
@@ -495,13 +499,17 @@ pub fn smart_context_observed_token_accounting_with_calibration(
                 accounting_risks,
             },
             pressure,
-        )
+        ))
     }
 
     #[cfg(not(feature = "mojo"))]
-    oracle::smart_context_observed_token_accounting_rust(input)
+    {
+        let _ = input;
+        None
+    }
 }
 
+#[cfg(feature = "mojo")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmartContextPressureSnapshotInput<'a> {
     pub model_context_window_tokens: Option<u64>,
@@ -512,116 +520,60 @@ pub struct SmartContextPressureSnapshotInput<'a> {
     pub accounting_risks: &'a [SmartContextTokenAccountingRisk],
 }
 
+#[cfg(feature = "mojo")]
 pub fn smart_context_pressure_snapshot(
     input: SmartContextPressureSnapshotInput<'_>,
 ) -> SmartContextPressureSnapshot {
-    #[cfg(feature = "mojo")]
-    {
-        let snapshot = crate::quota::mojo::smart_context_pressure_snapshot(
-            input.model_context_window_tokens,
-            input.reserved_output_tokens,
-            input.effective_input_tokens,
-            match input.effective_input_source {
-                SmartContextTokenAccountingSource::CurrentRequestTokens => 0,
-                SmartContextTokenAccountingSource::CurrentRequestBodyEstimate => 1,
-                SmartContextTokenAccountingSource::ObservedHistory => 2,
-                SmartContextTokenAccountingSource::Unknown => 3,
-            },
-            input
-                .accounting_risks
-                .contains(&SmartContextTokenAccountingRisk::UnknownTokenWindow),
-            input
-                .accounting_risks
-                .contains(&SmartContextTokenAccountingRisk::ZeroContextWindow),
-            input
-                .accounting_risks
-                .contains(&SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow),
-        )
-        .expect("Mojo Smart Context pressure snapshot returned invalid output");
-        let pressure_band = match snapshot.pressure_band {
-            0 => Some(SmartContextPressureBand::Unknown),
-            1 => Some(SmartContextPressureBand::Low),
-            2 => Some(SmartContextPressureBand::Moderate),
-            3 => Some(SmartContextPressureBand::High),
-            4 => Some(SmartContextPressureBand::Critical),
-            5 => Some(SmartContextPressureBand::Exhausted),
-            _ => None,
-        };
-        let estimator_confidence = match snapshot.estimator_confidence {
-            0 => Some(SmartContextEstimatorConfidence::High),
-            1 => Some(SmartContextEstimatorConfidence::Medium),
-            2 => Some(SmartContextEstimatorConfidence::Low),
-            _ => None,
-        };
-        let pressure_band = pressure_band.expect("Mojo Smart Context pressure band is invalid");
-        let estimator_confidence =
-            estimator_confidence.expect("Mojo Smart Context estimator confidence is invalid");
-        SmartContextPressureSnapshot {
-            model_context_window_tokens: input.model_context_window_tokens,
-            reserved_output_tokens: input.reserved_output_tokens,
-            effective_usable_context_tokens: snapshot.effective_usable_context_tokens,
-            effective_used_tokens: snapshot.effective_used_tokens,
-            pressure_basis_points: snapshot.pressure_basis_points,
-            pressure_band,
-            absolute_safety_floor_tokens: snapshot.absolute_safety_floor_tokens,
-            available_context_tokens: input.available_context_tokens,
-            estimator_confidence,
-        }
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    oracle::smart_context_pressure_snapshot_rust(input)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub fn smart_context_pressure_band(pressure_basis_points: Option<u32>) -> SmartContextPressureBand {
-    match pressure_basis_points {
-        None => SmartContextPressureBand::Unknown,
-        Some(value) if value >= 10_000 => SmartContextPressureBand::Exhausted,
-        Some(value) if value >= 9_000 => SmartContextPressureBand::Critical,
-        Some(value) if value >= 7_500 => SmartContextPressureBand::High,
-        Some(value) if value >= 5_000 => SmartContextPressureBand::Moderate,
-        Some(_) => SmartContextPressureBand::Low,
-    }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub fn smart_context_estimator_confidence(
-    source: SmartContextTokenAccountingSource,
-    risks: &[SmartContextTokenAccountingRisk],
-) -> SmartContextEstimatorConfidence {
-    if risks.iter().any(|risk| {
-        matches!(
-            risk,
-            SmartContextTokenAccountingRisk::UnknownTokenWindow
-                | SmartContextTokenAccountingRisk::ZeroContextWindow
-                | SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow
-        )
-    }) {
-        return SmartContextEstimatorConfidence::Low;
-    }
-    match source {
-        SmartContextTokenAccountingSource::CurrentRequestTokens
-        | SmartContextTokenAccountingSource::ObservedHistory => {
-            SmartContextEstimatorConfidence::High
-        }
-        SmartContextTokenAccountingSource::CurrentRequestBodyEstimate => {
-            SmartContextEstimatorConfidence::Medium
-        }
-        SmartContextTokenAccountingSource::Unknown => SmartContextEstimatorConfidence::Low,
-    }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub fn smart_context_absolute_safety_floor_tokens(
-    model_context_window_tokens: Option<u64>,
-    reserved_output_tokens: u64,
-) -> u64 {
-    let Some(window) = model_context_window_tokens else {
-        return 2_000;
+    let snapshot = crate::quota::mojo::smart_context_pressure_snapshot(
+        input.model_context_window_tokens,
+        input.reserved_output_tokens,
+        input.effective_input_tokens,
+        match input.effective_input_source {
+            SmartContextTokenAccountingSource::CurrentRequestTokens => 0,
+            SmartContextTokenAccountingSource::CurrentRequestBodyEstimate => 1,
+            SmartContextTokenAccountingSource::ObservedHistory => 2,
+            SmartContextTokenAccountingSource::Unknown => 3,
+        },
+        input
+            .accounting_risks
+            .contains(&SmartContextTokenAccountingRisk::UnknownTokenWindow),
+        input
+            .accounting_risks
+            .contains(&SmartContextTokenAccountingRisk::ZeroContextWindow),
+        input
+            .accounting_risks
+            .contains(&SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow),
+    )
+    .expect("Mojo Smart Context pressure snapshot returned invalid output");
+    let pressure_band = match snapshot.pressure_band {
+        0 => Some(SmartContextPressureBand::Unknown),
+        1 => Some(SmartContextPressureBand::Low),
+        2 => Some(SmartContextPressureBand::Moderate),
+        3 => Some(SmartContextPressureBand::High),
+        4 => Some(SmartContextPressureBand::Critical),
+        5 => Some(SmartContextPressureBand::Exhausted),
+        _ => None,
     };
-    let usable = window.saturating_sub(reserved_output_tokens);
-    (usable / 20).clamp(1_000, 8_000)
+    let estimator_confidence = match snapshot.estimator_confidence {
+        0 => Some(SmartContextEstimatorConfidence::High),
+        1 => Some(SmartContextEstimatorConfidence::Medium),
+        2 => Some(SmartContextEstimatorConfidence::Low),
+        _ => None,
+    };
+    let pressure_band = pressure_band.expect("Mojo Smart Context pressure band is invalid");
+    let estimator_confidence =
+        estimator_confidence.expect("Mojo Smart Context estimator confidence is invalid");
+    SmartContextPressureSnapshot {
+        model_context_window_tokens: input.model_context_window_tokens,
+        reserved_output_tokens: input.reserved_output_tokens,
+        effective_usable_context_tokens: snapshot.effective_usable_context_tokens,
+        effective_used_tokens: snapshot.effective_used_tokens,
+        pressure_basis_points: snapshot.pressure_basis_points,
+        pressure_band,
+        absolute_safety_floor_tokens: snapshot.absolute_safety_floor_tokens,
+        available_context_tokens: input.available_context_tokens,
+        estimator_confidence,
+    }
 }
 
 pub fn smart_context_observed_usage_context_tokens(usage: RuntimeTokenUsage) -> Option<u64> {
@@ -633,38 +585,34 @@ pub fn smart_context_observed_usage_context_tokens(usage: RuntimeTokenUsage) -> 
     }
 
     #[cfg(not(feature = "mojo"))]
-    smart_context_observed_usage_context_tokens_rust(usage)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(super) fn smart_context_observed_usage_context_tokens_rust(
-    usage: RuntimeTokenUsage,
-) -> Option<u64> {
-    let observed = usage
-        .input_tokens
-        .saturating_add(usage.output_tokens)
-        .saturating_add(usage.reasoning_tokens);
-    let observed = if observed == 0 {
-        usage.cached_input_tokens
-    } else {
-        observed
-    };
-    (observed > 0).then_some(observed)
-}
-
-pub fn smart_context_token_budget_tier_from_accounting(
-    accounting: &SmartContextObservedTokenAccounting,
-) -> SmartContextTokenBudgetTier {
-    accounting
-        .available_context_tokens
-        .map(smart_context_u64_budget_tier)
-        .unwrap_or(SmartContextTokenBudgetTier::Exact)
+    {
+        let _ = usage;
+        None
+    }
 }
 
 pub fn smart_context_accounting_safe_for_adaptive_policy(
     accounting: &SmartContextObservedTokenAccounting,
 ) -> bool {
     accounting.accounting_risks.is_empty()
+}
+
+#[cfg(all(test, not(feature = "mojo")))]
+#[test]
+fn observed_token_accounting_is_unavailable_without_mojo() {
+    assert_eq!(
+        smart_context_observed_usage_context_tokens(RuntimeTokenUsage {
+            input_tokens: 1,
+            ..Default::default()
+        }),
+        None
+    );
+    assert!(
+        smart_context_observed_token_accounting_with_calibration(
+            SmartContextObservedTokenAccountingCalibrationInput::default()
+        )
+        .is_none()
+    );
 }
 
 #[cfg(all(test, feature = "mojo"))]

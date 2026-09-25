@@ -10,7 +10,7 @@ mod static_context;
 mod token_accounting;
 mod tokenizer;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo"))]
 use crate::RuntimeTokenUsage;
 
 pub use core::*;

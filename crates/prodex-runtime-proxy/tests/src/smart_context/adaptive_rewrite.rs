@@ -1,6 +1,7 @@
 use super::*;
 
 #[path = "adaptive_rewrite/policy.rs"]
+#[cfg(feature = "mojo")]
 mod policy;
 
 #[path = "adaptive_rewrite/regression.rs"]

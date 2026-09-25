@@ -1,6 +1,6 @@
 use super::RuntimeSmartContextBudget;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo-quota"))]
 pub(super) const RUNTIME_SMART_CONTEXT_MAX_JSON_DEPTH: usize =
     runtime_proxy_crate::SMART_CONTEXT_MAX_JSON_DEPTH;
 #[cfg(test)]

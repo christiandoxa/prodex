@@ -1,5 +1,12 @@
 use super::*;
 
+fn smart_context_adaptive_budget_policy(
+    input: SmartContextAdaptiveBudgetPolicyInput,
+) -> SmartContextAdaptiveBudgetPolicy {
+    crate::smart_context_adaptive_budget_policy(input)
+        .expect("Smart Context adaptive policy requires Mojo")
+}
+
 #[test]
 fn memory_capsule_selection_prioritizes_required_then_relevance() {
     let selected = smart_context_select_memory_capsules(

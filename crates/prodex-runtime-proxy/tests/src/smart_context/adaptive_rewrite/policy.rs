@@ -1,5 +1,12 @@
 use super::super::*;
 
+fn smart_context_adaptive_budget_policy(
+    input: SmartContextAdaptiveBudgetPolicyInput,
+) -> SmartContextAdaptiveBudgetPolicy {
+    crate::smart_context_adaptive_budget_policy(input)
+        .expect("Smart Context adaptive policy requires Mojo")
+}
+
 #[test]
 fn adaptive_budget_policy_prefers_safe_exact_when_required() {
     let accounting =

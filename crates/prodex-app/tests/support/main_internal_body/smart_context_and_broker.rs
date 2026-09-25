@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(feature = "mojo-quota")]
 fn smart_context_enabled_from_default_super_shortcut() -> bool {
     let command = parse_cli_command_from(["prodex", "s", "exec", "hi"])
         .expect("default Super shortcut should parse");
@@ -12,6 +13,7 @@ fn smart_context_enabled_from_default_super_shortcut() -> bool {
 }
 
 #[test]
+#[cfg(feature = "mojo-quota")]
 fn default_super_shortcut_rewrites_same_request_duplicate_losslessly() {
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let temp_dir = TestDir::new();

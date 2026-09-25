@@ -70,7 +70,7 @@ pub(super) fn runtime_smart_context_effective_websocket_prompt_cache_key(
     runtime_smart_context_static_prompt_cache_key_from_body(request_text.as_bytes())
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo-quota"))]
 fn observe_runtime_smart_context_rewrite_safety(
     shared: &RuntimeRotationProxyShared,
     observation: RuntimeSmartContextRewriteSafetyObservation,
@@ -495,7 +495,7 @@ fn runtime_smart_context_enabled(shared: &RuntimeRotationProxyShared) -> bool {
     shared.smart_context_engine.is_enabled()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo-quota"))]
 fn with_runtime_smart_context_artifacts<R>(
     shared: &RuntimeRotationProxyShared,
     action: impl FnOnce(&mut RuntimeSmartContextArtifactStore) -> R,
@@ -505,7 +505,7 @@ fn with_runtime_smart_context_artifacts<R>(
     })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo-quota"))]
 fn with_runtime_smart_context_proxy_state<R>(
     shared: &RuntimeRotationProxyShared,
     action: impl FnOnce(&mut RuntimeSmartContextProxyState) -> R,
