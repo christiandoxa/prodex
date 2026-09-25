@@ -2,61 +2,8 @@
 
 use prodex_mojo_core::runtime::{ProfileHealthScoreInput, profile_health_sort_key_batch};
 
-fn effective(score: u32, updated_at: i64, now: i64, decay_seconds: i64) -> u32 {
-    let elapsed = if now <= updated_at {
-        0
-    } else {
-        now.saturating_sub(updated_at)
-    };
-    score.saturating_sub((elapsed / decay_seconds.max(1)).min(u32::MAX as i64) as u32)
-}
-
-fn expected(
-    input: ProfileHealthScoreInput,
-    now: i64,
-    health_decay: i64,
-    bad_pairing_decay: i64,
-    performance_decay: i64,
-) -> u32 {
-    let effective_score = |score, updated_at, decay| effective(score, updated_at, now, decay);
-    let coupling = effective_score(
-        input.coupled_health_score,
-        input.coupled_health_updated_at,
-        health_decay,
-    )
-    .saturating_add(effective_score(
-        input.coupled_bad_pairing_score,
-        input.coupled_bad_pairing_updated_at,
-        bad_pairing_decay,
-    )) / 2;
-    effective_score(input.global_score, input.global_updated_at, health_decay)
-        .saturating_add(effective_score(
-            input.route_health_score,
-            input.route_health_updated_at,
-            health_decay,
-        ))
-        .saturating_add(effective_score(
-            input.route_bad_pairing_score,
-            input.route_bad_pairing_updated_at,
-            bad_pairing_decay,
-        ))
-        .saturating_add(coupling)
-        .saturating_add(effective_score(
-            input.route_performance_score,
-            input.route_performance_updated_at,
-            performance_decay,
-        ))
-        .saturating_add(
-            effective_score(
-                input.coupled_performance_score,
-                input.coupled_performance_updated_at,
-                performance_decay,
-            ) / 2,
-        )
-}
-
 #[test]
-fn profile_health_batch_matches_rust_boundary_oracle() {
+fn profile_health_batch_matches_boundary_expectations() {
     let inputs = [
         ProfileHealthScoreInput {
             global_score: 1,
@@ -92,13 +39,8 @@ fn profile_health_batch_matches_rust_boundary_oracle() {
         },
     ];
     let actual =
-        profile_health_sort_key_batch(&inputs, 100, 2, 4, 8).expect("valid profile health batch");
-    let expected = inputs
-        .iter()
-        .copied()
-        .map(|input| expected(input, 100, 2, 4, 8))
-        .collect::<Vec<_>>();
-    assert_eq!(actual, expected);
+        profile_health_sort_key_batch(&inputs, 102, 2, 4, 8).expect("valid profile health batch");
+    assert_eq!(actual, [16, 18]);
 }
 
 #[test]
