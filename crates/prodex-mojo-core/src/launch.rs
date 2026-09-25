@@ -99,7 +99,52 @@ pub enum SuperOverrideKind {
     NoRespectSystemProxy = 37,
 }
 
+const SUPER_OVERRIDE_KINDS: [SuperOverrideKind; 37] = [
+    SuperOverrideKind::Provider,
+    SuperOverrideKind::Cli,
+    SuperOverrideKind::ApiKey,
+    SuperOverrideKind::SubAgentProvider,
+    SuperOverrideKind::SubAgentModel,
+    SuperOverrideKind::SubAgentReasoningEffort,
+    SuperOverrideKind::SubAgentUrl,
+    SuperOverrideKind::SubAgentMaxConcurrency,
+    SuperOverrideKind::LocalModel,
+    SuperOverrideKind::Profile,
+    SuperOverrideKind::BaseUrl,
+    SuperOverrideKind::Url,
+    SuperOverrideKind::LocalContextWindow,
+    SuperOverrideKind::LocalAutoCompactTokenLimit,
+    SuperOverrideKind::Tool,
+    SuperOverrideKind::RequiredTool,
+    SuperOverrideKind::WebSearch,
+    SuperOverrideKind::RolloutBudgetTokens,
+    SuperOverrideKind::RolloutBudgetReminders,
+    SuperOverrideKind::RolloutBudgetSamplingWeight,
+    SuperOverrideKind::RolloutBudgetPrefillWeight,
+    SuperOverrideKind::CurrentTimeReminderInterval,
+    SuperOverrideKind::CurrentTimeClockSource,
+    SuperOverrideKind::NoAutoRotate,
+    SuperOverrideKind::AutoRotate,
+    SuperOverrideKind::AutoRedeem,
+    SuperOverrideKind::SkipQuotaCheck,
+    SuperOverrideKind::DryRun,
+    SuperOverrideKind::NoProxy,
+    SuperOverrideKind::Presidio,
+    SuperOverrideKind::NoPresidio,
+    SuperOverrideKind::SubAgent,
+    SuperOverrideKind::NoSubAgent,
+    SuperOverrideKind::FullAccess,
+    SuperOverrideKind::CurrentTimeReminder,
+    SuperOverrideKind::RespectSystemProxy,
+    SuperOverrideKind::NoRespectSystemProxy,
+];
+
 impl SuperOverrideKind {
+    fn from_tag(tag: i64) -> Option<Self> {
+        let index = usize::try_from(tag.checked_sub(1)?).ok()?;
+        SUPER_OVERRIDE_KINDS.get(index).copied()
+    }
+
     const fn takes_value(self) -> bool {
         matches!(
             self,
@@ -418,95 +463,76 @@ fn decode_super_override<'a>(
     if piece.offset < 0 {
         return Err(MojoError::InvalidOutput);
     }
-    let kind = match piece.kind {
-        0 => {
-            if piece.index != i64::try_from(index).map_err(|_| MojoError::InvalidOutput)?
-                || piece.offset != 0
-            {
-                return Err(MojoError::InvalidOutput);
-            }
-            return Ok(None);
-        }
-        1 => SuperOverrideKind::Provider,
-        2 => SuperOverrideKind::Cli,
-        3 => SuperOverrideKind::ApiKey,
-        4 => SuperOverrideKind::SubAgentProvider,
-        5 => SuperOverrideKind::SubAgentModel,
-        6 => SuperOverrideKind::SubAgentReasoningEffort,
-        7 => SuperOverrideKind::SubAgentUrl,
-        8 => SuperOverrideKind::SubAgentMaxConcurrency,
-        9 => SuperOverrideKind::LocalModel,
-        10 => SuperOverrideKind::Profile,
-        11 => SuperOverrideKind::BaseUrl,
-        12 => SuperOverrideKind::Url,
-        13 => SuperOverrideKind::LocalContextWindow,
-        14 => SuperOverrideKind::LocalAutoCompactTokenLimit,
-        15 => SuperOverrideKind::Tool,
-        16 => SuperOverrideKind::RequiredTool,
-        17 => SuperOverrideKind::WebSearch,
-        18 => SuperOverrideKind::RolloutBudgetTokens,
-        19 => SuperOverrideKind::RolloutBudgetReminders,
-        20 => SuperOverrideKind::RolloutBudgetSamplingWeight,
-        21 => SuperOverrideKind::RolloutBudgetPrefillWeight,
-        22 => SuperOverrideKind::CurrentTimeReminderInterval,
-        23 => SuperOverrideKind::CurrentTimeClockSource,
-        24 => SuperOverrideKind::NoAutoRotate,
-        25 => SuperOverrideKind::AutoRotate,
-        26 => SuperOverrideKind::AutoRedeem,
-        27 => SuperOverrideKind::SkipQuotaCheck,
-        28 => SuperOverrideKind::DryRun,
-        29 => SuperOverrideKind::NoProxy,
-        30 => SuperOverrideKind::Presidio,
-        31 => SuperOverrideKind::NoPresidio,
-        32 => SuperOverrideKind::SubAgent,
-        33 => SuperOverrideKind::NoSubAgent,
-        34 => SuperOverrideKind::FullAccess,
-        35 => SuperOverrideKind::CurrentTimeReminder,
-        36 => SuperOverrideKind::RespectSystemProxy,
-        37 => SuperOverrideKind::NoRespectSystemProxy,
-        _ => return Err(MojoError::InvalidOutput),
-    };
-    let value = if kind.takes_value() {
-        if piece.offset > 0 {
-            if piece.index != i64::try_from(index).map_err(|_| MojoError::InvalidOutput)? {
-                return Err(MojoError::InvalidOutput);
-            }
-            let value = arguments[index].ok_or(MojoError::InvalidOutput)?;
-            let offset = usize::try_from(piece.offset).map_err(|_| MojoError::InvalidOutput)?;
-            if value.as_bytes().get(offset - 1) != Some(&b'=') {
-                return Err(MojoError::InvalidOutput);
-            }
-            Some(value.get(offset..).ok_or(MojoError::InvalidOutput)?)
-        } else if piece.index == -1 {
-            None
-        } else {
-            if piece.index != i64::try_from(index + 1).map_err(|_| MojoError::InvalidOutput)? {
-                return Err(MojoError::InvalidOutput);
-            }
-            Some(
-                arguments
-                    .get(index + 1)
-                    .copied()
-                    .flatten()
-                    .ok_or(MojoError::InvalidOutput)?,
-            )
-        }
-    } else {
-        if piece.index != -1 || piece.offset != 0 {
-            return Err(MojoError::InvalidOutput);
-        }
-        None
-    };
-    let consumed_count = if piece.offset > 0 {
-        1
-    } else if piece.index == i64::try_from(index + 1).map_err(|_| MojoError::InvalidOutput)? {
-        2
-    } else {
-        1
-    };
+    if piece.kind == 0 {
+        let expected = i64::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+        return (piece.index == expected && piece.offset == 0)
+            .then_some(None)
+            .ok_or(MojoError::InvalidOutput);
+    }
+
+    let kind = SuperOverrideKind::from_tag(piece.kind).ok_or(MojoError::InvalidOutput)?;
+    let value = decode_super_override_value(kind, piece, index, arguments)?;
+    let consumed_count = decode_super_override_consumed_count(piece, index)?;
     Ok(Some(ScannedSuperOverride {
         kind,
         value,
         consumed_count,
     }))
+}
+
+fn decode_super_override_value<'a>(
+    kind: SuperOverrideKind,
+    piece: &ArgumentPiece,
+    index: usize,
+    arguments: &[Option<&'a str>],
+) -> Result<Option<&'a str>, MojoError> {
+    if !kind.takes_value() {
+        return (piece.index == -1 && piece.offset == 0)
+            .then_some(None)
+            .ok_or(MojoError::InvalidOutput);
+    }
+    if piece.offset > 0 {
+        return decode_inline_super_override_value(piece, index, arguments).map(Some);
+    }
+    if piece.index == -1 {
+        return Ok(None);
+    }
+    let expected = i64::try_from(index + 1).map_err(|_| MojoError::InvalidOutput)?;
+    if piece.index != expected {
+        return Err(MojoError::InvalidOutput);
+    }
+    arguments
+        .get(index + 1)
+        .copied()
+        .flatten()
+        .map(Some)
+        .ok_or(MojoError::InvalidOutput)
+}
+
+fn decode_inline_super_override_value<'a>(
+    piece: &ArgumentPiece,
+    index: usize,
+    arguments: &[Option<&'a str>],
+) -> Result<&'a str, MojoError> {
+    let expected = i64::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+    if piece.index != expected {
+        return Err(MojoError::InvalidOutput);
+    }
+    let value = arguments[index].ok_or(MojoError::InvalidOutput)?;
+    let offset = usize::try_from(piece.offset).map_err(|_| MojoError::InvalidOutput)?;
+    if offset == 0 || value.as_bytes().get(offset - 1) != Some(&b'=') {
+        return Err(MojoError::InvalidOutput);
+    }
+    value.get(offset..).ok_or(MojoError::InvalidOutput)
+}
+
+fn decode_super_override_consumed_count(
+    piece: &ArgumentPiece,
+    index: usize,
+) -> Result<usize, MojoError> {
+    if piece.offset > 0 {
+        return Ok(1);
+    }
+    let split_index = i64::try_from(index + 1).map_err(|_| MojoError::InvalidOutput)?;
+    Ok(usize::from(piece.index == split_index) + 1)
 }

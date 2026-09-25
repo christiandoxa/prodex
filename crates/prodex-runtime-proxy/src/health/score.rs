@@ -574,10 +574,17 @@ mod mojo_parity_tests {
         }
     }
 
-    #[test]
-    fn health_scores_match_rust_oracles_over_full_width_inputs() {
-        let mut seed = 0x6a09_e667_f3bc_c909_u64;
-        let time_boundaries = [i64::MIN, -1, 0, 1, i64::MAX];
+    fn next_observation(seed: &mut u64) -> RuntimeProfileHealthSnapshot {
+        *seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        let score = *seed as u32;
+        *seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+        RuntimeProfileHealthSnapshot {
+            score,
+            updated_at: *seed as i64,
+        }
+    }
+
+    fn assert_effective_score_boundaries(time_boundaries: [i64; 5]) {
         for score in [0_u32, u32::MAX] {
             for updated_at in time_boundaries {
                 for now in time_boundaries {
@@ -592,37 +599,62 @@ mod mojo_parity_tests {
                 }
             }
         }
+    }
 
+    fn assert_random_effective_scores(seed: &mut u64) {
         for _ in 0..10_000 {
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let score = seed as u32;
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let updated_at = seed as i64;
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let now = seed as i64;
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let decay_seconds = seed as i64;
-            let entry = RuntimeProfileHealthSnapshot { score, updated_at };
+            let entry = next_observation(seed);
+            *seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let now = *seed as i64;
+            *seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            let decay_seconds = *seed as i64;
             assert_eq!(
                 runtime_profile_effective_score(&entry, now, decay_seconds),
                 runtime_profile_effective_score_rust(&entry, now, decay_seconds),
-                "score={score} updated={updated_at} now={now} decay={decay_seconds}"
+                "score={} updated={} now={now} decay={decay_seconds}",
+                entry.score,
+                entry.updated_at
             );
         }
+    }
 
+    fn assert_route_parity(
+        health: &BTreeMap<String, RuntimeProfileHealthSnapshot>,
+        profile: &str,
+        now: i64,
+    ) {
+        let lookup = |key: &str| health.get(key).copied();
+        for route in [
+            RuntimeRouteKind::Responses,
+            RuntimeRouteKind::Compact,
+            RuntimeRouteKind::Websocket,
+            RuntimeRouteKind::Standard,
+        ] {
+            assert_eq!(
+                runtime_profile_route_coupling_score_by_key(lookup, profile, now, route),
+                runtime_profile_route_coupling_score_by_key_rust(lookup, profile, now, route),
+                "coupling profile={profile} route={route:?}"
+            );
+            assert_eq!(
+                runtime_profile_route_performance_score_by_key(lookup, profile, now, route),
+                runtime_profile_route_performance_score_by_key_rust(lookup, profile, now, route),
+                "performance profile={profile} route={route:?}"
+            );
+            assert_eq!(
+                runtime_profile_health_sort_key_by_key(profile, lookup, now, route),
+                runtime_profile_health_sort_key_by_key_rust(profile, lookup, now, route),
+                "sort profile={profile} route={route:?}"
+            );
+        }
+    }
+
+    fn build_health_parity_fixture(
+        seed: &mut u64,
+    ) -> BTreeMap<String, RuntimeProfileHealthSnapshot> {
         let mut health = BTreeMap::new();
         for index in 0..128 {
             let profile = format!("profile-{index}");
-            let mut observation = || {
-                seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-                let score = seed as u32;
-                seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-                RuntimeProfileHealthSnapshot {
-                    score,
-                    updated_at: seed as i64,
-                }
-            };
-            health.insert(profile.clone(), observation());
+            health.insert(profile.clone(), next_observation(seed));
             for route in [
                 RuntimeRouteKind::Responses,
                 RuntimeRouteKind::Compact,
@@ -631,73 +663,32 @@ mod mojo_parity_tests {
             ] {
                 health.insert(
                     runtime_profile_route_health_key(&profile, route),
-                    observation(),
+                    next_observation(seed),
                 );
                 health.insert(
                     runtime_profile_route_bad_pairing_key(&profile, route),
-                    observation(),
+                    next_observation(seed),
                 );
                 health.insert(
                     runtime_profile_route_performance_key(&profile, route),
-                    observation(),
+                    next_observation(seed),
                 );
             }
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let now = seed as i64;
-            let lookup = |key: &str| health.get(key).copied();
-            for route in [
-                RuntimeRouteKind::Responses,
-                RuntimeRouteKind::Compact,
-                RuntimeRouteKind::Websocket,
-                RuntimeRouteKind::Standard,
-            ] {
-                assert_eq!(
-                    runtime_profile_route_coupling_score_by_key(lookup, &profile, now, route),
-                    runtime_profile_route_coupling_score_by_key_rust(lookup, &profile, now, route),
-                    "coupling profile={profile} route={route:?}"
-                );
-                assert_eq!(
-                    runtime_profile_route_performance_score_by_key(lookup, &profile, now, route),
-                    runtime_profile_route_performance_score_by_key_rust(
-                        lookup, &profile, now, route
-                    ),
-                    "performance profile={profile} route={route:?}"
-                );
-                assert_eq!(
-                    runtime_profile_health_sort_key_by_key(&profile, lookup, now, route),
-                    runtime_profile_health_sort_key_by_key_rust(&profile, lookup, now, route),
-                    "sort profile={profile} route={route:?}"
-                );
-            }
+            *seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
+            assert_route_parity(&health, &profile, *seed as i64);
         }
+        health
+    }
 
-        let profile = "profile-0";
-        let lookup = |key: &str| health.get(key).copied();
+    #[test]
+    fn health_scores_match_rust_oracles_over_full_width_inputs() {
+        let mut seed = 0x6a09_e667_f3bc_c909_u64;
+        let time_boundaries = [i64::MIN, -1, 0, 1, i64::MAX];
+        assert_effective_score_boundaries(time_boundaries);
+        assert_random_effective_scores(&mut seed);
+        let health = build_health_parity_fixture(&mut seed);
         for now in time_boundaries {
-            for route in [
-                RuntimeRouteKind::Responses,
-                RuntimeRouteKind::Compact,
-                RuntimeRouteKind::Websocket,
-                RuntimeRouteKind::Standard,
-            ] {
-                assert_eq!(
-                    runtime_profile_route_coupling_score_by_key(lookup, profile, now, route),
-                    runtime_profile_route_coupling_score_by_key_rust(lookup, profile, now, route),
-                    "boundary coupling now={now} route={route:?}"
-                );
-                assert_eq!(
-                    runtime_profile_route_performance_score_by_key(lookup, profile, now, route),
-                    runtime_profile_route_performance_score_by_key_rust(
-                        lookup, profile, now, route
-                    ),
-                    "boundary performance now={now} route={route:?}"
-                );
-                assert_eq!(
-                    runtime_profile_health_sort_key_by_key(profile, lookup, now, route),
-                    runtime_profile_health_sort_key_by_key_rust(profile, lookup, now, route),
-                    "boundary sort now={now} route={route:?}"
-                );
-            }
+            assert_route_parity(&health, "profile-0", now);
         }
     }
 }

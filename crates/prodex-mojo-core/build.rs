@@ -258,6 +258,11 @@ fn archive_objects(ar: &OsString, archive: &Path, objects: &[PathBuf], target: &
         command.arg(format!("/out:{}", archive.display()));
         command.args(objects);
     } else {
+        if target.ends_with("-apple-darwin")
+            && Path::new(ar).file_name().and_then(|name| name.to_str()) == Some("llvm-ar")
+        {
+            command.arg("--format=darwin");
+        }
         command.args(["crus"]).arg(archive).args(objects);
     }
     let status = command.status();

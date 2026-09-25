@@ -3,8 +3,8 @@ use std::{error::Error, ffi::OsString, fmt};
 
 #[cfg(feature = "mojo-core")]
 use prodex_mojo_core::launch::{
-    RuntimeFeatureClockSource, RuntimeFeatureConfigInput, RuntimeFeatureWebSearchMode,
-    plan_runtime_feature_config,
+    RuntimeFeatureClockSource, RuntimeFeatureConfigInput, RuntimeFeatureConfigPlan,
+    RuntimeFeatureWebSearchMode, plan_runtime_feature_config,
 };
 
 #[derive(Args, Debug, Clone, Default)]
@@ -92,6 +92,98 @@ struct RolloutBudgetPlan {
     prefill_weight: Option<f64>,
 }
 
+#[cfg(feature = "mojo-core")]
+fn mojo_web_search_mode(mode: Option<CodexWebSearchMode>) -> Option<RuntimeFeatureWebSearchMode> {
+    mode.map(|mode| match mode {
+        CodexWebSearchMode::Disabled => RuntimeFeatureWebSearchMode::Disabled,
+        CodexWebSearchMode::Cached => RuntimeFeatureWebSearchMode::Cached,
+        CodexWebSearchMode::Indexed => RuntimeFeatureWebSearchMode::Indexed,
+        CodexWebSearchMode::Live => RuntimeFeatureWebSearchMode::Live,
+    })
+}
+
+#[cfg(feature = "mojo-core")]
+fn codex_web_search_mode(mode: Option<RuntimeFeatureWebSearchMode>) -> Option<CodexWebSearchMode> {
+    mode.map(|mode| match mode {
+        RuntimeFeatureWebSearchMode::Disabled => CodexWebSearchMode::Disabled,
+        RuntimeFeatureWebSearchMode::Cached => CodexWebSearchMode::Cached,
+        RuntimeFeatureWebSearchMode::Indexed => CodexWebSearchMode::Indexed,
+        RuntimeFeatureWebSearchMode::Live => CodexWebSearchMode::Live,
+    })
+}
+
+#[cfg(feature = "mojo-core")]
+fn mojo_clock_source(
+    source: Option<CodexCurrentTimeClockSource>,
+) -> Option<RuntimeFeatureClockSource> {
+    source.map(|source| match source {
+        CodexCurrentTimeClockSource::System => RuntimeFeatureClockSource::System,
+        CodexCurrentTimeClockSource::External => RuntimeFeatureClockSource::External,
+    })
+}
+
+#[cfg(feature = "mojo-core")]
+fn codex_clock_source(
+    source: Option<RuntimeFeatureClockSource>,
+) -> Option<CodexCurrentTimeClockSource> {
+    source.map(|source| match source {
+        RuntimeFeatureClockSource::System => CodexCurrentTimeClockSource::System,
+        RuntimeFeatureClockSource::External => CodexCurrentTimeClockSource::External,
+    })
+}
+
+#[cfg(feature = "mojo-core")]
+fn enabled_weight(
+    enabled: bool,
+    value: Option<f64>,
+) -> Result<Option<f64>, RuntimeFeaturePlanError> {
+    if !enabled {
+        return Ok(None);
+    }
+    value.map(Some).ok_or(RuntimeFeaturePlanError)
+}
+
+#[cfg(feature = "mojo-core")]
+fn rollout_budget_from_mojo(
+    args: &CodexRuntimeFeatureArgs,
+    plan: &RuntimeFeatureConfigPlan,
+) -> Result<Option<RolloutBudgetPlan>, RuntimeFeaturePlanError> {
+    if !plan.rollout_budget_enabled {
+        let disabled_outputs_are_empty = plan.rollout_budget_reminders.is_empty()
+            && !plan.rollout_budget_sampling_weight
+            && !plan.rollout_budget_prefill_weight;
+        return disabled_outputs_are_empty
+            .then_some(None)
+            .ok_or(RuntimeFeaturePlanError);
+    }
+
+    Ok(Some(RolloutBudgetPlan {
+        limit: args.rollout_budget_tokens.ok_or(RuntimeFeaturePlanError)?,
+        reminders: plan.rollout_budget_reminders.clone(),
+        sampling_weight: enabled_weight(
+            plan.rollout_budget_sampling_weight,
+            args.rollout_budget_sampling_weight,
+        )?,
+        prefill_weight: enabled_weight(
+            plan.rollout_budget_prefill_weight,
+            args.rollout_budget_prefill_weight,
+        )?,
+    }))
+}
+
+#[cfg(feature = "mojo-core")]
+fn current_time_interval_from_mojo(
+    args: &CodexRuntimeFeatureArgs,
+    plan: &RuntimeFeatureConfigPlan,
+) -> Result<Option<u64>, RuntimeFeaturePlanError> {
+    if !plan.current_time_reminder_interval {
+        return Ok(None);
+    }
+    args.current_time_reminder_interval
+        .map(Some)
+        .ok_or(RuntimeFeaturePlanError)
+}
+
 impl CodexRuntimeFeatureArgs {
     pub fn to_codex_config_args(&self) -> Result<Vec<OsString>, RuntimeFeaturePlanError> {
         #[cfg(feature = "mojo-core")]
@@ -105,92 +197,25 @@ impl CodexRuntimeFeatureArgs {
     #[cfg(feature = "mojo-core")]
     fn mojo_plan(&self) -> Result<FeaturePlan, RuntimeFeaturePlanError> {
         let plan = plan_runtime_feature_config(RuntimeFeatureConfigInput {
-            web_search_mode: self.web_search.map(|mode| match mode {
-                CodexWebSearchMode::Disabled => RuntimeFeatureWebSearchMode::Disabled,
-                CodexWebSearchMode::Cached => RuntimeFeatureWebSearchMode::Cached,
-                CodexWebSearchMode::Indexed => RuntimeFeatureWebSearchMode::Indexed,
-                CodexWebSearchMode::Live => RuntimeFeatureWebSearchMode::Live,
-            }),
+            web_search_mode: mojo_web_search_mode(self.web_search),
             rollout_budget_limit: self.rollout_budget_tokens,
             rollout_budget_reminders: &self.rollout_budget_reminders,
             rollout_budget_sampling_weight: self.rollout_budget_sampling_weight,
             rollout_budget_prefill_weight: self.rollout_budget_prefill_weight,
             current_time_reminder: self.current_time_reminder,
             current_time_reminder_interval: self.current_time_reminder_interval,
-            current_time_clock_source: self.current_time_clock_source.map(|source| match source {
-                CodexCurrentTimeClockSource::System => RuntimeFeatureClockSource::System,
-                CodexCurrentTimeClockSource::External => RuntimeFeatureClockSource::External,
-            }),
+            current_time_clock_source: mojo_clock_source(self.current_time_clock_source),
             respect_system_proxy: self.respect_system_proxy,
             no_respect_system_proxy: self.no_respect_system_proxy,
         })
         .map_err(|_| RuntimeFeaturePlanError)?;
 
-        let rollout_budget = if plan.rollout_budget_enabled {
-            let Some(limit) = self.rollout_budget_tokens else {
-                return Err(RuntimeFeaturePlanError);
-            };
-            let sampling_weight = match (
-                plan.rollout_budget_sampling_weight,
-                self.rollout_budget_sampling_weight,
-            ) {
-                (false, _) => None,
-                (true, Some(weight)) => Some(weight),
-                (true, None) => return Err(RuntimeFeaturePlanError),
-            };
-            let prefill_weight = match (
-                plan.rollout_budget_prefill_weight,
-                self.rollout_budget_prefill_weight,
-            ) {
-                (false, _) => None,
-                (true, Some(weight)) => Some(weight),
-                (true, None) => return Err(RuntimeFeaturePlanError),
-            };
-            Some(RolloutBudgetPlan {
-                limit,
-                reminders: plan.rollout_budget_reminders,
-                sampling_weight,
-                prefill_weight,
-            })
-        } else {
-            if !plan.rollout_budget_reminders.is_empty()
-                || plan.rollout_budget_sampling_weight
-                || plan.rollout_budget_prefill_weight
-            {
-                return Err(RuntimeFeaturePlanError);
-            }
-            None
-        };
-
-        let current_time_reminder_interval = if plan.current_time_reminder_interval {
-            Some(
-                self.current_time_reminder_interval
-                    .ok_or(RuntimeFeaturePlanError)?,
-            )
-        } else {
-            None
-        };
-        let current_time_clock_source = match plan.current_time_clock_source {
-            None => None,
-            Some(RuntimeFeatureClockSource::System) => Some(CodexCurrentTimeClockSource::System),
-            Some(RuntimeFeatureClockSource::External) => {
-                Some(CodexCurrentTimeClockSource::External)
-            }
-        };
-        let web_search = match plan.web_search_mode {
-            None => None,
-            Some(RuntimeFeatureWebSearchMode::Disabled) => Some(CodexWebSearchMode::Disabled),
-            Some(RuntimeFeatureWebSearchMode::Cached) => Some(CodexWebSearchMode::Cached),
-            Some(RuntimeFeatureWebSearchMode::Indexed) => Some(CodexWebSearchMode::Indexed),
-            Some(RuntimeFeatureWebSearchMode::Live) => Some(CodexWebSearchMode::Live),
-        };
-
         Ok(FeaturePlan {
-            web_search,
-            rollout_budget,
+            web_search: codex_web_search_mode(plan.web_search_mode),
+            rollout_budget: rollout_budget_from_mojo(self, &plan)?,
             current_time_reminder_enabled: plan.current_time_reminder_enabled,
-            current_time_reminder_interval,
-            current_time_clock_source,
+            current_time_reminder_interval: current_time_interval_from_mojo(self, &plan)?,
+            current_time_clock_source: codex_clock_source(plan.current_time_clock_source),
             respect_system_proxy: plan.respect_system_proxy,
         })
     }
