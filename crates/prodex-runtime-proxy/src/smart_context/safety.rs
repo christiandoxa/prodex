@@ -40,8 +40,7 @@ pub struct SmartContextAffinityPressureRewriteInput<'a> {
 pub fn smart_context_affinity_pressure_rewrite_allowed(
     input: SmartContextAffinityPressureRewriteInput<'_>,
 ) -> bool {
-    #[cfg(feature = "mojo")]
-    return prodex_mojo_core::runtime::smart_context_affinity_rewrite_allowed(
+    prodex_mojo_core::runtime::smart_context_affinity_rewrite_allowed(
         input.exactness_guard.decision == SmartContextExactnessDecision::RequireExact,
         input
             .exactness_guard
@@ -54,24 +53,7 @@ pub fn smart_context_affinity_pressure_rewrite_allowed(
             bits | smart_context_budget_reason_bit(*reason)
         }),
     )
-    .expect("Mojo Smart Context affinity rewrite policy returned invalid output");
-
-    #[cfg(not(feature = "mojo"))]
-    smart_context_affinity_pressure_rewrite_allowed_rust(input)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(in crate::smart_context) fn smart_context_affinity_pressure_rewrite_allowed_rust(
-    input: SmartContextAffinityPressureRewriteInput<'_>,
-) -> bool {
-    input.exactness_guard.decision == SmartContextExactnessDecision::RequireExact
-        && !input.exactness_guard.reasons.is_empty()
-        && input
-            .exactness_guard
-            .reasons
-            .iter()
-            .all(smart_context_exactness_reason_is_affinity)
-        && !smart_context_budget_has_non_affinity_safety_block(input.policy_reasons)
+    .expect("Mojo Smart Context affinity rewrite policy returned invalid output")
 }
 
 pub fn smart_context_affinity_pressure_rewrite_guard(
@@ -83,31 +65,6 @@ pub fn smart_context_affinity_pressure_rewrite_guard(
     }
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
-fn smart_context_exactness_reason_is_affinity(reason: &SmartContextExactnessReason) -> bool {
-    matches!(
-        reason,
-        SmartContextExactnessReason::PreviousResponseAffinity
-            | SmartContextExactnessReason::TurnStateAffinity
-            | SmartContextExactnessReason::SessionAffinity
-    )
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn smart_context_budget_has_non_affinity_safety_block(
-    reasons: &[SmartContextBudgetPolicyReason],
-) -> bool {
-    reasons.iter().any(|reason| {
-        matches!(
-            reason,
-            SmartContextBudgetPolicyReason::StaticContextChanged
-                | SmartContextBudgetPolicyReason::UnknownTokenWindow
-                | SmartContextBudgetPolicyReason::UnsafeAccounting
-        )
-    })
-}
-
-#[cfg(feature = "mojo")]
 const fn smart_context_exactness_reason_bit(reason: SmartContextExactnessReason) -> u64 {
     match reason {
         SmartContextExactnessReason::ExplicitExactMode => 1,
@@ -118,7 +75,6 @@ const fn smart_context_exactness_reason_bit(reason: SmartContextExactnessReason)
     }
 }
 
-#[cfg(feature = "mojo")]
 const fn smart_context_budget_reason_bit(reason: SmartContextBudgetPolicyReason) -> u64 {
     match reason {
         SmartContextBudgetPolicyReason::ExactnessRequired => 1,
@@ -131,68 +87,5 @@ const fn smart_context_budget_reason_bit(reason: SmartContextBudgetPolicyReason)
         SmartContextBudgetPolicyReason::ModerateBudget => 128,
         SmartContextBudgetPolicyReason::TightBudget => 256,
         SmartContextBudgetPolicyReason::CriticalBudget => 512,
-    }
-}
-
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_tests {
-    use super::*;
-
-    #[test]
-    fn affinity_policy_matches_rust_oracle() {
-        let exactness_reasons = [
-            SmartContextExactnessReason::ExplicitExactMode,
-            SmartContextExactnessReason::PreviousResponseAffinity,
-            SmartContextExactnessReason::TurnStateAffinity,
-            SmartContextExactnessReason::SessionAffinity,
-            SmartContextExactnessReason::ToolOutputWithoutArtifact,
-        ];
-        let policy_reasons = [
-            SmartContextBudgetPolicyReason::ExactnessRequired,
-            SmartContextBudgetPolicyReason::StaticContextChanged,
-            SmartContextBudgetPolicyReason::MissingRehydrateRefs,
-            SmartContextBudgetPolicyReason::UnknownTokenWindow,
-            SmartContextBudgetPolicyReason::UnsafeAccounting,
-            SmartContextBudgetPolicyReason::RecentRewriteSavingsSafe,
-            SmartContextBudgetPolicyReason::PlentyOfBudget,
-            SmartContextBudgetPolicyReason::ModerateBudget,
-            SmartContextBudgetPolicyReason::TightBudget,
-            SmartContextBudgetPolicyReason::CriticalBudget,
-        ];
-        for exactness_mask in 0..32_u16 {
-            for policy_mask in 0..1_024_u16 {
-                let exactness = SmartContextExactnessGuard {
-                    decision: if exactness_mask & 1 == 0 {
-                        SmartContextExactnessDecision::Allow
-                    } else {
-                        SmartContextExactnessDecision::RequireExact
-                    },
-                    reasons: exactness_reasons
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(index, reason)| {
-                            (exactness_mask & (1 << index) != 0).then_some(*reason)
-                        })
-                        .collect(),
-                };
-                let reasons = policy_reasons
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(index, reason)| {
-                        (policy_mask & (1 << index) != 0).then_some(*reason)
-                    })
-                    .collect::<Vec<_>>();
-                let input = SmartContextAffinityPressureRewriteInput {
-                    exactness_guard: &exactness,
-                    tier: SmartContextTokenBudgetTier::Exact,
-                    available_tokens: 1_000,
-                    policy_reasons: &reasons,
-                };
-                assert_eq!(
-                    smart_context_affinity_pressure_rewrite_allowed(input),
-                    smart_context_affinity_pressure_rewrite_allowed_rust(input)
-                );
-            }
-        }
     }
 }

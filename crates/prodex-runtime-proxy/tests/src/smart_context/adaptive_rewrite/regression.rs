@@ -145,3 +145,35 @@ fn regression_self_check_rejects_estimated_token_savings() {
             .contains(&SmartContextRegressionSelfCheckReason::TokenizerEstimateNotEligible)
     );
 }
+
+#[test]
+fn regression_self_check_saturates_extreme_token_overhead() {
+    let check = smart_context_regression_self_check(SmartContextRegressionSelfCheckInput {
+        exactness_guard: smart_context_exactness_guard(SmartContextExactnessInput::default()),
+        before_hash: "before".to_string(),
+        after_hash: "after".to_string(),
+        before_tokens: u64::MAX,
+        after_tokens: 0,
+        token_count_source: SmartContextTokenCountSource::TokenizerCounted,
+        future_retrieval_overhead_tokens: u64::MAX,
+        injected_protocol_overhead_tokens: 1,
+        expected_recovery_overhead_tokens: 1,
+        before_critical_signal_count: 0,
+        after_critical_signal_count: 0,
+        missing_rehydrate_refs: Vec::new(),
+        unresolved_rehydrate_refs_are_segment_local: false,
+    });
+
+    assert_eq!(
+        check.decision,
+        SmartContextRegressionSelfCheckDecision::FallbackExact
+    );
+    assert_eq!(check.saved_tokens, 0);
+    assert_eq!(
+        check.reasons,
+        vec![
+            SmartContextRegressionSelfCheckReason::TokenSavingsBelowSafetyMargin,
+            SmartContextRegressionSelfCheckReason::EmptyAfterPayload,
+        ]
+    );
+}
