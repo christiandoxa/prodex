@@ -544,6 +544,10 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
+    name: "standard_precommit_blocks_retired_model_before_auto_redeem",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "compact_precommit_preserves_valid_model_hard_affinity_quota_bypass",
     tags: SERIALIZED_TAGS,
   },

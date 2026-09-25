@@ -9,6 +9,12 @@
   "minimum_percent": 20,
   "target_percent": 23,
   "release_operation_overrides": {
+    "smart_context_rehydration_plan": {
+      "mojo_entry": "prodex_smart_context_rehydrate_plan_batch",
+      "mojo_source": "mojo/prodex_core/smart_context_rehydrate.mojo",
+      "consumer_marker": "prodex_mojo_core::rich::ContextPlanItem::plan_smart_context_rehydrate",
+      "rust_adapter_scope": "artifact acquisition and typed plan mapping"
+    },
     "provider_model_fallback_parser": {
       "rust_adapter_scope": "provider identity adapter; Rust fallback parser and test oracle deleted"
     },

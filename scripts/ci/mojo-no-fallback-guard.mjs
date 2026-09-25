@@ -96,6 +96,8 @@ const REMOVED_ORACLE_FILES = [
 ];
 const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-context/src/critical_signal.rs",
+  "crates/prodex-quota/src/render/windows.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs",
@@ -118,6 +120,8 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
+const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
+const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
 const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
   [/\bfn\s+anthropic_response_block_input\s*\(/u, "Rust response block classifier"],
   [/\bfn\s+plan_with_rust\s*\(/u, "Rust response planner"],
@@ -186,6 +190,26 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => HARD_REPLACED_RUST_FILES.has(filePath) &&
       /\b(?:rust_oracle|fn\s+[A-Za-z0-9_]+_rust\s*\()/u.test(contents))
     .map(([filePath]) => `${filePath}: contains a Rust semantic oracle or copy`);
+  const quotaWindowViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== QUOTA_WINDOWS_FILE) return [];
+    const violations = [];
+    if (/\bfn\s+quota_error_summary_(?:basic|transport|auth|response)\s*\(/u.test(contents)) {
+      violations.push(`${filePath}: contains a Rust quota error classifier`);
+    }
+    for (const name of ["format_blocked_quota_status", "quota_error_summary"]) {
+      const body = contents.match(new RegExp(`\\bfn\\s+${name}\\([^]*?^\\}`, "mu"))?.[0];
+      if (body && FEATURE_OFF_RUST_PATH.test(body)) {
+        violations.push(`${filePath}: ${name} contains a feature-off Rust classifier`);
+      }
+    }
+    return violations;
+  });
+  const rehydrateViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== REHYDRATE_FILE) return [];
+    const body = contents.match(/\bpub fn smart_context_auto_rehydrate_plan\([^]*?^fn smart_context_auto_rehydrate_plan_mojo/mu)?.[0];
+    return body && FEATURE_OFF_RUST_PATH.test(body)
+      ? [`${filePath}: rehydration has a feature-off Rust planner`] : [];
+  });
   const defaultFeatureViolations = files.flatMap(([filePath, contents]) => {
     const required = REQUIRED_DEFAULT_FEATURES.get(filePath);
     if (!required) return [];
@@ -195,7 +219,9 @@ export function findViolations(files) {
   });
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
-    ...geminiFallbackViolations, ...hardReplacementViolations, ...defaultFeatureViolations];
+    ...geminiFallbackViolations, ...hardReplacementViolations, ...quotaWindowViolations,
+    ...rehydrateViolations,
+    ...defaultFeatureViolations];
 }
 
 async function promotedFiles() {
@@ -273,6 +299,14 @@ function selfTest() {
     "fn retarget_codex_tui_resume_args() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-runtime-doctor/Cargo.toml",
     '[features]\ndefault = []\nruntime-log-mojo = []']])[0], /default features must include runtime-log-mojo/u);
+  assert.match(findViolations([[QUOTA_WINDOWS_FILE,
+    "fn quota_error_summary_basic(lower: &str) {}"]])[0], /Rust quota error classifier/u);
+  assert.match(findViolations([[QUOTA_WINDOWS_FILE,
+    'fn format_blocked_quota_status() {\n    #[cfg(not(feature = "mojo"))] rust();\n}']])[0],
+    /feature-off Rust classifier/u);
+  assert.match(findViolations([[REHYDRATE_FILE,
+    'pub fn smart_context_auto_rehydrate_plan() {\n    #[cfg(not(feature = "mojo"))] rust();\n}\nfn smart_context_auto_rehydrate_plan_mojo() {}']])[0],
+    /feature-off Rust planner/u);
   assert.match(findViolations([["crates/prodex-runtime-tuning/src/capacity.rs",
     "fn runtime_proxy_worker_count_default_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",

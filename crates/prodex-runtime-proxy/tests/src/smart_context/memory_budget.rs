@@ -180,6 +180,140 @@ fn rehydrate_plan_respects_artifacts_tier_and_budget() {
 }
 
 #[test]
+fn rehydrate_plan_orders_required_items_and_preserves_duplicate_ids() {
+    let plan = smart_context_auto_rehydrate_plan(
+        [
+            SmartContextRehydrateRef {
+                id: "optional".to_string(),
+                token_cost: 1,
+                required: false,
+            },
+            SmartContextRehydrateRef {
+                id: "required-z".to_string(),
+                token_cost: 5,
+                required: true,
+            },
+            SmartContextRehydrateRef {
+                id: "duplicate".to_string(),
+                token_cost: 3,
+                required: true,
+            },
+            SmartContextRehydrateRef {
+                id: "required-a".to_string(),
+                token_cost: 5,
+                required: true,
+            },
+            SmartContextRehydrateRef {
+                id: "duplicate".to_string(),
+                token_cost: 2,
+                required: true,
+            },
+            SmartContextRehydrateRef {
+                id: "missing".to_string(),
+                token_cost: 1,
+                required: true,
+            },
+        ],
+        [
+            "optional".to_string(),
+            "required-z".to_string(),
+            "duplicate".to_string(),
+            "required-a".to_string(),
+            "duplicate".to_string(),
+        ],
+        1_000,
+        SmartContextTokenBudgetTier::Exact,
+    );
+
+    assert_eq!(
+        plan.actions,
+        vec![
+            SmartContextRehydrateAction::Defer {
+                id: "missing".to_string(),
+                reason: SmartContextRehydrateDeferReason::MissingArtifact,
+            },
+            SmartContextRehydrateAction::Rehydrate {
+                id: "duplicate".to_string(),
+                token_cost: 2,
+            },
+            SmartContextRehydrateAction::Rehydrate {
+                id: "duplicate".to_string(),
+                token_cost: 3,
+            },
+            SmartContextRehydrateAction::Rehydrate {
+                id: "required-a".to_string(),
+                token_cost: 5,
+            },
+            SmartContextRehydrateAction::Rehydrate {
+                id: "required-z".to_string(),
+                token_cost: 5,
+            },
+            SmartContextRehydrateAction::Rehydrate {
+                id: "optional".to_string(),
+                token_cost: 1,
+            },
+        ]
+    );
+    assert_eq!(plan.used_tokens, 16);
+}
+
+#[test]
+fn rehydrate_plan_rejects_budget_overflow_without_losing_used_tokens() {
+    let plan = smart_context_auto_rehydrate_plan(
+        [
+            SmartContextRehydrateRef {
+                id: "optional".to_string(),
+                token_cost: 2,
+                required: false,
+            },
+            SmartContextRehydrateRef {
+                id: "required".to_string(),
+                token_cost: usize::MAX - 1,
+                required: true,
+            },
+        ],
+        ["optional".to_string(), "required".to_string()],
+        usize::MAX,
+        SmartContextTokenBudgetTier::Exact,
+    );
+
+    assert_eq!(
+        plan.actions,
+        vec![
+            SmartContextRehydrateAction::Rehydrate {
+                id: "required".to_string(),
+                token_cost: usize::MAX - 1,
+            },
+            SmartContextRehydrateAction::Defer {
+                id: "optional".to_string(),
+                reason: SmartContextRehydrateDeferReason::TokenBudgetExceeded,
+            },
+        ]
+    );
+    assert_eq!(plan.used_tokens, usize::MAX - 1);
+}
+
+#[test]
+fn rehydrate_plan_rejects_input_count_beyond_abi_bound() {
+    let ids = (0..257)
+        .map(|index| format!("artifact-{index}"))
+        .collect::<Vec<_>>();
+    let items = ids
+        .iter()
+        .map(|id| prodex_mojo_core::rich::ContextPlanItem {
+            id,
+            token_cost: 1,
+            required: true,
+        })
+        .collect::<Vec<_>>();
+
+    assert!(matches!(
+        prodex_mojo_core::rich::ContextPlanItem::plan_smart_context_rehydrate(&items, &[], 1, 3,),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    ));
+}
+
+#[test]
 fn token_budget_tiers_are_stable_boundaries() {
     assert_eq!(
         smart_context_token_budget_tier(1_999),
