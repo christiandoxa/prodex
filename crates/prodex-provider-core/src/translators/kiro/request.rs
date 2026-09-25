@@ -1,15 +1,11 @@
 //! Kiro provider request rewriting and Chat Completions compatibility helpers.
 
-#[path = "request/controls.rs"]
-mod controls;
 #[path = "request/messages.rs"]
 mod messages;
-#[cfg(feature = "mojo")]
-#[path = "request/validation.rs"]
-mod validation;
+#[cfg(test)]
+#[path = "request/semantics_tests.rs"]
+mod semantics_tests;
 
-#[cfg(not(feature = "mojo"))]
-use self::controls::kiro_provider_core_reject_token_limit_controls;
 pub use messages::{
     kiro_provider_core_prompt_from_chat_messages,
     kiro_provider_core_responses_items_from_chat_message,
@@ -18,8 +14,11 @@ pub use messages::{
 };
 use serde_json::Value;
 
-#[cfg(feature = "mojo")]
-use prodex_mojo_core::rich::{KiroKernelInput, kiro_kernel};
+use prodex_mojo_core::rich::{
+    KiroChatRewriteIssue, KiroKernelInput, KiroKernelOperation, KiroRequestValidationMode,
+    KiroRequestValidationPlan, kiro_kernel, kiro_rewrite_chat_request_json,
+    kiro_validate_request_json,
+};
 
 use crate::{
     deepseek_provider_core_reject_beta_completion_fields,
@@ -44,463 +43,34 @@ impl KiroProviderCoreRequestError {
     }
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn kiro_mojo_body(input: KiroKernelInput<'_>) -> Vec<u8> {
     kiro_kernel(input).unwrap_or_else(|error| panic!("Mojo Kiro kernel failed: {error:?}"))
 }
 
-#[cfg(not(feature = "mojo"))]
-mod rust_oracle {
-    use super::controls::{
-        kiro_provider_core_has_requested_nondefault_number,
-        kiro_provider_core_has_requested_parallel_tool_calls_control,
-        kiro_provider_core_has_requested_sampling_value,
-        kiro_provider_core_has_requested_stop_sequences,
-        kiro_provider_core_reject_token_limit_controls,
-        kiro_provider_core_supported_chat_response_format,
-    };
-    use super::*;
-
-    pub(super) fn kiro_validate_chat_completion_format_and_sampling(
-        object: &mut serde_json::Map<String, Value>,
-    ) -> Result<(), KiroProviderCoreRequestError> {
-        if let Some(response_format) = object.get("response_format")
-            && !kiro_provider_core_supported_chat_response_format(response_format)
-        {
-            return Err(KiroProviderCoreRequestError::new(
-                "Kiro provider only supports chat response_format type 'text' right now",
-                "unsupported_response_format",
-            ));
-        }
-        if let Some(n) = object.get("n")
-            && !n.is_null()
-            && n.as_u64() != Some(1)
-        {
-            return Err(KiroProviderCoreRequestError::new(
-                "Kiro provider only supports chat completion parameter n=1 right now",
-                "unsupported_choice_count",
-            ));
-        }
-        kiro_remove_default_chat_control(
-            object,
-            "stop",
-            kiro_provider_core_has_requested_stop_sequences,
-            "Kiro provider does not support chat stop sequences right now",
-            "unsupported_stop",
-        )?;
-        kiro_remove_default_number_chat_control(
-            object,
-            "temperature",
-            1.0,
-            "Kiro provider does not support non-default chat temperature right now",
-            "unsupported_temperature",
-        )?;
-        kiro_remove_default_number_chat_control(
-            object,
-            "top_p",
-            1.0,
-            "Kiro provider does not support non-default chat top_p right now",
-            "unsupported_top_p",
-        )
+fn kiro_validation_error(
+    plan: KiroRequestValidationPlan,
+    object: &serde_json::Map<String, Value>,
+) -> Result<(), KiroProviderCoreRequestError> {
+    if plan.reason == KiroRequestValidationPlan::REASON_NONE {
+        return Ok(());
     }
-
-    pub(super) fn kiro_validate_chat_completion_penalties(
-        object: &mut serde_json::Map<String, Value>,
-    ) -> Result<(), KiroProviderCoreRequestError> {
-        kiro_remove_default_number_chat_control(
-            object,
-            "presence_penalty",
-            0.0,
-            "Kiro provider does not support non-default chat presence_penalty right now",
-            "unsupported_presence_penalty",
-        )?;
-        kiro_remove_default_number_chat_control(
-            object,
-            "frequency_penalty",
-            0.0,
-            "Kiro provider does not support non-default chat frequency_penalty right now",
-            "unsupported_frequency_penalty",
-        )?;
-        if object
-            .get("seed")
-            .is_some_and(kiro_provider_core_has_requested_sampling_value)
-        {
-            return Err(KiroProviderCoreRequestError::new(
-                "Kiro provider does not support chat seed right now",
-                "unsupported_seed",
-            ));
-        }
-        kiro_remove_default_chat_control(
-            object,
-            "parallel_tool_calls",
-            kiro_provider_core_has_requested_parallel_tool_calls_control,
-            "Kiro provider does not support chat parallel_tool_calls right now",
-            "unsupported_parallel_tool_calls",
-        )
-    }
-
-    fn kiro_remove_default_chat_control(
-        object: &mut serde_json::Map<String, Value>,
-        field: &str,
-        is_requested: impl Fn(&Value) -> bool,
-        message: &str,
-        code: &str,
-    ) -> Result<(), KiroProviderCoreRequestError> {
-        if let Some(value) = object.get(field) {
-            if is_requested(value) {
-                return Err(KiroProviderCoreRequestError::new(message, code));
-            }
-            object.remove(field);
-        }
-        Ok(())
-    }
-
-    fn kiro_remove_default_number_chat_control(
-        object: &mut serde_json::Map<String, Value>,
-        field: &str,
-        default: f64,
-        message: &str,
-        code: &str,
-    ) -> Result<(), KiroProviderCoreRequestError> {
-        kiro_remove_default_chat_control(
-            object,
-            field,
-            |value| kiro_provider_core_has_requested_nondefault_number(value, default),
-            message,
-            code,
-        )
-    }
-
-    pub(super) fn kiro_rewrite_chat_messages(
-        object: &mut serde_json::Map<String, Value>,
-    ) -> Result<(), KiroProviderCoreRequestError> {
-        let messages = object.remove("messages").ok_or_else(|| {
-            KiroProviderCoreRequestError::new(
-                "Kiro chat completions request is missing messages",
-                "missing_messages",
-            )
-        })?;
-        let items = messages
-            .as_array()
-            .ok_or_else(|| {
-                KiroProviderCoreRequestError::new(
-                    "Kiro chat completions messages must be an array",
-                    "invalid_messages",
-                )
-            })?
-            .iter()
-            .flat_map(kiro_provider_core_responses_items_from_chat_message)
-            .collect::<Vec<_>>();
-        object.insert("input".to_string(), Value::Array(items));
-        kiro_rewrite_legacy_chat_tools(object);
-        Ok(())
-    }
-
-    pub(super) fn kiro_rewrite_anthropic_messages_request(
-        value: &Value,
-    ) -> Result<Vec<u8>, KiroProviderCoreRequestError> {
-        let object = value.as_object().ok_or_else(|| {
-            KiroProviderCoreRequestError::new(
-                "Kiro Messages request body must be a JSON object",
-                "invalid_request_body",
-            )
-        })?;
-        let mut rewritten = serde_json::Map::new();
-        kiro_copy_optional_field(object, &mut rewritten, "model");
-        kiro_copy_optional_field(object, &mut rewritten, "stream");
-
-        let mut input = Vec::new();
-        if let Some(system) = object.get("system") {
-            input.push(kiro_anthropic_text_message(
-                "system",
-                kiro_anthropic_text(system).unwrap_or_default(),
-            ));
-        }
-        input.extend(kiro_anthropic_messages_items(object.get("messages"))?);
-        rewritten.insert("input".to_string(), Value::Array(input));
-        serde_json::to_vec(&Value::Object(rewritten)).map_err(|_| {
-            KiroProviderCoreRequestError::new(
-                "failed to serialize rewritten Kiro Messages body",
-                "invalid_request_body",
-            )
-        })
-    }
-
-    fn kiro_copy_optional_field(
-        source: &serde_json::Map<String, Value>,
-        target: &mut serde_json::Map<String, Value>,
-        field: &str,
-    ) {
-        if let Some(value) = source.get(field) {
-            target.insert(field.to_string(), value.clone());
-        }
-    }
-
-    fn kiro_anthropic_messages_items(
-        messages: Option<&Value>,
-    ) -> Result<Vec<Value>, KiroProviderCoreRequestError> {
-        let Some(messages) = messages.and_then(Value::as_array) else {
-            return Ok(Vec::new());
-        };
-        let mut items = Vec::new();
-        for message in messages {
-            let Some(message) = message.as_object() else {
-                continue;
-            };
-            let role = message
-                .get("role")
-                .and_then(Value::as_str)
-                .unwrap_or("user");
-            if let Some(content) = message.get("content") {
-                items.extend(kiro_anthropic_content_items(role, content)?);
-            }
-        }
-        Ok(items)
-    }
-
-    fn kiro_anthropic_content_items(
-        role: &str,
-        content: &Value,
-    ) -> Result<Vec<Value>, KiroProviderCoreRequestError> {
-        match content {
-            Value::String(text) => Ok(vec![kiro_anthropic_text_message(role, text.clone())]),
-            Value::Array(blocks) => {
-                let mut items = Vec::new();
-                for block in blocks {
-                    let Some(block) = block.as_object() else {
-                        continue;
-                    };
-                    if let Some(item) = kiro_anthropic_block_item(role, block)? {
-                        items.push(item);
-                    }
-                }
-                Ok(items)
-            }
-            _ => Ok(Vec::new()),
-        }
-    }
-
-    fn kiro_anthropic_block_item(
-        role: &str,
-        block: &serde_json::Map<String, Value>,
-    ) -> Result<Option<Value>, KiroProviderCoreRequestError> {
-        match block.get("type").and_then(Value::as_str) {
-            Some("text") => Ok(block
-                .get("text")
-                .and_then(Value::as_str)
-                .map(|text| kiro_anthropic_text_message(role, text.to_string()))),
-            Some("tool_use") => {
-                let arguments = block
-                    .get("input")
-                    .map(serde_json::to_string)
-                    .transpose()
-                    .map_err(|_| {
-                        KiroProviderCoreRequestError::new(
-                            "failed to serialize Kiro tool input",
-                            "invalid_request_body",
-                        )
-                    })?
-                    .unwrap_or_else(|| "{}".to_string());
-                Ok(Some(serde_json::json!({
-                    "type": "function_call",
-                    "call_id": block
-                        .get("id")
-                        .and_then(Value::as_str)
-                        .unwrap_or("call_kiro"),
-                    "name": block
-                        .get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or("tool_call"),
-                    "arguments": arguments,
-                })))
-            }
-            Some("tool_result") => Ok(Some(serde_json::json!({
-                "type": "function_call_output",
-                "call_id": block
-                    .get("tool_use_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("call_kiro"),
-                "output": block
-                    .get("content")
-                    .and_then(kiro_anthropic_text)
-                    .unwrap_or_default(),
-            }))),
-            _ => Ok(None),
-        }
-    }
-
-    fn kiro_anthropic_text_message(role: &str, text: String) -> Value {
-        serde_json::json!({
-            "type": "message",
-            "role": role,
-            "content": [{
-                "type": "input_text",
-                "text": text,
-            }],
-        })
-    }
-
-    fn kiro_anthropic_text(value: &Value) -> Option<String> {
-        match value {
-            Value::String(text) => Some(text.clone()),
-            Value::Array(items) => {
-                let text = items
-                    .iter()
-                    .filter_map(kiro_anthropic_text)
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                (!text.is_empty()).then_some(text)
-            }
-            Value::Object(object) => object
-                .get("text")
-                .and_then(Value::as_str)
-                .map(str::to_string)
-                .or_else(|| object.get("content").and_then(kiro_anthropic_text))
-                .or_else(|| object.get("output").and_then(kiro_anthropic_text)),
-            _ => None,
-        }
-    }
-
-    pub(super) fn kiro_validate_serialized_chat_body(
-        value: &Value,
-    ) -> Result<Vec<u8>, KiroProviderCoreRequestError> {
-        let body = serde_json::to_vec(value).map_err(|_| {
-            KiroProviderCoreRequestError::new(
-                "failed to serialize rewritten Kiro chat completions body",
-                "invalid_request_body",
-            )
-        })?;
-        kiro_provider_core_responses_request_body(&body, false)
-    }
-
-    pub(super) fn kiro_validate_response_generation_controls(
-        object: &serde_json::Map<String, Value>,
-        allow_token_limit: bool,
-    ) -> Result<(), KiroProviderCoreRequestError> {
-        for field in ["temperature", "top_p", "seed"] {
-            if object.get(field).is_some_and(|value| !value.is_null()) {
-                return Err(KiroProviderCoreRequestError::new(
-                    format!("Kiro ACP does not expose the {field} control"),
-                    "unsupported_generation_control",
-                ));
-            }
-        }
-        if !allow_token_limit {
-            kiro_provider_core_reject_token_limit_controls(object)?;
-        }
-        for field in ["stop", "stop_sequences", "stopSequences"] {
-            if object
-                .get(field)
-                .is_some_and(kiro_provider_core_has_requested_stop_sequences)
-            {
-                return Err(KiroProviderCoreRequestError::new(
-                    "Kiro ACP does not expose stop-sequence controls",
-                    "unsupported_stop",
-                ));
-            }
-        }
-        kiro_validate_response_logprobs(object)
-    }
-
-    fn kiro_validate_response_logprobs(
-        object: &serde_json::Map<String, Value>,
-    ) -> Result<(), KiroProviderCoreRequestError> {
-        if let Some(logprobs) = object.get("logprobs") {
-            match logprobs {
-                Value::Null | Value::Bool(false) => {}
-                Value::Bool(true) => {
-                    return Err(KiroProviderCoreRequestError::new(
-                        "Kiro ACP does not expose log probabilities",
-                        "unsupported_logprobs",
-                    ));
-                }
-                _ => {
-                    return Err(KiroProviderCoreRequestError::new(
-                        "Kiro logprobs must be a boolean",
-                        "invalid_logprobs",
-                    ));
-                }
-            }
-        }
-        if object
-            .get("top_logprobs")
-            .is_some_and(|value| !value.is_null())
-        {
-            return Err(KiroProviderCoreRequestError::new(
-                "Kiro ACP does not expose top_logprobs",
-                "unsupported_logprobs",
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn kiro_validate_response_format_and_tools(
-        object: &serde_json::Map<String, Value>,
-    ) -> Result<(), KiroProviderCoreRequestError> {
-        for format in [
-            object.get("response_format"),
-            object.get("text").and_then(|text| text.get("format")),
-        ]
-        .into_iter()
-        .flatten()
-        {
-            if !kiro_provider_core_supported_chat_response_format(format) {
-                return Err(KiroProviderCoreRequestError::new(
-                    "Kiro ACP supports only text response format",
-                    "unsupported_response_format",
-                ));
-            }
-        }
-        if let Some(choice) = object.get("tool_choice")
-            && !choice.is_null()
-            && choice.as_str() != Some("auto")
-        {
-            return Err(KiroProviderCoreRequestError::new(
-                "Kiro ACP owns tool selection and cannot honor tool_choice",
-                "unsupported_tool_choice",
-            ));
-        }
-        if let Some(tools) = object.get("tools")
-            && !tools.is_null()
-            && tools.as_array().is_none_or(|tools| !tools.is_empty())
-        {
-            return Err(KiroProviderCoreRequestError::new(
-                "Kiro ACP owns its tool inventory and cannot execute external tools",
-                "unsupported_tools",
-            ));
-        }
-        if object.get("web_search_options").is_some() {
-            return Err(KiroProviderCoreRequestError::new(
-                "Kiro ACP owns web search and cannot honor web_search_options",
-                "unsupported_web_search_options",
-            ));
-        }
-        Ok(())
-    }
-
-    pub(super) fn kiro_validate_response_reasoning(
-        value: &Value,
-        object: &serde_json::Map<String, Value>,
-    ) -> Result<(), KiroProviderCoreRequestError> {
-        deepseek_provider_core_validate_reasoning_shape(value, "Kiro")
-            .map_err(kiro_invalid_request)?;
-        if let Some(effort) = object
-            .get("reasoning")
-            .and_then(|reasoning| reasoning.get("effort"))
-            .or_else(|| object.get("reasoning_effort"))
-            .and_then(Value::as_str)
-            && !matches!(
-                effort.trim(),
-                "none" | "low" | "medium" | "high" | "xhigh" | "max"
-            )
-        {
-            return Err(KiroProviderCoreRequestError::new(
-                format!("Kiro ACP does not support reasoning effort `{effort}`"),
-                "unsupported_reasoning_effort",
-            ));
-        }
-        Ok(())
-    }
+    let effort = object
+        .get("reasoning")
+        .and_then(|reasoning| reasoning.get("effort"))
+        .or_else(|| object.get("reasoning_effort"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let mut input = KiroKernelInput::new(KiroKernelOperation::RequestValidationError);
+    input.request_id = u64::try_from(plan.reason).unwrap_or_default();
+    input.used = u64::try_from(plan.detail).unwrap_or(u64::MAX);
+    input.include_role = plan.detail_is_invalid;
+    input.reason = Some(effort);
+    let rendered =
+        String::from_utf8(kiro_mojo_body(input)).expect("Mojo Kiro validation error is UTF-8");
+    let (code, message) = rendered
+        .split_once('\n')
+        .expect("Mojo Kiro validation error contains code and message");
+    Err(KiroProviderCoreRequestError::new(message, code))
 }
 
 pub fn kiro_provider_core_chat_completions_request_body(
@@ -519,87 +89,60 @@ pub fn kiro_provider_core_chat_completions_request_body(
         ));
     };
 
-    #[cfg(not(feature = "mojo"))]
-    let _ = object;
-
-    #[cfg(feature = "mojo")]
-    {
-        use prodex_mojo_core::rich::{
-            KiroChatRewriteIssue, KiroRequestValidationMode, kiro_rewrite_chat_request_json,
-            kiro_validate_request_json,
-        };
-
-        let canonical = serde_json::to_string(&value).map_err(|_| {
-            KiroProviderCoreRequestError::new(
-                "failed to serialize Kiro chat completions request",
-                "invalid_request_body",
-            )
-        })?;
-        let plan = kiro_validate_request_json(
-            KiroRequestValidationMode::ChatCompletions,
-            &canonical,
-            false,
+    let canonical = serde_json::to_string(&value).map_err(|_| {
+        KiroProviderCoreRequestError::new(
+            "failed to serialize Kiro chat completions request",
+            "invalid_request_body",
         )
-        .unwrap_or_else(|error| panic!("Mojo Kiro raw request validation failed: {error:?}"));
-        validation::error(plan, object)?;
+    })?;
+    let plan = kiro_validate_request_json(
+        KiroRequestValidationMode::ChatCompletions,
+        &canonical,
+        false,
+    )
+    .unwrap_or_else(|error| panic!("Mojo Kiro raw request validation failed: {error:?}"));
+    kiro_validation_error(plan, object)?;
 
-        let had_input = object.contains_key("input");
-        let rewritten = kiro_rewrite_chat_request_json(&canonical)
-            .unwrap_or_else(|error| panic!("Mojo Kiro raw chat rewrite failed: {error:?}"));
-        match rewritten.issue {
-            KiroChatRewriteIssue::None => {}
-            KiroChatRewriteIssue::MissingMessages => {
-                return Err(KiroProviderCoreRequestError::new(
-                    "Kiro chat completions request is missing messages",
-                    "missing_messages",
-                ));
-            }
-            KiroChatRewriteIssue::InvalidMessages => {
-                return Err(KiroProviderCoreRequestError::new(
-                    "Kiro chat completions messages must be an array",
-                    "invalid_messages",
-                ));
-            }
+    let had_input = object.contains_key("input");
+    let rewritten = kiro_rewrite_chat_request_json(&canonical)
+        .unwrap_or_else(|error| panic!("Mojo Kiro raw chat rewrite failed: {error:?}"));
+    match rewritten.issue {
+        KiroChatRewriteIssue::None => {}
+        KiroChatRewriteIssue::MissingMessages => {
+            return Err(KiroProviderCoreRequestError::new(
+                "Kiro chat completions request is missing messages",
+                "missing_messages",
+            ));
         }
-        let mut rewritten: Value = serde_json::from_slice(&rewritten.body).map_err(|_| {
-            KiroProviderCoreRequestError::new(
-                "failed to serialize rewritten Kiro chat completions body",
-                "invalid_request_body",
-            )
-        })?;
-        let object = rewritten.as_object_mut().ok_or_else(|| {
-            KiroProviderCoreRequestError::new(
-                "failed to serialize rewritten Kiro chat completions body",
-                "invalid_request_body",
-            )
-        })?;
-        if !had_input {
-            kiro_rewrite_legacy_chat_tools(object);
+        KiroChatRewriteIssue::InvalidMessages => {
+            return Err(KiroProviderCoreRequestError::new(
+                "Kiro chat completions messages must be an array",
+                "invalid_messages",
+            ));
         }
-        let body = serde_json::to_vec(&rewritten).map_err(|_| {
-            KiroProviderCoreRequestError::new(
-                "failed to serialize rewritten Kiro chat completions body",
-                "invalid_request_body",
-            )
-        })?;
-        kiro_provider_core_responses_request_body(&body, false)
     }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        let mut value = value;
-        let object = value.as_object_mut().expect("validated request object");
-        rust_oracle::kiro_validate_chat_completion_format_and_sampling(object)?;
-        rust_oracle::kiro_validate_chat_completion_penalties(object)?;
-        object.remove("n");
-        object.remove("user");
-        kiro_provider_core_reject_token_limit_controls(object)?;
-        if object.contains_key("input") {
-            return rust_oracle::kiro_validate_serialized_chat_body(&value);
-        }
-        rust_oracle::kiro_rewrite_chat_messages(object)?;
-        rust_oracle::kiro_validate_serialized_chat_body(&value)
+    let mut rewritten: Value = serde_json::from_slice(&rewritten.body).map_err(|_| {
+        KiroProviderCoreRequestError::new(
+            "failed to serialize rewritten Kiro chat completions body",
+            "invalid_request_body",
+        )
+    })?;
+    let object = rewritten.as_object_mut().ok_or_else(|| {
+        KiroProviderCoreRequestError::new(
+            "failed to serialize rewritten Kiro chat completions body",
+            "invalid_request_body",
+        )
+    })?;
+    if !had_input {
+        kiro_rewrite_legacy_chat_tools(object);
     }
+    let body = serde_json::to_vec(&rewritten).map_err(|_| {
+        KiroProviderCoreRequestError::new(
+            "failed to serialize rewritten Kiro chat completions body",
+            "invalid_request_body",
+        )
+    })?;
+    kiro_provider_core_responses_request_body(&body, false)
 }
 fn kiro_rewrite_legacy_chat_tools(object: &mut serde_json::Map<String, Value>) {
     if !object.contains_key("tools")
@@ -640,72 +183,45 @@ pub(super) fn kiro_provider_core_responses_request_body(
     let object = value.as_object().expect("validated request object");
 
     kiro_validate_response_input(object)?;
-    #[cfg(feature = "mojo")]
-    {
-        let raw = std::str::from_utf8(body).expect("valid JSON is valid UTF-8");
-        let plan = prodex_mojo_core::rich::kiro_validate_request_json(
-            prodex_mojo_core::rich::KiroRequestValidationMode::Responses,
-            raw,
-            allow_token_limit,
-        )
-        .unwrap_or_else(|error| panic!("Mojo Kiro raw request validation failed: {error:?}"));
-        if matches!(
-            plan.reason,
-            prodex_mojo_core::rich::KiroRequestValidationPlan::REASON_NONE
-                | prodex_mojo_core::rich::KiroRequestValidationPlan::REASON_REASONING_EFFORT
-        ) {
-            deepseek_provider_core_validate_reasoning_shape(&value, "Kiro")
-                .map_err(kiro_invalid_request)?;
-        }
-        validation::error(plan, object)?;
+    let raw = std::str::from_utf8(body).expect("valid JSON is valid UTF-8");
+    let plan =
+        kiro_validate_request_json(KiroRequestValidationMode::Responses, raw, allow_token_limit)
+            .unwrap_or_else(|error| panic!("Mojo Kiro raw request validation failed: {error:?}"));
+    if matches!(
+        plan.reason,
+        KiroRequestValidationPlan::REASON_NONE | KiroRequestValidationPlan::REASON_REASONING_EFFORT
+    ) {
+        deepseek_provider_core_validate_reasoning_shape(&value, "Kiro")
+            .map_err(kiro_invalid_request)?;
     }
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracle::kiro_validate_response_generation_controls(object, allow_token_limit)?;
-        rust_oracle::kiro_validate_response_format_and_tools(object)?;
-        rust_oracle::kiro_validate_response_reasoning(&value, object)?;
-    }
+    kiro_validation_error(plan, object)?;
     deepseek_provider_core_reject_beta_completion_fields(&value, "Kiro")
         .map_err(kiro_invalid_request)?;
     deepseek_provider_core_reject_unsupported_request_fields(&value, "Kiro")
         .map_err(kiro_invalid_request)?;
-    #[cfg(feature = "mojo")]
     if allow_token_limit && object.contains_key("messages") && !object.contains_key("input") {
         let canonical =
             serde_json::to_string(&value).expect("Kiro Anthropic Messages request serializes");
-        let mut input_value = KiroKernelInput::new(
-            prodex_mojo_core::rich::KiroKernelOperation::AnthropicRequestRewrite,
-        );
+        let mut input_value = KiroKernelInput::new(KiroKernelOperation::AnthropicRequestRewrite);
         input_value.input = Some(&canonical);
         return Ok(kiro_mojo_body(input_value));
     }
-    #[cfg(feature = "mojo")]
-    {
-        let model = object.get("model").and_then(Value::as_str);
-        let input = object
-            .get("input")
-            .map(|value| serde_json::to_string(value).expect("Kiro request input serializes"));
-        let extra = object
-            .iter()
-            .filter(|(key, _)| !matches!(key.as_str(), "model" | "input"))
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect::<serde_json::Map<_, _>>();
-        let extra = serde_json::to_string(&Value::Object(extra))
-            .expect("Kiro request extra fields serialize");
-        let mut input_value =
-            KiroKernelInput::new(prodex_mojo_core::rich::KiroKernelOperation::RequestBody);
-        input_value.model = model;
-        input_value.input = input.as_deref();
-        input_value.extra = Some(&extra);
-        Ok(kiro_mojo_body(input_value))
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        if allow_token_limit && object.contains_key("messages") && !object.contains_key("input") {
-            return rust_oracle::kiro_rewrite_anthropic_messages_request(&value);
-        }
-        Ok(body.to_vec())
-    }
+    let model = object.get("model").and_then(Value::as_str);
+    let input = object
+        .get("input")
+        .map(|value| serde_json::to_string(value).expect("Kiro request input serializes"));
+    let extra = object
+        .iter()
+        .filter(|(key, _)| !matches!(key.as_str(), "model" | "input"))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect::<serde_json::Map<_, _>>();
+    let extra =
+        serde_json::to_string(&Value::Object(extra)).expect("Kiro request extra fields serialize");
+    let mut input_value = KiroKernelInput::new(KiroKernelOperation::RequestBody);
+    input_value.model = model;
+    input_value.input = input.as_deref();
+    input_value.extra = Some(&extra);
+    Ok(kiro_mojo_body(input_value))
 }
 
 fn kiro_validate_response_input(

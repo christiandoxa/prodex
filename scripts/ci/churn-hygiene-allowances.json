@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-mojo-kiro-request-hard-replacement-20260926",
+    "requiredSubjects": [
+      "refactor(kiro): replace request validation and rewriting with Mojo"
+    ],
+    "caps": {
+      "maxFiles": 3,
+      "maxBehaviorFiles": 3,
+      "maxLines": 900,
+      "maxFileLines": 702
+    },
+    "reason": "One bounded Kiro request hard replacement removes the 452-line in-file Rust oracle and its feature-off paths, plus two now-unreachable oracle modules. Pre-removal differential tests, independent request fixtures, both provider feature modes, and the full provider and runtime gates validate the deletion. The ordinary churn thresholds remain unchanged."
+  },
+  {
     "id": "audited-prodex-0.430.1-ui-preservation-train",
     "requiredSubjects": [
       "feat(ui): restore 0.429.4 terminal surfaces"
