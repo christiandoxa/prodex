@@ -4,73 +4,11 @@
 mod gemini;
 
 use self::gemini::provider_gemini_code_assist_model_allowed;
-#[cfg(any(not(feature = "mojo"), test))]
-use self::gemini::provider_gemini_model_fallback_alias_chain;
-#[cfg(all(feature = "mojo", not(test)))]
 use crate::ProviderId;
-#[cfg(any(not(feature = "mojo"), test))]
-use crate::{
-    PRODEX_ANTHROPIC_DEFAULT_MODEL, PRODEX_COPILOT_DEFAULT_MODEL, PRODEX_KIRO_DEFAULT_MODEL,
-    ProviderId,
-};
 
-#[cfg(feature = "mojo")]
 pub fn provider_model_fallback_chain(provider: ProviderId, model: &str) -> Vec<String> {
     prodex_mojo_core::rich::model_fallback_chain(provider.label(), model)
         .expect("Mojo model fallback parser returned an invalid structured result")
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn provider_model_fallback_chain_rust(provider: ProviderId, model: &str) -> Vec<String> {
-    let model = model.trim();
-    if let Some(chain) = combo_chain(model) {
-        return chain;
-    }
-    let lower = model.to_ascii_lowercase();
-    let chain: &[&str] = match provider {
-        ProviderId::Anthropic => match lower.as_str() {
-            "" | "auto" | "default" => &[
-                PRODEX_ANTHROPIC_DEFAULT_MODEL,
-                "claude-opus-4-8",
-                "claude-haiku-4-5",
-            ],
-            "opus" | "best" => &["claude-opus-4-8", "claude-sonnet-4-6"],
-            "sonnet" | "pro" => &["claude-sonnet-4-6", "claude-opus-4-8"],
-            "haiku" | "flash" => &["claude-haiku-4-5", "claude-sonnet-4-6"],
-            _ => return non_empty_single(model),
-        },
-        ProviderId::Copilot => match lower.as_str() {
-            "" | "auto" | "default" => &[PRODEX_COPILOT_DEFAULT_MODEL, "gpt-5.1-codex", "gpt-4o"],
-            "codex" | "pro" => &["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
-            "gpt-5.5" => &["gpt-5.5", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
-            "gpt-5.4" => &["gpt-5.4", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
-            "gpt-5.3-codex" => &["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
-            "claude" | "sonnet" => &["claude-sonnet-4-6", "gpt-5.3-codex", "gpt-5.1-codex"],
-            "gemini" => &["gemini-3.1-pro-preview", "gpt-5.3-codex", "gpt-5.1-codex"],
-            _ => return non_empty_single(model),
-        },
-        ProviderId::Gemini => match provider_gemini_model_fallback_alias_chain(&lower) {
-            Some(chain) => chain,
-            None => return non_empty_single(model),
-        },
-        ProviderId::DeepSeek => match lower.as_str() {
-            "" | "auto" => &["deepseek-v4-pro", "deepseek-v4-flash"],
-            "pro" => &["deepseek-v4-pro", "deepseek-v4-flash"],
-            "flash" => &["deepseek-v4-flash", "deepseek-v4-pro"],
-            _ => return non_empty_single(model),
-        },
-        ProviderId::Kiro => match lower.as_str() {
-            "" | "auto" | "default" | "claude" | "sonnet" => &[PRODEX_KIRO_DEFAULT_MODEL],
-            _ => return non_empty_single(model),
-        },
-        ProviderId::OpenAi | ProviderId::Local => return non_empty_single(model),
-    };
-    dedup_chain(chain.iter().map(|value| (*value).to_string()).collect())
-}
-
-#[cfg(not(feature = "mojo"))]
-pub fn provider_model_fallback_chain(provider: ProviderId, model: &str) -> Vec<String> {
-    provider_model_fallback_chain_rust(provider, model)
 }
 
 pub fn provider_gemini_retain_code_assist_models(model_chain: &mut Vec<String>) {
@@ -92,116 +30,341 @@ pub fn provider_model_allows_session_memory(model: &str) -> bool {
     )
 }
 
-#[cfg(all(test, feature = "mojo"))]
 #[test]
-fn rich_model_fallback_parser_matches_rust_oracle_for_generated_cases() {
-    let providers = [
-        ProviderId::OpenAi,
-        ProviderId::Anthropic,
-        ProviderId::Copilot,
-        ProviderId::DeepSeek,
-        ProviderId::Gemini,
-        ProviderId::Kiro,
-        ProviderId::Local,
+fn rich_model_fallback_matches_expected_provider_cases() {
+    let cases: &[(ProviderId, &str, &[&str])] = &[
+        (
+            ProviderId::Anthropic,
+            "",
+            &["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"],
+        ),
+        (
+            ProviderId::Anthropic,
+            "DEFAULT",
+            &["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5"],
+        ),
+        (
+            ProviderId::Anthropic,
+            "best",
+            &["claude-opus-4-8", "claude-sonnet-4-6"],
+        ),
+        (
+            ProviderId::Anthropic,
+            "pro",
+            &["claude-sonnet-4-6", "claude-opus-4-8"],
+        ),
+        (
+            ProviderId::Anthropic,
+            "flash",
+            &["claude-haiku-4-5", "claude-sonnet-4-6"],
+        ),
+        (
+            ProviderId::Copilot,
+            "",
+            &["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
+        ),
+        (
+            ProviderId::Copilot,
+            "auto",
+            &["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
+        ),
+        (
+            ProviderId::Copilot,
+            "codex",
+            &["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
+        ),
+        (
+            ProviderId::Copilot,
+            "gpt-5.5",
+            &["gpt-5.5", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
+        ),
+        (
+            ProviderId::Copilot,
+            "gpt-5.4",
+            &["gpt-5.4", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
+        ),
+        (
+            ProviderId::Copilot,
+            "gpt-5.3-codex",
+            &["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"],
+        ),
+        (
+            ProviderId::Copilot,
+            "sonnet",
+            &["claude-sonnet-4-6", "gpt-5.3-codex", "gpt-5.1-codex"],
+        ),
+        (
+            ProviderId::Copilot,
+            "gemini",
+            &["gemini-3.1-pro-preview", "gpt-5.3-codex", "gpt-5.1-codex"],
+        ),
+        (
+            ProviderId::Gemini,
+            "chat-compression-default",
+            &[
+                "gemini-3-pro-preview",
+                "gemini-3-flash-preview",
+                "gemini-2.5-pro",
+                "gemini-2.5-flash",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "",
+            &[
+                "gemini-3-pro-preview",
+                "gemini-3.1-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3.5-flash",
+                "gemini-3-flash",
+                "gemini-2.5-flash",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "auto",
+            &[
+                "gemini-3-pro-preview",
+                "gemini-3.1-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3.5-flash",
+                "gemini-3-flash",
+                "gemini-2.5-flash",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "auto-gemini-3",
+            &[
+                "gemini-3-pro-preview",
+                "gemini-3.1-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3.5-flash",
+                "gemini-3-flash",
+                "gemini-2.5-flash",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "auto-gemini-2.5",
+            &["gemini-2.5-pro", "gemini-2.5-flash"],
+        ),
+        (
+            ProviderId::Gemini,
+            "pro",
+            &[
+                "gemini-3-pro-preview",
+                "gemini-3.1-pro-preview",
+                "gemini-2.5-pro",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "gemini-3.1-pro-preview-customtools",
+            &[
+                "gemini-3.1-pro-preview-customtools",
+                "gemini-3.1-pro-preview",
+                "gemini-3-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3-flash",
+                "gemini-3.5-flash",
+                "gemini-2.5-flash",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "gemini-3.1-pro-preview",
+            &[
+                "gemini-3.1-pro-preview",
+                "gemini-3-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3-flash",
+                "gemini-3.5-flash",
+                "gemini-2.5-flash",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "gemini-3-pro-preview",
+            &[
+                "gemini-3-pro-preview",
+                "gemini-3.1-pro-preview",
+                "gemini-2.5-pro",
+                "gemini-3-flash-preview",
+                "gemini-3.5-flash",
+                "gemini-3-flash",
+                "gemini-2.5-flash",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "gemini-3.5-flash",
+            &[
+                "gemini-3.5-flash",
+                "gemini-3-flash",
+                "gemini-3-flash-preview",
+                "gemini-2.5-flash",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "gemini-3-flash-preview",
+            &[
+                "gemini-3-flash-preview",
+                "gemini-3.5-flash",
+                "gemini-3-flash",
+                "gemini-2.5-flash",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "gemini-3-flash",
+            &["gemini-3-flash", "gemini-3.5-flash", "gemini-2.5-flash"],
+        ),
+        (
+            ProviderId::Gemini,
+            "gemini-3.1-flash-lite",
+            &[
+                "gemini-3.1-flash-lite",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-flash",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "gemini-2.5-flash",
+            &["gemini-2.5-flash"],
+        ),
+        (
+            ProviderId::Gemini,
+            "flash",
+            &[
+                "gemini-3-flash-preview",
+                "gemini-3.5-flash",
+                "gemini-3-flash",
+                "gemini-2.5-flash",
+            ],
+        ),
+        (
+            ProviderId::Gemini,
+            "flash-lite",
+            &["gemini-3.1-flash-lite", "gemini-2.5-flash-lite"],
+        ),
+        (
+            ProviderId::DeepSeek,
+            "",
+            &["deepseek-v4-pro", "deepseek-v4-flash"],
+        ),
+        (
+            ProviderId::DeepSeek,
+            "auto",
+            &["deepseek-v4-pro", "deepseek-v4-flash"],
+        ),
+        (
+            ProviderId::DeepSeek,
+            "pro",
+            &["deepseek-v4-pro", "deepseek-v4-flash"],
+        ),
+        (
+            ProviderId::DeepSeek,
+            "flash",
+            &["deepseek-v4-flash", "deepseek-v4-pro"],
+        ),
+        (ProviderId::Kiro, "", &["auto"]),
+        (ProviderId::Kiro, "default", &["auto"]),
+        (ProviderId::Kiro, "claude", &["auto"]),
+        (ProviderId::Kiro, "sonnet", &["auto"]),
+        (ProviderId::OpenAi, "custom-model", &["custom-model"]),
+        (ProviderId::Local, "local-model", &["local-model"]),
+        (ProviderId::Local, "", &[]),
     ];
-    for model in [
-        "chat-compression-default",
-        "auto",
-        "auto-gemini-3",
-        "auto-gemini-2.5",
-        "pro",
-        "gemini-3.1-pro-preview-customtools",
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3.5-flash",
-        "gemini-3-flash-preview",
-        "gemini-3-flash",
-        "gemini-3.1-flash-lite",
-        "flash",
-        "flash-lite",
-    ] {
-        assert_eq!(
-            provider_model_fallback_chain(ProviderId::Gemini, model),
-            provider_model_fallback_chain_rust(ProviderId::Gemini, model),
-            "Gemini fallback parser case {model}"
-        );
-    }
-    for case in 0..20_000 {
-        let provider = providers[case % providers.len()];
-        let model = match case % 12 {
-            0 => String::new(),
-            1 => " auto ".to_string(),
-            2 => "default".to_string(),
-            3 => "opus".to_string(),
-            4 => "sonnet".to_string(),
-            5 => "codex".to_string(),
-            6 => "gpt-5.5".to_string(),
-            7 => "pro".to_string(),
-            8 => "flash".to_string(),
-            9 => "combo:Alpha, alpha;Beta|gamma>beta".to_string(),
-            10 => "combo:,,,".to_string(),
-            _ => format!(" \t模型-{case}\t "),
-        };
-        assert_eq!(
-            provider_model_fallback_chain(provider, &model),
-            provider_model_fallback_chain_rust(provider, &model),
-            "fallback parser case {case}: provider={provider:?} model={model:?}"
-        );
-    }
-}
 
-#[cfg(all(test, feature = "mojo"))]
-#[test]
-fn rich_model_fallback_batch_matches_rust_oracle() {
-    let seeds = ["codex", "gpt-5.3-codex", "custom-model", " custom-model "];
-    let actual =
-        prodex_mojo_core::rich::model_fallback_plan(ProviderId::Copilot.label(), &seeds).unwrap();
-    let mut expected = Vec::new();
-    for seed in seeds {
-        for model in provider_model_fallback_chain_rust(ProviderId::Copilot, seed) {
-            if !expected
+    for (provider, model, expected) in cases {
+        assert_eq!(
+            provider_model_fallback_chain(*provider, model),
+            expected
                 .iter()
-                .any(|existing: &String| existing.eq_ignore_ascii_case(&model))
-            {
-                expected.push(model);
-            }
-        }
-    }
-    assert_eq!(actual, expected);
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn non_empty_single(model: &str) -> Vec<String> {
-    if model.is_empty() {
-        Vec::new()
-    } else {
-        vec![model.to_string()]
+                .map(|value| (*value).to_string())
+                .collect::<Vec<_>>(),
+            "provider={provider:?} model={model:?}"
+        );
     }
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
-fn combo_chain(model: &str) -> Option<Vec<String>> {
-    let chain = model.trim().strip_prefix("combo:")?;
-    let models = chain
-        .split([',', ';', '|', '>'])
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+#[test]
+fn rich_model_fallback_preserves_combo_and_unrecognized_model_values() {
+    let cases = [
+        (
+            "combo:Alpha, alpha;Beta|gamma>beta",
+            vec!["Alpha", "Beta", "gamma"],
+        ),
+        ("combo:,,,", vec!["combo:,,,"]),
+        ("combo: \u{3000}Alpha\t, Beta", vec!["Alpha", "Beta"]),
+        ("COMBO:Alpha,beta", vec!["COMBO:Alpha,beta"]),
+        (" \u{2003}模型-custom\u{3000} ", vec!["模型-custom"]),
+    ];
+
+    for (model, expected) in cases {
+        assert_eq!(
+            provider_model_fallback_chain(ProviderId::OpenAi, model),
+            expected.into_iter().map(str::to_string).collect::<Vec<_>>(),
+            "model={model:?}"
+        );
+    }
+}
+
+#[test]
+fn rich_model_fallback_grows_for_large_values() {
+    for length in [4_096, 4_097] {
+        let long_model = "x".repeat(length);
+        assert_eq!(
+            provider_model_fallback_chain(ProviderId::OpenAi, &long_model),
+            vec![long_model]
+        );
+    }
+
+    let models = [
+        "model-0", "model-1", "model-2", "model-3", "model-4", "model-5", "model-6", "model-7",
+        "model-8", "model-9", "model-10", "model-11", "model-12", "model-13", "model-14",
+        "model-15", "model-16", "model-17", "model-18", "model-19", "model-20", "model-21",
+        "model-22", "model-23", "model-24", "model-25", "model-26", "model-27", "model-28",
+        "model-29", "model-30", "model-31", "model-32",
+    ];
+    for count in [32, 33] {
+        let expected = &models[..count];
+        let combo = format!("combo:{}", expected.join(","));
+        assert_eq!(
+            provider_model_fallback_chain(ProviderId::OpenAi, &combo),
+            expected
+                .iter()
+                .map(|model| (*model).to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    let models = (0..2_049)
+        .map(|index| format!("model-{index}"))
         .collect::<Vec<_>>();
-    (!models.is_empty()).then(|| dedup_chain(models))
+    let combo = format!("combo:{}", models.join(","));
+    assert_eq!(
+        provider_model_fallback_chain(ProviderId::OpenAi, &combo),
+        models
+    );
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
-fn dedup_chain(models: Vec<String>) -> Vec<String> {
-    let mut seen = Vec::<String>::new();
-    let mut deduped = Vec::new();
-    for model in models {
-        let key = model.to_ascii_lowercase();
-        if seen.iter().any(|value| value == &key) {
-            continue;
-        }
-        seen.push(key);
-        deduped.push(model);
-    }
-    deduped
+#[test]
+fn rich_model_fallback_batch_matches_expected_values() {
+    assert_eq!(
+        prodex_mojo_core::rich::model_fallback_plan(
+            ProviderId::Copilot.label(),
+            &["codex", "gpt-5.3-codex", "custom-model", " custom-model "],
+        )
+        .unwrap(),
+        vec!["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o", "custom-model"]
+    );
 }

@@ -365,41 +365,63 @@ impl MojoError {
 
 pub fn model_fallback_chain(provider: &str, model: &str) -> Result<Vec<String>, MojoError> {
     ensure_rich_abi()?;
-    let record_capacity = 32_usize;
-    let scratch_capacity = hash_capacity(record_capacity)?;
     let output_capacity = model
         .len()
         .checked_add(4_096)
         .ok_or(MojoError::InvalidInput)?;
-    let mut records = vec![RichFallbackRecord::default(); record_capacity];
-    let mut output = vec![0_u8; output_capacity];
-    let mut hash_slots = vec![-1_i64; scratch_capacity];
-    let mut result = RichFallbackResult::default();
     let provider_view = view(provider);
     let model_view = view(model);
-    let status = unsafe {
-        prodex_mojo_rich_model_fallback_v2(
-            RICH_ABI_VERSION,
-            mojo_pointer_address(&provider_view),
-            mojo_pointer_address(&model_view),
-            mojo_pointer_address(records.as_mut_ptr()),
-            i64::try_from(record_capacity).map_err(|_| MojoError::InvalidInput)?,
-            mojo_pointer_address(output.as_mut_ptr()),
-            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
-            mojo_pointer_address(hash_slots.as_mut_ptr()),
-            i64::try_from(scratch_capacity).map_err(|_| MojoError::InvalidInput)?,
-            mojo_mut_pointer_address(&mut result),
-        )
+    let max_records = model
+        .len()
+        .div_ceil(2)
+        .max(8)
+        .checked_next_power_of_two()
+        .ok_or(MojoError::InvalidInput)?
+        .max(32);
+    let mut record_capacity = 32_usize;
+    let (records, output, result) = loop {
+        let scratch_capacity = hash_capacity(record_capacity)?;
+        let mut records = vec![RichFallbackRecord::default(); record_capacity];
+        let mut output = vec![0_u8; output_capacity];
+        let mut hash_slots = vec![-1_i64; scratch_capacity];
+        let mut result = RichFallbackResult::default();
+        let status = unsafe {
+            prodex_mojo_rich_model_fallback_v2(
+                RICH_ABI_VERSION,
+                mojo_pointer_address(&provider_view),
+                mojo_pointer_address(&model_view),
+                mojo_pointer_address(records.as_mut_ptr()),
+                i64::try_from(record_capacity).map_err(|_| MojoError::InvalidInput)?,
+                mojo_pointer_address(output.as_mut_ptr()),
+                i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+                mojo_pointer_address(hash_slots.as_mut_ptr()),
+                i64::try_from(scratch_capacity).map_err(|_| MojoError::InvalidInput)?,
+                mojo_mut_pointer_address(&mut result),
+            )
+        };
+        if status == RICH_STATUS_CAPACITY
+            && let Ok(required_records) = usize::try_from(result.required_records)
+            && required_records > record_capacity
+        {
+            let next_capacity = required_records
+                .checked_next_power_of_two()
+                .ok_or(MojoError::InvalidInput)?;
+            if next_capacity <= max_records {
+                record_capacity = next_capacity;
+                continue;
+            }
+        }
+        if status != 0 {
+            return Err(status_error(
+                status,
+                4,
+                result.issue_kind,
+                result.issue_offset,
+                result.issue_length,
+            ));
+        }
+        break (records, output, result);
     };
-    if status != 0 {
-        return Err(status_error(
-            status,
-            4,
-            result.issue_kind,
-            result.issue_offset,
-            result.issue_length,
-        ));
-    }
     if result.records_written < 0
         || result.records_written as usize > record_capacity
         || result.output_written < 0

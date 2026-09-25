@@ -13,9 +13,7 @@ path = "src/lib.rs"
 [features]
 default = []
 mojo = [
-    "dep:prodex_mojo_core",
     "prodex_mojo_core/mojo-provider-constraints",
-    "prodex_mojo_core/mojo-rich",
 ]
 
 [dependencies]
@@ -23,7 +21,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 url = { workspace = true }
-prodex_mojo_core = { workspace = true, optional = true }
+# Mojo owns model fallback even when the broader Mojo feature is disabled.
+prodex_mojo_core = { workspace = true, features = ["mojo-rich"] }
 
 [lints]
 workspace = true
