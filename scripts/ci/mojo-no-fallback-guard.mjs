@@ -70,6 +70,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/health/latency.rs",
   "crates/prodex-runtime-proxy/src/health/inflight.rs",
   "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
+  "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
@@ -80,8 +81,9 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
   "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+  "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
 ]);
-const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|runtime-log-mojo|state-summary-mojo)"\s*\)/u;
+const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|mojo-core|runtime-log-mojo|state-summary-mojo)"\s*\)/u;
 const ANTHROPIC_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs";
 const ANTHROPIC_MESSAGES_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages.rs";
 const ANTHROPIC_WEB_SEARCH_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs";
@@ -95,6 +97,7 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/pressure.rs",
   "crates/prodex-runtime-launch/src/args_oracle.rs",
   "crates/prodex-runtime-launch/src/args_resume.rs",
+  "crates/prodex-cli/src/runtime_args/super_tail_extract/mojo_tests.rs",
 ];
 const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-context/src/critical_signal.rs",
@@ -115,6 +118,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
   "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+  "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
 ]);
 const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-app/Cargo.toml", "mojo-core"],
@@ -125,6 +129,7 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
+const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
 const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
   [/\bfn\s+anthropic_response_block_input\s*\(/u, "Rust response block classifier"],
   [/\bfn\s+plan_with_rust\s*\(/u, "Rust response planner"],
@@ -213,6 +218,17 @@ export function findViolations(files) {
     return body && FEATURE_OFF_RUST_PATH.test(body)
       ? [`${filePath}: rehydration has a feature-off Rust planner`] : [];
   });
+  const replacedClassifierViolations = files.flatMap(([filePath, contents]) => {
+    const forbidden = new Map([
+      [SUPER_OVERRIDE_FILE, /\bfn\s+(?:scan_override_rust|scan_identity_override|scan_boolean_override|scan_runtime_override|scan_feature_value_override|scan_feature_boolean_override)\s*\(/u],
+    ]);
+    return forbidden.get(filePath)?.test(contents)
+      ? [`${filePath}: contains a replaced Rust semantic implementation`] : [];
+  });
+  const cliDependencyViolations = files
+    .filter(([filePath, contents]) => filePath === "crates/prodex-cli/Cargo.toml" &&
+      !/^prodex_mojo_core\s*=\s*\{[^\n]*features\s*=\s*\["mojo-runtime"\][^\n]*\}/mu.test(contents))
+    .map(([filePath]) => `${filePath}: Super override scanning requires Mojo without a feature gate`);
   const defaultFeatureViolations = files.flatMap(([filePath, contents]) => {
     const required = REQUIRED_DEFAULT_FEATURES.get(filePath);
     if (!required) return [];
@@ -223,7 +239,7 @@ export function findViolations(files) {
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
     ...geminiFallbackViolations, ...hardReplacementViolations, ...quotaWindowViolations,
-    ...rehydrateViolations,
+    ...rehydrateViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...defaultFeatureViolations];
 }
 
@@ -247,6 +263,7 @@ async function promotedFiles() {
       await fs.readFile(path.join(repoRoot, filePath), "utf8"),
     ]),
   ));
+  files.push(["crates/prodex-cli/Cargo.toml", await fs.readFile(path.join(repoRoot, "crates/prodex-cli/Cargo.toml"), "utf8")]);
   return files;
 }
 
@@ -313,6 +330,12 @@ function selfTest() {
   assert.match(findViolations([[REHYDRATE_FILE,
     'pub fn smart_context_auto_rehydrate_plan() {\n    #[cfg(not(feature = "mojo"))] rust();\n}\nfn smart_context_auto_rehydrate_plan_mojo() {}']])[0],
     /feature-off Rust planner/u);
+  assert.match(findViolations([[SUPER_OVERRIDE_FILE, "fn scan_override_rust() {}"]]).join("\n"),
+    /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[SUPER_OVERRIDE_FILE,
+    '#[cfg(not(feature = "mojo-core"))] fn old_scan() {}']])[0], /feature-off Rust path/u);
+  assert.match(findViolations([["crates/prodex-cli/Cargo.toml",
+    'prodex_mojo_core = { workspace = true, optional = true }']])[0], /requires Mojo/u);
   assert.match(findViolations([["crates/prodex-runtime-tuning/src/capacity.rs",
     "fn runtime_proxy_worker_count_default_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
