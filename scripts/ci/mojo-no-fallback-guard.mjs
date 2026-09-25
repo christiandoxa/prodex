@@ -24,24 +24,42 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/rich/routing.rs",
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-quota/src/render/gemini.rs",
+  "crates/prodex-quota/src/capacity.rs",
+  "crates/prodex-quota/src/render/windows.rs",
   "crates/prodex-runtime-proxy/src/mojo.rs",
   "crates/prodex-runtime-proxy/src/quota.rs",
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-quota/src/selection/scoring.rs",
   "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
+  "crates/prodex-runtime-launch/src/args.rs",
   "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
   "crates/prodex-observability/src/lib.rs",
   "crates/prodex-observability/src/mojo.rs",
   "crates/prodex-runtime-tuning/src/lib.rs",
+  "crates/prodex-runtime-tuning/src/capacity.rs",
   "crates/prodex-runtime-tuning/src/mojo.rs",
+  "crates/prodex-runtime-launch/src/args.rs",
+  "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
+  "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+  "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
+  "crates/prodex-runtime-doctor/src/parsing/selection.rs",
   "crates/prodex-provider-core/src/fallback/chains.rs",
+  "crates/prodex-provider-core/src/fallback/chains/gemini.rs",
   "crates/prodex-provider-core/src/catalog.rs",
   "crates/prodex-provider-core/src/models.rs",
   "crates/prodex-provider-core/src/translators/anthropic/messages.rs",
   "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs",
+  "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
+  "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_response.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_util.rs",
+  "crates/prodex-cli/src/runtime_features.rs",
   "crates/prodex-runtime-quota/src/pressure.rs",
   "crates/prodex-runtime-store/src/continuations/status.rs",
   "crates/prodex-runtime-store/src/continuations/status/mojo.rs",
@@ -56,10 +74,50 @@ const PROMOTED_FILES = [
 const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-quota/src/selection/scoring.rs",
   "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
+  "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
+  "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+  "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
+  "crates/prodex-runtime-doctor/src/parsing/selection.rs",
 ]);
-const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"mojo"\s*\)/u;
+const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|runtime-log-mojo)"\s*\)/u;
 const ANTHROPIC_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs";
 const ANTHROPIC_MESSAGES_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages.rs";
+const ANTHROPIC_WEB_SEARCH_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs";
+const ANTHROPIC_REQUEST_FALLBACK_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/request_fallback.rs";
+const ANTHROPIC_REQUEST_ORACLE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/mojo_request_tests.rs";
+const REMOVED_ORACLE_FILES = [
+  ANTHROPIC_REQUEST_FALLBACK_FILE,
+  ANTHROPIC_REQUEST_ORACLE_FILE,
+  "crates/prodex-context/src/critical_signal/rust_oracle.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/token_accounting/oracle.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/token_accounting/pressure.rs",
+  "crates/prodex-runtime-launch/src/args_oracle.rs",
+  "crates/prodex-runtime-launch/src/args_resume.rs",
+];
+const HARD_REPLACED_RUST_FILES = new Set([
+  "crates/prodex-context/src/critical_signal.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs",
+  "crates/prodex-runtime-tuning/src/capacity.rs",
+  "crates/prodex-provider-core/src/fallback/chains.rs",
+  "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_response.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_util.rs",
+  "crates/prodex-runtime-launch/src/args.rs",
+  "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
+  "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+  "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
+  "crates/prodex-runtime-doctor/src/parsing/selection.rs",
+]);
+const REQUIRED_DEFAULT_FEATURES = new Map([
+  ["crates/prodex-app/Cargo.toml", "mojo-core"],
+  ["crates/prodex-quota/Cargo.toml", "mojo"],
+  ["crates/prodex-runtime-doctor/Cargo.toml", "runtime-log-mojo"],
+  ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
+]);
+const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
 const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
   [/\bfn\s+anthropic_response_block_input\s*\(/u, "Rust response block classifier"],
   [/\bfn\s+plan_with_rust\s*\(/u, "Rust response planner"],
@@ -87,7 +145,7 @@ export function findViolations(files) {
     .filter(([filePath, contents]) =>
       UNCONDITIONAL_MOJO_FILES.has(filePath) && FEATURE_OFF_RUST_PATH.test(contents),
     )
-    .map(([filePath]) => `${filePath}: Mojo-owned quota scoring cannot have a feature-off Rust path`);
+    .map(([filePath]) => `${filePath}: Mojo-owned operation cannot have a feature-off Rust path`);
   const anthropicResponseViolations = files.flatMap(([filePath, contents]) =>
     filePath !== ANTHROPIC_RESPONSE_FILE
       ? []
@@ -101,17 +159,66 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === ANTHROPIC_MESSAGES_FILE &&
       /\bfn\s+(?:anthropic_response_envelope_rust|anthropic_usage)\s*\(/u.test(contents))
     .map(([filePath]) => `${filePath}: contains a Rust response envelope implementation`);
+  const anthropicRequestViolations = files.flatMap(([filePath, contents]) => {
+    if (REMOVED_ORACLE_FILES.includes(filePath)) {
+      return [`${filePath}: retained Rust fallback or oracle`];
+    }
+    if (filePath === ANTHROPIC_MESSAGES_FILE &&
+      /\bfn\s+(?:translate_chat_request_to_anthropic_rust|anthropic_messages|append_anthropic_message|anthropic_message_blocks|anthropic_tool_call_blocks|anthropic_tool_call_block|anthropic_tools|anthropic_tool_choice|anthropic_tool_name)\s*\(/u.test(contents)) {
+      return [`${filePath}: contains Rust Anthropic request semantics`];
+    }
+    if (filePath === ANTHROPIC_WEB_SEARCH_FILE &&
+      /\bfn\s+(?:anthropic_web_search_tool|validate_anthropic_web_search_options)\s*\(/u.test(contents)) {
+      return [`${filePath}: contains Rust Anthropic request web-search semantics`];
+    }
+    return [];
+  });
+  const cliRuntimeFeatureViolations = files
+    .filter(([filePath, contents]) => filePath === CLI_RUNTIME_FEATURE_FILE &&
+      /\bfn\s+(?:rust_plan|rollout_budget_reminders|to_codex_config_args_rust|mojo_feature_plan_matches_rust_oracle_for_seeded_inputs)\s*\(/u.test(contents))
+    .map(([filePath]) => `${filePath}: contains a Rust runtime-feature planner or oracle`);
+  const geminiFallbackViolations = files
+    .filter(([filePath, contents]) =>
+      filePath === "crates/prodex-provider-core/src/fallback/chains/gemini.rs" &&
+      /\bfn\s+provider_gemini_model_fallback_alias_chain\s*\(/u.test(contents))
+    .map(([filePath]) => `${filePath}: contains a Rust Gemini model fallback table`);
+  const hardReplacementViolations = files
+    .filter(([filePath, contents]) => HARD_REPLACED_RUST_FILES.has(filePath) &&
+      /\b(?:rust_oracle|fn\s+[A-Za-z0-9_]+_rust\s*\()/u.test(contents))
+    .map(([filePath]) => `${filePath}: contains a Rust semantic oracle or copy`);
+  const defaultFeatureViolations = files.flatMap(([filePath, contents]) => {
+    const required = REQUIRED_DEFAULT_FEATURES.get(filePath);
+    if (!required) return [];
+    const defaults = contents.match(/^default\s*=\s*\[([^\]]*)\]/mu)?.[1];
+    return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
+      ? [] : [`${filePath}: default features must include ${required}`];
+  });
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
-    ...anthropicEnvelopeViolations];
+    ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
+    ...geminiFallbackViolations, ...hardReplacementViolations, ...defaultFeatureViolations];
 }
 
 async function promotedFiles() {
-  return Promise.all(
+  const files = await Promise.all(
     PROMOTED_FILES.map(async (filePath) => [
       filePath,
       await fs.readFile(path.join(repoRoot, filePath), "utf8"),
     ]),
   );
+  for (const filePath of REMOVED_ORACLE_FILES) {
+    try {
+      files.push([filePath, await fs.readFile(path.join(repoRoot, filePath), "utf8")]);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+  }
+  files.push(...await Promise.all(
+    [...REQUIRED_DEFAULT_FEATURES.keys()].map(async (filePath) => [
+      filePath,
+      await fs.readFile(path.join(repoRoot, filePath), "utf8"),
+    ]),
+  ));
+  return files;
 }
 
 function selfTest() {
@@ -121,6 +228,13 @@ function selfTest() {
     findViolations([[
       "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
       '#[cfg(not(feature = "mojo"))] fn rust_order() {}',
+    ]]).length,
+    1,
+  );
+  assert.equal(
+    findViolations([[
+      "crates/prodex-runtime-doctor/src/parsing/selection.rs",
+      '#[cfg(not(feature = "runtime-log-mojo"))] fn rust_selection() {}',
     ]]).length,
     1,
   );
@@ -145,6 +259,32 @@ function selfTest() {
     /feature-off Rust response path/u);
   assert.match(findViolations([[ANTHROPIC_MESSAGES_FILE,
     "fn anthropic_response_envelope_rust() {}"]])[0], /Rust response envelope/u);
+  assert.match(findViolations([[ANTHROPIC_REQUEST_FALLBACK_FILE, "fn fallback() {}"]])[0],
+    /Rust fallback or oracle/u);
+  assert.match(findViolations([[ANTHROPIC_REQUEST_ORACLE_FILE, "fn oracle() {}"]])[0],
+    /Rust fallback or oracle/u);
+  assert.match(findViolations([["crates/prodex-context/src/critical_signal/rust_oracle.rs",
+    "fn count_critical_signals() {}"]])[0], /Rust fallback or oracle/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/token_accounting/pressure.rs",
+    "fn smart_context_pressure_snapshot_rust() {}"]])[0], /Rust fallback or oracle/u);
+  assert.match(findViolations([["crates/prodex-runtime-launch/src/args_oracle.rs",
+    "fn normalize_run_codex_args() {}"]])[0], /Rust fallback or oracle/u);
+  assert.match(findViolations([["crates/prodex-runtime-launch/src/args_resume.rs",
+    "fn retarget_codex_tui_resume_args() {}"]])[0], /Rust fallback or oracle/u);
+  assert.match(findViolations([["crates/prodex-runtime-doctor/Cargo.toml",
+    '[features]\ndefault = []\nruntime-log-mojo = []']])[0], /default features must include runtime-log-mojo/u);
+  assert.match(findViolations([["crates/prodex-runtime-tuning/src/capacity.rs",
+    "fn runtime_proxy_worker_count_default_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
+    "fn translate_chat_stream_value_to_responses_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+  assert.match(findViolations([[ANTHROPIC_MESSAGES_FILE,
+    "fn anthropic_tool_choice() {}"]])[0], /Rust Anthropic request semantics/u);
+  assert.match(findViolations([[ANTHROPIC_WEB_SEARCH_FILE,
+    "fn anthropic_web_search_tool() {}"]])[0], /Rust Anthropic request web-search semantics/u);
+  assert.match(findViolations([[CLI_RUNTIME_FEATURE_FILE, "fn rust_plan() {}"]])[0],
+    /Rust runtime-feature planner or oracle/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/fallback/chains/gemini.rs",
+    "fn provider_gemini_model_fallback_alias_chain() {}"]])[0], /Rust Gemini model fallback table/u);
   for (const filePath of [
     "crates/prodex-provider-core/src/translators/anthropic/messages.rs",
     "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",

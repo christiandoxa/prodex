@@ -45,6 +45,7 @@ function productionRustFiles() {
   }).split(/\r?\n/u).filter((file) =>
     file.endsWith(".rs") &&
     (file.startsWith("src/") || file.startsWith("crates/")) &&
+    fs.existsSync(path.join(repoRoot, file)) &&
     !/(?:^|\/)(?:tests?|benches|examples|fixtures|snapshots|generated|vendor|target)(?:\/|$)/iu.test(file),
   ).sort();
 }

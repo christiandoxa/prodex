@@ -13,11 +13,6 @@ const COUNTING_RULES_VERSION = 1;
 const COUNTED_CLASSIFICATIONS = new Set(["DETERMINISTIC_DOMAIN", "MIXED"]);
 const SEMANTIC_ROLES = new Set(["semantic", undefined]);
 const VALID_RUST_REDUCTION_STATES = new Set(["deleted", "adapter-only"]);
-const LEGACY_TEST_ORACLE_REDUCTIONS = new Set([
-  ["smart_context_adaptive_budget_planning", "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs", "smart_context_adaptive_budget_policy"].join("\u0000"),
-  ["smart_context_calibrated_estimate", "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs", "smart_context_observed_calibrated_request_estimate"].join("\u0000"),
-  ["smart_context_token_usage_summary", "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs", "smart_context_observed_usage_totals_rust"].join("\u0000"),
-]);
 const sourceCache = new Map();
 
 function parseArgs(argv) {
@@ -551,9 +546,7 @@ function reductionKey(reduction) {
 }
 
 function validateRustReductionState(reduction) {
-  assert(VALID_RUST_REDUCTION_STATES.has(reduction.final_state) ||
-    (reduction.final_state === "test-oracle-only" &&
-      LEGACY_TEST_ORACLE_REDUCTIONS.has(reductionKey(reduction))),
+  assert(VALID_RUST_REDUCTION_STATES.has(reduction.final_state),
     `${reduction.file}:${reduction.symbol} has an invalid Rust semantic reduction state`);
 }
 
@@ -913,19 +906,18 @@ export function ownershipMeetsMinimum(result, minimumPercent) {
 function selfTest() {
   assert.equal(countSemanticLines("// comment\nuse std::x;\n#[cfg(test)]\nmod tests {\nfn ignored() {}\n}\nfn production() {}\n", "rust"), 1);
   assert.equal(countSemanticLines("# comment\nfrom std import Pointer\n@export(\"x\")\ndef production():\n    return 1\n", "mojo"), 2);
-  const legacyOracle = {
+  const reduction = {
     operation: "smart_context_adaptive_budget_planning",
     file: "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
     symbol: "smart_context_adaptive_budget_policy",
     final_state: "test-oracle-only",
   };
-  assert.doesNotThrow(() => validateRustReductionState(legacyOracle));
   assert.throws(
-    () => validateRustReductionState({ ...legacyOracle, operation: "new_operation" }),
+    () => validateRustReductionState(reduction),
     /invalid Rust semantic reduction state/u,
   );
-  assert.doesNotThrow(() => validateRustReductionState({ ...legacyOracle, final_state: "adapter-only" }));
-  assert.doesNotThrow(() => validateRustReductionState({ ...legacyOracle, final_state: "deleted" }));
+  assert.doesNotThrow(() => validateRustReductionState({ ...reduction, final_state: "adapter-only" }));
+  assert.doesNotThrow(() => validateRustReductionState({ ...reduction, final_state: "deleted" }));
   const result = calculateOwnership(
     {
       rust_deterministic_sources: [],
