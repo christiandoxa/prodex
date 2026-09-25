@@ -129,6 +129,31 @@ fn overlay_drops_inherited_codex_app_cache_only() {
     let _ = fs::remove_dir_all(base);
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn overlay_allows_codex_control_socket_at_default_home_depth() {
+    use std::os::unix::net::UnixListener;
+
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let root = PathBuf::from(format!("/tmp/p{stamp:x}"));
+    let managed = root.join("profiles");
+    let base = root.join("base");
+    fs::create_dir_all(&base).unwrap();
+
+    let overlay = prepare_prodex_overlay_home(&managed, &base).unwrap();
+    let second_overlay = prepare_prodex_overlay_home(&managed, &base).unwrap();
+    assert_ne!(overlay, second_overlay);
+    let socket = overlay.join("app-server-control/app-server-control.sock");
+    fs::create_dir_all(socket.parent().unwrap()).unwrap();
+    let listener = UnixListener::bind(&socket).unwrap();
+
+    drop(listener);
+    fs::remove_dir_all(root).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn overlay_rejects_symlink_managed_root() {

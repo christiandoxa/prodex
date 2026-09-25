@@ -2,7 +2,7 @@ use anyhow::{Context, Result, bail};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::fs_ops::{
     copy_file_streaming, read_text_file_limited, remove_existing_dir_path, write_text_file,
@@ -132,16 +132,15 @@ pub fn configure_prodex_overlay_home(codex_home: &Path) -> Result<()> {
 }
 
 fn create_temporary_prodex_overlay_home(managed_profiles_root: &Path) -> Result<PathBuf> {
+    static NEXT_OVERLAY_ID: AtomicUsize = AtomicUsize::new(0);
+
     ensure_prodex_overlay_root(managed_profiles_root)?;
 
-    for attempt in 0..100 {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
+    for _ in 0..100 {
         let candidate = managed_profiles_root.join(format!(
-            ".prodex-overlay-{}-{stamp}-{attempt}",
-            std::process::id()
+            ".prodex-overlay-{:x}-{:x}",
+            std::process::id(),
+            NEXT_OVERLAY_ID.fetch_add(1, Ordering::Relaxed)
         ));
         if candidate.exists() {
             continue;
