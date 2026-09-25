@@ -25,7 +25,7 @@ impl TelemetryAttribute {
     }
 
     pub fn as_metric_label(&self) -> Result<(&str, &str), TelemetryAttributeError> {
-        #[cfg(feature = "mojo-observability")]
+        #[cfg(feature = "mojo")]
         {
             use prodex_mojo_core::observability::TelemetryMetricLabelValidation as Validation;
 
@@ -39,7 +39,7 @@ impl TelemetryAttribute {
                 Ok(Validation::InvalidValue) | Err(_) => Err(TelemetryAttributeError::InvalidValue),
             }
         }
-        #[cfg(not(feature = "mojo-observability"))]
+        #[cfg(not(feature = "mojo"))]
         validate_telemetry_metric_label_rust(&self.key, &self.value)
             .map(|()| (self.key.as_str(), self.value.as_str()))
     }
@@ -58,7 +58,7 @@ impl fmt::Display for TelemetryAttributeError {
 }
 impl Error for TelemetryAttributeError {}
 
-#[cfg(any(not(feature = "mojo-observability"), test))]
+#[cfg(any(not(feature = "mojo"), test))]
 fn validate_telemetry_metric_label_rust(
     key: &str,
     value: &str,
@@ -72,7 +72,7 @@ fn validate_telemetry_metric_label_rust(
     }
 }
 
-#[cfg(any(not(feature = "mojo-observability"), test))]
+#[cfg(any(not(feature = "mojo"), test))]
 fn invalid_label_key(key: &str) -> bool {
     if key.is_empty() || key.len() > 128 || key.chars().any(|c| !c.is_ascii_graphic()) {
         return true;
@@ -92,7 +92,7 @@ fn invalid_label_key(key: &str) -> bool {
     .any(|blocked| normalized.contains(blocked))
 }
 
-#[cfg(any(not(feature = "mojo-observability"), test))]
+#[cfg(any(not(feature = "mojo"), test))]
 fn invalid_label_value(value: &str) -> bool {
     if value.is_empty() || value.len() > 128 || value.chars().any(|c| !c.is_ascii_graphic()) {
         return true;
@@ -108,6 +108,6 @@ fn invalid_label_value(value: &str) -> bool {
     uuid || hex_id
 }
 
-#[cfg(all(test, feature = "mojo-observability"))]
-#[path = "observability/mojo_parity_tests.rs"]
+#[cfg(all(test, feature = "mojo"))]
+#[path = "metric_label/mojo_parity_tests.rs"]
 mod mojo_parity_tests;

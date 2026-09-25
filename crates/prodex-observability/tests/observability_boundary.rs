@@ -6,10 +6,10 @@ use prodex_observability::{
     plan_provider_metric, plan_secret_provider_metric,
 };
 
-fn assert_safe_label(label: &prodex_domain::TelemetryAttribute) {
+fn assert_safe_label(label: &prodex_observability::TelemetryAttribute) {
     let (key, value) = label
         .as_metric_label()
-        .expect("planned labels must satisfy the domain metric-label boundary");
+        .expect("planned labels must satisfy the observability metric-label boundary");
     assert!(!key.is_empty());
     assert!(!value.is_empty());
 }

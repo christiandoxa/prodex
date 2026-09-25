@@ -15,13 +15,11 @@ default = []
 # Kept as a compatibility feature name; Mojo is now the only planner authority.
 mojo = [
     "dep:prodex_mojo_core",
-    "prodex_domain/mojo-observability",
     "prodex_mojo_core/mojo-observability",
 ]
 
 [dependencies]
 prodex_mojo_core = { workspace = true, optional = true }
-prodex_domain = { workspace = true }
 
 [lints]
 workspace = true

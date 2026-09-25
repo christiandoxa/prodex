@@ -1,4 +1,4 @@
-use prodex_domain::TelemetryAttribute;
+use prodex_observability::TelemetryAttribute;
 use prodex_observability::{
     ApiAdmissionResult, ApiRouteKind, ApiStatusClass, InspectionMetricPlan, ProviderKind,
     ProviderResultClass, SecretProviderBackend, SecretProviderOperation, SecretProviderResult,

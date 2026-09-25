@@ -9,7 +9,6 @@ const repoRoot = path.resolve(scriptDir, "..", "..");
 
 const DOMAIN_MANIFEST = "crates/prodex-domain/Cargo.toml";
 const DOMAIN_SRC_DIR = "crates/prodex-domain/src";
-const DOMAIN_OBSERVABILITY = "crates/prodex-domain/src/observability.rs";
 const DOMAIN_HEALTH = "crates/prodex-domain/src/health.rs";
 const DOMAIN_SECRETS = "crates/prodex-domain/src/secrets.rs";
 const DOMAIN_LIB = "crates/prodex-domain/src/lib.rs";
@@ -39,12 +38,7 @@ const FORBIDDEN_SOURCE_PATTERNS = Object.freeze([
   { name: "cli", pattern: /\bclap\s*::/u },
   { name: "transport", pattern: /\btungstenite\s*::/u },
   { name: "provider SDK", pattern: /\b(openai|anthropic|gemini|copilot)\s*::/u },
-]);
-const REQUIRED_OBSERVABILITY_SNIPPETS = Object.freeze([
-  "pub fn metric_label(key: impl Into<String>, value: impl Into<String>) -> Self",
-  "pub fn as_metric_label(&self) -> Result<(&str, &str), TelemetryAttributeError>",
-  '"tenant_id"',
-  "uuid || hex_id",
+  { name: "telemetry metric labels", pattern: /\bTelemetryAttribute\b/u },
 ]);
 const REQUIRED_HEALTH_SNIPPETS = Object.freeze([
   "pub active_policy_revision: Option<PolicyRevisionId>",
@@ -56,7 +50,12 @@ const REQUIRED_SECRET_SNIPPETS = Object.freeze([
   "fn secret_ref_part_is_well_formed(value: &str) -> bool",
   'f.write_str("<redacted-secret-ref>")',
 ]);
-const REQUIRED_LIB_SNIPPETS = Object.freeze(["#![forbid(unsafe_code)]", "pub use observability::*;"]);
+const REQUIRED_LIB_SNIPPETS = Object.freeze([
+  "#![forbid(unsafe_code)]",
+  "pub use governance::*;",
+  "pub use ids::*;",
+  "pub use secrets::*;",
+]);
 
 function sorted(values) {
   return [...values].sort((left, right) => left.localeCompare(right));
@@ -108,9 +107,7 @@ export function validateDomainSource(sourceText, sourcePath = "source.rs") {
 }
 
 export function validateDomainRequiredContracts(sourceText, sourcePath = "source.rs") {
-  const required = sourcePath === DOMAIN_OBSERVABILITY
-    ? REQUIRED_OBSERVABILITY_SNIPPETS
-    : sourcePath === DOMAIN_HEALTH
+  const required = sourcePath === DOMAIN_HEALTH
       ? REQUIRED_HEALTH_SNIPPETS
     : sourcePath === DOMAIN_SECRETS
       ? REQUIRED_SECRET_SNIPPETS
@@ -200,29 +197,12 @@ serde_json = { workspace = true }
     "http client source boundary accepted",
   );
   assertSelfTest(
+    validateDomainSource("pub struct TelemetryAttribute;", "bad.rs").some((error) => error.includes("telemetry metric labels")),
+    "observability label type accepted in pure domain",
+  );
+  assertSelfTest(
     validateDomainSource("use std::fmt;\nuse serde::Serialize;", "good.rs").length === 0,
     "safe source rejected",
-  );
-  assertSelfTest(
-    validateDomainRequiredContracts(
-      `
-impl TelemetryAttribute {
-    pub fn metric_label(key: impl Into<String>, value: impl Into<String>) -> Self { todo!() }
-    pub fn as_metric_label(&self) -> Result<(&str, &str), TelemetryAttributeError> { todo!() }
-}
-fn invalid_label_key(key: &str) -> bool { ["tenant_id"].contains(&key) }
-fn invalid_label_value(value: &str) -> bool { let uuid = false; let hex_id = false; uuid || hex_id }
-`,
-      DOMAIN_OBSERVABILITY,
-    ).length === 0,
-    "metric-label cardinality contract rejected",
-  );
-  assertSelfTest(
-    validateDomainRequiredContracts(
-      "pub fn metric_label(key: impl Into<String>, value: impl Into<String>) -> Self { todo!() }",
-      DOMAIN_OBSERVABILITY,
-    ).some((error) => error.includes("tenant_id")),
-    "missing tenant identifier metric-label guard accepted",
   );
   assertSelfTest(
     validateDomainRequiredContracts(
@@ -270,16 +250,16 @@ impl fmt::Display for SecretRef {
   );
   assertSelfTest(
     validateDomainRequiredContracts(
-      "#![forbid(unsafe_code)]\npub use observability::*;",
+      "#![forbid(unsafe_code)]\npub use governance::*;\npub use ids::*;\npub use secrets::*;",
       DOMAIN_LIB,
     ).length === 0,
-    "observability export rejected",
+    "domain module exports rejected",
   );
   assertSelfTest(
-    validateDomainRequiredContracts("pub use observability::*;", DOMAIN_LIB).some((error) =>
-      error.includes("forbid(unsafe_code)"),
+    validateDomainRequiredContracts("#![forbid(unsafe_code)]\npub use governance::*;", DOMAIN_LIB).some((error) =>
+      error.includes("pub use ids::*;"),
     ),
-    "missing domain unsafe forbid accepted",
+    "missing domain module export accepted",
   );
 }
 

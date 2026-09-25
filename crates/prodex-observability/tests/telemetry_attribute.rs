@@ -1,4 +1,4 @@
-use prodex_domain::{TelemetryAttribute, TelemetryAttributeError};
+use prodex_observability::{TelemetryAttribute, TelemetryAttributeError};
 
 #[test]
 fn safe_low_cardinality_metric_label_round_trips() {
@@ -53,7 +53,7 @@ fn debug_output_redacts_metric_value() {
     assert!(rendered.contains("<redacted>"));
 }
 
-#[cfg(feature = "mojo-observability")]
+#[cfg(feature = "mojo")]
 #[test]
 fn telemetry_metric_label_validation_uses_compiled_mojo() {
     assert_eq!(

@@ -5,12 +5,13 @@
 //! the typed boundary consumed by the runtime and validates the resulting
 //! bounded metric labels.
 
+mod metric_label;
+pub use metric_label::{TelemetryAttribute, TelemetryAttributeError};
+
 #[cfg(feature = "mojo")]
 mod mojo;
 #[cfg(not(feature = "mojo"))]
 mod rust;
-
-use prodex_domain::{TelemetryAttribute, TelemetryAttributeError};
 
 fn metric_name(plan: usize, slot: usize) -> &'static str {
     #[cfg(feature = "mojo")]
