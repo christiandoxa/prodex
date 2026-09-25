@@ -21,6 +21,7 @@ mod mojo_request;
 #[cfg(any(not(feature = "mojo"), test))]
 #[path = "messages/request_fallback.rs"]
 mod request_fallback;
+#[cfg(feature = "mojo")]
 #[path = "messages/response.rs"]
 mod response;
 #[path = "messages/stream.rs"]
@@ -29,11 +30,11 @@ mod stream;
 mod web_search;
 
 pub(super) use stream::translate_anthropic_stream_event_to_responses;
-#[cfg(any(not(feature = "mojo"), test))]
-use web_search::anthropic_tool_usage;
+use web_search::anthropic_web_search_call;
 #[cfg(any(not(feature = "mojo"), test))]
 use web_search::anthropic_web_search_tool;
-use web_search::{anthropic_web_search_call, merge_anthropic_web_search_result};
+#[cfg(feature = "mojo")]
+use web_search::merge_anthropic_web_search_result;
 
 #[cfg(any(not(feature = "mojo"), test))]
 use request_fallback::{build_anthropic_chat_request_rust, validate_anthropic_chat_fields};
@@ -201,6 +202,20 @@ fn json_fragment(value: &Value) -> Result<String, String> {
     serde_json::to_string(value).map_err(|error| format!("Anthropic JSON fragment failed: {error}"))
 }
 
+#[cfg(not(feature = "mojo"))]
+pub(super) fn translate_anthropic_response_to_responses(
+    input: ProviderTransformInput,
+) -> ProviderTransformResult {
+    ProviderTransformResult::unsupported(
+        ProviderId::Anthropic,
+        input.endpoint,
+        ProviderWireFormat::AnthropicMessages,
+        ProviderWireFormat::OpenAiResponses,
+        "Anthropic Messages response translation requires Mojo support",
+    )
+}
+
+#[cfg(feature = "mojo")]
 pub(super) fn translate_anthropic_response_to_responses(
     input: ProviderTransformInput,
 ) -> ProviderTransformResult {
@@ -226,13 +241,10 @@ pub(super) fn translate_anthropic_response_to_responses(
         Err(reason) => return rejected_response(reason),
     };
 
-    #[cfg(feature = "mojo")]
     let response = match anthropic_response_envelope_mojo(&value, output, unix_now_secs()) {
         Ok(response) => response,
         Err(reason) => return rejected_response(reason),
     };
-    #[cfg(not(feature = "mojo"))]
-    let response = anthropic_response_envelope_rust(&value, output, unix_now_secs());
 
     ProviderTransformResult::lossless(
         ProviderId::Anthropic,
@@ -302,53 +314,6 @@ fn anthropic_response_envelope_mojo(
     input.arguments = stop_reason.as_deref();
     input.tool_use_id = web_search_requests.as_deref();
     anthropic_mojo_value(input)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn anthropic_response_envelope_rust(value: &Value, output: Vec<Value>, created_at: u64) -> Value {
-    let mut response = json!({
-        "id": value.get("id").and_then(Value::as_str).unwrap_or("resp_anthropic"),
-        "object": "response",
-        "created_at": created_at,
-        "model": value.get("model").and_then(Value::as_str).unwrap_or("unknown"),
-        "output": output,
-    });
-    if let Some(usage) = anthropic_usage(value.get("usage")) {
-        response["usage"] = usage;
-    }
-    if let Some(tool_usage) = anthropic_tool_usage(value.get("usage")) {
-        response["tool_usage"] = tool_usage;
-    }
-    if let Some(stop_reason) = value.get("stop_reason") {
-        response["metadata"] = json!({"anthropic": {"stop_reason": stop_reason}});
-    }
-    response
-}
-
-#[cfg(not(feature = "mojo"))]
-fn anthropic_tool_use_item(block: &Value) -> Result<Value, String> {
-    let Some(id) = block.get("id").and_then(Value::as_str) else {
-        return Err("Anthropic tool_use block must contain id".to_string());
-    };
-    let Some(name) = block.get("name").and_then(Value::as_str) else {
-        return Err("Anthropic tool_use block must contain name".to_string());
-    };
-    let arguments = serde_json::to_string(block.get("input").unwrap_or(&Value::Object(Map::new())))
-        .expect("Anthropic tool input serializes");
-    let (namespace, name) = crate::provider_core_split_flat_namespace_tool_name(name);
-    let mut item = json!({
-        "type": "function_call",
-        "call_id": id,
-        "name": name,
-        "arguments": crate::provider_core_chat_compatible_rtk_wrapped_tool_arguments(
-            block.get("name").and_then(Value::as_str).unwrap_or(&name),
-            &arguments,
-        ),
-    });
-    if let Some(namespace) = namespace {
-        item["namespace"] = Value::String(namespace);
-    }
-    Ok(item)
 }
 
 #[cfg(feature = "mojo")]
@@ -585,24 +550,6 @@ fn anthropic_tool_name(namespace: Option<&str>, name: &str) -> String {
                 .map(|(namespace, name)| format!("{namespace}--{name}"))
         })
         .unwrap_or_else(|| name.to_string())
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn anthropic_usage(value: Option<&Value>) -> Option<Value> {
-    let value = value?.as_object()?;
-    let input = value
-        .get("input_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let output = value
-        .get("output_tokens")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    Some(json!({
-        "input_tokens": input,
-        "output_tokens": output,
-        "total_tokens": input.saturating_add(output),
-    }))
 }
 
 #[cfg(any(not(feature = "mojo"), test))]

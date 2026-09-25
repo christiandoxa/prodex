@@ -1,12 +1,12 @@
 use super::*;
 
-#[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{
-    AnthropicRequestKernelInput, AnthropicRequestKernelOperation, AnthropicResponseBlock,
+    AnthropicRequestKernelInput, AnthropicRequestKernelOperation,
+    AnthropicResponseBlockClassificationError, AnthropicResponseBlockClassificationInput,
     AnthropicResponseBlockKind, AnthropicResponsePlanKind, plan_anthropic_response_blocks,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResponseBlockKind {
     Text,
     ToolUse,
@@ -15,13 +15,14 @@ enum ResponseBlockKind {
     Thinking,
 }
 
+#[derive(Debug, PartialEq)]
 struct ResponseBlockInput {
     kind: ResponseBlockKind,
     has_text: bool,
     value: Option<Value>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ResponsePlanKind {
     Message,
     ToolUse,
@@ -30,7 +31,7 @@ enum ResponsePlanKind {
     Reasoning,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ResponsePlanItem {
     kind: ResponsePlanKind,
     start: usize,
@@ -38,34 +39,15 @@ struct ResponsePlanItem {
     input_index: usize,
 }
 
-fn anthropic_response_block_input(block: &Value) -> Result<ResponseBlockInput, String> {
-    let kind = match block.get("type").and_then(Value::as_str) {
-        Some("text") => {
-            if block.get("text").and_then(Value::as_str).is_none() {
-                return Err("Anthropic text block must contain text".to_string());
-            }
-            ResponseBlockKind::Text
-        }
-        Some("tool_use") => ResponseBlockKind::ToolUse,
-        Some("server_tool_use") => ResponseBlockKind::WebSearchCall,
-        Some("web_search_tool_result") => ResponseBlockKind::WebSearchResult,
-        Some("thinking") => ResponseBlockKind::Thinking,
-        Some(kind) => {
-            return Err(format!(
-                "unsupported Anthropic Messages content block `{kind}`"
-            ));
-        }
-        None => return Err("Anthropic Messages content block requires type".to_string()),
-    };
+fn response_block_input(
+    block: &Value,
+    kind: ResponseBlockKind,
+    has_text: bool,
+) -> Result<ResponseBlockInput, String> {
     let value = match kind {
         ResponseBlockKind::ToolUse => Some(anthropic_tool_use_item(block)?),
         ResponseBlockKind::WebSearchCall => Some(anthropic_web_search_call(block)?),
         _ => None,
-    };
-    let has_text = match kind {
-        ResponseBlockKind::Text => true,
-        ResponseBlockKind::Thinking => block.get("thinking").and_then(Value::as_str).is_some(),
-        _ => false,
     };
     Ok(ResponseBlockInput {
         kind,
@@ -74,88 +56,87 @@ fn anthropic_response_block_input(block: &Value) -> Result<ResponseBlockInput, S
     })
 }
 
-#[cfg(feature = "mojo")]
-fn plan_with_mojo(inputs: &[ResponseBlockInput]) -> Result<Vec<ResponsePlanItem>, String> {
-    let mojo_inputs = inputs
+fn response_plan_with_mojo(
+    content: &[Value],
+) -> Result<(Vec<ResponseBlockInput>, Vec<ResponsePlanItem>), String> {
+    let classification_input = content
         .iter()
-        .map(|input| AnthropicResponseBlock {
-            kind: match input.kind {
-                ResponseBlockKind::Text => AnthropicResponseBlockKind::Text,
-                ResponseBlockKind::ToolUse => AnthropicResponseBlockKind::ToolUse,
-                ResponseBlockKind::WebSearchCall => AnthropicResponseBlockKind::WebSearchCall,
-                ResponseBlockKind::WebSearchResult => AnthropicResponseBlockKind::WebSearchResult,
-                ResponseBlockKind::Thinking => AnthropicResponseBlockKind::Thinking,
-            },
-            has_text: input.has_text,
+        .map(|block| AnthropicResponseBlockClassificationInput {
+            type_name: block.get("type").and_then(Value::as_str),
+            has_text_field: block.get("text").and_then(Value::as_str).is_some(),
+            has_thinking_field: block.get("thinking").and_then(Value::as_str).is_some(),
+            has_id_field: block.get("id").and_then(Value::as_str).is_some(),
+            has_name_field: block.get("name").and_then(Value::as_str).is_some(),
+            name_is_web_search: block.get("name").and_then(Value::as_str) == Some("web_search"),
         })
         .collect::<Vec<_>>();
-    plan_anthropic_response_blocks(&mojo_inputs)
-        .map_err(|error| format!("Anthropic Messages response plan failed: {error:?}"))
-        .map(|plan| {
-            plan.into_iter()
-                .map(|item| ResponsePlanItem {
-                    kind: match item.kind {
-                        AnthropicResponsePlanKind::Message => ResponsePlanKind::Message,
-                        AnthropicResponsePlanKind::ToolUse => ResponsePlanKind::ToolUse,
-                        AnthropicResponsePlanKind::WebSearchCall => ResponsePlanKind::WebSearchCall,
-                        AnthropicResponsePlanKind::WebSearchResult => {
-                            ResponsePlanKind::WebSearchResult
-                        }
-                        AnthropicResponsePlanKind::Reasoning => ResponsePlanKind::Reasoning,
-                    },
-                    start: item.start,
-                    count: item.count,
-                    input_index: item.input_index,
-                })
-                .collect()
-        })
-}
+    let plan = plan_anthropic_response_blocks(&classification_input)
+        .map_err(|error| format!("Anthropic Messages response plan failed: {error:?}"))?;
 
-#[cfg(not(feature = "mojo"))]
-fn plan_with_rust(inputs: &[ResponseBlockInput]) -> Vec<ResponsePlanItem> {
-    let mut plan = Vec::new();
-    let mut text_start = None;
-    for (input_index, input) in inputs.iter().enumerate() {
-        if matches!(input.kind, ResponseBlockKind::Text) {
-            text_start.get_or_insert(input_index);
-            continue;
-        }
-        if let Some(start) = text_start.take() {
-            plan.push(ResponsePlanItem {
-                kind: ResponsePlanKind::Message,
-                start,
-                count: input_index - start,
-                input_index: 0,
-            });
-        }
-        let kind = match input.kind {
-            ResponseBlockKind::ToolUse => Some(ResponsePlanKind::ToolUse),
-            ResponseBlockKind::WebSearchCall => Some(ResponsePlanKind::WebSearchCall),
-            ResponseBlockKind::WebSearchResult => Some(ResponsePlanKind::WebSearchResult),
-            ResponseBlockKind::Thinking if input.has_text => Some(ResponsePlanKind::Reasoning),
-            ResponseBlockKind::Text | ResponseBlockKind::Thinking => None,
-        };
-        if let Some(kind) = kind {
-            plan.push(ResponsePlanItem {
-                kind,
-                start: 0,
-                count: 0,
-                input_index,
-            });
-        }
-    }
-    if let Some(start) = text_start {
-        plan.push(ResponsePlanItem {
-            kind: ResponsePlanKind::Message,
-            start,
-            count: inputs.len() - start,
-            input_index: 0,
+    let inputs = content
+        .iter()
+        .zip(plan.blocks)
+        .map(|(block, classified)| {
+            let kind = match classified.kind {
+                AnthropicResponseBlockKind::Text => ResponseBlockKind::Text,
+                AnthropicResponseBlockKind::ToolUse => ResponseBlockKind::ToolUse,
+                AnthropicResponseBlockKind::WebSearchCall => ResponseBlockKind::WebSearchCall,
+                AnthropicResponseBlockKind::WebSearchResult => ResponseBlockKind::WebSearchResult,
+                AnthropicResponseBlockKind::Thinking => ResponseBlockKind::Thinking,
+            };
+            response_block_input(block, kind, classified.has_text)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(error) = plan.issue {
+        return Err(match error {
+            AnthropicResponseBlockClassificationError::MissingType { .. } => {
+                "Anthropic Messages content block requires type".to_string()
+            }
+            AnthropicResponseBlockClassificationError::UnsupportedType { index } => content
+                .get(index)
+                .and_then(|block| block.get("type"))
+                .and_then(Value::as_str)
+                .map(|kind| format!("unsupported Anthropic Messages content block `{kind}`"))
+                .unwrap_or_else(|| {
+                    "Anthropic Messages response classifier returned an invalid block index"
+                        .to_string()
+                }),
+            AnthropicResponseBlockClassificationError::MissingText { .. } => {
+                "Anthropic text block must contain text".to_string()
+            }
+            AnthropicResponseBlockClassificationError::MissingToolUseId { .. } => {
+                "Anthropic tool_use block must contain id".to_string()
+            }
+            AnthropicResponseBlockClassificationError::MissingToolUseName { .. } => {
+                "Anthropic tool_use block must contain name".to_string()
+            }
+            AnthropicResponseBlockClassificationError::MissingServerToolId { .. } => {
+                "Anthropic server_tool_use block must contain id".to_string()
+            }
+            AnthropicResponseBlockClassificationError::UnsupportedServerTool { .. } => {
+                "unsupported Anthropic server tool".to_string()
+            }
         });
     }
-    plan
+    let items = plan
+        .items
+        .into_iter()
+        .map(|item| ResponsePlanItem {
+            kind: match item.kind {
+                AnthropicResponsePlanKind::Message => ResponsePlanKind::Message,
+                AnthropicResponsePlanKind::ToolUse => ResponsePlanKind::ToolUse,
+                AnthropicResponsePlanKind::WebSearchCall => ResponsePlanKind::WebSearchCall,
+                AnthropicResponsePlanKind::WebSearchResult => ResponsePlanKind::WebSearchResult,
+                AnthropicResponsePlanKind::Reasoning => ResponsePlanKind::Reasoning,
+            },
+            start: item.start,
+            count: item.count,
+            input_index: item.input_index,
+        })
+        .collect();
+    Ok((inputs, items))
 }
 
-#[cfg(feature = "mojo")]
 fn render_response_message(blocks: &[Value]) -> Result<Value, String> {
     let blocks = super::json_fragment(&Value::Array(blocks.to_vec()))?;
     let mut input =
@@ -164,26 +145,6 @@ fn render_response_message(blocks: &[Value]) -> Result<Value, String> {
     super::anthropic_mojo_value(input)
 }
 
-#[cfg(not(feature = "mojo"))]
-fn render_response_message(blocks: &[Value]) -> Result<Value, String> {
-    let content = blocks
-        .iter()
-        .map(|block| {
-            let text = block
-                .get("text")
-                .and_then(Value::as_str)
-                .ok_or_else(|| "Anthropic text block must contain text".to_string())?;
-            Ok(json!({"type": "output_text", "text": text}))
-        })
-        .collect::<Result<Vec<_>, String>>()?;
-    Ok(json!({
-        "type": "message",
-        "role": "assistant",
-        "content": content,
-    }))
-}
-
-#[cfg(feature = "mojo")]
 fn render_response_reasoning(block: &Value) -> Result<Value, String> {
     let block = super::json_fragment(block)?;
     let mut input =
@@ -192,27 +153,8 @@ fn render_response_reasoning(block: &Value) -> Result<Value, String> {
     super::anthropic_mojo_value(input)
 }
 
-#[cfg(not(feature = "mojo"))]
-fn render_response_reasoning(block: &Value) -> Result<Value, String> {
-    let thinking = block
-        .get("thinking")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "Anthropic response plan referenced invalid reasoning".to_string())?;
-    Ok(json!({
-        "type": "reasoning",
-        "summary": [{"type": "summary_text", "text": thinking}],
-    }))
-}
-
 pub(super) fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>, String> {
-    let inputs = content
-        .iter()
-        .map(anthropic_response_block_input)
-        .collect::<Result<Vec<_>, _>>()?;
-    #[cfg(feature = "mojo")]
-    let plan = plan_with_mojo(&inputs)?;
-    #[cfg(not(feature = "mojo"))]
-    let plan = plan_with_rust(&inputs);
+    let (inputs, plan) = response_plan_with_mojo(content)?;
 
     let mut output = Vec::new();
     for item in plan {
@@ -249,4 +191,132 @@ pub(super) fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>,
         }
     }
     Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn mojo_response_block_classification_and_plan_match_expected_values() {
+        let valid = vec![
+            json!({"type": "text", "text": ""}),
+            json!({"type": "tool_use", "id": "call_test", "name": "read_file", "input": {}}),
+            json!({"type": "server_tool_use", "id": "search_test", "name": "web_search", "input": {"query": "release"}}),
+            json!({"type": "web_search_tool_result", "tool_use_id": "search_test", "content": []}),
+            json!({"type": "thinking", "thinking": ""}),
+            json!({"type": "thinking", "thinking": false}),
+            json!({"type": "thinking"}),
+        ];
+        let (actual_inputs, actual_plan) = response_plan_with_mojo(&valid).unwrap();
+        assert_eq!(
+            actual_inputs
+                .iter()
+                .map(|input| (input.kind, input.has_text))
+                .collect::<Vec<_>>(),
+            vec![
+                (ResponseBlockKind::Text, true),
+                (ResponseBlockKind::ToolUse, false),
+                (ResponseBlockKind::WebSearchCall, false),
+                (ResponseBlockKind::WebSearchResult, false),
+                (ResponseBlockKind::Thinking, true),
+                (ResponseBlockKind::Thinking, false),
+                (ResponseBlockKind::Thinking, false),
+            ]
+        );
+        assert_eq!(
+            actual_plan,
+            vec![
+                ResponsePlanItem {
+                    kind: ResponsePlanKind::Message,
+                    start: 0,
+                    count: 1,
+                    input_index: 0
+                },
+                ResponsePlanItem {
+                    kind: ResponsePlanKind::ToolUse,
+                    start: 0,
+                    count: 0,
+                    input_index: 1
+                },
+                ResponsePlanItem {
+                    kind: ResponsePlanKind::WebSearchCall,
+                    start: 0,
+                    count: 0,
+                    input_index: 2
+                },
+                ResponsePlanItem {
+                    kind: ResponsePlanKind::WebSearchResult,
+                    start: 0,
+                    count: 0,
+                    input_index: 3
+                },
+                ResponsePlanItem {
+                    kind: ResponsePlanKind::Reasoning,
+                    start: 0,
+                    count: 0,
+                    input_index: 4
+                },
+            ]
+        );
+
+        for (content, expected) in [
+            (
+                vec![json!({})],
+                "Anthropic Messages content block requires type",
+            ),
+            (
+                vec![json!({"type": 1})],
+                "Anthropic Messages content block requires type",
+            ),
+            (
+                vec![json!({"type": "future_block"})],
+                "unsupported Anthropic Messages content block `future_block`",
+            ),
+            (
+                vec![json!({"type": "text", "text": false})],
+                "Anthropic text block must contain text",
+            ),
+            (
+                vec![json!({"type": "tool_use"})],
+                "Anthropic tool_use block must contain id",
+            ),
+            (
+                vec![json!({"type": "tool_use", "id": "call_test"})],
+                "Anthropic tool_use block must contain name",
+            ),
+            (
+                vec![json!({"type": "server_tool_use"})],
+                "Anthropic server_tool_use block must contain id",
+            ),
+            (
+                vec![json!({"type": "server_tool_use", "id": "search_test", "name": "other"})],
+                "unsupported Anthropic server tool",
+            ),
+            (
+                vec![json!({"type": "tool_use"}), json!({"type": "future_block"})],
+                "Anthropic tool_use block must contain id",
+            ),
+        ] {
+            assert_eq!(
+                response_plan_with_mojo(&content).unwrap_err(),
+                expected,
+                "{content:?}",
+            );
+        }
+
+        let oversized_tool = json!({
+            "type": "tool_use",
+            "id": "call_test",
+            "name": "read_file",
+            "input": {"payload": "x".repeat(4 * 1024 * 1024)},
+        });
+        let content = vec![oversized_tool, json!({"type": "future_block"})];
+        assert!(
+            response_plan_with_mojo(&content)
+                .unwrap_err()
+                .starts_with("Anthropic request kernel failed:"),
+            "materialization failure must precede a later classification issue"
+        );
+    }
 }

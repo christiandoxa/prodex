@@ -4,22 +4,28 @@ use super::*;
 #[test]
 fn native_web_search_route_is_selected_only_for_native_modes_with_options() {
     let body = br#"{"web_search_options":{}}"#;
-    assert!(runtime_deepseek_uses_native_web_search(
+    for mode in [
         RuntimeDeepSeekWebSearchMode::Auto,
-        body
-    ));
-    assert!(runtime_deepseek_uses_native_web_search(
         RuntimeDeepSeekWebSearchMode::Anthropic,
-        body
-    ));
-    assert!(!runtime_deepseek_uses_native_web_search(
-        RuntimeDeepSeekWebSearchMode::OpenAiChat,
-        body
-    ));
-    assert!(!runtime_deepseek_uses_native_web_search(
-        RuntimeDeepSeekWebSearchMode::Auto,
-        br#"{}"#
-    ));
+    ] {
+        let result = runtime_deepseek_uses_native_web_search(mode, body);
+        if cfg!(feature = "mojo-core") {
+            assert!(result.unwrap());
+        } else {
+            assert_eq!(
+                result.unwrap_err().to_string(),
+                "DeepSeek native Anthropic web-search translation requires Mojo support"
+            );
+        }
+    }
+    assert!(
+        !runtime_deepseek_uses_native_web_search(RuntimeDeepSeekWebSearchMode::OpenAiChat, body)
+            .unwrap()
+    );
+    assert!(
+        !runtime_deepseek_uses_native_web_search(RuntimeDeepSeekWebSearchMode::Auto, br#"{}"#)
+            .unwrap()
+    );
 }
 
 #[test]

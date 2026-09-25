@@ -452,7 +452,7 @@ fn runtime_deepseek_prepare_model_request(
     let mut native_messages = runtime_deepseek_uses_native_web_search(
         context.web_search_mode,
         translated.body.as_slice(),
-    );
+    )?;
     let body = if native_messages {
         let mut input =
             ProviderTransformInput::new(ProviderEndpoint::Responses, translated.body.clone());
@@ -751,15 +751,19 @@ fn runtime_deepseek_live_result(
 fn runtime_deepseek_uses_native_web_search(
     mode: super::super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode,
     body: &[u8],
-) -> bool {
-    matches!(
+) -> Result<bool> {
+    let native = matches!(
         mode,
         super::super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode::Auto
             | super::super::deepseek_rewrite::RuntimeDeepSeekWebSearchMode::Anthropic
     ) && serde_json::from_slice::<serde_json::Value>(body)
         .ok()
         .and_then(|value| value.get("web_search_options").cloned())
-        .is_some()
+        .is_some();
+    if native && !cfg!(feature = "mojo-core") {
+        anyhow::bail!("DeepSeek native Anthropic web-search translation requires Mojo support");
+    }
+    Ok(native)
 }
 
 fn runtime_deepseek_auto_chat_fallback_body(

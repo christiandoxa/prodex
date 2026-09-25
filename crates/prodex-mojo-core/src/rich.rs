@@ -24,8 +24,9 @@ mod context;
 pub use context::{ContextAnalysis, ContextGroup, analyze_context, signal_counts_batch};
 mod anthropic_messages;
 pub use anthropic_messages::{
-    AnthropicResponseBlock, AnthropicResponseBlockKind, AnthropicResponsePlanItem,
-    AnthropicResponsePlanKind, plan_anthropic_response_blocks,
+    AnthropicResponseBlock, AnthropicResponseBlockClassificationError,
+    AnthropicResponseBlockClassificationInput, AnthropicResponseBlockKind, AnthropicResponsePlan,
+    AnthropicResponsePlanItem, AnthropicResponsePlanKind, plan_anthropic_response_blocks,
 };
 #[path = "rich/anthropic_request.rs"]
 mod anthropic_request;
