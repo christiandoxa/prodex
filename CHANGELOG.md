@@ -2,73 +2,112 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.432.0 - 2026-09-25
+
+### Runtime
+
+- Own continuation binding retention (`b496617`)
+- Own continuation status policy (`04f03f7`)
+- Own runtime log tokenization (`26ebebe`)
+
+### CLI
+
+- Aggregate OpenAI pools in Mojo (`8fc4c10`)
+- Own quota status classification (`f70166a`)
+- Own OpenAI model quota planning (`b78bd72`)
+
+### Misc
+
+- Support Codex 0.157.0 (`a96f995`)
+- Merge pull request #95 from christiandoxa/mojo-75-chat-response-20260925 (`37f9f12`)
+- Shape function history parts in Mojo (`376c06f`)
+- Move label validation to Mojo (`8cd0b67`)
+- Move request validation to Mojo (`87fba48`)
+- Own provider error classification (`e5e4e0e`)
+- Own Gemini stream event transform (`470f27d`)
+- Own rate-limit header classification (`978d600`)
+- Own SSE inspection transitions (`637d81b`)
+- Own SSE line planning (`aafd19f`)
+- Own response forwarding classification (`14b939d`)
+- Record collapsed Smart Context adapters (`f458dda`)
+- Own previous response error classification (`db4514b`)
+- Own request compatibility surface planning (`ed73a21`)
+- Own retry-after numeric policy (`12dc895`)
+- Route remaining human status through ratatui (`cb04b3e`)
+- Render interactive command status with ratatui (`bbaea3e`)
+- Own operational log detail planning (`3506b8b`)
+- Own operational log event classification (`b9b3343`)
+# Prodex 0.432.0
+
+## New Features
+
+- Target the official Codex rust-v0.157.0 release.
+- Accommodate Codex 0.157.0 GPT-6 Sol and GPT-6 Luna support on Amazon Bedrock.
+  Prodex continues to launch Bedrock profiles directly and leaves the static
+  Bedrock model catalog upstream-owned; the compatibility contract now tracks
+  the new model IDs and GPT-6 Sol default.
+- Preserve the new optional app-server thread-item lifecycle timestamps
+  (startedAtMs and completedAtMs) as additive protocol fields.
+- Preserve Codex-owned automatic background-server startup, remote/local-daemon
+  /import support, fullscreen transcript behavior, and conversation-fork UI.
+
+## Bug Fixes
+
+- Fix a long-standing direct Super resume trust regression. When
+  prodex s <session-uuid> resumes a thread whose persisted workspace differs
+  from the shell's current directory, Prodex now trusts the persisted session
+  cwd before Codex starts.
+- Prevent the Codex Folder access / Trust and continue screen from appearing in
+  that direct-resume case. Super now projects both the launch cwd and the
+  authoritative resumed-session cwd into project trust.
+- Keep invalid_prompt distinct from quota, rate-limit, and overload failures in
+  line with Codex 0.157.0 so those requests pass through rather than triggering
+  profile rotation.
+
+## Compatibility and Safety
+
+- Respect Codex 0.157.0's first-party-only internal metadata boundary:
+  tool-result metadata and MCP attribution metadata filtered by Codex for a
+  custom provider destination are not reconstructed by Prodex.
+- Preserve HTTP/SSE/WebSocket transport-policy failures as transport/policy
+  failures rather than reclassifying them as account quota.
+- Keep the 0.431.1 workspace-routing fix: chatgpt_base_url remains
+  Codex-owned/HTTPS while OpenAI model traffic uses the authenticated Prodex
+  local provider.
+- No global project-trust switch or hook-trust bypass is introduced. Exact
+  per-hook hash trust and post-write verification remain unchanged.
+- Normal non-Super launches do not gain automatic folder trust.
+
+## Validation
+
+- Compared exact Codex 0.156.1 and 0.157.0 tagged source trees: 1,086 changed
+  files, 42,832 additions, and 10,984 deletions.
+- Replayed 797 critical-file and semantic markers against the exact 0.157.0
+  tagged tree with zero missing markers.
+- Verified the official 0.157.0 Linux musl release asset and extracted binary
+  checksums; the binary reports codex-cli 0.157.0.
+- Ran an isolated official 0.157.0 app-server initialize smoke without user
+  credentials or a model turn.
+- Added a regression test where the launch cwd and resumed session cwd differ;
+  both are emitted as trusted projects for Super.
+- Upstream baseline self-tests and direct source replay pass with the new GPT-6
+  Bedrock, invalid_prompt, internal-metadata, and app-server timestamp
+  contracts.
+
+## Changelog
+
+- Align the compatibility baseline with Codex rust-v0.157.0.
+- Add Bedrock GPT-6 Sol/Luna and additive app-server protocol coverage.
+- Restore zero-prompt folder trust for prodex s <session-uuid> across
+  workspaces.
+
+Full Changelog: [0.431.7...0.432.0](https://github.com/christiandoxa/prodex/compare/0.431.7...0.432.0)
+
 ## 0.431.7 - 2026-09-24
 
 ### CLI
 
 - Accept overridden hook trust writes (`be65261`)
-# Prodex 0.431.7
-
-## New Features
-
-- No new user-facing features in this patch release; 0.431.7 is a focused regression fix for direct Super session resume.
-
-## Bug Fixes
-
-- Fix a Super resume regression where launching an existing Codex session directly with
-  `prodex s <session-uuid>` could abort during quota preflight with
-  `Codex hook-trust config write did not report status=ok`.
-- Accept Codex `config/batchWrite` success status `okOverridden` in the Super hook-trust
-  preflight. Codex returns this status when the trust write is effective but a higher-priority
-  session flag also contributes to the resulting `hooks.state` value.
-- Keep the existing post-write `hooks/list` verification as the authority for whether every
-  discovered hook is actually trusted. A write that does not result in trusted hooks still
-  fails closed before the Codex TUI starts.
-- Cover the regression in the hook-trust unit tests and release artifact smoke path so both
-  `ok` and `okOverridden` success responses remain supported.
-
-## Affected Flow
-
-The regression was specific to direct Super resume with automatic profile rotation enabled:
-
-```bash
-prodex s <session-uuid>
-```
-
-The runtime usage-limit monitor adds a session-scoped `hooks.state` override so it can safely
-track the resumed session. Codex 0.156.1 can therefore report a successful hook trust write as
-`okOverridden`. Prodex 0.431.3 through 0.431.6 accepted only the literal `ok` status and treated
-that successful response as fatal.
-
-Starting `prodex s` first and then using `/resume` did not exercise the same launch-time
-configuration path.
-
-## Safety
-
-- No global hook-trust bypass is reintroduced.
-- Super still trusts only exact hook hashes returned by Codex.
-- The second `hooks/list` call remains mandatory and rejects any hook that is still
-  `untrusted` or `modified`.
-- Workspace trust, profile rotation, optional tools, provider routing, and Presidio defaults
-  are unchanged.
-
-## Validation
-
-- Added a focused Rust regression test for Codex hook-trust write statuses `ok` and
-  `okOverridden`, including rejection of unknown or missing statuses.
-- Updated the standalone release artifact smoke app-server fixture to return
-  `okOverridden` with session-flag override metadata.
-- `cargo fmt --all -- --check` passed.
-- The focused `prodex-app` hook-trust regression test passed.
-- `node --test scripts/ci/release-artifact-smoke.test.mjs` passed.
-
-## Changelog
-
-- Restore direct `prodex s <session-uuid>` resume on Codex 0.156.1 when Super's
-  session-scoped hook trust state is present.
-- Preserve exact-hash verification and fail-closed hook trust semantics.
-
-Full Changelog: [0.431.6...0.431.7](https://github.com/christiandoxa/prodex/compare/0.431.6...0.431.7)
 
 ## 0.431.6 - 2026-09-23
 
