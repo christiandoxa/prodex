@@ -14,7 +14,7 @@ name = "prodex_quota"
 path = "src/lib.rs"
 
 [features]
-default = []
+default = ["mojo"]
 mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-quota"]
 
 [dependencies]

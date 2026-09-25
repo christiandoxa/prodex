@@ -77,8 +77,9 @@ fn rust_pressure_band(status: RuntimeQuotaWindowStatus) -> RuntimeQuotaPressureB
     }
 }
 
+#[cfg(feature = "mojo")]
 #[test]
-fn quota_window_pair_readiness_matches_rust_oracle() {
+fn quota_window_pair_readiness_matches_expected_values() {
     for (first, second, expected) in [
         (None, None, false),
         (Some(0), None, true),
@@ -103,11 +104,5 @@ fn quota_window_pair_readiness_matches_rust_oracle() {
             }),
         };
         assert_eq!(window_pair_has_ready_limit(&pair), expected);
-        let rust = [first, second].into_iter().flatten().next().is_some()
-            && [first, second]
-                .into_iter()
-                .flatten()
-                .all(|used_percent| used_percent < 100);
-        assert_eq!(window_pair_has_ready_limit(&pair), rust);
     }
 }

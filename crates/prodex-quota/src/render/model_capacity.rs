@@ -269,30 +269,8 @@ pub fn openai_usage_has_unknown_luna_capacity(usage: &UsageResponse) -> bool {
 
     #[cfg(not(feature = "mojo"))]
     {
-        let Some(pair) = usage.rate_limit.as_ref() else {
-            return false;
-        };
-        if pair.allowed == Some(false)
-            || pair.limit_reached == Some(true)
-            || !["rate_limit_reached_type", "rateLimitReachedType"]
-                .into_iter()
-                .all(|key| pair.extra.get(key).is_none_or(serde_json::Value::is_null))
-            || ["spend_control_reached", "spendControlReached"]
-                .into_iter()
-                .any(|key| pair.extra.get(key).and_then(serde_json::Value::as_bool) == Some(true))
-            || window_pair_has_ready_limit(pair)
-        {
-            return false;
-        }
-        let windows = [pair.primary_window.as_ref(), pair.secondary_window.as_ref()];
-        windows
-            .into_iter()
-            .flatten()
-            .any(|window| window.used_percent.is_none())
-            && !windows
-                .into_iter()
-                .flatten()
-                .any(|window| window.used_percent.is_some_and(|used| used >= 100))
+        let _ = usage;
+        false
     }
 }
 

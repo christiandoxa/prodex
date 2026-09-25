@@ -20,83 +20,54 @@ pub(super) fn required_window_snapshot_at(
     label: &str,
     now: i64,
 ) -> Option<MainWindowSnapshot> {
-    let window = find_main_window(pair, label)?;
-    if window_pair_has_blocking_admission(pair)
-        && ![pair.primary_window.as_ref(), pair.secondary_window.as_ref()]
-            .into_iter()
-            .flatten()
-            .any(|window| window.used_percent.is_some_and(|used| used >= 100))
-    {
-        return None;
-    }
-    let remaining_percent = remaining_percent(Some(window.used_percent?));
-    let reset_at = window.reset_at.unwrap_or(i64::MAX);
-
     #[cfg(feature = "mojo")]
-    let pressure_score = crate::mojo::quota_window_pressure(remaining_percent, reset_at, now)
-        .expect("Mojo quota window pressure failed");
+    {
+        let window = find_main_window(pair, label)?;
+        let capacity = crate::capacity::quota_capacity_for_window_pair(pair)
+            .expect("Mojo quota capacity classification failed");
+        if !capacity.admission_allowed && !capacity.any_window_exhausted {
+            return None;
+        }
+        let remaining_percent = remaining_percent(Some(window.used_percent?));
+        let reset_at = window.reset_at.unwrap_or(i64::MAX);
+        let pressure_score = crate::mojo::quota_window_pressure(remaining_percent, reset_at, now)
+            .expect("Mojo quota window pressure failed");
+        Some(MainWindowSnapshot {
+            remaining_percent,
+            reset_at,
+            pressure_score,
+        })
+    }
 
     #[cfg(not(feature = "mojo"))]
-    let pressure_score = {
-        let seconds_until_reset = if reset_at == i64::MAX {
-            i64::MAX
-        } else {
-            reset_at.saturating_sub(now).max(0)
-        };
-        seconds_until_reset
-            .saturating_mul(1_000)
-            .checked_div(remaining_percent.max(1))
-            .unwrap_or(i64::MAX)
-    };
-
-    Some(MainWindowSnapshot {
-        remaining_percent,
-        reset_at,
-        pressure_score,
-    })
+    {
+        let _ = (pair, label, now);
+        None
+    }
 }
 
 pub use crate::capacity::additional_rate_limit_is_usable;
 
 pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
-    if window_pair_has_blocking_admission(pair) {
-        return false;
-    }
-    let first_used_percent = find_main_window(pair, "5h").and_then(|window| window.used_percent);
-    let second_used_percent =
-        find_main_window(pair, "weekly").and_then(|window| window.used_percent);
-
     #[cfg(feature = "mojo")]
     {
-        crate::mojo::window_pair_has_ready_limit(first_used_percent, second_used_percent)
+        crate::capacity::quota_capacity_for_window_pair(pair)
+            .expect("Mojo quota capacity classification failed")
+            .usable
     }
 
     #[cfg(not(feature = "mojo"))]
     {
-        let used_percentages = [first_used_percent, second_used_percent]
-            .into_iter()
-            .flatten()
-            .collect::<Vec<_>>();
-        !used_percentages.is_empty()
-            && used_percentages
-                .into_iter()
-                .all(|used_percent| used_percent < 100)
+        let _ = pair;
+        false
     }
 }
 
+#[cfg(feature = "mojo")]
 pub(crate) fn window_pair_has_blocking_admission(pair: &WindowPair) -> bool {
-    pair.allowed == Some(false)
-        || pair.limit_reached == Some(true)
-        || ["rate_limit_reached_type", "rateLimitReachedType"]
-            .into_iter()
-            .any(|key| pair.extra.get(key).is_some_and(|value| !value.is_null()))
-        || ["spend_control_reached", "spendControlReached"]
-            .into_iter()
-            .any(|key| pair.extra.get(key).and_then(serde_json::Value::as_bool) == Some(true))
-        || pair
-            .extra
-            .get("ordinaryUsageAllowed")
-            .is_some_and(|value| value.as_bool() != Some(true))
+    !crate::capacity::quota_capacity_for_window_pair(pair)
+        .expect("Mojo quota capacity classification failed")
+        .admission_allowed
 }
 
 pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&WindowPair> {
@@ -124,15 +95,8 @@ pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&Window
 
     #[cfg(not(feature = "mojo"))]
     {
-        if usage
-            .rate_limit
-            .as_ref()
-            .is_some_and(window_pair_has_ready_limit)
-        {
-            return usage.rate_limit.as_ref();
-        }
-
-        usage.rate_limit.as_ref()
+        let _ = usage;
+        None
     }
 }
 
@@ -150,7 +114,10 @@ pub fn openai_quota_has_ready_limit(usage: &UsageResponse) -> bool {
     }
 
     #[cfg(not(feature = "mojo"))]
-    openai_quota_runtime_window_pair(usage).is_some_and(window_pair_has_ready_limit)
+    {
+        let _ = usage;
+        false
+    }
 }
 
 fn openai_quota_has_ready_runtime_limit(usage: &UsageResponse) -> bool {

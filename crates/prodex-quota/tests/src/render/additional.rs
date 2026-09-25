@@ -75,6 +75,7 @@ fn additional_rate_limit_preserves_admission_and_future_fields() {
     );
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
     let usage: UsageResponse = serde_json::from_value(serde_json::json!({

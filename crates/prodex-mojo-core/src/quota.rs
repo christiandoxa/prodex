@@ -1,7 +1,10 @@
+mod capacity;
+pub use capacity::quota_capacity_batch;
+
 pub const QUOTA_MAIN_AGGREGATION_MAX_COUNT: usize = 1_024;
 pub const QUOTA_GEMINI_BUCKET_BATCH_MAX_COUNT: usize = 1_024;
 pub const QUOTA_CAPACITY_BATCH_MAX_COUNT: usize = 256;
-pub const QUOTA_CAPACITY_FIELD_COUNT: usize = 11;
+pub const QUOTA_CAPACITY_FIELD_COUNT: usize = 22;
 
 pub const QUOTA_CAPACITY_LANE_MAIN: i64 = 0;
 pub const QUOTA_CAPACITY_LANE_MODEL_SPECIFIC: i64 = 1;
@@ -74,19 +77,40 @@ pub struct MainQuotaAggregation {
     pub earliest_reset_at: Option<i64>,
 }
 
+/// Shape of an admission field preserved from the upstream quota payload.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaAdmissionValue {
+    Missing,
+    Null,
+    True,
+    False,
+    Other,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct QuotaCapacityInput {
     pub lane: i64,
-    pub allowed: i64,
-    pub limit_reached: i64,
+    pub pair_allowed: Option<bool>,
+    pub outer_allowed: Option<bool>,
+    pub pair_limit_reached: Option<bool>,
+    pub outer_limit_reached: Option<bool>,
+    pub rate_limit_reached_type: QuotaAdmissionValue,
+    pub camel_rate_limit_reached_type: QuotaAdmissionValue,
+    pub spend_control_reached: QuotaAdmissionValue,
+    pub camel_spend_control_reached: QuotaAdmissionValue,
+    pub ordinary_usage_allowed: QuotaAdmissionValue,
     pub five_hour_used_percent: i64,
     pub five_hour_has_value: bool,
-    pub five_hour_seconds_until_reset: i64,
+    pub five_hour_reset_at: i64,
     pub weekly_used_percent: i64,
     pub weekly_has_value: bool,
-    pub weekly_seconds_until_reset: i64,
+    pub weekly_reset_at: i64,
+    pub primary_used_percent: i64,
+    pub primary_has_value: bool,
+    pub secondary_used_percent: i64,
+    pub secondary_has_value: bool,
     pub scale_bps: i64,
-    pub weekly_weight: i64,
+    pub now: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -99,6 +123,7 @@ pub struct QuotaCapacityOutput {
     pub pressure_band: i64,
     pub admission_allowed: bool,
     pub pair_ready: bool,
+    pub any_window_exhausted: bool,
     pub usable: bool,
     pub routing_eligible: bool,
     pub reserve_floor: i64,
@@ -145,16 +170,27 @@ pub fn self_test() -> bool {
     let capacity = quota_capacity_batch(
         &[QuotaCapacityInput {
             lane: QUOTA_CAPACITY_LANE_MAIN,
-            allowed: 0,
-            limit_reached: 0,
+            pair_allowed: None,
+            outer_allowed: None,
+            pair_limit_reached: None,
+            outer_limit_reached: None,
+            rate_limit_reached_type: QuotaAdmissionValue::Missing,
+            camel_rate_limit_reached_type: QuotaAdmissionValue::Missing,
+            spend_control_reached: QuotaAdmissionValue::Missing,
+            camel_spend_control_reached: QuotaAdmissionValue::Missing,
+            ordinary_usage_allowed: QuotaAdmissionValue::Missing,
             five_hour_used_percent: 10,
             five_hour_has_value: true,
-            five_hour_seconds_until_reset: 0,
+            five_hour_reset_at: 0,
             weekly_used_percent: 20,
             weekly_has_value: true,
-            weekly_seconds_until_reset: 0,
+            weekly_reset_at: 0,
+            primary_used_percent: 10,
+            primary_has_value: true,
+            secondary_used_percent: 20,
+            secondary_has_value: true,
             scale_bps: 10_000,
-            weekly_weight: 10,
+            now: 0,
         }],
         3,
     )
@@ -170,7 +206,6 @@ pub fn self_test() -> bool {
     remaining_percent(Some(42)) == 58
         && window_status(5, true) == 2
         && pressure_band(1, 2) == 2
-        && window_pair_has_ready_limit(Some(20), Some(30))
         && round_f64(1.5) == 2
         && round_f64(-0.5) == -1
         && capacity
@@ -201,12 +236,6 @@ unsafe extern "C" {
     fn prodex_quota_remaining_percent(used_percent: i64, has_value: i64) -> i64;
     fn prodex_quota_window_status(remaining_percent: i64, has_window: i64) -> i64;
     fn prodex_quota_pressure_band(five_hour_status: i64, weekly_status: i64) -> i64;
-    fn prodex_quota_window_pair_has_ready_limit(
-        first_used_percent: i64,
-        first_has_value: i64,
-        second_used_percent: i64,
-        second_has_value: i64,
-    ) -> i64;
     fn prodex_quota_gemini_bucket_batch(
         remaining_amount: *const i64,
         remaining_amount_state: *const i64,
@@ -232,7 +261,7 @@ unsafe extern "C" {
         earliest_present: *mut i64,
         count: i64,
     ) -> i64;
-    fn prodex_quota_capacity_batch(
+    fn prodex_quota_capacity_batch_v2(
         fields_address: u64,
         lane_address: u64,
         five_hour_remaining_address: u64,
@@ -242,6 +271,7 @@ unsafe extern "C" {
         pressure_band_address: u64,
         admission_allowed_address: u64,
         pair_ready_address: u64,
+        any_window_exhausted_address: u64,
         usable_address: u64,
         routing_eligible_address: u64,
         reserve_floor_address: u64,
@@ -507,140 +537,6 @@ pub fn gemini_bucket_numeric_batch(
     Ok(outputs)
 }
 
-pub fn quota_capacity_batch(
-    inputs: &[QuotaCapacityInput],
-    route_kind: i64,
-) -> Result<Vec<QuotaCapacityOutput>, crate::MojoError> {
-    if inputs.len() > QUOTA_CAPACITY_BATCH_MAX_COUNT
-        || !(0..=3).contains(&route_kind)
-        || inputs.iter().any(|input| {
-            !(QUOTA_CAPACITY_LANE_MAIN..=QUOTA_CAPACITY_LANE_UNKNOWN_ADDITIONAL)
-                .contains(&input.lane)
-                || !(0..=2).contains(&input.allowed)
-                || !(0..=2).contains(&input.limit_reached)
-                || input.five_hour_seconds_until_reset < 0
-                || input.weekly_seconds_until_reset < 0
-                || input.scale_bps < 0
-                || input.weekly_weight < 0
-        })
-    {
-        return Err(crate::MojoError::InvalidInput);
-    }
-
-    let mut fields = Vec::with_capacity(inputs.len() * QUOTA_CAPACITY_FIELD_COUNT);
-    for input in inputs {
-        fields.extend([
-            input.lane,
-            input.allowed,
-            input.limit_reached,
-            input.five_hour_used_percent,
-            i64::from(input.five_hour_has_value),
-            input.five_hour_seconds_until_reset,
-            input.weekly_used_percent,
-            i64::from(input.weekly_has_value),
-            input.weekly_seconds_until_reset,
-            input.scale_bps,
-            input.weekly_weight,
-        ]);
-    }
-
-    let mut lane = vec![0_i64; inputs.len()];
-    let mut five_hour_remaining = vec![0_i64; inputs.len()];
-    let mut weekly_remaining = vec![0_i64; inputs.len()];
-    let mut five_hour_status = vec![0_i64; inputs.len()];
-    let mut weekly_status = vec![0_i64; inputs.len()];
-    let mut pressure_band = vec![0_i64; inputs.len()];
-    let mut admission_allowed = vec![0_i64; inputs.len()];
-    let mut pair_ready = vec![0_i64; inputs.len()];
-    let mut usable = vec![0_i64; inputs.len()];
-    let mut routing_eligible = vec![0_i64; inputs.len()];
-    let mut reserve_floor = vec![0_i64; inputs.len()];
-    let mut five_hour_pressure = vec![0_i64; inputs.len()];
-    let mut weekly_pressure = vec![0_i64; inputs.len()];
-    let mut total_pressure = vec![0_i64; inputs.len()];
-    let status = unsafe {
-        prodex_quota_capacity_batch(
-            fields.as_ptr() as u64,
-            lane.as_mut_ptr() as u64,
-            five_hour_remaining.as_mut_ptr() as u64,
-            weekly_remaining.as_mut_ptr() as u64,
-            five_hour_status.as_mut_ptr() as u64,
-            weekly_status.as_mut_ptr() as u64,
-            pressure_band.as_mut_ptr() as u64,
-            admission_allowed.as_mut_ptr() as u64,
-            pair_ready.as_mut_ptr() as u64,
-            usable.as_mut_ptr() as u64,
-            routing_eligible.as_mut_ptr() as u64,
-            reserve_floor.as_mut_ptr() as u64,
-            five_hour_pressure.as_mut_ptr() as u64,
-            weekly_pressure.as_mut_ptr() as u64,
-            total_pressure.as_mut_ptr() as u64,
-            route_kind,
-            i64::try_from(inputs.len()).map_err(|_| crate::MojoError::InvalidInput)?,
-        )
-    };
-    if status != 0 {
-        return Err(if status == 1 {
-            crate::MojoError::InvalidInput
-        } else {
-            crate::MojoError::InvalidOutput
-        });
-    }
-
-    let mut outputs = Vec::with_capacity(inputs.len());
-    for index in 0..inputs.len() {
-        if lane[index] != inputs[index].lane
-            || !(0..=100).contains(&five_hour_remaining[index])
-            || !(0..=100).contains(&weekly_remaining[index])
-            || !(0..=4).contains(&five_hour_status[index])
-            || !(0..=4).contains(&weekly_status[index])
-            || !(0..=4).contains(&pressure_band[index])
-            || !matches!(
-                (
-                    admission_allowed[index],
-                    pair_ready[index],
-                    usable[index],
-                    routing_eligible[index]
-                ),
-                (0 | 1, 0 | 1, 0 | 1, 0 | 1)
-            )
-            || reserve_floor[index] < 0
-            || reserve_floor[index] > 100
-            || five_hour_pressure[index] < 0
-            || weekly_pressure[index] < 0
-            || total_pressure[index] < 0
-            || usable[index] != admission_allowed[index] * pair_ready[index]
-            || routing_eligible[index]
-                != i64::from(
-                    usable[index] == 1
-                        && matches!(
-                            inputs[index].lane,
-                            QUOTA_CAPACITY_LANE_MAIN | QUOTA_CAPACITY_LANE_MODEL_SPECIFIC
-                        ),
-                )
-        {
-            return Err(crate::MojoError::InvalidOutput);
-        }
-        outputs.push(QuotaCapacityOutput {
-            lane: lane[index],
-            five_hour_remaining: five_hour_remaining[index],
-            weekly_remaining: weekly_remaining[index],
-            five_hour_status: five_hour_status[index],
-            weekly_status: weekly_status[index],
-            pressure_band: pressure_band[index],
-            admission_allowed: admission_allowed[index] == 1,
-            pair_ready: pair_ready[index] == 1,
-            usable: usable[index] == 1,
-            routing_eligible: routing_eligible[index] == 1,
-            reserve_floor: reserve_floor[index],
-            five_hour_pressure: five_hour_pressure[index],
-            weekly_pressure: weekly_pressure[index],
-            total_pressure: total_pressure[index],
-        });
-    }
-    Ok(outputs)
-}
-
 pub fn quota_window_pressure(
     remaining_percent: i64,
     reset_at: i64,
@@ -725,17 +621,6 @@ pub fn window_status(remaining_percent: i64, has_window: bool) -> i64 {
 
 pub fn pressure_band(five_hour_status: i64, weekly_status: i64) -> i64 {
     unsafe { prodex_quota_pressure_band(five_hour_status, weekly_status) }
-}
-
-pub fn window_pair_has_ready_limit(first: Option<i64>, second: Option<i64>) -> bool {
-    unsafe {
-        prodex_quota_window_pair_has_ready_limit(
-            first.unwrap_or(0),
-            i64::from(first.is_some()),
-            second.unwrap_or(0),
-            i64::from(second.is_some()),
-        ) != 0
-    }
 }
 
 #[cfg(all(test, feature = "mojo-quota"))]

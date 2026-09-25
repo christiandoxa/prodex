@@ -14,13 +14,6 @@ pub(super) fn pressure_band(five_hour_status: i64, weekly_status: i64) -> i64 {
     prodex_mojo_core::quota::pressure_band(five_hour_status, weekly_status)
 }
 
-pub(super) fn window_pair_has_ready_limit(
-    first_used_percent: Option<i64>,
-    second_used_percent: Option<i64>,
-) -> bool {
-    prodex_mojo_core::quota::window_pair_has_ready_limit(first_used_percent, second_used_percent)
-}
-
 pub(crate) fn gemini_bucket_numeric_batch(
     inputs: &[prodex_mojo_core::quota::GeminiBucketNumericInput],
 ) -> Result<Vec<prodex_mojo_core::quota::GeminiBucketNumericOutput>, prodex_mojo_core::MojoError> {

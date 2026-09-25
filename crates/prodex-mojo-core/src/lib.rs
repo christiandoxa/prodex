@@ -37,7 +37,7 @@ pub fn self_test() -> bool {
     let quota = quota::remaining_percent(Some(42)) == 58
         && quota::window_status(5, true) == 2
         && quota::pressure_band(1, 2) == 2
-        && quota::window_pair_has_ready_limit(Some(20), Some(30));
+        && quota::self_test();
     let routing_ok = routing::self_test();
     let profile_schedule_ok = runtime::profile_schedule_self_test();
     let quota_score_ok = runtime::quota_score_self_test();

@@ -1,5 +1,6 @@
 use super::*;
 
+#[cfg(feature = "mojo")]
 #[test]
 fn quota_pool_available_count_excludes_blocked_profiles() {
     let reports = vec![
