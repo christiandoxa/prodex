@@ -120,7 +120,6 @@ mod additional;
 #[cfg(feature = "mojo")]
 #[path = "render/model_capacity.rs"]
 mod model_capacity;
-#[cfg(feature = "mojo")]
 #[path = "render/quota_pool.rs"]
 mod quota_pool;
 #[test]

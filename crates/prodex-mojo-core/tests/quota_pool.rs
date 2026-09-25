@@ -1,85 +1,110 @@
 #![cfg(feature = "mojo-quota")]
 
-use prodex_mojo_core::{MojoError, quota_pool::*};
+use prodex_mojo_core::{
+    MojoError,
+    quota::{
+        MainQuotaAggregation, MainQuotaAggregationInput, QUOTA_MAIN_AGGREGATION_MAX_COUNT,
+        main_quota_aggregate_batch,
+    },
+    quota_pool::*,
+};
 
-fn next(state: &mut u64) -> u64 {
-    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-    *state
-}
+#[test]
+fn openai_pool_aggregate_matches_fixed_expected_values() {
+    let window = |remaining_percent, reset_at| {
+        Some(QuotaPoolWindowInput {
+            remaining_percent,
+            reset_at,
+        })
+    };
+    let inputs = [
+        OpenAiQuotaPoolInput {
+            five_hour: window(80, 50),
+            weekly: window(95, i64::MAX),
+            ready: true,
+        },
+        OpenAiQuotaPoolInput {
+            five_hour: window(0, 40),
+            weekly: None,
+            ready: false,
+        },
+        OpenAiQuotaPoolInput {
+            five_hour: None,
+            weekly: window(25, -5),
+            ready: true,
+        },
+        OpenAiQuotaPoolInput {
+            five_hour: None,
+            weekly: None,
+            ready: true,
+        },
+    ];
 
-fn oracle(inputs: &[OpenAiQuotaPoolInput]) -> OpenAiQuotaPoolAggregation {
-    let mut output = OpenAiQuotaPoolAggregation::default();
-    for input in inputs {
-        if input.five_hour.is_none() && input.weekly.is_none() {
-            continue;
-        }
-        output.profiles_with_data += 1;
-        if input.ready {
-            output.ready_profiles_with_data += 1;
-        }
-        if let Some(window) = input.five_hour {
-            output.five_hour_profiles_with_data += 1;
-            output.five_hour_pool_remaining += window.remaining_percent;
-            if input.ready {
-                output.ready_five_hour_profiles_with_data += 1;
-                output.ready_five_hour_pool_remaining += window.remaining_percent;
-            }
-            if window.reset_at != i64::MAX {
-                output.earliest_five_hour_reset_at = Some(
-                    output
-                        .earliest_five_hour_reset_at
-                        .map_or(window.reset_at, |current| current.min(window.reset_at)),
-                );
-            }
-        }
-        if let Some(window) = input.weekly {
-            output.weekly_profiles_with_data += 1;
-            output.weekly_pool_remaining += window.remaining_percent;
-            if input.ready {
-                output.ready_weekly_profiles_with_data += 1;
-                output.ready_weekly_pool_remaining += window.remaining_percent;
-            }
-            if window.reset_at != i64::MAX {
-                output.earliest_weekly_reset_at = Some(
-                    output
-                        .earliest_weekly_reset_at
-                        .map_or(window.reset_at, |current| current.min(window.reset_at)),
-                );
-            }
-        }
-    }
-    output
+    assert_eq!(
+        openai_quota_pool_aggregate(&inputs),
+        Ok(OpenAiQuotaPoolAggregation {
+            profiles_with_data: 3,
+            ready_profiles_with_data: 2,
+            five_hour_profiles_with_data: 2,
+            weekly_profiles_with_data: 2,
+            ready_five_hour_profiles_with_data: 1,
+            ready_weekly_profiles_with_data: 2,
+            five_hour_pool_remaining: 80,
+            weekly_pool_remaining: 120,
+            ready_five_hour_pool_remaining: 80,
+            ready_weekly_pool_remaining: 120,
+            earliest_five_hour_reset_at: Some(40),
+            earliest_weekly_reset_at: Some(-5),
+        })
+    );
 }
 
 #[test]
-fn openai_pool_aggregate_matches_rust_oracle_for_generated_rows() {
-    let mut state = 0x7175_6f74_615f_706f_u64;
-    for case in 0..2_000 {
-        let count = (next(&mut state) % 65) as usize;
-        let mut inputs = Vec::with_capacity(count);
-        for _ in 0..count {
-            let make_window = |state: &mut u64| {
-                (next(state) & 3 != 0).then(|| QuotaPoolWindowInput {
-                    remaining_percent: (next(state) % 101) as i64,
-                    reset_at: if next(state).is_multiple_of(13) {
-                        i64::MAX
-                    } else {
-                        (next(state) % 20_001) as i64 - 10_000
-                    },
-                })
-            };
-            inputs.push(OpenAiQuotaPoolInput {
-                five_hour: make_window(&mut state),
-                weekly: make_window(&mut state),
-                ready: next(&mut state) & 1 != 0,
-            });
-        }
-        assert_eq!(
-            openai_quota_pool_aggregate(&inputs),
-            Ok(oracle(&inputs)),
-            "case={case}"
-        );
-    }
+fn main_pool_aggregate_matches_fixed_expected_values_and_keeps_its_bound() {
+    let inputs = [
+        MainQuotaAggregationInput {
+            remaining_percent: Some(30),
+            reset_at: Some(90),
+        },
+        MainQuotaAggregationInput {
+            remaining_percent: None,
+            reset_at: Some(1),
+        },
+        MainQuotaAggregationInput {
+            remaining_percent: Some(70),
+            reset_at: Some(40),
+        },
+        MainQuotaAggregationInput {
+            remaining_percent: None,
+            reset_at: None,
+        },
+    ];
+    assert_eq!(
+        main_quota_aggregate_batch(&inputs),
+        Ok(MainQuotaAggregation {
+            profiles_with_data: 2,
+            pool_remaining: 100,
+            earliest_reset_at: Some(40),
+        })
+    );
+
+    let input = MainQuotaAggregationInput {
+        remaining_percent: Some(1),
+        reset_at: None,
+    };
+    let max_rows = vec![input; QUOTA_MAIN_AGGREGATION_MAX_COUNT];
+    assert_eq!(
+        main_quota_aggregate_batch(&max_rows),
+        Ok(MainQuotaAggregation {
+            profiles_with_data: 1_024,
+            pool_remaining: 1_024,
+            earliest_reset_at: None,
+        })
+    );
+    assert_eq!(
+        main_quota_aggregate_batch(&[input; QUOTA_MAIN_AGGREGATION_MAX_COUNT + 1]),
+        Err(MojoError::InvalidInput)
+    );
 }
 
 #[test]

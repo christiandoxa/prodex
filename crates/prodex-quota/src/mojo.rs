@@ -20,33 +20,6 @@ pub(crate) fn gemini_bucket_numeric_batch(
     prodex_mojo_core::quota::gemini_bucket_numeric_batch(inputs)
 }
 
-pub(crate) fn main_quota_aggregate(
-    inputs: &[(Option<i64>, Option<i64>)],
-) -> Result<(usize, i64, Option<i64>), prodex_mojo_core::MojoError> {
-    let inputs = inputs
-        .iter()
-        .copied()
-        .map(
-            |(remaining_percent, reset_at)| prodex_mojo_core::quota::MainQuotaAggregationInput {
-                remaining_percent,
-                reset_at,
-            },
-        )
-        .collect::<Vec<_>>();
-    let aggregate = prodex_mojo_core::quota::main_quota_aggregate_batch(&inputs)?;
-    Ok((
-        aggregate.profiles_with_data,
-        aggregate.pool_remaining,
-        aggregate.earliest_reset_at,
-    ))
-}
-
-pub(crate) fn openai_quota_pool_aggregate(
-    inputs: &[prodex_mojo_core::quota_pool::OpenAiQuotaPoolInput],
-) -> Result<prodex_mojo_core::quota_pool::OpenAiQuotaPoolAggregation, prodex_mojo_core::MojoError> {
-    prodex_mojo_core::quota_pool::openai_quota_pool_aggregate(inputs)
-}
-
 pub(crate) fn quota_capacity_batch(
     inputs: &[prodex_mojo_core::quota::QuotaCapacityInput],
     route_kind: i64,
