@@ -60,6 +60,19 @@ fn affinity_pressure_rewrite_allows_affinity_without_global_exact_passthrough() 
 
 #[test]
 fn affinity_pressure_rewrite_blocks_non_affinity_or_safety_reasons() {
+    let no_reason = SmartContextExactnessGuard {
+        decision: SmartContextExactnessDecision::RequireExact,
+        reasons: Vec::new(),
+    };
+    assert!(!smart_context_affinity_pressure_rewrite_allowed(
+        SmartContextAffinityPressureRewriteInput {
+            exactness_guard: &no_reason,
+            tier: SmartContextTokenBudgetTier::Exact,
+            available_tokens: 1_000,
+            policy_reasons: &[],
+        },
+    ));
+
     let explicit = SmartContextExactnessGuard {
         decision: SmartContextExactnessDecision::RequireExact,
         reasons: vec![SmartContextExactnessReason::ExplicitExactMode],
@@ -83,6 +96,14 @@ fn affinity_pressure_rewrite_blocks_non_affinity_or_safety_reasons() {
             tier: SmartContextTokenBudgetTier::Minimal,
             available_tokens: 1_000,
             policy_reasons: &[SmartContextBudgetPolicyReason::StaticContextChanged],
+        },
+    ));
+    assert!(!smart_context_affinity_pressure_rewrite_allowed(
+        SmartContextAffinityPressureRewriteInput {
+            exactness_guard: &affinity,
+            tier: SmartContextTokenBudgetTier::Minimal,
+            available_tokens: 1_000,
+            policy_reasons: &[SmartContextBudgetPolicyReason::UnknownTokenWindow],
         },
     ));
 

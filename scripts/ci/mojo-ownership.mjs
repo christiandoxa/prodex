@@ -435,6 +435,7 @@ function validateOperations(manifest, revision) {
       continue;
     }
     assert.equal(operation.final_state, "authoritative", `${operation.name} is not final-authoritative`);
+    validateOperationRustState(operation);
     assert.equal(typeof operation.mojo_entry, "string", `${operation.name} needs a Mojo entry`);
     assert.equal(typeof operation.mojo_source, "string", `${operation.name} needs a Mojo source`);
     assert.equal(typeof operation.consumer, "string", `${operation.name} needs a production consumer`);
@@ -548,6 +549,14 @@ function reductionKey(reduction) {
 function validateRustReductionState(reduction) {
   assert(VALID_RUST_REDUCTION_STATES.has(reduction.final_state),
     `${reduction.file}:${reduction.symbol} has an invalid Rust semantic reduction state`);
+}
+
+function validateOperationRustState(operation) {
+  assert(VALID_RUST_REDUCTION_STATES.has(operation.rust_state_after),
+    `${operation.name} has an invalid Rust state after Mojo migration`);
+  for (const field of ["production_fallback", "duplicate_production_owner", "platform_fallback"]) {
+    assert.equal(operation[field], false, `${operation.name} must not retain ${field}`);
+  }
 }
 
 function requireReduction(reductions, file, message) {
@@ -906,6 +915,14 @@ export function ownershipMeetsMinimum(result, minimumPercent) {
 function selfTest() {
   assert.equal(countSemanticLines("// comment\nuse std::x;\n#[cfg(test)]\nmod tests {\nfn ignored() {}\n}\nfn production() {}\n", "rust"), 1);
   assert.equal(countSemanticLines("# comment\nfrom std import Pointer\n@export(\"x\")\ndef production():\n    return 1\n", "mojo"), 2);
+  const operation = { name: "example", rust_state_after: "deleted", production_fallback: false,
+    duplicate_production_owner: false, platform_fallback: false };
+  assert.doesNotThrow(() => validateOperationRustState(operation));
+  assert.doesNotThrow(() => validateOperationRustState({ ...operation, rust_state_after: "adapter-only" }));
+  assert.throws(() => validateOperationRustState({ ...operation, rust_state_after: "test-oracle-only" }),
+    /invalid Rust state after Mojo migration/u);
+  assert.throws(() => validateOperationRustState({ ...operation, production_fallback: true }),
+    /must not retain production_fallback/u);
   const reduction = {
     operation: "smart_context_adaptive_budget_planning",
     file: "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
