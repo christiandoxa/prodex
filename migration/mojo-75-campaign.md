@@ -1097,3 +1097,23 @@ and **196,470 Rust production LOC**, totaling **248,258 LOC**:
 **20.86% Mojo**. The 7% release floor and non-regression check pass. The 75%
 project target remains unmet; **537,622 additional Mojo LOC** are required at
 the current Rust volume.
+
+## Response-forwarding classifier hard replacement
+
+Proxy response header skipping, SSE content-type detection, token-usage event
+loggability, and generation-start detection now call the existing Mojo
+classifier in all feature combinations. The Rust feature-off classifier and
+test oracle were deleted. Mojo uses the shared Unicode trim and UTF-8 validator
+for header names, matching the prior Rust `trim()` boundary. Caller tests cover
+fixed event and header values, Unicode, and malformed ABI input. Proxy suites
+pass 303 tests without Mojo and 353 with it. Runtime smoke, the 364-test serial
+app proxy filter, hot-path and manifest guards, offline upstream baseline and
+capture replay, changed tests, workspace Clippy, Mojo ownership/authority,
+and no-fallback guards pass after deletion. The changed Mojo root compiles to
+objects for all six release triples; native execution was Linux x86_64 only.
+
+The canonical report for this checkpoint counts **51,784 reachable Mojo LOC**
+and **196,462 Rust production LOC**, totaling **248,246 LOC**:
+**20.86% Mojo**. The 7% release floor and non-regression check pass. The 75%
+project target remains unmet; **537,602 additional Mojo LOC** are required at
+the current Rust volume.
