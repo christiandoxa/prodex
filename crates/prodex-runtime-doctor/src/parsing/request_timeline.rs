@@ -18,7 +18,6 @@ fn runtime_doctor_request_id(fields: &BTreeMap<String, String>) -> Option<String
         .cloned()
 }
 
-#[cfg(feature = "mojo")]
 fn runtime_doctor_request_timeline_phase(marker: &str) -> Option<&'static str> {
     let semantics = prodex_mojo_core::rich::runtime_doctor_marker_semantics(marker)
         .expect("Mojo runtime-doctor marker semantics returned invalid output");
@@ -30,92 +29,6 @@ fn runtime_doctor_request_timeline_phase(marker: &str) -> Option<&'static str> {
         prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_PHASE_FAIL => Some("fail"),
         prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_PHASE_NONE => None,
         _ => unreachable!("validated Mojo timeline phase"),
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_doctor_request_timeline_phase(marker: &str) -> Option<&'static str> {
-    runtime_doctor_request_timeline_phase_rust(marker)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_doctor_request_timeline_phase_rust(marker: &str) -> Option<&'static str> {
-    match marker {
-        "selection_keep_affinity"
-        | "selection_keep_current"
-        | "selection_plan"
-        | "selection_pick"
-        | "selection_skip_current"
-        | "selection_skip_affinity"
-        | "selection_skip_sync_probe"
-        | "local_selection_blocked" => Some("selection"),
-        "responses_pre_send_skip"
-        | "websocket_pre_send_skip"
-        | "quota_critical_floor_before_send"
-        | "compact_pre_send_allow_quota_exhausted" => Some("pre_send"),
-        "upstream_connect_timeout"
-        | "upstream_connect_dns_error"
-        | "upstream_tls_handshake_error"
-        | "upstream_connect_error"
-        | "upstream_connect_http"
-        | "upstream_overload_passthrough"
-        | "upstream_overloaded"
-        | "upstream_read_error"
-        | "upstream_send_error"
-        | "upstream_stream_error"
-        | "upstream_close_before_completed"
-        | "upstream_connection_closed"
-        | "upstream_usage_limit_passthrough"
-        | "first_upstream_chunk" => Some("upstream"),
-        "first_local_chunk"
-        | "previous_response_owner"
-        | "compact_committed"
-        | "compact_committed_owner"
-        | "compact_followup_owner"
-        | "compact_exit_committed"
-        | "compact_exit_committed_owner"
-        | "compact_exit_followup_owner" => Some("commit"),
-        "runtime_proxy_queue_overloaded"
-        | "runtime_proxy_active_limit_reached"
-        | "runtime_proxy_lane_limit_reached"
-        | "runtime_proxy_overload_backoff"
-        | "runtime_proxy_admission_wait_exhausted"
-        | "runtime_proxy_queue_wait_exhausted"
-        | "profile_inflight_saturated"
-        | "precommit_budget_exhausted"
-        | "profile_retry_backoff"
-        | "profile_transport_backoff"
-        | "profile_transport_failure"
-        | "profile_circuit_open"
-        | "profile_bad_pairing"
-        | "profile_auth_recovery_failed"
-        | "previous_response_not_found"
-        | "previous_response_negative_cache"
-        | "previous_response_fresh_fallback_blocked"
-        | "compact_fresh_fallback_blocked"
-        | "compact_pressure_shed"
-        | "compact_precommit_budget_exhausted"
-        | "compact_candidate_exhausted"
-        | "compact_retryable_failure"
-        | "compact_transport_failure"
-        | "compact_final_failure"
-        | "compact_exit_fresh_fallback_blocked"
-        | "compact_exit_pressure_shed"
-        | "compact_exit_precommit_budget_exhausted"
-        | "compact_exit_candidate_exhausted"
-        | "compact_exit_retryable_failure"
-        | "websocket_precommit_frame_timeout"
-        | "websocket_precommit_hold_timeout"
-        | "websocket_dns_resolve_timeout"
-        | "websocket_dns_overflow_reject"
-        | "websocket_connect_overflow_reject"
-        | "websocket_connect_overflow_rejected"
-        | "stream_read_error"
-        | "local_writer_error"
-        | "chain_dead_upstream_confirmed"
-        | "stale_continuation"
-        | "quota_blocked" => Some("fail"),
-        _ => None,
     }
 }
 
@@ -204,24 +117,131 @@ pub(super) fn runtime_doctor_set_latest_request_timeline(
     summary.latest_request_timeline = builder.events;
 }
 
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_semantics_parity_tests {
-    use super::*;
-    use crate::markers::RuntimeDoctorMarker;
+#[cfg(all(test, feature = "runtime-log-mojo"))]
+mod expected_timeline_phases {
+    use super::runtime_doctor_request_timeline_phase;
 
     #[test]
-    fn timeline_phase_matches_rust_oracle_for_every_marker() {
-        for marker in RuntimeDoctorMarker::ALL {
-            let marker = marker.as_str();
+    fn timeline_phase_matches_fixed_cases() {
+        for (phase, markers) in [
+            (
+                "selection",
+                &[
+                    "selection_keep_affinity",
+                    "selection_keep_current",
+                    "selection_plan",
+                    "selection_pick",
+                    "selection_skip_current",
+                    "selection_skip_affinity",
+                    "selection_skip_sync_probe",
+                    "local_selection_blocked",
+                ][..],
+            ),
+            (
+                "pre_send",
+                &[
+                    "responses_pre_send_skip",
+                    "websocket_pre_send_skip",
+                    "quota_critical_floor_before_send",
+                    "compact_pre_send_allow_quota_exhausted",
+                ][..],
+            ),
+            (
+                "upstream",
+                &[
+                    "upstream_connect_timeout",
+                    "upstream_connect_dns_error",
+                    "upstream_tls_handshake_error",
+                    "upstream_connect_error",
+                    "upstream_connect_http",
+                    "upstream_overload_passthrough",
+                    "upstream_overloaded",
+                    "upstream_read_error",
+                    "upstream_send_error",
+                    "upstream_stream_error",
+                    "upstream_close_before_completed",
+                    "upstream_connection_closed",
+                    "upstream_usage_limit_passthrough",
+                    "first_upstream_chunk",
+                ][..],
+            ),
+            (
+                "commit",
+                &[
+                    "first_local_chunk",
+                    "previous_response_owner",
+                    "compact_committed",
+                    "compact_committed_owner",
+                    "compact_followup_owner",
+                    "compact_exit_committed",
+                    "compact_exit_committed_owner",
+                    "compact_exit_followup_owner",
+                ][..],
+            ),
+            (
+                "fail",
+                &[
+                    "runtime_proxy_queue_overloaded",
+                    "runtime_proxy_active_limit_reached",
+                    "runtime_proxy_lane_limit_reached",
+                    "runtime_proxy_overload_backoff",
+                    "runtime_proxy_admission_wait_exhausted",
+                    "runtime_proxy_queue_wait_exhausted",
+                    "profile_inflight_saturated",
+                    "precommit_budget_exhausted",
+                    "profile_retry_backoff",
+                    "profile_transport_backoff",
+                    "profile_transport_failure",
+                    "profile_circuit_open",
+                    "profile_bad_pairing",
+                    "profile_auth_recovery_failed",
+                    "previous_response_not_found",
+                    "previous_response_negative_cache",
+                    "previous_response_fresh_fallback_blocked",
+                    "compact_fresh_fallback_blocked",
+                    "compact_pressure_shed",
+                    "compact_precommit_budget_exhausted",
+                    "compact_candidate_exhausted",
+                    "compact_retryable_failure",
+                    "compact_transport_failure",
+                    "compact_final_failure",
+                    "compact_exit_fresh_fallback_blocked",
+                    "compact_exit_pressure_shed",
+                    "compact_exit_precommit_budget_exhausted",
+                    "compact_exit_candidate_exhausted",
+                    "compact_exit_retryable_failure",
+                    "websocket_precommit_frame_timeout",
+                    "websocket_precommit_hold_timeout",
+                    "websocket_dns_resolve_timeout",
+                    "websocket_dns_overflow_reject",
+                    "websocket_connect_overflow_reject",
+                    "websocket_connect_overflow_rejected",
+                    "stream_read_error",
+                    "local_writer_error",
+                    "chain_dead_upstream_confirmed",
+                    "stale_continuation",
+                    "quota_blocked",
+                ][..],
+            ),
+        ] {
+            for marker in markers {
+                assert_eq!(
+                    runtime_doctor_request_timeline_phase(marker),
+                    Some(phase),
+                    "{marker}"
+                );
+            }
+        }
+        for marker in [
+            "selection_bucket",
+            "first_upstream_header",
+            "unknown_marker",
+        ] {
             assert_eq!(
                 runtime_doctor_request_timeline_phase(marker),
-                runtime_doctor_request_timeline_phase_rust(marker),
+                None,
                 "{marker}"
             );
         }
-        assert_eq!(
-            runtime_doctor_request_timeline_phase("unknown_marker"),
-            None
-        );
     }
 }

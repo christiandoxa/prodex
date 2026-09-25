@@ -1,27 +1,37 @@
 use anyhow::{Context, Result};
+#[cfg(feature = "runtime-log-mojo")]
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
+#[cfg(feature = "runtime-log-mojo")]
 use super::*;
 
 mod log_line;
+#[cfg(feature = "runtime-log-mojo")]
 mod request_timeline;
+#[cfg(feature = "runtime-log-mojo")]
 mod route_profile;
+#[cfg(feature = "runtime-log-mojo")]
 mod selection;
 
 pub(crate) use log_line::RuntimeDoctorParsedLogLine;
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime-log-mojo"))]
 use log_line::runtime_doctor_parse_message_fields;
+#[cfg(feature = "runtime-log-mojo")]
 use log_line::{runtime_doctor_chain_event_summary, runtime_doctor_truncate_line};
+#[cfg(feature = "runtime-log-mojo")]
 use request_timeline::{
     RuntimeDoctorRequestTimelineBuilder, runtime_doctor_record_request_timeline_event,
     runtime_doctor_set_latest_request_timeline,
 };
+#[cfg(feature = "runtime-log-mojo")]
 use route_profile::runtime_doctor_record_route_profile_event;
+#[cfg(feature = "runtime-log-mojo")]
 use selection::runtime_doctor_record_selection_summary;
 
+#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_count_context_value(
     counts: &mut BTreeMap<String, usize>,
     fields: &BTreeMap<String, String>,
@@ -36,6 +46,7 @@ fn runtime_doctor_count_context_value(
     *counts.entry(value.clone()).or_insert(0) += 1;
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_record_marker_context(
     context: &mut BTreeMap<String, RuntimeDoctorMarkerContextSummary>,
     marker: &str,
@@ -54,6 +65,7 @@ fn runtime_doctor_record_marker_context(
     runtime_doctor_count_context_value(&mut entry.profiles, fields, "profile");
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_marker_context_summary(
     context: BTreeMap<String, RuntimeDoctorMarkerContextSummary>,
 ) -> Vec<RuntimeDoctorMarkerContextSummary> {
@@ -72,6 +84,7 @@ fn runtime_doctor_marker_context_summary(
     summary
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_record_marker_reason(
     summary: &mut RuntimeDoctorSummary,
     marker: &str,
@@ -104,6 +117,7 @@ fn runtime_doctor_record_marker_reason(
     }
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_record_continuation_fields(
     summary: &mut RuntimeDoctorSummary,
     marker: &str,
@@ -133,6 +147,7 @@ fn runtime_doctor_record_continuation_fields(
     }
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_record_marker_facets(
     summary: &mut RuntimeDoctorSummary,
     fields: &BTreeMap<String, String>,
@@ -149,6 +164,7 @@ fn runtime_doctor_record_marker_facets(
     }
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_record_parsed_marker(
     summary: &mut RuntimeDoctorSummary,
     request_timelines: &mut BTreeMap<String, RuntimeDoctorRequestTimelineBuilder>,
@@ -207,6 +223,7 @@ pub fn read_runtime_log_tail(path: &Path, max_bytes: usize) -> Result<Vec<u8>> {
     Ok(buffer)
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
     let text = String::from_utf8_lossy(tail);
     let mut summary = RuntimeDoctorSummary::default();
@@ -241,6 +258,6 @@ pub fn summarize_runtime_log_tail(tail: &[u8]) -> RuntimeDoctorSummary {
     summary
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime-log-mojo"))]
 #[path = "../tests/src/parsing.rs"]
 mod tests;

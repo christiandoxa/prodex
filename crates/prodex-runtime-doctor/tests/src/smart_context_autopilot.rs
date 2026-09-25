@@ -134,6 +134,7 @@ fn runtime_doctor_parses_json_smart_context_autopilot_fields() {
 }
 
 #[test]
+#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_tail_summary_counts_smart_context_marker_and_facets() {
     let log = br#"
 [2026-05-04T00:00:00Z] smart_context_autopilot request=1 transport=http route=responses tier=large decision=rewritten reasons=- token_usage_source=responses_api body_bytes_before=100 body_bytes_after=20 self_check=shrunk budget_mode=artifact_condensed policy_reasons=tight_budget

@@ -6,7 +6,7 @@ use crate::log_fields::{
     runtime_doctor_string_field, runtime_proxy_log_fields,
 };
 use crate::parsing::RuntimeDoctorParsedLogLine;
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime-log-mojo"))]
 use crate::summarize_runtime_log_tail;
 use runtime_proxy_crate::runtime_proxy_redact_log_field_value;
 

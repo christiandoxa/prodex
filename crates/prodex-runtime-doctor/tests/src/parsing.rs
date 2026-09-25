@@ -1,17 +1,24 @@
 use super::*;
 
 #[test]
-fn runtime_doctor_parse_message_fields_handles_quoted_structured_values() {
+fn runtime_doctor_parse_message_fields_match_fixed_values() {
     let fields = runtime_doctor_parse_message_fields(
-        "stream_read_error request=7 transport=http error=\"failed with spaces\" empty=\"\"",
+        r#"selection_pick request=7 transport=http profile="alpha beta" note="say \"yes\"" city=東京 empty="" malformed="unterminated"#,
     );
 
-    assert_eq!(fields.get("request").map(String::as_str), Some("7"));
-    assert_eq!(
-        fields.get("error").map(String::as_str),
-        Some("failed with spaces")
-    );
-    assert_eq!(fields.get("empty").map(String::as_str), Some(""));
+    let expected = [
+        ("city", "東京"),
+        ("empty", ""),
+        ("malformed", "unterminated"),
+        ("note", "say \"yes\""),
+        ("profile", "alpha beta"),
+        ("request", "7"),
+        ("transport", "http"),
+    ]
+    .into_iter()
+    .map(|(key, value)| (key.to_string(), value.to_string()))
+    .collect::<std::collections::BTreeMap<_, _>>();
+    assert_eq!(fields, expected);
 }
 
 #[test]
@@ -58,6 +65,35 @@ fn runtime_doctor_prefers_json_event_and_fields() {
             .map(String::as_str),
         Some("false")
     );
+}
+
+#[test]
+fn runtime_doctor_finds_known_marker_after_unclassified_message_prefix() {
+    let line = RuntimeDoctorParsedLogLine::new(
+        "[2026-05-12 00:00:00Z] notice request_id=req-1 selection_pick profile=alpha",
+    );
+
+    assert_eq!(line.marker_name().as_deref(), Some("selection_pick"));
+    assert_eq!(
+        line.fields(),
+        std::collections::BTreeMap::from([
+            ("profile".to_string(), "alpha".to_string()),
+            ("request_id".to_string(), "req-1".to_string()),
+        ])
+    );
+}
+
+#[test]
+fn runtime_doctor_uses_message_event_when_json_event_is_unknown() {
+    let log = br#"{"event":"unknown_marker","message":"selection_pick profile=alpha"}"#;
+
+    let summary = summarize_runtime_log_tail(log);
+
+    assert_eq!(
+        summary.marker_counts.get("selection_pick").copied(),
+        Some(1)
+    );
+    assert_eq!(summary.marker_counts.get("unknown_marker").copied(), None);
 }
 
 #[test]

@@ -61,6 +61,6 @@ pub fn runtime_doctor_policy_suggestion_lines(
     lines
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "runtime-log-mojo"))]
 #[path = "../tests/src/suggestions.rs"]
 mod tests;
