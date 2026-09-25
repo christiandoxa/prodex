@@ -1290,10 +1290,10 @@
       "production_consumers": [
         "crates/prodex-cli/src/runtime_args/super_tail_extract.rs"
       ],
-      "production_reachability_test": "crates/prodex-cli/src/runtime_args/super_tail_extract/mojo_tests.rs",
+      "production_reachability_test": "crates/prodex-mojo-core/tests/launch_args.rs",
       "rust_owner_before": "Prodex option classification, inline values, and paired value boundaries",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "feature-off Rust scanner plus feature-on differential test; Mojo errors do not trigger recomputation",
+      "rust_test_oracle": "deleted after parity; independent caller-boundary values cover every override kind",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,

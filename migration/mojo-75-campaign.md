@@ -1027,3 +1027,54 @@ The current canonical broad inventory is **51,633 reachable Mojo LOC** and
 The 7% release floor and audited non-regression check pass. The 75% project
 target remains unmet; at the current Rust volume the report estimates
 **538,467 additional Mojo LOC** are needed.
+
+## Quota, rehydration, and doctor hard replacements
+
+Quota error and blocked-status labels now always use the existing Mojo
+classifiers, including in `--no-default-features` builds. The feature-off Rust
+classifiers and their helpers are deleted. The quota suite passes 72 default
+and 44 feature-off tests; focused all-target Clippy passes with warnings denied.
+
+Smart Context rehydration now delegates required-first ordering and artifact
+presence lookup to a bounded Mojo ABI before the existing Mojo admission plan.
+The Rust sort, feature-off planner, and differential oracle are deleted; the
+feature-off proxy excludes this API. Fixed expected-value tests cover ordering,
+duplicate IDs, missing artifacts, minimal tier, budget overflow, and the 256-item
+ABI limit. Runtime-proxy suites pass 349 Mojo-enabled and 298 feature-off tests.
+The changed Mojo root compiles to objects for all six release target triples;
+only Linux x86_64 runtime execution was tested. Runtime smoke, offline upstream
+baseline, capture replay, ownership, authority, no-fallback, and changed-test
+checks pass. The full app runtime-proxy filter passed 364 serial tests on a
+rerun after a temporary concurrent Gemini compiler error was fixed.
+
+Default runtime-doctor builds now use the Mojo route planner for profile
+summaries. Its Rust summary planner and differential oracle are deleted;
+feature-off builds omit that capability while keeping unrelated doctor views.
+Independent caller-boundary expectations cover profile order, freshness,
+health decay, quota bands, circuits, and backoff. The doctor suite passes 32
+default, 33 all-feature, and 13 feature-off tests; focused all-target Clippy
+passes with warnings denied.
+
+The canonical report for committed `HEAD` (`80995ade6`) counts **51,783 reachable
+Mojo LOC** and **196,573 Rust production LOC**, totaling **248,356 LOC**:
+**20.85% Mojo**. The 7% release floor and non-regression check pass. The 75%
+project target remains unmet; **537,936 additional Mojo LOC** are required at
+the current Rust volume.
+
+## Super override hard replacement
+
+Super override classification now calls the existing Mojo scanner in default,
+Mojo-enabled, and `--no-default-features` CLI builds. The Rust scanner and its
+differential oracle were deleted. Rust still parses typed values, preserves
+`OsString` arguments, and applies the scan result. Caller-boundary expectations
+cover all 37 override kinds, precedence, passthrough, and partial mutation.
+The CLI suite passes 135 unit and 2 integration tests by default and without
+default features, and 139 unit and 2 integration tests with `mojo-core`.
+The Mojo launch ABI tests, workspace Clippy, ownership, authority, and
+no-fallback guards pass after deletion.
+
+The canonical report for this checkpoint counts **51,783 reachable Mojo
+LOC** and **196,508 Rust production LOC**, totaling **248,291 LOC**:
+**20.86% Mojo**. The 7% release floor and non-regression check pass. The 75%
+project target remains unmet; **537,741 additional Mojo LOC** are required at
+the current Rust volume.
