@@ -1,55 +1,9 @@
 use super::*;
 
-#[cfg(any(not(feature = "mojo"), test))]
-pub(in crate::smart_context) fn smart_context_effective_input_source(
-    current_input_tokens: u64,
-    estimated_current_request_tokens: u64,
-    current_request_accounted_tokens: u64,
-    last_accounted_input_tokens: u64,
-    effective_input_tokens: u64,
-) -> SmartContextTokenAccountingSource {
-    if effective_input_tokens == 0 {
-        SmartContextTokenAccountingSource::Unknown
-    } else if last_accounted_input_tokens > current_request_accounted_tokens {
-        SmartContextTokenAccountingSource::ObservedHistory
-    } else if current_input_tokens >= estimated_current_request_tokens && current_input_tokens > 0 {
-        SmartContextTokenAccountingSource::CurrentRequestTokens
-    } else if estimated_current_request_tokens > 0 {
-        SmartContextTokenAccountingSource::CurrentRequestBodyEstimate
-    } else if last_accounted_input_tokens > 0 {
-        SmartContextTokenAccountingSource::ObservedHistory
-    } else {
-        SmartContextTokenAccountingSource::Unknown
-    }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(in crate::smart_context) fn smart_context_token_accounting_risks(
-    model_context_window_tokens: Option<u64>,
-    reserved_output_tokens: u64,
-    effective_input_source: SmartContextTokenAccountingSource,
-) -> Vec<SmartContextTokenAccountingRisk> {
-    let mut risks = Vec::new();
-
-    match model_context_window_tokens {
-        Some(0) => risks.push(SmartContextTokenAccountingRisk::ZeroContextWindow),
-        Some(window) if reserved_output_tokens >= window => {
-            risks.push(SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow);
-        }
-        Some(_) => {}
-        None => risks.push(SmartContextTokenAccountingRisk::UnknownTokenWindow),
-    }
-    if effective_input_source == SmartContextTokenAccountingSource::Unknown {
-        risks.push(SmartContextTokenAccountingRisk::UnknownCurrentRequestAccounting);
-    }
-
-    risks
-}
-
+#[cfg(feature = "mojo")]
 pub(in crate::smart_context) fn smart_context_u64_budget_tier(
     available_tokens: u64,
 ) -> SmartContextTokenBudgetTier {
-    #[cfg(feature = "mojo")]
     {
         match prodex_mojo_core::rich::smart_context_budget_tier(available_tokens)
             .expect("Mojo Smart Context budget tier returned invalid output")
@@ -60,13 +14,6 @@ pub(in crate::smart_context) fn smart_context_u64_budget_tier(
             3 => SmartContextTokenBudgetTier::Minimal,
             _ => unreachable!("Mojo Smart Context budget tier was validated"),
         }
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    if available_tokens > usize::MAX as u64 {
-        SmartContextTokenBudgetTier::Exact
-    } else {
-        smart_context_token_budget_tier(available_tokens as usize)
     }
 }
 
