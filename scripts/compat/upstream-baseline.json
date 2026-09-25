@@ -2,13 +2,13 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.156.1 release",
+      "baseline_source": "openai/codex rust-v0.157.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
         {
           "path": "codex-rs/core/src/client.rs",
-          "reason": "Owns Responses request metadata/header construction, websocket client metadata, and auth-owner cache invalidation used by Prodex affinity.",
+          "reason": "Owns Responses request metadata/header construction, websocket client metadata, auth-owner cache invalidation, and Codex 0.157 first-party-only internal metadata gating used across Prodex affinity and local-proxy launches.",
           "required_contains": [
             "build_responses_headers",
             "build_responses_compatibility_headers",
@@ -54,7 +54,12 @@
             "build_responses_request",
             "responses_session_id",
             "session_source.is_non_root_agent()",
-            "prompt_cache_key(metadata)"
+            "prompt_cache_key(metadata)",
+            "is_internal_metadata_destination",
+            "clear_tool_result_metadata",
+            "url.scheme() == \"https\"",
+            "host == \"api.openai.com\"",
+            "codex_http_client::is_allowed_chatgpt_host(host)"
           ]
         },
         {
@@ -139,7 +144,7 @@
         },
         {
           "path": "codex-rs/models-manager/models.json",
-          "reason": "Owns bundled GPT-5.6 plus Codex 0.156.1 GPT-6 Sol/Luna model metadata and context-window contracts. Prodex preserves these upstream values while keeping its provider catalogs independently governed.",
+          "reason": "Owns bundled GPT-5.6 plus Codex 0.157.0 GPT-6 Sol/Luna model metadata and context-window contracts. Prodex preserves these upstream values while keeping its provider catalogs independently governed.",
           "required_contains": [
             "\"display_name\": \"GPT-6-Luna\"",
             "\"display_name\": \"GPT-6-Sol\"",
@@ -222,7 +227,7 @@
         },
         {
           "path": "codex-rs/model-provider-info/src/lib.rs",
-          "reason": "Owns provider metadata and Bedrock model ID constants. Codex 0.148.0 adds the built-in Bedrock Runtime provider while Prodex Gemini and Bedrock direct-launch compatibility depend on the resulting OpenAI/Azure behavior.",
+          "reason": "Owns provider metadata and Bedrock model ID constants, including Codex 0.157 GPT-6 Sol/Luna Bedrock IDs used by direct Bedrock launches.",
           "required_contains": [
             "ModelProviderInfo",
             "supports_standalone_web_search",
@@ -233,12 +238,16 @@
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
             "openai.gpt-5.6-terra",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
-            "openai.gpt-5.6-luna"
+            "openai.gpt-5.6-luna",
+            "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
+            "openai.gpt-6-sol",
+            "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
+            "openai.gpt-6-luna"
           ]
         },
         {
           "path": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
-          "reason": "Owns the Codex static Amazon Bedrock model catalog. Prodex launches Bedrock/custom providers directly, so compatibility tracking must preserve GPT-5.6 slugs, inherited reasoning metadata, default-only service tiers, text-only web search, and disabled Responses Lite/tool mode.",
+          "reason": "Owns the Codex static Amazon Bedrock model catalog. Codex 0.157 adds GPT-6 Sol/Luna, makes GPT-6 Sol the default, and retains inherited reasoning metadata, default-only service tiers, text-only web search, and disabled Responses Lite/tool mode.",
           "required_contains": [
             "static_model_catalog",
             "normalize_bedrock_catalog",
@@ -253,12 +262,14 @@
             "model.default_service_tier = None",
             "WebSearchToolType::Text",
             "model.use_responses_lite = false",
-            "model.tool_mode = None"
+            "model.tool_mode = None",
+            "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID"
           ]
         },
         {
           "path": "codex-rs/model-provider/src/provider.rs",
-          "reason": "Owns Codex provider capabilities and model-manager wiring for direct Bedrock launches. Codex 0.148.0 keeps remote-compaction support in ProviderCapabilities and adds the Bedrock Runtime catalog.",
+          "reason": "Owns Codex provider capabilities and static Bedrock model-manager wiring, including GPT-6 Sol/Luna direct-launch availability in 0.157.",
           "required_contains": [
             "RemoteCompactionSupport",
             "ProviderCapabilities",
@@ -270,7 +281,9 @@
             "openai.gpt-5.4",
             "openai.gpt-5.6-sol",
             "openai.gpt-5.6-terra",
-            "openai.gpt-5.6-luna"
+            "openai.gpt-5.6-luna",
+            "openai.gpt-6-sol",
+            "openai.gpt-6-luna"
           ]
         },
         {
@@ -316,7 +329,7 @@
         },
         {
           "path": "codex-rs/codex-api/src/sse/responses.rs",
-          "reason": "Owns SSE Responses stream parsing, turn-state capture, completion boundary, and quota/error event interpretation.",
+          "reason": "Owns Responses SSE lifecycle and failed-event classification. Codex 0.157 preserves invalid_prompt as a distinct InvalidPrompt error while retaining explicit quota/rate/overload classes.",
           "required_contains": [
             "spawn_response_stream",
             "process_sse",
@@ -341,7 +354,9 @@
             "organization_spend_limit_exceeded",
             "project_spend_limit_exceeded",
             "slow_down",
-            "server_is_overloaded"
+            "server_is_overloaded",
+            "invalid_prompt",
+            "ApiError::InvalidPrompt"
           ]
         },
         {
@@ -661,12 +676,15 @@
         },
         {
           "path": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
-          "reason": "Owns camelCase threadSource fields on thread/start and thread/fork; thread/resume intentionally has no source override field.",
+          "reason": "Owns additive v2 thread protocol fields, including free-form thread_source and Codex 0.157 optional item lifecycle timestamps.",
           "required_contains": [
             "ThreadStartParams",
             "ThreadForkParams",
             "pub thread_source: Option<ThreadSource>",
-            "Optional client-supplied analytics source classification"
+            "Optional client-supplied analytics source classification",
+            "ThreadItemEntry",
+            "pub started_at_ms: Option<i64>",
+            "pub completed_at_ms: Option<i64>"
           ]
         },
         {
@@ -850,6 +868,19 @@
             "response.completed",
             "response.failed",
             "response.metadata"
+          ]
+        },
+        {
+          "id": "responses.internal-metadata-destination-gate",
+          "kind": "security_boundary",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Codex 0.157 sends internal tool-result and MCP attribution metadata only to HTTPS OpenAI/allowed ChatGPT destinations; custom provider destinations such as Prodex loopback remain intentionally filtered.",
+          "file_contains_all": [
+            "is_internal_metadata_destination",
+            "url.scheme() == \"https\"",
+            "host == \"api.openai.com\"",
+            "codex_http_client::is_allowed_chatgpt_host(host)",
+            "clear_tool_result_metadata"
           ]
         },
         {
@@ -1122,10 +1153,10 @@
           ]
         },
         {
-          "id": "model-provider.bedrock-gpt-5-6-catalog",
+          "id": "model-provider.bedrock-gpt-6-catalog",
           "kind": "provider_catalog",
           "file": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
-          "reason": "Codex 0.149.1 builds GPT-5.6 Sol/Terra/Luna Bedrock models from bundled metadata, removes Ultra, disables Responses Lite/tool mode, and keeps Bedrock service tiers default-only.",
+          "reason": "Codex 0.157 adds GPT-6 Sol/Luna to the static Bedrock catalog, promotes GPT-6 Sol to default priority, retains GPT-5.6 compatibility entries, removes Ultra where required, disables Responses Lite/tool mode, and keeps Bedrock service tiers default-only.",
           "file_contains_all": [
             "static_model_catalog",
             "normalize_bedrock_catalog",
@@ -1140,7 +1171,9 @@
             "model.default_service_tier = None",
             "WebSearchToolType::Text",
             "model.use_responses_lite = false",
-            "model.tool_mode = None"
+            "model.tool_mode = None",
+            "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID"
           ]
         },
         {
@@ -1160,21 +1193,23 @@
           "id": "model-provider.bedrock-static-manager-models",
           "kind": "provider_catalog",
           "file": "codex-rs/model-provider/src/provider.rs",
-          "reason": "Codex 0.142.3 static Bedrock model manager must expose the existing GPT-5.5/GPT-5.4 IDs plus GPT-5.6 Sol/Terra/Luna.",
+          "reason": "Codex 0.157 static Bedrock model manager exposes GPT-6 Sol/Luna alongside the prior GPT-5.x catalog and defaults to GPT-6 Sol.",
           "file_contains_all": [
             "amazon_bedrock_provider_creates_static_models_manager",
             "openai.gpt-5.5",
             "openai.gpt-5.4",
             "openai.gpt-5.6-sol",
             "openai.gpt-5.6-terra",
-            "openai.gpt-5.6-luna"
+            "openai.gpt-5.6-luna",
+            "openai.gpt-6-sol",
+            "openai.gpt-6-luna"
           ]
         },
         {
           "id": "sse.responses-events",
           "kind": "event_group",
           "file": "codex-rs/codex-api/src/sse/responses.rs",
-          "reason": "SSE parsing must keep response lifecycle events grouped for stream compatibility.",
+          "reason": "SSE parsing must keep response lifecycle events grouped and preserve Codex 0.157 invalid_prompt as a distinct typed error.",
           "file_contains_all": [
             "process_responses_event",
             "response.completed",
@@ -1185,7 +1220,9 @@
             "ResponseEvent::SafetyBuffering",
             "treatment_from_headers",
             "SafetyBufferingTreatment",
-            "with_treatment"
+            "with_treatment",
+            "invalid_prompt",
+            "ApiError::InvalidPrompt"
           ],
           "expected_stream_events_all": [
             "response.created",
@@ -1477,6 +1514,17 @@
           ]
         },
         {
+          "id": "app-server.thread-item-lifecycle-timestamps",
+          "kind": "jsonrpc_schema",
+          "file": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+          "reason": "Codex 0.157 adds optional started/completed millisecond timestamps to ThreadItemEntry; Prodex compatibility consumers must preserve these additive fields.",
+          "file_contains_all": [
+            "ThreadItemEntry",
+            "pub started_at_ms: Option<i64>",
+            "pub completed_at_ms: Option<i64>"
+          ]
+        },
+        {
           "id": "app-server.additive-extensions",
           "kind": "jsonrpc_docs",
           "file": "codex-rs/app-server/README.md",
@@ -1627,7 +1675,7 @@
           "id": "models-manager.gpt-6-sol-luna",
           "kind": "model_catalog",
           "file": "codex-rs/models-manager/models.json",
-          "reason": "Codex 0.156.1 exposes GPT-6 Sol and GPT-6 Luna in the picker with a 272,000 base context window and 872,000 maximum context window; Sol supports Ultra while Luna tops out at Max.",
+          "reason": "Codex 0.157.0 retains GPT-6 Sol and GPT-6 Luna in the picker with a 272,000 base context window and 872,000 maximum context window; Sol supports Ultra while Luna tops out at Max.",
           "file_contains_all": [
             "\"slug\": \"gpt-6-sol\"",
             "\"display_name\": \"GPT-6-Sol\"",
@@ -1640,7 +1688,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.156.1",
+      "tested_codex_release": "rust-v0.157.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1829,6 +1877,24 @@
           ],
           "prodex_action": "Retain the 0.431.1 workspace-routing hotfix, preserve upstream model-list metadata opaquely, and recognize GPT-6 Sol/Luna as 872,000-token models when Prodex derives runtime and Smart Context budgets. No quota-reserve remapping is inferred for GPT-6 Luna.",
           "compatibility_evidence": "Exact 0.156.0 and 0.156.1 tagged source archives, official release/tag metadata, official Linux binary checksum and model/list smoke, repeated synthetic account/read workspace-routing failure reproduction, upstream baseline replay, and focused GPT-6 context tests are recorded in migration/codex-rust-v0.156.1-audit.md."
+        },
+        {
+          "from": "rust-v0.156.1",
+          "to": "rust-v0.157.0",
+          "upstream_commit": "00c972ed5d6ff6499317fd41b7f23605b8e6850d",
+          "upstream_tag_object": "ac21625ddf7f9dd5f34b2802212cf20295fdff95",
+          "upstream_release_date": "2026-09-25T02:31:06Z",
+          "tree_comparison": "exact tagged source archives; 1086 changed files, 42832 additions, 10984 deletions",
+          "runtime_changes": [
+            "Amazon Bedrock static catalog adds GPT-6 Sol and GPT-6 Luna and makes GPT-6 Sol the default while retaining GPT-5.6 compatibility entries.",
+            "Responses invalid_prompt failures map to the distinct InvalidPrompt error class instead of generic InvalidRequest.",
+            "Internal tool-result metadata and cumulative MCP attribution metadata are emitted only for HTTPS OpenAI or allowed ChatGPT destinations; custom provider destinations remain filtered.",
+            "HTTP/SSE/WebSocket network-policy denials are propagated as transport-policy errors across redirects and ongoing traffic.",
+            "ThreadItemEntry adds optional started_at_ms and completed_at_ms lifecycle timestamps.",
+            "Codex enables automatic background app-server startup for eligible interactive sessions, enables /import in remote/local daemon sessions, and expands TUI behavior; these remain upstream-owned."
+          ],
+          "prodex_action": "Preserve Codex 0.157 additive app-server fields and typed invalid_prompt behavior; track GPT-6 Sol/Luna Bedrock IDs/default without reimplementing the Bedrock catalog; respect the upstream first-party-only internal metadata gate rather than reconstructing filtered metadata in the Prodex custom provider; retain the 0.431.1 workspace-routing projection and existing proxy affinity/rotation boundaries. Super direct resume additionally trusts the persisted session cwd before TUI startup so prodex s <uuid> remains zero-prompt across workspaces.",
+          "compatibility_evidence": "Exact 0.156.1 and 0.157.0 tagged source archives, official release/tag metadata, official Linux musl binary checksum/version smoke, updated critical-file/semantic baseline guards, focused direct-Super-resume trust regression coverage, and runtime/provider compatibility tests are recorded in migration/codex-rust-v0.157.0-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -1851,18 +1917,26 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.156.1",
-      "name": "0.156.1",
-      "published_at": "2026-09-23T02:41:36Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.156.1",
+      "tag_name": "rust-v0.157.0",
+      "name": "0.157.0",
+      "published_at": "2026-09-25T02:31:06Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.157.0",
       "body_head": [
         "## New Features",
         "",
-        "- Choose GPT-6 Sol or GPT-6 Luna from the model picker. The rate-limit switch prompt now recommends GPT-6 Luna. (#47405)",
+        "- Added GPT-6 Sol and Luna, including Amazon Bedrock support and migration prompts for older models. (#47332, #47347)",
+        "- Enabled fullscreen transcripts by default and added Shift-click to extend text selections. (#47178, #47414)",
+        "- Enabled automatic background-server startup for eligible interactive sessions, with recovery choices when server settings are incompatible. (#47179, #47318)",
+        "- Added an f shortcut to fork conversations open in another app, preserving drafts and queued prompts. (#47185)",
+        "- Made /import available in remote sessions and local background-server sessions. (#47317)",
         "",
-        "## Changelog",
+        "## Bug Fixes",
         "",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.156.0...rust-v0.156.1"
+        "- Preserved active voice conversations when switching threads. (#47381)",
+        "- Fixed configured proxy routing for realtime connections and standalone web search, including search redirects. (#47101, #47142, #47204)",
+        "- Enforced network restrictions across redirects and ongoing HTTP and WebSocket traffic, including cancellation when policy changes revoke access. (#47389, #47407)",
+        "",
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.156.0...rust-v0.157.0"
       ]
     }
   },
