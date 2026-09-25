@@ -1117,3 +1117,20 @@ and **196,462 Rust production LOC**, totaling **248,246 LOC**:
 **20.86% Mojo**. The 7% release floor and non-regression check pass. The 75%
 project target remains unmet; **537,602 additional Mojo LOC** are required at
 the current Rust volume.
+
+## Quota pool aggregation hard replacement
+
+Quota pool summaries now call the existing Mojo main and OpenAI aggregation
+kernels in default and `--no-default-features` builds. The Rust feature-off
+aggregators, obsolete wrappers, and differential oracles were deleted. Fixed
+caller expectations cover mixed providers, absent and failed reports, summary
+ordering, and reset sentinels. Mojo ABI expectations cover the 1,024-row main
+limit, OpenAI aggregation bounds, and invalid percentages. After deletion,
+quota tests pass 72 default and 45 feature-off cases; four Mojo ABI tests,
+focused Clippy, formatting, ownership, authority, and no-fallback guards pass.
+
+The canonical report for this checkpoint counts **51,784 reachable Mojo LOC**
+and **196,359 Rust production LOC**, totaling **248,143 LOC**:
+**20.87% Mojo**. The 7% release floor and non-regression check pass. The 75%
+project target remains unmet; **537,293 additional Mojo LOC** are required at
+the current Rust volume.

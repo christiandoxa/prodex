@@ -27,8 +27,7 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
         total_profiles: reports.len(),
         ..QuotaPoolAggregate::default()
     };
-    let mut main_quota_rows = Vec::new();
-    #[cfg(feature = "mojo")]
+    let mut main_quota_rows = Vec::<prodex_mojo_core::quota::MainQuotaAggregationInput>::new();
     let mut openai_quota_rows = Vec::new();
 
     for report in reports {
@@ -51,7 +50,6 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
                     continue;
                 }
                 let ready = openai_quota_has_ready_limit(usage);
-                #[cfg(feature = "mojo")]
                 openai_quota_rows.push(prodex_mojo_core::quota_pool::OpenAiQuotaPoolInput {
                     five_hour: five_hour.map(|window| {
                         prodex_mojo_core::quota_pool::QuotaPoolWindowInput {
@@ -67,144 +65,45 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
                     }),
                     ready,
                 });
-                #[cfg(not(feature = "mojo"))]
-                aggregate_openai_quota(five_hour, weekly, ready, &mut aggregate);
             }
-            ProviderQuotaSnapshot::Gemini(info) => main_quota_rows.push((
-                super::gemini_main_remaining_percent(info),
-                gemini_reset_epoch(info),
-            )),
-            ProviderQuotaSnapshot::Copilot(info) => main_quota_rows.push((
-                copilot_main_remaining_percent(info),
-                copilot_reset_epoch(info),
-            )),
+            ProviderQuotaSnapshot::Gemini(info) => {
+                main_quota_rows.push(prodex_mojo_core::quota::MainQuotaAggregationInput {
+                    remaining_percent: super::gemini_main_remaining_percent(info),
+                    reset_at: gemini_reset_epoch(info),
+                });
+            }
+            ProviderQuotaSnapshot::Copilot(info) => {
+                main_quota_rows.push(prodex_mojo_core::quota::MainQuotaAggregationInput {
+                    remaining_percent: copilot_main_remaining_percent(info),
+                    reset_at: copilot_reset_epoch(info),
+                });
+            }
             ProviderQuotaSnapshot::External(_) => {}
         }
     }
 
-    #[cfg(feature = "mojo")]
-    {
-        let (profiles_with_data, pool_remaining, earliest_reset_at) =
-            crate::mojo::main_quota_aggregate(&main_quota_rows)
-                .expect("Mojo quota aggregation rejected normalized rows");
-        aggregate.main_profiles_with_data = profiles_with_data;
-        aggregate.main_pool_remaining = pool_remaining;
-        aggregate.earliest_main_reset_at = earliest_reset_at;
-    }
-    #[cfg(not(feature = "mojo"))]
-    for (remaining_percent, reset_at) in main_quota_rows {
-        aggregate_main_quota(remaining_percent, reset_at, &mut aggregate);
-    }
+    let main = prodex_mojo_core::quota::main_quota_aggregate_batch(&main_quota_rows)
+        .expect("Mojo main quota aggregation rejected normalized rows");
+    aggregate.main_profiles_with_data = main.profiles_with_data;
+    aggregate.main_pool_remaining = main.pool_remaining;
+    aggregate.earliest_main_reset_at = main.earliest_reset_at;
 
-    #[cfg(feature = "mojo")]
-    {
-        let openai = crate::mojo::openai_quota_pool_aggregate(&openai_quota_rows)
-            .expect("Mojo OpenAI quota-pool aggregation rejected normalized rows");
-        aggregate.profiles_with_data = openai.profiles_with_data;
-        aggregate.ready_profiles_with_data = openai.ready_profiles_with_data;
-        aggregate.five_hour_profiles_with_data = openai.five_hour_profiles_with_data;
-        aggregate.weekly_profiles_with_data = openai.weekly_profiles_with_data;
-        aggregate.ready_five_hour_profiles_with_data = openai.ready_five_hour_profiles_with_data;
-        aggregate.ready_weekly_profiles_with_data = openai.ready_weekly_profiles_with_data;
-        aggregate.five_hour_pool_remaining = openai.five_hour_pool_remaining;
-        aggregate.weekly_pool_remaining = openai.weekly_pool_remaining;
-        aggregate.ready_five_hour_pool_remaining = openai.ready_five_hour_pool_remaining;
-        aggregate.ready_weekly_pool_remaining = openai.ready_weekly_pool_remaining;
-        aggregate.earliest_five_hour_reset_at = openai.earliest_five_hour_reset_at;
-        aggregate.earliest_weekly_reset_at = openai.earliest_weekly_reset_at;
-    }
+    let openai = prodex_mojo_core::quota_pool::openai_quota_pool_aggregate(&openai_quota_rows)
+        .expect("Mojo OpenAI quota-pool aggregation rejected normalized rows");
+    aggregate.profiles_with_data = openai.profiles_with_data;
+    aggregate.ready_profiles_with_data = openai.ready_profiles_with_data;
+    aggregate.five_hour_profiles_with_data = openai.five_hour_profiles_with_data;
+    aggregate.weekly_profiles_with_data = openai.weekly_profiles_with_data;
+    aggregate.ready_five_hour_profiles_with_data = openai.ready_five_hour_profiles_with_data;
+    aggregate.ready_weekly_profiles_with_data = openai.ready_weekly_profiles_with_data;
+    aggregate.five_hour_pool_remaining = openai.five_hour_pool_remaining;
+    aggregate.weekly_pool_remaining = openai.weekly_pool_remaining;
+    aggregate.ready_five_hour_pool_remaining = openai.ready_five_hour_pool_remaining;
+    aggregate.ready_weekly_pool_remaining = openai.ready_weekly_pool_remaining;
+    aggregate.earliest_five_hour_reset_at = openai.earliest_five_hour_reset_at;
+    aggregate.earliest_weekly_reset_at = openai.earliest_weekly_reset_at;
 
     aggregate
-}
-
-#[cfg(not(feature = "mojo"))]
-fn aggregate_openai_quota(
-    five_hour: Option<MainWindowSnapshot>,
-    weekly: Option<MainWindowSnapshot>,
-    ready: bool,
-    aggregate: &mut QuotaPoolAggregate,
-) {
-    if five_hour.is_none() && weekly.is_none() {
-        return;
-    }
-
-    aggregate.profiles_with_data += 1;
-    add_pool_window(
-        five_hour,
-        &mut aggregate.five_hour_profiles_with_data,
-        &mut aggregate.five_hour_pool_remaining,
-        &mut aggregate.earliest_five_hour_reset_at,
-    );
-    add_pool_window(
-        weekly,
-        &mut aggregate.weekly_profiles_with_data,
-        &mut aggregate.weekly_pool_remaining,
-        &mut aggregate.earliest_weekly_reset_at,
-    );
-    if ready {
-        aggregate.ready_profiles_with_data += 1;
-        add_ready_pool_window(
-            five_hour,
-            &mut aggregate.ready_five_hour_profiles_with_data,
-            &mut aggregate.ready_five_hour_pool_remaining,
-        );
-        add_ready_pool_window(
-            weekly,
-            &mut aggregate.ready_weekly_profiles_with_data,
-            &mut aggregate.ready_weekly_pool_remaining,
-        );
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn aggregate_main_quota(
-    remaining_percent: Option<i64>,
-    reset_at: Option<i64>,
-    aggregate: &mut QuotaPoolAggregate,
-) {
-    let Some(remaining_percent) = remaining_percent else {
-        return;
-    };
-    aggregate.main_profiles_with_data += 1;
-    aggregate.main_pool_remaining += remaining_percent;
-    if let Some(reset_at) = reset_at {
-        aggregate.earliest_main_reset_at = Some(
-            aggregate
-                .earliest_main_reset_at
-                .map_or(reset_at, |current| current.min(reset_at)),
-        );
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn add_pool_window(
-    window: Option<MainWindowSnapshot>,
-    profiles: &mut usize,
-    remaining: &mut i64,
-    earliest_reset_at: &mut Option<i64>,
-) {
-    let Some(window) = window else {
-        return;
-    };
-    *profiles += 1;
-    *remaining += window.remaining_percent;
-    if window.reset_at != i64::MAX {
-        *earliest_reset_at =
-            Some(earliest_reset_at.map_or(window.reset_at, |current| current.min(window.reset_at)));
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn add_ready_pool_window(
-    window: Option<MainWindowSnapshot>,
-    profiles: &mut usize,
-    remaining: &mut i64,
-) {
-    let Some(window) = window else {
-        return;
-    };
-    *profiles += 1;
-    *remaining += window.remaining_percent;
 }
 
 fn copilot_main_remaining_percent(info: &CopilotQuotaInfo) -> Option<i64> {

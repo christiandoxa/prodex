@@ -48,3 +48,75 @@ fn openai_quota_pool_summary_handles_more_than_1024_profiles() {
         )
     );
 }
+
+#[test]
+fn main_quota_pool_uses_mojo_aggregation_for_present_and_absent_rows() {
+    let absent = QuotaReport {
+        name: "copilot-empty".to_string(),
+        active: false,
+        auth: AuthSummary {
+            label: "copilot".to_string(),
+            quota_compatible: false,
+        },
+        workspace_id: None,
+        workspace_name: None,
+        result: Ok(ProviderQuotaSnapshot::Copilot(CopilotQuotaInfo {
+            login: None,
+            access_type_sku: None,
+            copilot_plan: None,
+            limited_user_quotas: BTreeMap::new(),
+            monthly_quotas: BTreeMap::new(),
+            limited_user_reset_date: None,
+        })),
+        fetched_at: 1_700_000_200,
+    };
+    let failed = QuotaReport {
+        name: "failed".to_string(),
+        active: false,
+        auth: AuthSummary {
+            label: "copilot".to_string(),
+            quota_compatible: false,
+        },
+        workspace_id: None,
+        workspace_name: None,
+        result: Err("unavailable".to_string()),
+        fetched_at: 1_700_000_300,
+    };
+    let gemini = QuotaReport {
+        name: "gemini-main".to_string(),
+        active: false,
+        auth: AuthSummary {
+            label: "gemini".to_string(),
+            quota_compatible: true,
+        },
+        workspace_id: None,
+        workspace_name: None,
+        result: Ok(ProviderQuotaSnapshot::Gemini(GeminiQuotaInfo {
+            email: None,
+            plan: None,
+            project_id: None,
+            buckets: vec![GeminiQuotaBucket {
+                remaining_amount: None,
+                remaining_fraction: Some(0.5),
+                reset_time: None,
+                token_type: None,
+                model_id: Some("models/gemini-test".to_string()),
+            }],
+        })),
+        fetched_at: 1_700_000_400,
+    };
+
+    let fields = quota_pool_summary_fields(&[copilot_report(None), gemini, absent, failed]);
+
+    assert_eq!(
+        fields[0],
+        ("Available".to_string(), "3/4 profile".to_string())
+    );
+    assert_eq!(
+        fields[2],
+        (
+            "Remaining pool".to_string(),
+            "140% across 2 profile(s)".to_string(),
+        )
+    );
+}
