@@ -70,7 +70,9 @@ command/model discovery, resume retargeting, profile normalization, dry-run
 extraction, launch preparation and configuration scope ordering. The active
 consumer is `crates/prodex-runtime-launch/src/args_mojo.rs`, enabled through
 `prodex-app/mojo-core -> prodex-runtime-launch/mojo`. The original Rust source
-was first moved byte-for-byte and then restricted to feature-off/test builds.
+was first isolated for parity, then deleted along with its test oracle and
+resume retargeting copy. Runtime launch now enables Mojo by default and rejects
+an explicit feature-off build at compile time.
 
 Validation before activation: 64 strict Mojo launch unit tests, including 5,000
 seeded differential argument vectors; 60 feature-off tests; four raw ABI,
@@ -182,7 +184,8 @@ The shared OpenAI Responses-to-Chat request bridge now has one production-author
 Mojo transform over the caller-owned parsed JSON arena. Mojo owns rejection precedence,
 text/history message planning, function-call and function-output mapping, model precedence,
 forwarded request controls, and the final chat request object. Rust retains Serde parsing,
-the ProviderTransformResult host contract, and a test/Rust-only oracle.
+the ProviderTransformResult host contract. Any retained Rust parity oracle in
+this older wave remains cleanup debt under the hard-replacement rule.
 
 Validation includes explicit empty/wrong-type precedence fixtures plus 5,000 deterministic
 generated requests. The Mojo boundary also has raw ABI, malformed-tree, and reentrancy tests.
@@ -197,8 +200,10 @@ fields, message/tool-call structure, web-search options and tool-choice shape,
 merges adjacent roles, converts system/developer messages, normalizes tool names,
 constructs tool-use/tool-result blocks, applies request defaults, and records the
 existing web-search context-size degradation contract. Rust retains Serde JSON
-acquisition/materialization, provider result DTOs, time, transport, and the
-feature-off/test oracle only.
+acquisition/materialization, provider result DTOs, time, transport, and typed
+result mapping. The feature-off request implementation
+and Rust test oracle have since been deleted; unavailable Mojo returns an
+explicit unsupported result.
 
 The production path no longer composes the former per-fragment Mojo request
 builder or Rust-side tool-shape decisions. Focused evidence includes four raw
@@ -875,8 +880,9 @@ web-search selection, rollout-budget eligibility and reminder filtering,
 defaults, ordering and deduplication, current-time reminder enablement, and
 system-proxy precedence. Rust retains Clap and `OsString` ownership, fixed-width
 ABI mapping, validated result reconstruction, and TOML override rendering. The
-feature-off Rust plan remains a test/build oracle. Mojo errors propagate without
-Rust recomputation.
+feature-off Rust planner and test oracle were deleted after parity; builds
+without `mojo-core` reject requested runtime feature overrides. Mojo errors
+propagate without Rust recomputation.
 
 The first Mojo-enabled test run exposed a reminder deduplication overwrite: the
 descending scan wrote into unread lower indices. Mojo now deduplicates forward
@@ -979,3 +985,45 @@ The canonical broad inventory is now 51,560 reachable Mojo LOC and 197,305
 Rust production LOC, or 20.72% Mojo. The release floor and non-regression
 check pass; the 75% project target remains unmet, with 540,355 additional
 Mojo LOC needed at the current Rust volume.
+
+## Hard-replacement cleanup checkpoint
+
+The Anthropic request and stream bridges, OpenAI chat response and SSE bridge,
+provider model fallback chain, Codex runtime feature planner, Critical Signal,
+runtime tuning capacity defaults, Smart Context adaptive/calibrated/observed
+planning, and quota capacity admission now have no Rust feature-off semantic
+copy or Rust test oracle. Rust keeps input acquisition, typed ABI adaptation,
+and host effects. Unsupported feature-off capabilities fail closed. Quota
+capacity uses the versioned `prodex_quota_capacity_batch_v2` ABI; the old
+scalar readiness export is gone. The provider fallback boundary accepts long
+model identifiers and grows caller-owned output buffers as needed. Normal
+`prodex-quota` builds enable Mojo by default, so app runtime selection retains
+capacity decisions. Normal `prodex-app` builds now enable `mojo-core` so the
+default Super shortcut retains Smart Context rewrites. Explicit feature-off
+builds exclude these Mojo-owned capabilities.
+
+Independent expected-value and caller-boundary tests replace the deleted
+oracles. Final focused source runs pass: provider-core 209 tests without Mojo
+and 256 with Mojo (two ignored), quota 44 without Mojo and 72 with Mojo,
+Mojo-core quota capacity 3 tests, and runtime-proxy pressure snapshot 2 tests.
+The `prodex-app` runtime proxy filter also passes 360 tests with its default
+features after the quota default was updated.
+The provider SPI guard was aligned with the active retry-plan contract after
+the older response-plan contract had been retired. The historical ownership
+guard passes at 423/4,227 eligible Rust semantic LOC migrated (10.01%).
+The modified Rich and quota Mojo roots compile to objects with pinned Mojo
+1.1.0 for all six release target triples. Only Linux x86_64 ran these tests;
+cross-target object compilation is not native runtime evidence.
+
+The runtime doctor now enables its Mojo log parser by default. Its former Rust
+message tokenizer, marker-known classifier, timeline phase, selection bucket,
+and route action copies and differential oracles are deleted. The explicit
+feature-off build omits log summarization while retaining unrelated doctor
+capabilities. After deletion, 31 default, 33 all-feature, and 15 feature-off
+doctor tests pass; focused all-feature Clippy and format checks also pass.
+
+The current canonical broad inventory is **51,633 reachable Mojo LOC** and
+**196,700 Rust production LOC**, totaling **248,333 LOC**: **20.79% Mojo**.
+The 7% release floor and audited non-regression check pass. The 75% project
+target remains unmet; at the current Rust volume the report estimates
+**538,467 additional Mojo LOC** are needed.

@@ -1,15 +1,17 @@
 # Rust-Mojo parity matrix
 
-Rust is a temporary parity oracle. A row is `MOJO` only when the compiled Mojo result is
-authoritative on the supported Mojo target; a Rust-only target is a separate build policy,
-not runtime fallback.
+Rust may serve as a parity oracle only in uncommitted migration work. A row marked
+`MOJO` records production authority on the supported Mojo target; historical
+oracle names in this matrix are validation evidence or remaining cleanup debt,
+not permission to retain a Rust copy. Completed migrations delete feature-off
+implementations and test oracles.
 
 | Component | Rust oracle | Mojo entry point | Inputs | Expected output | Coverage | Status |
 | --- | --- | --- | --- | --- | --- | --- |
 | Quota remaining percent | `prodex_quota::remaining_percent` Rust branch | `prodex_quota_remaining_percent` | `None`, negative, 0, middle, 100, over 100, extremes | Exact `i64` result | `remaining_percent_matches_rust_oracle` | `MOJO` |
 | Quota window status | Rust threshold branches in `quota_window_summary` | `prodex_quota_window_status` | missing window, 0, 1, 5, 6, 15, 16, 100 | Exact status tag | `quota_window_status_matches_rust_oracle` | `MOJO` |
 | Quota pressure band | Rust status mapping and max aggregation | `prodex_quota_pressure_band` | every status pair and single status | Exact band tag | `quota_pressure_band_matches_rust_oracle` | `MOJO` |
-| Quota window-pair readiness | Rust `window_pair_has_ready_limit` | `prodex_quota_window_pair_has_ready_limit` | empty, partial, ready, exhausted, extreme values | Exact boolean | `quota_window_pair_readiness_matches_rust_oracle` | `MOJO` |
+| Quota window-pair readiness | Rust classifier deleted after parity | `prodex_quota_capacity_batch_v2` (`pair_ready` and `usable`) | empty, partial, ready, exhausted, extreme values | Exact boolean | Quota capacity ABI and renderer expected-value tests | `MOJO` |
 | Runtime route quota pressure | Rust `runtime_proxy_quota_pressure_band_for_route` | `prodex_runtime_quota_pressure_band_for_route` | four routes, missing/negative/threshold/exhausted windows | Exact band tag | `route_pressure_band_matches_rust_oracle_for_all_routes_and_boundaries` | `MOJO` |
 | Runtime quota window summary | Rust `runtime_proxy_quota_window_summary` status thresholds | Reused `prodex_quota_window_status` and `prodex_quota_pressure_band` | Active proxy observations and usage snapshots | Exact status and pressure tags | `quota_window_summary_uses_the_compiled_status_kernel` plus runtime quota tests | `MOJO` |
 | Runtime profile scheduling order | Rust-only `ready_profile_runtime_sort_key_from_score` comparator | `prodex_runtime_quota_profile_schedule_batch` | Up to 256 normalized 16-field profile rows, including provider, cooldown, raw pressure/window completeness, reset, source, preferred, and input order | Exact stable ordered indices; Mojo derives scaling, reserve bias, and ordering | Fixed ordering oracle, healthy/thin/critical/exhausted/unknown boundary fixtures, and runtime quota scheduler tests | `MOJO` |
@@ -31,9 +33,9 @@ not runtime fallback.
 | Optimistic current-candidate decision | Rust-only feature-off predicate test oracle | `prodex_runtime_optimistic_current_candidate_decision` | Normalized route/source/band tags, booleans, bounded counters, and Rust-normalized prompt-cache presence/owner match | Keep or exact first ordered skip reason | `optimistic_current_candidate_matches_rust_oracle_for_generated_inputs` (5,000 fixed-seed cases), precedence fixtures, strict runtime-proxy suite | `MOJO` |
 | Provider request constraints | Rust-only feature-off evaluator used as a differential test oracle | `prodex_provider_constraints_evaluate_v2` | Versioned 17/7-word input and 12/5-word output buffers after Rust parsing and typed normalization | Exact decision, eligibility, totals, context, output adjustment, missing feature, warnings | ABI count/version/tag/malformed-output tests, `provider_constraints_match_rust_oracle_for_generated_normalized_cases` (2,000 fixed-seed cases), 304 provider-core tests, strict provider suite | `MOJO` |
 | Smart Context rehydration plan | Rust-only feature-off ordering/admission oracle | `prodex_smart_context_rehydrate_plan_batch` | Rust-ranked artifact rows with token cost, required/present flags, tier, and budget; maximum 256 | Exact rehydrate/defer tags and used-token total; Rust restores IDs | `rehydrate_plan_matches_rust_oracle_for_generated_inputs` (2,000 fixed-seed cases), active body-transform path | `MOJO` |
-| Runtime tuning defaults | Rust-only feature-off `runtime_tuning_defaults_rust` test oracle | `prodex_runtime_tuning_defaults` | Normalized host parallelism | Exact worker/log/websocket default tuple | `tuning_defaults_match_rust_oracle_for_generated_parallelism` (2,000 fixed-seed cases), runtime config and probe queue callers | `MOJO` |
+| Runtime tuning defaults | Rust oracle and feature-off capacity formulas deleted after generated parity checks | `prodex_runtime_tuning_defaults` | Normalized host parallelism | Exact worker/log/websocket default tuple | Independent expected-value defaults and capacity tests; crate `mojo` feature is default and capacity APIs are unavailable without it | `MOJO` |
 | External provider catalog merge | Rust-only `external_catalog_model_indices_rust` oracle | `prodex_mojo_rich_catalog_merge_v1` | Ordered launch, dynamic, and provider IDs; empty canonical model list | First non-empty Unicode-trimmed, ASCII-case-insensitive IDs in input order | Long-ID Rust differential and `external_catalog_merge_keeps_first_dynamic_metadata_and_order` | `MOJO` |
-| Codex runtime feature configuration | Feature-off/test `CodexRuntimeFeatureArgs::rust_plan` oracle | `prodex_mojo_runtime_feature_plan_v1` | Web-search mode, rollout limit/reminders/weights, current-time reminder settings, and proxy preference flags | Exact mode, eligibility tags, descending unique reminder thresholds, and override precedence | 2,000 fixed-seed feature-on comparisons of rendered arguments; CLI suites pass with Mojo on and off | `MOJO` |
+| Codex runtime feature configuration | Rust planner and oracle deleted after 2,000 fixed-seed parity cases | `prodex_mojo_runtime_feature_plan_v1` | Web-search mode, rollout limit/reminders/weights, current-time reminder settings, and proxy preference flags | Exact mode, eligibility tags, descending unique reminder thresholds, and override precedence | Independent CLI override fixtures; feature-off builds reject requested overrides | `MOJO` |
 | Smart Context candidate scoring | `smart_context_candidate_score` and selection | Not started | Normalized candidate batch | Exact score/order | Smart Context regression fixtures | `AUDIT_ONLY` |
 
 ## Prodex 0.419.0 additions
@@ -43,15 +45,15 @@ not runtime fallback.
 | Provider catalog identity and choices | feature-off catalog matcher/planner | `prodex_mojo_rich_catalog_resolve_v1`, `prodex_mojo_rich_catalog_choices_v1` | bounded provider catalog, aliases, configured IDs, current ID | canonical identity and stable provider/default/configured/custom choice order | provider-core catalog suite, alias/order/capacity tests | `MOJO` |
 | Provider catalog merge deduplication | feature-off catalog merge oracle | `prodex_mojo_rich_catalog_merge_v1` | bounded canonical IDs, aliases, additional IDs | accepted additional indices with alias/canonical deduplication | provider-core merge suite and rich alias regression | `MOJO` |
 | Route-aware quota pressure score | `runtime_proxy_quota_score_for_route_rust` | `prodex_runtime_quota_score_batch` | bounded two-window observations and route tag | pressure band, weighted pressure, reserve floor, remaining/reset values | 300 generated parity cases and runtime-quota batch/scalar equivalence | `MOJO` |
-| Observed Smart Context usage totals | `smart_context_observed_usage_totals_rust` | `prodex_smart_context_token_usage_summary_batch` | bounded input/cached/output/reasoning token rows | saturating totals and last-observation accounting values | generated saturation parity and full Mojo runtime suite | `MOJO` |
+| Observed Smart Context usage totals | Rust aggregation oracle deleted | `prodex_smart_context_token_usage_summary_batch` | bounded input/cached/output/reasoning token rows | saturating totals and last-observation accounting values | existing expected-value token-accounting cases and full Mojo runtime suite | `MOJO` |
 
 ## Promotion rule
 
 Every future row needs normal, empty, invalid, boundary, extreme, and randomized inputs
 where meaningful. Before promotion, a mismatch means Mojo is not ready. After promotion,
 a mismatch is a CI/validation failure. It never selects a Rust implementation at runtime.
-Rust may remain only as a separate Rust-only target build or a test oracle with an explicit
-maintenance reason.
+Only a necessary host or effect adapter may remain in Rust after the replaced semantics
+and temporary oracle are deleted.
 
 ## Real Mojo CI coverage
 
@@ -80,16 +82,17 @@ These rows supersede the baseline's normalization-only boundary descriptions.
 
 | Component | Rust oracle | Mojo entry point | Inputs/outputs | Coverage | Status |
 | --- | --- | --- | --- | --- | --- |
-| Context diagnostic analysis | `critical_signal_counts_for_line` plus Rust normalized text | `prodex_mojo_rich_context_analyze_v2` | bounded UTF-8 text; grouped `DiagnosticRecord` table, counts, normalized output strings | existing context suite plus 20,000 generated Unicode/ANSI/CRLF cases | `MOJO` |
-| Provider/model fallback parser | `provider_model_fallback_chain_rust` | `prodex_mojo_rich_model_fallback_v2` | provider/model UTF-8 views; ordered deduped model records | 20,000 valid/invalid `combo:` and alias cases plus exact Gemini catalog aliases | `MOJO` |
+| Context diagnostic analysis | Rust oracle deleted after parity | `prodex_mojo_rich_context_analyze_v2` | bounded UTF-8 text; grouped `DiagnosticRecord` table, counts, normalized output strings | existing context suite plus 20,000 generated Unicode/ANSI/CRLF cases | `MOJO` |
+| Provider/model fallback parser | Rust oracle and feature-off parser deleted after parity | `prodex_mojo_rich_model_fallback_v2` | provider/model UTF-8 views; ordered deduped model records | 20,000 valid/invalid `combo:` and alias cases plus exact Gemini catalog aliases; permanent expected-value fixtures | `MOJO` |
 | Gateway route-alias policy parser | `validate_gateway_route_alias_rust` | `prodex_mojo_rich_policy_alias_v2` | alias, model list, optional strategy, metric list; normalized model records or issue fields | 20,000 generated valid/invalid grammar cases and existing policy suite | `MOJO` |
 | Governed provider route plan | `plan_governed_provider_route_rust` | `prodex_mojo_rich_route_plan_v2` | provider/model/capability text and bounded signals; candidate objects, score components, reasons, order | 10,000 generated candidate sets plus existing provider SPI suite | `MOJO` |
 | Smart Context rehydration plan | `smart_context_auto_rehydrate_plan_rust` | `prodex_mojo_rich_context_plan_v2` | opaque artifact-reference views, optional availability set, required/token fields; action graph | existing 2,000 generated cases and active app rehydration callers | `MOJO` |
 | Runtime log event classification | Rust log-key classifier (test oracle) | `prodex_mojo_log_classify_v3` | bounded UTF-8 event key | category and severity tags used by the shared log renderer | classifier self-test, operational log rendering tests, and Mojo-enabled app log suite | `MOJO` |
+| Runtime doctor log parsing | Rust tokenizer and marker semantic classifiers deleted after parity | `prodex_mojo_runtime_doctor_parse_message_v1`, `prodex_mojo_runtime_doctor_marker_known_v1`, `prodex_mojo_runtime_doctor_marker_semantics_v1` | UTF-8 log message and marker name | field spans, known-marker decision, timeline phase, selection bucket, route action | fixed expected-value parser and marker fixtures; 31 default, 33 all-feature, 15 feature-off doctor tests | `MOJO` |
 
 Each Rust wrapper validates version, status, counts, offsets, lengths, UTF-8, indices, tags,
-ordering, and duplicate invariants. The Rust implementations remain test-only or Rust-only-target
-oracles and are never selected after a Mojo-enabled error.
+ordering, and duplicate invariants. Remaining test-only or Rust-only implementations are
+unfinished migration debt; completed migrations delete them before commit.
 
 The release-wide generated differential corpus contains 55,000 deterministic cases: 20,000
 Unicode/ANSI/CRLF context cases, 20,000 valid/invalid fallback-parser cases, 10,000 governed

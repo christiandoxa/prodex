@@ -8,13 +8,11 @@ Rust calls the quota policy exports when the `prodex-quota/mojo` Cargo feature i
 prodex_quota_remaining_percent(used_percent: Int64, has_value: Int64) -> Int64
 prodex_quota_window_status(remaining_percent: Int64, has_window: Int64) -> Int64
 prodex_quota_pressure_band(five_hour_status: Int64, weekly_status: Int64) -> Int64
-prodex_quota_window_pair_has_ready_limit(
-    first_used_percent: Int64,
-    first_has_value: Int64,
-    second_used_percent: Int64,
-    second_has_value: Int64,
-) -> Int64
 ```
+
+Window-pair readiness and admission are returned by the versioned
+`prodex_quota_capacity_batch_v2` export, using bounded caller-owned input and
+output arrays. The former scalar readiness export was removed.
 
 The `prodex-provider-spi/mojo` feature uses the shared `mojo-routing` source for one complete
 bounded routing-plan batch and one capability-match batch:
@@ -546,9 +544,11 @@ for concurrent calls.
 
 Production v3 entry points are `prodex_mojo_rich_context_analyze_v2`,
 `prodex_mojo_rich_route_plan_v2`, `prodex_mojo_rich_policy_alias_v2`,
-`prodex_mojo_rich_model_fallback_v2`, and `prodex_mojo_rich_context_plan_v2`. The feature-off Rust
-implementation is a separate supported target and differential oracle, never a runtime fallback
-after a Mojo-enabled call fails. Catalog v2 adds `prodex_mojo_rich_catalog_choices_v2` for
+`prodex_mojo_rich_model_fallback_v2`, and `prodex_mojo_rich_context_plan_v2`. Model fallback now
+requires Mojo even when provider-core's broader `mojo` feature is off; its Rust implementation
+and differential oracle were deleted. Other historical feature-off paths remain cleanup work and
+are never selected after a Mojo-enabled call fails. Catalog v2 adds
+`prodex_mojo_rich_catalog_choices_v2` for
 filtering/sorting dynamic model caches and `prodex_mojo_rich_catalog_config_v1` for remembered,
 provider-default, main-agent, and sub-agent model/effort precedence. Both use caller-owned rich
 record arrays and remain Mojo-authoritative when the rich feature is enabled.
@@ -570,5 +570,5 @@ The 0.420.0 qualifying migration inventory also records profile provider-order p
 Smart Context calibration matching, and provider constraint preclassification. Their Rust
 consumers retain only observation acquisition, bounded DTO construction, status validation, and
 typed result reconstruction; the deterministic decisions execute through the listed Mojo entry
-points in production feature builds. Feature-off Rust implementations remain parity oracles and
-are not runtime fallback paths after a Mojo-enabled call fails.
+points in production feature builds. Historical feature-off Rust copies still present for
+unfinished migrations are cleanup debt. A completed migration deletes them before commit.

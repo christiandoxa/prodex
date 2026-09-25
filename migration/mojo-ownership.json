@@ -9,6 +9,9 @@
   "minimum_percent": 20,
   "target_percent": 23,
   "release_operation_overrides": {
+    "provider_model_fallback_parser": {
+      "rust_adapter_scope": "provider identity adapter; Rust fallback parser and test oracle deleted"
+    },
     "quota_route_score_resolution": {
       "mojo_entry": "prodex_runtime_quota_route_score_resolution_batch",
       "consumer_marker": "prodex_mojo_core::runtime::quota_route_score_batch",
@@ -21,6 +24,7 @@
       "expanded_in": "0.420.0"
     },
     "quota_capacity_lane_planning": {
+      "mojo_entry": "prodex_quota_capacity_batch_v2",
       "expanded_in": "0.420.0"
     },
     "critical_signal_line_classification": {
@@ -28,7 +32,8 @@
     },
     "critical_signal_range_planning": {
       "production_reachability_test": "crates/prodex-context/src/critical_signal.rs",
-      "mojo_source": "mojo/prodex_core/context_critical_signal.mojo"
+      "mojo_source": "mojo/prodex_core/context_critical_signal.mojo",
+      "rust_adapter_scope": "row preparation and range DTO adapter; Rust oracle deleted"
     },
     "provider_catalog_merge_dedup": {
       "production_reachability_test": "crates/prodex-app/src/runtime_external_provider_config/catalog_merge_tests.rs"
@@ -37,7 +42,8 @@
       "expanded_in": "0.427.0"
     },
     "critical_signal_text_grouping": {
-      "production_reachability_test": "crates/prodex-context/src/critical_signal.rs"
+      "production_reachability_test": "crates/prodex-context/src/critical_signal.rs",
+      "rust_adapter_scope": "typed Mojo result mapping; Rust oracle deleted"
     },
     "runtime_log_level_classification": {
       "consumer": "crates/prodex-app/src/app_commands/doctor.rs",
@@ -1252,10 +1258,10 @@
         "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
         "crates/prodex-provider-core/src/translators/deepseek/response.rs"
       ],
-      "production_reachability_test": "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream/mojo_tests.rs",
+      "production_reachability_test": "crates/prodex-mojo-core/tests/openai_chat_response.rs",
       "rust_owner_before": "OpenAI chat-completion Responses body and SSE event selection and serialization",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "feature-off Rust implementation and cfg(test) differential oracle remain separate; Mojo errors do not trigger recomputation",
+      "rust_test_oracle": "deleted after parity; independent expected-value fixtures exercise the caller boundary",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
@@ -1301,10 +1307,10 @@
       "production_consumers": [
         "crates/prodex-cli/src/runtime_features.rs"
       ],
-      "production_reachability_test": "crates/prodex-cli/src/runtime_features.rs",
+      "production_reachability_test": "crates/prodex-cli/tests/src/runtime_features.rs",
       "rust_owner_before": "Codex runtime feature eligibility, rollout reminder normalization, and override planning",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "feature-off Rust plan and 2,000 fixed-seed feature-on comparisons; Mojo errors propagate without recomputation",
+      "rust_test_oracle": "deleted after 2,000 fixed-seed differential cases; permanent CLI tests use independent expected values and feature-off planning is unavailable",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
@@ -1336,9 +1342,9 @@
       "previous_responsibility": "adaptive Smart Context tier, mode, budget, and reason decisions",
       "baseline_semantic_loc": 179,
       "migrated_semantic_loc": 57,
-      "final_state": "test-oracle-only",
+      "final_state": "adapter-only",
       "rust_before": "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs::smart_context_adaptive_budget_policy",
-      "rust_after": "test-oracle-only",
+      "rust_after": "adapter-only; Mojo plans the policy and feature-off callers receive no policy",
       "mojo_owner": "mojo/prodex_core/smart_context.mojo::prodex_smart_context_adaptive_budget_plan_v1",
       "mojo_source": "mojo/prodex_core/smart_context.mojo",
       "mojo_entry": "prodex_smart_context_adaptive_budget_plan_v1",
@@ -1352,10 +1358,10 @@
       "operation": "smart_context_calibrated_estimate",
       "previous_responsibility": "calibrated request-token estimate safety arithmetic",
       "baseline_semantic_loc": 248,
-      "migrated_semantic_loc": 206,
-      "final_state": "test-oracle-only",
+      "migrated_semantic_loc": 151,
+      "final_state": "adapter-only",
       "rust_before": "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs::smart_context_observed_calibrated_request_estimate",
-      "rust_after": "test-oracle-only",
+      "rust_after": "adapter-only; Mojo plans the calibrated estimate and the Rust oracle is deleted",
       "mojo_owner": "mojo/prodex_core/smart_context.mojo::prodex_smart_context_calibrated_estimate_batch",
       "mojo_source": "mojo/prodex_core/smart_context.mojo",
       "mojo_entry": "prodex_smart_context_calibrated_estimate_batch",
@@ -1373,9 +1379,9 @@
       "final_state": "adapter-only",
       "rust_before": "crates/prodex-quota/src/render/windows.rs::additional_rate_limit_is_usable",
       "rust_after": "adapter-only",
-      "mojo_owner": "mojo/prodex_core/quota.mojo::prodex_quota_capacity_batch",
+      "mojo_owner": "mojo/prodex_core/quota.mojo::prodex_quota_capacity_batch_v2",
       "mojo_source": "mojo/prodex_core/quota.mojo",
-      "mojo_entry": "prodex_quota_capacity_batch",
+      "mojo_entry": "prodex_quota_capacity_batch_v2",
       "production_consumer": "crates/prodex-quota/src/capacity.rs",
       "parity_test": "crates/prodex-mojo-core/tests/quota_capacity.rs",
       "performance": "one capacity batch for all lanes"
@@ -1420,7 +1426,7 @@
       "operation": "critical_signal_line_classification",
       "previous_responsibility": "critical-signal line classification and normalized range input construction",
       "baseline_semantic_loc": 367,
-      "migrated_semantic_loc": 130,
+      "migrated_semantic_loc": 151,
       "final_state": "deleted",
       "rust_before": "crates/prodex-context/src/critical_signal.rs::critical_signal_normalized_rows_rust",
       "rust_after": "deleted; production critical-signal classification and range planning delegate directly to Mojo",
@@ -1478,10 +1484,12 @@
     },
     {
       "file": "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs",
-      "symbol": "smart_context_observed_usage_totals_rust",
+      "symbol": "smart_context_observed_usage_totals",
       "operation": "smart_context_token_usage_summary",
       "previous_responsibility": "observed token aggregation and last-observation derivation",
-      "final_state": "test-oracle-only"
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs::smart_context_observed_usage_totals_rust",
+      "rust_after": "adapter-only; Mojo aggregates the usage rows and the Rust oracle is deleted"
     },
     {
       "file": "crates/prodex-context/src/critical_signal.rs",
