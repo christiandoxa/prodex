@@ -1,7 +1,3 @@
-#[cfg(not(feature = "mojo"))]
-#[path = "critical_signal/rust_oracle.rs"]
-mod rust_oracle;
-
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
@@ -67,12 +63,20 @@ pub struct CriticalSignalSelfCheck {
 
 impl CriticalSignalSelfCheck {
     pub fn passed(self) -> bool {
-        self.lost.is_empty()
+        critical_signal_available() && self.lost.is_empty()
     }
 
     pub fn has_loss(self) -> bool {
         !self.passed()
     }
+}
+
+/// Reports whether Mojo critical-signal operations are compiled into this crate.
+///
+/// Without the `mojo` feature, counts are empty, ranges are unavailable, and
+/// self-checks fail closed.
+pub const fn critical_signal_available() -> bool {
+    cfg!(feature = "mojo")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -114,7 +118,10 @@ pub fn count_critical_signals(input: &str) -> CriticalSignalCounts {
         }
     }
     #[cfg(not(feature = "mojo"))]
-    rust_oracle::count_critical_signals(input)
+    {
+        let _ = input;
+        CriticalSignalCounts::default()
+    }
 }
 
 pub fn critical_signal_self_check(before: &str, after: &str) -> CriticalSignalSelfCheck {
@@ -124,7 +131,10 @@ pub fn critical_signal_self_check(before: &str, after: &str) -> CriticalSignalSe
     let (lost, gained) = prodex_mojo_core::context::signal_diff(&before.values(), &after.values())
         .expect("Mojo critical-signal diff returned invalid output");
     #[cfg(not(feature = "mojo"))]
-    let (lost, gained) = rust_oracle::signal_diff(before, after);
+    let (lost, gained) = (
+        CriticalSignalCounts::default(),
+        CriticalSignalCounts::default(),
+    );
     CriticalSignalSelfCheck {
         before,
         after,
@@ -185,7 +195,10 @@ pub fn critical_signal_lost_line_ranges_with_options(
         .collect()
     }
     #[cfg(not(feature = "mojo"))]
-    rust_oracle::lost_line_ranges(before, after, check.lost, options)
+    {
+        let _ = (before, after, options);
+        Vec::new()
+    }
 }
 
 #[cfg(feature = "mojo")]
@@ -244,31 +257,94 @@ fn lines(input: &str) -> Vec<&str> {
 mod tests {
     use super::*;
 
+    #[cfg(feature = "mojo")]
     #[test]
-    fn mojo_counts_and_diff_preserve_critical_signal_contract() {
-        let before = "error[E0308]: mismatch\nsrc/lib.rs:12:5\nprocess exited with code 1\n";
-        let after = "error[E0308]: mismatch\n";
-        let check = critical_signal_self_check(before, after);
-        assert!(check.has_loss());
-        assert!(check.before.total() > check.after.total());
-        assert!(check.lost.file_locations > 0 || check.lost.exit_codes > 0);
-    }
-
-    #[test]
-    fn mojo_lost_ranges_are_one_based_and_bounded() {
-        let before = "head\nerror: failed\nsrc/lib.rs:2:1\ntail\n";
-        let ranges = critical_signal_lost_line_ranges(before, "");
-        assert!(!ranges.is_empty());
-        assert!(
-            ranges
-                .iter()
-                .all(|range| range.start >= 1 && range.end >= range.start)
+    fn mojo_counts_and_diff_match_expected_fixture() {
+        let before = concat!(
+            "error[E0308]: mismatch\n",
+            "noise\n",
+            "src/lib.rs:12:5\n",
+            "noise\n",
+            "@@ -1,2 +1,3 @@\n",
+            "noise\n",
+            "test parses ... FAILED\n",
+            "noise\n",
+            "exit code 1\n",
+            "noise\n",
+            "stack backtrace:\n",
+            "noise\n",
+            "warning: unused variable\n",
         );
+        let after = "error[E0308]: mismatch\nnoise\n";
+        let expected_before = CriticalSignalCounts {
+            errors: 1,
+            file_locations: 1,
+            diff_hunks: 1,
+            test_failures: 1,
+            exit_codes: 1,
+            stack_markers: 1,
+            rust_diagnostics: 2,
+        };
+        let expected_after = CriticalSignalCounts {
+            errors: 1,
+            rust_diagnostics: 1,
+            ..CriticalSignalCounts::default()
+        };
+        let expected = CriticalSignalSelfCheck {
+            before: expected_before,
+            after: expected_after,
+            lost: CriticalSignalCounts {
+                file_locations: 1,
+                diff_hunks: 1,
+                test_failures: 1,
+                exit_codes: 1,
+                stack_markers: 1,
+                rust_diagnostics: 1,
+                ..CriticalSignalCounts::default()
+            },
+            gained: CriticalSignalCounts::default(),
+        };
+
+        assert!(critical_signal_available());
+        assert_eq!(count_critical_signals(before), expected_before);
+        assert_eq!(count_critical_signals(after), expected_after);
+        let check = critical_signal_self_check(before, after);
+        assert_eq!(check, expected);
+        assert!(check.has_loss());
     }
 
+    #[cfg(feature = "mojo")]
+    #[test]
+    fn mojo_lost_ranges_match_duplicate_line_fixture() {
+        let before = "head\nerror: duplicate\na\nb\nc\nerror: duplicate\ntail\n";
+        let after = "error: duplicate\n";
+        let ranges = critical_signal_lost_line_ranges_with_options(
+            before,
+            after,
+            CriticalSignalLineRangeOptions {
+                context_lines: 1,
+                max_ranges: 32,
+                max_range_lines: 6,
+            },
+        );
+        assert_eq!(ranges, [CriticalSignalLineRange { start: 5, end: 7 }]);
+    }
+
+    #[cfg(feature = "mojo")]
     #[test]
     fn unchanged_text_passes() {
         let text = "error: stable\nsrc/lib.rs:2:1\n";
         assert!(critical_signal_self_check(text, text).passed());
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    #[test]
+    fn critical_signal_capability_is_unavailable_without_mojo() {
+        assert!(!critical_signal_available());
+        assert!(count_critical_signals("error: dropped").is_empty());
+        let check = critical_signal_self_check("error: dropped", "");
+        assert!(!check.passed());
+        assert!(check.has_loss());
+        assert!(critical_signal_lost_line_ranges("error: dropped", "").is_empty());
     }
 }

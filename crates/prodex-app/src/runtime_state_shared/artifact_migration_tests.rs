@@ -36,11 +36,9 @@ mod tests {
             .insert_text(text)
             .expect("matching legacy artifact should refresh metadata");
 
-        assert!(
-            store
-                .line_index(&content_hash)
-                .is_some_and(|index| index.complete)
-        );
+        assert!(store.line_index(&content_hash).is_some_and(|index| {
+            index.complete == prodex_context::critical_signal_available()
+        }));
         assert!(
             store
                 .chunk_index(&content_hash)
