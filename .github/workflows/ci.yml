@@ -696,7 +696,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/${{ runner.arch == 'ARM64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/aarch64-apple-darwin/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -705,8 +705,8 @@ jobs:
       - name: Download macOS runtime Mojo archive
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
-          name: mojo-runtime-archive-${{ runner.arch == 'ARM64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
-          path: target/mojo-runtime/${{ runner.arch == 'ARM64' && 'aarch64-apple-darwin' || 'x86_64-apple-darwin' }}
+          name: mojo-runtime-archive-aarch64-apple-darwin
+          path: target/mojo-runtime/aarch64-apple-darwin
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
