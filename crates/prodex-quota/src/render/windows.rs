@@ -520,41 +520,19 @@ pub fn format_openai_quota_status(usage: &UsageResponse) -> String {
 }
 
 pub fn format_blocked_quota_status(blocked: &[BlockedLimit]) -> String {
-    #[cfg(feature = "mojo")]
-    {
-        let kind = blocked
-            .iter()
-            .map(|limit| crate::mojo::blocked_limit_kind(&limit.message))
-            .max()
-            .unwrap_or(prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_NONE);
-        match kind {
-            prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_FIVE_HOUR => "Blocked 5h".to_string(),
-            prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_WEEKLY => "Blocked weekly".to_string(),
-            prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_EXHAUSTED => "Blocked".to_string(),
-            _ => "Unavailable".to_string(),
-        }
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        if blocked.iter().any(|limit| {
-            let message = limit.message.to_ascii_lowercase();
-            message.contains("exhausted") && message.contains("5h")
-        }) {
-            "Blocked 5h".to_string()
-        } else if blocked.iter().any(|limit| {
-            let message = limit.message.to_ascii_lowercase();
-            message.contains("exhausted") && message.contains("weekly")
-        }) {
-            "Blocked weekly".to_string()
-        } else if blocked
-            .iter()
-            .any(|limit| limit.message.to_ascii_lowercase().contains("exhausted"))
-        {
-            "Blocked".to_string()
-        } else {
-            "Unavailable".to_string()
-        }
+    let kind = blocked
+        .iter()
+        .map(|limit| {
+            prodex_mojo_core::quota::blocked_limit_kind(&limit.message)
+                .expect("Mojo blocked quota status classification failed")
+        })
+        .max()
+        .unwrap_or(prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_NONE);
+    match kind {
+        prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_FIVE_HOUR => "Blocked 5h".to_string(),
+        prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_WEEKLY => "Blocked weekly".to_string(),
+        prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_EXHAUSTED => "Blocked".to_string(),
+        _ => "Unavailable".to_string(),
     }
 }
 
@@ -583,122 +561,26 @@ fn quota_error_summary(error: &str) -> String {
         return "unknown".to_string();
     }
 
-    #[cfg(feature = "mojo")]
-    {
-        let kind = crate::mojo::quota_error_summary_kind(&first_line);
-        let summary = match kind {
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_UNAVAILABLE => Some("unavailable"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_CONFIG => Some("config"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_SERVER => Some("server"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_TIMEOUT => Some("timeout"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_NETWORK => Some("network"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_PROXY => Some("proxy"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_CONNECTION => Some("connection"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_INVALID_AUTH => Some("invalid auth"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_RATE_LIMIT => Some("rate limit"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_PARSE => Some("parse"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_EMPTY => Some("empty"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_CANCELLED => Some("cancelled"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_FORBIDDEN => Some("forbidden"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_NOT_FOUND => Some("not found"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_UNKNOWN => Some("unknown"),
-            prodex_mojo_core::quota::QUOTA_ERROR_KIND_OTHER => None,
-            _ => unreachable!("validated Mojo quota error kind"),
-        };
-        summary.map(str::to_string).unwrap_or(first_line)
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        let lower = first_line.to_ascii_lowercase();
-        if let Some(summary) = [
-            quota_error_summary_basic(&lower),
-            quota_error_summary_transport(&lower),
-            quota_error_summary_auth(&lower),
-            quota_error_summary_response(&lower),
-        ]
-        .into_iter()
-        .flatten()
-        .next()
-        {
-            return summary.to_string();
-        }
-        first_line
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn quota_error_summary_basic(lower: &str) -> Option<&'static str> {
-    if lower.contains("unavailable") {
-        Some("unavailable")
-    } else if lower.contains("missing")
-        || lower.contains("not configured")
-        || lower.contains("config")
-    {
-        Some("config")
-    } else {
-        None
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn quota_error_summary_transport(lower: &str) -> Option<&'static str> {
-    if lower.contains("500")
-        || lower.contains("502")
-        || lower.contains("503")
-        || lower.contains("504")
-        || lower.contains("server")
-    {
-        Some("server")
-    } else if lower.contains("timeout") || lower.contains("timed out") {
-        Some("timeout")
-    } else if lower.contains("dns")
-        || lower.contains("tls")
-        || lower.contains("certificate")
-        || lower.contains("network")
-    {
-        Some("network")
-    } else if lower.contains("proxy") {
-        Some("proxy")
-    } else if lower.contains("refused") || lower.contains("connect") {
-        Some("connection")
-    } else {
-        None
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn quota_error_summary_auth(lower: &str) -> Option<&'static str> {
-    if lower.contains("invalid auth")
-        || lower.contains("invalid token")
-        || lower.contains("bad credentials")
-        || lower.contains("credential")
-    {
-        Some("invalid auth")
-    } else if lower.contains("429") || lower.contains("rate limit") {
-        Some("rate limit")
-    } else {
-        None
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn quota_error_summary_response(lower: &str) -> Option<&'static str> {
-    if lower.contains("parse")
-        || lower.contains("deserialize")
-        || lower.contains("decode")
-        || lower.contains("invalid json")
-    {
-        Some("parse")
-    } else if lower.contains("empty") {
-        Some("empty")
-    } else if lower.contains("cancel") {
-        Some("cancelled")
-    } else if lower.contains("403") || lower.contains("forbidden") {
-        Some("forbidden")
-    } else if lower.contains("404") || lower.contains("not found") {
-        Some("not found")
-    } else {
-        None
-    }
+    let kind = prodex_mojo_core::quota::quota_error_summary_kind(&first_line)
+        .expect("Mojo quota error summary classification failed");
+    let summary = match kind {
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_UNAVAILABLE => Some("unavailable"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_CONFIG => Some("config"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_SERVER => Some("server"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_TIMEOUT => Some("timeout"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_NETWORK => Some("network"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_PROXY => Some("proxy"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_CONNECTION => Some("connection"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_INVALID_AUTH => Some("invalid auth"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_RATE_LIMIT => Some("rate limit"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_PARSE => Some("parse"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_EMPTY => Some("empty"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_CANCELLED => Some("cancelled"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_FORBIDDEN => Some("forbidden"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_NOT_FOUND => Some("not found"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_UNKNOWN => Some("unknown"),
+        prodex_mojo_core::quota::QUOTA_ERROR_KIND_OTHER => None,
+        _ => unreachable!("validated Mojo quota error kind"),
+    };
+    summary.map(str::to_string).unwrap_or(first_line)
 }

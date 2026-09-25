@@ -356,7 +356,7 @@ fn openai_model_capacity_plan_matches_exhaustive_boolean_oracle() {
     }
 }
 #[test]
-fn quota_error_summary_kind_preserves_rust_precedence() {
+fn quota_error_summary_kind_matches_expected_precedence() {
     use prodex_mojo_core::quota::*;
     for (message, expected) in [
         ("quota unavailable", QUOTA_ERROR_KIND_UNAVAILABLE),
@@ -377,7 +377,7 @@ fn quota_error_summary_kind_preserves_rust_precedence() {
         ("", QUOTA_ERROR_KIND_UNKNOWN),
     ] {
         assert_eq!(
-            crate::mojo::quota_error_summary_kind(message),
+            prodex_mojo_core::quota::quota_error_summary_kind(message).unwrap(),
             expected,
             "message={message:?}"
         );
@@ -385,7 +385,7 @@ fn quota_error_summary_kind_preserves_rust_precedence() {
 }
 
 #[test]
-fn blocked_limit_kind_preserves_status_priority() {
+fn blocked_limit_kind_matches_expected_status_priority() {
     use prodex_mojo_core::quota::*;
     for (message, expected) in [
         ("5h exhausted until tomorrow", QUOTA_BLOCKED_KIND_FIVE_HOUR),
@@ -395,7 +395,7 @@ fn blocked_limit_kind_preserves_status_priority() {
         ("", QUOTA_BLOCKED_KIND_NONE),
     ] {
         assert_eq!(
-            crate::mojo::blocked_limit_kind(message),
+            prodex_mojo_core::quota::blocked_limit_kind(message).unwrap(),
             expected,
             "message={message:?}"
         );
