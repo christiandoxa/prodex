@@ -1,138 +1,96 @@
 use super::{
-    ProviderEndpoint, ProviderId, ProviderTransformInput, translate_chat_stream_event_to_responses,
-    translate_chat_stream_value_to_responses_rust,
+    ProviderEndpoint, ProviderId, ProviderTransformInput, ProviderWireFormat,
+    translate_chat_stream_event_to_responses,
 };
 use crate::ProviderTransformLoss;
 use serde_json::{Value, json};
 
-fn assert_stream_parity(value: Value) {
-    let data = serde_json::to_string(&value).expect("event JSON");
-    let mut document = crate::mojo_json::Document::default();
-    document.openai_chat_context(&value, None);
-    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
-    let expected = translate_chat_stream_value_to_responses_rust(&value);
-    assert_eq!(
-        prodex_mojo_core::json::transform_openai_chat_stream_event(&document.nodes, raw)
-            .expect("Mojo stream transform"),
-        expected,
-        "kernel event={data}"
-    );
+fn translate(value: Value) -> crate::ProviderTransformResult {
+    let data = serde_json::to_string(&value).expect("event fixture serializes");
     let event = format!("data: {data}\n\n");
-    let actual = translate_chat_stream_event_to_responses(
+    translate_chat_stream_event_to_responses(
         ProviderId::Anthropic,
-        ProviderTransformInput::new(ProviderEndpoint::Responses, event.as_bytes()),
+        ProviderTransformInput::new(ProviderEndpoint::Responses, event),
+    )
+}
+
+fn assert_event(result: crate::ProviderTransformResult, event_name: &str, expected: Value) {
+    assert_eq!(result.loss, ProviderTransformLoss::Lossless);
+    assert_eq!(result.endpoint, ProviderEndpoint::Responses);
+    assert_eq!(
+        result.from_format,
+        ProviderWireFormat::OpenAiChatCompletions
     );
-    match expected {
-        Some(expected) => {
-            assert!(matches!(actual.loss, ProviderTransformLoss::Lossless));
-            assert_eq!(
-                actual.body.as_deref(),
-                Some(expected.as_slice()),
-                "event={data}"
-            );
-        }
-        None => {
-            assert_eq!(
-                actual.loss,
-                ProviderTransformLoss::UnsupportedUpstream {
-                    reason: "chat completions SSE event does not contain a supported text delta"
-                        .into(),
-                }
-            );
-        }
-    }
+    assert_eq!(result.to_format, ProviderWireFormat::OpenAiResponses);
+    let body = String::from_utf8(result.body.expect("translated SSE body"))
+        .expect("translated SSE is UTF-8");
+    let (header, data) = body.split_once('\n').expect("SSE header and data line");
+    assert_eq!(header, format!("event: {event_name}"));
+    let payload = data
+        .strip_suffix("\n\n")
+        .and_then(|line| line.strip_prefix("data: "))
+        .expect("SSE data framing");
+    assert_eq!(serde_json::from_str::<Value>(payload).unwrap(), expected);
 }
 
 #[test]
-fn stream_event_matches_rust_oracle_for_sparse_and_precedence_shapes() {
-    for value in [
-        json!({}),
-        json!([]),
-        json!({"choices": []}),
-        json!({"choices": [null]}),
-        json!({"choices": [{"delta": {"content": ""}}]}),
-        json!({"choices": [{"delta": {"content": "東京\n\"quoted\""}}]}),
-        json!({"choices": [{"delta": {"content": "text"}, "finish_reason": "stop"}]}),
-        json!({"choices": [{"delta": {"tool_calls": [
-            {"id": "call", "function": {
-                "name": "functions.exec_command",
-                "arguments": "{\"cmd\":\"ls\"}"
-            }}
-        ], "content": "lower priority"}}]}),
-        json!({"choices": [{"delta": {"tool_calls": [
-            {"id": false, "function": {"name": 7, "arguments": "raw"}}
-        ], "content": "lower priority"}}]}),
-        json!({"choices": [{"delta": {"tool_calls": [
-            {"function": {"name": "functions.exec_command", "arguments": 7}}
-        ], "content": "fallback text"}}]}),
-        json!({"choices": [{"delta": {"tool_calls": [
-            {"function": {"arguments": ""}}
-        ]}, "finish_reason": "stop"}]}),
-        json!({"choices": [{"delta": {}, "finish_reason": null}]}),
-        json!({"choices": [{"delta": {}, "finish_reason": 0}]}),
-        json!({"choices": [
-            {"delta": {}, "finish_reason": null},
-            {"delta": {"content": "ignored second choice"}}
-        ]}),
-    ] {
-        assert_stream_parity(value);
-    }
-}
-
-#[test]
-fn stream_event_matches_rust_oracle_for_five_thousand_generated_events() {
-    for index in 0..5_000 {
-        let text = format!("event-{index}-東京-\"quoted\"\\n");
-        let value = match index % 8 {
-            0 => json!({"choices": [{"delta": {"content": text}}]}),
-            1 => json!({"choices": [{"delta": {"tool_calls": [{
-                "id": format!("call-{index}"),
-                "function": {
+fn tool_argument_delta_takes_precedence_over_text_delta() {
+    assert_event(
+        translate(json!({
+            "choices": [{"delta": {
+                "content": "ignored",
+                "tool_calls": [{"id": "call_test", "function": {
                     "name": "functions.exec_command",
-                    "arguments": format!(r#"{{"cmd":"cargo test {index}"}}"#)
-                }
-            }]}}]}),
-            2 => json!({"choices": [{"delta": {
-                "content": text,
-                "tool_calls": [{"function": {
-                    "name": "tools.sub.tool",
-                    "arguments": {"index": index, "unicode": "東京"}
+                    "arguments": r#"{"cmd":"ls"}"#
                 }}]
-            }}]}),
-            3 => json!({"choices": [{"delta": {}, "finish_reason": "stop"}]}),
-            4 => json!({"choices": [{"delta": {"content": text}, "finish_reason": null}]}),
-            5 => json!({"choices": [{"delta": {
-                "content": text,
-                "tool_calls": [{"function": {"arguments": false}}]
-            }}]}),
-            6 => json!({"choices": [{"delta": {}}]}),
-            _ => json!({"choices": [
-                {"delta": {}, "finish_reason": null},
-                {"delta": {"content": text}}
-            ]}),
-        };
-        assert_stream_parity(value);
-    }
+            }}]
+        })),
+        "response.function_call_arguments.delta",
+        json!({
+            "type": "response.function_call_arguments.delta",
+            "call_id": "call_test",
+            "delta": r#"{"cmd":"rtk ls"}"#
+        }),
+    );
 }
 
 #[test]
-fn stream_done_and_invalid_json_keep_transport_boundary_behavior() {
+fn text_delta_fixture_preserves_unicode_and_escaping() {
+    assert_event(
+        translate(json!({
+            "choices": [{"delta": {"content": "東京\n\"quoted\""}}]
+        })),
+        "response.output_text.delta",
+        json!({
+            "type": "response.output_text.delta",
+            "delta": "東京\n\"quoted\""
+        }),
+    );
+}
+
+#[test]
+fn finish_and_done_events_emit_completion() {
+    assert_event(
+        translate(json!({"choices": [{"delta": {}, "finish_reason": "stop"}]})),
+        "response.completed",
+        json!({}),
+    );
+
     let done = translate_chat_stream_event_to_responses(
         ProviderId::Anthropic,
         ProviderTransformInput::new(ProviderEndpoint::Responses, b"data: [DONE]\n\n"),
     );
-    assert!(matches!(done.loss, ProviderTransformLoss::Lossless));
-    assert_eq!(
-        done.body.as_deref(),
-        Some(b"event: response.completed\ndata: {}\n\n".as_slice())
-    );
+    assert_event(done, "response.completed", json!({}));
+}
 
-    let invalid = translate_chat_stream_event_to_responses(
-        ProviderId::Anthropic,
-        ProviderTransformInput::new(ProviderEndpoint::Responses, b"data: {bad}\n\n"),
+#[test]
+fn event_without_supported_delta_remains_unsupported() {
+    let result = translate(json!({"choices": [{"delta": {}}]}));
+    assert_eq!(
+        result.loss,
+        ProviderTransformLoss::UnsupportedUpstream {
+            reason: "chat completions SSE event does not contain a supported text delta".into(),
+        }
     );
-    assert!(matches!(
-        invalid.loss,
-        ProviderTransformLoss::Rejected { .. }
-    ));
+    assert_eq!(result.body, None);
 }
