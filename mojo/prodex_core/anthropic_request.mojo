@@ -536,25 +536,40 @@ def anthropic_request_write_web_search_call(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     input: ProdexAnthropicRequestKernelInput,
 ) -> Bool:
-    if input.id.len == 0 or input.queries.len == 0 or input.choice_kind < 0 or input.choice_kind > 1:
+    if (
+        input.id.len == 0
+        or (input.queries.len == 0 and input.content.len < 2)
+        or input.choice_kind < 0
+        or input.choice_kind > 1
+    ):
         return False
     if not anthropic_request_put_literal(
         writer, StringSlice('{"type":"web_search_call","id":')
     ) or not anthropic_request_put_view(writer, input.id):
         return False
     if input.choice_kind == 1:
-        if not anthropic_request_put_literal(writer, StringSlice(',"status":"in_progress"')):
+        if not anthropic_request_put_literal(
+            writer, StringSlice(',"status":"in_progress"')
+        ):
             return False
-    elif not anthropic_request_put_literal(writer, StringSlice(',"status":"completed"')):
+    elif not anthropic_request_put_literal(
+        writer, StringSlice(',"status":"completed"')
+    ):
         return False
-    return (
-        anthropic_request_put_literal(
-            writer, StringSlice(',"action":{"type":"search","queries":')
-        )
-        and anthropic_request_put_view(writer, input.queries)
-        and anthropic_request_put_literal(writer, StringSlice(',"sources":[]}'))
-        and anthropic_request_put_byte(writer, 125)
-    )
+    if not anthropic_request_put_literal(
+        writer, StringSlice(',"action":{"type":"search","queries":')
+    ):
+        return False
+    if input.queries.len > 0:
+        if not anthropic_request_put_view(writer, input.queries):
+            return False
+    elif not anthropic_request_write_web_search_queries(
+        writer, input.content.copy(), 0, Int64(input.content.len)
+    ):
+        return False
+    return anthropic_request_put_literal(
+        writer, StringSlice(',"sources":[]}')
+    ) and anthropic_request_put_byte(writer, 125)
 
 
 def anthropic_request_write_tool_use_item(
@@ -1069,7 +1084,7 @@ def anthropic_request_range_is_string(
     )
 
 
-def anthropic_request_write_stream_queries(
+def anthropic_request_write_web_search_queries(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     view: ProdexRichStringView,
     block_start: Int64,
@@ -1084,7 +1099,9 @@ def anthropic_request_write_stream_queries(
     if anthropic_request_range_is_string(view, query):
         return (
             anthropic_request_put_byte(writer, 91)
-            and anthropic_request_put_view_range(writer, view, query[0], query[1])
+            and anthropic_request_put_view_range(
+                writer, view, query[0], query[1]
+            )
             and anthropic_request_put_byte(writer, 93)
         )
     var queries = anthropic_request_object_field(
@@ -1102,7 +1119,9 @@ def anthropic_request_write_stream_queries(
     var first = True
     var index = anthropic_request_skip_ws(view, queries[0] + 1, queries[1] - 1)
     while index < queries[1] - 1:
-        var item_end = anthropic_request_value_end(view, index, queries[1] - 1, 0)
+        var item_end = anthropic_request_value_end(
+            view, index, queries[1] - 1, 0
+        )
         if item_end < 0:
             return False
         var item = Array[Int64, 2](fill=-1)
@@ -1112,7 +1131,9 @@ def anthropic_request_write_stream_queries(
             if not first and not anthropic_request_put_byte(writer, 44):
                 return False
             first = False
-            if not anthropic_request_put_view_range(writer, view, index, item_end):
+            if not anthropic_request_put_view_range(
+                writer, view, index, item_end
+            ):
                 return False
         index = anthropic_request_skip_ws(view, item_end, queries[1] - 1)
         if index < queries[1] - 1 and anthropic_request_byte(view, index) == 44:
@@ -1268,7 +1289,7 @@ def anthropic_request_write_stream_event_result(
                 )
             ):
                 return False
-            if not anthropic_request_write_stream_queries(
+            if not anthropic_request_write_web_search_queries(
                 writer, view, block[0], block[1]
             ):
                 return False
