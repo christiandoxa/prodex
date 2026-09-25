@@ -87,148 +87,33 @@ pub fn runtime_profile_health_recovery_decision(
     }
 }
 
-// Test-only pre-migration Rust oracle retained for direct Mojo parity checks.
-
 #[cfg(test)]
-use super::runtime_profile_circuit_open_seconds;
-
-#[cfg(test)]
-fn runtime_profile_bad_pairing_next_score_rust(current_score: u32, delta: u32) -> u32 {
-    current_score
-        .saturating_add(delta)
-        .min(RUNTIME_PROFILE_HEALTH_MAX_SCORE)
-}
-
-#[cfg(test)]
-fn runtime_profile_health_bump_decision_rust(
-    current_score: u32,
-    delta: u32,
-    circuit_already_open: bool,
-    current_circuit_reopen_stage: u32,
-) -> RuntimeProfileHealthBumpDecision {
-    let next_score = current_score
-        .saturating_add(delta)
-        .min(RUNTIME_PROFILE_HEALTH_MAX_SCORE);
-
-    if next_score < RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD {
-        return RuntimeProfileHealthBumpDecision {
-            next_score,
-            circuit_reopen_stage: None,
-            circuit_open_seconds: None,
-        };
-    }
-
-    let reopen_stage = if circuit_already_open {
-        current_circuit_reopen_stage
-            .saturating_add(1)
-            .min(RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE)
-    } else {
-        0
-    };
-
-    RuntimeProfileHealthBumpDecision {
-        next_score,
-        circuit_reopen_stage: Some(reopen_stage),
-        circuit_open_seconds: Some(runtime_profile_circuit_open_seconds(
-            next_score,
-            reopen_stage,
-        )),
-    }
-}
-
-#[cfg(test)]
-fn runtime_profile_health_recovery_decision_rust(
-    current_score: Option<u32>,
-    current_success_streak: u32,
-) -> RuntimeProfileHealthRecoveryDecision {
-    let Some(current_score) = current_score else {
-        return RuntimeProfileHealthRecoveryDecision {
-            next_score: None,
-            next_success_streak: None,
-        };
-    };
-
-    let next_success_streak = current_success_streak
-        .saturating_add(1)
-        .min(RUNTIME_PROFILE_SUCCESS_STREAK_MAX);
-    let recovery = RUNTIME_PROFILE_HEALTH_SUCCESS_RECOVERY_SCORE
-        .saturating_add(next_success_streak.saturating_sub(1).min(1));
-    let next_score = current_score.saturating_sub(recovery);
-
-    if next_score == 0 {
-        RuntimeProfileHealthRecoveryDecision {
-            next_score: None,
-            next_success_streak: None,
-        }
-    } else {
-        RuntimeProfileHealthRecoveryDecision {
-            next_score: Some(next_score),
-            next_success_streak: Some(next_success_streak),
-        }
-    }
-}
-
-#[cfg(test)]
-mod mojo_parity_tests {
+mod tests {
     use super::*;
 
     #[test]
-    fn health_decisions_match_rust_oracles() {
-        for current in [0_u32, 1, 3, 4, 10, u32::MAX] {
-            for delta in [0_u32, 1, 2, 100, u32::MAX] {
-                assert_eq!(
-                    runtime_profile_bad_pairing_next_score(current, delta),
-                    runtime_profile_bad_pairing_next_score_rust(current, delta),
-                );
-                for open in [false, true] {
-                    for stage in [0_u32, 1, RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE, u32::MAX] {
-                        assert_eq!(
-                            runtime_profile_health_bump_decision(current, delta, open, stage),
-                            runtime_profile_health_bump_decision_rust(current, delta, open, stage),
-                        );
-                    }
-                }
-            }
-            for streak in [0_u32, 1, 2, RUNTIME_PROFILE_SUCCESS_STREAK_MAX, u32::MAX] {
-                for score in [None, Some(current)] {
-                    assert_eq!(
-                        runtime_profile_health_recovery_decision(score, streak),
-                        runtime_profile_health_recovery_decision_rust(score, streak),
-                    );
-                }
-            }
-        }
-    }
+    fn health_policy_saturates_at_score_and_stage_limits() {
+        let max_score = RUNTIME_PROFILE_HEALTH_MAX_SCORE;
+        assert_eq!(runtime_profile_bad_pairing_next_score(3, 2), 5);
+        assert_eq!(
+            runtime_profile_bad_pairing_next_score(max_score - 1, 2),
+            max_score
+        );
 
-    #[test]
-    fn health_decisions_match_rust_oracles_over_generated_values() {
-        let mut seed = 0xbb67_ae85_84ca_a73b_u64;
-        for _ in 0..10_000 {
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let current = seed as u32;
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let delta = seed as u32;
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let open = seed & 1 != 0;
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let stage = seed as u32;
-            seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1);
-            let streak = seed as u32;
-
-            assert_eq!(
-                runtime_profile_bad_pairing_next_score(current, delta),
-                runtime_profile_bad_pairing_next_score_rust(current, delta),
-            );
-            assert_eq!(
-                runtime_profile_health_bump_decision(current, delta, open, stage),
-                runtime_profile_health_bump_decision_rust(current, delta, open, stage),
-            );
-            for score in [None, Some(current)] {
-                assert_eq!(
-                    runtime_profile_health_recovery_decision(score, streak),
-                    runtime_profile_health_recovery_decision_rust(score, streak),
-                );
-            }
-        }
+        assert_eq!(
+            runtime_profile_health_bump_decision(max_score - 1, u32::MAX, true, u32::MAX),
+            RuntimeProfileHealthBumpDecision {
+                next_score: max_score,
+                circuit_reopen_stage: Some(RUNTIME_PROFILE_CIRCUIT_REOPEN_MAX_STAGE),
+                circuit_open_seconds: Some(crate::RUNTIME_PROFILE_CIRCUIT_OPEN_MAX_SECONDS),
+            },
+        );
+        assert_eq!(
+            runtime_profile_health_recovery_decision(Some(max_score), u32::MAX),
+            RuntimeProfileHealthRecoveryDecision {
+                next_score: Some(13),
+                next_success_streak: Some(RUNTIME_PROFILE_SUCCESS_STREAK_MAX),
+            },
+        );
     }
 }

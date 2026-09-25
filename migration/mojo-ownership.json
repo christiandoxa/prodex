@@ -1204,7 +1204,6 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "profile-state lookup, route-key construction, and fixed-width input/output mapping",
-      "rust_test_oracle": "pre-migration formula retained only under #[cfg(test)]",
       "mojo_abi_version": 1
     },
     {
@@ -1237,7 +1236,6 @@
       "production_reachability_test": "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
       "rust_owner_before": "bad-pairing, health-transition, in-flight, and latency policy calculations in feature-off builds",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "pre-migration Rust formulas retained only under #[cfg(test)]",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,

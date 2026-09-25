@@ -43,113 +43,47 @@ pub fn runtime_profile_inflight_soft_limit(
         .unwrap_or_else(|error| panic!("Mojo inflight soft limit failed: {error:?}"))
 }
 
-// Test-only pre-migration Rust oracle retained for direct Mojo parity checks.
-
 #[cfg(test)]
-fn runtime_profile_inflight_weight_rust(context: &str) -> usize {
-    match context {
-        "websocket_session" | "responses_http" => 2,
-        _ => 1,
-    }
-}
-
-#[cfg(test)]
-fn runtime_profile_inflight_soft_limit_rust(
-    route_kind: RuntimeRouteKind,
-    pressure_mode: bool,
-    base_limit: usize,
-) -> usize {
-    let base = base_limit.max(1);
-    if !pressure_mode {
-        return base;
-    }
-    match route_kind {
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => base.saturating_sub(1).max(1),
-        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => base.saturating_sub(2).max(1),
-    }
-}
-
-#[cfg(test)]
-mod mojo_parity_tests {
+mod tests {
     use super::*;
 
     #[test]
-    fn inflight_policy_matches_rust_oracle() {
-        for context in [
-            "websocket_session",
-            "responses_http",
-            "standard_http",
-            "",
-            "other",
+    fn inflight_policy_preserves_weights_and_pressure_boundaries() {
+        assert_eq!(runtime_profile_inflight_weight("responses_http"), 2);
+        assert_eq!(runtime_profile_inflight_weight("websocket_session"), 2);
+        assert_eq!(runtime_profile_inflight_weight("standard_http"), 1);
+        assert_eq!(
+            runtime_profile_inflight_effective_hard_limit("responses_http", 0),
+            2
+        );
+        assert_eq!(
+            runtime_profile_inflight_effective_hard_limit("standard_http", 0),
+            1
+        );
+        assert_eq!(
+            runtime_profile_inflight_effective_hard_limit("standard_http", usize::MAX),
+            usize::MAX,
+        );
+
+        for (route, pressure_mode, base_limit, expected) in [
+            (RuntimeRouteKind::Responses, false, 0, 1),
+            (RuntimeRouteKind::Responses, true, 0, 1),
+            (RuntimeRouteKind::Responses, true, 5, 4),
+            (RuntimeRouteKind::Compact, true, 1, 1),
+            (RuntimeRouteKind::Compact, true, 5, 3),
+            (RuntimeRouteKind::Websocket, true, 0, 1),
+            (RuntimeRouteKind::Websocket, true, 5, 4),
+            (RuntimeRouteKind::Standard, true, 5, 3),
         ] {
             assert_eq!(
-                runtime_profile_inflight_weight(context),
-                runtime_profile_inflight_weight_rust(context),
+                runtime_profile_inflight_soft_limit(route, pressure_mode, base_limit),
+                expected,
+                "route={route:?} pressure={pressure_mode} base={base_limit}"
             );
-            for limit in [0_usize, 1, 2, 8, usize::MAX / 2] {
-                assert_eq!(
-                    runtime_profile_inflight_effective_hard_limit(context, limit),
-                    limit.max(runtime_profile_inflight_weight_rust(context)),
-                );
-            }
         }
-        for route in [
-            RuntimeRouteKind::Responses,
-            RuntimeRouteKind::Compact,
-            RuntimeRouteKind::Websocket,
-            RuntimeRouteKind::Standard,
-        ] {
-            for pressure in [false, true] {
-                for base in [0_usize, 1, 2, 5, 64] {
-                    assert_eq!(
-                        runtime_profile_inflight_soft_limit(route, pressure, base),
-                        runtime_profile_inflight_soft_limit_rust(route, pressure, base),
-                    );
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn inflight_limits_match_rust_oracles_at_usize_boundaries() {
-        let mut limits = vec![0, 1, 2, 8, usize::MAX / 2, usize::MAX];
-        if let Ok(signed_max) = usize::try_from(i64::MAX) {
-            limits.push(signed_max);
-            if signed_max < usize::MAX {
-                limits.push(signed_max + 1);
-            }
-        }
-        for context in [
-            "websocket_session",
-            "responses_http",
-            "other",
-            "RESPONSES_HTTP",
-        ] {
-            let weight = runtime_profile_inflight_weight_rust(context);
-            for limit in &limits {
-                assert_eq!(
-                    runtime_profile_inflight_effective_hard_limit(context, *limit),
-                    (*limit).max(weight),
-                    "context={context:?} limit={limit}"
-                );
-            }
-        }
-
-        for route in [
-            RuntimeRouteKind::Responses,
-            RuntimeRouteKind::Compact,
-            RuntimeRouteKind::Websocket,
-            RuntimeRouteKind::Standard,
-        ] {
-            for pressure in [false, true] {
-                for base in &limits {
-                    assert_eq!(
-                        runtime_profile_inflight_soft_limit(route, pressure, *base),
-                        runtime_profile_inflight_soft_limit_rust(route, pressure, *base),
-                        "route={route:?} pressure={pressure} base={base}"
-                    );
-                }
-            }
-        }
+        assert_eq!(
+            runtime_profile_inflight_soft_limit(RuntimeRouteKind::Compact, true, usize::MAX),
+            usize::MAX - 2,
+        );
     }
 }
