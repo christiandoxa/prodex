@@ -71,22 +71,6 @@ def prodex_quota_pressure_band(
     return weekly_band
 
 
-@export("prodex_quota_window_pair_has_ready_limit")
-def prodex_quota_window_pair_has_ready_limit(
-    first_used_percent: Int64,
-    first_has_value: Int64,
-    second_used_percent: Int64,
-    second_has_value: Int64,
-) abi("C") -> Int64:
-    if first_has_value == 0 and second_has_value == 0:
-        return 0
-    if first_has_value != 0 and first_used_percent >= 100:
-        return 0
-    if second_has_value != 0 and second_used_percent >= 100:
-        return 0
-    return 1
-
-
 comptime QUOTA_GEMINI_BUCKET_BATCH_MAX_COUNT: Int64 = 1_024
 
 
@@ -218,7 +202,7 @@ def prodex_quota_main_aggregate_batch(
     return 0
 
 
-comptime QUOTA_CAPACITY_FIELD_COUNT: Int64 = 11
+comptime QUOTA_CAPACITY_FIELD_COUNT: Int64 = 22
 comptime QUOTA_CAPACITY_BATCH_MAX_COUNT: Int64 = 256
 
 
@@ -265,6 +249,44 @@ def quota_saturating_sub(left: Int64, right: Int64) -> Int64:
     return left - right
 
 
+def quota_capacity_reset_seconds(reset_at: Int64, now: Int64) -> Int64:
+    if reset_at == INT64_MAX:
+        return INT64_MAX
+    if reset_at > now:
+        return quota_saturating_sub(reset_at, now)
+    return 0
+
+
+def quota_capacity_weekly_weight(route_kind: Int64) -> Int64:
+    if route_kind == 0 or route_kind == 2:
+        return 10
+    return 8
+
+
+def quota_capacity_admission_allowed(
+    pair_allowed: Int64,
+    outer_allowed: Int64,
+    pair_limit_reached: Int64,
+    outer_limit_reached: Int64,
+    rate_limit_reached_type: Int64,
+    camel_rate_limit_reached_type: Int64,
+    spend_control_reached: Int64,
+    camel_spend_control_reached: Int64,
+    ordinary_usage_allowed: Int64,
+) -> Int64:
+    if pair_allowed == 2 or outer_allowed == 2 or pair_limit_reached == 2 or outer_limit_reached == 2:
+        return 0
+    if (rate_limit_reached_type != 0 and rate_limit_reached_type != 1) or (
+        camel_rate_limit_reached_type != 0 and camel_rate_limit_reached_type != 1
+    ):
+        return 0
+    if spend_control_reached == 2 or camel_spend_control_reached == 2:
+        return 0
+    if ordinary_usage_allowed != 0 and ordinary_usage_allowed != 2:
+        return 0
+    return 1
+
+
 @export("prodex_quota_window_pressure")
 def prodex_quota_window_pressure(
     remaining_percent: Int64,
@@ -274,14 +296,8 @@ def prodex_quota_window_pressure(
     if remaining_percent < 0 or remaining_percent > 100:
         return 1
 
-    var seconds_until_reset: Int64 = 0
-    if reset_at == INT64_MAX:
-        seconds_until_reset = INT64_MAX
-    elif reset_at > now:
-        seconds_until_reset = quota_saturating_sub(reset_at, now)
-
     return quota_capacity_pressure(
-        seconds_until_reset,
+        quota_capacity_reset_seconds(reset_at, now),
         remaining_percent,
         1,
     )
@@ -328,8 +344,8 @@ def quota_capacity_pressure_band_for_route(
     return five_hour_band
 
 
-@export("prodex_quota_capacity_batch")
-def prodex_quota_capacity_batch(
+@export("prodex_quota_capacity_batch_v2")
+def prodex_quota_capacity_batch_v2(
     fields_address: UInt,
     lane_address: UInt,
     five_hour_remaining_address: UInt,
@@ -339,6 +355,7 @@ def prodex_quota_capacity_batch(
     pressure_band_address: UInt,
     admission_allowed_address: UInt,
     pair_ready_address: UInt,
+    any_window_exhausted_address: UInt,
     usable_address: UInt,
     routing_eligible_address: UInt,
     reserve_floor_address: UInt,
@@ -354,7 +371,7 @@ def prodex_quota_capacity_batch(
         return 1
     if count == 0:
         return 0
-    if fields_address == 0 or lane_address == 0 or five_hour_remaining_address == 0 or weekly_remaining_address == 0 or five_hour_status_address == 0 or weekly_status_address == 0 or pressure_band_address == 0 or admission_allowed_address == 0 or pair_ready_address == 0 or usable_address == 0 or routing_eligible_address == 0 or reserve_floor_address == 0 or five_hour_pressure_address == 0 or weekly_pressure_address == 0 or total_pressure_address == 0:
+    if fields_address == 0 or lane_address == 0 or five_hour_remaining_address == 0 or weekly_remaining_address == 0 or five_hour_status_address == 0 or weekly_status_address == 0 or pressure_band_address == 0 or admission_allowed_address == 0 or pair_ready_address == 0 or any_window_exhausted_address == 0 or usable_address == 0 or routing_eligible_address == 0 or reserve_floor_address == 0 or five_hour_pressure_address == 0 or weekly_pressure_address == 0 or total_pressure_address == 0:
         return 1
 
     var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](unsafe_from_address=Int(fields_address))
@@ -366,6 +383,7 @@ def prodex_quota_capacity_batch(
     var pressure_band = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(pressure_band_address))
     var admission_allowed = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(admission_allowed_address))
     var pair_ready = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(pair_ready_address))
+    var any_window_exhausted = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(any_window_exhausted_address))
     var usable = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(usable_address))
     var routing_eligible = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(routing_eligible_address))
     var reserve_floor = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(reserve_floor_address))
@@ -375,21 +393,38 @@ def prodex_quota_capacity_batch(
 
     for index in range(count):
         var row_lane = quota_capacity_field(fields, index, 0)
-        var allowed = quota_capacity_field(fields, index, 1)
-        var limit_reached = quota_capacity_field(fields, index, 2)
-        var five_hour_used = quota_capacity_field(fields, index, 3)
-        var five_hour_has_value = quota_capacity_field(fields, index, 4)
-        var five_hour_seconds = quota_capacity_field(fields, index, 5)
-        var weekly_used = quota_capacity_field(fields, index, 6)
-        var weekly_has_value = quota_capacity_field(fields, index, 7)
-        var weekly_seconds = quota_capacity_field(fields, index, 8)
-        var scale_bps = quota_capacity_field(fields, index, 9)
-        var weekly_weight = quota_capacity_field(fields, index, 10)
-        if row_lane < 0 or row_lane > 2 or allowed < 0 or allowed > 2 or limit_reached < 0 or limit_reached > 2:
+        var pair_allowed = quota_capacity_field(fields, index, 1)
+        var outer_allowed = quota_capacity_field(fields, index, 2)
+        var pair_limit_reached = quota_capacity_field(fields, index, 3)
+        var outer_limit_reached = quota_capacity_field(fields, index, 4)
+        var rate_limit_reached_type = quota_capacity_field(fields, index, 5)
+        var camel_rate_limit_reached_type = quota_capacity_field(fields, index, 6)
+        var spend_control_reached = quota_capacity_field(fields, index, 7)
+        var camel_spend_control_reached = quota_capacity_field(fields, index, 8)
+        var ordinary_usage_allowed = quota_capacity_field(fields, index, 9)
+        var five_hour_used = quota_capacity_field(fields, index, 10)
+        var five_hour_has_value = quota_capacity_field(fields, index, 11)
+        var five_hour_reset_at = quota_capacity_field(fields, index, 12)
+        var weekly_used = quota_capacity_field(fields, index, 13)
+        var weekly_has_value = quota_capacity_field(fields, index, 14)
+        var weekly_reset_at = quota_capacity_field(fields, index, 15)
+        var primary_used = quota_capacity_field(fields, index, 16)
+        var primary_has_value = quota_capacity_field(fields, index, 17)
+        var secondary_used = quota_capacity_field(fields, index, 18)
+        var secondary_has_value = quota_capacity_field(fields, index, 19)
+        var scale_bps = quota_capacity_field(fields, index, 20)
+        var now = quota_capacity_field(fields, index, 21)
+        if row_lane < 0 or row_lane > 2 or pair_allowed < 0 or pair_allowed > 2 or outer_allowed < 0 or outer_allowed > 2:
             return 2
-        if five_hour_has_value < 0 or five_hour_has_value > 1 or weekly_has_value < 0 or weekly_has_value > 1:
+        if pair_limit_reached < 0 or pair_limit_reached > 2 or outer_limit_reached < 0 or outer_limit_reached > 2:
             return 2
-        if five_hour_seconds < 0 or weekly_seconds < 0 or scale_bps < 0 or weekly_weight < 0:
+        if rate_limit_reached_type < 0 or rate_limit_reached_type > 4 or camel_rate_limit_reached_type < 0 or camel_rate_limit_reached_type > 4:
+            return 2
+        if spend_control_reached < 0 or spend_control_reached > 4 or camel_spend_control_reached < 0 or camel_spend_control_reached > 4 or ordinary_usage_allowed < 0 or ordinary_usage_allowed > 4:
+            return 2
+        if five_hour_has_value < 0 or five_hour_has_value > 1 or weekly_has_value < 0 or weekly_has_value > 1 or primary_has_value < 0 or primary_has_value > 1 or secondary_has_value < 0 or secondary_has_value > 1:
+            return 2
+        if scale_bps < 0:
             return 2
 
         var five_hour_remaining_value = prodex_quota_remaining_percent(
@@ -405,12 +440,12 @@ def prodex_quota_capacity_batch(
             weekly_remaining_value, weekly_has_value
         )
         var five_hour_pressure_value = quota_capacity_pressure(
-            five_hour_seconds,
+            quota_capacity_reset_seconds(five_hour_reset_at, now),
             five_hour_remaining_value,
             five_hour_has_value,
         )
         var weekly_pressure_value = quota_capacity_pressure(
-            weekly_seconds,
+            quota_capacity_reset_seconds(weekly_reset_at, now),
             weekly_remaining_value,
             weekly_has_value,
         )
@@ -421,9 +456,17 @@ def prodex_quota_capacity_batch(
             weekly_has_value,
             route_kind,
         )
-        var admission_value: Int64 = 1
-        if allowed == 2 or limit_reached == 2:
-            admission_value = 0
+        var admission_value = quota_capacity_admission_allowed(
+            pair_allowed,
+            outer_allowed,
+            pair_limit_reached,
+            outer_limit_reached,
+            rate_limit_reached_type,
+            camel_rate_limit_reached_type,
+            spend_control_reached,
+            camel_spend_control_reached,
+            ordinary_usage_allowed,
+        )
         var pair_ready_value: Int64 = 0
         if five_hour_has_value == 1 or weekly_has_value == 1:
             pair_ready_value = 1
@@ -431,6 +474,11 @@ def prodex_quota_capacity_batch(
                 weekly_has_value == 1 and weekly_remaining_value == 0
             ):
                 pair_ready_value = 0
+        var any_window_exhausted_value: Int64 = 0
+        if (primary_has_value == 1 and primary_used >= 100) or (
+            secondary_has_value == 1 and secondary_used >= 100
+        ):
+            any_window_exhausted_value = 1
         var usable_value = admission_value * pair_ready_value
         var routing_value: Int64 = 0
         if usable_value == 1 and (row_lane == 0 or row_lane == 1):
@@ -449,7 +497,10 @@ def prodex_quota_capacity_batch(
         var raw_total = quota_saturating_add(
             reserve_bias,
             quota_saturating_add(
-                quota_capacity_saturating_mul(weekly_pressure_value, weekly_weight),
+                quota_capacity_saturating_mul(
+                    weekly_pressure_value,
+                    quota_capacity_weekly_weight(route_kind),
+                ),
                 five_hour_pressure_value,
             ),
         )
@@ -462,6 +513,7 @@ def prodex_quota_capacity_batch(
         pressure_band[unsafe_offset=index] = band
         admission_allowed[unsafe_offset=index] = admission_value
         pair_ready[unsafe_offset=index] = pair_ready_value
+        any_window_exhausted[unsafe_offset=index] = any_window_exhausted_value
         usable[unsafe_offset=index] = usable_value
         routing_eligible[unsafe_offset=index] = routing_value
         reserve_floor[unsafe_offset=index] = reserve_floor_value

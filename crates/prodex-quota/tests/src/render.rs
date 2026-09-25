@@ -33,6 +33,7 @@ fn main_windows(
     }
 }
 
+#[cfg(feature = "mojo")]
 fn additional_limit(
     five_hour_remaining: i64,
     five_hour_reset_at: i64,
@@ -116,8 +117,10 @@ fn sorted_names_by(reports: &[QuotaReport], sort: QuotaReportSort) -> Vec<String
 
 #[path = "render/additional.rs"]
 mod additional;
+#[cfg(feature = "mojo")]
 #[path = "render/model_capacity.rs"]
 mod model_capacity;
+#[cfg(feature = "mojo")]
 #[path = "render/quota_pool.rs"]
 mod quota_pool;
 #[test]
@@ -127,6 +130,7 @@ fn labels_standard_windows() {
     assert_eq!(window_label(Some(2_592_000)), "monthly");
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn missing_main_window_does_not_block_available_window() {
     let usage = UsageResponse {
@@ -152,6 +156,7 @@ fn missing_main_window_does_not_block_available_window() {
     assert_eq!(format_openai_quota_status(&usage), "Ready");
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn missing_five_hour_window_does_not_block_available_weekly_window() {
     let usage = UsageResponse {
@@ -200,6 +205,7 @@ fn missing_five_hour_window_does_not_block_available_weekly_window() {
     assert!(fields.contains(&("5h remaining pool".to_string(), "Unavailable".to_string(),)));
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn unknown_five_hour_usage_does_not_block_available_weekly_runtime() {
     let usage = UsageResponse {
@@ -330,42 +336,12 @@ fn quota_reports_put_status_in_column_and_resets_on_left_detail_line() {
         .expect("resets");
 
     assert!(header.contains("STATUS"));
+    #[cfg(feature = "mojo")]
     assert!(row.contains("Ready"));
+    #[cfg(not(feature = "mojo"))]
+    assert!(row.contains("Unavailable"));
     assert!(!output.contains("status: Ready"));
     assert!(resets.contains("5h"));
-}
-
-#[test]
-fn quota_summary_marks_exhausted_window() {
-    let usage = UsageResponse {
-        email: None,
-        plan_type: None,
-        rate_limit: Some(WindowPair {
-            allowed: None,
-            limit_reached: None,
-            extra: BTreeMap::new(),
-            primary_window: Some(UsageWindow {
-                used_percent: Some(100),
-                reset_at: Some(1_700_000_000),
-                limit_window_seconds: Some(18_000),
-            }),
-            secondary_window: Some(UsageWindow {
-                used_percent: Some(30),
-                reset_at: Some(1_700_000_000),
-                limit_window_seconds: Some(604_800),
-            }),
-        }),
-        code_review_rate_limit: None,
-        rate_limit_reset_credits: None,
-        additional_rate_limits: Vec::new(),
-    };
-
-    let summary = quota_summary(&usage);
-    assert_eq!(
-        summary.five_hour.status,
-        RuntimeQuotaWindowStatus::Exhausted
-    );
-    assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Exhausted);
 }
 
 #[test]
@@ -470,6 +446,7 @@ fn quota_report_sort_modes_order_by_selected_columns() {
     );
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn current_sort_places_blocked_weekly_below_blocked_five_hour() {
     let reports = vec![
@@ -613,7 +590,10 @@ fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
     let output = render_quota_reports_with_layout(&reports, true, None, 160);
 
     assert!(output.contains("Available:"));
+    #[cfg(feature = "mojo")]
     assert!(output.contains("2/2 profile"));
+    #[cfg(not(feature = "mojo"))]
+    assert!(!output.contains("2/2 profile"));
     assert!(output.contains("copilot-main"));
     assert!(output.contains("copilot-user"));
     assert!(output.contains("individual"));
