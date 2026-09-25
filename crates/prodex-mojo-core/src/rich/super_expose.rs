@@ -211,8 +211,8 @@ mod tests {
     fn tunnel_client_version_policy_accepts_official_format_across_versions() {
         for value in [
             "0.0.13+4b5267f823be0b046bb883aacb51603cfde3a0ea (git sha: 4b5267f823be0b046bb883aacb51603cfde3a0ea)",
-            "0.0.14+0f870e50a973fa820d4c409000059e181e8d242b (git sha: 0f870e50a973fa820d4c409000059e181e8d242b)",
-            "0.0.15+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+            "0.0.15+a390c168ff1b2d14e73a95991c186c6aba3ff5a0 (git sha: a390c168ff1b2d14e73a95991c186c6aba3ff5a0)",
+            "0.0.16+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
         ] {
             assert!(
                 super_expose_tunnel_client_version_output_valid(value).unwrap(),

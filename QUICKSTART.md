@@ -226,7 +226,7 @@ Local mode has no external tunnel. OpenAI mode requires a pre-created tunnel ID,
 outbound HTTPS/TCP 443 and provides MCP connectivity only. Prodex accepts stable
 tunnel-client 0.0.13 or newer when the official version format and required
 `run` capability are present; release qualification tracks the latest stable
-reference (0.0.14 at the 0.431.5 release cut). The browser remains
+reference (0.0.15 at the 0.432.0 release cut). The browser remains
 local in OpenAI mode. Stop the process with Ctrl+C to revoke access.
 
 To use parallel workspaces, create separate worktrees and run one process in
