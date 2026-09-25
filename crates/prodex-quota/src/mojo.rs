@@ -87,12 +87,3 @@ pub(super) fn openai_model_capacity_plan(
     prodex_mojo_core::quota::openai_model_capacity_plan(input)
         .expect("Mojo OpenAI model capacity planning failed")
 }
-pub(super) fn quota_error_summary_kind(value: &str) -> i64 {
-    prodex_mojo_core::quota::quota_error_summary_kind(value)
-        .expect("Mojo quota error summary classification failed")
-}
-
-pub(super) fn blocked_limit_kind(value: &str) -> i64 {
-    prodex_mojo_core::quota::blocked_limit_kind(value)
-        .expect("Mojo blocked quota status classification failed")
-}
