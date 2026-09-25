@@ -2644,7 +2644,6 @@ dependencies = [
 name = "prodex-domain"
 version = "0.431.7"
 dependencies = [
- "prodex-mojo-core",
  "serde",
  "serde_json",
  "uuid",
@@ -2676,7 +2675,6 @@ version = "0.431.7"
 name = "prodex-observability"
 version = "0.431.7"
 dependencies = [
- "prodex-domain",
  "prodex-mojo-core",
 ]
 

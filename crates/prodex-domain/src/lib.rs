@@ -3,10 +3,8 @@
 
 mod governance;
 mod ids;
-mod observability;
 mod secrets;
 
 pub use governance::*;
 pub use ids::*;
-pub use observability::*;
 pub use secrets::*;

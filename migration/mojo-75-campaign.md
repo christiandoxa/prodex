@@ -839,3 +839,28 @@ authority, no-fallback, and production-share guards, and `git diff --check`.
 The canonical broad inventory is 51,375 reachable Mojo LOC and 196,826 Rust
 production LOC, or 20.70% Mojo. The 75% project target remains unmet; 539,103
 additional Mojo LOC are estimated at current Rust volume.
+
+## Telemetry metric-label ownership cleanup
+
+`TelemetryAttribute` and its differential tests now live in
+`prodex-observability`, their only in-repository consumer. The application uses
+the observability-owned path. `prodex-domain` no longer depends on
+`prodex-mojo-core` or exports telemetry types; its disabled Mojo governance
+blocks are removed. `prodex-observability` no longer depends on the domain crate
+and keeps its Mojo bridge optional behind the existing feature.
+
+The observability boundary guard now checks the live crate API, nested metric
+label module, Mojo ABI mapping, privacy validator, and active metric names. It
+retains the legacy plan checks for the former source layout. Feature-off and
+Mojo tests preserve safe-label, sensitive-key, identifier, and redaction
+behavior. Mojo boundary errors remain fail-closed.
+
+Validation passes: `cargo fmt --all -- --check`, domain and observability tests
+with Mojo disabled and enabled, the feature-on `prodex-app` check, workspace
+all-target/all-feature Clippy, `npm run docs`, `npm run test:changed`, crate,
+domain, and observability boundary guards, Mojo ownership and authority guards,
+the no-fallback and production-share guards, and `git diff --check`.
+
+The canonical broad inventory is 51,375 reachable Mojo LOC and 196,784 Rust
+production LOC, or 20.70% Mojo. The 75% project target remains unmet; 538,977
+additional Mojo LOC are estimated at current Rust volume.

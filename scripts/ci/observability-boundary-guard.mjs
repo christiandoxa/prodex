@@ -9,7 +9,7 @@ const repoRoot = path.resolve(scriptDir, "..", "..");
 
 const OBS_MANIFEST = "crates/prodex-observability/Cargo.toml";
 const OBS_SRC_DIR = "crates/prodex-observability/src";
-const ALLOWED_DEPENDENCIES = new Set(["prodex_domain"]);
+const ALLOWED_DEPENDENCIES = new Set(["prodex_mojo_core"]);
 const ALLOWED_DEV_DEPENDENCIES = new Set([]);
 const FORBIDDEN_DEPENDENCIES = new Set([
   "anyhow",
@@ -729,6 +729,117 @@ const REQUIRED_SOURCE_SNIPPETS = Object.freeze([
   "persistence_result_label(result)",
 ]);
 
+const CURRENT_OBSERVABILITY_SOURCE_SNIPPETS = Object.freeze([
+  "mod metric_label;",
+  "pub use metric_label::{TelemetryAttribute, TelemetryAttributeError};",
+  "#[cfg(feature = \"mojo\")]\nmod mojo;",
+  "#[cfg(not(feature = \"mojo\"))]\nmod rust;",
+  "pub struct TelemetryAttribute",
+  "pub enum TelemetryAttributeError",
+  "pub fn metric_label(key: impl Into<String>, value: impl Into<String>) -> Self",
+  "pub fn as_metric_label(&self) -> Result<(&str, &str), TelemetryAttributeError>",
+  "prodex_mojo_core::observability::validate_telemetry_metric_label(",
+  "Ok(Validation::InvalidValue) | Err(_) => Err(TelemetryAttributeError::InvalidValue)",
+  "validate_telemetry_metric_label_rust(&self.key, &self.value)",
+  "fn invalid_label_key(key: &str) -> bool",
+  '"tenant_id"',
+  '"user_id"',
+  '"principal_id"',
+  '"request_id"',
+  '"call_id"',
+  '"virtual_key"',
+  '"api_key"',
+  '"prompt"',
+  "let uuid = bytes.len() == 36",
+  "let hex_id = bytes.len() == 32",
+  "uuid || hex_id",
+  '.field("value", &"<redacted>")',
+  "pub enum ApiRouteKind",
+  "pub enum ApiStatusClass",
+  "pub enum ApiAdmissionResult",
+  "pub struct ApiRedMetricPlan",
+  "pub struct ApiAdmissionMetricPlan",
+  "pub fn plan_api_red_metric(",
+  "pub fn plan_api_admission_metric(",
+  "pub enum ProviderKind",
+  "pub enum ProviderResultClass",
+  "pub struct ProviderMetricPlan",
+  "pub fn plan_provider_metric(",
+  "pub enum SecretProviderBackend",
+  "pub enum SecretProviderOperation",
+  "pub enum SecretProviderResult",
+  "pub struct SecretProviderMetricPlan",
+  "pub fn plan_secret_provider_metric(",
+  "pub enum InspectionStage",
+  "pub enum InspectionCoverageClass",
+  "pub enum InspectionFindingCategory",
+  "pub enum InspectionMaskingAction",
+  "pub enum InspectionOutcome",
+  "pub struct InspectionMetricPlan",
+  "pub fn plan_inspection_metric(",
+  "duration_micros: duration_micros.min(120_000_000)",
+  "prodex_mojo_core::observability::plan_label_spec(",
+  "prodex_mojo_core::observability::metric_name(plan as i64, slot as i64)",
+  "rust::planned_metric_label(plan, slot, value)",
+]);
+
+const CURRENT_KERNEL_SOURCE_CONTRACTS = Object.freeze([
+  {
+    sourcePath: "crates/prodex-mojo-core/src/observability.rs",
+    snippets: Object.freeze([
+      "fn prodex_mojo_observability_metric_label_validate_v1(",
+      "pub fn validate_telemetry_metric_label(",
+      "match output_tag {",
+      "0 => Ok(TelemetryMetricLabelValidation::Valid)",
+      "1 => Ok(TelemetryMetricLabelValidation::InvalidKey)",
+      "2 => Ok(TelemetryMetricLabelValidation::InvalidValue)",
+      "_ => Err(MojoError::InvalidOutput)",
+    ]),
+  },
+  {
+    sourcePath: "mojo/prodex_core/telemetry_label.mojo",
+    snippets: Object.freeze([
+      "comptime TELEMETRY_LABEL_ABI_VERSION: Int64 = 1",
+      "comptime TELEMETRY_LABEL_MAX_BYTES: Int64 = 128",
+      "def telemetry_label_ascii_graphic(",
+      "if length <= 0 or length > TELEMETRY_LABEL_MAX_BYTES:",
+      "if byte < 33 or byte > 126:",
+      'StringSlice("tenant_id")',
+      'StringSlice("user_id")',
+      'StringSlice("principal_id")',
+      'StringSlice("request_id")',
+      'StringSlice("call_id")',
+      'StringSlice("virtual_key")',
+      'StringSlice("api_key")',
+      'StringSlice("prompt")',
+      "def telemetry_label_value_is_uuid(",
+      "if length != 36:",
+      "def telemetry_label_value_is_hex_id(",
+      "if length != 32:",
+      '@export("prodex_mojo_observability_metric_label_validate_v1")',
+      "if telemetry_label_key_invalid(key, key_length):",
+      "or telemetry_label_value_is_uuid(",
+      "or telemetry_label_value_is_hex_id(",
+    ]),
+  },
+  {
+    sourcePath: "mojo/prodex_core/observability_labels.mojo",
+    snippets: Object.freeze([
+      "comptime OBSERVABILITY_LABEL_ABI_VERSION: Int64 = 1",
+      '@export("prodex_mojo_observability_metric_name_v1")',
+      '@export("prodex_mojo_observability_plan_label_spec_v1")',
+      'StringSlice("prodex_api_admission_decisions_total")',
+      'StringSlice("prodex_api_requests_total")',
+      'StringSlice("prodex_api_request_duration_ms")',
+      'StringSlice("prodex_secret_provider_operations_total")',
+      'StringSlice("prodex_provider_requests_total")',
+      'StringSlice("prodex_provider_request_duration_ms")',
+      'StringSlice("prodex_inspection_events_total")',
+      'StringSlice("prodex_inspection_duration_microseconds")',
+    ]),
+  },
+]);
+
 function sorted(values) {
   return [...values].sort((left, right) => left.localeCompare(right));
 }
@@ -745,6 +856,13 @@ export function validateObservabilityManifest(tomlText, manifestPath = OBS_MANIF
     if (FORBIDDEN_DEPENDENCIES.has(dep)) {
       errors.push(`${manifestPath}: prodex-observability cannot depend on forbidden telemetry/runtime/framework crate '${dep}'`);
     }
+  }
+  const mojoCoreDependency = tomlText.match(/^\s*prodex_mojo_core\s*=\s*\{([^}]*)\}\s*$/mu);
+  if (!mojoCoreDependency || !/\boptional\s*=\s*true\b/u.test(mojoCoreDependency[1])) {
+    errors.push(`${manifestPath}: prodex-mojo-core must remain optional`);
+  }
+  if (!tomlText.includes("\"dep:prodex_mojo_core\"") || !tomlText.includes("\"prodex_mojo_core/mojo-observability\"")) {
+    errors.push(`${manifestPath}: the mojo feature must enable optional prodex-mojo-core observability`);
   }
   for (const dep of devDependencies) {
     if (!ALLOWED_DEV_DEPENDENCIES.has(dep)) {
@@ -774,9 +892,13 @@ export function validateObservabilitySource(sourceText, sourcePath = "source.rs"
   return errors;
 }
 
-export function validateRequiredObservabilityContracts(sourceText, sourcePath = "source.rs") {
+export function validateRequiredObservabilityContracts(
+  sourceText,
+  sourcePath = "source.rs",
+  requiredSnippets = REQUIRED_SOURCE_SNIPPETS,
+) {
   const errors = [];
-  for (const snippet of REQUIRED_SOURCE_SNIPPETS) {
+  for (const snippet of requiredSnippets) {
     if (!sourceText.includes(snippet)) {
       errors.push(`${sourcePath}: missing required observability contract '${snippet}'`);
     }
@@ -814,7 +936,20 @@ async function validateSources() {
       errors.push(...validateObservabilityCrateRoot(source, path.relative(repoRoot, file)));
     }
   }
-  errors.push(...validateRequiredObservabilityContracts(crateSource.join("\n"), OBS_SRC_DIR));
+  const combinedSource = crateSource.join("\n");
+  if (combinedSource.includes("pub use metric_label::{TelemetryAttribute, TelemetryAttributeError};")) {
+    errors.push(...validateRequiredObservabilityContracts(
+      combinedSource,
+      OBS_SRC_DIR,
+      CURRENT_OBSERVABILITY_SOURCE_SNIPPETS,
+    ));
+    for (const { sourcePath, snippets } of CURRENT_KERNEL_SOURCE_CONTRACTS) {
+      const source = await fs.readFile(path.join(repoRoot, sourcePath), "utf8");
+      errors.push(...validateRequiredObservabilityContracts(source, sourcePath, snippets));
+    }
+  } else {
+    errors.push(...validateRequiredObservabilityContracts(combinedSource, OBS_SRC_DIR));
+  }
   return errors;
 }
 
@@ -827,10 +962,21 @@ const valid = `
 [package]
 name = "prodex-observability"
 
+[features]
+mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-observability"]
+
 [dependencies]
-prodex_domain = { workspace = true }
+prodex_mojo_core = { workspace = true, optional = true }
 `;
   assertSelfTest(validateObservabilityManifest(valid, "valid/Cargo.toml").length === 0, "valid manifest rejected");
+  assertSelfTest(
+    validateObservabilityManifest(valid.replace("optional = true", "optional = false"), "required-mojo/Cargo.toml").some((error) => error.includes("must remain optional")),
+    "mandatory Mojo dependency accepted",
+  );
+  assertSelfTest(
+    validateObservabilityManifest(valid.replace(', "prodex_mojo_core/mojo-observability"', ""), "missing-feature/Cargo.toml").some((error) => error.includes("mojo feature")),
+    "Mojo feature without observability ABI accepted",
+  );
   assertSelfTest(
     validateObservabilityManifest(`${valid}\nopentelemetry = "0.27"\n`, "invalid/Cargo.toml").some((error) => error.includes("opentelemetry")),
     "forbidden opentelemetry dependency accepted",
@@ -1646,6 +1792,30 @@ fn persistence_result_label(result: PersistenceResult) {}
       error.includes("jwks_cache_state"),
     ),
     "missing JWKS state label contract accepted",
+  );
+  assertSelfTest(
+    validateRequiredObservabilityContracts(
+      CURRENT_OBSERVABILITY_SOURCE_SNIPPETS.join("\n"),
+      OBS_SRC_DIR,
+      CURRENT_OBSERVABILITY_SOURCE_SNIPPETS,
+    ).length === 0,
+    "current observability source contracts rejected",
+  );
+  assertSelfTest(
+    validateRequiredObservabilityContracts(
+      "mod metric_label;",
+      OBS_SRC_DIR,
+      CURRENT_OBSERVABILITY_SOURCE_SNIPPETS,
+    ).some((error) => error.includes("validate_telemetry_metric_label")),
+    "missing Mojo telemetry validator accepted",
+  );
+  assertSelfTest(
+    validateRequiredObservabilityContracts(
+      "",
+      "mojo/prodex_core/telemetry_label.mojo",
+      CURRENT_KERNEL_SOURCE_CONTRACTS[1].snippets,
+    ).some((error) => error.includes('StringSlice("tenant_id")')),
+    "missing Mojo tenant-label rejection accepted",
   );
 }
 
