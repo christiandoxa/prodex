@@ -121,7 +121,7 @@ test("native builds link strict runtime archives while the real Mojo lane owns a
   assert.doesNotMatch(full, /--all-features/);
   assert.match(linuxArchive[0], /PRODEX_MOJO_REQUIRED=1/);
   assert.match(linuxArchive[0], /cargo build --release --locked --target .* -p prodex-mojo-core/);
-  assert.match(ci, /PRODEX_MOJO_ARCHIVE: \$\{\{ github\.workspace \}\}\/target\/mojo-runtime\//);
+  assert.match(ci, /PRODEX_MOJO_ARCHIVE: \$\{\{ github\.workspace \}\}\/\.prodex-ci\/mojo-runtime\//);
   assert.match(mojoJob[0], /name: Real Mojo \/ parity/);
   assert.match(mojoJob[0], /Install pinned Mojo toolchain/);
   assert.match(mojoJob[0], /cargo clippy .* --all-features -- -D warnings/);

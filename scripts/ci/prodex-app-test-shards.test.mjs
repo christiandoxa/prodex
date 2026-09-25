@@ -198,7 +198,12 @@ test("CI consumes generated app shards and retains required safety gates", () =>
   assert.equal(processGuard.includes("node scripts/docs/smart-context-evidence.mjs --check"), false);
   assert.equal(processGuard.match(/if: matrix\.lane == 'static'/g)?.length, 6);
   assert.match(processGuard, /Download runtime Mojo archive/);
-  assert.match(processGuard, /PRODEX_MOJO_ARCHIVE: \$\{\{ github\.workspace \}\}\/target\/mojo-runtime\/x86_64-unknown-linux-gnu\/libprodex_mojo_core\.a/);
+  assert.doesNotMatch(
+    workflow,
+    /PRODEX_MOJO_ARCHIVE: \$\{\{ github\.workspace \}\}\/target\/mojo-runtime\//,
+    'prebuilt Mojo archives must stay outside target so rust-cache cannot remove them',
+  );
+  assert.match(processGuard, /PRODEX_MOJO_ARCHIVE: \$\{\{ github\.workspace \}\}\/\.prodex-ci\/mojo-runtime\/x86_64-unknown-linux-gnu\/libprodex_mojo_core\.a/);
   assert.equal(processGuard.match(/if: matrix\.lane == 'hygiene'/g)?.length, 2);
   assert.equal(processGuard.match(/if: matrix\.lane == 'enterprise-core'/g)?.length, 1);
   assert.equal(processGuard.match(/if: matrix\.lane == 'node'/g)?.length, 1);

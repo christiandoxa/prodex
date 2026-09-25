@@ -281,7 +281,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.prodex_app_matrix) }}
@@ -294,7 +294,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -354,7 +354,7 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -364,7 +364,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -475,7 +475,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-pc-windows-msvc/prodex_mojo_core.lib
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-pc-windows-msvc/prodex_mojo_core.lib
     strategy:
       fail-fast: false
       matrix:
@@ -509,7 +509,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-pc-windows-msvc
-          path: target/mojo-runtime/x86_64-pc-windows-msvc
+          path: .prodex-ci/mojo-runtime/x86_64-pc-windows-msvc
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -616,7 +616,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-pc-windows-msvc/prodex_mojo_core.lib
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-pc-windows-msvc/prodex_mojo_core.lib
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.changes.outputs.windows_prodex_app_matrix) }}
@@ -629,7 +629,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-pc-windows-msvc
-          path: target/mojo-runtime/x86_64-pc-windows-msvc
+          path: .prodex-ci/mojo-runtime/x86_64-pc-windows-msvc
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -702,7 +702,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/aarch64-apple-darwin/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/aarch64-apple-darwin/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -712,7 +712,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-aarch64-apple-darwin
-          path: target/mojo-runtime/aarch64-apple-darwin
+          path: .prodex-ci/mojo-runtime/aarch64-apple-darwin
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -807,7 +807,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -820,7 +820,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
@@ -962,7 +962,7 @@ jobs:
     env:
       RUSTC_WRAPPER: sccache
       SONAR_HOST_URL: http://127.0.0.1:9000
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     services:
       sonarqube:
@@ -980,7 +980,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -1319,7 +1319,7 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -1329,7 +1329,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -1383,7 +1383,7 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -1393,7 +1393,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -1425,7 +1425,7 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -1435,7 +1435,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -1470,7 +1470,7 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
     strategy:
       fail-fast: false
       matrix:
@@ -1504,7 +1504,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -1537,7 +1537,7 @@ jobs:
     timeout-minutes: 30
     env:
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -1547,7 +1547,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -1577,7 +1577,7 @@ jobs:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: "1"
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -1587,7 +1587,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -1642,7 +1642,7 @@ jobs:
     env:
       CARGO_PROFILE_BENCH_DEBUG: "0"
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -1652,7 +1652,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -1680,7 +1680,7 @@ jobs:
     timeout-minutes: 10
     env:
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -1690,7 +1690,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
@@ -1732,7 +1732,7 @@ jobs:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: "1"
       RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/target/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
+      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
 
     steps:
       - name: Check out repository
@@ -1742,7 +1742,7 @@ jobs:
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: target/mojo-runtime/x86_64-unknown-linux-gnu
+          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
