@@ -82,6 +82,16 @@ pub fn retarget_codex_tui_resume_args(args: &[OsString], session_id: &str) -> Ve
     .0
 }
 
+pub fn retarget_codex_exec_resume_args(args: &[OsString], session_id: &str) -> Vec<OsString> {
+    super::args_mojo::plan(
+        args,
+        LaunchArgumentOperation::RetargetExec,
+        false,
+        Some(session_id),
+    )
+    .0
+}
+
 pub fn is_codex_exec_invocation(args: &[OsString]) -> bool {
     super::args_mojo::inspect(args).is_exec
 }

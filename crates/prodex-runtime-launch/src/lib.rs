@@ -1,12 +1,8 @@
-#[cfg(feature = "mojo")]
-mod args;
-#[cfg(feature = "mojo")]
-mod args_mojo;
-#[cfg(any(not(feature = "mojo"), test))]
-mod args_oracle;
 #[cfg(not(feature = "mojo"))]
-use args_oracle as args;
-mod args_resume;
+compile_error!("prodex-runtime-launch requires the Mojo launch planner");
+
+mod args;
+mod args_mojo;
 mod child;
 mod dry_run;
 mod profile;
@@ -19,7 +15,6 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 pub use self::args::*;
-pub use self::args_resume::*;
 pub use self::child::*;
 pub use self::dry_run::*;
 pub use self::profile::*;
