@@ -390,6 +390,39 @@ fn gemini_provider_core_shapes_completed_stream_tool_call_items() {
     assert_eq!(search["type"], "tool_search_call");
     assert_eq!(search["call_id"], "call_search");
     assert_eq!(search["arguments"]["query"], "sqz tools");
+
+    assert_eq!(
+        gemini_provider_core_stream_completed_tool_call_item(
+            "call_patch",
+            "apply_patch",
+            r#"{"input":"*** Begin Patch\n*** End Patch"}"#,
+            None,
+            false,
+        ),
+        json!({
+            "type": "custom_tool_call",
+            "call_id": "call_patch",
+            "name": "apply_patch",
+            "input": "*** Begin Patch\n*** End Patch",
+        })
+    );
+
+    assert_eq!(
+        gemini_provider_core_stream_completed_tool_call_item(
+            "call_namespaced",
+            "mcp__prodex_sqz__compress",
+            "{}",
+            None,
+            false,
+        ),
+        json!({
+            "type": "function_call",
+            "call_id": "call_namespaced",
+            "name": "compress",
+            "arguments": "{}",
+            "namespace": "mcp__prodex_sqz",
+        })
+    );
 }
 
 #[test]
@@ -603,6 +636,10 @@ fn gemini_provider_core_shapes_stream_response_value() {
             "metadata": {"gemini": {"finishReason": "STOP"}},
         })
     );
+    assert_eq!(
+        gemini_provider_core_stream_response_value("resp_empty", Vec::new(), None, None, None),
+        json!({"id": "resp_empty", "output": []})
+    );
 }
 
 #[test]
@@ -761,6 +798,10 @@ fn gemini_provider_core_stream_transform_rejects_invalid_and_unsupported_events(
         invalid.status(),
         crate::translator::TransformStatus::Rejected { .. }
     ));
+    assert_eq!(
+        invalid.status().reason(),
+        Some("failed to parse Gemini SSE JSON")
+    );
 
     let unsupported = translator.transform_stream_event(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -772,4 +813,11 @@ fn gemini_provider_core_stream_transform_rejects_invalid_and_unsupported_events(
         unsupported.status(),
         crate::translator::TransformStatus::Unsupported { .. }
     ));
+    assert_eq!(
+        unsupported.status().reason(),
+        Some("Gemini SSE event does not contain a supported text or function-call delta")
+    );
 }
+
+#[path = "gemini_stream_tests.rs"]
+mod stream_expected;

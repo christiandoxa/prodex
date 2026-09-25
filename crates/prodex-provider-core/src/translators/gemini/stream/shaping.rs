@@ -6,10 +6,8 @@ use super::{
 };
 use serde_json::{Value, json};
 
-#[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{GeminiResponseKernelInput, GeminiResponseKernelOperation};
 
-#[cfg(feature = "mojo")]
 fn gemini_stream_identifier(
     operation: GeminiResponseKernelOperation,
     request_id: u64,
@@ -25,58 +23,43 @@ fn gemini_stream_identifier(
 }
 
 pub fn gemini_provider_core_stream_output_text_item_id(request_id: u64) -> String {
-    #[cfg(feature = "mojo")]
-    return gemini_stream_identifier(
+    gemini_stream_identifier(
         GeminiResponseKernelOperation::StreamOutputTextItemId,
         request_id,
         0,
-    );
-    #[cfg(not(feature = "mojo"))]
-    format!("msg_gemini_{request_id}")
+    )
 }
 
 pub fn gemini_provider_core_stream_media_item_id(request_id: u64) -> String {
-    #[cfg(feature = "mojo")]
-    return gemini_stream_identifier(
+    gemini_stream_identifier(
         GeminiResponseKernelOperation::StreamMediaItemId,
         request_id,
         0,
-    );
-    #[cfg(not(feature = "mojo"))]
-    format!("msg_gemini_media_{request_id}")
+    )
 }
 
 pub fn gemini_provider_core_stream_citation_item_id(request_id: u64) -> String {
-    #[cfg(feature = "mojo")]
-    return gemini_stream_identifier(
+    gemini_stream_identifier(
         GeminiResponseKernelOperation::StreamCitationItemId,
         request_id,
         0,
-    );
-    #[cfg(not(feature = "mojo"))]
-    format!("msg_gemini_citations_{request_id}")
+    )
 }
 
 pub fn gemini_provider_core_stream_fallback_response_id(request_id: u64) -> String {
-    #[cfg(feature = "mojo")]
-    return gemini_stream_identifier(
+    gemini_stream_identifier(
         GeminiResponseKernelOperation::StreamFallbackResponseId,
         request_id,
         0,
-    );
-    #[cfg(not(feature = "mojo"))]
-    format!("resp_gemini_{request_id}")
+    )
 }
 
 pub fn gemini_provider_core_stream_fallback_tool_call_id(request_id: u64, index: usize) -> String {
-    #[cfg(feature = "mojo")]
-    return gemini_stream_identifier(
+    gemini_stream_identifier(
         GeminiResponseKernelOperation::StreamFallbackToolCallId,
         request_id,
         index,
-    );
-    #[cfg(not(feature = "mojo"))]
-    format!("call_gemini_{request_id}_{index}")
+    )
 }
 
 pub fn gemini_provider_core_stream_function_call_delta(
@@ -90,7 +73,6 @@ pub fn gemini_provider_core_stream_function_call_delta(
     let name = value.get("name").and_then(Value::as_str);
     let arguments = value.get("args").cloned().unwrap_or_else(|| json!({}));
     let arguments = serde_json::to_string(&arguments).unwrap_or_else(|_| "{}".to_string());
-    #[cfg(feature = "mojo")]
     {
         let mut input =
             GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamFunctionCallDelta);
@@ -117,15 +99,8 @@ pub fn gemini_provider_core_stream_function_call_delta(
                 .to_string(),
         }
     }
-    #[cfg(not(feature = "mojo"))]
-    GeminiProviderCoreStreamFunctionCallDelta {
-        explicit_call_id,
-        name: name.unwrap_or("tool_call").to_string(),
-        arguments,
-    }
 }
 
-#[cfg(feature = "mojo")]
 pub(crate) fn gemini_provider_core_stream_chat_tool_call_item(
     tool_call: &GeminiProviderCoreStreamToolCall,
 ) -> Value {
@@ -146,7 +121,6 @@ pub fn gemini_provider_core_stream_tool_call(
     arguments: &str,
     thought_signature: Option<&str>,
 ) -> GeminiProviderCoreStreamToolCall {
-    #[cfg(feature = "mojo")]
     {
         let mut input =
             GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamToolCall);
@@ -178,15 +152,6 @@ pub fn gemini_provider_core_stream_tool_call(
                 .map(str::to_string),
         }
     }
-    #[cfg(not(feature = "mojo"))]
-    GeminiProviderCoreStreamToolCall {
-        call_id: call_id.map(str::to_string).unwrap_or_else(|| {
-            gemini_provider_core_stream_fallback_tool_call_id(request_id, index)
-        }),
-        name: name.unwrap_or("tool_call").to_string(),
-        arguments: arguments.to_string(),
-        thought_signature: thought_signature.map(str::to_string),
-    }
 }
 
 pub fn gemini_provider_core_stream_tool_call_ids(
@@ -200,7 +165,6 @@ pub fn gemini_provider_core_stream_tool_call_ids(
 }
 
 pub fn gemini_provider_core_stream_should_emit_function_call_arguments_delta(name: &str) -> bool {
-    #[cfg(feature = "mojo")]
     {
         let mut input = GeminiResponseKernelInput::new(
             GeminiResponseKernelOperation::StreamShouldEmitArgumentsDelta,
@@ -210,8 +174,6 @@ pub fn gemini_provider_core_stream_should_emit_function_call_arguments_delta(nam
             .as_bool()
             .unwrap_or_else(|| panic!("Mojo Gemini stream emission kernel returned a non-boolean"))
     }
-    #[cfg(not(feature = "mojo"))]
-    !matches!(name, "tool_search" | "apply_patch")
 }
 
 pub fn gemini_provider_core_function_call_arguments_delta_event_with_thought_signature(
@@ -278,32 +240,44 @@ pub fn gemini_provider_core_stream_completed_tool_call_item(
     blocked: bool,
 ) -> Value {
     if blocked {
-        return crate::gemini_provider_core_blocked_tool_call_item(arguments);
+        return super::gemini_provider_core_stream_output_message_item(vec![
+            super::gemini_provider_core_stream_output_text_content(arguments),
+        ]);
     }
-    if let Ok(arguments_value) = serde_json::from_str::<Value>(arguments) {
-        let mut function_call = json!({
-            "name": name,
-            "args": arguments_value,
-        });
-        if let Some(signature) = thought_signature {
-            function_call["thoughtSignature"] = Value::String(signature.to_string());
-        }
-        return super::super::gemini_response_tool_call_item_with_call_id(
-            &json!({}),
-            &function_call,
-            Some(call_id),
-        );
+    let Ok(arguments_value) = serde_json::from_str::<Value>(arguments) else {
+        let mut input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::RawFunctionCallItem);
+        input.call_id = Some(call_id);
+        input.name = Some(name);
+        input.arguments = Some(arguments);
+        input.signature = thought_signature;
+        return super::gemini_mojo_value(input);
+    };
+    if name == "tool_search" {
+        let arguments = serde_json::to_string(&arguments_value).expect("tool arguments serialize");
+        let mut input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::ToolSearchCallItem);
+        input.call_id = Some(call_id);
+        input.arguments = Some(&arguments);
+        return super::gemini_mojo_value(input);
     }
-    let mut part = json!({});
-    if let Some(signature) = thought_signature {
-        part["thoughtSignature"] = Value::String(signature.to_string());
+    if name == "apply_patch" {
+        let arguments = super::super::gemini_custom_apply_patch_input(&arguments_value);
+        let mut input =
+            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::CustomToolCallItem);
+        input.call_id = Some(call_id);
+        input.name = Some(name);
+        input.arguments = Some(&arguments);
+        return super::gemini_mojo_value(input);
     }
-    super::super::gemini_response_tool_call_raw_item_with_call_id(
-        &part,
-        name,
-        arguments,
-        Some(call_id),
-    )
+    let arguments = serde_json::to_string(&arguments_value).expect("tool arguments serialize");
+    let arguments = gemini_provider_core_stream_completed_tool_call_arguments(name, &arguments);
+    let mut input = GeminiResponseKernelInput::new(GeminiResponseKernelOperation::FunctionCallItem);
+    input.call_id = Some(call_id);
+    input.name = Some(name);
+    input.arguments = Some(&arguments);
+    input.signature = thought_signature;
+    super::gemini_mojo_value(input)
 }
 
 pub fn gemini_provider_core_stream_tool_call_added_item(
@@ -311,24 +285,21 @@ pub fn gemini_provider_core_stream_tool_call_added_item(
     name: &str,
     thought_signature: Option<&str>,
 ) -> Option<Value> {
-    let mut function_call = json!({
-        "name": name,
-    });
-    if let Some(signature) = thought_signature {
-        function_call["thoughtSignature"] = Value::String(signature.to_string());
+    if !gemini_provider_core_stream_should_emit_function_call_arguments_delta(name) {
+        return None;
     }
-    super::super::gemini_response_tool_call_added_item_with_call_id(
-        &json!({}),
-        &function_call,
-        Some(call_id),
-    )
+    let mut input =
+        GeminiResponseKernelInput::new(GeminiResponseKernelOperation::AddedFunctionCallItem);
+    input.call_id = Some(call_id);
+    input.name = Some(name);
+    input.signature = thought_signature;
+    Some(super::gemini_mojo_value(input))
 }
 
 pub fn gemini_provider_core_stream_response_id_from_chunk(
     current_response_id: &str,
     value: &Value,
 ) -> Option<String> {
-    #[cfg(feature = "mojo")]
     {
         let candidate = value
             .get("responseId")
@@ -340,13 +311,6 @@ pub fn gemini_provider_core_stream_response_id_from_chunk(
         input.call_id = candidate;
         super::gemini_mojo_value(input).as_str().map(str::to_string)
     }
-    #[cfg(not(feature = "mojo"))]
-    value
-        .get("responseId")
-        .or_else(|| value.get("id"))
-        .and_then(Value::as_str)
-        .filter(|_| current_response_id.starts_with("resp_gemini_"))
-        .map(str::to_string)
 }
 
 pub fn gemini_provider_core_stream_chunk_metadata(
