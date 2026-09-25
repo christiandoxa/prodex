@@ -21,6 +21,7 @@ from rich_types import (
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
+comptime RICH_MAX_FALLBACK_MODEL_BYTES: Int64 = 9_223_372_036_854_775_807
 comptime RICH_MAX_FALLBACK_MODELS: Int64 = 2_048
 comptime RICH_MAX_FALLBACK_INPUTS: Int64 = 256
 comptime RICH_STATUS_OK: Int64 = 0
@@ -343,7 +344,7 @@ def prodex_mojo_rich_model_fallback_v2(
     ](unsafe_from_address=Int(model_address))
     var provider = provider_ptr[].copy()
     var model = model_ptr[].copy()
-    if record_capacity < 0 or record_capacity > RICH_MAX_FALLBACK_MODELS or not rich_view_valid(provider, RICH_MAX_IDENTIFIER_BYTES) or not rich_view_valid(model, RICH_MAX_IDENTIFIER_BYTES):
+    if record_capacity < 0 or not rich_view_valid(provider, RICH_MAX_IDENTIFIER_BYTES) or not rich_view_valid(model, RICH_MAX_FALLBACK_MODEL_BYTES) or record_capacity > 32 and UInt(record_capacity - 32) > model.len:
         return RICH_STATUS_INVALID
     if output_records_address == 0 or output_address == 0 or hash_slots_address == 0:
         return RICH_STATUS_INVALID
@@ -364,6 +365,7 @@ def prodex_mojo_rich_model_fallback_v2(
     var written: Int64 = 0
     var records: Int64 = 0
     if not fallback_add_chain(provider, model, output_records, Pointer(to=records), output, output_capacity, Pointer(to=written), hash_slots, hash_capacity):
+        result_ptr[].required_records = records + 1
         result_ptr[].required_output = written + 256
         return RICH_STATUS_CAPACITY
     result_ptr[].records_written = records
