@@ -8,6 +8,7 @@ mod response_tool_calls_apply_patch;
 mod rtk;
 
 pub(crate) use self::chat::gemini_chat_assistant_tool_call_item_with_call_id;
+pub(crate) use self::chat::gemini_chat_assistant_tool_call_with_call_id;
 use self::rtk::gemini_rtk_wrapped_tool_arguments;
 
 pub(super) fn gemini_response_tool_call_item(part: &Value, function_call: &Value) -> Value {

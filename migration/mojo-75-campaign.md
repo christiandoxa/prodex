@@ -893,3 +893,26 @@ Validation passes:
 The canonical broad inventory is 51,569 reachable Mojo LOC and 197,051 Rust
 production LOC, or 20.742096371973293% Mojo. The 75% target remains unmet;
 539,584 additional Mojo LOC are estimated at current Rust volume.
+
+## Gemini chat response message shaping reuse wave
+
+The live buffered Gemini rewrite consumer,
+`runtime_gemini_generate_buffered_response_parts`, now routes assembled chat
+assistant messages through the existing `StreamAssistantMessage` operation
+(operation 29) and tool-call items through `ChatFunctionCallItem` (operation
+21) in `prodex_mojo_gemini_response_kernel_v1`. No Mojo operation or ABI
+version was added. Rust retains provider-part collection, the blocked-tool
+callback, and typed tool-call input normalization. A raw string
+`functionCall.id` still takes precedence over the generated fallback, including
+empty and whitespace-only values. Feature-off builds retain Rust shaping; Mojo
+errors do not trigger Rust recomputation.
+
+Validation passes: provider-core tests with Mojo disabled (216) and enabled
+(254 passed, two ignored), the Mojo-enabled `prodex-app` Gemini filter (179),
+workspace all-target/all-feature Clippy, formatting, docs, changed tests,
+Mojo ownership/authority/no-fallback/production-share checks, the
+secret-boundary guard, and `git diff --check`.
+
+The canonical broad inventory is 51,569 reachable Mojo LOC and 197,032 Rust
+production LOC, or 20.743681642471270% Mojo. The 75% target remains unmet;
+539,527 additional Mojo LOC are estimated at current Rust volume.
