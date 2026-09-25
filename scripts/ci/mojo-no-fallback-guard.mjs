@@ -31,10 +31,10 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/quota.rs",
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs",
-  "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-quota/src/selection/scoring.rs",
   "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
   "crates/prodex-runtime-launch/src/args.rs",
@@ -100,6 +100,11 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
   "crates/prodex-runtime-proxy/src/response_forwarding.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
+  "crates/prodex-runtime-proxy/src/health/score.rs",
+  "crates/prodex-runtime-proxy/src/health/latency.rs",
+  "crates/prodex-runtime-proxy/src/health/inflight.rs",
+  "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
   "crates/prodex-quota/src/render/pool.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
@@ -130,6 +135,12 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-quota/src/render/windows.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
+  "crates/prodex-runtime-proxy/src/health/score.rs",
+  "crates/prodex-runtime-proxy/src/health/latency.rs",
+  "crates/prodex-runtime-proxy/src/health/inflight.rs",
+  "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
+  "crates/prodex-quota/src/render/model_capacity.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs",
@@ -399,6 +410,23 @@ function selfTest() {
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn old_stream() {}']])[0], /feature-off Rust path/u);
+  assert.match(findViolations([[GEMINI_TOOL_CALLS_FILE,
+    "fn gemini_split_flat_namespace_tool_name() {}"]]).join("\n"),
+    /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[GEMINI_CHAT_TOOL_CALLS_FILE,
+    'let mut item = json!({"type":"function"});']]).join("\n"),
+    /replaced Rust semantic implementation/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
+    '#[cfg(not(feature = "mojo"))] fn old_estimator() {}']])[0], /feature-off Rust path/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/health/score.rs",
+    "fn effective_score_rust() {}"]]).join("\n"), /Rust semantic oracle or copy/u);
+  assert.match(findViolations([[QUOTA_MODEL_CAPACITY_FILE,
+    "fn normalized_identifier() {}"]]).join("\n"), /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[HEALTH_ABI_TEST_FILE,
+    "fn effective() {}"]]).join("\n"), /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[DEEPSEEK_RESPONSE_FILE,
+    '#[cfg(not(feature = "mojo"))] pub(super) fn deepseek_stream_event_from_chat_value() {}']]).join("\n"),
+    /replaced Rust semantic implementation/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/schema/composition.rs",
     "fn collapse_schema_union() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([[SUPER_OVERRIDE_FILE,

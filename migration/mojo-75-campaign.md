@@ -234,7 +234,8 @@ OpenAI model classification and model-aware quota routing now use a production-a
 Mojo policy in `quota.mojo`. The kernel owns normalized Luna/Spark identity, Luna-reserve
 identifier matching, regular-versus-reserve selection, unknown-Luna-capacity classification,
 ready-limit decisions, and the code-review gate. Rust retains provider JSON acquisition,
-borrowed `WindowPair` reconstruction, account-identity comparison, and the feature-off oracle.
+borrowed `WindowPair` reconstruction and account-identity comparison. A later
+hard-replacement checkpoint removed the feature-off oracle.
 
 The boundary is exercised by the existing quota integration suite plus new direct parity
 coverage: normalized identifier fixtures, Luna-reserve identity cases, and all 2,048
@@ -365,9 +366,9 @@ Mojo-authoritative by-key scoring path. The duplicate Rust implementations for m
 coupling, performance, aggregate sort-key scoring, and their map-only effective-score helpers
 were deleted rather than retained as a second production implementation.
 
-Feature-on tests now verify the map adapter produces the same result as the canonical by-key Mojo
-path, while the remaining feature-off compatibility implementation is limited to the explicit
-non-Mojo build path. Focused Mojo/default tests, all-target runtime-proxy Clippy, size guard,
+Feature-on tests verified the map adapter against the canonical by-key Mojo
+path. A later checkpoint deleted the remaining feature-off compatibility
+implementation. Focused Mojo/default tests, all-target runtime-proxy Clippy, size guard,
 production-share, authority, and no-fallback guards pass with Mojo 1.1.0.
 
 The canonical broad inventory at this checkpoint is 48,959 reachable Mojo LOC and 196,734 Rust
@@ -586,12 +587,13 @@ library tests, and all-target Clippy with warnings denied for both crates. The c
 broad inventory is 50,203 reachable Mojo LOC and 196,676 Rust production LOC, or
 20.335063% Mojo.
 
-## Runtime health Rust-oracle deletion wave
+## Runtime health feature-off replacement wave
 
 The runtime-proxy health scorer, latency policy, inflight limits, and bump/recovery
 decisions now use their existing `runtime_health.mojo` owners unconditionally. The
-feature-off Rust implementations were removed; the exact pre-migration Rust formulas
-remain under `#[cfg(test)]` as direct Mojo differential oracles.
+feature-off Rust implementations were removed. The exact pre-migration Rust
+formulas served as temporary differential oracles and were deleted in a later
+checkpoint.
 
 `prodex_mojo_core/mojo-runtime` is already a mandatory runtime-proxy dependency after
 the preceding backoff wave, so these paths no longer need a feature-gated fallback.
@@ -798,7 +800,8 @@ DeepSeek chat SSE events now pass their parsed JSON tree through operation 2 of
 `prodex_mojo_openai_chat_response_v1`. Mojo owns first-choice and first-tool
 delta selection, tool-over-text precedence, call-ID inclusion, and complete
 Responses SSE event serialization. Rust retains framing, UTF-8 decoding, JSON
-parsing, `[DONE]` handling, result mapping, and the feature-off Rust oracle.
+parsing, `[DONE]` handling, and result mapping. A later checkpoint deleted the
+feature-off Rust oracle.
 Invalid first tool deltas remain unsupported without text fallback; missing
 text remains an empty text delta. Mojo errors do not trigger Rust recomputation.
 
@@ -1155,3 +1158,36 @@ and **196,327 Rust production LOC**, totaling **248,111 LOC**:
 **20.87% Mojo**. The 7% release floor and non-regression check pass. The 75%
 project target remains unmet; **537,197 additional Mojo LOC** are required at
 the current Rust volume.
+
+## Capacity, provider, and runtime hard replacements
+
+OpenAI model-capacity decisions now use the existing Mojo plan in both quota
+feature modes. Rust feature-off classifiers and model-capacity test oracles were
+deleted. The no-default build still fails closed for unavailable admission
+capacity; Luna reserve model slugs now use the same Mojo normalization as the
+default build instead of the former exact-only feature-off comparison.
+
+Gemini response and chat tool-call items now use the existing Mojo response
+kernel in both feature modes. DeepSeek chat SSE translation likewise calls its
+existing Mojo kernel unconditionally. Their Rust feature-off item builders,
+DeepSeek SSE serializer, and differential oracles were deleted. Permanent
+caller-boundary tests assert complete expected JSON and SSE bytes, precedence,
+Unicode, malformed shapes, and error behavior. The shared Serde JSON document
+builder is available in both provider feature modes.
+
+Smart Context body-token estimation now calls Mojo in both runtime-proxy feature
+modes. The Rust estimator and test oracle were deleted, together with two
+unused proxy wrappers. Runtime profile-health score, latency, inflight, and
+transition Rust test oracles were also deleted; fixed expected values remain in
+proxy and Mojo ABI tests. The no-fallback guard now covers these completed
+operations. No Mojo source or ABI changed in this checkpoint.
+
+After deletion, provider-core tests pass 217 without default features and 260
+with Mojo (two ignored); quota tests pass 45 without default features and 72 by
+default. Runtime-proxy tests pass 300 without default features and 349 with
+Mojo. The 364-test serial app runtime-proxy filter and runtime smoke pass.
+
+The canonical report counts **51,784 reachable Mojo LOC** and **196,021 Rust
+production LOC**, totaling **247,805 LOC**: **20.90% Mojo**. The 7% release
+floor and non-regression check pass. The 75% project target remains unmet;
+**536,279 additional Mojo LOC** are required at the current Rust volume.

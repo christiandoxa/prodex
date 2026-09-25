@@ -188,16 +188,6 @@ pub(crate) fn quota_score_batch(
         .collect()
 }
 
-pub(crate) fn smart_context_estimate_tokens_from_body_bytes(body_bytes: u64) -> u64 {
-    prodex_mojo_core::runtime::smart_context_estimate_tokens_from_body_bytes(body_bytes)
-}
-
-pub(crate) fn smart_context_estimate_tokens_from_body(
-    body: &[u8],
-) -> Result<u64, prodex_mojo_core::MojoError> {
-    prodex_mojo_core::runtime::smart_context_estimate_tokens_from_body(body)
-}
-
 pub(crate) fn smart_context_pressure_snapshot(
     model_context_window_tokens: Option<u64>,
     reserved_output_tokens: u64,
