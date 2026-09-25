@@ -1191,3 +1191,37 @@ The canonical report counts **51,784 reachable Mojo LOC** and **196,021 Rust
 production LOC**, totaling **247,805 LOC**: **20.90% Mojo**. The 7% release
 floor and non-regression check pass. The 75% project target remains unmet;
 **536,279 additional Mojo LOC** are required at the current Rust volume.
+
+## Request and Smart Context hard replacements
+
+Kiro request validation and body rewriting now call the existing Mojo kernels in
+both provider feature modes. The in-file Rust oracle and two orphaned request
+control/validation modules were deleted. The shared Responses-to-chat request
+bridge likewise calls one Mojo transform in both modes; its Rust translator,
+validator, input-content oracle, and unused text helpers were deleted. Its
+supported-parameter report also comes from Mojo. Permanent expected-value
+fixtures cover rejection precedence, wrong types, tool history, Unicode,
+duplicate keys, ordering, and large text.
+
+DeepSeek's completed response event, output item, tool-call item, and delta JSON
+builders now call the existing Mojo kernel in both modes; five separate stream
+projection and metadata operations remain outside this wave. Smart Context
+affinity rewrite permission, rollout planning, and regression self-checks also
+use their existing Mojo kernels in both runtime-proxy feature modes. Their Rust
+feature-off algorithms and differential oracles were deleted; fixed caller
+expectations cover safety blocks, canary precedence, and saturating token math.
+The ownership and no-fallback guards reject retained Rust semantic states and
+reintroduced copies for these completed operations. An attempted Gemini request
+wave was withheld because its text-only Mojo kernel cannot yet preserve tool
+history, non-text inputs, and custom tools; the existing Gemini behavior remains.
+
+After Rust deletion, provider-core tests pass 217 cases without default features
+and 256 with Mojo (two manual tests ignored). Runtime-proxy tests pass 301
+without default features and 347 with Mojo. The 364-test serial app proxy filter,
+runtime smoke, offline upstream baseline/replay, formatter, workspace Clippy,
+Mojo ownership/authority/no-fallback, and runtime hot-path/manifest guards pass.
+
+The canonical report counts **51,784 reachable Mojo LOC** and **195,436 Rust
+production LOC**, totaling **247,220 LOC**: **20.95% Mojo**. The 7% release
+floor and non-regression check pass. The 75% project target remains unmet;
+**534,524 additional Mojo LOC** are required at the current Rust volume.

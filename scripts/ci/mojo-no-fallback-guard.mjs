@@ -35,6 +35,9 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/safety.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
   "crates/prodex-runtime-quota/src/selection/scoring.rs",
   "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
   "crates/prodex-runtime-launch/src/args.rs",
@@ -60,7 +63,11 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_response.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
-  "crates/prodex-provider-core/src/translators/openai_chat_compat_util.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_params.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_request_mojo.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_request_mojo_tests.rs",
+  "crates/prodex-provider-core/src/mojo_json.rs",
   "crates/prodex-cli/src/runtime_features.rs",
   "crates/prodex-runtime-quota/src/pressure.rs",
   "crates/prodex-runtime-store/src/continuations/status.rs",
@@ -84,8 +91,13 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
+  "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream/shaping_tests.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
+  "crates/prodex-provider-core/src/translators/kiro/request.rs",
+  "crates/prodex-provider-core/src/translators/kiro/request/semantics_tests.rs",
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
@@ -101,6 +113,9 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
   "crates/prodex-runtime-proxy/src/response_forwarding.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/safety.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
   "crates/prodex-runtime-proxy/src/health/score.rs",
   "crates/prodex-runtime-proxy/src/health/latency.rs",
   "crates/prodex-runtime-proxy/src/health/inflight.rs",
@@ -112,7 +127,13 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
+  "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
+  "crates/prodex-provider-core/src/translators/kiro/request.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_params.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_request_mojo.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_request_mojo_tests.rs",
 ]);
 const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|mojo-core|runtime-log-mojo|state-summary-mojo)"\s*\)/u;
 const ANTHROPIC_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs";
@@ -130,6 +151,12 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-runtime-launch/src/args_resume.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema/composition.rs",
+  "crates/prodex-provider-core/src/translators/kiro/request/controls.rs",
+  "crates/prodex-provider-core/src/translators/kiro/request/validation.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_request.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_request/validation.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_request/validation/input_content.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_util.rs",
 ];
 const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-context/src/critical_signal.rs",
@@ -144,12 +171,18 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/observed.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/safety.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
   "crates/prodex-runtime-tuning/src/capacity.rs",
   "crates/prodex-provider-core/src/fallback/chains.rs",
   "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_response.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
-  "crates/prodex-provider-core/src/translators/openai_chat_compat_util.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_params.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_request_mojo.rs",
+  "crates/prodex-provider-core/src/translators/openai_chat_compat_request_mojo_tests.rs",
   "crates/prodex-runtime-launch/src/args.rs",
   "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
   "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
@@ -167,8 +200,13 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
+  "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream/shaping_tests.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
+  "crates/prodex-provider-core/src/translators/kiro/request.rs",
+  "crates/prodex-provider-core/src/translators/kiro/request/semantics_tests.rs",
 ]);
 const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-app/Cargo.toml", "mojo-core"],
@@ -187,6 +225,20 @@ const QUOTA_POOL_FILE = "crates/prodex-quota/src/render/pool.rs";
 const QUOTA_MODEL_CAPACITY_FILE = "crates/prodex-quota/src/render/model_capacity.rs";
 const HEALTH_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/profile_health.rs";
 const DEEPSEEK_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/deepseek/response.rs";
+const DEEPSEEK_SHAPING_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs";
+const DEEPSEEK_SHAPING_COMPLETED_FNS = [
+  "deepseek_provider_core_response_completed_event",
+  "deepseek_provider_core_response_created_event",
+  "deepseek_provider_core_stream_output_text_item",
+  "deepseek_provider_core_stream_tool_call_added_item",
+  "deepseek_provider_core_stream_tool_call_item",
+  "deepseek_provider_core_stream_function_call_arguments_delta_source",
+  "deepseek_provider_core_stream_text_delta_source",
+  "deepseek_provider_core_output_item_added_event",
+  "deepseek_provider_core_function_call_arguments_delta_event",
+  "deepseek_provider_core_output_text_delta_event",
+  "deepseek_provider_core_output_item_done_event",
+];
 const GEMINI_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs";
 const GEMINI_CHAT_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs";
 const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
@@ -257,6 +309,16 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => HARD_REPLACED_RUST_FILES.has(filePath) &&
       /\b(?:rust_oracle|fn\s+[A-Za-z0-9_]+_rust\s*\()/u.test(contents))
     .map(([filePath]) => `${filePath}: contains a Rust semantic oracle or copy`);
+  const deepseekShapingViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== DEEPSEEK_SHAPING_FILE) return [];
+    return DEEPSEEK_SHAPING_COMPLETED_FNS.flatMap((name) => {
+      const start = contents.indexOf(`pub fn ${name}(`);
+      if (start < 0) return [`${filePath}: missing Mojo-owned ${name}`];
+      const next = contents.indexOf("\npub fn ", start + 1);
+      return FEATURE_OFF_RUST_PATH.test(contents.slice(start, next < 0 ? undefined : next))
+        ? [`${filePath}: ${name} contains a feature-off Rust path`] : [];
+    });
+  });
   const quotaWindowViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== QUOTA_WINDOWS_FILE) return [];
     const violations = [];
@@ -306,7 +368,8 @@ export function findViolations(files) {
   });
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
-    ...geminiFallbackViolations, ...hardReplacementViolations, ...quotaWindowViolations,
+    ...geminiFallbackViolations, ...hardReplacementViolations, ...deepseekShapingViolations,
+    ...quotaWindowViolations,
     ...rehydrateViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...defaultFeatureViolations];
 }
@@ -429,12 +492,21 @@ function selfTest() {
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/schema/composition.rs",
     "fn collapse_schema_union() {}"]])[0], /Rust fallback or oracle/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/kiro/request/validation.rs",
+    "fn old_kiro_validation() {}"]])[0], /Rust fallback or oracle/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/openai_chat_compat_request.rs",
+    "fn old_chat_request() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([[SUPER_OVERRIDE_FILE,
     '#[cfg(not(feature = "mojo-core"))] fn old_scan() {}']])[0], /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-cli/Cargo.toml",
     'prodex_mojo_core = { workspace = true, optional = true }']])[0], /requires Mojo/u);
   assert.match(findViolations([["crates/prodex-runtime-tuning/src/capacity.rs",
     "fn runtime_proxy_worker_count_default_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
+    "fn smart_context_rollout_decision_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+  assert(findViolations([[DEEPSEEK_SHAPING_FILE,
+    'pub fn deepseek_provider_core_response_created_event() { #[cfg(not(feature = "mojo"))] fallback(); }']])
+    .some((violation) => violation.includes("deepseek_provider_core_response_created_event contains a feature-off Rust path")));
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
     "fn translate_chat_stream_value_to_responses_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([[ANTHROPIC_MESSAGES_FILE,
