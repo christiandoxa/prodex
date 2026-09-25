@@ -62,7 +62,7 @@ pub enum CodexCurrentTimeClockSource {
     External,
 }
 
-/// Failed closed when the Mojo runtime-feature planner returns an invalid result.
+/// Failed closed when Mojo runtime-feature planning is unavailable or returns an invalid result.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeFeaturePlanError;
 
@@ -74,6 +74,7 @@ impl fmt::Display for RuntimeFeaturePlanError {
 
 impl Error for RuntimeFeaturePlanError {}
 
+#[cfg(feature = "mojo-core")]
 #[derive(Debug, PartialEq)]
 struct FeaturePlan {
     web_search: Option<CodexWebSearchMode>,
@@ -84,6 +85,7 @@ struct FeaturePlan {
     respect_system_proxy: Option<bool>,
 }
 
+#[cfg(feature = "mojo-core")]
 #[derive(Debug, PartialEq)]
 struct RolloutBudgetPlan {
     limit: u64,
@@ -187,11 +189,28 @@ fn current_time_interval_from_mojo(
 impl CodexRuntimeFeatureArgs {
     pub fn to_codex_config_args(&self) -> Result<Vec<OsString>, RuntimeFeaturePlanError> {
         #[cfg(feature = "mojo-core")]
-        let plan = self.mojo_plan()?;
+        let result = self.mojo_plan().map(render_plan);
         #[cfg(not(feature = "mojo-core"))]
-        let plan = self.rust_plan();
+        let result = if self.has_requested_features() {
+            Err(RuntimeFeaturePlanError)
+        } else {
+            Ok(Vec::new())
+        };
+        result
+    }
 
-        Ok(render_plan(plan))
+    #[cfg(not(feature = "mojo-core"))]
+    fn has_requested_features(&self) -> bool {
+        self.web_search.is_some()
+            || self.rollout_budget_tokens.is_some()
+            || !self.rollout_budget_reminders.is_empty()
+            || self.rollout_budget_sampling_weight.is_some()
+            || self.rollout_budget_prefill_weight.is_some()
+            || self.current_time_reminder
+            || self.current_time_reminder_interval.is_some()
+            || self.current_time_clock_source.is_some()
+            || self.respect_system_proxy
+            || self.no_respect_system_proxy
     }
 
     #[cfg(feature = "mojo-core")]
@@ -219,54 +238,9 @@ impl CodexRuntimeFeatureArgs {
             respect_system_proxy: plan.respect_system_proxy,
         })
     }
-
-    #[cfg(any(not(feature = "mojo-core"), test))]
-    fn rust_plan(&self) -> FeaturePlan {
-        let rollout_budget = self
-            .rollout_budget_tokens
-            .filter(|limit| *limit > 1)
-            .map(|limit| {
-                let reminders = rollout_budget_reminders(limit, &self.rollout_budget_reminders);
-                let sampling_weight = self
-                    .rollout_budget_sampling_weight
-                    .filter(|weight| weight.is_finite() && *weight >= 0.0);
-                let prefill_weight = self
-                    .rollout_budget_prefill_weight
-                    .filter(|weight| weight.is_finite() && *weight >= 0.0);
-                RolloutBudgetPlan {
-                    limit,
-                    reminders,
-                    sampling_weight,
-                    prefill_weight,
-                }
-            });
-        let current_time_reminder_enabled = self.current_time_reminder
-            || self.current_time_reminder_interval.is_some()
-            || self.current_time_clock_source.is_some();
-        FeaturePlan {
-            web_search: self.web_search,
-            rollout_budget,
-            current_time_reminder_enabled,
-            current_time_reminder_interval: self
-                .current_time_reminder_interval
-                .filter(|interval| *interval > 0),
-            current_time_clock_source: self.current_time_clock_source,
-            respect_system_proxy: if self.respect_system_proxy {
-                Some(true)
-            } else if self.no_respect_system_proxy {
-                Some(false)
-            } else {
-                None
-            },
-        }
-    }
-
-    #[cfg(all(test, feature = "mojo-core"))]
-    fn to_codex_config_args_rust(&self) -> Vec<OsString> {
-        render_plan(self.rust_plan())
-    }
 }
 
+#[cfg(feature = "mojo-core")]
 fn render_plan(plan: FeaturePlan) -> Vec<OsString> {
     let mut overrides = Vec::new();
     if let Some(mode) = plan.web_search {
@@ -329,6 +303,7 @@ fn render_plan(plan: FeaturePlan) -> Vec<OsString> {
     args
 }
 
+#[cfg(feature = "mojo-core")]
 impl CodexWebSearchMode {
     fn config_value(self) -> &'static str {
         match self {
@@ -340,6 +315,7 @@ impl CodexWebSearchMode {
     }
 }
 
+#[cfg(feature = "mojo-core")]
 impl CodexCurrentTimeClockSource {
     fn config_value(self) -> &'static str {
         match self {
@@ -349,111 +325,7 @@ impl CodexCurrentTimeClockSource {
     }
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
-fn rollout_budget_reminders(limit: u64, configured: &[u64]) -> Vec<u64> {
-    let mut reminders = configured
-        .iter()
-        .copied()
-        .filter(|value| *value > 0 && *value < limit)
-        .collect::<Vec<_>>();
-    if reminders.is_empty() && limit > 1 {
-        reminders = [75_u64, 50, 25]
-            .iter()
-            .filter_map(|percent| {
-                let value = limit.saturating_mul(*percent) / 100;
-                (value > 0 && value < limit).then_some(value)
-            })
-            .collect();
-    }
-    if reminders.is_empty() && limit > 1 {
-        reminders.push(limit - 1);
-    }
-    reminders.sort_unstable();
-    reminders.dedup();
-    reminders.reverse();
-    reminders
-}
-
+#[cfg(feature = "mojo-core")]
 fn toml_string_literal(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
-}
-
-#[cfg(all(test, feature = "mojo-core"))]
-mod tests {
-    use super::*;
-
-    fn next(state: &mut u64) -> u64 {
-        *state ^= *state << 13;
-        *state ^= *state >> 7;
-        *state ^= *state << 17;
-        *state
-    }
-
-    #[cfg(feature = "mojo-core")]
-    #[test]
-    fn mojo_feature_plan_matches_rust_oracle_for_seeded_inputs() {
-        let weights = [
-            -1.0,
-            0.0,
-            f64::INFINITY,
-            f64::NEG_INFINITY,
-            f64::NAN,
-            f64::MAX,
-        ];
-        let mut state = 0x8a5c_3e21_74d9_b60f;
-        for case in 0..2_000 {
-            let limit = match case % 7 {
-                0 => None,
-                1 => Some(0),
-                2 => Some(1),
-                3 => Some(2),
-                4 => Some(u64::MAX),
-                _ => Some(next(&mut state) | 1),
-            };
-            let reminder_count = (next(&mut state) % 12) as usize;
-            let reminders = (0..reminder_count)
-                .map(|_| match next(&mut state) % 5 {
-                    0 => 0,
-                    1 => limit.unwrap_or_default(),
-                    2 => u64::MAX,
-                    _ => next(&mut state),
-                })
-                .collect();
-            let args = CodexRuntimeFeatureArgs {
-                web_search: match case % 5 {
-                    0 => None,
-                    1 => Some(CodexWebSearchMode::Disabled),
-                    2 => Some(CodexWebSearchMode::Cached),
-                    3 => Some(CodexWebSearchMode::Indexed),
-                    _ => Some(CodexWebSearchMode::Live),
-                },
-                rollout_budget_tokens: limit,
-                rollout_budget_reminders: reminders,
-                rollout_budget_sampling_weight: (case % 3 != 0)
-                    .then(|| weights[(next(&mut state) % weights.len() as u64) as usize]),
-                rollout_budget_prefill_weight: (case % 4 != 0)
-                    .then(|| weights[(next(&mut state) % weights.len() as u64) as usize]),
-                current_time_reminder: case % 2 == 0,
-                current_time_reminder_interval: match case % 4 {
-                    0 => None,
-                    1 => Some(0),
-                    2 => Some(1),
-                    _ => Some(next(&mut state)),
-                },
-                current_time_clock_source: match case % 3 {
-                    0 => None,
-                    1 => Some(CodexCurrentTimeClockSource::System),
-                    _ => Some(CodexCurrentTimeClockSource::External),
-                },
-                respect_system_proxy: case % 5 == 0,
-                no_respect_system_proxy: case % 7 == 0,
-            };
-            assert_eq!(
-                args.to_codex_config_args()
-                    .expect("Mojo plan should validate"),
-                args.to_codex_config_args_rust(),
-                "generated feature plan {case}"
-            );
-        }
-    }
 }
