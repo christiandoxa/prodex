@@ -1,23 +1,26 @@
 #[cfg(feature = "mojo")]
-use super::runtime_tuning_defaults_rust;
-#[cfg(feature = "mojo")]
 use crate::runtime_tuning_defaults;
+#[cfg(feature = "mojo")]
 use crate::{
-    RuntimeProxyLaneLimitOverrides, RuntimeTuningLaneLimits, RuntimeTuningPrecommitBudget,
-    RuntimeTuningSnapshotInput, runtime_probe_refresh_worker_count_default,
-    runtime_proxy_active_request_limit_default, runtime_proxy_async_worker_count_default,
-    runtime_proxy_lane_limits_from_overrides, runtime_proxy_log_queue_capacity_default,
-    runtime_proxy_long_lived_queue_capacity_default, runtime_proxy_long_lived_worker_count_default,
-    runtime_proxy_worker_count_default, runtime_take_fault_injection_budget,
-    runtime_tuning_snapshot_from_input, runtime_websocket_dns_resolve_overflow_capacity_default,
+    RuntimeProxyLaneLimitOverrides, RuntimeTuningDefaults,
+    runtime_probe_refresh_worker_count_default, runtime_proxy_active_request_limit_default,
+    runtime_proxy_async_worker_count_default, runtime_proxy_lane_limits_from_overrides,
+    runtime_proxy_log_queue_capacity_default, runtime_proxy_long_lived_queue_capacity_default,
+    runtime_proxy_long_lived_worker_count_default, runtime_proxy_worker_count_default,
+    runtime_websocket_dns_resolve_overflow_capacity_default,
     runtime_websocket_dns_resolve_queue_capacity_default,
     runtime_websocket_dns_resolve_worker_count_default,
     runtime_websocket_tcp_connect_overflow_capacity_default,
     runtime_websocket_tcp_connect_queue_capacity_default,
     runtime_websocket_tcp_connect_worker_count_default,
 };
+use crate::{
+    RuntimeTuningLaneLimits, RuntimeTuningPrecommitBudget, RuntimeTuningSnapshotInput,
+    runtime_take_fault_injection_budget, runtime_tuning_snapshot_from_input,
+};
 use std::time::Duration;
 
+#[cfg(feature = "mojo")]
 #[test]
 fn websocket_tcp_connect_defaults_are_bounded() {
     assert_eq!(runtime_websocket_tcp_connect_worker_count_default(1), 4);
@@ -41,6 +44,7 @@ fn websocket_tcp_connect_defaults_are_bounded() {
     );
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn websocket_dns_defaults_are_bounded() {
     assert_eq!(runtime_websocket_dns_resolve_worker_count_default(1), 2);
@@ -63,21 +67,31 @@ fn websocket_dns_defaults_are_bounded() {
 
 #[cfg(feature = "mojo")]
 #[test]
-fn tuning_defaults_match_rust_oracle_for_generated_parallelism() {
-    let mut state = 0x74756e696e675f64_u64;
-    for case in 0..2_000 {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let parallelism = match case {
-            0 => 0,
-            1 => usize::MAX,
-            _ => (state % 10_000) as usize,
-        };
-        assert_eq!(
-            runtime_tuning_defaults(parallelism),
-            runtime_tuning_defaults_rust(parallelism),
-            "tuning defaults case {case}"
-        );
-    }
+fn runtime_tuning_defaults_cover_zero_and_saturated_parallelism() {
+    assert_eq!(
+        runtime_tuning_defaults(0),
+        RuntimeTuningDefaults {
+            worker_count: 4,
+            long_lived_worker_count: 8,
+            probe_refresh_worker_count: 2,
+            async_worker_count: 2,
+            log_queue_capacity: 1_024,
+            websocket_connect_worker_count: 4,
+            websocket_dns_worker_count: 2,
+        }
+    );
+    assert_eq!(
+        runtime_tuning_defaults(usize::MAX),
+        RuntimeTuningDefaults {
+            worker_count: 12,
+            long_lived_worker_count: 24,
+            probe_refresh_worker_count: 4,
+            async_worker_count: 4,
+            log_queue_capacity: 8_192,
+            websocket_connect_worker_count: 16,
+            websocket_dns_worker_count: 8,
+        }
+    );
 }
 
 #[test]
@@ -138,6 +152,7 @@ fn runtime_tuning_snapshot_from_input_converts_duration_budgets() {
     assert_eq!(snapshot.profile_inflight_hard_limit, 36);
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn runtime_proxy_worker_defaults_are_bounded() {
     assert_eq!(runtime_proxy_worker_count_default(1), 4);
@@ -157,6 +172,7 @@ fn runtime_proxy_worker_defaults_are_bounded() {
     assert_eq!(runtime_proxy_async_worker_count_default(64), 4);
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn runtime_proxy_capacity_defaults_are_bounded() {
     assert_eq!(runtime_proxy_long_lived_queue_capacity_default(1), 128);
@@ -170,98 +186,18 @@ fn runtime_proxy_capacity_defaults_are_bounded() {
     assert_eq!(runtime_proxy_log_queue_capacity_default(1), 1024);
     assert_eq!(runtime_proxy_log_queue_capacity_default(8), 2048);
     assert_eq!(runtime_proxy_log_queue_capacity_default(64), 8192);
+    assert_eq!(
+        runtime_proxy_long_lived_queue_capacity_default(usize::MAX),
+        1024
+    );
+    assert_eq!(
+        runtime_proxy_active_request_limit_default(usize::MAX, usize::MAX),
+        512
+    );
+    assert_eq!(runtime_proxy_log_queue_capacity_default(usize::MAX), 8192);
 }
 
 #[cfg(feature = "mojo")]
-#[test]
-fn mojo_capacity_defaults_match_the_rust_reference_at_boundaries() {
-    use super::capacity::{
-        runtime_proxy_active_request_limit_default_rust,
-        runtime_proxy_lane_limits_from_overrides_rust,
-        runtime_proxy_log_queue_capacity_default_rust,
-        runtime_proxy_long_lived_queue_capacity_default_rust,
-        runtime_websocket_dns_resolve_overflow_capacity_default_rust,
-        runtime_websocket_dns_resolve_queue_capacity_default_rust,
-        runtime_websocket_tcp_connect_overflow_capacity_default_rust,
-        runtime_websocket_tcp_connect_queue_capacity_default_rust,
-    };
-
-    for worker_count in [1, 2, 8, 16, 64, 256] {
-        assert_eq!(
-            runtime_proxy_long_lived_queue_capacity_default(worker_count),
-            runtime_proxy_long_lived_queue_capacity_default_rust(worker_count),
-            "long-lived queue worker_count={worker_count}"
-        );
-        assert_eq!(
-            runtime_websocket_tcp_connect_queue_capacity_default(worker_count),
-            runtime_websocket_tcp_connect_queue_capacity_default_rust(worker_count),
-            "websocket queue worker_count={worker_count}"
-        );
-        assert_eq!(
-            runtime_websocket_dns_resolve_queue_capacity_default(worker_count),
-            runtime_websocket_dns_resolve_queue_capacity_default_rust(worker_count),
-            "DNS queue worker_count={worker_count}"
-        );
-        let tcp_queue = runtime_websocket_tcp_connect_queue_capacity_default(worker_count);
-        assert_eq!(
-            runtime_websocket_tcp_connect_overflow_capacity_default(worker_count, tcp_queue),
-            runtime_websocket_tcp_connect_overflow_capacity_default_rust(worker_count, tcp_queue),
-            "websocket overflow worker_count={worker_count}"
-        );
-        let dns_queue = runtime_websocket_dns_resolve_queue_capacity_default(worker_count);
-        assert_eq!(
-            runtime_websocket_dns_resolve_overflow_capacity_default(worker_count, dns_queue),
-            runtime_websocket_dns_resolve_overflow_capacity_default_rust(worker_count, dns_queue),
-            "DNS overflow worker_count={worker_count}"
-        );
-    }
-    for (global_limit, worker_count, long_lived_worker_count, overrides) in [
-        (
-            8,
-            1,
-            99,
-            RuntimeProxyLaneLimitOverrides {
-                responses: Some(0),
-                compact: Some(99),
-                websocket: Some(3),
-                standard: Some(0),
-            },
-        ),
-        (64, 12, 16, RuntimeProxyLaneLimitOverrides::default()),
-    ] {
-        assert_eq!(
-            runtime_proxy_lane_limits_from_overrides(
-                global_limit,
-                worker_count,
-                long_lived_worker_count,
-                overrides,
-            ),
-            runtime_proxy_lane_limits_from_overrides_rust(
-                global_limit,
-                worker_count,
-                long_lived_worker_count,
-                overrides,
-            ),
-        );
-    }
-    for parallelism in [0, 1, 4, 8, 64, usize::MAX] {
-        assert_eq!(
-            runtime_proxy_active_request_limit_default(
-                runtime_proxy_worker_count_default(parallelism),
-                runtime_proxy_long_lived_worker_count_default(parallelism),
-            ),
-            runtime_proxy_active_request_limit_default_rust(
-                runtime_proxy_worker_count_default(parallelism),
-                runtime_proxy_long_lived_worker_count_default(parallelism),
-            ),
-        );
-        assert_eq!(
-            runtime_proxy_log_queue_capacity_default(parallelism),
-            runtime_proxy_log_queue_capacity_default_rust(parallelism),
-        );
-    }
-}
-
 #[test]
 fn runtime_proxy_lane_limits_keep_defaults_and_clamp_overrides() {
     assert_eq!(

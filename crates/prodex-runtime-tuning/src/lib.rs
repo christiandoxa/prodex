@@ -3,9 +3,11 @@ use std::env;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
+#[cfg(feature = "mojo")]
 mod capacity;
 #[cfg(feature = "mojo")]
 mod mojo;
+#[cfg(feature = "mojo")]
 pub use capacity::{
     RuntimeProxyLaneLimitOverrides, runtime_probe_refresh_worker_count_default,
     runtime_proxy_active_request_limit_default, runtime_proxy_async_worker_count_default,
@@ -117,6 +119,7 @@ pub fn runtime_tuning_snapshot_from_input(
     input.into_snapshot()
 }
 
+#[cfg(feature = "mojo")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeTuningDefaults {
     pub worker_count: usize,
@@ -128,33 +131,9 @@ pub struct RuntimeTuningDefaults {
     pub websocket_dns_worker_count: usize,
 }
 
+#[cfg(feature = "mojo")]
 pub fn runtime_tuning_defaults(parallelism: usize) -> RuntimeTuningDefaults {
-    #[cfg(feature = "mojo")]
-    {
-        mojo::runtime_tuning_defaults(parallelism)
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    runtime_tuning_defaults_rust(parallelism)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_tuning_defaults_rust(parallelism: usize) -> RuntimeTuningDefaults {
-    RuntimeTuningDefaults {
-        worker_count: capacity::runtime_proxy_worker_count_default_rust(parallelism),
-        long_lived_worker_count: capacity::runtime_proxy_long_lived_worker_count_default_rust(
-            parallelism,
-        ),
-        probe_refresh_worker_count: capacity::runtime_probe_refresh_worker_count_default_rust(
-            parallelism,
-        ),
-        async_worker_count: capacity::runtime_proxy_async_worker_count_default_rust(parallelism),
-        log_queue_capacity: capacity::runtime_proxy_log_queue_capacity_default_rust(parallelism),
-        websocket_connect_worker_count: runtime_websocket_tcp_connect_worker_count_default(
-            parallelism,
-        ),
-        websocket_dns_worker_count: runtime_websocket_dns_resolve_worker_count_default(parallelism),
-    }
+    mojo::runtime_tuning_defaults(parallelism)
 }
 
 impl RuntimeTuningSnapshotInput {
