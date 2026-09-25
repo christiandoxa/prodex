@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     env,
     ffi::OsString,
     fs,
@@ -29,6 +30,8 @@ fn emit_cargo_directives() {
 
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO_REQUIRED");
     println!("cargo:rerun-if-env-changed=AR");
+    println!("cargo:rerun-if-env-changed=LLVM_NM");
+    println!("cargo:rerun-if-env-changed=LLVM_OBJCOPY");
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO_TARGET");
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO_TARGET_CPU");
     println!("cargo:rerun-if-env-changed=PRODEX_MOJO_ARCHIVE");
@@ -163,6 +166,9 @@ fn build_mojo_archive(sources: Vec<&'static str>, manifest_dir: PathBuf, strict:
         objects.push(object);
     }
 
+    if target.ends_with("-msvc") {
+        namespace_conflicting_msvc_weak_static_strings(&objects, &out_dir);
+    }
     archive_objects(&ar, &archive, &objects, &target);
     emit_link(&out_dir, &target);
 }
@@ -250,6 +256,137 @@ fn compile_mojo_source(
             mojo.to_string_lossy()
         ),
     }
+}
+
+fn llvm_tool(env_key: &str, default: &str) -> OsString {
+    env::var_os(env_key).unwrap_or_else(|| OsString::from(default))
+}
+
+fn weak_static_string_symbols(nm: &OsString, object: &Path) -> Vec<String> {
+    let output = Command::new(nm)
+        .arg("--format=posix")
+        .arg(object)
+        .output()
+        .unwrap_or_else(|error| {
+            panic!(
+                "failed to run LLVM symbol scanner {} for {}: {error}",
+                nm.to_string_lossy(),
+                object.display()
+            )
+        });
+    if !output.status.success() {
+        panic!(
+            "LLVM symbol scanner {} failed for {} ({})",
+            nm.to_string_lossy(),
+            object.display(),
+            output.status
+        );
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut fields = line.split_whitespace();
+            let name = fields.next()?;
+            let kind = fields.next()?;
+            (matches!(kind, "W" | "w") && name.starts_with("static_string_"))
+                .then(|| name.to_string())
+        })
+        .collect()
+}
+
+fn duplicate_weak_static_strings(
+    nm: &OsString,
+    objects: &[PathBuf],
+) -> BTreeMap<String, Vec<usize>> {
+    let mut occurrences = BTreeMap::<String, Vec<usize>>::new();
+    for (index, object) in objects.iter().enumerate() {
+        for name in weak_static_string_symbols(nm, object) {
+            occurrences.entry(name).or_default().push(index);
+        }
+    }
+    occurrences.retain(|_, indices| indices.len() > 1);
+    occurrences
+}
+
+fn namespace_conflicting_msvc_weak_static_strings(objects: &[PathBuf], out_dir: &Path) {
+    let nm = llvm_tool("LLVM_NM", "llvm-nm");
+    let objcopy = llvm_tool("LLVM_OBJCOPY", "llvm-objcopy");
+    let duplicates = duplicate_weak_static_strings(&nm, objects);
+    if duplicates.is_empty() {
+        return;
+    }
+
+    let mut renames = BTreeMap::<usize, Vec<(String, String)>>::new();
+    for (name, indices) in &duplicates {
+        for index in indices.iter().skip(1).copied() {
+            renames
+                .entry(index)
+                .or_default()
+                .push((name.clone(), format!("{name}__prodex_obj_{index}")));
+        }
+    }
+
+    let mut rename_count = 0_usize;
+    for (index, mappings) in renames {
+        let object = &objects[index];
+        let map_path = out_dir.join(format!("prodex_mojo_core_{index}.weak-renames.txt"));
+        let rewritten = out_dir.join(format!("prodex_mojo_core_{index}.weak-renames.rewritten.o"));
+        let map = mappings
+            .iter()
+            .map(|(from, to)| format!("{from} {to}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        fs::write(&map_path, format!("{map}\n")).unwrap_or_else(|error| {
+            panic!(
+                "failed to write Mojo COFF weak-symbol rename map {}: {error}",
+                map_path.display()
+            )
+        });
+        let status = Command::new(&objcopy)
+            .arg(format!("--redefine-syms={}", map_path.display()))
+            .arg(object)
+            .arg(&rewritten)
+            .status();
+        match status {
+            Ok(status) if status.success() => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                panic!(
+                    "LLVM objcopy was required for MSVC Mojo weak-symbol isolation but {} was not found on PATH",
+                    objcopy.to_string_lossy()
+                );
+            }
+            Ok(status) => panic_on_failure("LLVM objcopy", status, object),
+            Err(error) => panic!(
+                "failed to run LLVM objcopy {} for {}: {error}",
+                objcopy.to_string_lossy(),
+                object.display()
+            ),
+        }
+        fs::remove_file(object).unwrap_or_else(|error| {
+            panic!(
+                "failed to replace original Mojo COFF object {}: {error}",
+                object.display()
+            )
+        });
+        fs::rename(&rewritten, object).unwrap_or_else(|error| {
+            panic!(
+                "failed to install rewritten Mojo COFF object {}: {error}",
+                object.display()
+            )
+        });
+        rename_count += mappings.len();
+    }
+
+    let remaining = duplicate_weak_static_strings(&nm, objects);
+    if !remaining.is_empty() {
+        let names = remaining.keys().cloned().collect::<Vec<_>>().join(", ");
+        panic!(
+            "MSVC Mojo archive still contains duplicate weak static-string aliases after isolation: {names}"
+        );
+    }
+    println!(
+        "cargo:warning=prodex-mojo-core isolated {rename_count} conflicting MSVC Mojo weak static-string alias(es)"
+    );
 }
 
 fn archive_objects(ar: &OsString, archive: &Path, objects: &[PathBuf], target: &str) {

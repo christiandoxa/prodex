@@ -250,6 +250,16 @@ jobs:
           llvm-nm -g "${archive}" | grep -F 'prodex_mojo_abi_version'
           llvm-nm -g "${archive}" | grep -F 'prodex_mojo_observability_label_v1'
           llvm-nm -g "${archive}" | grep -F 'prodex_mojo_provider_registry_plan_v1'
+          if [[ "${target}" == *-pc-windows-msvc ]]; then
+            duplicate_weak="$(llvm-nm --format=posix "${archive}" \
+              | awk '$2 == "W" && $1 ~ /^static_string_/ { print $1 }' \
+              | sort | uniq -d)"
+            if [ -n "${duplicate_weak}" ]; then
+              echo "MSVC Mojo archive contains duplicate weak static-string aliases:" >&2
+              printf '%s\n' "${duplicate_weak}" >&2
+              exit 1
+            fi
+          fi
 
       - name: Upload platform runtime Mojo archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
