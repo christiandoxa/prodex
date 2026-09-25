@@ -724,6 +724,8 @@ Detached memory traffic carries `thread_source: "memory_consolidation"` in `x-co
 
 `--respect-system-proxy` enables Codex's `[features.respect_system_proxy]` config when the official upstream Codex supports it. Codex 0.148.0 routes auth, model, plugin, MCP, remote-exec, and Responses traffic through its shared proxy-aware HTTP client path so supported system proxy, PAC, WPAD, static proxy, and bypass decisions can be honored. `--no-respect-system-proxy` renders an explicit false override for sessions that need the upstream default direct/env-proxy behavior.
 
+These runtime feature overrides require a Prodex build with `mojo-core`; builds without it reject the requested overrides during launch planning.
+
 Codex `multiAgentMode` is an app-server/thread setting, not a normal TUI `config.toml` launch override. Prodex therefore does not invent a competing CLI config flag. Launch `prodex app-server` or `prodex run app-server` and pass upstream `multiAgentMode` values (`none`, `explicitRequestOnly`, or `proactive`) through the Codex app-server API.
 
 `prodex mcp-server`, `prodex app-server`, and `prodex exec-server` preserve Codex command-server stdio and protocol arguments. Prodex performs runtime preparation silently: it selects the profile `CODEX_HOME` and routes model HTTP traffic through the same runtime proxy when rotation, pressure controls, or governance require it, without writing launch notices into the protocol stream. The JSON-RPC-aware app-server broker remains an explicit opt-in for validating the stdio frames themselves.
