@@ -1,5 +1,7 @@
 use super::*;
 use crate::{ProviderTransformLoss, anthropic_messages_translator};
+#[cfg(feature = "mojo")]
+use serde_json::{Value, json};
 
 #[cfg(feature = "mojo")]
 #[test]
@@ -65,6 +67,7 @@ fn mojo_response_envelope_matches_expected_fixtures() {
     }
 }
 
+#[cfg(feature = "mojo")]
 fn request(value: Value) -> ProviderTransformResult {
     anthropic_messages_translator().transform_request(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -72,6 +75,7 @@ fn request(value: Value) -> ProviderTransformResult {
     ))
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn request_maps_system_tools_and_tool_history_to_native_messages() {
     let result = request(json!({
@@ -88,25 +92,49 @@ fn request_maps_system_tools_and_tool_history_to_native_messages() {
         "tool_choice": "required",
         "input": [
             {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "Read it"}]},
-            {"type": "function_call", "call_id": "call_test", "name": "read_file", "arguments": "{\"path\":\"/tmp/test\"}"},
+            {"type": "function_call", "call_id": "call_test", "name": "read_file", "arguments": "{\"path\":\"/home/test-user/test\"}"},
             {"type": "function_call_output", "call_id": "call_test", "output": "contents"}
         ]
     }));
     assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
     assert_eq!(result.to_format, ProviderWireFormat::AnthropicMessages);
     let body: Value = serde_json::from_slice(result.body.as_ref().unwrap()).unwrap();
-    assert_eq!(body["system"], "Be concise.");
-    assert_eq!(body["max_tokens"], 512);
-    assert_eq!(body["tool_choice"]["type"], "any");
-    assert_eq!(body["tools"][0]["input_schema"]["required"][0], "path");
-    assert_eq!(body["messages"][1]["content"][0]["type"], "tool_use");
-    assert_eq!(body["messages"][2]["content"][0]["type"], "tool_result");
     assert_eq!(
-        body["messages"][2]["content"][0]["tool_use_id"],
-        "call_test"
+        body,
+        json!({
+            "model": "claude-sonnet-4-6",
+            "messages": [
+                {"role": "user", "content": [{"type": "text", "text": "Read it"}]},
+                {"role": "assistant", "content": [{
+                    "type": "tool_use",
+                    "id": "call_test",
+                    "name": "read_file",
+                    "input": {"path": "/home/test-user/test"}
+                }]},
+                {"role": "user", "content": [{
+                    "type": "tool_result",
+                    "tool_use_id": "call_test",
+                    "content": "contents"
+                }]}
+            ],
+            "max_tokens": 512,
+            "stream": true,
+            "system": "Be concise.",
+            "tools": [{
+                "name": "read_file",
+                "description": "Read one file",
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"path": {"type": "string"}},
+                    "required": ["path"]
+                }
+            }],
+            "tool_choice": {"type": "any"}
+        })
     );
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn request_rejects_unmappable_sampling_fields() {
     let result = request(json!({
@@ -121,6 +149,7 @@ fn request_rejects_unmappable_sampling_fields() {
     assert!(result.body.is_none());
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn chat_request_rejects_every_unmapped_top_level_field() {
     for (field, value) in [
@@ -155,6 +184,7 @@ fn chat_request_rejects_every_unmapped_top_level_field() {
     }
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn chat_request_accepts_benign_ignored_transport_fields() {
     let result = translate_chat_request_to_anthropic(ProviderTransformInput::new(
@@ -171,6 +201,7 @@ fn chat_request_accepts_benign_ignored_transport_fields() {
     assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn chat_request_normalizes_namespaced_tools_in_the_authoritative_path() {
     let result = translate_chat_request_to_anthropic(ProviderTransformInput::new(
@@ -191,6 +222,7 @@ fn chat_request_normalizes_namespaced_tools_in_the_authoritative_path() {
     assert_eq!(body["tool_choice"]["name"], "functions--lookup");
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn chat_request_maps_native_web_search_tool_and_reports_context_degradation() {
     let result = translate_chat_request_to_anthropic(ProviderTransformInput::new(
@@ -219,6 +251,7 @@ fn chat_request_maps_native_web_search_tool_and_reports_context_degradation() {
     assert!(body["tools"][0].get("search_context_size").is_none());
 }
 
+#[cfg(feature = "mojo")]
 #[test]
 fn chat_request_rejects_disabled_parallel_tool_calls() {
     let result = translate_chat_request_to_anthropic(ProviderTransformInput::new(
@@ -235,6 +268,31 @@ fn chat_request_rejects_disabled_parallel_tool_calls() {
         ProviderTransformLoss::Rejected { .. }
     ));
     assert!(result.body.is_none());
+}
+
+#[cfg(not(feature = "mojo"))]
+#[test]
+fn request_translation_is_explicitly_unsupported_without_mojo() {
+    let response = anthropic_messages_translator().transform_request(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        b"invalid JSON is not parsed without the request kernel".to_vec(),
+    ));
+    let chat = crate::translate_openai_chat_request_to_anthropic_messages(
+        ProviderTransformInput::new(ProviderEndpoint::Responses, b"{}".to_vec()),
+    );
+    for (result, from_format) in [
+        (response, ProviderWireFormat::OpenAiResponses),
+        (chat, ProviderWireFormat::OpenAiChatCompletions),
+    ] {
+        assert!(matches!(
+            result.loss,
+            ProviderTransformLoss::UnsupportedUpstream { ref reason }
+                if reason == "Anthropic Messages request translation requires Mojo support"
+        ));
+        assert!(result.body.is_none());
+        assert_eq!(result.from_format, from_format);
+        assert_eq!(result.to_format, ProviderWireFormat::AnthropicMessages);
+    }
 }
 
 #[test]
@@ -274,7 +332,7 @@ fn response_maps_native_web_search_call_sources_and_usage() {
             "id": "msg_search",
             "model": "deepseek-chat",
             "content": [
-                {"type": "server_tool_use", "id": "srv_1", "name": "web_search", "input": {"query": "current release"}},
+                {"type": "server_tool_use", "id": "srv_1", "name": "web_search", "input": {"queries": ["current release", null, 7, "policy"]}},
                 {"type": "web_search_tool_result", "tool_use_id": "srv_1", "content": [
                     {"type": "web_search_result", "url": "https://example.com/release", "title": "Release"}
                 ]},
@@ -291,7 +349,11 @@ fn response_maps_native_web_search_call_sources_and_usage() {
     assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
     let body: Value = serde_json::from_slice(result.body.as_ref().unwrap()).unwrap();
     assert_eq!(body["output"][0]["type"], "web_search_call");
-    assert_eq!(body["output"][0]["action"]["queries"][0], "current release");
+    assert_eq!(body["output"][0]["status"], "completed");
+    assert_eq!(
+        body["output"][0]["action"]["queries"],
+        json!(["current release", "policy"])
+    );
     assert_eq!(
         body["output"][0]["action"]["sources"][0]["url"],
         "https://example.com/release"
@@ -333,6 +395,7 @@ fn response_plan_preserves_flush_and_web_search_result_order() {
 }
 
 #[test]
+#[cfg(feature = "mojo")]
 fn stream_maps_native_delta_and_tolerates_ping() {
     let ping = anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -352,14 +415,11 @@ fn stream_maps_native_delta_and_tolerates_ping() {
         body.lines().next(),
         Some("event: response.output_text.delta")
     );
-    let expected = responses_sse_event(
-        "response.output_text.delta",
-        json!({
-            "type": "response.output_text.delta",
-            "output_index": 0,
-            "delta": "hello",
-        }),
-    );
+    let expected = json!({
+        "type": "response.output_text.delta",
+        "output_index": 0,
+        "delta": "hello",
+    });
     assert_eq!(
         serde_json::from_str::<Value>(
             body.lines()
@@ -367,13 +427,7 @@ fn stream_maps_native_delta_and_tolerates_ping() {
                 .unwrap(),
         )
         .unwrap(),
-        serde_json::from_str::<Value>(
-            expected
-                .lines()
-                .find_map(|line| line.strip_prefix("data: "))
-                .unwrap(),
-        )
-        .unwrap()
+        expected
     );
 }
 
@@ -419,6 +473,7 @@ fn response_translation_is_explicitly_unsupported_without_mojo() {
 }
 
 #[test]
+#[cfg(feature = "mojo")]
 fn stream_maps_tool_search_and_completion_events() {
     let tool = anthropic_messages_translator().transform_stream_event(
         ProviderTransformInput::new(
@@ -456,4 +511,52 @@ fn stream_maps_tool_search_and_completion_events() {
         String::from_utf8(completed.body.unwrap()).unwrap(),
         "event: response.completed\ndata: {\"type\":\"response.completed\"}\n\n"
     );
+}
+
+#[cfg(feature = "mojo")]
+#[test]
+fn stream_rejects_malformed_sse_without_changing_wire_formats() {
+    let malformed =
+        anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            b"event: content_block_delta\ndata: {\n\n".to_vec(),
+        ));
+    assert!(matches!(
+        malformed.loss,
+        ProviderTransformLoss::Rejected { ref reason }
+            if reason.starts_with("failed to parse Anthropic SSE JSON:")
+    ));
+    assert_eq!(malformed.from_format, ProviderWireFormat::AnthropicMessages);
+    assert_eq!(malformed.to_format, ProviderWireFormat::OpenAiResponses);
+    assert!(malformed.body.is_none());
+
+    let unframed = anthropic_messages_translator().transform_stream_event(
+        ProviderTransformInput::new(ProviderEndpoint::Responses, b"{\"type\":\"ping\"}".to_vec()),
+    );
+    assert!(matches!(
+        unframed.loss,
+        ProviderTransformLoss::UnsupportedUpstream { ref reason }
+            if reason == "Anthropic SSE event must contain data: <json> framing"
+    ));
+    assert_eq!(unframed.from_format, ProviderWireFormat::AnthropicMessages);
+    assert_eq!(unframed.to_format, ProviderWireFormat::OpenAiResponses);
+    assert!(unframed.body.is_none());
+}
+
+#[cfg(not(feature = "mojo"))]
+#[test]
+fn stream_translation_is_explicitly_unsupported_without_mojo() {
+    let result =
+        anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            b"not SSE or JSON; translation must not parse this body".to_vec(),
+        ));
+    assert!(matches!(
+        result.loss,
+        ProviderTransformLoss::UnsupportedUpstream { ref reason }
+            if reason == "Anthropic Messages stream translation requires Mojo support"
+    ));
+    assert_eq!(result.from_format, ProviderWireFormat::AnthropicMessages);
+    assert_eq!(result.to_format, ProviderWireFormat::OpenAiResponses);
+    assert!(result.body.is_none());
 }

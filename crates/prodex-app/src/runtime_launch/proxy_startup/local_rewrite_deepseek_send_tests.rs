@@ -84,6 +84,17 @@ fn only_known_native_capability_rejections_allow_auto_fallback() {
     assert!(!runtime_deepseek_native_translation_fallback_is_safe(
         &unsafe_result
     ));
+
+    let unsupported = prodex_provider_core::ProviderTransformResult::unsupported(
+        ProviderId::Anthropic,
+        ProviderEndpoint::Responses,
+        prodex_provider_core::ProviderWireFormat::OpenAiChatCompletions,
+        prodex_provider_core::ProviderWireFormat::AnthropicMessages,
+        "Anthropic Messages request translation requires Mojo support",
+    );
+    assert!(!runtime_deepseek_native_translation_fallback_is_safe(
+        &unsupported
+    ));
 }
 
 #[test]
