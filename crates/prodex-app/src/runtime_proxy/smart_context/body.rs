@@ -151,6 +151,9 @@ fn prepare_runtime_smart_context_body_input(
     transport: RuntimeSmartContextTransport,
     profile_name: Option<&str>,
 ) -> Result<Option<RuntimeSmartContextBodyInput>, RuntimeSmartContextPrepareError> {
+    if !cfg!(feature = "mojo-quota") {
+        return Ok(None);
+    }
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
         runtime_smart_context_log_prepare_fallback(
             request_id,
@@ -245,7 +248,7 @@ fn prepare_runtime_smart_context_body_input(
             missing_rehydrate_refs: missing_rehydrate_refs.clone(),
         },
     );
-    let mut budget = runtime_smart_context_budget_for_parsed(
+    let Some(mut budget) = runtime_smart_context_budget_for_parsed(
         RuntimeSmartContextBudgetInput {
             shared,
             body: &request.body,
@@ -258,7 +261,9 @@ fn prepare_runtime_smart_context_body_input(
         },
         model_name.as_deref(),
         &request_token_count,
-    );
+    ) else {
+        return Ok(None);
+    };
     let affinity_pressure_rewrite =
         runtime_smart_context_affinity_pressure_rewrite_allowed(&exactness, &budget);
     let transform_exactness = if affinity_pressure_rewrite {
@@ -267,7 +272,7 @@ fn prepare_runtime_smart_context_body_input(
         exactness.clone()
     };
     if affinity_pressure_rewrite {
-        budget = runtime_smart_context_budget_for_parsed(
+        let Some(affinity_budget) = runtime_smart_context_budget_for_parsed(
             RuntimeSmartContextBudgetInput {
                 shared,
                 body: &request.body,
@@ -280,7 +285,10 @@ fn prepare_runtime_smart_context_body_input(
             },
             model_name.as_deref(),
             &request_token_count,
-        );
+        ) else {
+            return Ok(None);
+        };
+        budget = affinity_budget;
     }
     Ok(Some(RuntimeSmartContextBodyInput {
         value,

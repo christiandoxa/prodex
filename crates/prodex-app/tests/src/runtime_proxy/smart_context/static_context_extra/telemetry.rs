@@ -1,4 +1,5 @@
 #[test]
+#[cfg(feature = "mojo-quota")]
 fn smart_context_rewrite_telemetry_ring_records_bytes_tokens_and_fallback() {
     let shared = smart_context_test_shared("rewrite-telemetry");
     register_runtime_smart_context_proxy_state(&shared, true, None, None);

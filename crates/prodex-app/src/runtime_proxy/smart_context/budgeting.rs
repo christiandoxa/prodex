@@ -11,7 +11,7 @@ pub(super) struct RuntimeSmartContextBudgetInput<'a> {
     pub(super) static_context_changed: bool,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo-quota"))]
 pub(super) fn runtime_smart_context_budget(
     input: RuntimeSmartContextBudgetInput<'_>,
 ) -> RuntimeSmartContextBudget {
@@ -25,13 +25,14 @@ pub(super) fn runtime_smart_context_budget(
         model_name.as_deref(),
         &current_request_token_count,
     )
+    .expect("Smart Context budget requires Mojo")
 }
 
 pub(super) fn runtime_smart_context_budget_for_parsed(
     input: RuntimeSmartContextBudgetInput<'_>,
     model_name: Option<&str>,
     current_request_token_count: &runtime_proxy_crate::SmartContextTokenCount,
-) -> RuntimeSmartContextBudget {
+) -> Option<RuntimeSmartContextBudget> {
     let bucket_key = runtime_smart_context_token_calibration_bucket_key_with_model(
         input.route_kind,
         input.transport,
@@ -83,7 +84,7 @@ pub(super) fn runtime_smart_context_budget_for_parsed(
             calibration_bucket_key: Some(bucket_key),
             calibration_samples,
         },
-    );
+    )?;
     let available_context_tokens = accounting.available_context_tokens;
     let pressure = accounting.pressure;
     let mut policy = runtime_proxy_crate::smart_context_adaptive_budget_policy(
@@ -94,7 +95,7 @@ pub(super) fn runtime_smart_context_budget_for_parsed(
             static_context_changed: input.static_context_changed,
             missing_rehydrate_refs: input.missing_rehydrate_refs,
         },
-    );
+    )?;
     let telemetry_decision = runtime_proxy_crate::smart_context_rewrite_telemetry_budget_decision(
         runtime_proxy_crate::SmartContextRewriteTelemetryBudgetInput {
             recent_rewrite_safety: Default::default(),
@@ -110,7 +111,7 @@ pub(super) fn runtime_smart_context_budget_for_parsed(
         .ok()
         .filter(|tokens| tokens.checked_add(1).is_some())
         .unwrap_or_default();
-    RuntimeSmartContextBudget {
+    Some(RuntimeSmartContextBudget {
         tier: policy.tier,
         policy,
         model_context_window_tokens,
@@ -126,10 +127,10 @@ pub(super) fn runtime_smart_context_budget_for_parsed(
         },
         request_token_count: current_request_token_count.clone(),
         pressure,
-    }
+    })
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "mojo-quota"))]
 pub(super) fn runtime_smart_context_token_calibration_bucket_key(
     route_kind: RuntimeRouteKind,
     transport: RuntimeSmartContextTransport,
