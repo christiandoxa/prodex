@@ -225,6 +225,7 @@ fn runtime_doctor_quota_freshness_label_preserves_hold_rules() {
 }
 
 #[test]
+#[cfg(feature = "state-summary-mojo")]
 fn runtime_doctor_route_circuit_state_labels_all_states() {
     assert_eq!(
         runtime_doctor_route_circuit_state(Some(1_001), 1_000),
@@ -238,6 +239,7 @@ fn runtime_doctor_route_circuit_state_labels_all_states() {
 }
 
 #[test]
+#[cfg(feature = "state-summary-mojo")]
 fn runtime_doctor_profile_summaries_build_route_rows() {
     let now = 1_000;
     let profile_names = vec!["alpha".to_string(), "beta".to_string()];

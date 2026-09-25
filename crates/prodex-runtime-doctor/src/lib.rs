@@ -44,12 +44,13 @@ pub use state_summary::{
     RuntimeDoctorQuotaWindowStatus, RuntimeDoctorRouteKind, RuntimeDoctorStateSummaryConfig,
     RuntimeDoctorUsageSnapshot, runtime_doctor_backoff_maps_from_runtime,
     runtime_doctor_binding_state_summary, runtime_doctor_degraded_routes,
-    runtime_doctor_health_scores_from_runtime, runtime_doctor_profile_summaries,
-    runtime_doctor_quota_freshness_label, runtime_doctor_quota_window_status_from_runtime,
-    runtime_doctor_route_circuit_state, runtime_doctor_route_kind_label,
+    runtime_doctor_health_scores_from_runtime, runtime_doctor_quota_freshness_label,
+    runtime_doctor_quota_window_status_from_runtime, runtime_doctor_route_kind_label,
     runtime_doctor_runtime_broker_mismatch_reason, runtime_doctor_usage_snapshot_from_runtime,
     runtime_doctor_usage_snapshots_from_runtime,
 };
+#[cfg(feature = "state-summary-mojo")]
+pub use state_summary::{runtime_doctor_profile_summaries, runtime_doctor_route_circuit_state};
 pub use suggestions::{
     RuntimeDoctorPolicySettingSuggestion, RuntimeDoctorPolicySuggestion,
     runtime_doctor_policy_suggestion_lines, runtime_doctor_policy_suggestions,

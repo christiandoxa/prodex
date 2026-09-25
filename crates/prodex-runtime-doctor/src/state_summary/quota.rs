@@ -1,90 +1,9 @@
-use super::{
-    RuntimeDoctorQuotaPressureBand, RuntimeDoctorQuotaWindowStatus, RuntimeDoctorRouteKind,
-    RuntimeDoctorUsageSnapshot,
-};
+use super::{RuntimeDoctorQuotaWindowStatus, RuntimeDoctorUsageSnapshot};
 
-#[cfg(any(not(feature = "mojo"), test))]
-#[derive(Debug, Clone, Copy)]
-pub(super) struct RuntimeDoctorQuotaWindowSummary {
-    pub(super) status: RuntimeDoctorQuotaWindowStatus,
-}
+#[cfg(feature = "state-summary-mojo")]
+use super::{RuntimeDoctorQuotaPressureBand, RuntimeDoctorRouteKind};
 
-#[cfg(any(not(feature = "mojo"), test))]
-#[derive(Debug, Clone, Copy)]
-pub(super) struct RuntimeDoctorQuotaSummary {
-    pub(super) five_hour: RuntimeDoctorQuotaWindowSummary,
-    pub(super) weekly: RuntimeDoctorQuotaWindowSummary,
-    pub(super) route_band: RuntimeDoctorQuotaPressureBand,
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_doctor_quota_window_summary_from_usage_snapshot_at(
-    status: RuntimeDoctorQuotaWindowStatus,
-    _remaining_percent: i64,
-    reset_at: i64,
-    now: i64,
-) -> RuntimeDoctorQuotaWindowSummary {
-    if reset_at != i64::MAX && reset_at <= now {
-        return RuntimeDoctorQuotaWindowSummary {
-            status: RuntimeDoctorQuotaWindowStatus::Ready,
-        };
-    }
-    RuntimeDoctorQuotaWindowSummary { status }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_doctor_quota_pressure_band_from_window_status(
-    status: RuntimeDoctorQuotaWindowStatus,
-) -> RuntimeDoctorQuotaPressureBand {
-    match status {
-        RuntimeDoctorQuotaWindowStatus::Ready => RuntimeDoctorQuotaPressureBand::Healthy,
-        RuntimeDoctorQuotaWindowStatus::Thin => RuntimeDoctorQuotaPressureBand::Thin,
-        RuntimeDoctorQuotaWindowStatus::Critical => RuntimeDoctorQuotaPressureBand::Critical,
-        RuntimeDoctorQuotaWindowStatus::Exhausted => RuntimeDoctorQuotaPressureBand::Exhausted,
-        RuntimeDoctorQuotaWindowStatus::Unknown => RuntimeDoctorQuotaPressureBand::Unknown,
-    }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(super) fn runtime_doctor_quota_summary_from_usage_snapshot_at(
-    snapshot: &RuntimeDoctorUsageSnapshot,
-    route_kind: RuntimeDoctorRouteKind,
-    now: i64,
-) -> RuntimeDoctorQuotaSummary {
-    let five_hour = runtime_doctor_quota_window_summary_from_usage_snapshot_at(
-        snapshot.five_hour_status,
-        snapshot.five_hour_remaining_percent,
-        snapshot.five_hour_reset_at,
-        now,
-    );
-    let weekly = runtime_doctor_quota_window_summary_from_usage_snapshot_at(
-        snapshot.weekly_status,
-        snapshot.weekly_remaining_percent,
-        snapshot.weekly_reset_at,
-        now,
-    );
-    let route_band = [
-        five_hour.status,
-        weekly.status,
-        match route_kind {
-            RuntimeDoctorRouteKind::Responses | RuntimeDoctorRouteKind::Websocket => weekly.status,
-            RuntimeDoctorRouteKind::Compact | RuntimeDoctorRouteKind::Standard => five_hour.status,
-        },
-    ]
-    .into_iter()
-    .map(runtime_doctor_quota_pressure_band_from_window_status)
-    .fold(
-        RuntimeDoctorQuotaPressureBand::Healthy,
-        RuntimeDoctorQuotaPressureBand::max,
-    );
-    RuntimeDoctorQuotaSummary {
-        five_hour,
-        weekly,
-        route_band,
-    }
-}
-
-#[cfg(feature = "mojo")]
+#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_quota_status_code(status: RuntimeDoctorQuotaWindowStatus) -> i64 {
     match status {
         RuntimeDoctorQuotaWindowStatus::Ready => {
@@ -105,7 +24,7 @@ pub(super) fn runtime_doctor_quota_status_code(status: RuntimeDoctorQuotaWindowS
     }
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_quota_status_from_code(value: i64) -> RuntimeDoctorQuotaWindowStatus {
     match value {
         prodex_mojo_core::rich::RUNTIME_DOCTOR_STATE_STATUS_READY => {
@@ -124,7 +43,7 @@ pub(super) fn runtime_doctor_quota_status_from_code(value: i64) -> RuntimeDoctor
     }
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_quota_pressure_band_from_code(
     value: i64,
 ) -> RuntimeDoctorQuotaPressureBand {
@@ -145,7 +64,7 @@ pub(super) fn runtime_doctor_quota_pressure_band_from_code(
     }
 }
 
-#[cfg(feature = "mojo")]
+#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_quota_route_code(route_kind: RuntimeDoctorRouteKind) -> i64 {
     match route_kind {
         RuntimeDoctorRouteKind::Responses => {
@@ -163,6 +82,7 @@ pub(super) fn runtime_doctor_quota_route_code(route_kind: RuntimeDoctorRouteKind
     }
 }
 
+#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_quota_pressure_band_reason(
     band: RuntimeDoctorQuotaPressureBand,
 ) -> &'static str {
@@ -175,6 +95,7 @@ pub(super) fn runtime_doctor_quota_pressure_band_reason(
     }
 }
 
+#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_quota_window_status_reason(
     status: RuntimeDoctorQuotaWindowStatus,
 ) -> &'static str {
@@ -281,18 +202,5 @@ pub fn runtime_doctor_quota_freshness_label(
         "fresh"
     } else {
         "stale"
-    }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(super) fn runtime_doctor_unknown_quota_summary() -> RuntimeDoctorQuotaSummary {
-    RuntimeDoctorQuotaSummary {
-        five_hour: RuntimeDoctorQuotaWindowSummary {
-            status: RuntimeDoctorQuotaWindowStatus::Unknown,
-        },
-        weekly: RuntimeDoctorQuotaWindowSummary {
-            status: RuntimeDoctorQuotaWindowStatus::Unknown,
-        },
-        route_band: RuntimeDoctorQuotaPressureBand::Unknown,
     }
 }
