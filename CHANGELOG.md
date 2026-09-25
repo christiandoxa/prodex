@@ -2,6 +2,33 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.432.1 - 2026-09-25
+
+### Runtime
+
+- Shorten overlays for Codex daemon sockets (`4ddf7d7`)
+# Prodex 0.432.1
+
+## New Features
+
+- No new features in this patch release.
+
+## Bug Fixes
+
+- Fix `prodex s` startup with Codex 0.157.0 when its automatic background
+  app-server starts. Prodex now uses shorter temporary `CODEX_HOME` overlay
+  names so the nested `app-server-control` Unix socket fits the platform path
+  limit on default profile paths.
+- Preserve the `.prodex-overlay-` marker used to recognize existing overlay
+  paths and repair session state.
+
+## Changelog
+
+- Restore Super startup when the Codex background daemon uses its default
+  control socket path.
+
+Full Changelog: [0.432.0...0.432.1](https://github.com/christiandoxa/prodex/compare/0.432.0...0.432.1)
+
 ## 0.432.0 - 2026-09-25
 
 ### Runtime
@@ -18,6 +45,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Isolate MSVC weak aliases (`bf06276`)
 - Support Codex 0.157.0 (`a96f995`)
 - Merge pull request #95 from christiandoxa/mojo-75-chat-response-20260925 (`37f9f12`)
 - Shape function history parts in Mojo (`376c06f`)
@@ -37,126 +65,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Render interactive command status with ratatui (`bbaea3e`)
 - Own operational log detail planning (`3506b8b`)
 - Own operational log event classification (`b9b3343`)
-# Prodex 0.432.0
-
-## New Features
-
-- Target the official Codex rust-v0.157.0 release.
-- Accommodate Codex 0.157.0 GPT-6 Sol and GPT-6 Luna support on Amazon Bedrock.
-  Prodex continues to launch Bedrock profiles directly and leaves the static
-  Bedrock model catalog upstream-owned; the compatibility contract now tracks
-  the new model IDs and GPT-6 Sol default.
-- Preserve the new optional app-server thread-item lifecycle timestamps
-  (startedAtMs and completedAtMs) as additive protocol fields.
-- Preserve Codex-owned automatic background-server startup, remote/local-daemon
-  /import support, fullscreen transcript behavior, and conversation-fork UI.
-- Refresh the release-qualified RTK reference from 0.49.0 to 0.50.0 using
-  the official v0.50.0 commit, Git tree, checksum manifest, and platform asset digests.
-
-## Bug Fixes
-
-- Fix a long-standing direct Super resume trust regression. When
-  prodex s <session-uuid> resumes a thread whose persisted workspace differs
-  from the shell's current directory, Prodex now trusts the persisted session
-  cwd before Codex starts.
-- Prevent the Codex Folder access / Trust and continue screen from appearing in
-  that direct-resume case. Super now projects both the launch cwd and the
-  authoritative resumed-session cwd into project trust.
-- Keep invalid_prompt distinct from quota, rate-limit, and overload failures in
-  line with Codex 0.157.0 so those requests pass through rather than triggering
-  profile rotation.
-
-## Compatibility and Safety
-
-- Respect Codex 0.157.0's first-party-only internal metadata boundary:
-  tool-result metadata and MCP attribution metadata filtered by Codex for a
-  custom provider destination are not reconstructed by Prodex.
-- Preserve HTTP/SSE/WebSocket transport-policy failures as transport/policy
-  failures rather than reclassifying them as account quota.
-- Keep the 0.431.1 workspace-routing fix: chatgpt_base_url remains
-  Codex-owned/HTTPS while OpenAI model traffic uses the authenticated Prodex
-  local provider.
-- No global project-trust switch or hook-trust bypass is introduced. Exact
-  per-hook hash trust and post-write verification remain unchanged.
-- Normal non-Super launches do not gain automatic folder trust.
-
-## Validation
-
-- Compared exact Codex 0.156.1 and 0.157.0 tagged source trees: 1,086 changed
-  files, 42,832 additions, and 10,984 deletions.
-- Replayed 797 critical-file and semantic markers against the exact 0.157.0
-  tagged tree with zero missing markers.
-- Verified the official 0.157.0 Linux musl release asset and extracted binary
-  checksums; the binary reports codex-cli 0.157.0.
-- Ran an isolated official 0.157.0 app-server initialize smoke without user
-  credentials or a model turn.
-- Added a regression test where the launch cwd and resumed session cwd differ;
-  both are emitted as trusted projects for Super.
-- Upstream baseline self-tests and direct source replay pass with the new GPT-6
-  Bedrock, invalid_prompt, internal-metadata, and app-server timestamp
-  contracts.
-
-## Changelog
-
-- Align the compatibility baseline with Codex rust-v0.157.0.
-- Add Bedrock GPT-6 Sol/Luna and additive app-server protocol coverage.
-- Restore zero-prompt folder trust for prodex s <session-uuid> across
-  workspaces.
-
-Full Changelog: [0.431.7...0.432.0](https://github.com/christiandoxa/prodex/compare/0.431.7...0.432.0)
 
 ## 0.431.7 - 2026-09-24
-
-### CLI
-
-- Accept overridden hook trust writes (`be65261`)
-
-## 0.431.6 - 2026-09-23
-
-### CLI
-
-- Report incompatible optional tools as info (`c6c9df5`)
-- Skip incompatible optional tools by default (`b39fe11`)
-
-## 0.431.5 - 2026-09-23
-
-### Misc
-
-- Treat missing Playwright as optional (`7675cee`)
-- Show redacted expose exec commands (`da3ad15`)
-- Accept capability-compatible dependency versions (`2d2bb48`)
-
-## 0.431.4 - 2026-09-23
-
-- No grouped changes.
-
-## 0.431.3 - 2026-09-23
-
-### CLI
-
-- Trust hooks by hash before launch (`1942397`)
-
-## 0.431.2 - 2026-09-23
-
-### CLI
-
-- Keep trust bypass CLI-only (`6295c79`)
-
-### Docs
-
-- Record stable 1.1 compiler baseline (`1c04046`)
-
-## 0.431.1 - 2026-09-23
-
-### CLI
-
-- Preserve Codex workspace bootstrap URL (`98a7beb`)
-
-### Misc
-
-- Align with Codex 0.156.1 (`6e1605d`)
-
-## 0.431.0 - 2026-09-23
 
 ### Runtime
 
@@ -164,6 +74,12 @@ Full Changelog: [0.431.7...0.432.0](https://github.com/christiandoxa/prodex/comp
 
 ### CLI
 
+- Accept overridden hook trust writes (`be65261`)
+- Report incompatible optional tools as info (`c6c9df5`)
+- Skip incompatible optional tools by default (`b39fe11`)
+- Trust hooks by hash before launch (`1942397`)
+- Keep trust bypass CLI-only (`6295c79`)
+- Preserve Codex workspace bootstrap URL (`98a7beb`)
 - Preserve quota observations and accept unknown log tokens (`af60a49`)
 - Move config override matching into Mojo (`e362aea`)
 - Make Mojo authoritative for Codex argument plans (`e7a63eb`)
@@ -173,8 +89,16 @@ Full Changelog: [0.431.7...0.432.0](https://github.com/christiandoxa/prodex/comp
 - Move Anthropic Messages request shaping into Mojo (`dbbd8d7`)
 - Add complete Anthropic Messages request kernel (`b6a9147`)
 
+### Docs
+
+- Record stable 1.1 compiler baseline (`1c04046`)
+
 ### Misc
 
+- Treat missing Playwright as optional (`7675cee`)
+- Show redacted expose exec commands (`da3ad15`)
+- Accept capability-compatible dependency versions (`2d2bb48`)
+- Align with Codex 0.156.1 (`6e1605d`)
 - Align with Codex 0.156.0 (`d42c691`)
 - Move complete Responses chat request planning to Mojo (`6fad0fb`)
 - Add complete Responses chat request kernel (`9002804`)
