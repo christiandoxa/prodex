@@ -560,6 +560,16 @@
         "operations": [
           "super_override_argument_classification"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_feature_plan.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "codex_runtime_feature_configuration"
+        ]
       }
     ],
     "removed": [
@@ -1276,6 +1286,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "OsString preservation, typed value parsing, and SuperArgs mutation"
+    },
+    {
+      "name": "codex_runtime_feature_configuration",
+      "domain": "cli/runtime-feature-config",
+      "introduced_in": "0.431.7",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_feature_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_feature_plan.mojo",
+      "consumer": "crates/prodex-cli/src/runtime_features.rs",
+      "consumer_marker": "plan_runtime_feature_config",
+      "production_consumers": [
+        "crates/prodex-cli/src/runtime_features.rs"
+      ],
+      "production_reachability_test": "crates/prodex-cli/src/runtime_features.rs",
+      "rust_owner_before": "Codex runtime feature eligibility, rollout reminder normalization, and override planning",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "feature-off Rust plan and 2,000 fixed-seed feature-on comparisons; Mojo errors propagate without recomputation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Clap values, fixed-width ABI mapping, validated result mapping, and TOML/OsString rendering"
     }
   ],
   "rust_semantic_reductions": [

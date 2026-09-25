@@ -864,3 +864,32 @@ the no-fallback and production-share guards, and `git diff --check`.
 The canonical broad inventory is 51,375 reachable Mojo LOC and 196,784 Rust
 production LOC, or 20.70% Mojo. The 75% project target remains unmet; 538,977
 additional Mojo LOC are estimated at current Rust volume.
+
+## Codex runtime feature configuration wave
+
+`CodexRuntimeFeatureArgs` now calls `prodex_mojo_runtime_feature_plan_v1` for
+web-search selection, rollout-budget eligibility and reminder filtering,
+defaults, ordering and deduplication, current-time reminder enablement, and
+system-proxy precedence. Rust retains Clap and `OsString` ownership, fixed-width
+ABI mapping, validated result reconstruction, and TOML override rendering. The
+feature-off Rust plan remains a test/build oracle. Mojo errors propagate without
+Rust recomputation.
+
+The first Mojo-enabled test run exposed a reminder deduplication overwrite: the
+descending scan wrote into unread lower indices. Mojo now deduplicates forward
+and reverses only the unique prefix. The fixed-seed parity suite covers this
+case and compares 2,000 complete rendered argument plans.
+
+Validation passes:
+
+- `PRODEX_MOJO_VERSION=1.1.0 rtk cargo test --locked -q -p prodex-cli --features mojo-core -- --test-threads=1` (139 passed)
+- `PRODEX_MOJO_VERSION=1.1.0 rtk cargo test --locked -q -p prodex-cli -- --test-threads=1` (137 passed)
+- `PRODEX_MOJO_VERSION=1.1.0 rtk cargo check --locked -q -p prodex-app --features mojo-core`
+- `PRODEX_MOJO_VERSION=1.1.0 rtk cargo test --locked -q -p prodex-app --features mojo-core --lib --no-run`
+- `PRODEX_MOJO_VERSION=1.1.0 rtk cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`
+- `cargo fmt --all -- --check`, `npm run docs`, and `npm run test:changed`
+- `npm run mojo:ownership`, `npm run mojo:authority`, `node scripts/ci/mojo-no-fallback-guard.mjs`, `npm run mojo:production-share`, `node scripts/ci/secret-boundary-guard.mjs`, and `git diff --check`
+
+The canonical broad inventory is 51,569 reachable Mojo LOC and 197,051 Rust
+production LOC, or 20.742096371973293% Mojo. The 75% target remains unmet;
+539,584 additional Mojo LOC are estimated at current Rust volume.

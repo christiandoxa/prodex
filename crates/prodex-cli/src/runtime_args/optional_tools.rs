@@ -26,11 +26,14 @@ impl SuperArgs {
         }
     }
 
-    pub fn into_runtime_tool_args(self) -> RuntimeToolArgs {
+    pub fn into_runtime_tool_args(self) -> Result<RuntimeToolArgs, super::RuntimeFeaturePlanError> {
         self.into_runtime_tool_args_with_presidio(false)
     }
 
-    pub fn into_runtime_tool_args_with_presidio(self, presidio: bool) -> RuntimeToolArgs {
+    pub fn into_runtime_tool_args_with_presidio(
+        self,
+        presidio: bool,
+    ) -> Result<RuntimeToolArgs, super::RuntimeFeaturePlanError> {
         let no_presidio = self.no_presidio;
         let required_presidio = self.required_tools.contains(&OptionalToolId::Presidio);
         let presidio = required_presidio || (presidio && !no_presidio);
@@ -68,7 +71,7 @@ impl SuperArgs {
         let local_mode = self.url.is_some() || self.provider.is_some();
         let skip_quota_check = self.skip_quota_check || local_mode;
 
-        let feature_overrides = self.codex_features.to_codex_config_args();
+        let feature_overrides = self.codex_features.to_codex_config_args()?;
         let mut codex_args = Vec::new();
         codex_args.extend(local_provider_args);
         codex_args.extend(external_provider_args);
@@ -101,7 +104,7 @@ impl SuperArgs {
         for tool in &required_tools {
             tools.insert(*tool);
         }
-        RuntimeToolArgs {
+        Ok(RuntimeToolArgs {
             profile: self.profile,
             auto_rotate: self.auto_rotate,
             no_auto_rotate: self.no_auto_rotate,
@@ -124,7 +127,7 @@ impl SuperArgs {
             external_provider_api_key: self.api_key,
             codex_features: CodexRuntimeFeatureArgs::default(),
             codex_args,
-        }
+        })
     }
 }
 
@@ -160,7 +163,9 @@ impl fmt::Debug for RuntimeToolArgs {
 }
 
 impl RuntimeToolArgs {
-    pub fn codex_args_with_feature_overrides(&self) -> Vec<OsString> {
+    pub fn codex_args_with_feature_overrides(
+        &self,
+    ) -> Result<Vec<OsString>, super::RuntimeFeaturePlanError> {
         codex_args_with_feature_overrides(&self.codex_args, &self.codex_features)
     }
 

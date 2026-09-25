@@ -71,6 +71,7 @@ not claims about the historical 0.419.0 wave.
 | `prodex-gateway-server` | Hyper/TLS serving and connection handling | IO/async | Hyper, Tokio, rustls | Critical | C | `KEEP_RUST` | Explicit ecosystem-heavy keep decision |
 | `prodex-storage*` | Adapter-neutral plans and DB/Redis drivers | IO/stateful | SQLite, PostgreSQL, Redis, async | Critical | C | `KEEP_RUST` | Do not recreate mature drivers or wire protocols |
 | `prodex-cli`, `prodex-app`, root binaries | CLI parsing, command routing, orchestration | IO/orchestration | Clap, Tokio, processes | Critical | C | `KEEP_RUST` | Rust remains host application |
+| `prodex-cli::CodexRuntimeFeatureArgs` | Plan Codex feature and rollout-budget configuration overrides | Pure after Clap parsing | Fixed-width modes, thresholds, weights, and flags | Low | A | `MOVE_NOW` | Mojo owns feature eligibility, reminder normalization/order, and proxy precedence; Rust retains Clap values and `OsString` rendering |
 | prodex-app ping protocol core | Validate bounded Codex JSONL turn ordering and classify typed OpenAI failures | Pure after process output capture | borrowed JSONL/error text | Medium | A/B | MOVE_NOW | Release builds call prodex_mojo_ping_validate_jsonl_v1 and prodex_mojo_ping_classify_failure_v1; Rust retains process/profile/timeout/redaction/render boundaries and a feature-off oracle. |
 | `prodex-authn`, `prodex-secret-store`, `prodex-presidio` | OAuth, credentials, redaction | Security/IO | crypto, browser, secret stores | Critical | C | `KEEP_RUST` | Secrets never cross the initial Mojo boundary |
 | `prodex-profile-*`, `prodex-shared-codex-fs`, `prodex-core` | Profile/path/filesystem operations | IO | filesystem, platform | High | C | `KEEP_RUST` | OS semantics and secret paths remain Rust-owned |
@@ -127,3 +128,12 @@ credentials, security, and ABI/result validation. Parity evidence and final-stat
 in `migration/mojo-ownership.json`; the superseded Rust code is either removed from the Mojo
 production path or retained only as a feature-off/test oracle where the repository's Rust-only
 compatibility build requires it.
+
+## Codex runtime feature configuration wave (2026-09-25)
+
+`CodexRuntimeFeatureArgs` now delegates feature eligibility, rollout reminder
+filtering/defaults/sort/deduplication, current-time reminder enablement, and
+proxy override precedence to the compiled Mojo planner. Rust retains Clap
+values, fixed-width ABI mapping, validated result reconstruction, and ordered
+`OsString`/TOML rendering. The feature-off Rust plan remains a parity oracle;
+Mojo errors propagate without runtime recomputation.

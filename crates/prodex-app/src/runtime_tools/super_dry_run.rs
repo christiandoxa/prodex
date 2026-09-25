@@ -18,7 +18,7 @@ pub(crate) fn handle_super_runtime_tools_dry_run(
     let mut args = args;
     crate::app_commands::runtime_launch::resolve_super_dry_run_main_agent(&mut args)?;
     let args =
-        crate::app_commands::runtime_launch::resolved_super_runtime_tool_args(args, presidio);
+        crate::app_commands::runtime_launch::resolved_super_runtime_tool_args(args, presidio)?;
     if let Some(base_url) = args.base_url.as_deref() {
         validate_credential_free_http_url(base_url, "runtime upstream base URL")?;
     }
@@ -27,7 +27,7 @@ pub(crate) fn handle_super_runtime_tools_dry_run(
     let presidio_enabled =
         args.presidio || selected_tools.contains(prodex_optional_tools::OptionalToolId::Presidio);
     let tool_plan = resolve_runtime_optional_tool_plan(&selected_tools, &required_tools)?;
-    let codex_args = args.codex_args_with_feature_overrides();
+    let codex_args = args.codex_args_with_feature_overrides()?;
     let (_, codex_args) = extract_prodex_dry_run_flag(&codex_args);
     let (codex_args, include_code_review) =
         prepare_codex_launch_args(&codex_args, args.full_access);

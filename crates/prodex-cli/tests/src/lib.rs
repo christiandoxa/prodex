@@ -19,6 +19,7 @@ fn parse_super_as_runtime_tools(args: &[&str]) -> RuntimeToolArgs {
         panic!("expected super command");
     };
     args.into_runtime_tool_args()
+        .expect("Codex feature plan should succeed")
 }
 fn parse_super_as_runtime_tools_with_presidio_preference(args: &[&str]) -> RuntimeToolArgs {
     let command = parse_cli_command_from(args.iter().copied()).expect("super command should parse");
@@ -27,6 +28,7 @@ fn parse_super_as_runtime_tools_with_presidio_preference(args: &[&str]) -> Runti
     };
     let use_presidio = args.presidio_preference().unwrap_or(false);
     args.into_runtime_tool_args_with_presidio(use_presidio)
+        .expect("Codex feature plan should succeed")
 }
 fn os_args(args: &[&str]) -> Vec<OsString> {
     args.iter().map(OsString::from).collect()
@@ -165,7 +167,12 @@ fn secret_bearing_runtime_args_debug_is_redacted_through_commands() {
     let Commands::Super(super_args) = super_command else {
         panic!("expected super command");
     };
-    let runtime_tools_debug = format!("{:?}", super_args.into_runtime_tool_args());
+    let runtime_tools_debug = format!(
+        "{:?}",
+        super_args
+            .into_runtime_tool_args()
+            .expect("Codex feature plan should succeed")
+    );
 
     let gateway_debug = format!(
         "{:?}",

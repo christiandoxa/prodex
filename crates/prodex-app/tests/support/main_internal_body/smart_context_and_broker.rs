@@ -6,7 +6,9 @@ fn smart_context_enabled_from_default_super_shortcut() -> bool {
     let Commands::Super(args) = command else {
         panic!("expected Super command from prodex s");
     };
-    args.into_runtime_tool_args().smart_context
+    args.into_runtime_tool_args()
+        .expect("Codex feature plan should succeed")
+        .smart_context
 }
 
 #[test]

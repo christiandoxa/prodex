@@ -424,7 +424,7 @@ impl RunManager {
             std::env::current_exe().map_err(|error| format!("current executable: {error}"))?;
         let mut command = Command::new(executable);
         command
-            .args(build_child_args(args))
+            .args(build_child_args(args).map_err(|error| error.to_string())?)
             .current_dir(&self.inner.workspace)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
@@ -605,7 +605,7 @@ mod tests {
         else {
             panic!("expected super args");
         };
-        let child = build_child_args(&args);
+        let child = build_child_args(&args).expect("child argument plan should succeed");
         assert_eq!(child.first().and_then(|value| value.to_str()), Some("s"));
         assert!(child.iter().any(|value| value == "--full-access"));
         assert_eq!(
@@ -640,7 +640,7 @@ mod tests {
             OsString::from("--prompt"),
             OsString::from("review"),
         ];
-        let child = build_child_args(&args);
+        let child = build_child_args(&args).expect("child argument plan should succeed");
         assert!(child.iter().any(|value| value == "--cli"));
         assert!(child.iter().any(|value| value == "agy"));
         assert!(child.iter().any(|value| value == "--prompt"));
@@ -669,7 +669,7 @@ mod tests {
         .unwrap() else {
             panic!("expected super args");
         };
-        let child = build_child_args(&args);
+        let child = build_child_args(&args).expect("child argument plan should succeed");
         let rendered = child
             .iter()
             .map(|value| value.to_string_lossy().into_owned())

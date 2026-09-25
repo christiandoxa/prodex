@@ -76,8 +76,8 @@ impl RuntimeToolLaunchStrategy {
     pub(crate) fn new_with_sub_agent(
         args: RuntimeToolArgs,
         sub_agent: Option<ResolvedSuperSubAgent>,
-    ) -> Self {
-        let codex_feature_args = args.codex_args_with_feature_overrides();
+    ) -> Result<Self, prodex_cli::RuntimeFeaturePlanError> {
+        let codex_feature_args = args.codex_args_with_feature_overrides()?;
         let selected_tools = args.selected_tool_set();
         let rtk_enabled = selected_tools.contains(prodex_optional_tools::OptionalToolId::Rtk);
         let presidio_enabled = args.presidio
@@ -92,7 +92,7 @@ impl RuntimeToolLaunchStrategy {
             runtime_launch_cli_model_context_window_tokens(&codex_args);
         let gemini_thinking_budget_tokens =
             runtime_launch_cli_gemini_thinking_budget_tokens(&codex_args);
-        Self {
+        Ok(Self {
             args,
             codex_args,
             include_code_review,
@@ -113,7 +113,7 @@ impl RuntimeToolLaunchStrategy {
             transient_recovery_rounds: 0,
             recovery_generation: 0,
             allow_failed_profile_recovery: false,
-        }
+        })
     }
 }
 
@@ -281,7 +281,7 @@ pub(crate) fn handle_super_runtime_tools(
     }
     execute_runtime_launch(RuntimeToolLaunchStrategy::new_with_sub_agent(
         args, sub_agent,
-    ))
+    )?)
 }
 
 #[cfg(test)]
@@ -295,6 +295,7 @@ mod tests {
             panic!("expected super command");
         };
         args.into_runtime_tool_args_with_presidio(true)
+            .expect("Codex feature plan should succeed")
     }
 
     fn assert_super_optional_stack(strategy: &RuntimeToolLaunchStrategy) {
@@ -329,7 +330,8 @@ mod tests {
         let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
             super_as_caveman_args(&["prodex", "s"]),
             None,
-        );
+        )
+        .expect("Codex feature plan should succeed");
         let root = crate::test_temp_root()
             .join(format!("prodex-session-server-plan-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
@@ -374,7 +376,8 @@ mod tests {
         let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
             super_as_caveman_args(&["prodex", "super", "exec", "hi"]),
             None,
-        );
+        )
+        .expect("Codex feature plan should succeed");
 
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
@@ -424,7 +427,8 @@ mod tests {
         let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
             super_as_caveman_args(&["prodex", "s", "exec", "hi"]),
             None,
-        );
+        )
+        .expect("Codex feature plan should succeed");
 
         assert!(strategy.rtk_enabled);
         assert!(strategy.presidio_enabled);
@@ -441,7 +445,8 @@ mod tests {
         let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
             super_as_caveman_args(&["prodex", "s", "exec", "hi"]),
             None,
-        );
+        )
+        .expect("Codex feature plan should succeed");
 
         assert_super_optional_stack(&strategy);
         assert!(!strategy.args.skip_quota_check);
@@ -463,7 +468,8 @@ mod tests {
                 "hi",
             ]),
             None,
-        );
+        )
+        .expect("Codex feature plan should succeed");
 
         assert_super_optional_stack(&strategy);
         assert!(strategy.args.skip_quota_check);
@@ -496,7 +502,8 @@ mod tests {
                 "hi",
             ]),
             None,
-        );
+        )
+        .expect("Codex feature plan should succeed");
 
         assert_super_optional_stack(&strategy);
         assert!(strategy.args.skip_quota_check);
@@ -529,7 +536,8 @@ mod tests {
                 "hi",
             ]),
             None,
-        );
+        )
+        .expect("Codex feature plan should succeed");
 
         assert_super_optional_stack(&strategy);
         assert!(strategy.args.skip_quota_check);
@@ -567,7 +575,8 @@ mod tests {
                 "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9",
             ]),
             None,
-        );
+        )
+        .expect("Codex feature plan should succeed");
 
         let rendered = strategy
             .codex_args
@@ -628,7 +637,8 @@ mod tests {
                 "hi",
             ]),
             None,
-        );
+        )
+        .expect("Codex feature plan should succeed");
 
         assert_super_optional_stack(&strategy);
         assert!(strategy.args.skip_quota_check);

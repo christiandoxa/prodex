@@ -83,7 +83,7 @@ pub(crate) fn validate_native_agy_args(args: &SuperArgs) -> Result<()> {
         || args.url.is_some()
         || args.local_context_window.is_some()
         || args.local_auto_compact_token_limit.is_some()
-        || !args.codex_features.to_codex_config_args().is_empty()
+        || !args.codex_features.to_codex_config_args()?.is_empty()
         || prodex_runtime_launch::codex_resume_requested(&args.codex_args)
     {
         bail!("selected options are unsupported for native Antigravity");

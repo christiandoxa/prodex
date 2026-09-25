@@ -138,7 +138,9 @@ fn super_omits_presidio_unless_explicitly_enabled() {
     let Commands::Super(args) = command else {
         panic!("expected super command");
     };
-    let runtime_args = args.into_runtime_tool_args();
+    let runtime_args = args
+        .into_runtime_tool_args()
+        .expect("Codex feature plan should succeed");
     assert!(rendered_codex_args(&runtime_args).contains(&"features.apps=false".to_string()));
     assert!(
         runtime_args
@@ -154,7 +156,9 @@ fn super_includes_presidio_prefix_when_opted_in() {
     let Commands::Super(args) = command else {
         panic!("expected super command");
     };
-    let runtime_args = args.into_runtime_tool_args_with_presidio(true);
+    let runtime_args = args
+        .into_runtime_tool_args_with_presidio(true)
+        .expect("Codex feature plan should succeed");
     assert!(rendered_codex_args(&runtime_args).contains(&"features.apps=false".to_string()));
     assert!(
         runtime_args
@@ -231,7 +235,9 @@ fn explicit_presidio_tool_is_inherited_unless_no_presidio_wins() {
         panic!("expected Super command");
     };
     assert_eq!(args.presidio_preference(), Some(false));
-    let runtime_args = args.into_runtime_tool_args_with_presidio(false);
+    let runtime_args = args
+        .into_runtime_tool_args_with_presidio(false)
+        .expect("Codex feature plan should succeed");
     assert!(!runtime_args.presidio);
     assert!(
         !runtime_args
@@ -258,7 +264,9 @@ fn no_presidio_cannot_suppress_required_presidio() {
         .validate_urls()
         .expect_err("required Presidio must not be silently ignored");
     assert!(error.contains("--require-tool presidio"), "{error}");
-    let runtime_args = args.into_runtime_tool_args_with_presidio(false);
+    let runtime_args = args
+        .into_runtime_tool_args_with_presidio(false)
+        .expect("Codex feature plan should succeed");
     assert!(runtime_args.presidio);
     assert!(
         runtime_args
