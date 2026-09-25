@@ -37,7 +37,7 @@ pub(crate) use provider_auth::{
 };
 pub(crate) use sub_agents::*;
 pub(crate) use super_dry_run::handle_super_runtime_tools_dry_run;
-pub(crate) use super_trust::trusted_workspace_codex_args;
+pub(crate) use super_trust::{trusted_super_resume_codex_args, trusted_workspace_codex_args};
 
 pub(super) fn session_app_server_companion_eligible(
     strategy: &RuntimeToolLaunchStrategy,
@@ -214,7 +214,11 @@ impl RuntimeToolLaunchStrategy {
 
     fn base_runtime_codex_args(&self, overlay_home: &std::path::Path) -> Result<Vec<OsString>> {
         let codex_args = if self.args.super_mode {
-            trusted_workspace_codex_args(&env::current_dir()?, &self.codex_args)
+            trusted_super_resume_codex_args(
+                &env::current_dir()?,
+                self.resume_session_path.as_deref(),
+                &self.codex_args,
+            )?
         } else {
             self.codex_args.clone()
         };

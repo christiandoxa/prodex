@@ -101,6 +101,11 @@ const REQUIRED_FILE_CONTAINS = {
     "responses_session_id",
     "session_source.is_non_root_agent()",
     "prompt_cache_key(metadata)",
+    "is_internal_metadata_destination",
+    "clear_tool_result_metadata",
+    "url.scheme() == \"https\"",
+    "host == \"api.openai.com\"",
+    "codex_http_client::is_allowed_chatgpt_host(host)",
   ],
   "codex-rs/core/src/compact_remote_v2.rs": [
     "run_remote_compact_task",
@@ -236,6 +241,10 @@ const REQUIRED_FILE_CONTAINS = {
     "openai.gpt-5.6-terra",
     "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
     "openai.gpt-5.6-luna",
+    "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
+    "openai.gpt-6-sol",
+    "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
+    "openai.gpt-6-luna",
   ],
   "codex-rs/model-provider/src/amazon_bedrock/catalog.rs": [
     "static_model_catalog",
@@ -252,6 +261,8 @@ const REQUIRED_FILE_CONTAINS = {
     "WebSearchToolType::Text",
     "model.use_responses_lite = false",
     "model.tool_mode = None",
+    "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
+    "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
   ],
   "codex-rs/model-provider/src/provider.rs": [
     "RemoteCompactionSupport",
@@ -265,6 +276,8 @@ const REQUIRED_FILE_CONTAINS = {
     "openai.gpt-5.6-sol",
     "openai.gpt-5.6-terra",
     "openai.gpt-5.6-luna",
+    "openai.gpt-6-sol",
+    "openai.gpt-6-luna",
   ],
   "codex-rs/core/src/realtime_conversation.rs": [
     "ConversationStartTransport::Websocket",
@@ -320,6 +333,8 @@ const REQUIRED_FILE_CONTAINS = {
     "rate_limit_exceeded",
     "slow_down",
     "server_is_overloaded",
+    "invalid_prompt",
+    "ApiError::InvalidPrompt",
   ],
   "codex-rs/codex-api/src/endpoint/responses.rs": [
     "ResponsesClient",
@@ -553,6 +568,9 @@ const REQUIRED_FILE_CONTAINS = {
     "ThreadForkParams",
     "pub thread_source: Option<ThreadSource>",
     "Optional client-supplied analytics source classification",
+    "ThreadItemEntry",
+    "pub started_at_ms: Option<i64>",
+    "pub completed_at_ms: Option<i64>",
   ],
   "codex-rs/app-server/src/message_processor.rs": [
     "reject_obsolete_request_fields",
@@ -724,6 +742,18 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "response.completed",
       "response.failed",
       "response.metadata",
+    ],
+  },
+  {
+    id: "responses.internal-metadata-destination-gate",
+    kind: "security_boundary",
+    file: "codex-rs/core/src/client.rs",
+    file_contains_all: [
+      "is_internal_metadata_destination",
+      "url.scheme() == \"https\"",
+      "host == \"api.openai.com\"",
+      "codex_http_client::is_allowed_chatgpt_host(host)",
+      "clear_tool_result_metadata",
     ],
   },
   {
@@ -935,7 +965,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
     ],
   },
   {
-    id: "model-provider.bedrock-gpt-5-6-catalog",
+    id: "model-provider.bedrock-gpt-6-catalog",
     kind: "provider_catalog",
     file: "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
     file_contains_all: [
@@ -953,6 +983,8 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "WebSearchToolType::Text",
       "model.use_responses_lite = false",
       "model.tool_mode = None",
+      "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
+      "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
     ],
   },
   {
@@ -978,6 +1010,8 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "openai.gpt-5.6-sol",
       "openai.gpt-5.6-terra",
       "openai.gpt-5.6-luna",
+      "openai.gpt-6-sol",
+      "openai.gpt-6-luna",
     ],
   },
   {
@@ -995,6 +1029,8 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "SafetyBuffering",
       "safety_buffering",
       "ResponseEvent::SafetyBuffering",
+      "invalid_prompt",
+      "ApiError::InvalidPrompt",
     ],
     expected_stream_events_all: [
       "response.created",
@@ -1224,6 +1260,16 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "ThreadStartParams",
       "ThreadForkParams",
       "pub thread_source: Option<ThreadSource>",
+    ],
+  },
+  {
+    id: "app-server.thread-item-lifecycle-timestamps",
+    kind: "jsonrpc_schema",
+    file: "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+    file_contains_all: [
+      "ThreadItemEntry",
+      "pub started_at_ms: Option<i64>",
+      "pub completed_at_ms: Option<i64>",
     ],
   },
   {
@@ -1893,15 +1939,15 @@ function runSelfTest() {
   });
 
   assertSelfTestError({
-    name: "missing Bedrock GPT-5.6 catalog token",
+    name: "missing Bedrock GPT-6 catalog token",
     mutate: (compat) => {
-      const check = semanticCheck(compat, "model-provider.bedrock-gpt-5-6-catalog");
+      const check = semanticCheck(compat, "model-provider.bedrock-gpt-6-catalog");
       check.file_contains_all = check.file_contains_all.filter(
-        (token) => token !== "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
+        (token) => token !== "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
       );
     },
     expectedMessage:
-      'codex.compatibility.semantic_checks.model-provider.bedrock-gpt-5-6-catalog.file_contains_all missing "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID"',
+      'codex.compatibility.semantic_checks.model-provider.bedrock-gpt-6-catalog.file_contains_all missing "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID"',
   });
 
   assertSelfTestError({

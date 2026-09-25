@@ -293,6 +293,19 @@ pub fn repair_resume_session_metadata_prefix(
 }
 
 /// Finds a valid exact rollout path without changing the session file.
+pub fn session_cwd_from_path(path: &Path) -> Result<Option<PathBuf>> {
+    let mut report = SessionReport::from_path(path, file_modified_epoch(path).unwrap_or(0));
+    let valid = if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
+        read_json_session_report(path, &mut report)?
+    } else {
+        read_jsonl_session_report(path, &mut report)?
+    };
+    if !valid {
+        return Ok(None);
+    }
+    Ok(report.cwd.map(PathBuf::from))
+}
+
 pub fn find_resume_session_path(
     shared_codex_root: &Path,
     selector: &str,
