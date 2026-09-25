@@ -35,7 +35,6 @@ impl<'a> Document<'a> {
         self.nodes[0].raw_length = self.raw.len();
     }
 
-    #[cfg(feature = "mojo")]
     pub(crate) fn openai_chat_request_context(
         &mut self,
         request: &'a Value,
@@ -132,7 +131,6 @@ impl<'a> Document<'a> {
         self.nodes[0].raw_length = self.raw.len();
     }
 
-    #[cfg(feature = "mojo")]
     fn push_string(&mut self, text: &'a str, parent: Option<usize>, key: &'a str) -> usize {
         let index = self.nodes.len();
         let start = self.raw.len();
