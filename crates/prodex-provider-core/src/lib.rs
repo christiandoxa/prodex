@@ -299,5 +299,4 @@ pub use usage::{
     microusd_to_usd,
 };
 
-#[cfg(feature = "mojo")]
 mod mojo_json;

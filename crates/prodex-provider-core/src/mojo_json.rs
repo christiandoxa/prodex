@@ -10,6 +10,7 @@ pub(crate) struct Document<'a> {
 }
 
 impl<'a> Document<'a> {
+    #[cfg(feature = "mojo")]
     pub(crate) fn array(&mut self, values: impl IntoIterator<Item = &'a Value>) {
         self.nodes.push(JsonNode {
             kind: JsonKind::Array,
@@ -34,6 +35,7 @@ impl<'a> Document<'a> {
         self.nodes[0].raw_length = self.raw.len();
     }
 
+    #[cfg(feature = "mojo")]
     pub(crate) fn openai_chat_request_context(
         &mut self,
         request: &'a Value,
@@ -130,6 +132,7 @@ impl<'a> Document<'a> {
         self.nodes[0].raw_length = self.raw.len();
     }
 
+    #[cfg(feature = "mojo")]
     fn push_string(&mut self, text: &'a str, parent: Option<usize>, key: &'a str) -> usize {
         let index = self.nodes.len();
         let start = self.raw.len();
@@ -147,6 +150,7 @@ impl<'a> Document<'a> {
         index
     }
 
+    #[cfg(feature = "mojo")]
     pub(crate) fn member(&mut self, value: &'a Value, key: &'a str) {
         self.nodes.push(JsonNode {
             kind: JsonKind::Object,

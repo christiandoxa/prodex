@@ -10,59 +10,12 @@ use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
 #[path = "response/metadata.rs"]
 mod metadata;
 
-#[cfg(feature = "mojo")]
 pub(super) fn deepseek_stream_event_from_chat_value(value: &Value) -> Option<Vec<u8>> {
     let mut document = crate::mojo_json::Document::default();
     document.openai_chat_context(value, None);
     let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
     prodex_mojo_core::json::transform_deepseek_chat_stream_event(&document.nodes, raw)
         .unwrap_or_else(|error| panic!("Mojo DeepSeek stream event failed: {error:?}"))
-}
-
-#[cfg(not(feature = "mojo"))]
-pub(super) fn deepseek_stream_event_from_chat_value(value: &Value) -> Option<Vec<u8>> {
-    deepseek_stream_event_from_chat_value_rust(value)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(super) fn deepseek_stream_event_from_chat_value_rust(value: &Value) -> Option<Vec<u8>> {
-    let delta = value
-        .get("choices")
-        .and_then(Value::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("delta"))?;
-    if let Some(tool_call) = delta
-        .get("tool_calls")
-        .and_then(Value::as_array)
-        .and_then(|tool_calls| tool_calls.first())
-    {
-        let arguments = tool_call
-            .get("function")
-            .and_then(|function| function.get("arguments"))
-            .and_then(Value::as_str)?;
-        let mut transformed = json!({
-            "type":"response.function_call_arguments.delta",
-            "delta": arguments,
-        });
-        if let Some(call_id) = tool_call.get("id").and_then(Value::as_str)
-            && let Some(object) = transformed.as_object_mut()
-        {
-            object.insert("call_id".to_string(), Value::String(call_id.to_string()));
-        }
-        return Some(
-            format!("event: response.function_call_arguments.delta\ndata: {transformed}\n\n")
-                .into_bytes(),
-        );
-    }
-    let text = delta
-        .get("content")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let transformed = json!({
-        "type":"response.output_text.delta",
-        "delta":text,
-    });
-    Some(format!("event: response.output_text.delta\ndata: {transformed}\n\n").into_bytes())
 }
 
 pub(super) fn deepseek_responses_value_from_chat_value(value: &Value) -> Value {

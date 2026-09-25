@@ -1883,7 +1883,7 @@
       "previous_responsibility": "first-choice and first-tool delta selection and complete Responses SSE event serialization",
       "final_state": "adapter-only",
       "rust_before": "Serde field selection and SSE event assembly",
-      "rust_after": "Mojo-enabled path sends the parsed event tree once; feature-off Rust implementation remains available",
+      "rust_after": "Mojo sends the parsed event tree once in both feature modes; Rust retains framing and result mapping",
       "mojo_owner": "mojo/prodex_core/openai_chat_response.mojo::prodex_mojo_openai_chat_response_v1 operation 2",
       "mojo_source": "mojo/prodex_core/openai_chat_response.mojo",
       "mojo_entry": "prodex_mojo_openai_chat_response_v1",

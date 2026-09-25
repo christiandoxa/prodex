@@ -181,6 +181,6 @@ pub(super) fn deepseek_transform_stream_event(
     )
 }
 
-#[cfg(all(test, feature = "mojo"))]
+#[cfg(test)]
 #[path = "stream/mojo_tests.rs"]
 mod mojo_tests;

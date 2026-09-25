@@ -27,7 +27,6 @@ pub(crate) use self::response::{
     gemini_image_generation_call_item_from_part, gemini_media_content_item_from_part,
     gemini_text_from_special_part,
 };
-#[cfg(feature = "mojo")]
 pub(crate) use self::stream::gemini_provider_core_stream_chat_tool_call_item;
 pub use self::stream::{
     GeminiProviderCoreStreamChunkMetadata, GeminiProviderCoreStreamFunctionCallDelta,
