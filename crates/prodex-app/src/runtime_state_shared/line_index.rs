@@ -19,16 +19,22 @@ use std::fmt::Write as _;
 pub(super) fn runtime_smart_context_artifact_line_index(
     text: &str,
 ) -> RuntimeSmartContextArtifactLineIndex {
-    let mut ranges = prodex_context::critical_signal_lost_line_ranges_with_options(
-        text,
-        "",
-        prodex_context::CriticalSignalLineRangeOptions {
-            context_lines: 1,
-            max_ranges: RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_RANGES.saturating_add(1),
-            max_range_lines: 6,
-        },
-    );
-    let complete = ranges.len() <= RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_RANGES;
+    let critical_signals_available = prodex_context::critical_signal_available();
+    let mut ranges = if critical_signals_available {
+        prodex_context::critical_signal_lost_line_ranges_with_options(
+            text,
+            "",
+            prodex_context::CriticalSignalLineRangeOptions {
+                context_lines: 1,
+                max_ranges: RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_RANGES.saturating_add(1),
+                max_range_lines: 6,
+            },
+        )
+    } else {
+        Vec::new()
+    };
+    let complete =
+        critical_signals_available && ranges.len() <= RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_RANGES;
     ranges.truncate(RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_RANGES);
 
     let lines = text.lines().collect::<Vec<_>>();

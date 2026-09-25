@@ -70,25 +70,29 @@ tail";
         let index = store
             .line_index(&artifact.id)
             .expect("new artifacts should carry a line index");
-        assert!(index.complete);
-        assert!(
-            index
-                .critical_ranges
-                .iter()
-                .any(|range| range.text.contains("error: hidden failure"))
-        );
-        assert!(
-            index
-                .critical_ranges
-                .iter()
-                .any(|range| range.text.contains("src/main.rs:22:5"))
-        );
-        assert!(
-            index
-                .critical_ranges
-                .iter()
-                .any(|range| range.text.contains("test result: FAILED"))
-        );
+        assert_eq!(index.complete, prodex_context::critical_signal_available());
+        if prodex_context::critical_signal_available() {
+            assert!(
+                index
+                    .critical_ranges
+                    .iter()
+                    .any(|range| range.text.contains("error: hidden failure"))
+            );
+            assert!(
+                index
+                    .critical_ranges
+                    .iter()
+                    .any(|range| range.text.contains("src/main.rs:22:5"))
+            );
+            assert!(
+                index
+                    .critical_ranges
+                    .iter()
+                    .any(|range| range.text.contains("test result: FAILED"))
+            );
+        } else {
+            assert!(index.critical_ranges.is_empty());
+        }
         for range in &index.critical_ranges {
             assert_eq!(range.byte_len, range.text.len());
             assert_eq!(
