@@ -63,7 +63,7 @@ jobs:
           PRODEX_MOJO_TARGET_CPU=x86-64 \
           CARGO_TARGET_DIR="${target_dir}" \
             cargo build --release --locked --target "${target}" -p prodex-mojo-core \
-              --features mojo-runtime,mojo-quota,mojo-rich
+              --features mojo-core
           archive="$(find "${target_dir}/${target}/release/build" -type f \
             -name libprodex_mojo_core.a -print -quit)"
           test -s "${archive}"

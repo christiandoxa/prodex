@@ -154,7 +154,7 @@ jobs:
           PRODEX_MOJO_TARGET_CPU=x86-64 \
           CARGO_TARGET_DIR="${target_dir}" \
             cargo build --release --locked --target "${target}" -p prodex-mojo-core \
-              --features mojo-runtime,mojo-quota,mojo-rich
+              --features mojo-core
           archive="$(find "${target_dir}/${target}/release/build" -type f \
             -name libprodex_mojo_core.a -print -quit)"
           test -s "${archive}"
@@ -162,6 +162,9 @@ jobs:
           cp "${archive}" "target/mojo-runtime/${target}/libprodex_mojo_core.a"
           llvm-nm -g "${archive}" | grep -F 'prodex_runtime_profile_provider_order_batch'
           llvm-nm -g "${archive}" | grep -F 'prodex_runtime_profile_rotation_order_batch'
+          llvm-nm -g "${archive}" | grep -F 'prodex_mojo_abi_version'
+          llvm-nm -g "${archive}" | grep -F 'prodex_mojo_observability_label_v1'
+          llvm-nm -g "${archive}" | grep -F 'prodex_mojo_provider_registry_plan_v1'
 
       - name: Upload Linux runtime Mojo archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -231,7 +234,7 @@ jobs:
           PRODEX_MOJO_TARGET_CPU='${{ matrix.mojo_target_cpu }}' \
           CARGO_TARGET_DIR="${target_dir}" \
             cargo build --release --locked --target "${target}" -p prodex-mojo-core \
-              --features mojo-runtime,mojo-quota,mojo-rich
+              --features mojo-core
           archive="$(find "${target_dir}/${target}/release/build" -type f \
             -name '${{ matrix.archive_name }}' -print -quit)"
           test -s "${archive}"
@@ -239,6 +242,9 @@ jobs:
           cp "${archive}" "target/mojo-runtime/${target}/${{ matrix.archive_name }}"
           llvm-nm -g "${archive}" | grep -F 'prodex_runtime_profile_provider_order_batch'
           llvm-nm -g "${archive}" | grep -F 'prodex_runtime_profile_rotation_order_batch'
+          llvm-nm -g "${archive}" | grep -F 'prodex_mojo_abi_version'
+          llvm-nm -g "${archive}" | grep -F 'prodex_mojo_observability_label_v1'
+          llvm-nm -g "${archive}" | grep -F 'prodex_mojo_provider_registry_plan_v1'
 
       - name: Upload platform runtime Mojo archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
