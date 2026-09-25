@@ -1,217 +1,314 @@
 use super::*;
-use serde_json::{Map, Value, json};
+use crate::translator::ProviderTransformLoss;
+use serde_json::{Value, json};
 
-fn assert_request_parity(request: Value, input_model: Option<&str>, default_model: &str) {
-    let body = serde_json::to_vec(&request).expect("fixture serializes");
-    let mut input = ProviderTransformInput::new(ProviderEndpoint::Responses, body);
+enum Expected {
+    Body(Value),
+    Rejected(&'static str),
+    InvalidJson,
+}
+
+fn assert_fixture(body: &[u8], input_model: Option<&str>, expected: Expected) {
+    let mut input = ProviderTransformInput::new(ProviderEndpoint::Responses, body.to_vec());
     input.model = input_model.map(str::to_owned);
-    let actual = translate_responses_request_to_chat(provider(), input.clone(), default_model);
-    let expected = translate_responses_request_to_chat_rust(provider(), input, default_model);
+    let result = translate_responses_request_to_chat(ProviderId::Anthropic, input, "default-model");
 
-    assert_eq!(actual.provider, expected.provider);
-    assert_eq!(actual.endpoint, expected.endpoint);
-    assert_eq!(actual.from_format, expected.from_format);
-    assert_eq!(actual.to_format, expected.to_format);
-    assert_eq!(actual.headers, expected.headers);
-    assert_eq!(actual.metadata, expected.metadata);
-    assert_eq!(actual.loss, expected.loss, "request={request}");
+    assert_eq!(result.provider, ProviderId::Anthropic);
+    assert_eq!(result.endpoint, ProviderEndpoint::Responses);
+    assert_eq!(result.from_format, ProviderWireFormat::OpenAiResponses);
+    assert_eq!(result.to_format, ProviderWireFormat::OpenAiChatCompletions);
+    assert!(result.headers.is_empty());
+    assert!(result.metadata.is_empty());
 
-    match (actual.body, expected.body) {
-        (Some(actual), Some(expected)) => {
-            let actual: Value = serde_json::from_slice(&actual).expect("Mojo body is JSON");
-            let expected: Value = serde_json::from_slice(&expected).expect("Rust body is JSON");
-            assert_eq!(actual, expected, "request={request}");
+    match expected {
+        Expected::Body(expected) => {
+            assert!(matches!(&result.loss, ProviderTransformLoss::Lossless));
+            let Some(body) = result.body.as_deref() else {
+                panic!("expected translated body");
+            };
+            let actual: Value = serde_json::from_slice(body).expect("translated body is JSON");
+            assert_eq!(actual, expected);
         }
-        (None, None) => {}
-        (actual, expected) => panic!(
-            "body presence differs for request={request}: actual={actual:?} expected={expected:?}"
-        ),
+        Expected::Rejected(expected) => {
+            assert!(result.body.is_none());
+            let ProviderTransformLoss::Rejected { reason } = &result.loss else {
+                panic!("expected rejected request");
+            };
+            assert_eq!(reason, expected);
+        }
+        Expected::InvalidJson => {
+            assert!(result.body.is_none());
+            let ProviderTransformLoss::Rejected { reason } = &result.loss else {
+                panic!("expected invalid JSON rejection");
+            };
+            assert!(reason.starts_with("failed to parse Responses request JSON:"));
+        }
     }
 }
 
-fn provider() -> ProviderId {
-    ProviderId::Anthropic
+fn assert_value_fixture(request: Value, input_model: Option<&str>, expected: Expected) {
+    assert_fixture(
+        &serde_json::to_vec(&request).expect("fixture serializes"),
+        input_model,
+        expected,
+    );
 }
 
 #[test]
-fn complete_openai_chat_request_matches_edge_contracts() {
-    let fixtures = [
-        json!({"input": "hello"}),
-        json!({"instructions": "system", "input": "hello", "model": "request-model"}),
-        json!({"instructions": "", "input": " "}),
-        json!({"input": [{"type":"message","role":"assistant","content":"hello"}]}),
-        json!({"input": [{"type":"message","role":"assistant","content":"","text":"blocked"}]}),
-        json!({"input": [{"type":"message","role":"assistant","content":[{"type":"input_text","text":"a"},{"type":"text","content":"b"}]}]}),
-        json!({"input": [{"type":"input_text","text":" \t "},{"type":"output_text","text":"assistant"}]}),
-        json!({"input": [{"type":"function_call","call_id":"c1","namespace":"agents","name":"run","arguments":{"x":1}}]}),
-        json!({"input": [{"type":"function_call","call_id":17,"id":"fallback","name":"run","arguments":true}]}),
-        json!({"input": [{"type":"function_call","name":null,"tool_name":"blocked","arguments":"{}"}]}),
-        json!({"input": [{"type":"function_call_output","call_id":"c1","output":{"ok":true}}]}),
-        json!({"input": [{"type":"function_call_output","call_id":17,"id":"blocked","output":"x"}]}),
+fn openai_chat_request_matches_translation_fixtures() {
+    assert_value_fixture(
         json!({
-            "input":"hello",
-            "temperature":0.2,
-            "top_p":0.9,
-            "presence_penalty":0.1,
-            "frequency_penalty":0.3,
-            "seed":42,
-            "max_completion_tokens":77,
-            "max_output_tokens":88,
-            "max_tokens":99,
-            "tools":[{"type":"function","name":"f"}],
-            "tool_choice":"auto",
-            "parallel_tool_calls":true,
-            "user":"u",
-            "stream":true
+            "model": "request-model",
+            "instructions": "system",
+            "input": [
+                {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "héllo 東京"}]},
+                {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "done"}]}
+            ],
+            "max_output_tokens": 17,
+            "stream": true
         }),
-        json!({"messages":[],"input":"x"}),
-        json!({"response_format":{"type":"json_object"},"input":"x"}),
-        json!({"reasoning":{"effort":"high"},"input":"x"}),
-        json!({"previous_response_id":"resp_1","input":"x"}),
-        json!({"text":{"format":{"type":"json_schema"}},"input":"x"}),
-        json!({"n":2,"input":"x"}),
-        json!({"n":2.0,"input":"x"}),
-        json!({"metadata":{},"input":"x"}),
-        json!({"safety_identifier":"s","input":"x"}),
-        json!({"web_search_options":{},"input":"x"}),
-        json!({"tools":[{"type":"custom","name":"x"}],"input":"x"}),
-        json!({"tool_choice":{"type":"mcp","name":"x"},"input":"x"}),
-        json!({"parallel_tool_calls":false,"input":"x"}),
-        json!({"logprobs":true,"input":"x"}),
-        json!({"top_logprobs":2,"input":"x"}),
-        json!({"stop_sequences":["x"],"input":"x"}),
-        json!({"input":[{"type":"custom_tool_call","name":"x"}]}),
-        json!({"input":[{"type":"input_image","image_url":"data:image/png;base64,AA=="}]}),
-        json!({"input":[]}),
-        json!({"input":null}),
-    ];
-    for fixture in fixtures {
-        assert_request_parity(fixture, Some("input-model"), "default-model");
-    }
-}
-
-#[derive(Clone, Copy)]
-struct Lcg(u64);
-
-impl Lcg {
-    fn next(&mut self) -> u64 {
-        self.0 = self
-            .0
-            .wrapping_mul(6_364_136_223_846_793_005)
-            .wrapping_add(1_442_695_040_888_963_407);
-        self.0
-    }
-
-    fn pick(&mut self, count: u64) -> u64 {
-        self.next() % count
-    }
-}
-
-fn generated_request(rng: &mut Lcg, index: usize) -> Value {
-    let text = format!("case-{index}-東京-{}", rng.pick(10_000));
-    let mut request = Map::new();
-    let input = match rng.pick(7) {
-        0 => Value::String(text.clone()),
-        1 => {
-            json!([{"type":"message","role": if rng.pick(2)==0 {"user"} else {"assistant"},"content":text}])
-        }
-        2 => json!([{"type":"message","content":[
-            {"type":"input_text","text":text},
-            {"type":"text","content":"tail"}
-        ]}]),
-        3 => {
-            json!([{"type":"function_call","call_id":format!("call-{index}"),"namespace":"functions","name":"exec_command","arguments":{"cmd":"pwd"}}])
-        }
-        4 => {
-            json!([{"type":"function_call_output","call_id":format!("call-{index}"),"output":{"ok":true,"index":index}}])
-        }
-        5 => json!([{"type":"input_text","text":text},{"type":"output_text","text":"done"}]),
-        _ => json!({"type":"message","role":"user","text":text}),
-    };
-    request.insert("input".into(), input);
-
-    if rng.pick(3) == 0 {
-        request.insert(
-            "instructions".into(),
-            Value::String(format!("system-{index}")),
-        );
-    }
-    if rng.pick(4) == 0 {
-        request.insert(
-            "model".into(),
-            Value::String(format!("model-{}", rng.pick(5))),
-        );
-    }
-    if rng.pick(2) == 0 {
-        request.insert("stream".into(), Value::Bool(rng.pick(2) == 0));
-    }
-    if rng.pick(3) == 0 {
-        request.insert("temperature".into(), json!((rng.pick(20) as f64) / 10.0));
-    }
-    if rng.pick(4) == 0 {
-        request.insert("top_p".into(), json!((rng.pick(10) as f64) / 10.0));
-    }
-    if rng.pick(5) == 0 {
-        request.insert("max_output_tokens".into(), json!(1 + rng.pick(4096)));
-    }
-    if rng.pick(6) == 0 {
-        request.insert(
-            "tools".into(),
-            json!([{"type":"function","name":format!("tool_{index}"),"parameters":{"type":"object"}}]),
-        );
-    }
-    if rng.pick(6) == 0 {
-        request.insert("tool_choice".into(), Value::String("auto".into()));
-    }
-
-    match rng.pick(18) {
-        0 => {
-            request.insert("messages".into(), json!([]));
-        }
-        1 => {
-            request.insert("response_format".into(), json!({"type":"json_object"}));
-        }
-        2 => {
-            request.insert("reasoning".into(), json!({"effort":"high"}));
-        }
-        3 => {
-            request.insert("previous_response_id".into(), json!("resp_prev"));
-        }
-        4 => {
-            request.insert("metadata".into(), json!({"case":index}));
-        }
-        5 => {
-            request.insert("safety_identifier".into(), json!("id"));
-        }
-        6 => {
-            request.insert("web_search_options".into(), json!({}));
-        }
-        7 => {
-            request.insert("parallel_tool_calls".into(), json!(false));
-        }
-        8 => {
-            request.insert("logprobs".into(), json!(true));
-        }
-        9 => {
-            request.insert("stop_sequences".into(), json!(["x"]));
-        }
-        10 => {
-            request.insert("n".into(), json!(2));
-        }
-        11 => {
-            request.insert("text".into(), json!({"format":{"type":"text"}}));
-        }
-        _ => {}
-    }
-    Value::Object(request)
+        None,
+        Expected::Body(json!({
+            "model": "request-model",
+            "messages": [
+                {"role": "system", "content": "system"},
+                {"role": "user", "content": "héllo 東京"},
+                {"role": "assistant", "content": "done"}
+            ],
+            "max_tokens": 17,
+            "stream": true
+        })),
+    );
+    assert_value_fixture(
+        json!({
+            "input": "hello",
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "presence_penalty": 0.1,
+            "frequency_penalty": 0.3,
+            "seed": 42,
+            "max_completion_tokens": 77,
+            "max_output_tokens": 88,
+            "max_tokens": 99,
+            "tools": [{"type": "function", "name": "f"}],
+            "tool_choice": "auto",
+            "parallel_tool_calls": true,
+            "user": "u",
+            "stream": true
+        }),
+        None,
+        Expected::Body(json!({
+            "model": "default-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": 77,
+            "stream": true,
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "presence_penalty": 0.1,
+            "frequency_penalty": 0.3,
+            "seed": 42,
+            "tools": [{"type": "function", "name": "f"}],
+            "tool_choice": "auto",
+            "parallel_tool_calls": true,
+            "user": "u"
+        })),
+    );
+    assert_value_fixture(
+        json!({"input": [
+            {"type": "function_call", "call_id": "c1", "namespace": "agents", "name": "run", "arguments": {"x": 1, "z": 2}},
+            {"type": "function_call_output", "call_id": "c1", "output": {"ok": true}}
+        ]}),
+        None,
+        Expected::Body(json!({
+            "model": "default-model",
+            "messages": [
+                {"role": "assistant", "content": "", "tool_calls": [{
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "agents.run", "arguments": "{\"x\":1,\"z\":2}"}
+                }]},
+                {"role": "tool", "tool_call_id": "c1", "content": "{\"ok\":true}"}
+            ],
+            "stream": false
+        })),
+    );
+    assert_value_fixture(
+        json!({
+            "input": "hello",
+            "instructions": 17,
+            "model": 42,
+            "stream": "true",
+            "temperature": "warm",
+            "max_output_tokens": false,
+            "tools": "raw-tools"
+        }),
+        Some("caller-model"),
+        Expected::Body(json!({
+            "model": "caller-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "max_tokens": false,
+            "stream": false,
+            "temperature": "warm",
+            "tools": "raw-tools"
+        })),
+    );
+    assert_value_fixture(
+        json!({"input": [{"type": null, "content": "wrong-type but text"}]}),
+        None,
+        Expected::Body(json!({
+            "model": "default-model",
+            "messages": [{"role": "user", "content": "wrong-type but text"}],
+            "stream": false
+        })),
+    );
+    assert_value_fixture(
+        json!({"instructions": "", "input": " "}),
+        None,
+        Expected::Body(json!({
+            "model": "default-model",
+            "messages": [{"role": "user", "content": " "}],
+            "stream": false
+        })),
+    );
+    assert_value_fixture(
+        json!({"input": [{"type": "input_text", "text": " \t "}, {"type": "output_text", "text": "assistant"}]}),
+        None,
+        Expected::Body(json!({
+            "model": "default-model",
+            "messages": [{"role": "user", "content": " \t \nassistant"}],
+            "stream": false
+        })),
+    );
+    assert_value_fixture(
+        json!({"n": 2.0, "input": "hello"}),
+        None,
+        Expected::Body(json!({
+            "model": "default-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "stream": false
+        })),
+    );
 }
 
 #[test]
-fn complete_openai_chat_request_matches_five_thousand_generated_requests() {
-    let mut rng = Lcg(0x6f70656e61695f35);
-    for index in 0..5_000 {
-        let request = generated_request(&mut rng, index);
-        let input_model = (rng.pick(3) == 0).then_some("caller-model");
-        assert_request_parity(request, input_model, "default-model");
+fn openai_chat_request_rejects_unmapped_inputs_in_precedence_order() {
+    let rejected = [
+        (
+            json!({"messages": [], "response_format": {}, "reasoning": {}, "input": "x"}),
+            "anthropic Responses chat-compat expects Responses input, not raw chat-completions messages",
+        ),
+        (
+            json!({"response_format": {}, "reasoning": {}, "input": "x"}),
+            "anthropic Responses chat-compat does not translate response_format controls",
+        ),
+        (
+            json!({"reasoning": {}, "previous_response_id": "resp_1", "input": "x"}),
+            "anthropic Responses chat-compat does not map Responses reasoning controls",
+        ),
+        (
+            json!({"previous_response_id": "resp_1", "input": "x"}),
+            "anthropic Responses chat-compat does not map previous_response_id continuation state",
+        ),
+        (
+            json!({"text": {"format": {}}, "n": 2, "input": "x"}),
+            "anthropic Responses chat-compat does not translate text.format controls",
+        ),
+        (
+            json!({"n": 2, "input": "x"}),
+            "anthropic Responses chat-compat returns only the first choice and does not support n>1",
+        ),
+        (
+            json!({"metadata": {}, "safety_identifier": "s", "web_search_options": {}, "input": "x"}),
+            "anthropic Responses chat-compat does not translate request metadata",
+        ),
+        (
+            json!({"safety_identifier": "s", "web_search_options": {}, "input": "x"}),
+            "anthropic Responses chat-compat does not translate safety_identifier",
+        ),
+        (
+            json!({"web_search_options": {}, "input": "x"}),
+            "anthropic Responses chat-compat does not translate web_search_options",
+        ),
+        (
+            json!({"tools": [{"type": "custom", "name": "x"}], "tool_choice": {"type": "mcp"}, "input": "x"}),
+            "anthropic Responses chat-compat only forwards function tools",
+        ),
+        (
+            json!({"tool_choice": {"type": "mcp", "name": "x"}, "parallel_tool_calls": false, "input": "x"}),
+            "anthropic Responses chat-compat only forwards function tool_choice controls",
+        ),
+        (
+            json!({"parallel_tool_calls": false, "logprobs": true, "input": "x"}),
+            "anthropic Responses chat-compat does not prove a compatible parallel_tool_calls=false control",
+        ),
+        (
+            json!({"logprobs": true, "top_logprobs": 2, "input": "x"}),
+            "anthropic Responses chat-compat does not translate logprobs controls",
+        ),
+        (
+            json!({"stop_sequences": ["x"], "input": "x"}),
+            "anthropic Responses chat-compat does not translate stop_sequences",
+        ),
+        (
+            json!({"input": [{"type": "custom_tool_call", "name": "x"}, {"type": "input_image", "image_url": "data:image/png;base64,AA=="}]}),
+            "anthropic Responses chat-compat only translates message/function-call history items",
+        ),
+        (
+            json!({"input": [{"type": "input_image", "image_url": "data:image/png;base64,AA=="}]}),
+            "anthropic Responses chat-compat currently translates only text input content",
+        ),
+        (
+            json!({"input": 42}),
+            "Responses request must include a textual input or messages array",
+        ),
+        (
+            json!({"input": []}),
+            "Responses request must include a textual input or messages array",
+        ),
+        (
+            json!({"input": null}),
+            "Responses request must include a textual input or messages array",
+        ),
+        (
+            json!({"input": [{"type": "function_call", "name": null, "tool_name": "blocked", "arguments": "{}"}]}),
+            "Responses request must include a textual input or messages array",
+        ),
+        (
+            json!({"input": [{"type": "function_call_output", "call_id": 17, "id": "blocked", "output": "x"}]}),
+            "Responses request must include a textual input or messages array",
+        ),
+    ];
+    for (request, reason) in rejected {
+        assert_value_fixture(request, None, Expected::Rejected(reason));
     }
+}
+
+#[test]
+fn openai_chat_request_preserves_duplicate_and_large_input_contracts() {
+    assert_fixture(
+        br#"{"input":"first","input":"last","model":"first-model","model":"last-model"}"#,
+        None,
+        Expected::Body(json!({
+            "model": "last-model",
+            "messages": [{"role": "user", "content": "last"}],
+            "stream": false
+        })),
+    );
+    assert_fixture(b"{broken", None, Expected::InvalidJson);
+    assert_fixture(
+        b"null",
+        None,
+        Expected::Rejected("Responses request body must be a JSON object"),
+    );
+
+    let large_text = "東京🌍".repeat(32_768);
+    assert_value_fixture(
+        json!({"input": large_text.clone()}),
+        None,
+        Expected::Body(json!({
+            "model": "default-model",
+            "messages": [{"role": "user", "content": large_text}],
+            "stream": false
+        })),
+    );
 }
