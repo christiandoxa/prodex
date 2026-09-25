@@ -228,10 +228,15 @@ jobs:
           set -euo pipefail
           target='${{ matrix.target }}'
           target_dir="${GITHUB_WORKSPACE}/target/mojo-runtime-build/${target}"
+          archive_tool=llvm-ar
+          if [[ "${target}" == *-pc-windows-msvc ]]; then
+            archive_tool=llvm-lib
+          fi
           PRODEX_MOJO_REQUIRED=1 \
           PRODEX_MOJO_VERSION="${MOJO_VERSION}" \
           PRODEX_MOJO_TARGET="${target}" \
           PRODEX_MOJO_TARGET_CPU='${{ matrix.mojo_target_cpu }}' \
+          AR="${archive_tool}" \
           CARGO_TARGET_DIR="${target_dir}" \
             cargo build --release --locked --target "${target}" -p prodex-mojo-core \
               --features mojo-core
