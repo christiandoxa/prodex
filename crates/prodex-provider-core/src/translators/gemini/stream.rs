@@ -44,7 +44,6 @@ pub struct GeminiProviderCoreStreamFunctionCallDelta {
 mod events;
 #[path = "stream/shaping.rs"]
 mod shaping;
-#[cfg(feature = "mojo")]
 pub(crate) use self::shaping::gemini_provider_core_stream_chat_tool_call_item;
 pub use events::{
     gemini_provider_core_function_call_arguments_delta_event,

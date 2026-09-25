@@ -81,6 +81,11 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/stream.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/response.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
@@ -99,6 +104,10 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/stream.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
 ]);
 const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|mojo-core|runtime-log-mojo|state-summary-mojo)"\s*\)/u;
 const ANTHROPIC_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs";
@@ -144,6 +153,11 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/stream.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/response.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
 ]);
 const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-app/Cargo.toml", "mojo-core"],

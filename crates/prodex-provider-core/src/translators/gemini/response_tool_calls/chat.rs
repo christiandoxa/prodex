@@ -47,23 +47,5 @@ pub(crate) fn gemini_chat_assistant_tool_call_item_with_call_id(
 ) -> Value {
     let tool_call =
         gemini_chat_assistant_tool_call_with_call_id(part, function_call, call_id_override);
-    #[cfg(feature = "mojo")]
-    {
-        crate::translators::gemini::gemini_provider_core_stream_chat_tool_call_item(&tool_call)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let mut item = json!({
-            "id": tool_call.call_id,
-            "type": "function",
-            "function": {
-                "name": tool_call.name,
-                "arguments": tool_call.arguments,
-            },
-        });
-        if let Some(signature) = tool_call.thought_signature {
-            item["gemini_thought_signature"] = Value::String(signature);
-        }
-        item
-    }
+    crate::translators::gemini::gemini_provider_core_stream_chat_tool_call_item(&tool_call)
 }
