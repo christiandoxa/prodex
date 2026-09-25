@@ -12,17 +12,15 @@ path = "src/lib.rs"
 
 [features]
 default = []
-mojo = [
-    "prodex_mojo_core/mojo-provider-constraints",
-]
+mojo = []
 
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 url = { workspace = true }
-# Mojo owns model fallback even when the broader Mojo feature is disabled.
-prodex_mojo_core = { workspace = true, features = ["mojo-rich"] }
+# Mojo owns provider constraints and model fallback even when the broader feature is disabled.
+prodex_mojo_core = { workspace = true, features = ["mojo-provider-constraints", "mojo-rich"] }
 
 [lints]
 workspace = true

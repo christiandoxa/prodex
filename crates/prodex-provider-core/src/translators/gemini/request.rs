@@ -33,7 +33,6 @@ pub(super) use self::generation_config::{
 pub(super) use self::optional_fields::gemini_apply_optional_request_fields;
 #[cfg(not(feature = "mojo"))]
 pub(super) use self::response_format::gemini_apply_response_format;
-#[cfg(not(feature = "mojo"))]
 pub(crate) use self::schema::sanitize_function_schema;
 pub(crate) use self::tool_signatures::gemini_preserve_tool_call_signatures;
 pub(super) use self::tools::gemini_tool_from_openai_tool;

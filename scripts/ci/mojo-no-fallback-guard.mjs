@@ -71,6 +71,9 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/health/inflight.rs",
   "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/request/tools.rs",
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
@@ -82,6 +85,8 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
   "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
 ]);
 const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|mojo-core|runtime-log-mojo|state-summary-mojo)"\s*\)/u;
 const ANTHROPIC_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs";
@@ -98,6 +103,7 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-runtime-launch/src/args_oracle.rs",
   "crates/prodex-runtime-launch/src/args_resume.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract/mojo_tests.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/schema/composition.rs",
 ];
 const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-context/src/critical_signal.rs",
@@ -119,6 +125,8 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
   "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
 ]);
 const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-app/Cargo.toml", "mojo-core"],
@@ -130,6 +138,8 @@ const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
+const GEMINI_SCHEMA_FILE = "crates/prodex-provider-core/src/translators/gemini/request/schema.rs";
+const GEMINI_TOOLS_FILE = "crates/prodex-provider-core/src/translators/gemini/request/tools.rs";
 const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
   [/\bfn\s+anthropic_response_block_input\s*\(/u, "Rust response block classifier"],
   [/\bfn\s+plan_with_rust\s*\(/u, "Rust response planner"],
@@ -221,6 +231,8 @@ export function findViolations(files) {
   const replacedClassifierViolations = files.flatMap(([filePath, contents]) => {
     const forbidden = new Map([
       [SUPER_OVERRIDE_FILE, /\bfn\s+(?:scan_override_rust|scan_identity_override|scan_boolean_override|scan_runtime_override|scan_feature_value_override|scan_feature_boolean_override)\s*\(/u],
+      [GEMINI_SCHEMA_FILE, /\bfn\s+(?:schema_type|supported_schema_type|sanitized_enum|sanitized_properties|sanitized_required)\s*\(/u],
+      [GEMINI_TOOLS_FILE, /\bfn\s+gemini_tool_config_from_request_oracle\s*\(/u],
     ]);
     return forbidden.get(filePath)?.test(contents)
       ? [`${filePath}: contains a replaced Rust semantic implementation`] : [];
@@ -332,6 +344,12 @@ function selfTest() {
     /feature-off Rust planner/u);
   assert.match(findViolations([[SUPER_OVERRIDE_FILE, "fn scan_override_rust() {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[GEMINI_SCHEMA_FILE, "fn sanitized_required() {}"]]).join("\n"),
+    /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[GEMINI_TOOLS_FILE, "fn gemini_tool_config_from_request_oracle() {}"]]).join("\n"),
+    /replaced Rust semantic implementation/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/schema/composition.rs",
+    "fn collapse_schema_union() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([[SUPER_OVERRIDE_FILE,
     '#[cfg(not(feature = "mojo-core"))] fn old_scan() {}']])[0], /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-cli/Cargo.toml",

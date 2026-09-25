@@ -5,10 +5,8 @@ mod system_instruction;
 #[path = "request_contents/text.rs"]
 mod text;
 
-#[cfg(feature = "mojo")]
 use serde_json::Value;
 
-#[cfg(feature = "mojo")]
 pub(crate) fn gemini_request_content_mojo_value(
     operation: prodex_mojo_core::provider_constraints::GeminiRequestContentOperation,
     primary: Option<&[u8]>,

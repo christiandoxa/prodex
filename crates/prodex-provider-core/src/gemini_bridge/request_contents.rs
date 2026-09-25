@@ -1,14 +1,14 @@
 //! Rust-side views for the reachable Gemini request Mojo kernels.
 
-#[cfg(feature = "mojo")]
 use prodex_mojo_core::MojoError;
-#[cfg(feature = "mojo")]
 use serde_json::Value;
 
+use prodex_mojo_core::provider_constraints::{
+    GeminiBridgeRequestKernelInput, GeminiBridgeRequestOperation,
+};
 #[cfg(feature = "mojo")]
 use prodex_mojo_core::provider_constraints::{
-    GeminiBridgeRequestKernelInput, GeminiBridgeRequestOperation, GeminiRequestContentKernelInput,
-    GeminiRequestContentOperation,
+    GeminiRequestContentKernelInput, GeminiRequestContentOperation,
 };
 
 #[cfg(feature = "mojo")]
@@ -33,15 +33,13 @@ pub(super) fn gemini_request_content_value(
     })
 }
 
-#[cfg(feature = "mojo")]
 fn gemini_bridge_request_bytes(
     input: GeminiBridgeRequestKernelInput<'_>,
 ) -> Result<Vec<u8>, MojoError> {
     prodex_mojo_core::provider_constraints::gemini_bridge_request_kernel(input)
 }
 
-#[cfg(feature = "mojo")]
-pub(super) fn gemini_bridge_request_value(input: GeminiBridgeRequestKernelInput<'_>) -> Value {
+fn gemini_bridge_request_value(input: GeminiBridgeRequestKernelInput<'_>) -> Value {
     let body = gemini_bridge_request_bytes(input)
         .unwrap_or_else(|error| panic!("Mojo Gemini bridge request kernel failed: {error:?}"));
     serde_json::from_slice(&body).unwrap_or_else(|error| {
@@ -142,7 +140,6 @@ pub(super) fn gemini_bridge_request_candidate_count(value: &Value) -> Result<(),
     }
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_tool_config(value: &Value) -> Option<Value> {
     let input = serde_json::to_vec(value).expect("Gemini tool choice serializes");
     let value = gemini_bridge_request_value(GeminiBridgeRequestKernelInput {

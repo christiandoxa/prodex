@@ -578,6 +578,134 @@ mod tests {
     }
 
     #[test]
+    fn function_tools_keep_order_duplicates_unicode_and_schema_arrays() {
+        let declaration = json!({
+            "type": "function",
+            "function": {
+                "name": "検索🙂",
+                "description": "Unicode tool description: β",
+                "parameters": {
+                    "$schema": "discarded",
+                    "strict": true,
+                    "type": "object",
+                    "required": ["β", "alpha", "β"],
+                    "properties": {
+                        "β": {"type": "string", "additionalProperties": false},
+                        "alpha": {"type": "integer"}
+                    }
+                }
+            }
+        });
+        let result = transform(json!({
+            "tools": [declaration.clone(), declaration]
+        }));
+        let body: serde_json::Value = serde_json::from_slice(&result.body.unwrap()).unwrap();
+
+        assert_eq!(
+            body["request"]["tools"],
+            json!([{
+                "functionDeclarations": [
+                    {
+                        "name": "検索🙂",
+                        "description": "Unicode tool description: β",
+                        "parameters": {
+                            "type": "object",
+                            "required": ["β", "alpha", "β"],
+                            "properties": {
+                                "β": {"type": "string"},
+                                "alpha": {"type": "integer"}
+                            }
+                        }
+                    },
+                    {
+                        "name": "検索🙂",
+                        "description": "Unicode tool description: β",
+                        "parameters": {
+                            "type": "object",
+                            "required": ["β", "alpha", "β"],
+                            "properties": {
+                                "β": {"type": "string"},
+                                "alpha": {"type": "integer"}
+                            }
+                        }
+                    }
+                ]
+            }])
+        );
+    }
+
+    #[test]
+    fn tool_choice_keeps_nested_string_precedence_and_legacy_outer_fallback() {
+        for (choice, expected) in [
+            (
+                json!({"function": {"name": 7}, "name": "fallback🙂"}),
+                Some(json!({
+                    "functionCallingConfig": {
+                        "mode": "ANY",
+                        "allowedFunctionNames": ["fallback🙂"]
+                    }
+                })),
+            ),
+            (
+                json!({"function": {"name": "nested"}, "name": "outer"}),
+                Some(json!({
+                    "functionCallingConfig": {
+                        "mode": "ANY",
+                        "allowedFunctionNames": ["nested"]
+                    }
+                })),
+            ),
+            (
+                json!({"function": false, "name": "outer"}),
+                Some(json!({
+                    "functionCallingConfig": {
+                        "mode": "ANY",
+                        "allowedFunctionNames": ["outer"]
+                    }
+                })),
+            ),
+            (
+                json!({"name": "outer-only"}),
+                Some(json!({
+                    "functionCallingConfig": {
+                        "mode": "ANY",
+                        "allowedFunctionNames": ["outer-only"]
+                    }
+                })),
+            ),
+            (
+                json!({"function": {"name": ""}, "name": "outer"}),
+                Some(json!({
+                    "functionCallingConfig": {
+                        "mode": "ANY",
+                        "allowedFunctionNames": [""]
+                    }
+                })),
+            ),
+            (json!({"function": {"name": 7}, "name": false}), None),
+        ] {
+            let result = transform(json!({"tool_choice": choice}));
+            let body: serde_json::Value = serde_json::from_slice(&result.body.unwrap()).unwrap();
+            assert_eq!(body["request"].get("toolConfig").cloned(), expected);
+        }
+        for (choice, expected) in [
+            ("auto", None),
+            (
+                "none",
+                Some(json!({"functionCallingConfig": {"mode": "NONE"}})),
+            ),
+            (
+                "required",
+                Some(json!({"functionCallingConfig": {"mode": "ANY"}})),
+            ),
+        ] {
+            let result = transform(json!({"tool_choice": choice}));
+            let body: serde_json::Value = serde_json::from_slice(&result.body.unwrap()).unwrap();
+            assert_eq!(body["request"].get("toolConfig").cloned(), expected);
+        }
+    }
+
+    #[test]
     fn valid_custom_tool_is_translated_instead_of_discarded() {
         let result = transform(json!({
             "tools": [{

@@ -1,51 +1,24 @@
 //! Gemini request tool-shape bridge helpers.
 
+#[cfg(not(feature = "mojo"))]
+use crate::translators::gemini_request_body_without_tool;
 use crate::translators::{
     gemini_builtin_tools_from_request, gemini_function_declaration_from_openai_tool,
-    gemini_validate_openai_tools,
-};
-#[cfg(not(feature = "mojo"))]
-use crate::translators::{
-    gemini_request_body_without_tool, gemini_sanitize_function_schema,
-    gemini_tool_config_from_request,
+    gemini_sanitize_function_schema, gemini_validate_openai_tools,
 };
 
 use crate::gemini_bridge::gemini_provider_core_apply_gemini3_tool_declaration_overrides;
 
-#[cfg(feature = "mojo")]
-pub fn gemini_provider_core_sanitize_function_schema(
-    schema: &serde_json::Value,
-) -> serde_json::Value {
-    let schema = serde_json::to_vec(schema).expect("Gemini function schema serializes");
-    super::request_contents::gemini_request_content_value(
-        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::SanitizeFunctionSchema,
-        Some(&schema),
-        None,
-        None,
-        None,
-        0,
-    )
-}
-
-#[cfg(not(feature = "mojo"))]
 pub fn gemini_provider_core_sanitize_function_schema(
     schema: &serde_json::Value,
 ) -> serde_json::Value {
     gemini_sanitize_function_schema(schema)
 }
 
-#[cfg(feature = "mojo")]
 pub fn gemini_provider_core_tool_config_from_request(
     value: &serde_json::Value,
 ) -> Option<serde_json::Value> {
     super::request_contents::gemini_bridge_request_tool_config(value)
-}
-
-#[cfg(not(feature = "mojo"))]
-pub fn gemini_provider_core_tool_config_from_request(
-    value: &serde_json::Value,
-) -> Option<serde_json::Value> {
-    gemini_tool_config_from_request(value)
 }
 
 fn gemini_provider_core_function_declaration_from_openai_tool(
@@ -180,4 +153,75 @@ pub fn gemini_provider_core_unsupported_tool_fallback_body(
             gemini_provider_core_request_body_without_tool(body, tool_name)
                 .map(|body| (tool_name, body))
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn function_declaration_uses_the_mojo_union_contract() {
+        let result = gemini_provider_core_function_tools_from_chat(
+            &json!({
+                "tools": [{
+                    "type": "function",
+                    "function": {
+                        "name": "lookup",
+                        "parameters": {
+                            "anyOf": [],
+                            "oneOf": [{"type": "string"}]
+                        }
+                    }
+                }]
+            }),
+            "gemini-2.5-flash",
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            Some(json!([{
+                "functionDeclarations": [{
+                    "name": "lookup",
+                    "parameters": {"type": "string"}
+                }]
+            }]))
+        );
+    }
+
+    #[test]
+    fn function_tool_validation_keeps_missing_and_wrong_type_precedence() {
+        for (tool, expected) in [
+            (
+                json!({"function": null, "name": "flat", "parameters": {}}),
+                "tools[0].function` must be an object",
+            ),
+            (
+                json!({"function": {"name": 7, "description": 3}}),
+                "tools[0].function.name` must be a non-empty string",
+            ),
+            (
+                json!({"function": {"name": "lookup", "description": 3}}),
+                "tools[0].function.parameters` is required",
+            ),
+            (
+                json!({
+                    "function": {"name": "lookup", "parameters": false, "description": 3}
+                }),
+                "tools[0].function.parameters` must be an object",
+            ),
+            (
+                json!({
+                    "function": {"name": "lookup", "parameters": {}, "description": 3}
+                }),
+                "tools[0].function.description` must be a string",
+            ),
+        ] {
+            let error =
+                gemini_provider_core_validate_request_tools(&json!({"tools": [tool]})).unwrap_err();
+            assert!(error.contains(expected), "{error}");
+        }
+    }
 }
