@@ -965,3 +965,17 @@ The canonical broad inventory is 51,624 reachable Mojo LOC and 197,305 Rust
 production LOC, or 20.74% Mojo. The 7% release floor passes; the 75% project
 target remains unmet, with 540,291 additional Mojo LOC needed at the current
 Rust volume.
+
+## Retired audit decision ABI cleanup
+
+The old `prodex_mojo_audit_decision_v1` export had no Rust caller after the
+domain audit plane was retired. Its time-range, ordering, retention, expiry,
+and hold decisions had no live production consumer; the current audit log has
+a different contract. The unused export and its private operation constants
+were deleted rather than counted as reachable production behavior. The
+retention constants still used by gateway policy remain.
+
+The canonical broad inventory is now 51,560 reachable Mojo LOC and 197,305
+Rust production LOC, or 20.72% Mojo. The release floor and non-regression
+check pass; the 75% project target remains unmet, with 540,355 additional
+Mojo LOC needed at the current Rust volume.

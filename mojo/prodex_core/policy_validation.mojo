@@ -26,12 +26,6 @@ comptime RETENTION_MAX_DAYS: UInt64 = 3_650
 comptime RETENTION_DEFAULT_LIMIT: UInt64 = 100
 comptime RETENTION_MAX_LIMIT: UInt64 = 1_000
 comptime RETENTION_MILLIS_PER_DAY: UInt64 = 86_400_000
-comptime AUDIT_DECISION_ABI_VERSION: Int64 = 1
-comptime AUDIT_TIME_RANGE_CONTAINS: Int64 = 0
-comptime AUDIT_COMPARE_POSITIONS: Int64 = 1
-comptime AUDIT_RETENTION_CUTOFF: Int64 = 2
-comptime AUDIT_EVENT_EXPIRED: Int64 = 3
-comptime AUDIT_HOLD_ACTIVE: Int64 = 4
 
 
 @export("prodex_mojo_policy_refresh_decision_v1")
@@ -149,67 +143,6 @@ def prodex_mojo_rate_limit_plan_v1(
         output[0] = 2
         output[4] = remaining - requested_requests
     return GATEWAY_ADMIN_POLICY_STATUS_OK
-
-
-@export("prodex_mojo_audit_decision_v1")
-def prodex_mojo_audit_decision_v1(
-    abi_version: Int64,
-    operation: Int64,
-    values_address: UInt,
-    value_count: Int64,
-    output_address: UInt,
-) abi("C") -> Int64:
-    if abi_version != AUDIT_DECISION_ABI_VERSION:
-        return GATEWAY_ADMIN_POLICY_STATUS_ABI
-    if values_address == 0 or output_address == 0:
-        return GATEWAY_ADMIN_POLICY_STATUS_INVALID
-    var values = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
-        unsafe_from_address=Int(values_address)
-    )
-    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
-        unsafe_from_address=Int(output_address)
-    )
-    if operation == AUDIT_TIME_RANGE_CONTAINS:
-        if value_count != 5 or values[0] > 1 or values[2] > 1:
-            return GATEWAY_ADMIN_POLICY_STATUS_INVALID
-        output[] = UInt64(
-            (values[0] == 0 or values[4] >= values[1])
-            and (values[2] == 0 or values[4] <= values[3])
-        )
-        return GATEWAY_ADMIN_POLICY_STATUS_OK
-    if operation == AUDIT_COMPARE_POSITIONS:
-        if value_count != 7 or values[6] > 1:
-            return GATEWAY_ADMIN_POLICY_STATUS_INVALID
-        if values[0] != values[3]:
-            var left_before = values[0] < values[3]
-            if values[6] == 1:
-                left_before = not left_before
-            output[] = 0 if left_before else 2
-        elif values[1] != values[4]:
-            output[] = 0 if values[1] < values[4] else 2
-        elif values[2] != values[5]:
-            output[] = 0 if values[2] < values[5] else 2
-        else:
-            output[] = 1
-        return GATEWAY_ADMIN_POLICY_STATUS_OK
-    if operation == AUDIT_RETENTION_CUTOFF:
-        if value_count != 3 or values[1] > UINT64_MAX // RETENTION_MILLIS_PER_DAY:
-            return GATEWAY_ADMIN_POLICY_STATUS_INVALID
-        var retention_ms = values[1] * RETENTION_MILLIS_PER_DAY
-        var cutoff = values[0] - retention_ms if values[0] > retention_ms else 0
-        output[] = cutoff if cutoff > values[2] else values[2]
-        return GATEWAY_ADMIN_POLICY_STATUS_OK
-    if operation == AUDIT_EVENT_EXPIRED:
-        if value_count != 2:
-            return GATEWAY_ADMIN_POLICY_STATUS_INVALID
-        output[] = UInt64(values[0] < values[1])
-        return GATEWAY_ADMIN_POLICY_STATUS_OK
-    if operation == AUDIT_HOLD_ACTIVE:
-        if value_count != 3 or values[0] > 1:
-            return GATEWAY_ADMIN_POLICY_STATUS_INVALID
-        output[] = UInt64(values[0] == 0 or values[2] <= values[1])
-        return GATEWAY_ADMIN_POLICY_STATUS_OK
-    return GATEWAY_ADMIN_POLICY_STATUS_INVALID
 
 
 def gateway_admin_policy_status(abi_version: Int64) -> Int64:
