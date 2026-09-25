@@ -1134,3 +1134,24 @@ and **196,359 Rust production LOC**, totaling **248,143 LOC**:
 **20.87% Mojo**. The 7% release floor and non-regression check pass. The 75%
 project target remains unmet; **537,293 additional Mojo LOC** are required at
 the current Rust volume.
+
+## Gemini stream shaping hard replacement
+
+Gemini SSE event selection, response events, and supported tool-call item
+shaping now use the existing Mojo response kernel in both provider feature
+modes. The matching Rust feature-off branches were deleted. Independent tests
+cover event precedence, sparse calls, malformed payloads, Unicode, omitted
+fields, special tool items, and stream completion. The stream tests were split
+into a focused sibling file to satisfy the source-size guard. After deletion,
+provider-core tests pass 214 default and feature-off cases, and 260 Mojo cases
+with two ignored; 53 app Gemini SSE integration tests, changed tests, workspace
+Clippy, formatting, secret-boundary, ownership, authority, and no-fallback
+guards pass. Arbitrary thought-signature shapes, RTK argument normalization,
+and tool-call ID filtering remain separate Rust-owned work because the existing
+Mojo operation does not represent those inputs.
+
+The canonical report for this checkpoint counts **51,784 reachable Mojo LOC**
+and **196,327 Rust production LOC**, totaling **248,111 LOC**:
+**20.87% Mojo**. The 7% release floor and non-regression check pass. The 75%
+project target remains unmet; **537,197 additional Mojo LOC** are required at
+the current Rust volume.

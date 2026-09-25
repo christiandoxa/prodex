@@ -76,6 +76,9 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/gemini_bridge/request/tools.rs",
   "crates/prodex-runtime-proxy/src/response_forwarding.rs",
   "crates/prodex-quota/src/render/pool.rs",
+  "crates/prodex-provider-core/src/translators/gemini/stream.rs",
+  "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
+  "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
@@ -91,6 +94,9 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
   "crates/prodex-runtime-proxy/src/response_forwarding.rs",
   "crates/prodex-quota/src/render/pool.rs",
+  "crates/prodex-provider-core/src/translators/gemini/stream.rs",
+  "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
+  "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
 ]);
 const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|mojo-core|runtime-log-mojo|state-summary-mojo)"\s*\)/u;
 const ANTHROPIC_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs";
@@ -133,6 +139,9 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
   "crates/prodex-runtime-proxy/src/response_forwarding.rs",
   "crates/prodex-quota/src/render/pool.rs",
+  "crates/prodex-provider-core/src/translators/gemini/stream.rs",
+  "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
+  "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
 ]);
 const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-app/Cargo.toml", "mojo-core"],
@@ -362,6 +371,8 @@ function selfTest() {
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([[QUOTA_POOL_FILE, "fn aggregate_openai_quota() {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream.rs",
+    '#[cfg(not(feature = "mojo"))] fn old_stream() {}']])[0], /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/schema/composition.rs",
     "fn collapse_schema_union() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([[SUPER_OVERRIDE_FILE,
