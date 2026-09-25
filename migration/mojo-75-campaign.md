@@ -1225,3 +1225,22 @@ The canonical report counts **51,784 reachable Mojo LOC** and **195,436 Rust
 production LOC**, totaling **247,220 LOC**: **20.95% Mojo**. The 7% release
 floor and non-regression check pass. The 75% project target remains unmet;
 **534,524 additional Mojo LOC** are required at the current Rust volume.
+
+## Gemini status and usage hard replacement
+
+Gemini finish-reason and prompt-block status mapping, plus response usage JSON
+building, now call the existing Mojo response kernel in both provider feature
+modes. The Rust feature-off mappings, usage builder, and differential oracles
+were deleted. Independent caller tests cover the supported and unknown reasons,
+Unicode, absent or invalid totals, explicit zero, and saturating token sums.
+Invalid `totalTokenCount` is treated as absent before the Mojo call, matching
+the previous non-Mojo behavior. The no-fallback guard covers both files.
+
+Provider-core tests pass 223 cases by default and without default features,
+and 261 with Mojo (two manual tests ignored). Formatter, ownership, authority,
+no-fallback, and production-share checks pass after Rust deletion.
+
+The canonical report counts **51,784 reachable Mojo LOC** and **195,432 Rust
+production LOC**, totaling **247,216 LOC**: **20.95% Mojo**. The 7% release
+floor passes; the 75% project target remains unmet, with **534,512 additional
+Mojo LOC** required at the current Rust volume.
