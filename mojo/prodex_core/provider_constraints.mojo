@@ -2901,9 +2901,14 @@ def gemini_bridge_request_write_tool_config(
         input.primary, choice[0], choice[1], StringSlice("name")
     )
     if gemini_bridge_request_is_object(input.primary, function[0], function[1]):
-        name = gemini_bridge_request_object_member(
+        var function_name = gemini_bridge_request_object_member(
             input.primary, function[0], function[1], StringSlice("name")
         )
+        if (
+            function_name[0] >= 0
+            and gemini_request_content_byte(input.primary, function_name[0]) == 34
+        ):
+            name = function_name.copy()
     if name[0] < 0 or gemini_request_content_byte(input.primary, name[0]) != 34:
         return gemini_request_content_put_literal(writer, StringSlice("null"))
     return (

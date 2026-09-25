@@ -1078,3 +1078,22 @@ LOC** and **196,508 Rust production LOC**, totaling **248,291 LOC**:
 **20.86% Mojo**. The 7% release floor and non-regression check pass. The 75%
 project target remains unmet; **537,741 additional Mojo LOC** are required at
 the current Rust volume.
+
+## Gemini schema and tool-choice hard replacement
+
+Gemini function-schema sanitization and tool-choice mapping now call the existing
+Mojo kernels in both default and `mojo` provider builds. The Rust schema
+sanitizer, composition helper, feature-off tool-choice mapper, and test oracle
+were deleted. Rust keeps Serde acquisition and typed validation at the request
+boundary. Caller and ABI tests cover wrong field types, validation order,
+Unicode, duplicate array entries, large inputs, and nested-versus-outer tool
+names. The existing Mojo rule for an empty `anyOf` followed by a single
+`oneOf` remains the canonical output. Provider tests pass 213 without the
+feature and 259 with it (two ignored); five ABI tests and workspace Clippy
+pass after deletion.
+
+The canonical report for this checkpoint counts **51,788 reachable Mojo LOC**
+and **196,470 Rust production LOC**, totaling **248,258 LOC**:
+**20.86% Mojo**. The 7% release floor and non-regression check pass. The 75%
+project target remains unmet; **537,622 additional Mojo LOC** are required at
+the current Rust volume.

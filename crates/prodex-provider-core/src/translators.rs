@@ -63,10 +63,7 @@ pub(crate) use gemini::gemini_normalized_response_value;
 pub(crate) use gemini::gemini_preserve_tool_call_signatures;
 #[cfg(not(feature = "mojo"))]
 pub(crate) use gemini::gemini_request_body_without_tool;
-#[cfg(not(feature = "mojo"))]
 pub(crate) use gemini::gemini_sanitize_function_schema;
-#[cfg(not(feature = "mojo"))]
-pub(crate) use gemini::gemini_tool_config_from_request;
 #[cfg(not(feature = "mojo"))]
 pub(crate) use gemini::gemini_validate_candidate_count;
 pub(crate) use gemini::gemini_validate_openai_tools;

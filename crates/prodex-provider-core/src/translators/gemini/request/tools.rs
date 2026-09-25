@@ -103,7 +103,6 @@ fn gemini_validate_function_tool(
     Ok(())
 }
 
-#[cfg(feature = "mojo")]
 pub(crate) fn gemini_tool_from_openai_tool(tool: &Value, index: usize) -> Result<Value, String> {
     let Some(function) = tool.get("function") else {
         return Err(format!(
@@ -143,39 +142,6 @@ pub(crate) fn gemini_tool_from_openai_tool(tool: &Value, index: usize) -> Result
     )
 }
 
-#[cfg(not(feature = "mojo"))]
-pub(crate) fn gemini_tool_from_openai_tool(tool: &Value, index: usize) -> Result<Value, String> {
-    let Some(function) = tool.get("function") else {
-        return Err(format!(
-            "invalid_tool_declaration: Gemini request field `tools[{index}].function` must be an object"
-        ));
-    };
-    let Some(name) = function.get("name").and_then(Value::as_str) else {
-        return Err(format!(
-            "invalid_tool_declaration: Gemini request field `tools[{index}].function.name` must be a non-empty string"
-        ));
-    };
-    if name.trim().is_empty() {
-        return Err(format!(
-            "invalid_tool_declaration: Gemini request field `tools[{index}].function.name` must be a non-empty string"
-        ));
-    }
-    let description = function
-        .get("description")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let parameters = function
-        .get("parameters")
-        .map(sanitize_schema)
-        .unwrap_or_else(|| json!({"type":"object","properties":{}}));
-    Ok(json!({
-        "name": name,
-        "description": description,
-        "parameters": parameters,
-    }))
-}
-
-#[cfg(feature = "mojo")]
 pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Option<Value> {
     let function = tool.get("function")?;
     let name = function.get("name").and_then(Value::as_str)?;
@@ -202,86 +168,6 @@ pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Opti
     )
 }
 
-#[cfg(not(feature = "mojo"))]
-pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Option<Value> {
-    let function = tool.get("function")?;
-    let name = function.get("name").and_then(Value::as_str)?;
-    let default_parameters = json!({"type": "object"});
-    let parameters = function.get("parameters").unwrap_or(&default_parameters);
-    let mut declaration = json!({
-        "name": name,
-        "parameters": sanitize_function_schema(parameters),
-    });
-    if let Some(description) = function.get("description").and_then(Value::as_str) {
-        declaration["description"] = Value::String(description.to_string());
-    }
-    Some(declaration)
-}
-
-#[cfg(feature = "mojo")]
 pub(crate) fn gemini_tool_config_from_request(value: &Value) -> Option<Value> {
     crate::gemini_provider_core_tool_config_from_request(value)
-}
-
-#[cfg(not(feature = "mojo"))]
-pub(crate) fn gemini_tool_config_from_request(value: &Value) -> Option<Value> {
-    gemini_tool_config_from_request_oracle(value)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn gemini_tool_config_from_request_oracle(value: &Value) -> Option<Value> {
-    let tool_choice = value.get("tool_choice")?;
-    if tool_choice.as_str() == Some("auto") {
-        return None;
-    }
-    if tool_choice.as_str() == Some("none") {
-        return Some(json!({
-            "functionCallingConfig": {
-                "mode": "NONE",
-            }
-        }));
-    }
-    if tool_choice.as_str() == Some("required") {
-        return Some(json!({
-            "functionCallingConfig": {
-                "mode": "ANY",
-            }
-        }));
-    }
-    let name = tool_choice
-        .get("function")
-        .and_then(|function| function.get("name"))
-        .and_then(Value::as_str)
-        .or_else(|| tool_choice.get("name").and_then(Value::as_str))?;
-    Some(json!({
-        "functionCallingConfig": {
-            "mode": "ANY",
-            "allowedFunctionNames": [name],
-        }
-    }))
-}
-
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_tool_config_tests {
-    use super::{gemini_tool_config_from_request, gemini_tool_config_from_request_oracle};
-    use serde_json::json;
-
-    #[test]
-    fn tool_choice_mapping_matches_rust_oracle() {
-        for request in [
-            json!({}),
-            json!({"tool_choice": null}),
-            json!({"tool_choice": "auto"}),
-            json!({"tool_choice": "none"}),
-            json!({"tool_choice": "required"}),
-            json!({"tool_choice": {"name": "検索🙂"}}),
-            json!({"tool_choice": {"function": {"name": "検索🙂"}}}),
-            json!({"tool_choice": {"function": {"name": ""}}}),
-        ] {
-            assert_eq!(
-                gemini_tool_config_from_request(&request),
-                gemini_tool_config_from_request_oracle(&request),
-            );
-        }
-    }
 }
