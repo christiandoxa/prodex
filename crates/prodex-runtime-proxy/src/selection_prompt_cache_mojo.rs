@@ -3,11 +3,15 @@ pub fn runtime_prompt_cache_affinity_batch(
     prompt_cache_owner_profile: Option<&str>,
     profiles: &[&str],
 ) -> Result<Vec<(u8, u64)>, prodex_mojo_core::MojoError> {
-    prodex_mojo_core::runtime::prompt_cache_affinity_batch(
-        prompt_cache_key,
-        prompt_cache_owner_profile,
-        profiles,
-    )
+    let mut scores = Vec::with_capacity(profiles.len());
+    for batch in profiles.chunks(prodex_mojo_core::runtime::RUNTIME_CANDIDATE_PLAN_MAX_COUNT) {
+        scores.extend(prodex_mojo_core::runtime::prompt_cache_affinity_batch(
+            prompt_cache_key,
+            prompt_cache_owner_profile,
+            batch,
+        )?);
+    }
+    Ok(scores)
 }
 
 pub fn runtime_prompt_cache_affinity_sort_key_with_owner(

@@ -13,6 +13,7 @@ pub(super) fn plan_value(
     (source, plan)
 }
 
+#[cfg(feature = "mojo")]
 pub(super) fn plan_bytes(
     input: &[u8],
     operation: DeepSeekRequestPolicyOperation,
@@ -22,6 +23,7 @@ pub(super) fn plan_bytes(
     deepseek_request_policy(operation, source, flag, 0).ok()
 }
 
+#[cfg(feature = "mojo")]
 pub(super) fn detail(source: &str, plan: DeepSeekRequestPolicyPlan) -> Option<String> {
     let start = plan.detail_start?;
     let end = plan.detail_end?;

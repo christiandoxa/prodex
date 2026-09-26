@@ -16,25 +16,9 @@ fn deepseek_request_body_from_responses(
 ) -> Result<DeepSeekRequestBody, String> {
     let canonical = serde_json::to_string(value)
         .map_err(|error| format!("DeepSeek request serialization failed: {error}"))?;
-    #[cfg(feature = "mojo")]
     crate::deepseek_bridge::deepseek_provider_core_validate_responses_request_params(
         &canonical, "DeepSeek",
     )?;
-    #[cfg(not(feature = "mojo"))]
-    {
-        let mut fields = serde_json::Map::new();
-        crate::deepseek_bridge::deepseek_provider_core_insert_primitive_request_fields(
-            value,
-            &mut fields,
-            "DeepSeek",
-        )?;
-        crate::deepseek_bridge::deepseek_provider_core_top_logprobs_from_responses_request(
-            value, "DeepSeek",
-        )?;
-        crate::deepseek_bridge::deepseek_provider_core_stop_from_responses_request(
-            value, "DeepSeek",
-        )?;
-    }
     let user_id = crate::deepseek_bridge::deepseek_provider_core_user_id_from_responses_request(
         value, "DeepSeek",
     )?;
@@ -230,7 +214,7 @@ mod tests {
                 "logprobs": true,
                 "top_logprobs": 5,
                 "stop_sequences": ["END"],
-                "user": "user_123",
+                "user": " \u{2003}user_123\u{00a0} ",
                 "response_format": {
                     "type": "json_schema",
                     "schema": {"type": "object"},
@@ -541,6 +525,10 @@ mod tests {
     fn request_transform_rejects_invalid_parameters_with_stable_reasons() {
         for (request, expected) in [
             (
+                json!({"input": "hello", "temperature": "warm", "stop": [1]}),
+                "DeepSeek temperature must be a number",
+            ),
+            (
                 json!({"input": "hello", "temperature": "warm"}),
                 "DeepSeek temperature must be a number",
             ),
@@ -553,11 +541,23 @@ mod tests {
                 "DeepSeek top_logprobs must be <= 20",
             ),
             (
+                json!({"input": "hello", "top_logprobs": 21, "logprobs": true, "stop": [1]}),
+                "DeepSeek top_logprobs must be <= 20",
+            ),
+            (
                 json!({"input": "hello", "stop": ["END", 1]}),
                 "DeepSeek stop sequences must be strings",
             ),
             (
                 json!({"input": "hello", "user_id": "bad!"}),
+                "DeepSeek user_id must use only letters, numbers, underscores, or dashes and be at most 512 bytes",
+            ),
+            (
+                json!({"input": "hello", "user_id": "user-é"}),
+                "DeepSeek user_id must use only letters, numbers, underscores, or dashes and be at most 512 bytes",
+            ),
+            (
+                json!({"input": "hello", "user_id": "u".repeat(513)}),
                 "DeepSeek user_id must use only letters, numbers, underscores, or dashes and be at most 512 bytes",
             ),
         ] {
@@ -573,5 +573,57 @@ mod tests {
             };
             assert_eq!(reason, expected, "request: {request}");
         }
+    }
+
+    #[test]
+    fn request_transform_accepts_512_byte_user_id_after_unicode_trim() {
+        let user_id = "u".repeat(512);
+        let result = deepseek_transform_request(
+            ProviderId::DeepSeek,
+            ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                serde_json::to_vec(&json!({
+                    "input": "hello",
+                    "user_id": format!(" \u{2003}{user_id}\u{00a0} ")
+                }))
+                .expect("request serializes"),
+            ),
+        );
+
+        assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
+        let body: serde_json::Value =
+            serde_json::from_slice(result.body.as_ref().expect("request body")).unwrap();
+        assert_eq!(body["user_id"], user_id);
+
+        let blank = deepseek_transform_request(
+            ProviderId::DeepSeek,
+            ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                br#"{"input":"hello","user_id":" \u2003\u00a0 "}"#.to_vec(),
+            ),
+        );
+        assert!(matches!(blank.loss, ProviderTransformLoss::Lossless));
+        let body: serde_json::Value =
+            serde_json::from_slice(blank.body.as_ref().expect("request body")).unwrap();
+        assert!(body.get("user_id").is_none());
+    }
+
+    #[test]
+    fn request_transform_prioritizes_stop_limit_over_item_type() {
+        let mut stop = vec![json!(1)];
+        stop.extend(std::iter::repeat_n(json!("END"), 16));
+        let result = deepseek_transform_request(
+            ProviderId::DeepSeek,
+            ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                serde_json::to_vec(&json!({"input": "hello", "stop": stop}))
+                    .expect("request serializes"),
+            ),
+        );
+
+        let ProviderTransformLoss::Rejected { reason } = result.loss else {
+            panic!("request should be rejected");
+        };
+        assert_eq!(reason, "DeepSeek supports at most 16 stop sequences");
     }
 }

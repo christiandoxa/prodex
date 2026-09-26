@@ -2,7 +2,7 @@ from std.collections import Array
 
 from std.memory import Pointer
 
-from rich_text import rich_view_ptr, rich_view_valid
+from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
 from json_view import (
     deepseek_json_byte,
@@ -961,8 +961,9 @@ def deepseek_put_user_id(
 ) -> Bool:
     if input.input_present != 1:
         return False
-    var start = deepseek_trim_start(input.input)
-    var end = deepseek_trim_end(input.input, start)
+    var bounds = rich_trim_bounds(input.input)
+    var start = bounds[0]
+    var end = bounds[1]
     if end - start > 512:
         return deepseek_put_literal(writer, StringSlice("null"))
     for index in range(start, end):
@@ -1666,18 +1667,15 @@ def deepseek_stop_plan(
         deepseek_policy_set(output, 1)
         return True
     var count: Int64 = 0
+    var invalid_type = False
     var index = deepseek_json_skip_ws(view, stop[0] + 1, stop[1] - 1)
     while index < stop[1] - 1:
         var value_end = deepseek_json_value_end(view, index, stop[1] - 1, 0)
         if value_end < 0:
             return False
         count += 1
-        if count > 16:
-            deepseek_policy_set(output, 2)
-            return True
         if deepseek_json_byte(view, index) != 34:
-            deepseek_policy_set(output, 3)
-            return True
+            invalid_type = True
         index = deepseek_json_skip_ws(view, value_end, stop[1] - 1)
         if index < stop[1] - 1 and deepseek_json_byte(view, index) == 44:
             index = deepseek_json_skip_ws(view, index + 1, stop[1] - 1)
@@ -1685,6 +1683,10 @@ def deepseek_stop_plan(
         if index == stop[1] - 1:
             break
         return False
+    if count > 16:
+        deepseek_policy_set(output, 2)
+    elif invalid_type:
+        deepseek_policy_set(output, 3)
     return True
 
 

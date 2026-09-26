@@ -1339,3 +1339,35 @@ The canonical report counts **51,907 reachable Mojo LOC** and **194,946 Rust
 production LOC**, totaling **246,853 LOC**: **21.027494095676374% Mojo**. The
 7% release floor and non-regression check pass; the 75% project target remains
 unmet, with **532,931 additional Mojo LOC** required at the current Rust volume.
+
+## DeepSeek parameters, prompt-cache affinity, and proxy quota scoring
+
+DeepSeek request parameter validation and normalization now use the existing
+Mojo policy and kernel in every provider feature mode. The Rust feature-off
+validators and their test oracle were deleted. Mojo preserves validation
+precedence, the 16-stop limit, and Unicode-trimmed user IDs up to 512 bytes.
+The Rust boundary still acquires JSON fields and translates typed kernel results
+into the established provider errors.
+
+Prompt-cache affinity hashing and owner preference now use Mojo in every proxy
+feature mode; the Rust hash implementation was deleted. The Mojo kernel now
+matches the previous FNV offset and Unicode trimming, including keys longer
+than 4 KiB. The Rust adapter splits batches above the 256-profile ABI limit
+without reimplementing the hash or preference. Proxy quota pressure banding and
+route scoring likewise use Mojo in every feature mode. Their Rust fallback and
+pressure-band test oracle were deleted, and both feature modes share one Rust
+ABI adapter. Snapshot and precommit policy paths remain separate work.
+
+After deletion, provider-core tests pass 235 cases in default and no-default
+modes and 268 with Mojo (two manual tests ignored). Runtime-proxy tests pass
+305 cases in default and no-default modes and 350 with Mojo. The 364-case
+serial app runtime-proxy filter, runtime smoke, offline upstream baseline and
+five replay fixtures, formatter, ownership/authority/no-fallback, hot-path,
+manifest, and crate-boundary guards pass. The changed Mojo kernels compile to
+objects for all six release targets; native execution was tested on Linux
+x86_64 only.
+
+The canonical report counts **51,921 reachable Mojo LOC** and **194,791 Rust
+production LOC**, totaling **246,712 LOC**: **21.045186290087226% Mojo**. The
+7% release floor and non-regression check pass; the 75% project target remains
+unmet, with **532,452 additional Mojo LOC** required at the current Rust volume.

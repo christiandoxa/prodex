@@ -29,8 +29,11 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/render/windows.rs",
   "crates/prodex-runtime-proxy/src/mojo.rs",
   "crates/prodex-runtime-proxy/src/quota.rs",
+  "crates/prodex-runtime-proxy/src/quota/mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
+  "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/quota/mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_policy.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
@@ -109,6 +112,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
@@ -121,7 +125,9 @@ const PROMOTED_FILES = [
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/quota/mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
+  "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_policy.rs",
   "crates/prodex-runtime-quota/src/selection/scoring.rs",
   "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
@@ -157,6 +163,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
@@ -198,9 +205,11 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-provider-core/src/translators/openai_chat_compat_util.rs",
   "crates/prodex-provider-core/src/catalog_parity_tests.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/rust_oracles.rs",
+  "crates/prodex-runtime-proxy/src/selection_prompt_cache_rust.rs",
   "crates/prodex-provider-core/src/translators/deepseek/request.rs",
   "crates/prodex-provider-core/src/translators/deepseek/request/mojo_parity_tests.rs",
   "crates/prodex-provider-core/src/translators/deepseek/request/params.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params_tests.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/messages.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/chat_items.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/input_tool_calls.rs",
@@ -224,6 +233,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
+  "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
   "crates/prodex-runtime-tuning/src/capacity.rs",
   "crates/prodex-provider-core/src/fallback/chains.rs",
   "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
@@ -259,6 +269,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
@@ -289,10 +300,12 @@ const GEMINI_STATUS_FILE = "crates/prodex-provider-core/src/translators/gemini/r
 const RESPONSE_FORWARDING_FILE = "crates/prodex-runtime-proxy/src/response_forwarding.rs";
 const QUOTA_POOL_FILE = "crates/prodex-quota/src/render/pool.rs";
 const QUOTA_MODEL_CAPACITY_FILE = "crates/prodex-quota/src/render/model_capacity.rs";
+const RUNTIME_QUOTA_FILE = "crates/prodex-runtime-proxy/src/quota.rs";
 const HEALTH_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/profile_health.rs";
 const DEEPSEEK_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/deepseek/response.rs";
 const DEEPSEEK_REQUEST_FILE = "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
+const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
 const DEEPSEEK_SHAPING_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs";
 const DEEPSEEK_SHAPING_COMPLETED_FNS = [
   "deepseek_provider_core_response_completed_event",
@@ -425,10 +438,12 @@ export function findViolations(files) {
       [RESPONSE_FORWARDING_FILE, /\bfn\s+(?:should_skip_response_header|response_content_type_is_sse|token_usage_event_is_loggable|response_event_is_generation_start)\s*\(/u],
       [QUOTA_POOL_FILE, /\bfn\s+(?:aggregate_openai_quota|aggregate_main_quota|add_pool_window|add_ready_pool_window)\s*\(/u],
       [QUOTA_MODEL_CAPACITY_FILE, /\bfn\s+(?:normalized_identifier|is_luna_reserve_identifier|openai_usage_advertises_luna_reserve)\s*\(/u],
+      [RUNTIME_QUOTA_FILE, /\bfn\s+runtime_proxy_quota_score_for_route_rust\s*\(/u],
       [HEALTH_ABI_TEST_FILE, /\bfn\s+(?:effective|expected)\s*\(/u],
       [DEEPSEEK_RESPONSE_FILE, /\bfn\s+deepseek_stream_event_from_chat_value_rust\s*\(|#\[cfg\(not\(feature\s*=\s*"mojo"\)\)\]\s*pub\(super\)\s+fn\s+deepseek_stream_event_from_chat_value\s*\(/u],
       [DEEPSEEK_REQUEST_FILE, /\bfn\s+(?:deepseek_request_body_from_responses_rust|deepseek_messages_from_request|deepseek_tool_choice_from_request)\s*\(/u],
       [MODEL_SPEC_FILE, /\beq_ignore_ascii_case\s*\(/u],
+      [PROMPT_CACHE_SELECTION_FILE, /selection_prompt_cache_rust|\bfn\s+runtime_prompt_cache_affinity_score\s*\(/u],
       [GEMINI_TOOL_CALLS_FILE, /\bfn\s+gemini_split_flat_namespace_tool_name\s*\(/u],
       [GEMINI_CHAT_TOOL_CALLS_FILE, /\blet\s+mut\s+item\s*=\s*json!\s*\(/u],
     ]);
@@ -587,6 +602,9 @@ function selfTest() {
     "fn effective_score_rust() {}"]]).join("\n"), /Rust semantic oracle or copy/u);
   assert.match(findViolations([[QUOTA_MODEL_CAPACITY_FILE,
     "fn normalized_identifier() {}"]]).join("\n"), /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[RUNTIME_QUOTA_FILE,
+    "fn runtime_proxy_quota_score_for_route_rust() {}"]]).join("\n"),
+    /replaced Rust semantic implementation/u);
   assert.match(findViolations([[HEALTH_ABI_TEST_FILE,
     "fn effective() {}"]]).join("\n"), /replaced Rust semantic implementation/u);
   assert.match(findViolations([[DEEPSEEK_RESPONSE_FILE,
@@ -598,11 +616,19 @@ function selfTest() {
   assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
     "fn deepseek_request_body_from_responses() {}"]]).join("\n"),
     /must use the Mojo raw kernel/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
+    '#[cfg(not(feature = "mojo"))] fn validate_primitive_request_fields_rust() {}']]).join("\n"),
+    /feature-off Rust path/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/request_params_tests.rs",
+    "fn oracle() {}"]]).join("\n"), /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/deepseek/request.rs",
     "fn deepseek_request_body_from_responses() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([[MODEL_SPEC_FILE,
     "fn matches_id_or_alias() { self.id.eq_ignore_ascii_case(model) }"]]).join("\n"),
     /model matcher must use the Mojo catalog kernel/u);
+  assert.match(findViolations([[PROMPT_CACHE_SELECTION_FILE,
+    '#[path = "selection_prompt_cache_rust.rs"] mod prompt_cache;']]).join("\n"),
+    /replaced Rust semantic implementation/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/schema/composition.rs",
     "fn collapse_schema_union() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/kiro/request/validation.rs",

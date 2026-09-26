@@ -10,6 +10,10 @@ use crate::{
 #[path = "mojo.rs"]
 pub(crate) mod mojo;
 
+#[cfg(not(feature = "mojo"))]
+#[path = "quota/mojo.rs"]
+pub(crate) mod mojo;
+
 #[cfg(any(not(feature = "mojo"), test))]
 #[path = "quota/rust_oracles.rs"]
 mod rust_oracles;
@@ -399,84 +403,29 @@ pub fn runtime_proxy_quota_score_for_route(
     weekly: Option<RuntimeProxyQuotaWindowObservation>,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeProxyQuotaScore {
-    #[cfg(feature = "mojo")]
-    {
-        runtime_proxy_quota_scores_for_route_batch(&[(five_hour, weekly)], route_kind)
-            .into_iter()
-            .next()
-            .expect("Mojo runtime quota score batch returned no score")
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    runtime_proxy_quota_score_for_route_rust(five_hour, weekly, route_kind)
+    runtime_proxy_quota_scores_for_route_batch(&[(five_hour, weekly)], route_kind)
+        .into_iter()
+        .next()
+        .expect("Mojo runtime quota score batch returned no score")
 }
 
 pub fn runtime_proxy_quota_scores_for_route_batch(
     observations: &[RuntimeProxyQuotaObservationPair],
     route_kind: RuntimeRouteKind,
 ) -> Vec<RuntimeProxyQuotaScore> {
-    #[cfg(feature = "mojo")]
-    {
-        let mut scores = Vec::with_capacity(observations.len());
-        for chunk in observations.chunks(prodex_mojo_core::runtime::RUNTIME_QUOTA_SCORE_MAX_COUNT) {
-            scores.extend(
-                mojo::quota_score_batch(chunk, route_kind)
-                    .expect("Mojo runtime quota score batch returned invalid output"),
-            );
-        }
-        assert_eq!(
-            scores.len(),
-            observations.len(),
-            "Mojo runtime quota score batch returned the wrong count"
+    let mut scores = Vec::with_capacity(observations.len());
+    for chunk in observations.chunks(prodex_mojo_core::runtime::RUNTIME_QUOTA_SCORE_MAX_COUNT) {
+        scores.extend(
+            mojo::quota_score_batch(chunk, route_kind)
+                .expect("Mojo runtime quota score batch returned invalid output"),
         );
-        scores
     }
-
-    #[cfg(not(feature = "mojo"))]
-    observations
-        .iter()
-        .map(|(five_hour, weekly)| {
-            runtime_proxy_quota_score_for_route_rust(*five_hour, *weekly, route_kind)
-        })
-        .collect()
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_proxy_quota_score_for_route_rust(
-    five_hour: Option<RuntimeProxyQuotaWindowObservation>,
-    weekly: Option<RuntimeProxyQuotaWindowObservation>,
-    route_kind: RuntimeRouteKind,
-) -> RuntimeProxyQuotaScore {
-    let weekly_pressure = weekly.map_or(i64::MAX, |window| window.pressure_score);
-    let five_hour_pressure = five_hour.map_or(i64::MAX, |window| window.pressure_score);
-    let weekly_remaining = weekly.map_or(0, |window| window.remaining_percent);
-    let five_hour_remaining = five_hour.map_or(0, |window| window.remaining_percent);
-    let pressure_band = runtime_proxy_quota_pressure_band_for_route(five_hour, weekly, route_kind);
-    let weekly_weight = match route_kind {
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => 10,
-        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => 8,
-    };
-    let reserve_bias = match pressure_band {
-        RuntimeSelectionQuotaPressureBand::Healthy => 0,
-        RuntimeSelectionQuotaPressureBand::Thin => 250_000,
-        RuntimeSelectionQuotaPressureBand::Critical => 1_000_000,
-        RuntimeSelectionQuotaPressureBand::Exhausted
-        | RuntimeSelectionQuotaPressureBand::Unknown => i64::MAX / 4,
-    };
-
-    RuntimeProxyQuotaScore {
-        pressure_band,
-        total_pressure: reserve_bias
-            .saturating_add(weekly_pressure.saturating_mul(weekly_weight))
-            .saturating_add(five_hour_pressure),
-        weekly_pressure,
-        five_hour_pressure,
-        reserve_floor: weekly_remaining.min(five_hour_remaining),
-        weekly_remaining,
-        five_hour_remaining,
-        weekly_reset_at: weekly.map_or(i64::MAX, |window| window.reset_at),
-        five_hour_reset_at: five_hour.map_or(i64::MAX, |window| window.reset_at),
-    }
+    assert_eq!(
+        scores.len(),
+        observations.len(),
+        "Mojo runtime quota score batch returned the wrong count"
+    );
+    scores
 }
 
 pub fn runtime_proxy_quota_pressure_band_for_route(
@@ -484,41 +433,8 @@ pub fn runtime_proxy_quota_pressure_band_for_route(
     weekly: Option<RuntimeProxyQuotaWindowObservation>,
     route_kind: RuntimeRouteKind,
 ) -> RuntimeSelectionQuotaPressureBand {
-    #[cfg(feature = "mojo")]
-    {
-        mojo::pressure_band_for_route(five_hour, weekly, route_kind)
-            .expect("Mojo runtime quota pressure band returned an invalid result")
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        if weekly.is_none() && five_hour.is_none() {
-            return RuntimeSelectionQuotaPressureBand::Unknown;
-        }
-
-        if weekly.is_some_and(|window| window.remaining_percent == 0)
-            || five_hour.is_some_and(|window| window.remaining_percent == 0)
-        {
-            return RuntimeSelectionQuotaPressureBand::Exhausted;
-        }
-
-        let (thin_weekly, thin_five_hour, critical_weekly, critical_five_hour) = match route_kind {
-            RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => (20, 10, 10, 5),
-            RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => (10, 5, 5, 3),
-        };
-
-        if weekly.is_some_and(|window| window.remaining_percent <= critical_weekly)
-            || five_hour.is_some_and(|window| window.remaining_percent <= critical_five_hour)
-        {
-            RuntimeSelectionQuotaPressureBand::Critical
-        } else if weekly.is_some_and(|window| window.remaining_percent <= thin_weekly)
-            || five_hour.is_some_and(|window| window.remaining_percent <= thin_five_hour)
-        {
-            RuntimeSelectionQuotaPressureBand::Thin
-        } else {
-            RuntimeSelectionQuotaPressureBand::Healthy
-        }
-    }
+    mojo::pressure_band_for_route(five_hour, weekly, route_kind)
+        .expect("Mojo runtime quota pressure band returned an invalid result")
 }
 
 pub fn runtime_proxy_quota_summary_requires_precommit_live_probe(
