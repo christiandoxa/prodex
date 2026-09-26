@@ -12,6 +12,10 @@ fn catalog_identity_trims_long_unicode_whitespace() {
         crate::provider_model_spec(ProviderId::OpenAi, &query).map(|model| model.id),
         Some("gpt-5.6-sol")
     );
+    assert!(
+        crate::provider_model_spec(ProviderId::OpenAi, &query)
+            .is_some_and(|model| model.matches_id_or_alias(&query))
+    );
 }
 
 #[test]

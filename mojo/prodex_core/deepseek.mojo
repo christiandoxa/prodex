@@ -2804,6 +2804,93 @@ def deepseek_raw_string_nonempty(
         and bounds[1] - bounds[0] > 2
     )
 
+def deepseek_raw_hex_digit(value: UInt8) -> Int64:
+    if value >= 48 and value <= 57:
+        return Int64(value) - 48
+    if value >= 65 and value <= 70:
+        return Int64(value) - 55
+    if value >= 97 and value <= 102:
+        return Int64(value) - 87
+    return -1
+
+def deepseek_raw_unicode_whitespace(value: Int64) -> Bool:
+    return (
+        (value >= 9 and value <= 13)
+        or value == 32
+        or value == 0x85
+        or value == 0xA0
+        or value == 0x1680
+        or (value >= 0x2000 and value <= 0x200A)
+        or value == 0x2028
+        or value == 0x2029
+        or value == 0x202F
+        or value == 0x205F
+        or value == 0x3000
+    )
+
+def deepseek_raw_trimmed_string_nonempty(
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
+) -> Bool:
+    if not deepseek_json_bounds_is_kind(view, bounds, 34):
+        return False
+    var index = bounds[0] + 1
+    var end = bounds[1] - 1
+    while index < end:
+        var value = deepseek_json_byte(view, index)
+        if value == 92:
+            if index + 1 >= end:
+                return False
+            var escaped = deepseek_json_byte(view, index + 1)
+            if escaped == 110 or escaped == 114 or escaped == 116 or escaped == 102:
+                index += 2
+                continue
+            if escaped == 117 and index + 6 <= end:
+                var codepoint: Int64 = 0
+                for offset in range(2, 6):
+                    var digit = deepseek_raw_hex_digit(
+                        deepseek_json_byte(view, index + Int64(offset))
+                    )
+                    if digit < 0:
+                        return True
+                    codepoint = codepoint * 16 + digit
+                if deepseek_raw_unicode_whitespace(codepoint):
+                    index += 6
+                    continue
+            return True
+        if value == 9 or value == 10 or value == 13 or value == 32:
+            index += 1
+            continue
+        if value == 194 and index + 1 < end:
+            var next = deepseek_json_byte(view, index + 1)
+            if next == 133 or next == 160:
+                index += 2
+                continue
+        elif value == 225 and index + 2 < end:
+            if (
+                deepseek_json_byte(view, index + 1) == 154
+                and deepseek_json_byte(view, index + 2) == 128
+            ):
+                index += 3
+                continue
+        elif value == 226 and index + 2 < end:
+            var next = deepseek_json_byte(view, index + 1)
+            var last = deepseek_json_byte(view, index + 2)
+            if (
+                (next == 128 and (last >= 128 and last <= 138 or last == 168 or last == 169 or last == 175))
+                or (next == 129 and last == 159)
+            ):
+                index += 3
+                continue
+        elif value == 227 and index + 2 < end:
+            if (
+                deepseek_json_byte(view, index + 1) == 128
+                and deepseek_json_byte(view, index + 2) == 128
+            ):
+                index += 3
+                continue
+        return True
+    return False
+
 def deepseek_raw_put_default_or_string(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     view: ProdexRichStringView,
@@ -3057,7 +3144,7 @@ def deepseek_raw_put_tool_choice(
     var name = deepseek_json_object_member(
         view, choice[0], choice[1], StringSlice("name")
     )
-    if not deepseek_raw_present(name):
+    if not deepseek_json_bounds_is_kind(view, name, 34):
         var function = deepseek_json_object_member(
             view, choice[0], choice[1], StringSlice("function")
         )
@@ -3065,7 +3152,7 @@ def deepseek_raw_put_tool_choice(
             name = deepseek_json_object_member(
                 view, function[0], function[1], StringSlice("name")
             )
-    if not deepseek_raw_string_nonempty(view, name):
+    if not deepseek_raw_trimmed_string_nonempty(view, name):
         return False
     return (
         deepseek_put_literal(writer, StringSlice('{"type":"function","function":{"name":'))
@@ -3368,6 +3455,10 @@ def deepseek_raw_put_generic_input_message(
     view: ProdexRichStringView,
     item: Array[Int64, 2],
 ) -> Bool:
+    if deepseek_json_byte(view, item[0]) != 123:
+        return deepseek_put_literal(
+            writer, StringSlice('{"role":"user","content":""}')
+        )
     var role = deepseek_raw_member(view, item, StringSlice("role"))
     var content = deepseek_raw_member(view, item, StringSlice("content"))
     if not deepseek_raw_present(content):
@@ -3437,8 +3528,6 @@ def deepseek_raw_put_input_items(
     while cursor < items[1] - 1:
         var item_end = deepseek_json_value_end(view, cursor, items[1] - 1, 0)
         if item_end < 0:
-            return False
-        if deepseek_json_byte(view, cursor) != 123:
             return False
         var item = Array[Int64, 2](fill=-1)
         item[0] = cursor

@@ -32,13 +32,6 @@ pub(crate) fn deepseek_tool_call_thought_signature_object(
     .filter(|signature| !signature.trim().is_empty())
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
-pub(super) fn deepseek_tool_call_thought_signature(value: &Value) -> Option<String> {
-    let object = value.as_object()?;
-    deepseek_tool_call_thought_signature_object(object)
-}
-
 fn deepseek_string_field(object: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
     keys.iter()
         .find_map(|key| object.get(*key).and_then(Value::as_str))

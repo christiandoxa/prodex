@@ -3,8 +3,6 @@ use crate::translator::{
 };
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
 
-#[path = "deepseek/request.rs"]
-mod request;
 #[path = "deepseek/request_transform.rs"]
 mod request_transform;
 #[path = "deepseek/response.rs"]
