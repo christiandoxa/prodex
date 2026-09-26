@@ -5,8 +5,6 @@ use crate::profile_commands::KIRO_MODEL_CATALOG_FILE;
 use anyhow::{Context, Result, bail};
 use prodex_provider_core::{ProviderReasoningEffort, provider_catalog_entry};
 use serde_json::{Value, json};
-#[cfg(any(not(feature = "mojo-core"), test))]
-use std::collections::BTreeSet;
 use std::path::Path;
 
 const DEFAULT_REASONING_EFFORTS: [ProviderReasoningEffort; 4] = [
@@ -173,27 +171,17 @@ pub(super) fn external_catalog_models(
     Ok(models)
 }
 
-#[cfg(feature = "mojo-core")]
 pub(super) fn external_catalog_model_indices(ids: &[&str]) -> Result<Vec<usize>> {
-    prodex_mojo_core::rich::merge_catalog_ids(&[], ids)
-        .map_err(|error| anyhow::anyhow!("external model catalog merge failed: {error:?}"))
-}
-
-#[cfg(not(feature = "mojo-core"))]
-pub(super) fn external_catalog_model_indices(ids: &[&str]) -> Result<Vec<usize>> {
-    Ok(external_catalog_model_indices_rust(ids))
-}
-
-#[cfg(any(not(feature = "mojo-core"), test))]
-pub(super) fn external_catalog_model_indices_rust(ids: &[&str]) -> Vec<usize> {
-    let mut seen = BTreeSet::new();
-    ids.iter()
-        .enumerate()
-        .filter_map(|(index, id)| {
-            let id = id.trim();
-            (!id.is_empty() && seen.insert(id.to_ascii_lowercase())).then_some(index)
-        })
-        .collect()
+    #[cfg(feature = "mojo-core")]
+    {
+        prodex_mojo_core::rich::merge_catalog_ids(&[], ids)
+            .map_err(|error| anyhow::anyhow!("external model catalog merge failed: {error:?}"))
+    }
+    #[cfg(not(feature = "mojo-core"))]
+    {
+        let _ = ids;
+        bail!("external provider catalog planning requires the mojo-core feature")
+    }
 }
 
 #[derive(Clone, Debug)]

@@ -732,8 +732,9 @@ Mojo LOC are estimated at current Rust volume.
 `external_catalog_models` now sends launch, dynamic, and provider IDs through the
 existing `prodex_mojo_rich_catalog_merge_v1` operation. Mojo owns ordered,
 non-empty, ASCII-case-insensitive ID deduplication. Rust retains catalog file
-reading and parsing, metadata lookup, context limits, model JSON construction,
-and a feature-off Rust oracle. Dynamic duplicates remain available to first-match
+reading and parsing, metadata lookup, context limits, and model JSON construction.
+The former feature-off Rust oracle was deleted in the hard-replacement checkpoint
+below. Dynamic duplicates remain available to first-match
 metadata lookup, while the Mojo index plan keeps the first model in output order.
 
 The merge ABI accepts IDs across Rust's representable string range, including
@@ -741,7 +742,8 @@ values longer than 65,536 bytes. Its candidate count remains capped at 65,536;
 external model catalogs stay within their existing 512-entry dynamic limit plus
 the bounded static provider list.
 
-Validation passes: strict Mojo core tests (84); the long-ID Rust differential;
+Validation at that earlier checkpoint passed: strict Mojo core tests (84);
+the long-ID Rust differential;
 end-to-end duplicate metadata/order tests in Mojo and feature-off builds; and
 seven external-provider catalog tests in both feature modes. `rtk cargo clippy
 --locked --workspace --all-targets --all-features -- -D warnings`, `cargo fmt
@@ -1734,4 +1736,20 @@ The canonical source report counts **52,154 reachable Mojo LOC** and
 **193,327 Rust production LOC**, totaling **245,481 LOC**: **21.25% Mojo**.
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **527,827 additional Mojo LOC** required at this Rust
+volume.
+
+## External catalog dedup hard replacement
+
+External provider launch catalog deduplication now uses the existing Mojo
+merge kernel. The feature-off Rust implementation and test oracle were deleted;
+feature-off use returns an explicit unsupported error. Expected-value tests
+cover Unicode whitespace, IDs longer than 65,536 bytes, first dynamic metadata,
+model ordering, CLI precedence, and opaque OS argument preservation. Native
+execution evidence is Linux x86_64; macOS and Windows runtime execution was
+not run.
+
+The canonical source report counts **52,154 reachable Mojo LOC** and
+**193,329 Rust production LOC**, totaling **245,483 LOC**: **21.25% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **527,833 additional Mojo LOC** required at this Rust
 volume.

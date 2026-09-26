@@ -160,6 +160,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
   "crates/prodex-provider-core/src/translators/kiro/request/semantics_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/stream.rs",
+  "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
@@ -327,6 +328,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
   "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan/large_pool.rs",
@@ -527,6 +529,14 @@ export function findViolations(files) {
       /\bfn\s+matches_id_or_alias\s*\(/u.test(contents) &&
       !contents.includes("resolve_catalog_model("))
     .map(([filePath]) => `${filePath}: model matcher must use the Mojo catalog kernel`);
+  const catalogModelViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs") return [];
+    const body = contents.match(/\bpub\(super\) fn external_catalog_model_indices\([^]*?^\}/mu)?.[0];
+    return body?.includes("merge_catalog_ids(") &&
+      body.includes('bail!("external provider catalog planning requires') &&
+      !/\b(?:BTreeSet|to_ascii_lowercase)\b/u.test(body)
+      ? [] : [`${filePath}: catalog dedup must use Mojo or reject feature-off use`];
+  });
   const deepseekShapingViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== DEEPSEEK_SHAPING_FILE) return [];
     return DEEPSEEK_SHAPING_COMPLETED_FNS.flatMap((name) => {
@@ -619,7 +629,7 @@ export function findViolations(files) {
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
     ...geminiFallbackViolations, ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations,
-    ...modelSpecViolations,
+    ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...quotaWindowViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
@@ -838,6 +848,14 @@ function selfTest() {
   assert.match(findViolations([[MODEL_SPEC_FILE,
     "fn matches_id_or_alias() { self.id.eq_ignore_ascii_case(model) }"]]).join("\n"),
     /model matcher must use the Mojo catalog kernel/u);
+  assert.match(findViolations([[
+    "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
+    "fn external_catalog_model_indices_rust() {}",
+  ]])[0], /Rust semantic oracle or copy/u);
+  assert.match(findViolations([[
+    "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
+    "pub(super) fn external_catalog_model_indices(ids: &[&str]) -> Vec<usize> { ids.iter().map(|id| id.to_ascii_lowercase()).collect() }",
+  ]]).join("\n"), /catalog dedup must use Mojo/u);
   assert.match(findViolations([[PROMPT_CACHE_SELECTION_FILE,
     '#[path = "selection_prompt_cache_rust.rs"] mod prompt_cache;']]).join("\n"),
     /replaced Rust semantic implementation/u);
