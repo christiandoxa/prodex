@@ -227,7 +227,8 @@ fn gemini_request_contents(
     match gemini_text_contents_from_request_mojo(value).map_err(GeminiTransformIssue::Rejected)? {
         Some(contents) => Ok(contents),
         None => Ok((
-            gemini_system_instruction_from_request(value),
+            gemini_system_instruction_from_request(value)
+                .map_err(GeminiTransformIssue::Rejected)?,
             gemini_contents_from_request(value),
         )),
     }
@@ -238,7 +239,7 @@ fn gemini_request_contents(
     value: &Value,
 ) -> Result<(Option<Value>, Vec<Value>), GeminiTransformIssue> {
     Ok((
-        gemini_system_instruction_from_request(value),
+        gemini_system_instruction_from_request(value).map_err(GeminiTransformIssue::Rejected)?,
         gemini_contents_from_request(value),
     ))
 }
@@ -451,6 +452,28 @@ mod tests {
                     ]
                 }
             ])
+        );
+    }
+
+    #[cfg(not(feature = "mojo"))]
+    #[test]
+    fn feature_off_system_instruction_uses_fixed_mojo_result() {
+        let request = json!({
+            "input": [
+                {"role": "system", "content": "system instruction"},
+                {"role": "user", "content": "<environment_context>synthetic</environment_context>"},
+                {"role": "user", "content": "actual request"}
+            ]
+        });
+
+        assert_eq!(
+            gemini_request_contents(&request).expect("valid Gemini request contents"),
+            (
+                Some(
+                    json!({"parts": [{"text": "system instruction\n\n<environment_context>synthetic</environment_context>"}]})
+                ),
+                vec![json!({"role": "user", "parts": [{"text": "actual request"}]})]
+            )
         );
     }
 

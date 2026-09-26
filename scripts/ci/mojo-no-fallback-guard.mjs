@@ -159,6 +159,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
@@ -557,6 +558,7 @@ const GEMINI_CHAT_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators
 const GEMINI_BRIDGE_REQUEST_FILE = "crates/prodex-provider-core/src/gemini_bridge/request.rs";
 const GEMINI_GENERATION_CONFIG_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs";
 const GEMINI_THINKING_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs";
+const GEMINI_SYSTEM_INSTRUCTION_FILE = "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs";
 const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
   [/\bfn\s+anthropic_response_block_input\s*\(/u, "Rust response block classifier"],
   [/\bfn\s+plan_with_rust\s*\(/u, "Rust response planner"],
@@ -699,6 +701,16 @@ export function findViolations(files) {
       return [`${filePath}: contains replaced Rust thinking-config semantics`];
     }
     return [];
+  });
+  const geminiSystemInstructionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== GEMINI_SYSTEM_INSTRUCTION_FILE) return [];
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const body = production.match(/\bpub\(crate\)\s+fn gemini_system_instruction_from_request\([^]*?^\}/mu)?.[0];
+    const hasMojoOperation = body?.includes("GeminiRequestContentOperation::SystemInstructionFromRequest") &&
+      body.includes("gemini_request_content_kernel(");
+    const hasRustSemantics = /gemini_contextual_user_instruction_text|gemini_message_text|json!\s*\(/u.test(body ?? "");
+    return hasMojoOperation && !hasRustSemantics && !FEATURE_OFF_RUST_PATH.test(body)
+      ? [] : [filePath + ": Gemini system-instruction extraction must use Mojo in every feature mode"];
   });
   const hardReplacementViolations = files
     .filter(([filePath, contents]) => HARD_REPLACED_RUST_FILES.has(filePath) &&
@@ -902,7 +914,7 @@ export function findViolations(files) {
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...cliRuntimeFeatureViolations,
     ...superExposeViolations,
-    ...geminiFallbackViolations, ...geminiGenerationViolations,
+    ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiSystemInstructionViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
     ...deepseekReasoningViolations,
@@ -1316,6 +1328,11 @@ function selfTest() {
     .some((violation) => violation.includes("gemini_provider_core_generate_content_body_value must use Mojo")));
   assert.match(findViolations([[GEMINI_GENERATION_CONFIG_FILE,
     "fn gemini_generation_config_from_request() {}"]])[0], /duplicate Gemini generation-config adapter/u);
+  assert.match(findViolations([[GEMINI_SYSTEM_INSTRUCTION_FILE,
+    "pub(crate) fn gemini_system_instruction_from_request() { gemini_contextual_user_instruction_text(); }"]])[0],
+  /Gemini system-instruction extraction must use Mojo in every feature mode/u);
+  assert.deepEqual(findViolations([[GEMINI_SYSTEM_INSTRUCTION_FILE,
+    "pub(crate) fn gemini_system_instruction_from_request() {\n  GeminiRequestContentOperation::SystemInstructionFromRequest;\n  gemini_request_content_kernel();\n}"]]), []);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/optional_fields.rs",
     "fn gemini_apply_optional_request_fields() {}"]])[0], /Rust fallback or oracle/u);
   assert.deepEqual(findViolations([[ANTHROPIC_MESSAGES_FILE,

@@ -873,6 +873,7 @@ comptime GEMINI_REQUEST_CONTENT_FUNCTION_RESPONSE_PART: Int64 = 7
 comptime GEMINI_REQUEST_CONTENT_TOOL_DECLARATION: Int64 = 8
 comptime GEMINI_REQUEST_CONTENT_TOOL_CONFIG: Int64 = 9
 comptime GEMINI_REQUEST_CONTENT_BUILTIN_TOOL: Int64 = 10
+comptime GEMINI_REQUEST_CONTENT_SYSTEM_INSTRUCTION_FROM_REQUEST: Int64 = 11
 
 @fieldwise_init
 struct GeminiRequestContentStringView(Copyable):
@@ -1243,6 +1244,448 @@ def gemini_request_content_string_has_non_space(
             return True
         index += width
     return False
+
+
+def gemini_request_content_next_string_codepoint(
+    view: GeminiRequestContentStringView, index: Int64, end: Int64
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
+    if index >= end:
+        return result^
+    var value = gemini_request_content_byte(view, index)
+    if value == 92:
+        if index + 1 >= end:
+            return result^
+        var escaped = gemini_request_content_byte(view, index + 1)
+        if escaped == 117:
+            if index + 5 >= end:
+                return result^
+            var codepoint: Int64 = 0
+            for offset in range(4):
+                var digit = gemini_request_content_hex(
+                    gemini_request_content_byte(view, index + 2 + Int64(offset))
+                )
+                if digit < 0:
+                    return result^
+                codepoint = (codepoint << 4) | digit
+            var next = index + 6
+            if codepoint >= 55296 and codepoint <= 56319 and next + 5 < end and gemini_request_content_byte(view, next) == 92 and gemini_request_content_byte(view, next + 1) == 117:
+                var low: Int64 = 0
+                for offset in range(4):
+                    var digit = gemini_request_content_hex(
+                        gemini_request_content_byte(view, next + 2 + Int64(offset))
+                    )
+                    if digit < 0:
+                        return result^
+                    low = (low << 4) | digit
+                if low >= 56320 and low <= 57343:
+                    codepoint = 65536 + ((codepoint - 55296) << 10) + (low - 56320)
+                    next += 6
+            result[0] = codepoint
+            result[1] = next
+            return result^
+        if escaped == 98:
+            result[0] = 8
+        elif escaped == 102:
+            result[0] = 12
+        elif escaped == 110:
+            result[0] = 10
+        elif escaped == 114:
+            result[0] = 13
+        elif escaped == 116:
+            result[0] = 9
+        else:
+            result[0] = Int64(escaped)
+        result[1] = index + 2
+        return result^
+    var width = gemini_request_content_utf8_width(value)
+    if index + width > end:
+        return result^
+    result[0] = gemini_request_content_codepoint(view, index, width)
+    result[1] = index + width
+    return result^
+
+
+def gemini_request_content_string_region_has_non_space(
+    view: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Bool:
+    var index = start
+    while index < end:
+        var decoded = gemini_request_content_next_string_codepoint(view, index, end)
+        if decoded[0] < 0 or not gemini_request_content_unicode_space(decoded[0]):
+            return True
+        index = decoded[1]
+    return False
+
+
+def gemini_request_content_string_region_starts_with(
+    view: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    prefix: StringSlice,
+) -> Bool:
+    var index = start
+    while index < end:
+        var decoded = gemini_request_content_next_string_codepoint(view, index, end)
+        if decoded[0] < 0:
+            return False
+        if not gemini_request_content_unicode_space(decoded[0]):
+            break
+        index = decoded[1]
+    var expected = prefix.unsafe_ptr()
+    for offset in range(Int64(prefix.byte_length())):
+        if index >= end:
+            return False
+        var decoded = gemini_request_content_next_string_codepoint(view, index, end)
+        if decoded[0] != Int64(expected[unsafe_offset=offset]):
+            return False
+        index = decoded[1]
+    return True
+
+
+def gemini_request_content_contextual_prefix(
+    view: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Bool:
+    for prefix in [
+        StringSlice("# AGENTS.md instructions for "),
+        StringSlice("<environment_context>"),
+        StringSlice("<permissions instructions>"),
+        StringSlice("<collaboration_mode>"),
+        StringSlice("<skills_instructions>"),
+        StringSlice("<plugins_instructions>"),
+        StringSlice("<model_switch>"),
+        StringSlice("<personality_spec>"),
+        StringSlice("<realtime_conversation>"),
+    ]:
+        if gemini_request_content_string_region_starts_with(view, start, end, prefix):
+            return True
+    return False
+
+
+def gemini_request_content_contextual_instruction(
+    view: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Bool:
+    if start < 0 or end <= start + 1 or gemini_request_content_byte(view, start) != 34:
+        return False
+    var inner_start = start + 1
+    var inner_end = end - 1
+    if gemini_request_content_contextual_prefix(view, inner_start, inner_end):
+        return True
+    var fragment_start = inner_start
+    var previous_newline: Int64 = -1
+    var index = inner_start
+    while index < inner_end:
+        var decoded = gemini_request_content_next_string_codepoint(view, index, inner_end)
+        if decoded[0] < 0:
+            return False
+        if decoded[0] == 10:
+            if previous_newline >= 0:
+                if gemini_request_content_string_region_has_non_space(
+                    view, fragment_start, previous_newline
+                ) and not gemini_request_content_contextual_prefix(
+                    view, fragment_start, previous_newline
+                ):
+                    return False
+                fragment_start = decoded[1]
+                previous_newline = -1
+            else:
+                previous_newline = index
+        else:
+            previous_newline = -1
+        index = decoded[1]
+    return not gemini_request_content_string_region_has_non_space(
+        view, fragment_start, inner_end
+    ) or gemini_request_content_contextual_prefix(view, fragment_start, inner_end)
+
+
+def gemini_request_content_text_value(
+    view: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Array[Int64, 2]:
+    var missing = Array[Int64, 2](fill=-1)
+    var text = gemini_request_content_object_member(
+        view, start, end, StringSlice("text")
+    )
+    if text[0] < 0:
+        text = gemini_request_content_object_member(
+            view, start, end, StringSlice("content")
+        )
+    if text[0] >= 0 and gemini_request_content_byte(view, text[0]) == 34:
+        return text^
+    return missing^
+
+
+def gemini_request_content_message_text_plan(
+    view: GeminiRequestContentStringView, start: Int64, end: Int64
+) -> Array[Int64, 3]:
+    var result = Array[Int64, 3](fill=-1)
+    var content = gemini_request_content_object_member(
+        view, start, end, StringSlice("content")
+    )
+    if content[0] >= 0 and gemini_request_content_byte(view, content[0]) == 34:
+        result[0] = 1
+        result[1] = content[0]
+        result[2] = content[1]
+        return result^
+    if content[0] >= 0 and gemini_request_content_byte(view, content[0]) == 91:
+        result[0] = 2
+        result[1] = content[0]
+        result[2] = content[1]
+        return result^
+    var text = gemini_request_content_object_member(
+        view, start, end, StringSlice("text")
+    )
+    if text[0] >= 0 and gemini_request_content_byte(view, text[0]) == 34:
+        result[0] = 1
+        result[1] = text[0]
+        result[2] = text[1]
+    return result^
+
+
+def gemini_request_content_message_text_nonempty(
+    view: GeminiRequestContentStringView, plan: Array[Int64, 3]
+) -> Bool:
+    if plan[0] == 1:
+        return plan[2] > plan[1] + 2
+    if plan[0] != 2:
+        return False
+    var count: Int64 = 0
+    var nonempty = False
+    var index = gemini_request_content_skip_ws(view, plan[1] + 1, plan[2] - 1)
+    while index < plan[2] - 1:
+        var item_end = gemini_request_content_value_end(view, index, plan[2] - 1, 0)
+        if item_end < 0:
+            return False
+        var text = gemini_request_content_text_value(view, index, item_end)
+        if text[0] >= 0:
+            count += 1
+            if text[1] > text[0] + 2:
+                nonempty = True
+        index = gemini_request_content_skip_ws(view, item_end, plan[2] - 1)
+        if index < plan[2] - 1 and gemini_request_content_byte(view, index) == 44:
+            index = gemini_request_content_skip_ws(view, index + 1, plan[2] - 1)
+        else:
+            break
+    return nonempty or count > 1
+
+
+def gemini_request_content_message_text_has_non_space(
+    view: GeminiRequestContentStringView, plan: Array[Int64, 3]
+) -> Bool:
+    if plan[0] == 1:
+        return gemini_request_content_string_has_non_space(view, plan[1], plan[2])
+    if plan[0] != 2:
+        return False
+    var index = gemini_request_content_skip_ws(view, plan[1] + 1, plan[2] - 1)
+    while index < plan[2] - 1:
+        var item_end = gemini_request_content_value_end(view, index, plan[2] - 1, 0)
+        if item_end < 0:
+            return False
+        var text = gemini_request_content_text_value(view, index, item_end)
+        if text[0] >= 0 and gemini_request_content_string_has_non_space(
+            view, text[0], text[1]
+        ):
+            return True
+        index = gemini_request_content_skip_ws(view, item_end, plan[2] - 1)
+        if index < plan[2] - 1 and gemini_request_content_byte(view, index) == 44:
+            index = gemini_request_content_skip_ws(view, index + 1, plan[2] - 1)
+        else:
+            break
+    return False
+
+
+def gemini_request_content_write_message_text_inner(
+    view: GeminiRequestContentStringView,
+    plan: Array[Int64, 3],
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if plan[0] == 1:
+        return gemini_request_content_put_range(writer, view, plan[1] + 1, plan[2] - 1)
+    if plan[0] != 2:
+        return False
+    var found = False
+    var index = gemini_request_content_skip_ws(view, plan[1] + 1, plan[2] - 1)
+    while index < plan[2] - 1:
+        var item_end = gemini_request_content_value_end(view, index, plan[2] - 1, 0)
+        if item_end < 0:
+            return False
+        var text = gemini_request_content_text_value(view, index, item_end)
+        if text[0] >= 0:
+            if found and not gemini_request_content_put_literal(writer, StringSlice("\\n")):
+                return False
+            found = True
+            if not gemini_request_content_put_range(
+                writer, view, text[0] + 1, text[1] - 1
+            ):
+                return False
+        index = gemini_request_content_skip_ws(view, item_end, plan[2] - 1)
+        if index < plan[2] - 1 and gemini_request_content_byte(view, index) == 44:
+            index = gemini_request_content_skip_ws(view, index + 1, plan[2] - 1)
+        else:
+            break
+    return True
+
+
+def gemini_request_content_output_view(
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    start: Int64,
+    end: Int64,
+) -> GeminiRequestContentStringView:
+    return GeminiRequestContentStringView(
+        UInt64(Int(writer[].output)) + UInt64(start), UInt64(end - start)
+    )
+
+
+def gemini_request_content_is_contextual_user_item(
+    source: GeminiRequestContentStringView,
+    item_start: Int64,
+    item_end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    var role = gemini_request_content_object_member(
+        source, item_start, item_end, StringSlice("role")
+    )
+    if role[0] >= 0 and gemini_request_content_byte(source, role[0]) == 34 and not gemini_request_content_string_equals(
+        source, role[0], role[1], StringSlice("user"), False
+    ):
+        return False
+    var plan = gemini_request_content_message_text_plan(source, item_start, item_end)
+    if plan[0] < 0:
+        return False
+    var start = writer[].written
+    if not gemini_request_content_put_byte(writer, 34) or not gemini_request_content_write_message_text_inner(
+        source, plan, writer
+    ) or not gemini_request_content_put_byte(writer, 34):
+        writer[].written = start
+        return False
+    var end = writer[].written
+    var text = gemini_request_content_output_view(writer, start, end)
+    var contextual = gemini_request_content_contextual_instruction(
+        text, 0, end - start
+    )
+    writer[].written = start
+    return contextual
+
+
+def gemini_request_content_system_instruction_stats(
+    source: GeminiRequestContentStringView,
+    items_start: Int64,
+    items_end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Array[Int64, 4]:
+    var result = Array[Int64, 4](fill=0)
+    var contextual_nonempty = False
+    var index = gemini_request_content_skip_ws(source, items_start + 1, items_end - 1)
+    while index < items_end - 1 and gemini_request_content_byte(source, index) != 93:
+        var item_end = gemini_request_content_value_end(source, index, items_end - 1, 0)
+        if item_end < 0:
+            return Array[Int64, 4](fill=-1)^
+        var role = gemini_request_content_object_member(
+            source, index, item_end, StringSlice("role")
+        )
+        if role[0] >= 0 and gemini_request_content_byte(source, role[0]) == 34 and gemini_request_content_string_equals(
+            source, role[0], role[1], StringSlice("system"), False
+        ):
+            var plan = gemini_request_content_message_text_plan(source, index, item_end)
+            if gemini_request_content_message_text_has_non_space(source, plan):
+                result[0] += 1
+                result[3] = 1
+        elif gemini_request_content_is_contextual_user_item(
+            source, index, item_end, writer
+        ):
+            result[1] += 1
+            var plan = gemini_request_content_message_text_plan(source, index, item_end)
+            if gemini_request_content_message_text_nonempty(source, plan):
+                contextual_nonempty = True
+            if gemini_request_content_message_text_has_non_space(source, plan):
+                result[3] = 1
+        index = gemini_request_content_skip_ws(source, item_end, items_end - 1)
+        if index < items_end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, items_end - 1)
+        else:
+            break
+    result[2] = 1 if result[1] > 1 or contextual_nonempty else 0
+    return result^
+
+
+def gemini_request_content_write_system_instruction_from_request(
+    source: GeminiRequestContentStringView,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_request_content_fragment_valid(source):
+        return False
+    var root_start = gemini_request_content_skip_ws(source, 0, Int64(source.len))
+    var root_end = gemini_request_content_value_end(source, root_start, Int64(source.len), 0)
+    if root_end < 0 or gemini_request_content_byte(source, root_start) != 123:
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    var input = gemini_request_content_object_member(
+        source, root_start, root_end, StringSlice("input")
+    )
+    if input[0] < 0 or gemini_request_content_byte(source, input[0]) != 91:
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    var stats = gemini_request_content_system_instruction_stats(
+        source, input[0], input[1], writer
+    )
+    if stats[0] < 0 or stats[1] < 0:
+        return False
+    if stats[3] == 0:
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    if not gemini_request_content_put_literal(
+        writer, StringSlice("{\"parts\":[{\"text\":\"")
+    ):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, input[0] + 1, input[1] - 1)
+    while index < input[1] - 1 and gemini_request_content_byte(source, index) != 93:
+        var item_end = gemini_request_content_value_end(source, index, input[1] - 1, 0)
+        if item_end < 0:
+            return False
+        var role = gemini_request_content_object_member(
+            source, index, item_end, StringSlice("role")
+        )
+        if role[0] >= 0 and gemini_request_content_byte(source, role[0]) == 34 and gemini_request_content_string_equals(
+            source, role[0], role[1], StringSlice("system"), False
+        ):
+            var plan = gemini_request_content_message_text_plan(source, index, item_end)
+            if gemini_request_content_message_text_has_non_space(source, plan):
+                if not first and not gemini_request_content_put_literal(
+                    writer, StringSlice("\\n\\n")
+                ):
+                    return False
+                first = False
+                if not gemini_request_content_write_message_text_inner(
+                    source, plan, writer
+                ):
+                    return False
+        index = gemini_request_content_skip_ws(source, item_end, input[1] - 1)
+        if index < input[1] - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, input[1] - 1)
+        else:
+            break
+    var has_prior_text = stats[0] > 0
+    index = gemini_request_content_skip_ws(source, input[0] + 1, input[1] - 1)
+    while index < input[1] - 1 and gemini_request_content_byte(source, index) != 93:
+        var item_end = gemini_request_content_value_end(source, index, input[1] - 1, 0)
+        if item_end < 0:
+            return False
+        if gemini_request_content_is_contextual_user_item(
+            source, index, item_end, writer
+        ) and stats[2] == 1:
+            if has_prior_text and not gemini_request_content_put_literal(
+                writer, StringSlice("\\n\\n")
+            ):
+                return False
+            has_prior_text = True
+            var plan = gemini_request_content_message_text_plan(source, index, item_end)
+            if not gemini_request_content_write_message_text_inner(
+                source, plan, writer
+            ):
+                return False
+        index = gemini_request_content_skip_ws(source, item_end, input[1] - 1)
+        if index < input[1] - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, input[1] - 1)
+        else:
+            break
+    return gemini_request_content_put_literal(writer, StringSlice("\"}]}"))
 
 
 def gemini_request_content_supported_type(
@@ -1663,6 +2106,8 @@ def gemini_request_content_write_operation(
     var primary = input.primary.copy()
     var secondary = input.secondary.copy()
     var tertiary = input.tertiary.copy()
+    if input.operation == GEMINI_REQUEST_CONTENT_SYSTEM_INSTRUCTION_FROM_REQUEST:
+        return gemini_request_content_write_system_instruction_from_request(primary, writer)
     if input.operation == GEMINI_REQUEST_CONTENT_SANITIZE_SCHEMA:
         var end = Int64(primary.len)
         var value_end = gemini_request_content_value_end(primary, 0, end, 0)
@@ -1724,7 +2169,7 @@ def gemini_request_content_write_operation(
 
 
 def gemini_request_content_input_valid(input: GeminiRequestContentInput) -> Bool:
-    if input.operation < GEMINI_REQUEST_CONTENT_SANITIZE_SCHEMA or input.operation > GEMINI_REQUEST_CONTENT_BUILTIN_TOOL:
+    if input.operation < GEMINI_REQUEST_CONTENT_SANITIZE_SCHEMA or input.operation > GEMINI_REQUEST_CONTENT_SYSTEM_INSTRUCTION_FROM_REQUEST:
         return False
     if input.primary_present < 0 or input.primary_present > 1 or input.secondary_present < 0 or input.secondary_present > 1 or input.tertiary_present < 0 or input.tertiary_present > 1 or input.quaternary_present < 0 or input.quaternary_present > 1:
         return False
@@ -1735,6 +2180,11 @@ def gemini_request_content_input_valid(input: GeminiRequestContentInput) -> Bool
     if input.operation == GEMINI_REQUEST_CONTENT_BUILTIN_TOOL and (input.kind < 1 or input.kind > 4):
         return False
     if input.operation != GEMINI_REQUEST_CONTENT_BUILTIN_TOOL and input.kind != 0:
+        return False
+    if input.operation == GEMINI_REQUEST_CONTENT_SYSTEM_INSTRUCTION_FROM_REQUEST and (
+        input.primary_present != 1 or input.secondary_present != 0
+        or input.tertiary_present != 0 or input.quaternary_present != 0
+    ):
         return False
     return True
 
