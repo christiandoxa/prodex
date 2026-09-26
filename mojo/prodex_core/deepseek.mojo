@@ -3948,9 +3948,9 @@ def deepseek_put_request_metadata(
         ):
             return False
 
+    var provider_present = input.metadata_present == 1
     var provider_has_fields = (
-        input.metadata_present == 1
-        and deepseek_raw_object_has_fields(input.metadata)
+        provider_present and deepseek_raw_object_has_fields(input.metadata)
     )
     var has_degraded = (
         input.response_present == 1 and input.error_message_present == 1
@@ -3960,7 +3960,7 @@ def deepseek_put_request_metadata(
         and input.tool_choice_present == 1
         and input.arguments_present == 1
     )
-    if provider_has_fields or has_degraded or has_omitted:
+    if provider_present or has_degraded or has_omitted:
         if (
             input.name_present != 1
             or not deepseek_metadata_separator(writer, has_fields_ptr)

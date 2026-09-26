@@ -1,6 +1,5 @@
 //! DeepSeek response-format metadata and degraded JSON-mode notes.
 
-#[cfg(feature = "mojo")]
 struct MojoMetadataRequest<'a> {
     existing: serde_json::Map<String, serde_json::Value>,
     provider_label: &'a str,
@@ -13,7 +12,6 @@ struct MojoMetadataRequest<'a> {
     thinking_enabled: bool,
 }
 
-#[cfg(feature = "mojo")]
 fn mojo_metadata_value(
     request: MojoMetadataRequest<'_>,
 ) -> Result<Option<serde_json::Value>, String> {
@@ -29,12 +27,12 @@ fn mojo_metadata_value(
         thinking_enabled,
     } = request;
     let mut base = existing;
-    let provider = base
-        .remove(provider_key)
-        .unwrap_or_else(|| serde_json::json!({}));
+    let provider = base.remove(provider_key);
     let base = serde_json::to_string(&base)
         .map_err(|error| format!("{provider_label} metadata serialization failed: {error}"))?;
-    let provider = serde_json::to_string(&provider)
+    let provider = provider
+        .map(|value| serde_json::to_string(&value))
+        .transpose()
         .map_err(|error| format!("{provider_label} metadata serialization failed: {error}"))?;
     let client_metadata = client_metadata
         .map(serde_json::to_string)
@@ -59,7 +57,7 @@ fn mojo_metadata_value(
     let mut input =
         super::DeepSeekKernelInput::new(super::DeepSeekKernelOperation::RequestMetadata);
     input.extra = Some(&base);
-    input.metadata = Some(&provider);
+    input.metadata = provider.as_deref();
     input.item = client_metadata.as_deref();
     input.content = prompt_cache_key;
     input.reasoning_content = prompt_cache_retention;
@@ -94,19 +92,14 @@ pub fn deepseek_provider_core_response_format_from_responses_request(
         .unwrap_or_default();
     match format_type {
         "json_object" | "json_schema" | "json" | "structured_output" => {
-            #[cfg(feature = "mojo")]
-            {
-                let mut input =
-                    super::DeepSeekKernelInput::new(super::DeepSeekKernelOperation::ResponseFormat);
-                input.role = Some(format_type);
-                super::deepseek_provider_core_mojo_value(input)
-                    .map(Some)
-                    .map_err(|error| {
-                        format!("{provider_label} response_format could not be normalized: {error}")
-                    })
-            }
-            #[cfg(not(feature = "mojo"))]
-            Ok(Some(serde_json::json!({"type": "json_object"})))
+            let mut input =
+                super::DeepSeekKernelInput::new(super::DeepSeekKernelOperation::ResponseFormat);
+            input.role = Some(format_type);
+            super::deepseek_provider_core_mojo_value(input)
+                .map(Some)
+                .map_err(|error| {
+                    format!("{provider_label} response_format could not be normalized: {error}")
+                })
         }
         "text" => Ok(None),
         "" => Err(format!(
@@ -168,59 +161,17 @@ pub fn deepseek_provider_core_response_metadata_from_responses_request(
         .and_then(serde_json::Value::as_str)
         .filter(|format_type| matches!(*format_type, "json_schema" | "structured_output"));
 
-    #[cfg(feature = "mojo")]
-    {
-        mojo_metadata_value(MojoMetadataRequest {
-            existing: metadata,
-            provider_label,
-            provider_key,
-            client_metadata,
-            prompt_cache_key,
-            prompt_cache_retention,
-            degraded_from,
-            tool_choice: None,
-            thinking_enabled: false,
-        })
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let mut metadata = metadata;
-        if let Some(client_metadata) = client_metadata {
-            metadata.insert("client_metadata".to_string(), client_metadata.clone());
-        }
-        if let Some(prompt_cache_key) = prompt_cache_key {
-            metadata.insert(
-                "prompt_cache_key".to_string(),
-                serde_json::Value::String(prompt_cache_key.to_string()),
-            );
-        }
-        if let Some(prompt_cache_retention) = prompt_cache_retention {
-            metadata.insert(
-                "prompt_cache_retention".to_string(),
-                serde_json::Value::String(prompt_cache_retention.to_string()),
-            );
-        }
-        if let Some(format_type) = degraded_from {
-            let provider_metadata = metadata
-                .entry(provider_key.to_string())
-                .or_insert_with(|| serde_json::json!({}))
-                .as_object_mut()
-                .ok_or_else(|| {
-                    format!("{provider_label} request metadata.{provider_key} must be an object")
-                })?;
-            provider_metadata.insert(
-                "degraded_response_format".to_string(),
-                serde_json::json!({
-                    "from": format_type,
-                    "to": "json_object",
-                    "reason": format!(
-                        "{provider_label} response_format supports json_object but not native JSON Schema enforcement"
-                    )
-                }),
-            );
-        }
-        Ok((!metadata.is_empty()).then_some(serde_json::Value::Object(metadata)))
-    }
+    mojo_metadata_value(MojoMetadataRequest {
+        existing: metadata,
+        provider_label,
+        provider_key,
+        client_metadata,
+        prompt_cache_key,
+        prompt_cache_retention,
+        degraded_from,
+        tool_choice: None,
+        thinking_enabled: false,
+    })
 }
 
 pub fn deepseek_provider_core_note_thinking_tool_choice_omission(
@@ -236,50 +187,25 @@ pub fn deepseek_provider_core_note_thinking_tool_choice_omission(
     let Some(tool_choice) = value.get("tool_choice") else {
         return;
     };
-    #[cfg(feature = "mojo")]
-    {
-        let existing = response_metadata
-            .as_ref()
-            .and_then(serde_json::Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        *response_metadata = mojo_metadata_value(MojoMetadataRequest {
-            existing,
-            provider_label,
-            provider_key,
-            client_metadata: None,
-            prompt_cache_key: None,
-            prompt_cache_retention: None,
-            degraded_from: None,
-            tool_choice: Some(tool_choice),
-            thinking_enabled: true,
-        })
-        .unwrap_or_else(|error| panic!("Mojo DeepSeek metadata omission failed: {error}"));
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let metadata = response_metadata
-            .get_or_insert_with(|| serde_json::json!({}))
-            .as_object_mut();
-        let Some(metadata) = metadata else {
-            return;
-        };
-        let provider_metadata = metadata
-            .entry(provider_key.to_string())
-            .or_insert_with(|| serde_json::json!({}))
-            .as_object_mut();
-        let Some(provider_metadata) = provider_metadata else {
-            return;
-        };
-        provider_metadata.insert(
-            "omitted_tool_choice".to_string(),
-            serde_json::json!({
-                "from": tool_choice,
-                "reason": format!(
-                    "{provider_label} thinking mode currently rejects explicit tool_choice on the OpenAI Chat route, so Prodex omits it while preserving translated function tools"
-                )
-            }),
-        );
+    let existing = match response_metadata.as_ref() {
+        Some(serde_json::Value::Object(object)) => object.clone(),
+        Some(_) => return,
+        None => serde_json::Map::new(),
+    };
+    let mapped = mojo_metadata_value(MojoMetadataRequest {
+        existing,
+        provider_label,
+        provider_key,
+        client_metadata: None,
+        prompt_cache_key: None,
+        prompt_cache_retention: None,
+        degraded_from: None,
+        tool_choice: Some(tool_choice),
+        thinking_enabled: true,
+    });
+    // ponytail: retain metadata on bounded ABI failure; report errors if this API gains a Result.
+    if let Ok(mapped) = mapped {
+        *response_metadata = mapped;
     }
 }
 
@@ -312,4 +238,66 @@ fn deepseek_provider_core_message_has_json_guidance(message: &serde_json::Value)
         .get("content")
         .and_then(serde_json::Value::as_str)
         .is_some_and(|content| content.to_ascii_lowercase().contains("json"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        deepseek_provider_core_note_thinking_tool_choice_omission,
+        deepseek_provider_core_response_metadata_from_responses_request,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn empty_provider_metadata_survives_mojo_normalization() {
+        let request = json!({"metadata": {"deepseek": {}}});
+        assert_eq!(
+            deepseek_provider_core_response_metadata_from_responses_request(
+                &request, "DeepSeek", "deepseek"
+            )
+            .unwrap(),
+            Some(json!({"deepseek": {}}))
+        );
+
+        let request = json!({
+            "metadata": {"deepseek": {}},
+            "response_format": {"type": "json_schema"}
+        });
+        let metadata = deepseek_provider_core_response_metadata_from_responses_request(
+            &request, "DeepSeek", "deepseek",
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            metadata["deepseek"]["degraded_response_format"]["from"],
+            "json_schema"
+        );
+    }
+
+    #[test]
+    fn thinking_note_preserves_non_object_metadata() {
+        let mut metadata = Some(json!(["unrelated"]));
+        deepseek_provider_core_note_thinking_tool_choice_omission(
+            &json!({"tool_choice": "required"}),
+            true,
+            "DeepSeek",
+            "deepseek",
+            &mut metadata,
+        );
+        assert_eq!(metadata, Some(json!(["unrelated"])));
+    }
+
+    #[test]
+    fn oversized_thinking_note_keeps_existing_metadata() {
+        let original = Some(json!({"keep": true}));
+        let mut metadata = original.clone();
+        deepseek_provider_core_note_thinking_tool_choice_omission(
+            &json!({"tool_choice": {"name": "x".repeat(4 * 1024 * 1024)}}),
+            true,
+            "DeepSeek",
+            "deepseek",
+            &mut metadata,
+        );
+        assert_eq!(metadata, original);
+    }
 }

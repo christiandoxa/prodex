@@ -604,7 +604,8 @@
         "production_reachable": true,
         "role": "adapter",
         "operations": [
-          "deepseek_simple_request_eligibility"
+          "deepseek_simple_request_eligibility",
+          "deepseek_request_metadata_composition"
         ]
       },
       {
@@ -617,10 +618,15 @@
           {
             "start": 1509,
             "end": 1759
+          },
+          {
+            "start": 3893,
+            "end": 4008
           }
         ],
         "operations": [
-          "deepseek_simple_request_eligibility"
+          "deepseek_simple_request_eligibility",
+          "deepseek_request_metadata_composition"
         ]
       }
     ],
@@ -1424,6 +1430,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON parsing, previous-response lookup, and typed Mojo ABI mapping"
+    },
+    {
+      "name": "deepseek_request_metadata_composition",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.432.1",
+      "baseline_state": "feature-off Rust metadata composition",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_deepseek_kernel_v2",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "request_metadata": 38
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
+      "consumer_marker": "prodex_mojo_core::rich::deepseek_kernel",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
+        "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
+      "rust_owner_before": "Feature-off Rust metadata insertion, degraded-format notes, and omitted tool-choice notes",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; caller tests use fixed expected JSON values",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde field extraction and type validation, JSON serialization, and typed Mojo ABI result mapping"
     }
   ],
   "rust_semantic_reductions": [
@@ -2010,6 +2043,21 @@
       "production_consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
       "parity_test": "crates/prodex-provider-core/src/deepseek_bridge/tests/simple_request.rs",
       "performance": "one bounded Mojo policy call with no Rust eligibility fallback"
+    },
+    {
+      "file": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
+      "symbol": "deepseek_provider_core_response_metadata_from_responses_request",
+      "operation": "deepseek_request_metadata_composition",
+      "previous_responsibility": "feature-off Rust metadata insertion, degraded response-format note, and thinking tool-choice omission",
+      "final_state": "adapter-only",
+      "rust_before": "Rust map mutation and JSON note construction in feature-off paths",
+      "rust_after": "Serde validates and serializes caller fields, then maps the Mojo request-metadata result",
+      "mojo_owner": "mojo/prodex_core/deepseek.mojo::deepseek_put_request_metadata",
+      "mojo_source": "mojo/prodex_core/deepseek.mojo",
+      "mojo_entry": "prodex_mojo_deepseek_kernel_v2 operation 38",
+      "production_consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
+      "parity_test": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
+      "performance": "one bounded Mojo metadata composition call"
     }
   ],
   "deleted_authoritative_operations": [
