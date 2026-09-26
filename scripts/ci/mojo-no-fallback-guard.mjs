@@ -206,6 +206,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-proxy/tests/src/smart_context/static_context.rs",
   "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
   "crates/prodex-runtime-proxy/src/smart_context/core.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/rewrite_policy.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/budget.rs",
@@ -516,6 +517,7 @@ const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_p
 const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
 const FINGERPRINT_ARTIFACTS_FILE = "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs";
 const SMART_CONTEXT_CORE_FILE = "crates/prodex-runtime-proxy/src/smart_context/core.rs";
+const ADAPTIVE_BUDGET_FILE = "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs";
 const DEEPSEEK_SHAPING_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs";
 const RUNTIME_DOCTOR_MARKERS_FILE = "crates/prodex-runtime-doctor/src/markers.rs";
 const CHAT_TOOLS_BRIDGE_FILE = "crates/prodex-provider-core/src/chat_tools_bridge.rs";
@@ -570,6 +572,10 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === SMART_CONTEXT_CORE_FILE &&
       !contents.includes("prodex_mojo_core::runtime::smart_context_exactness_plan("))
     .map(([filePath]) => `${filePath}: Smart Context exactness must use the Mojo plan`);
+  const adaptiveBudgetViolations = files
+    .filter(([filePath, contents]) => filePath === ADAPTIVE_BUDGET_FILE &&
+      !contents.includes("prodex_mojo_core::runtime::smart_context_adaptive_budget_plan("))
+    .map(([filePath]) => `${filePath}: adaptive budget must use the Mojo plan`);
   const quotaPlannerViolations = files
     .filter(([filePath, contents]) => filePath === RUNTIME_QUOTA_FILE &&
       (!contents.includes("mojo::quota_snapshot_plan(") ||
@@ -829,6 +835,7 @@ export function findViolations(files) {
       ? [] : [`${filePath}: default features must include ${required}`];
   });
   return [...markerViolations, ...featureOffViolations, ...exactnessPlannerViolations,
+    ...adaptiveBudgetViolations,
     ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
@@ -928,6 +935,11 @@ function selfTest() {
     /exactness must use the Mojo plan/u);
   assert.deepEqual(findViolations([[SMART_CONTEXT_CORE_FILE,
     "prodex_mojo_core::runtime::smart_context_exactness_plan()"]]), []);
+  assert.match(findViolations([[ADAPTIVE_BUDGET_FILE,
+    "fn smart_context_adaptive_budget_policy() {}"]]).join("\n"),
+    /adaptive budget must use the Mojo plan/u);
+  assert.deepEqual(findViolations([[ADAPTIVE_BUDGET_FILE,
+    "prodex_mojo_core::runtime::smart_context_adaptive_budget_plan()"]]), []);
   assert.match(findViolations([[RUNTIME_QUOTA_FILE,
     "fn runtime_proxy_quota_summary_from_usage_snapshot_at() {}"]]).join("\n"),
     /quota snapshot and gate decisions must use Mojo/u);
