@@ -291,6 +291,7 @@ pub use translators::{
     kiro_provider_core_tool_choice_from_legacy_chat_function_call,
     kiro_provider_core_tool_from_legacy_chat_function,
     kiro_provider_core_truncated_tool_activity_item,
+    kiro_provider_core_try_chat_completion_value_from_response,
     kiro_provider_core_unsupported_path_error_value, provider_translator,
     translate_openai_chat_request_to_anthropic_messages,
 };

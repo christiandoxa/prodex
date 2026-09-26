@@ -527,6 +527,7 @@ const DEEPSEEK_REQUEST_REJECT_FILE = "crates/prodex-provider-core/src/deepseek_b
 const DEEPSEEK_REASONING_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs";
 const DEEPSEEK_METADATA_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs";
 const DEEPSEEK_SIMPLE_REQUEST_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs";
+const KIRO_CHAT_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/kiro/response.rs";
 const DEEPSEEK_STRICT_TOOLS_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs";
 const DEEPSEEK_STRICT_SCHEMA_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_tools/strict_schema.rs";
 const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
@@ -605,6 +606,17 @@ export function findViolations(files) {
       (!contents.includes("DeepSeekKernelOperation::RequestMetadata") ||
         !contents.includes("DeepSeekKernelOperation::ResponseFormat")))
     .map(([filePath]) => `${filePath}: DeepSeek metadata and response format must use Mojo`);
+  const kiroChatResponseViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== KIRO_CHAT_RESPONSE_FILE) return [];
+    const start = contents.indexOf("pub fn kiro_provider_core_chat_completion_value_from_response");
+    const end = contents.indexOf("\npub fn kiro_provider_core_apply_response_runtime_metadata", start);
+    const mapper = start < 0 ? "" : contents.slice(start, end < 0 ? undefined : end);
+    return mapper.includes("kiro_provider_core_try_chat_completion_value_from_response") &&
+      mapper.includes("kiro_rewrite_chat_response_json(") &&
+      !FEATURE_OFF_RUST_PATH.test(mapper) &&
+      !/response\.(?:get|pointer)\s*\(|output\.(?:iter|get)\s*\(|json!\s*\(|kiro_provider_core_chat_completion_finish_reason\s*\(/u.test(mapper)
+      ? [] : [`${filePath}: Kiro chat response mapping must use Mojo without a Rust copy`];
+  });
   const deepseekStrictSchemaViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === DEEPSEEK_STRICT_TOOLS_FILE &&
       !contents.includes("DeepSeekKernelOperation::StrictFunctionSchema")) {
@@ -908,6 +920,7 @@ export function findViolations(files) {
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
+    ...kiroChatResponseViolations,
     ...deepseekStrictSchemaViolations,
     ...quotaPlannerViolations,
     ...anthropicResponseViolations,
@@ -1023,6 +1036,22 @@ function selfTest() {
     /DeepSeek metadata and response format must use Mojo/u);
   assert.deepEqual(findViolations([[DEEPSEEK_METADATA_FILE,
     "DeepSeekKernelOperation::RequestMetadata; DeepSeekKernelOperation::ResponseFormat"]]), []);
+  const kiroChatResponseViolations = (contents) => findViolations([[KIRO_CHAT_RESPONSE_FILE, contents]]);
+  assert.deepEqual(kiroChatResponseViolations(`
+    pub fn kiro_provider_core_chat_completion_value_from_response(value: &Value, id: u64) -> Value {
+      kiro_provider_core_try_chat_completion_value_from_response(value, id)
+    }
+    pub(super) fn kiro_provider_core_try_chat_completion_value_from_response(value: &Value, id: u64) {
+      prodex_mojo_core::rich::kiro_rewrite_chat_response_json(value, id)
+    }
+    pub fn kiro_provider_core_apply_response_runtime_metadata() {}
+  `), []);
+  assert.match(kiroChatResponseViolations(`
+    pub fn kiro_provider_core_chat_completion_value_from_response(response: &Value, _: u64) -> Value {
+      response.get("output").cloned().unwrap_or_default()
+    }
+    pub fn kiro_provider_core_apply_response_runtime_metadata() {}
+  `)[0], /Kiro chat response mapping must use Mojo/u);
   assert.match(findViolations([[DEEPSEEK_STRICT_TOOLS_FILE, "fn strict_schema() {}"]]).join("\n"),
     /strict schema normalization must use Mojo/u);
   assert.match(findViolations([[DEEPSEEK_STRICT_SCHEMA_FILE,

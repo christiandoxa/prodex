@@ -150,6 +150,7 @@ pub use kiro::{
     kiro_provider_core_tool_choice_from_legacy_chat_function_call,
     kiro_provider_core_tool_from_legacy_chat_function,
     kiro_provider_core_truncated_tool_activity_item,
+    kiro_provider_core_try_chat_completion_value_from_response,
     kiro_provider_core_unsupported_path_error_value,
 };
 pub use passthrough::PassthroughTranslator;

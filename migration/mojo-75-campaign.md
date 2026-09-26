@@ -2149,3 +2149,20 @@ The canonical source report counts **53,528 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **523,090 additional Mojo LOC** required at this Rust
 volume.
+
+## Kiro chat-response body hard replacement
+
+Kiro Responses-to-Chat Completions body mapping now uses the existing Mojo
+response owner in every provider feature mode. The Rust mapper and feature-off
+copy were removed. Rust retains bounded serialization, ABI invocation, and
+typed error handling; the local Kiro route now propagates rewrite failures
+without panicking. Fixed boundary tests cover complete output, refusals,
+first-message behavior, and response size limits. Streaming, Anthropic
+projection, and separate response helpers remain outside this checkpoint.
+The rich ABI remains version 6.
+
+The canonical source report counts **53,535 reachable Mojo LOC** and
+**192,269 Rust production LOC**, totaling **245,804 LOC**: **21.78% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **523,272 additional Mojo LOC** required at this Rust
+volume.

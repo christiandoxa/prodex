@@ -1,6 +1,8 @@
 //! Kiro provider response compatibility helpers.
 
 use super::stream::kiro_provider_core_stream_content_text;
+use prodex_mojo_core::MojoError;
+use prodex_mojo_core::rich::KIRO_RESPONSE_MAX_BYTES;
 use serde_json::{Value, json};
 
 #[cfg(feature = "mojo")]
@@ -8,124 +10,30 @@ use super::stream::{kiro_mojo_body, kiro_mojo_value};
 #[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{KiroKernelInput, KiroKernelOperation};
 
+/// Legacy value-returning adapter. Use the fallible variant for untrusted responses.
+///
+/// # Panics
+///
+/// Panics if the bounded Mojo rewrite fails.
 pub fn kiro_provider_core_chat_completion_value_from_response(
     response: &Value,
     request_id: u64,
 ) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let canonical =
-            serde_json::to_string(response).expect("Kiro response canonical JSON serializes");
-        let body = prodex_mojo_core::rich::kiro_rewrite_chat_response_json(&canonical, request_id)
-            .unwrap_or_else(|error| panic!("Mojo Kiro raw response rewrite failed: {error:?}"));
-        serde_json::from_slice(&body).unwrap_or_else(|error| {
-            panic!("Mojo Kiro raw response rewrite returned invalid JSON: {error}")
-        })
-    }
+    kiro_provider_core_try_chat_completion_value_from_response(response, request_id)
+        .unwrap_or_else(|error| panic!("Mojo Kiro raw response rewrite failed: {error:?}"))
+}
 
-    #[cfg(not(feature = "mojo"))]
-    {
-        let id = response
-            .get("id")
-            .and_then(Value::as_str)
-            .map(|id| format!("chatcmpl_{id}"))
-            .unwrap_or_else(|| format!("chatcmpl_kiro_{request_id}"));
-        let created = response
-            .get("created_at")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let model = response
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or("kiro-cli");
-        let output = response
-            .get("output")
-            .and_then(Value::as_array)
-            .map(Vec::as_slice)
-            .unwrap_or_default();
-        let assistant_text = output
-            .iter()
-            .find(|item| item.get("type").and_then(Value::as_str) == Some("message"))
-            .and_then(|item| item.get("content"))
-            .and_then(Value::as_array)
-            .and_then(|content| content.first())
-            .and_then(|item| item.get("text"))
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        let function_calls = output
-            .iter()
-            .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
-            .collect::<Vec<_>>();
-        let has_tool_calls = !function_calls.is_empty();
-        let reasoning_content = response
-            .get("metadata")
-            .and_then(|metadata| metadata.get("kiro"))
-            .and_then(|kiro| kiro.get("reasoning_content"))
-            .and_then(Value::as_str)
-            .filter(|reasoning| !reasoning.is_empty());
-        let status = response.get("status").and_then(Value::as_str);
-        let refusal = if status == Some("failed") {
-            response.get("error").map(|error| {
-                error
-                    .get("message")
-                    .cloned()
-                    .unwrap_or_else(|| Value::String("Kiro request failed".to_string()))
-            })
-        } else {
-            None
-        };
-        let tool_calls = function_calls
-            .iter()
-            .map(|item| {
-                json!({
-                    "id": item.get("call_id").and_then(Value::as_str).unwrap_or("call_kiro"),
-                    "type": "function",
-                    "function": {
-                        "name": item.get("name").and_then(Value::as_str).unwrap_or("tool_call"),
-                        "arguments": item.get("arguments").and_then(Value::as_str).unwrap_or("{}"),
-                    }
-                })
-            })
-            .collect::<Vec<_>>();
-        let mut message = json!({
-            "role": "assistant",
-            "content": if assistant_text.is_empty() && has_tool_calls {
-                Value::Null
-            } else {
-                Value::String(assistant_text.to_string())
-            },
-        });
-        if has_tool_calls {
-            message["tool_calls"] = Value::Array(tool_calls);
-        }
-        if let Some(reasoning_content) = reasoning_content {
-            message["reasoning_content"] = Value::String(reasoning_content.to_string());
-        }
-        let finish_reason =
-            kiro_provider_core_chat_completion_finish_reason(response, has_tool_calls);
-        let mut choice = json!({
-            "index": 0,
-            "message": message,
-            "finish_reason": finish_reason,
-        });
-        if let Some(error) = refusal {
-            choice["message"]["refusal"] = error;
-        }
-        let mut completion = json!({
-            "id": id,
-            "object": "chat.completion",
-            "created": created,
-            "model": model,
-            "choices": [choice],
-        });
-        if let Some(requested_model) = response.get("requested_model") {
-            completion["requested_model"] = requested_model.clone();
-        }
-        if let Some(metadata) = response.get("metadata") {
-            completion["metadata"] = metadata.clone();
-        }
-        completion
+/// Rewrites a Kiro response as Chat Completions or returns a bounded kernel error.
+pub fn kiro_provider_core_try_chat_completion_value_from_response(
+    response: &Value,
+    request_id: u64,
+) -> Result<Value, MojoError> {
+    let canonical = serde_json::to_string(response).map_err(|_| MojoError::InvalidInput)?;
+    if canonical.len() > KIRO_RESPONSE_MAX_BYTES {
+        return Err(MojoError::InvalidInput);
     }
+    let body = prodex_mojo_core::rich::kiro_rewrite_chat_response_json(&canonical, request_id)?;
+    serde_json::from_slice(&body).map_err(|_| MojoError::InvalidOutput)
 }
 
 pub fn kiro_provider_core_apply_response_runtime_metadata(
