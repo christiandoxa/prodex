@@ -2060,3 +2060,20 @@ The canonical source report counts **52,810 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **524,063 additional Mojo LOC** required at this Rust
 volume.
+
+## DeepSeek simple-request eligibility hard replacement
+
+DeepSeek simple-request eligibility now uses the existing Mojo request policy
+in every provider-core feature mode. The feature-off Rust classifier and input
+item helper were deleted. Rust parses and normalizes JSON, checks existing
+response bindings, and maps the typed ABI result. Fixed caller cases cover
+supported inputs, tools, aliases, escaped fields, malformed JSON, Unicode,
+callback behavior, and the 16 MiB policy bound. The no-fallback guard requires
+the Mojo call and rejects a restored Rust classifier. The Mojo ABI did not
+change; native execution evidence remains Linux x86_64.
+
+The canonical source report counts **52,820 reachable Mojo LOC** and
+**192,289 Rust production LOC**, totaling **245,109 LOC**: **21.55% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **524,047 additional Mojo LOC** required at this Rust
+volume.
