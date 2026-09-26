@@ -229,7 +229,7 @@ fn gemini_request_contents(
         None => Ok((
             gemini_system_instruction_from_request(value)
                 .map_err(GeminiTransformIssue::Rejected)?,
-            gemini_contents_from_request(value),
+            gemini_contents_from_request(value).map_err(GeminiTransformIssue::Rejected)?,
         )),
     }
 }
@@ -240,7 +240,7 @@ fn gemini_request_contents(
 ) -> Result<(Option<Value>, Vec<Value>), GeminiTransformIssue> {
     Ok((
         gemini_system_instruction_from_request(value).map_err(GeminiTransformIssue::Rejected)?,
-        gemini_contents_from_request(value),
+        gemini_contents_from_request(value).map_err(GeminiTransformIssue::Rejected)?,
     ))
 }
 

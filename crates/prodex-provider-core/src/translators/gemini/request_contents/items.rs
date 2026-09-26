@@ -6,7 +6,19 @@ use crate::gemini_bridge::gemini_provider_core_collect_media_parts;
 
 use super::text::{gemini_contextual_user_instruction_text, gemini_message_text};
 
-fn gemini_content_value(role: &str, parts: Vec<Value>) -> Value {
+fn gemini_text_part(text: &str) -> Result<Value, String> {
+    let text = serde_json::to_vec(text).expect("Gemini text part serializes");
+    super::gemini_request_content_mojo_value(
+        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::TextPart,
+        Some(&text),
+        None,
+        None,
+        None,
+        0,
+    )
+}
+
+fn gemini_content_value(role: &str, parts: Vec<Value>) -> Result<Value, String> {
     #[cfg(feature = "mojo")]
     {
         let role = serde_json::to_vec(role).expect("Gemini content role serializes");
@@ -22,7 +34,7 @@ fn gemini_content_value(role: &str, parts: Vec<Value>) -> Value {
     }
     #[cfg(not(feature = "mojo"))]
     {
-        json!({"role": role, "parts": parts})
+        Ok(json!({"role": role, "parts": parts}))
     }
 }
 
@@ -58,17 +70,17 @@ pub(crate) fn gemini_contains_local_media_path(value: &Value) -> bool {
     }
 }
 
-fn gemini_content_parts_from_message_content(message: &Value) -> Vec<Value> {
+fn gemini_content_parts_from_message_content(message: &Value) -> Result<Vec<Value>, String> {
     let mut parts = Vec::new();
     match message {
         Value::String(text) => {
             if !text.trim().is_empty() {
-                parts.push(json!({"text": text}));
+                parts.push(gemini_text_part(text)?);
             }
         }
         Value::Array(items) => {
             for item in items {
-                parts.extend(gemini_content_parts_from_message_content(item));
+                parts.extend(gemini_content_parts_from_message_content(item)?);
             }
         }
         Value::Object(object) => {
@@ -84,7 +96,7 @@ fn gemini_content_parts_from_message_content(message: &Value) -> Vec<Value> {
                 .and_then(Value::as_str)
                 .filter(|text| !text.trim().is_empty())
             {
-                parts.push(json!({"text": text}));
+                parts.push(gemini_text_part(text)?);
             }
         }
         _ => {}
@@ -93,24 +105,33 @@ fn gemini_content_parts_from_message_content(message: &Value) -> Vec<Value> {
     if parts.is_empty()
         && let Some(text) = gemini_message_text(message).filter(|text| !text.trim().is_empty())
     {
-        parts.push(json!({"text": text}));
+        parts.push(gemini_text_part(&text)?);
     }
 
-    parts
+    Ok(parts)
 }
 
-pub(crate) fn gemini_contents_from_request(value: &Value) -> Vec<Value> {
+pub(crate) fn gemini_contents_from_request(value: &Value) -> Result<Vec<Value>, String> {
     if let Some(input) = value.get("input") {
         return match input {
-            Value::String(text) => vec![gemini_content_value("user", vec![json!({"text": text})])],
+            Value::String(text) => Ok(vec![gemini_content_value(
+                "user",
+                vec![gemini_text_part(text)?],
+            )?]),
             Value::Array(items) => gemini_contents_from_input_items(items),
-            _ => vec![gemini_content_value("user", vec![json!({"text":""})])],
+            _ => Ok(vec![gemini_content_value(
+                "user",
+                vec![gemini_text_part("")?],
+            )?]),
         };
     }
-    vec![gemini_content_value("user", vec![json!({"text":""})])]
+    Ok(vec![gemini_content_value(
+        "user",
+        vec![gemini_text_part("")?],
+    )?])
 }
 
-fn gemini_contents_from_input_items(items: &[Value]) -> Vec<Value> {
+fn gemini_contents_from_input_items(items: &[Value]) -> Result<Vec<Value>, String> {
     let mut contents = Vec::new();
     let mut tool_names_by_call_id = std::collections::BTreeMap::new();
     let mut index = 0;
@@ -120,7 +141,7 @@ fn gemini_contents_from_input_items(items: &[Value]) -> Vec<Value> {
         match role {
             "system" => {}
             "assistant" => {
-                gemini_append_assistant_content(item, &mut contents, &mut tool_names_by_call_id)
+                gemini_append_assistant_content(item, &mut contents, &mut tool_names_by_call_id)?
             }
             "tool" => {
                 gemini_append_tool_content(
@@ -128,7 +149,7 @@ fn gemini_contents_from_input_items(items: &[Value]) -> Vec<Value> {
                     &mut index,
                     &mut contents,
                     &tool_names_by_call_id,
-                );
+                )?;
                 continue;
             }
             _ => {
@@ -136,47 +157,50 @@ fn gemini_contents_from_input_items(items: &[Value]) -> Vec<Value> {
                     index += 1;
                     continue;
                 }
-                gemini_append_user_content(item, &mut contents);
+                gemini_append_user_content(item, &mut contents)?;
             }
         }
         index += 1;
     }
     if contents.is_empty() {
-        contents.push(gemini_content_value("user", vec![json!({"text":""})]));
+        contents.push(gemini_content_value("user", vec![gemini_text_part("")?])?);
     }
-    contents
+    Ok(contents)
 }
 
 fn gemini_append_assistant_content(
     item: &Value,
     contents: &mut Vec<Value>,
     tool_names_by_call_id: &mut std::collections::BTreeMap<String, String>,
-) {
+) -> Result<(), String> {
     let mut parts = Vec::new();
     if let Some(text) = gemini_message_text(item).filter(|text| !text.is_empty()) {
-        parts.push(json!({ "text": text }));
+        parts.push(gemini_text_part(&text)?);
     }
     if let Some(tool_calls) = item.get("tool_calls").and_then(Value::as_array) {
         for tool_call in tool_calls {
-            if let Some(part) = gemini_function_call_part(tool_call, tool_names_by_call_id) {
+            if let Some(part) = gemini_function_call_part(tool_call, tool_names_by_call_id)? {
                 parts.push(part);
             }
         }
     }
     if !parts.is_empty() {
-        contents.push(gemini_content_value("model", parts));
+        contents.push(gemini_content_value("model", parts)?);
     }
+    Ok(())
 }
 
 fn gemini_function_call_part(
     tool_call: &Value,
     tool_names_by_call_id: &mut std::collections::BTreeMap<String, String>,
-) -> Option<Value> {
+) -> Result<Option<Value>, String> {
     let call_id = tool_call
         .get("id")
         .and_then(Value::as_str)
         .unwrap_or_default();
-    let function = tool_call.get("function")?;
+    let Some(function) = tool_call.get("function") else {
+        return Ok(None);
+    };
     let name = function
         .get("name")
         .and_then(Value::as_str)
@@ -192,12 +216,12 @@ fn gemini_function_call_part(
     let call_id = (!call_id.trim().is_empty()).then_some(call_id);
     #[cfg(feature = "mojo")]
     {
-        Some(super::gemini_request_function_part(
+        Ok(Some(super::gemini_request_function_part(
             prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::FunctionCallPart,
             name,
             &args,
             call_id,
-        ))
+        )?))
     }
     #[cfg(not(feature = "mojo"))]
     {
@@ -208,7 +232,7 @@ fn gemini_function_call_part(
         if let Some(call_id) = call_id {
             function_call["id"] = Value::String(call_id.to_string());
         }
-        Some(json!({ "functionCall": function_call }))
+        Ok(Some(json!({ "functionCall": function_call })))
     }
 }
 
@@ -217,23 +241,24 @@ fn gemini_append_tool_content(
     index: &mut usize,
     contents: &mut Vec<Value>,
     tool_names_by_call_id: &std::collections::BTreeMap<String, String>,
-) {
+) -> Result<(), String> {
     let mut parts = Vec::new();
     while *index < items.len() && items[*index].get("role").and_then(Value::as_str) == Some("tool")
     {
         parts.push(gemini_function_response_part(
             &items[*index],
             tool_names_by_call_id,
-        ));
+        )?);
         *index += 1;
     }
-    contents.push(gemini_content_value("user", parts));
+    contents.push(gemini_content_value("user", parts)?);
+    Ok(())
 }
 
 fn gemini_function_response_part(
     tool_item: &Value,
     tool_names_by_call_id: &std::collections::BTreeMap<String, String>,
-) -> Value {
+) -> Result<Value, String> {
     let call_id = tool_item
         .get("tool_call_id")
         .and_then(Value::as_str)
@@ -264,15 +289,16 @@ fn gemini_function_response_part(
         if let Some(call_id) = call_id {
             function_response["id"] = Value::String(call_id.to_string());
         }
-        json!({ "functionResponse": function_response })
+        Ok(json!({ "functionResponse": function_response }))
     }
 }
 
-fn gemini_append_user_content(item: &Value, contents: &mut Vec<Value>) {
-    let parts = gemini_content_parts_from_message_content(item.get("content").unwrap_or(item));
+fn gemini_append_user_content(item: &Value, contents: &mut Vec<Value>) -> Result<(), String> {
+    let parts = gemini_content_parts_from_message_content(item.get("content").unwrap_or(item))?;
     if !parts.is_empty() {
-        contents.push(gemini_content_value("user", parts));
+        contents.push(gemini_content_value("user", parts)?);
     }
+    Ok(())
 }
 
 fn gemini_tool_response_from_message(message: &Value) -> Value {
@@ -282,4 +308,27 @@ fn gemini_tool_response_from_message(message: &Value) -> Value {
             "output": text
         })
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::gemini_contents_from_request;
+    use serde_json::json;
+
+    #[test]
+    fn request_text_parts_keep_the_fixed_wire_shape() {
+        assert_eq!(
+            gemini_contents_from_request(&json!({
+                "input": [
+                    {"role": "user", "content": "quoted \"text\"\nλ🙂"},
+                    {"role": "assistant", "content": [{"text": "second"}]}
+                ]
+            }))
+            .expect("valid Gemini request contents"),
+            vec![
+                json!({"role": "user", "parts": [{"text": "quoted \"text\"\nλ🙂"}]}),
+                json!({"role": "model", "parts": [{"text": "second"}]}),
+            ]
+        );
+    }
 }

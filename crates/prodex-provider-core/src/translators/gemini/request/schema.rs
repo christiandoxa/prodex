@@ -7,7 +7,7 @@ fn sanitize_with_mojo(
     operation: prodex_mojo_core::provider_constraints::GeminiRequestContentOperation,
 ) -> Value {
     let input = serde_json::to_vec(schema).expect("Gemini schema serializes");
-    super::super::request_contents::gemini_request_content_mojo_value(
+    super::super::request_contents::gemini_request_content_mojo_value_or_panic(
         operation,
         Some(&input),
         None,
