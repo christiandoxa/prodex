@@ -1,5 +1,4 @@
 use super::*;
-#[cfg(feature = "mojo")]
 use crate::smart_context::{
     SmartContextExactnessDecision, SmartContextTokenAccountingRisk, non_empty,
 };
@@ -29,73 +28,63 @@ pub struct SmartContextAdaptiveBudgetPolicy {
 pub fn smart_context_adaptive_budget_policy(
     input: SmartContextAdaptiveBudgetPolicyInput,
 ) -> Option<SmartContextAdaptiveBudgetPolicy> {
-    #[cfg(feature = "mojo")]
-    {
-        let plan = prodex_mojo_core::runtime::smart_context_adaptive_budget_plan(
-            prodex_mojo_core::runtime::SmartContextAdaptiveBudgetPlanInput {
-                available_context_tokens: input.accounting.available_context_tokens,
-                exactness_required: input.exactness_guard.decision
-                    == SmartContextExactnessDecision::RequireExact,
-                static_context_changed: input.static_context_changed,
-                missing_rehydrate_refs: input
-                    .missing_rehydrate_refs
-                    .iter()
-                    .any(|value| non_empty(value)),
-                unknown_token_window: input
-                    .accounting
-                    .accounting_risks
-                    .contains(&SmartContextTokenAccountingRisk::UnknownTokenWindow),
-                unsafe_accounting: input
-                    .accounting
-                    .accounting_risks
-                    .iter()
-                    .any(|risk| *risk != SmartContextTokenAccountingRisk::UnknownTokenWindow),
-                safe_rewrites: input.recent_rewrite_safety.safe_rewrites,
-                fallback_rewrites: input.recent_rewrite_safety.fallback_rewrites,
-                saved_tokens: input.recent_rewrite_safety.saved_tokens,
-            },
-        )
-        .expect("Mojo Smart Context adaptive budget planner returned invalid output");
-        Some(SmartContextAdaptiveBudgetPolicy {
-            tier: match plan.tier {
-                0 => SmartContextTokenBudgetTier::Exact,
-                1 => SmartContextTokenBudgetTier::Large,
-                2 => SmartContextTokenBudgetTier::Condensed,
-                3 => SmartContextTokenBudgetTier::Minimal,
-                _ => unreachable!("Mojo Smart Context tier was validated"),
-            },
-            mode: match plan.mode {
-                prodex_mojo_core::runtime::SMART_CONTEXT_BUDGET_MODE_EXACT => {
-                    SmartContextBudgetMode::ExactPassThrough
-                }
-                prodex_mojo_core::runtime::SMART_CONTEXT_BUDGET_MODE_LARGE => {
-                    SmartContextBudgetMode::LargeLossless
-                }
-                prodex_mojo_core::runtime::SMART_CONTEXT_BUDGET_MODE_CONDENSED => {
-                    SmartContextBudgetMode::ArtifactCondensed
-                }
-                prodex_mojo_core::runtime::SMART_CONTEXT_BUDGET_MODE_MINIMAL => {
-                    SmartContextBudgetMode::MinimalRefsOnly
-                }
-                _ => unreachable!("Mojo Smart Context mode was validated"),
-            },
-            max_inline_bytes: usize::try_from(plan.max_inline_bytes)
-                .expect("Mojo Smart Context inline budget fits usize"),
-            max_inline_tool_output_bytes: usize::try_from(plan.max_inline_bytes)
-                .expect("Mojo Smart Context inline budget fits usize"),
-            max_rehydrate_tokens: plan.max_rehydrate_tokens,
-            reasons: smart_context_budget_policy_reasons_from_bits(plan.reason_bits),
-        })
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        let _ = input;
-        None
-    }
+    let plan = prodex_mojo_core::runtime::smart_context_adaptive_budget_plan(
+        prodex_mojo_core::runtime::SmartContextAdaptiveBudgetPlanInput {
+            available_context_tokens: input.accounting.available_context_tokens,
+            exactness_required: input.exactness_guard.decision
+                == SmartContextExactnessDecision::RequireExact,
+            static_context_changed: input.static_context_changed,
+            missing_rehydrate_refs: input
+                .missing_rehydrate_refs
+                .iter()
+                .any(|value| non_empty(value)),
+            unknown_token_window: input
+                .accounting
+                .accounting_risks
+                .contains(&SmartContextTokenAccountingRisk::UnknownTokenWindow),
+            unsafe_accounting: input
+                .accounting
+                .accounting_risks
+                .iter()
+                .any(|risk| *risk != SmartContextTokenAccountingRisk::UnknownTokenWindow),
+            safe_rewrites: input.recent_rewrite_safety.safe_rewrites,
+            fallback_rewrites: input.recent_rewrite_safety.fallback_rewrites,
+            saved_tokens: input.recent_rewrite_safety.saved_tokens,
+        },
+    )
+    .expect("Mojo Smart Context adaptive budget planner returned invalid output");
+    Some(SmartContextAdaptiveBudgetPolicy {
+        tier: match plan.tier {
+            0 => SmartContextTokenBudgetTier::Exact,
+            1 => SmartContextTokenBudgetTier::Large,
+            2 => SmartContextTokenBudgetTier::Condensed,
+            3 => SmartContextTokenBudgetTier::Minimal,
+            _ => unreachable!("Mojo Smart Context tier was validated"),
+        },
+        mode: match plan.mode {
+            prodex_mojo_core::runtime::SMART_CONTEXT_BUDGET_MODE_EXACT => {
+                SmartContextBudgetMode::ExactPassThrough
+            }
+            prodex_mojo_core::runtime::SMART_CONTEXT_BUDGET_MODE_LARGE => {
+                SmartContextBudgetMode::LargeLossless
+            }
+            prodex_mojo_core::runtime::SMART_CONTEXT_BUDGET_MODE_CONDENSED => {
+                SmartContextBudgetMode::ArtifactCondensed
+            }
+            prodex_mojo_core::runtime::SMART_CONTEXT_BUDGET_MODE_MINIMAL => {
+                SmartContextBudgetMode::MinimalRefsOnly
+            }
+            _ => unreachable!("Mojo Smart Context mode was validated"),
+        },
+        max_inline_bytes: usize::try_from(plan.max_inline_bytes)
+            .expect("Mojo Smart Context inline budget fits usize"),
+        max_inline_tool_output_bytes: usize::try_from(plan.max_inline_bytes)
+            .expect("Mojo Smart Context inline budget fits usize"),
+        max_rehydrate_tokens: plan.max_rehydrate_tokens,
+        reasons: smart_context_budget_policy_reasons_from_bits(plan.reason_bits),
+    })
 }
 
-#[cfg(feature = "mojo")]
 fn smart_context_budget_policy_reasons_from_bits(bits: u64) -> Vec<SmartContextBudgetPolicyReason> {
     [
         (
@@ -144,9 +133,9 @@ fn smart_context_budget_policy_reasons_from_bits(bits: u64) -> Vec<SmartContextB
     .collect()
 }
 
-#[cfg(all(test, not(feature = "mojo")))]
+#[cfg(test)]
 #[test]
-fn adaptive_budget_policy_is_unavailable_without_mojo() {
+fn adaptive_budget_policy_uses_mojo_in_every_feature_mode() {
     let accounting = SmartContextObservedTokenAccounting {
         model_context_window_tokens: None,
         observed_turns: 0,
@@ -180,17 +169,21 @@ fn adaptive_budget_policy_is_unavailable_without_mojo() {
             estimator_confidence: crate::smart_context::SmartContextEstimatorConfidence::Low,
         },
     };
-    assert!(
-        smart_context_adaptive_budget_policy(SmartContextAdaptiveBudgetPolicyInput {
-            exactness_guard: SmartContextExactnessGuard {
-                decision: crate::smart_context::SmartContextExactnessDecision::Allow,
-                reasons: Vec::new(),
-            },
-            accounting,
-            recent_rewrite_safety: Default::default(),
-            static_context_changed: false,
-            missing_rehydrate_refs: Vec::new(),
-        })
-        .is_none()
+    let policy = smart_context_adaptive_budget_policy(SmartContextAdaptiveBudgetPolicyInput {
+        exactness_guard: SmartContextExactnessGuard {
+            decision: crate::smart_context::SmartContextExactnessDecision::Allow,
+            reasons: Vec::new(),
+        },
+        accounting,
+        recent_rewrite_safety: Default::default(),
+        static_context_changed: false,
+        missing_rehydrate_refs: Vec::new(),
+    })
+    .expect("Mojo adaptive budget policy is available in every feature mode");
+    assert_eq!(policy.tier, SmartContextTokenBudgetTier::Exact);
+    assert_eq!(policy.mode, SmartContextBudgetMode::ExactPassThrough);
+    assert_eq!(
+        policy.reasons,
+        vec![SmartContextBudgetPolicyReason::UnknownTokenWindow]
     );
 }

@@ -2045,3 +2045,18 @@ The canonical source report counts **52,810 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **524,069 additional Mojo LOC** required at this Rust
 volume.
+
+## Smart Context adaptive budget feature consistency
+
+The adaptive budget policy now calls the existing Mojo plan in every
+runtime-proxy feature mode. The feature-off `None` path and its unavailable
+test were replaced with a fixed caller expectation for an unknown token
+window. The no-fallback guard requires the Mojo call and rejects feature-off
+decision routing. The Mojo ABI did not change; native execution evidence
+remains Linux x86_64.
+
+The canonical source report counts **52,810 reachable Mojo LOC** and
+**192,291 Rust production LOC**, totaling **245,101 LOC**: **21.55% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **524,063 additional Mojo LOC** required at this Rust
+volume.
