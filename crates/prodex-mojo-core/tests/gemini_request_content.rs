@@ -92,3 +92,47 @@ fn tool_declaration_keeps_the_existing_json_shape() {
         br#"{"name":"lookup","description":"Look up a record","parameters":{"type":"object"}}"#
     );
 }
+
+#[test]
+fn system_instruction_from_request_joins_system_and_contextual_user_text() {
+    let mut input = GeminiRequestContentKernelInput::new(
+        GeminiRequestContentOperation::SystemInstructionFromRequest,
+    );
+    input.primary = Some(
+        br#"{"input":[
+            {"role":"system","content":"system one"},
+            {"role":"user","content":"  <environment_context>synthetic</environment_context>"},
+            {"role":"system","content":[{"text":"system two"},{"content":"system three"}]},
+            {"role":"user","content":"actual request"}
+        ]}"#,
+    );
+
+    assert_eq!(
+        gemini_request_content_kernel(input).unwrap(),
+        br#"{"parts":[{"text":"system one\n\nsystem two\nsystem three\n\n  <environment_context>synthetic</environment_context>"}]}"#
+    );
+}
+
+#[test]
+fn system_instruction_from_request_handles_empty_wrong_shapes_and_invalid_json() {
+    for request in [
+        br#"{"input":[{"role":"system","content":" \t"},{"role":"user","content":" \n\n "}]}"#
+            .as_slice(),
+        br#"{"input":"not-an-array"}"#.as_slice(),
+    ] {
+        let mut input = GeminiRequestContentKernelInput::new(
+            GeminiRequestContentOperation::SystemInstructionFromRequest,
+        );
+        input.primary = Some(request);
+        assert_eq!(gemini_request_content_kernel(input).unwrap(), b"null");
+    }
+
+    let mut input = GeminiRequestContentKernelInput::new(
+        GeminiRequestContentOperation::SystemInstructionFromRequest,
+    );
+    input.primary = Some(b"{");
+    assert_eq!(
+        gemini_request_content_kernel(input),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    );
+}

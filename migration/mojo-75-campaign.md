@@ -2134,3 +2134,18 @@ The canonical source report counts **53,106 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **523,560 additional Mojo LOC** required at this Rust
 volume.
+
+## Gemini system-instruction request hard replacement
+
+Gemini Responses system instructions now use the existing provider-constraints
+Mojo kernel to extract and join system and contextual-user text and build the
+Gemini `systemInstruction` value in every feature mode. Rust serializes the
+request and maps the bounded kernel result. Fixed caller and kernel tests cover
+mixed text, empty and malformed shapes, and the feature-off route. The ABI
+version is unchanged; native execution evidence remains Linux x86_64.
+
+The canonical source report counts **53,528 reachable Mojo LOC** and
+**192,206 Rust production LOC**, totaling **245,734 LOC**: **21.78% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **523,090 additional Mojo LOC** required at this Rust
+volume.

@@ -491,6 +491,7 @@
           "gemini_request_field_planning",
           "gemini_tool_call_indexing",
           "gemini_request_content_kernel",
+          "gemini_system_instruction_from_request",
           "gemini_bridge_request_kernel"
         ]
       }
@@ -674,6 +675,7 @@
     "gemini_request_field_planning",
     "gemini_tool_call_indexing",
     "gemini_request_content_kernel",
+    "gemini_system_instruction_from_request",
     "gemini_bridge_request_kernel",
     "command_output_text_kernel",
     "deepseek_chat_stream_event_translation"
@@ -1538,6 +1540,34 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON serialization, typed ABI result mapping, and live stream state"
+    },
+    {
+      "name": "gemini_system_instruction_from_request",
+      "domain": "provider/gemini",
+      "introduced_in": "0.432.1",
+      "baseline_state": "feature-off Rust instruction extraction and JSON construction",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_gemini_request_content_kernel_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "system_instruction_from_request": 11
+      },
+      "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
+      "consumer_marker": "GeminiRequestContentOperation::SystemInstructionFromRequest",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
+        "crates/prodex-provider-core/src/translators/gemini/request_transform.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
+      "rust_owner_before": "Responses JSON system and contextual-user text extraction, joining, and feature-off JSON shaping",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; provider and Mojo-core tests assert fixed output, empty input, and malformed-input results",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde request serialization, bounded Mojo invocation, error mapping, and JSON result decoding",
+      "reuse_constraint": "The existing Gemini bridge text operation rejects contextual-user instructions and handles only its text-only subset; this kernel preserves the broader feature-off Responses fallback semantics."
     }
   ],
   "rust_semantic_reductions": [
@@ -2184,6 +2214,31 @@
       "production_consumer": "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
       "parity_test": "crates/prodex-provider-core/src/translators/anthropic/messages_tests.rs",
       "performance": "one bounded Mojo result-source call per content block"
+    },
+    {
+      "file": "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
+      "symbol": "gemini_system_instruction_from_request",
+      "operation": "gemini_system_instruction_from_request",
+      "previous_responsibility": "Responses JSON system and contextual-user text extraction, joining, and feature-off systemInstruction construction",
+      "final_state": "adapter-only",
+      "rust_before": "Rust extracted and joined instruction text, then shaped the Gemini JSON value",
+      "rust_after": "Rust serializes the request, invokes the typed Mojo operation, maps failures, and decodes its JSON result",
+      "mojo_owner": "mojo/prodex_core/provider_constraints.mojo::gemini_request_content_write_system_instruction_from_request",
+      "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
+      "mojo_entry": "prodex_gemini_request_content_kernel_v1 operation 11",
+      "production_consumer": "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/gemini_request_content.rs",
+      "performance": "one bounded Mojo request-content operation",
+      "cleanup_loc": 22,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 7,
+          "end": 28
+        },
+        "release_symbol": "gemini_system_instruction_from_request",
+        "release_marker": "GeminiRequestContentOperation::SystemInstructionFromRequest"
+      }
     }
   ],
   "deleted_authoritative_operations": [

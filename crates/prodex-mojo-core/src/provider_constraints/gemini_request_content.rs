@@ -20,6 +20,7 @@ pub enum GeminiRequestContentOperation {
     ToolDeclaration = 8,
     ToolConfig = 9,
     BuiltinTool = 10,
+    SystemInstructionFromRequest = 11,
 }
 
 impl GeminiRequestContentOperation {
