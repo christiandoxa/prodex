@@ -10,20 +10,21 @@ from runtime_math import (
 )
 
 
-@export("prodex_runtime_precommit_budget_plan_v1")
-def prodex_runtime_precommit_budget_plan_v1(
+@export("prodex_runtime_precommit_budget_plan_v2")
+def prodex_runtime_precommit_budget_plan_v2(
     continuation: Int64,
     pressure_mode: Int64,
-    standard_attempt_limit: Int64,
-    standard_budget_ms: Int64,
-    continuation_attempt_limit: Int64,
-    continuation_budget_ms: Int64,
-    pressure_attempt_limit: Int64,
-    pressure_budget_ms: Int64,
-    profile_count: Int64,
-    attempts_per_profile: Int64,
-    attempt_limit_out: Pointer[mut=True, Int64, _],
-    budget_ms_out: Pointer[mut=True, Int64, _],
+    standard_attempt_limit: UInt64,
+    standard_budget_ms: UInt64,
+    continuation_attempt_limit: UInt64,
+    continuation_budget_ms: UInt64,
+    pressure_attempt_limit: UInt64,
+    pressure_budget_ms: UInt64,
+    profile_count: UInt64,
+    attempts_per_profile: UInt64,
+    attempt_limit_cap: UInt64,
+    attempt_limit_out: Pointer[mut=True, UInt64, _],
+    budget_ms_out: Pointer[mut=True, UInt64, _],
 ) abi("C") -> Int64:
     return runtime_precommit_budget_plan(
         continuation,
@@ -36,6 +37,7 @@ def prodex_runtime_precommit_budget_plan_v1(
         pressure_budget_ms,
         profile_count,
         attempts_per_profile,
+        attempt_limit_cap,
         attempt_limit_out,
         budget_ms_out,
     )

@@ -5,6 +5,8 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { repoRoot } from "../npm/common.mjs";
 
+const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
+const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
   "crates/prodex-mojo-core/build.rs",
   "crates/prodex-mojo-core/src/lib.rs",
@@ -34,6 +36,8 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/quota.rs",
   "crates/prodex-runtime-proxy/src/quota/mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
+  PRECOMMIT_BUDGET_FILE,
+  PRECOMMIT_BUDGET_TEST_FILE,
   "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
   "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
@@ -162,6 +166,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-quota/src/render/remaining_percent.rs",
   "crates/prodex-quota/src/render/quota_policy.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  PRECOMMIT_BUDGET_FILE,
   "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
   "crates/prodex-runtime-proxy/src/websocket_message.rs",
   "crates/prodex-runtime-proxy/src/websocket_response_tracking.rs",
@@ -309,6 +314,8 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
   "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  PRECOMMIT_BUDGET_FILE,
+  PRECOMMIT_BUDGET_TEST_FILE,
   "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
   "crates/prodex-runtime-proxy/src/compatibility_surface.rs",
   "crates/prodex-runtime-proxy/src/error_policy.rs",
@@ -486,6 +493,10 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => HARD_REPLACED_RUST_FILES.has(filePath) &&
       /\b(?:rust_oracle|fn\s+[A-Za-z0-9_]+_rust\s*\()/u.test(contents))
     .map(([filePath]) => `${filePath}: contains a Rust semantic oracle or copy`);
+  const precommitBudgetOracleViolations = files
+    .filter(([filePath, contents]) => filePath === PRECOMMIT_BUDGET_TEST_FILE &&
+      /\bfn\s+precommit_budget_matches_rust_oracle\s*\(/u.test(contents))
+    .map(([filePath]) => `${filePath}: contains a Rust pre-commit budget oracle`);
   const deepseekRequestViolations = files
     .filter(([filePath, contents]) => filePath === DEEPSEEK_REQUEST_FILE &&
       !contents.includes("DeepSeekKernelOperation::RawCommonRequest"))
@@ -578,7 +589,8 @@ export function findViolations(files) {
   });
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
-    ...geminiFallbackViolations, ...hardReplacementViolations, ...deepseekRequestViolations,
+    ...geminiFallbackViolations, ...hardReplacementViolations, ...precommitBudgetOracleViolations,
+    ...deepseekRequestViolations,
     ...modelSpecViolations,
     ...deepseekShapingViolations,
     ...quotaWindowViolations,
@@ -828,6 +840,12 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/normalization.rs",
     "fn smart_context_normalize_volatile_command_output_rust() {}"]])[0],
     /Rust semantic oracle or copy/u);
+  assert.match(findViolations([[PRECOMMIT_BUDGET_FILE,
+    "fn runtime_proxy_precommit_budget_for_profile_count_rust() {}"]])[0],
+    /Rust semantic oracle or copy/u);
+  assert.match(findViolations([[PRECOMMIT_BUDGET_TEST_FILE,
+    "fn precommit_budget_matches_rust_oracle() {}"]])[0],
+    /Rust pre-commit budget oracle/u);
   assert(findViolations([[DEEPSEEK_SHAPING_FILE,
     'pub fn deepseek_provider_core_response_created_event() { #[cfg(not(feature = "mojo"))] fallback(); }']])
     .some((violation) => violation.includes("deepseek_provider_core_response_created_event contains a feature-off Rust path")));
