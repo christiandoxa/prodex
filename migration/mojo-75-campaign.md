@@ -138,7 +138,8 @@ tool-call/output adjacency repair and two-level response-metadata merging.
 Mojo owns first-output lookup, global single emission, unanswered-call removal,
 content-presence rules and the historical no-valid-output special case. The
 lookup uses a stable index sort and binary searches over caller-owned scratch;
-Rust retains only value acquisition/materialization and feature-off/test oracles.
+Rust retains value acquisition/materialization. The former feature-off and test
+oracles were removed in the later hard-replacement checkpoint below.
 
 The new differential corpus contains 10,000 generated histories and metadata
 merges, plus explicit first-output/global-emission, Unicode, scalar/object merge
@@ -393,8 +394,8 @@ production LOC, or 19.928766% Mojo. The 75% project target remains a forward mig
 Structured runtime-log tokenization now runs in a dedicated Mojo parser. Mojo owns event-token
 selection, key/value boundary detection, quoted-value scanning, escape handling, whitespace
 skipping, and field-span planning. Rust retains owned-string construction, JSON unescaping,
-redaction, and rendering. The old Rust tokenizer is isolated to the explicit non-Mojo compatibility
-build and is not used by the Mojo production path.
+redaction, and rendering. The old Rust tokenizer was later deleted after a
+form-feed parity fix and a second differential check.
 
 A forced fresh Mojo archive build verified the new parser export. Feature-on expectation tests cover
 quoted/escaped values, Unicode, empty values, malformed field values, and event-only parsing; the
@@ -1420,3 +1421,42 @@ The canonical report counts **51,921 reachable Mojo LOC** and **194,714 Rust
 production LOC**, totaling **246,635 LOC**: **21.051756644434082% Mojo**. The
 7% release floor and non-regression check pass; the 75% project target remains
 unmet, with **532,221 additional Mojo LOC** required at the current Rust volume.
+
+## Gemini, registry, DeepSeek messages, and proxy payload/log hard replacement
+
+Gemini quota bucket numerics now use bounded Mojo batches in every feature mode;
+the Rust numeric fallback was deleted and rendering covers batches beyond the
+1,024-row ABI limit. The provider implementation registry now uses its Mojo plan
+and alias resolver in every mode, and its 362-line Rust registration copy was
+deleted. Rust still materializes typed provider descriptors and translators.
+
+DeepSeek thinking/content normalization, tool-call adjacency, and metadata merge
+now use the existing Mojo message kernel in every mode. The feature-off Rust
+message implementation, adjacency module, and differential oracle were removed.
+The shared Serde JSON-array builder is available in every mode. Input-item
+shaping remains a separate incomplete migration: the Mojo path emitted invalid
+JSON for a Unicode content array during parity testing, so its Rust path was
+not deleted.
+
+The runtime proxy now uses Mojo in every mode for SSE line/commit planning,
+previous-response error classification, and structured log tokenization. The
+replaced Rust scanners, classifiers, feature-off branches, and test oracles were
+deleted. A differential log test exposed form feed as a Rust whitespace byte;
+the owning Mojo parser now matches it. Expected-value tests retain SSE signal
+precedence, malformed lines, log fields, and quoted form-feed values. The
+no-fallback guard covers the promoted paths.
+
+After deletion, provider-core tests pass 242 cases in default and feature-off
+modes and 271 with Mojo (one manual test ignored). Quota tests pass 73/47/73
+across default, feature-off, and Mojo modes. Proxy tests pass 311/311/350 for
+the log replacement; the SSE and previous-response replacements passed their
+own three-mode tests, runtime smoke, serial app proxy tests, and offline replay.
+The form-feed Mojo ABI test and ownership, authority, no-fallback, documentation,
+and staged churn guards pass. Native execution evidence is Linux x86_64; no
+macOS or Windows runtime execution was run for this checkpoint.
+
+The canonical staged-source report counts **51,921 reachable Mojo LOC** and
+**194,411 Rust production LOC**, totaling **246,332 LOC**:
+**21.077651299871718% Mojo**. The 7% release floor and non-regression check
+pass; the 75% project target remains unmet, with **531,312 additional Mojo
+LOC** required at this Rust volume.

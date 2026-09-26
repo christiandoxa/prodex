@@ -14,7 +14,6 @@ pub(super) fn pressure_band(five_hour_status: i64, weekly_status: i64) -> i64 {
     prodex_mojo_core::quota::pressure_band(five_hour_status, weekly_status)
 }
 
-#[cfg(feature = "mojo")]
 pub(crate) fn gemini_bucket_numeric_batch(
     inputs: &[prodex_mojo_core::quota::GeminiBucketNumericInput],
 ) -> Result<Vec<prodex_mojo_core::quota::GeminiBucketNumericOutput>, prodex_mojo_core::MojoError> {

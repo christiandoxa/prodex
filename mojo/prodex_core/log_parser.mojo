@@ -9,7 +9,7 @@ comptime LOG_FIELD_WIDTH: Int64 = 4
 
 
 def log_ascii_whitespace(value: UInt8) -> Bool:
-    return value == 32 or value == 9 or value == 10 or value == 13
+    return value == 32 or value == 9 or value == 10 or value == 12 or value == 13
 
 
 def log_skip_whitespace(

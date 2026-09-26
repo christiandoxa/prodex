@@ -96,3 +96,28 @@ fn validate_span(message: &str, start: usize, end: usize) -> Result<(), MojoErro
         Err(MojoError::InvalidOutput)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn form_feed_separates_runtime_log_tokens() {
+        let message = "\u{c}event\u{c}key=value\u{c}next=field";
+        let plan = parse_log_message(message).unwrap();
+        assert_eq!(
+            plan.event.map(|(start, end)| &message[start..end]),
+            Some("event")
+        );
+        assert_eq!(
+            plan.fields
+                .iter()
+                .map(|field| (
+                    &message[field.key_start..field.key_end],
+                    &message[field.value_start..field.value_end],
+                ))
+                .collect::<Vec<_>>(),
+            [("key", "value"), ("next", "field")]
+        );
+    }
+}
