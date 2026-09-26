@@ -18,7 +18,7 @@ pub(crate) use self::response_tool_calls::gemini_response_tool_call_added_item_w
 use self::response_tool_calls::gemini_response_tool_call_item;
 pub(crate) use self::response_tool_calls::gemini_response_tool_call_item_with_call_id;
 pub(crate) use self::response_tool_calls::gemini_response_tool_call_raw_item_with_call_id;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::borrow::Cow;
 
 #[path = "response/chat_messages.rs"]
@@ -88,7 +88,7 @@ pub(crate) fn gemini_runtime_responses_value_from_generate_value_with_fallback_i
         .and_then(Value::as_str)
         .unwrap_or(default_model)
         .to_string();
-    gemini_build_response_value(
+    match gemini_build_response_value(
         value,
         &response_id,
         &model,
@@ -107,27 +107,35 @@ pub(crate) fn gemini_runtime_responses_value_from_generate_value_with_fallback_i
                 &mut blocked_tool_call_message,
             )
         },
-    )
-}
-
-pub(super) fn gemini_responses_value_from_generate_value(value: &Value) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let canonical =
-            serde_json::to_string(value).expect("Gemini raw text response input serializes");
-        let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
-            prodex_mojo_core::rich::GeminiResponseKernelOperation::RawTextResponse,
-        );
-        input.response = Some(&canonical);
-        input.response_id = Some("gemini_resp_prodex");
-        input.model = Some("gemini-2.5-pro");
-        input.include_empty_usage = true;
-        input.include_empty_metadata = true;
-        let mapped = super::stream::gemini_mojo_value(input);
-        if !mapped.is_null() {
-            return mapped;
+    ) {
+        Ok(response) => response,
+        Err(error) => {
+            let (code, message) = match error {
+                GeminiResponseBuildError::InputTooLarge => (
+                    "gemini_response_too_large",
+                    "Gemini response exceeds the buffered response size limit.",
+                ),
+                GeminiResponseBuildError::Kernel => (
+                    "gemini_response_normalization_failed",
+                    "Gemini response normalization failed.",
+                ),
+            };
+            json!({
+                "id": response_id,
+                "object": "response",
+                "model": model,
+                "created_at": created_at,
+                "output": [],
+                "status": "failed",
+                "error": {"code": code, "message": message},
+            })
         }
     }
+}
+
+pub(super) fn gemini_responses_value_from_generate_value(
+    value: &Value,
+) -> Result<Value, GeminiResponseBuildError> {
     let response_id = value
         .get("responseId")
         .and_then(Value::as_str)
@@ -162,6 +170,7 @@ pub(super) fn gemini_responses_value_from_generate_value(value: &Value) -> Value
 #[path = "response/build.rs"]
 mod response_build;
 
+pub(super) use self::response_build::GeminiResponseBuildError;
 use self::response_build::{
     gemini_build_response_value, gemini_function_call_id, gemini_function_call_id_with_fallback,
 };

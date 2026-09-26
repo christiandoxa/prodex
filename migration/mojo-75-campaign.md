@@ -1790,3 +1790,22 @@ The canonical source report counts **52,316 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **527,539 additional Mojo LOC** required at this Rust
 volume.
+
+## Gemini buffered-response hard replacement
+
+Buffered Gemini response envelope and message assembly now use a versioned Mojo
+kernel in every feature mode. The feature-off Rust assembler and temporary
+oracle were deleted. Rust retains Serde acquisition, part/usage/metadata
+preparation, and status application. The 16 MiB input ceiling returns a
+controlled provider or runtime response error; unexpected kernel errors also
+return controlled errors rather than panicking. Expected-value caller tests
+cover text, tools, Unicode, metadata, malformed input, and the size boundary.
+The updated rich ABI compiled to objects for all six release target triples.
+Native execution evidence is Linux x86_64; macOS and Windows runtime execution
+was not run.
+
+The canonical source report counts **52,367 reachable Mojo LOC** and
+**193,345 Rust production LOC**, totaling **245,712 LOC**: **21.31% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **527,668 additional Mojo LOC** required at this Rust
+volume.

@@ -177,8 +177,19 @@ struct GeminiResponseKernelFfiInput {
 
 const _: () = assert!(std::mem::size_of::<GeminiResponseKernelFfiInput>() == 448);
 
+/// Input limit for the versioned buffered-response kernel.
+pub const GEMINI_BUFFERED_RESPONSE_MAX_INPUT_BYTES: usize = 16 * 1024 * 1024;
+const GEMINI_BUFFERED_RESPONSE_ABI_VERSION: i64 = 2;
+
 unsafe extern "C" {
     fn prodex_mojo_gemini_response_kernel_v1(
+        abi_version: i64,
+        input: u64,
+        output: u64,
+        output_capacity: i64,
+        written: u64,
+    ) -> i64;
+    fn prodex_mojo_gemini_buffered_response_kernel_v2(
         abi_version: i64,
         input: u64,
         output: u64,
@@ -245,6 +256,17 @@ fn gemini_kernel_operation(operation: GeminiResponseKernelOperation) -> i64 {
 }
 
 fn gemini_kernel_capacity(input: &GeminiResponseKernelInput<'_>) -> Result<usize, MojoError> {
+    let input_bytes = gemini_kernel_input_bytes(input)?;
+    if input_bytes > GEMINI_KERNEL_MAX_BYTES {
+        return Err(MojoError::InvalidInput);
+    }
+    input_bytes
+        .checked_mul(6)
+        .and_then(|value| value.checked_add(512))
+        .ok_or(MojoError::InvalidInput)
+}
+
+fn gemini_kernel_input_bytes(input: &GeminiResponseKernelInput<'_>) -> Result<usize, MojoError> {
     let views = [
         input.response_id,
         input.call_id,
@@ -264,24 +286,66 @@ fn gemini_kernel_capacity(input: &GeminiResponseKernelInput<'_>) -> Result<usize
         input.arguments,
         input.citations,
     ];
-    let input_bytes = views.iter().flatten().try_fold(0_usize, |total, value| {
+    views.iter().flatten().try_fold(0_usize, |total, value| {
         total
             .checked_add(value.len())
             .ok_or(MojoError::InvalidInput)
-    })?;
-    if input_bytes > GEMINI_KERNEL_MAX_BYTES {
-        return Err(MojoError::InvalidInput);
+    })
+}
+
+/// Buffered-response kernel errors, including its explicit size ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeminiBufferedResponseError {
+    InputTooLarge,
+    Kernel(MojoError),
+}
+
+/// Assembles a buffered Gemini response with the version 2 Mojo ABI.
+pub fn gemini_buffered_response_kernel(
+    input: GeminiResponseKernelInput<'_>,
+) -> Result<Vec<u8>, GeminiBufferedResponseError> {
+    if input.operation != GeminiResponseKernelOperation::BufferedResponse {
+        return Err(GeminiBufferedResponseError::Kernel(MojoError::InvalidInput));
     }
-    input_bytes
+    ensure_rich_abi().map_err(GeminiBufferedResponseError::Kernel)?;
+    let input_bytes =
+        gemini_kernel_input_bytes(&input).map_err(GeminiBufferedResponseError::Kernel)?;
+    if input_bytes > GEMINI_BUFFERED_RESPONSE_MAX_INPUT_BYTES {
+        return Err(GeminiBufferedResponseError::InputTooLarge);
+    }
+    let capacity = input_bytes
         .checked_mul(6)
         .and_then(|value| value.checked_add(512))
-        .ok_or(MojoError::InvalidInput)
+        .ok_or(GeminiBufferedResponseError::Kernel(MojoError::InvalidInput))?;
+    gemini_kernel_run(
+        input,
+        capacity,
+        GEMINI_BUFFERED_RESPONSE_ABI_VERSION,
+        prodex_mojo_gemini_buffered_response_kernel_v2,
+    )
+    .map_err(GeminiBufferedResponseError::Kernel)
 }
 
 /// Runs one bounded Gemini response/stream JSON builder in compiled Mojo.
 pub fn gemini_response_kernel(input: GeminiResponseKernelInput<'_>) -> Result<Vec<u8>, MojoError> {
     ensure_rich_abi()?;
     let capacity = gemini_kernel_capacity(&input)?;
+    gemini_kernel_run(
+        input,
+        capacity,
+        RICH_ABI_VERSION,
+        prodex_mojo_gemini_response_kernel_v1,
+    )
+}
+
+type GeminiKernelEntry = unsafe extern "C" fn(i64, u64, u64, i64, u64) -> i64;
+
+fn gemini_kernel_run(
+    input: GeminiResponseKernelInput<'_>,
+    capacity: usize,
+    abi_version: i64,
+    entry: GeminiKernelEntry,
+) -> Result<Vec<u8>, MojoError> {
     let mut output = vec![0_u8; capacity];
     let ffi_input = GeminiResponseKernelFfiInput {
         operation: gemini_kernel_operation(input.operation),
@@ -326,8 +390,8 @@ pub fn gemini_response_kernel(input: GeminiResponseKernelInput<'_>) -> Result<Ve
     };
     let mut written = 0_i64;
     let status = unsafe {
-        prodex_mojo_gemini_response_kernel_v1(
-            RICH_ABI_VERSION,
+        entry(
+            abi_version,
             mojo_pointer_address(&ffi_input),
             mojo_mut_pointer_address(output.as_mut_ptr()),
             i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,

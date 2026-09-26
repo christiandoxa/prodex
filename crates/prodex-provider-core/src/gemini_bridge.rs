@@ -14,6 +14,7 @@ mod response;
 mod response_state;
 mod tooling;
 mod util;
+
 pub use self::bindings::{
     gemini_provider_core_response_bindings_from_body,
     gemini_provider_core_response_id_from_responses_value,
@@ -123,3 +124,9 @@ pub use self::util::{
     gemini_provider_core_collect_string_values, gemini_provider_core_parse_command_specific_tool,
     gemini_provider_core_skip_context_path_name, gemini_provider_core_stream_error,
 };
+
+#[cfg(test)]
+mod tests {
+    #[path = "response.rs"]
+    mod response;
+}
