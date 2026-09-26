@@ -1460,3 +1460,25 @@ The canonical staged-source report counts **51,921 reachable Mojo LOC** and
 **21.077651299871718% Mojo**. The 7% release floor and non-regression check
 pass; the 75% project target remains unmet, with **531,312 additional Mojo
 LOC** required at this Rust volume.
+
+## Runtime proxy error-policy hard replacement
+
+HTTP and stream error classification, code and message signals, and the official
+rate-limit header classification now use the existing Mojo kernels in every
+feature mode. The duplicate Rust rule table, JSON walker, signal predicates,
+feature-off branches, and differential test oracle were deleted. Rust retains
+header acquisition, phase-aware action materialization, retry-after handling,
+and conservative pass-through on an invalid Mojo result.
+
+Before deletion, differential tests exercised the Mojo and Rust decisions.
+After deletion, runtime-proxy tests pass 315 cases in default and feature-off
+modes and 353 with Mojo. Expected-value tests cover malformed JSON, competing
+signals, generic 429 pass-through, and committed header behavior. Focused
+Clippy and formatter checks pass. Native execution evidence is Linux x86_64;
+no macOS or Windows runtime execution was run for this checkpoint.
+
+The canonical source report counts **51,921 reachable Mojo LOC** and
+**194,057 Rust production LOC**, totaling **245,978 LOC**:
+**21.107985266975096% Mojo**. The 7% release floor and non-regression check
+pass; the 75% project target remains unmet, with **530,250 additional Mojo
+LOC** required at this Rust volume.

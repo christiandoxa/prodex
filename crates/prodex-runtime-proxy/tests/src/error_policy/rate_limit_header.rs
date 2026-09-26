@@ -84,6 +84,58 @@ fn workspace_exhaustion_header_overrides_generic_rate_limit_body() {
 }
 
 #[test]
+fn official_rate_limit_header_preserves_class_after_commit_without_retry() {
+    for (value, class, rule) in [
+        (
+            "rate_limit_reached",
+            RuntimeHttpErrorClass::RateLimited,
+            "rate_limited",
+        ),
+        (
+            "workspace_member_credits_depleted",
+            RuntimeHttpErrorClass::Quota,
+            "explicit_quota",
+        ),
+    ] {
+        let policy = runtime_http_error_policy_with_headers(
+            429,
+            br#"{"error":{"message":"Too Many Requests"}}"#,
+            [("X-Codex-Rate-Limit-Reached-Type", value.as_bytes())],
+            RuntimeHttpErrorPhase::Committed,
+        );
+        assert_eq!(policy.class, class, "{value}");
+        assert_eq!(
+            policy.action,
+            RuntimeHttpErrorAction::PassThrough,
+            "{value}"
+        );
+        assert_eq!(policy.rule, Some(rule), "{value}");
+    }
+}
+
+#[test]
+fn rate_limit_header_ignores_other_statuses_and_invalid_utf8() {
+    for (status, value) in [
+        (403, b"workspace_member_credits_depleted".as_slice()),
+        (429, b"\xff".as_slice()),
+    ] {
+        let policy = runtime_http_error_policy_with_headers(
+            status,
+            br#"{"error":{"message":"Too Many Requests"}}"#,
+            [("X-Codex-Rate-Limit-Reached-Type", value)],
+            RuntimeHttpErrorPhase::PreCommit,
+        );
+        assert_eq!(policy.class, RuntimeHttpErrorClass::Other, "{status}");
+        assert_eq!(
+            policy.action,
+            RuntimeHttpErrorAction::PassThrough,
+            "{status}"
+        );
+        assert_eq!(policy.rule, None, "{status}");
+    }
+}
+
+#[test]
 fn observed_upgrade_to_pro_usage_limit_rotates_on_403() {
     let body = br#"{"error":{"message":"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:08 PM."}}"#;
     let policy = runtime_http_error_policy(403, body, RuntimeHttpErrorPhase::PreCommit);

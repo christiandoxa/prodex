@@ -209,6 +209,91 @@ fn deactivated_workspace_rotates_only_before_commit_for_profile_statuses() {
 }
 
 #[test]
+fn http_error_policy_preserves_status_specific_rule_precedence() {
+    let cases = [
+        (
+            429,
+            serde_json::json!({
+                "error": {
+                    "code": "insufficient_quota",
+                    "type": "rate_limit_exceeded",
+                    "message": "multiple signals"
+                }
+            }),
+            RuntimeHttpErrorClass::RateLimited,
+            RuntimeHttpErrorAction::RetryProfile,
+            "rate_limited",
+        ),
+        (
+            403,
+            serde_json::json!({
+                "error": {
+                    "code": "insufficient_quota",
+                    "type": "deactivated_workspace",
+                    "message": "multiple signals"
+                }
+            }),
+            RuntimeHttpErrorClass::ProfileUnavailable,
+            RuntimeHttpErrorAction::RotateProfile,
+            "profile_unavailable",
+        ),
+        (
+            503,
+            serde_json::json!({
+                "error": {
+                    "code": "server_is_overloaded",
+                    "message": "multiple signals"
+                }
+            }),
+            RuntimeHttpErrorClass::Overload,
+            RuntimeHttpErrorAction::RetryProfile,
+            "explicit_overload",
+        ),
+    ];
+
+    for (status, value, class, precommit_action, rule) in cases {
+        let body = json_body(value);
+        for (phase, action) in [
+            (RuntimeHttpErrorPhase::PreCommit, precommit_action),
+            (
+                RuntimeHttpErrorPhase::Committed,
+                RuntimeHttpErrorAction::PassThrough,
+            ),
+        ] {
+            let policy = runtime_http_error_policy(status, &body, phase);
+            assert_eq!(policy.class, class, "{status} {phase:?}");
+            assert_eq!(policy.action, action, "{status} {phase:?}");
+            assert_eq!(policy.rule, Some(rule), "{status} {phase:?}");
+            assert_eq!(policy.message.as_deref(), Some("multiple signals"));
+        }
+    }
+
+    let stream = json_body(serde_json::json!({
+        "error": {
+            "code": "rate_limit_exceeded",
+            "type": "insufficient_quota",
+            "message": "multiple signals"
+        }
+    }));
+    for (phase, action) in [
+        (
+            RuntimeHttpErrorPhase::PreCommit,
+            RuntimeHttpErrorAction::RotateProfile,
+        ),
+        (
+            RuntimeHttpErrorPhase::Committed,
+            RuntimeHttpErrorAction::PassThrough,
+        ),
+    ] {
+        let policy = runtime_stream_error_policy(&stream, phase);
+        assert_eq!(policy.class, RuntimeHttpErrorClass::Quota, "{phase:?}");
+        assert_eq!(policy.action, action, "{phase:?}");
+        assert_eq!(policy.rule, Some("explicit_quota"), "{phase:?}");
+        assert_eq!(policy.message.as_deref(), Some("multiple signals"));
+    }
+}
+
+#[test]
 fn workspace_credit_message_does_not_make_a_generic_429_rotatable() {
     let body = json_body(serde_json::json!({
         "error": {
@@ -267,7 +352,7 @@ fn generic_429_passes_through_without_explicit_quota_code() {
 
 #[test]
 fn generic_429_matrix_passes_through_without_explicit_quota_or_rate_limit_code() {
-    let bodies: [(&str, &[u8]); 10] = [
+    let bodies: [(&str, &[u8]); 11] = [
         ("empty", b"" as &[u8]),
         ("plain_too_many_requests", b"Too Many Requests" as &[u8]),
         (
@@ -298,6 +383,10 @@ fn generic_429_matrix_passes_through_without_explicit_quota_or_rate_limit_code()
         (
             "json_message_code_shaped_text",
             br#"{"error":{"message":"insufficient_quota"}}"# as &[u8],
+        ),
+        (
+            "malformed_json_explicit_quota_code",
+            br#"{"error":{"code":"insufficient_quota"}"# as &[u8],
         ),
     ];
 
@@ -490,6 +579,7 @@ fn streaming_retry_requires_a_structured_explicit_code() {
         b"rate_limit_exceeded".as_slice(),
         b"server is overloaded".as_slice(),
         br#"{"error":{"message":"rate_limit_exceeded"}}"#,
+        br#"{"error":{"code":"rate_limit_exceeded"}"#,
         br#"{"error":{"reason":"server is overloaded; try again"}}"#,
     ] {
         let policy = runtime_stream_error_policy(body, RuntimeHttpErrorPhase::PreCommit);
@@ -731,43 +821,44 @@ fn failure_policy_is_transport_parity_safe_before_and_after_commit() {
     }
 }
 
-#[cfg(feature = "mojo")]
 #[test]
-fn mojo_error_signal_extractors_match_rust_oracle() {
+fn error_signal_extractors_match_expected_values() {
     let json_cases = [
         (
             RuntimeHttpErrorClass::Quota,
             serde_json::json!({"error": {"code": "insufficient_quota", "message": "quota gone"}}),
+            Some("quota gone"),
         ),
         (
             RuntimeHttpErrorClass::Quota,
             serde_json::json!({"outer": [{"message": "You've hit your usage limit. Try again at 10:00."}]}),
+            Some("You've hit your usage limit. Try again at 10:00."),
         ),
         (
             RuntimeHttpErrorClass::RateLimited,
             serde_json::json!({"error": {"type": "rate_limit_exceeded", "detail": "slow down"}}),
+            Some("slow down"),
         ),
         (
             RuntimeHttpErrorClass::ProfileUnavailable,
             serde_json::json!({"error": {"reason": "deactivated_workspace", "message": "workspace disabled"}}),
+            Some("workspace disabled"),
         ),
         (
             RuntimeHttpErrorClass::Overload,
             serde_json::json!({"nested": {"message": "Selected model is at capacity. Please try again."}}),
+            Some("Selected model is at capacity. Please try again."),
         ),
         (
             RuntimeHttpErrorClass::Other,
             serde_json::json!({"error": {"code": "insufficient_quota", "message": "ignored"}}),
+            None,
         ),
     ];
-    for (class, value) in json_cases {
+    for (class, value, expected) in json_cases {
         assert_eq!(
-            runtime_error_signal_message_from_value(&value, class),
-            runtime_error_signal_message_from_value_mode(
-                &value,
-                class,
-                RuntimeSignalMatchMode::UsageMessage,
-            ),
+            runtime_error_signal_message_from_value(&value, class).as_deref(),
+            expected,
             "class={class:?} value={value}",
         );
     }
@@ -776,30 +867,35 @@ fn mojo_error_signal_extractors_match_rust_oracle() {
         (
             RuntimeHttpErrorClass::Quota,
             " You've hit your usage limit. ",
+            Some("You've hit your usage limit."),
         ),
         (
             RuntimeHttpErrorClass::RateLimited,
             "request failed: RATE_LIMIT_EXCEEDED",
+            Some("request failed: RATE_LIMIT_EXCEEDED"),
         ),
         (
             RuntimeHttpErrorClass::ProfileUnavailable,
             "DEACTIVATED_WORKSPACE",
+            Some("DEACTIVATED_WORKSPACE"),
         ),
         (
             RuntimeHttpErrorClass::Overload,
             "Selected model is at capacity; please try again.",
+            Some("Selected model is at capacity; please try again."),
         ),
-        (RuntimeHttpErrorClass::Other, "insufficient_quota"),
+        (RuntimeHttpErrorClass::Other, "insufficient_quota", None),
         (
             RuntimeHttpErrorClass::TransientServer,
             "server is overloaded",
+            None,
         ),
-        (RuntimeHttpErrorClass::Quota, "generic quota prose"),
+        (RuntimeHttpErrorClass::Quota, "generic quota prose", None),
     ];
-    for (class, text) in text_cases {
+    for (class, text, expected) in text_cases {
         assert_eq!(
-            runtime_error_signal_message_from_text(text, class),
-            runtime_error_signal_message_from_text_rust(text, class),
+            runtime_error_signal_message_from_text(text, class).as_deref(),
+            expected,
             "class={class:?} text={text:?}",
         );
     }

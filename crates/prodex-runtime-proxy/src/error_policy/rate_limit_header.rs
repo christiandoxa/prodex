@@ -44,28 +44,5 @@ pub fn runtime_http_error_policy_with_headers<'a>(
 }
 
 fn runtime_rate_limit_reached_type_class(value: &str) -> i64 {
-    #[cfg(feature = "mojo")]
-    {
-        prodex_mojo_core::rich::rate_limit_header_class(value)
-            .expect("Mojo rate-limit header classifier returned invalid output")
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        if value.eq_ignore_ascii_case("rate_limit_reached") {
-            1
-        } else if [
-            "workspace_owner_credits_depleted",
-            "workspace_member_credits_depleted",
-            "workspace_owner_usage_limit_reached",
-            "workspace_member_usage_limit_reached",
-        ]
-        .into_iter()
-        .any(|candidate| candidate.eq_ignore_ascii_case(value))
-        {
-            2
-        } else {
-            0
-        }
-    }
+    prodex_mojo_core::rich::rate_limit_header_class(value).unwrap_or(0)
 }

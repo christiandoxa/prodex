@@ -1,21 +1,18 @@
 use std::time::Duration;
-#[cfg(any(not(feature = "mojo"), test))]
-mod json;
+
 mod rate_limit_header;
 mod retry_after;
 mod signal;
 mod stream;
-#[cfg(not(feature = "mojo"))]
-use json::runtime_json_find;
+
 pub use rate_limit_header::runtime_http_error_policy_with_headers;
 pub use retry_after::{runtime_retry_after_from_headers, runtime_retry_after_from_message};
 pub use signal::runtime_error_signal_message_from_value;
-#[cfg(any(not(feature = "mojo"), test))]
-use signal::runtime_error_signal_message_from_value_mode;
 pub use stream::{
     runtime_http_error_action_label, runtime_http_error_class_label, runtime_stream_error_policy,
     runtime_stream_error_policy_from_value,
 };
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeHttpErrorPhase {
     PreCommit,
@@ -46,229 +43,6 @@ pub struct RuntimeHttpErrorPolicy {
     pub rule: Option<&'static str>,
     pub message: Option<String>,
     pub retry_after: Option<Duration>,
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RuntimeHttpErrorSignal {
-    ExplicitQuota,
-    ExplicitRateLimit,
-    ExplicitProfileUnavailable,
-    ExplicitOverload,
-    TransientStatus,
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RuntimeSignalMatchMode {
-    ExplicitCode,
-    UsageMessage,
-}
-
-#[derive(Clone, Copy)]
-#[cfg(not(feature = "mojo"))]
-struct RuntimeHttpErrorRule {
-    name: &'static str,
-    statuses: &'static [u16],
-    signal: RuntimeHttpErrorSignal,
-    class: RuntimeHttpErrorClass,
-    precommit_action: RuntimeHttpErrorAction,
-}
-
-#[cfg(not(feature = "mojo"))]
-const RUNTIME_TRANSIENT_HTTP_STATUSES: &[u16] = &[500, 502, 503, 504, 529];
-
-#[cfg(not(feature = "mojo"))]
-const RUNTIME_HTTP_ERROR_RULES: &[RuntimeHttpErrorRule] = &[
-    RuntimeHttpErrorRule {
-        name: "profile_unavailable",
-        statuses: &[402, 403],
-        signal: RuntimeHttpErrorSignal::ExplicitProfileUnavailable,
-        class: RuntimeHttpErrorClass::ProfileUnavailable,
-        precommit_action: RuntimeHttpErrorAction::RotateProfile,
-    },
-    RuntimeHttpErrorRule {
-        name: "rate_limited",
-        statuses: &[429],
-        signal: RuntimeHttpErrorSignal::ExplicitRateLimit,
-        class: RuntimeHttpErrorClass::RateLimited,
-        precommit_action: RuntimeHttpErrorAction::RetryProfile,
-    },
-    RuntimeHttpErrorRule {
-        name: "explicit_quota",
-        statuses: &[402, 403, 429],
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
-        class: RuntimeHttpErrorClass::Quota,
-        precommit_action: RuntimeHttpErrorAction::RotateProfile,
-    },
-    RuntimeHttpErrorRule {
-        name: "explicit_overload",
-        statuses: RUNTIME_TRANSIENT_HTTP_STATUSES,
-        signal: RuntimeHttpErrorSignal::ExplicitOverload,
-        class: RuntimeHttpErrorClass::Overload,
-        precommit_action: RuntimeHttpErrorAction::RetryProfile,
-    },
-    RuntimeHttpErrorRule {
-        name: "transient_5xx",
-        statuses: RUNTIME_TRANSIENT_HTTP_STATUSES,
-        signal: RuntimeHttpErrorSignal::TransientStatus,
-        class: RuntimeHttpErrorClass::TransientServer,
-        precommit_action: RuntimeHttpErrorAction::RetryProfile,
-    },
-];
-
-#[cfg(not(feature = "mojo"))]
-const RUNTIME_STREAM_ERROR_RULES: &[(RuntimeHttpErrorClass, RuntimeHttpErrorAction, &str)] = &[
-    (
-        RuntimeHttpErrorClass::ProfileUnavailable,
-        RuntimeHttpErrorAction::RotateProfile,
-        "profile_unavailable",
-    ),
-    (
-        RuntimeHttpErrorClass::Overload,
-        RuntimeHttpErrorAction::RetryProfile,
-        "explicit_overload",
-    ),
-    (
-        RuntimeHttpErrorClass::Quota,
-        RuntimeHttpErrorAction::RotateProfile,
-        "explicit_quota",
-    ),
-    (
-        RuntimeHttpErrorClass::RateLimited,
-        RuntimeHttpErrorAction::RetryProfile,
-        "rate_limited",
-    ),
-];
-
-#[cfg(any(not(feature = "mojo"), test))]
-#[derive(Clone, Copy)]
-struct RuntimePayloadCodeRule {
-    code: &'static str,
-    signal: RuntimeHttpErrorSignal,
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-const RUNTIME_PAYLOAD_CODE_RULES: &[RuntimePayloadCodeRule] = &[
-    RuntimePayloadCodeRule {
-        code: "insufficient_quota",
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
-    },
-    RuntimePayloadCodeRule {
-        code: "credit_balance_exhausted",
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
-    },
-    RuntimePayloadCodeRule {
-        code: "organization_spend_limit_exceeded",
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
-    },
-    RuntimePayloadCodeRule {
-        code: "project_spend_limit_exceeded",
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
-    },
-    RuntimePayloadCodeRule {
-        code: "quota_exhausted",
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
-    },
-    RuntimePayloadCodeRule {
-        code: "quota_exceeded",
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
-    },
-    RuntimePayloadCodeRule {
-        code: "resource_exhausted",
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
-    },
-    RuntimePayloadCodeRule {
-        code: "rate_limit_exceeded",
-        signal: RuntimeHttpErrorSignal::ExplicitRateLimit,
-    },
-    RuntimePayloadCodeRule {
-        code: "rate_limit_exceeded_error",
-        signal: RuntimeHttpErrorSignal::ExplicitRateLimit,
-    },
-    RuntimePayloadCodeRule {
-        code: "usage_limit_reached",
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
-    },
-    RuntimePayloadCodeRule {
-        code: "usage_not_included",
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
-    },
-    RuntimePayloadCodeRule {
-        code: "workspace_member_credits_depleted",
-        signal: RuntimeHttpErrorSignal::ExplicitQuota,
-    },
-    RuntimePayloadCodeRule {
-        code: "deactivated_workspace",
-        signal: RuntimeHttpErrorSignal::ExplicitProfileUnavailable,
-    },
-    RuntimePayloadCodeRule {
-        code: "server_is_overloaded",
-        signal: RuntimeHttpErrorSignal::ExplicitOverload,
-    },
-    RuntimePayloadCodeRule {
-        code: "slow_down",
-        signal: RuntimeHttpErrorSignal::ExplicitRateLimit,
-    },
-];
-
-#[cfg(not(feature = "mojo"))]
-impl RuntimeHttpErrorRule {
-    fn matches(self, status: u16, body: &[u8]) -> Option<String> {
-        if !self.statuses.contains(&status) {
-            return None;
-        }
-
-        let message = match self.signal {
-            RuntimeHttpErrorSignal::ExplicitQuota => runtime_error_signal_message_from_body(
-                body,
-                RuntimeHttpErrorSignal::ExplicitQuota,
-                if status == 429 {
-                    RuntimeSignalMatchMode::ExplicitCode
-                } else {
-                    RuntimeSignalMatchMode::UsageMessage
-                },
-            ),
-            RuntimeHttpErrorSignal::ExplicitRateLimit => runtime_error_signal_message_from_body(
-                body,
-                RuntimeHttpErrorSignal::ExplicitRateLimit,
-                RuntimeSignalMatchMode::ExplicitCode,
-            ),
-            RuntimeHttpErrorSignal::ExplicitProfileUnavailable => {
-                runtime_error_signal_message_from_body(
-                    body,
-                    RuntimeHttpErrorSignal::ExplicitProfileUnavailable,
-                    RuntimeSignalMatchMode::ExplicitCode,
-                )
-            }
-            RuntimeHttpErrorSignal::ExplicitOverload => runtime_error_signal_message_from_body(
-                body,
-                RuntimeHttpErrorSignal::ExplicitOverload,
-                RuntimeSignalMatchMode::ExplicitCode,
-            ),
-            RuntimeHttpErrorSignal::TransientStatus => {
-                Some(runtime_transient_http_error_message(status, body))
-            }
-        };
-        if message.is_some() {
-            return message;
-        }
-
-        // A canonical Codex usage-limit message is authoritative even when a 429
-        // response omitted its structured error code. Generic 429 bodies remain
-        // pass-through to avoid turning ordinary throttling into quota exhaustion.
-        (self.signal == RuntimeHttpErrorSignal::ExplicitQuota && status == 429)
-            .then(|| {
-                runtime_error_signal_message_from_body(
-                    body,
-                    RuntimeHttpErrorSignal::ExplicitQuota,
-                    RuntimeSignalMatchMode::UsageMessage,
-                )
-                .filter(|message| runtime_authoritative_usage_limit_text_message(message))
-            })
-            .flatten()
-    }
 }
 
 impl RuntimeHttpErrorAction {
@@ -319,36 +93,14 @@ pub fn runtime_http_error_policy(
     body: &[u8],
     phase: RuntimeHttpErrorPhase,
 ) -> RuntimeHttpErrorPolicy {
-    #[cfg(feature = "mojo")]
-    {
-        runtime_error_policy_from_mojo(
-            prodex_mojo_core::rich::RUNTIME_ERROR_MODE_HTTP,
-            status,
-            phase,
-            body,
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        for rule in RUNTIME_HTTP_ERROR_RULES {
-            let Some(message) = rule.matches(status, body) else {
-                continue;
-            };
-
-            return runtime_error_policy_match(
-                rule.class,
-                rule.precommit_action,
-                rule.name,
-                message,
-                phase,
-            );
-        }
-
-        RuntimeHttpErrorPolicy::pass_through()
-    }
+    runtime_error_policy_from_mojo(
+        prodex_mojo_core::rich::RUNTIME_ERROR_MODE_HTTP,
+        status,
+        phase,
+        body,
+    )
 }
 
-#[cfg(feature = "mojo")]
 fn runtime_error_policy_from_mojo(
     operation: i64,
     status: u16,
@@ -359,48 +111,39 @@ fn runtime_error_policy_from_mojo(
         RuntimeHttpErrorPhase::PreCommit => 0,
         RuntimeHttpErrorPhase::Committed => 1,
     };
-    let (class, action, message) =
+    let Ok((class, action, message)) =
         prodex_mojo_core::MojoError::rich_runtime_error_policy(operation, status, phase, body)
-            .expect("Mojo runtime error policy returned an invalid result");
-    let class = match class {
-        0 => RuntimeHttpErrorClass::Other,
-        1 => RuntimeHttpErrorClass::Quota,
-        2 => RuntimeHttpErrorClass::RateLimited,
-        3 => RuntimeHttpErrorClass::ProfileUnavailable,
-        4 => RuntimeHttpErrorClass::Overload,
-        5 => RuntimeHttpErrorClass::TransientServer,
+    else {
+        return RuntimeHttpErrorPolicy::pass_through();
+    };
+    let (class, rule) = match class {
+        1 => (RuntimeHttpErrorClass::Quota, "explicit_quota"),
+        2 => (RuntimeHttpErrorClass::RateLimited, "rate_limited"),
+        3 => (
+            RuntimeHttpErrorClass::ProfileUnavailable,
+            "profile_unavailable",
+        ),
+        4 => (RuntimeHttpErrorClass::Overload, "explicit_overload"),
+        5 => (RuntimeHttpErrorClass::TransientServer, "transient_5xx"),
         _ => return RuntimeHttpErrorPolicy::pass_through(),
     };
-    if class == RuntimeHttpErrorClass::Other {
-        return RuntimeHttpErrorPolicy::pass_through();
-    }
     let action = match action {
         0 => RuntimeHttpErrorAction::PassThrough,
         1 => RuntimeHttpErrorAction::RotateProfile,
         2 => RuntimeHttpErrorAction::RetryProfile,
         _ => return RuntimeHttpErrorPolicy::pass_through(),
     };
-    let rule = match class {
-        RuntimeHttpErrorClass::Quota => "explicit_quota",
-        RuntimeHttpErrorClass::RateLimited => "rate_limited",
-        RuntimeHttpErrorClass::ProfileUnavailable => "profile_unavailable",
-        RuntimeHttpErrorClass::Overload => "explicit_overload",
-        RuntimeHttpErrorClass::TransientServer => "transient_5xx",
-        RuntimeHttpErrorClass::Other => return RuntimeHttpErrorPolicy::pass_through(),
-    };
-    let retry_after = (class == RuntimeHttpErrorClass::RateLimited)
-        .then(|| runtime_retry_after_from_message(&message))
-        .flatten();
     RuntimeHttpErrorPolicy {
         class,
         action,
         rule: Some(rule),
+        retry_after: (class == RuntimeHttpErrorClass::RateLimited)
+            .then(|| runtime_retry_after_from_message(&message))
+            .flatten(),
         message: Some(message),
-        retry_after,
     }
 }
 
-#[cfg(feature = "mojo")]
 pub fn runtime_error_signal_message_from_text(
     text: &str,
     signal: RuntimeHttpErrorClass,
@@ -428,43 +171,6 @@ pub fn runtime_error_signal_message_from_text(
         .map(|_| trimmed.to_string())
 }
 
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_error_signal_message_from_text(
-    text: &str,
-    signal: RuntimeHttpErrorClass,
-) -> Option<String> {
-    runtime_error_signal_message_from_text_rust(text, signal)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_error_signal_message_from_text_rust(
-    text: &str,
-    signal: RuntimeHttpErrorClass,
-) -> Option<String> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    match signal {
-        RuntimeHttpErrorClass::Quota => {
-            runtime_usage_limit_text_message_rust(trimmed).then(|| trimmed.to_string())
-        }
-        RuntimeHttpErrorClass::RateLimited => {
-            runtime_text_has_payload_code(trimmed, RuntimeHttpErrorSignal::ExplicitRateLimit)
-                .then(|| trimmed.to_string())
-        }
-        RuntimeHttpErrorClass::ProfileUnavailable => {
-            runtime_profile_unavailable_text_message_rust(trimmed).then(|| trimmed.to_string())
-        }
-        RuntimeHttpErrorClass::Overload => {
-            runtime_overload_text_message_rust(trimmed).then(|| trimmed.to_string())
-        }
-        RuntimeHttpErrorClass::TransientServer | RuntimeHttpErrorClass::Other => None,
-    }
-}
-
-#[cfg(feature = "mojo")]
 pub fn runtime_quota_payload_code(code: &str) -> bool {
     prodex_mojo_core::MojoError::rich_runtime_error_policy(
         prodex_mojo_core::rich::RUNTIME_ERROR_MODE_CODE_QUOTA,
@@ -475,12 +181,6 @@ pub fn runtime_quota_payload_code(code: &str) -> bool {
     .is_ok_and(|(class, _, _)| class == 1)
 }
 
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_quota_payload_code(code: &str) -> bool {
-    runtime_payload_code_matches(code, RuntimeHttpErrorSignal::ExplicitQuota)
-}
-
-#[cfg(feature = "mojo")]
 pub fn runtime_rate_limit_payload_code(code: &str) -> bool {
     prodex_mojo_core::MojoError::rich_runtime_error_policy(
         prodex_mojo_core::rich::RUNTIME_ERROR_MODE_CODE_RATE,
@@ -491,12 +191,6 @@ pub fn runtime_rate_limit_payload_code(code: &str) -> bool {
     .is_ok_and(|(class, _, _)| class == 2)
 }
 
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_rate_limit_payload_code(code: &str) -> bool {
-    runtime_payload_code_matches(code, RuntimeHttpErrorSignal::ExplicitRateLimit)
-}
-
-#[cfg(feature = "mojo")]
 pub fn runtime_overload_payload_code(code: &str) -> bool {
     prodex_mojo_core::MojoError::rich_runtime_error_policy(
         prodex_mojo_core::rich::RUNTIME_ERROR_MODE_CODE_OVERLOAD,
@@ -507,12 +201,6 @@ pub fn runtime_overload_payload_code(code: &str) -> bool {
     .is_ok_and(|(class, _, _)| class == 4)
 }
 
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_overload_payload_code(code: &str) -> bool {
-    runtime_payload_code_matches(code, RuntimeHttpErrorSignal::ExplicitOverload)
-}
-
-#[cfg(feature = "mojo")]
 pub fn runtime_usage_limit_text_message(message: &str) -> bool {
     prodex_mojo_core::MojoError::rich_runtime_error_policy(
         prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_QUOTA,
@@ -523,27 +211,6 @@ pub fn runtime_usage_limit_text_message(message: &str) -> bool {
     .is_ok_and(|(class, _, _)| class == 1)
 }
 
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_usage_limit_text_message(message: &str) -> bool {
-    runtime_usage_limit_text_message_rust(message)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_usage_limit_text_message_rust(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitQuota)
-        || runtime_workspace_credit_exhausted_text_message(message)
-        || lower.contains("you've hit your usage limit")
-        || lower.contains("you have hit your usage limit")
-        || lower.contains("the usage limit has been reached")
-        || lower.contains("usage limit has been reached")
-        || lower.contains("usage limit")
-            && (lower.contains("try again at")
-                || lower.contains("request to your admin")
-                || lower.contains("more access now"))
-}
-
-#[cfg(feature = "mojo")]
 pub fn runtime_authoritative_usage_limit_text_message(message: &str) -> bool {
     prodex_mojo_core::MojoError::rich_runtime_error_policy(
         prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_AUTHORITATIVE_QUOTA,
@@ -554,15 +221,6 @@ pub fn runtime_authoritative_usage_limit_text_message(message: &str) -> bool {
     .is_ok_and(|(class, _, _)| class == 1)
 }
 
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_authoritative_usage_limit_text_message(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("you've hit your usage limit")
-        || lower.contains("you have hit your usage limit")
-        || lower.contains("you hit your usage limit")
-}
-
-#[cfg(feature = "mojo")]
 pub fn runtime_overload_text_message(message: &str) -> bool {
     prodex_mojo_core::MojoError::rich_runtime_error_policy(
         prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_OVERLOAD,
@@ -573,181 +231,6 @@ pub fn runtime_overload_text_message(message: &str) -> bool {
     .is_ok_and(|(class, _, _)| class == 4)
 }
 
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_overload_text_message(message: &str) -> bool {
-    runtime_overload_text_message_rust(message)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_overload_text_message_rust(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("selected model is at capacity")
-        || (lower.contains("model is at capacity")
-            && (lower.contains("try a different model") || lower.contains("please try again")))
-        || lower.contains("backend under high demand")
-        || lower.contains("experiencing high demand")
-        || lower.contains("server is overloaded")
-        || lower.contains("currently overloaded")
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_error_signal_message_from_body(
-    body: &[u8],
-    signal: RuntimeHttpErrorSignal,
-    match_mode: RuntimeSignalMatchMode,
-) -> Option<String> {
-    if let Ok(value) = serde_json::from_slice::<serde_json::Value>(body) {
-        return runtime_json_find(&value, |candidate| {
-            runtime_error_signal_candidate(candidate, signal, match_mode)
-        });
-    }
-
-    if let Some(message) = runtime_error_signal_message_from_sse_body(body, signal, match_mode) {
-        return Some(message);
-    }
-
-    runtime_utf8_text(body).and_then(|text| match signal {
-        RuntimeHttpErrorSignal::ExplicitQuota => match match_mode {
-            // A generic 429 text body is not a structured provider signal,
-            // even when it happens to contain a known code-shaped phrase.
-            RuntimeSignalMatchMode::ExplicitCode => None,
-            RuntimeSignalMatchMode::UsageMessage => {
-                runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::Quota)
-            }
-        },
-        RuntimeHttpErrorSignal::ExplicitRateLimit => {
-            if match_mode == RuntimeSignalMatchMode::ExplicitCode {
-                None
-            } else {
-                runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::RateLimited)
-            }
-        }
-        RuntimeHttpErrorSignal::ExplicitProfileUnavailable => {
-            runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::ProfileUnavailable)
-        }
-        RuntimeHttpErrorSignal::ExplicitOverload => {
-            runtime_error_signal_message_from_text(text, RuntimeHttpErrorClass::Overload)
-        }
-        RuntimeHttpErrorSignal::TransientStatus => None,
-    })
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_error_signal_message_from_sse_body(
-    body: &[u8],
-    signal: RuntimeHttpErrorSignal,
-    match_mode: RuntimeSignalMatchMode,
-) -> Option<String> {
-    let text = std::str::from_utf8(body).ok()?;
-    for line in text.lines() {
-        let Some(payload) = line.trim().strip_prefix("data:") else {
-            continue;
-        };
-        let Some(value) = serde_json::from_str::<serde_json::Value>(payload.trim()).ok() else {
-            continue;
-        };
-        if let Some(message) = runtime_json_find(&value, |candidate| {
-            runtime_error_signal_candidate(candidate, signal, match_mode)
-        }) {
-            return Some(message);
-        }
-    }
-    None
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_error_signal_candidate(
-    value: &serde_json::Value,
-    signal: RuntimeHttpErrorSignal,
-    match_mode: RuntimeSignalMatchMode,
-) -> Option<String> {
-    match value {
-        serde_json::Value::String(_) => None,
-        serde_json::Value::Object(map) => {
-            let message = map
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .or_else(|| map.get("detail").and_then(serde_json::Value::as_str))
-                .or_else(|| map.get("error").and_then(serde_json::Value::as_str));
-            let explicit_code = ["code", "type", "status", "reason"]
-                .into_iter()
-                .filter_map(|key| map.get(key).and_then(serde_json::Value::as_str))
-                .any(|code| runtime_payload_code_matches(code, signal))
-                || (signal == RuntimeHttpErrorSignal::ExplicitQuota
-                    && match_mode == RuntimeSignalMatchMode::UsageMessage
-                    && map
-                        .get("error")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|code| runtime_payload_code_matches(code, signal)));
-
-            match signal {
-                RuntimeHttpErrorSignal::ExplicitQuota if explicit_code => Some(
-                    message
-                        .unwrap_or("Upstream Codex account quota was exhausted.")
-                        .to_string(),
-                ),
-                RuntimeHttpErrorSignal::ExplicitQuota
-                    if match_mode == RuntimeSignalMatchMode::UsageMessage
-                        && message.is_some_and(|message| {
-                            runtime_workspace_credit_exhausted_text_message(message)
-                                || runtime_usage_limit_text_message(message)
-                        }) =>
-                {
-                    Some(
-                        message
-                            .unwrap_or("Upstream Codex account quota was exhausted.")
-                            .to_string(),
-                    )
-                }
-                RuntimeHttpErrorSignal::ExplicitRateLimit if explicit_code => Some(
-                    message
-                        .unwrap_or("Upstream Codex profile is temporarily rate limited.")
-                        .to_string(),
-                ),
-                RuntimeHttpErrorSignal::ExplicitProfileUnavailable if explicit_code => Some(
-                    message
-                        .unwrap_or("Upstream Codex workspace is deactivated for this profile.")
-                        .to_string(),
-                ),
-                RuntimeHttpErrorSignal::ExplicitOverload if explicit_code => Some(
-                    message
-                        .unwrap_or("Upstream Codex backend is currently overloaded.")
-                        .to_string(),
-                ),
-                RuntimeHttpErrorSignal::ExplicitOverload
-                    if match_mode == RuntimeSignalMatchMode::UsageMessage =>
-                {
-                    message
-                        .filter(|message| runtime_overload_text_message(message))
-                        .map(str::to_string)
-                }
-                RuntimeHttpErrorSignal::ExplicitOverload => None,
-                RuntimeHttpErrorSignal::ExplicitQuota
-                | RuntimeHttpErrorSignal::ExplicitRateLimit
-                | RuntimeHttpErrorSignal::ExplicitProfileUnavailable
-                | RuntimeHttpErrorSignal::TransientStatus => None,
-            }
-        }
-        _ => None,
-    }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_payload_code_matches(code: &str, signal: RuntimeHttpErrorSignal) -> bool {
-    RUNTIME_PAYLOAD_CODE_RULES
-        .iter()
-        .any(|rule| rule.signal == signal && rule.code.eq_ignore_ascii_case(code.trim()))
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_text_has_payload_code(text: &str, signal: RuntimeHttpErrorSignal) -> bool {
-    let lower = text.to_ascii_lowercase();
-    RUNTIME_PAYLOAD_CODE_RULES
-        .iter()
-        .any(|rule| rule.signal == signal && lower.contains(rule.code))
-}
-
-#[cfg(feature = "mojo")]
 pub fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
     prodex_mojo_core::MojoError::rich_runtime_error_policy(
         prodex_mojo_core::rich::RUNTIME_ERROR_MODE_TEXT_WORKSPACE,
@@ -756,37 +239,6 @@ pub fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
         message.as_bytes(),
     )
     .is_ok_and(|(class, _, _)| class == 1)
-}
-
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_workspace_credit_exhausted_text_message(message: &str) -> bool {
-    let lower = message.to_ascii_lowercase();
-    lower.contains("workspace_member_credits_depleted")
-        || lower.contains("workspace is out of credits")
-        || (lower.contains("out of credits")
-            && lower.contains("workspace owner")
-            && lower.contains("refill"))
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn runtime_profile_unavailable_text_message_rust(message: &str) -> bool {
-    runtime_text_has_payload_code(message, RuntimeHttpErrorSignal::ExplicitProfileUnavailable)
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_transient_http_error_message(status: u16, body: &[u8]) -> String {
-    runtime_utf8_text(body)
-        .filter(|text| !text.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| match status {
-            500 => "Upstream Codex backend is currently experiencing high demand.".to_string(),
-            status => format!("Upstream Codex backend returned transient HTTP {status}."),
-        })
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_utf8_text(body: &[u8]) -> Option<&str> {
-    std::str::from_utf8(body).ok().map(str::trim)
 }
 
 #[cfg(test)]
