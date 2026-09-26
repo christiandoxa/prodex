@@ -95,3 +95,252 @@ fn rewrite_budget_application_respects_bounds() {
     assert_eq!(relaxed.max_inline_bytes, 375);
     assert_eq!(relaxed.max_rehydrate_tokens, 2);
 }
+
+fn rewrite_budget_policy(
+    tier: SmartContextTokenBudgetTier,
+    mode: SmartContextBudgetMode,
+    max_inline_bytes: usize,
+    max_inline_tool_output_bytes: usize,
+    max_rehydrate_tokens: u64,
+) -> SmartContextAdaptiveBudgetPolicy {
+    SmartContextAdaptiveBudgetPolicy {
+        tier,
+        mode,
+        max_inline_bytes,
+        max_inline_tool_output_bytes,
+        max_rehydrate_tokens,
+        reasons: vec![SmartContextBudgetPolicyReason::CriticalBudget],
+    }
+}
+
+#[test]
+fn rewrite_budget_adjustment_preserves_mode_and_available_context_contracts() {
+    let exact = rewrite_budget_policy(
+        SmartContextTokenBudgetTier::Minimal,
+        SmartContextBudgetMode::ExactPassThrough,
+        91,
+        301,
+        12,
+    );
+    assert_eq!(
+        smart_context_apply_rewrite_budget_decision(
+            exact.clone(),
+            SmartContextRewriteBudgetDecision::Relax,
+            Some(7),
+        ),
+        rewrite_budget_policy(
+            SmartContextTokenBudgetTier::Minimal,
+            SmartContextBudgetMode::ExactPassThrough,
+            91,
+            301,
+            12,
+        )
+    );
+
+    assert_eq!(
+        smart_context_apply_rewrite_budget_decision(
+            rewrite_budget_policy(
+                SmartContextTokenBudgetTier::Exact,
+                SmartContextBudgetMode::ArtifactCondensed,
+                11,
+                42,
+                9,
+            ),
+            SmartContextRewriteBudgetDecision::NoChange,
+            Some(0),
+        ),
+        rewrite_budget_policy(
+            SmartContextTokenBudgetTier::Exact,
+            SmartContextBudgetMode::ArtifactCondensed,
+            11,
+            42,
+            0,
+        )
+    );
+}
+
+#[test]
+fn rewrite_budget_adjustment_preserves_tier_rounding_and_clamps() {
+    assert_eq!(
+        smart_context_apply_rewrite_budget_decision(
+            rewrite_budget_policy(
+                SmartContextTokenBudgetTier::Large,
+                SmartContextBudgetMode::LargeLossless,
+                7,
+                40_000,
+                8,
+            ),
+            SmartContextRewriteBudgetDecision::Relax,
+            None,
+        ),
+        rewrite_budget_policy(
+            SmartContextTokenBudgetTier::Large,
+            SmartContextBudgetMode::LargeLossless,
+            65_536,
+            65_536,
+            10,
+        )
+    );
+
+    assert_eq!(
+        smart_context_apply_rewrite_budget_decision(
+            rewrite_budget_policy(
+                SmartContextTokenBudgetTier::Condensed,
+                SmartContextBudgetMode::ArtifactCondensed,
+                7,
+                301,
+                3,
+            ),
+            SmartContextRewriteBudgetDecision::Relax,
+            None,
+        ),
+        rewrite_budget_policy(
+            SmartContextTokenBudgetTier::Condensed,
+            SmartContextBudgetMode::ArtifactCondensed,
+            377,
+            377,
+            4,
+        )
+    );
+
+    assert_eq!(
+        smart_context_apply_rewrite_budget_decision(
+            rewrite_budget_policy(
+                SmartContextTokenBudgetTier::Minimal,
+                SmartContextBudgetMode::MinimalRefsOnly,
+                7,
+                300,
+                2,
+            ),
+            SmartContextRewriteBudgetDecision::Tighten,
+            Some(1),
+        ),
+        rewrite_budget_policy(
+            SmartContextTokenBudgetTier::Minimal,
+            SmartContextBudgetMode::MinimalRefsOnly,
+            270,
+            270,
+            1,
+        )
+    );
+
+    assert_eq!(
+        smart_context_apply_rewrite_budget_decision(
+            rewrite_budget_policy(
+                SmartContextTokenBudgetTier::Large,
+                SmartContextBudgetMode::LargeLossless,
+                7,
+                70_000,
+                1,
+            ),
+            SmartContextRewriteBudgetDecision::Relax,
+            None,
+        ),
+        rewrite_budget_policy(
+            SmartContextTokenBudgetTier::Large,
+            SmartContextBudgetMode::LargeLossless,
+            70_000,
+            70_000,
+            2,
+        )
+    );
+}
+
+#[test]
+fn rewrite_budget_adjustment_preserves_zero_max_and_saturation_edges() {
+    for (inline, rehydrate) in [(0, u64::MAX), (usize::MAX, 0)] {
+        assert_eq!(
+            smart_context_apply_rewrite_budget_decision(
+                rewrite_budget_policy(
+                    SmartContextTokenBudgetTier::Minimal,
+                    SmartContextBudgetMode::MinimalRefsOnly,
+                    17,
+                    inline,
+                    rehydrate,
+                ),
+                SmartContextRewriteBudgetDecision::Relax,
+                None,
+            ),
+            rewrite_budget_policy(
+                SmartContextTokenBudgetTier::Minimal,
+                SmartContextBudgetMode::MinimalRefsOnly,
+                inline,
+                inline,
+                rehydrate,
+            )
+        );
+    }
+
+    assert_eq!(
+        smart_context_apply_rewrite_budget_decision(
+            rewrite_budget_policy(
+                SmartContextTokenBudgetTier::Minimal,
+                SmartContextBudgetMode::MinimalRefsOnly,
+                17,
+                256,
+                1,
+            ),
+            SmartContextRewriteBudgetDecision::Tighten,
+            None,
+        ),
+        rewrite_budget_policy(
+            SmartContextTokenBudgetTier::Minimal,
+            SmartContextBudgetMode::MinimalRefsOnly,
+            256,
+            256,
+            1,
+        )
+    );
+
+    let expected_relaxed_inline = match usize::BITS {
+        32 => usize::MAX,
+        64 => usize::MAX - 1,
+        bits => panic!("unsupported usize width: {bits}"),
+    };
+    assert_eq!(
+        smart_context_apply_rewrite_budget_decision(
+            rewrite_budget_policy(
+                SmartContextTokenBudgetTier::Condensed,
+                SmartContextBudgetMode::ArtifactCondensed,
+                17,
+                usize::MAX - 1,
+                u64::MAX - 1,
+            ),
+            SmartContextRewriteBudgetDecision::Relax,
+            None,
+        ),
+        rewrite_budget_policy(
+            SmartContextTokenBudgetTier::Condensed,
+            SmartContextBudgetMode::ArtifactCondensed,
+            expected_relaxed_inline,
+            expected_relaxed_inline,
+            u64::MAX - 1,
+        )
+    );
+
+    let expected_tightened_inline = match usize::BITS {
+        32 => 3_865_470_565usize,
+        64 => 1_844_674_407_370_955_161u64 as usize,
+        bits => panic!("unsupported usize width: {bits}"),
+    };
+    assert_eq!(
+        smart_context_apply_rewrite_budget_decision(
+            rewrite_budget_policy(
+                SmartContextTokenBudgetTier::Minimal,
+                SmartContextBudgetMode::MinimalRefsOnly,
+                17,
+                usize::MAX,
+                u64::MAX,
+            ),
+            SmartContextRewriteBudgetDecision::Tighten,
+            None,
+        ),
+        rewrite_budget_policy(
+            SmartContextTokenBudgetTier::Minimal,
+            SmartContextBudgetMode::MinimalRefsOnly,
+            expected_tightened_inline,
+            expected_tightened_inline,
+            1_844_674_407_370_955_161,
+        )
+    );
+}

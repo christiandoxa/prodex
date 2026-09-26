@@ -230,12 +230,12 @@ fn adaptive_budget_policy_expands_preview_only_after_recent_safe_savings() {
     let safe = SmartContextRecentRewriteSafety {
         safe_rewrites: 2,
         fallback_rewrites: 0,
-        saved_tokens: SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS * 2,
+        saved_tokens: 512,
     };
     let mixed = SmartContextRecentRewriteSafety {
         safe_rewrites: 2,
         fallback_rewrites: 1,
-        saved_tokens: SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS * 2,
+        saved_tokens: 512,
     };
 
     let large_safe = smart_context_adaptive_budget_policy(SmartContextAdaptiveBudgetPolicyInput {
@@ -292,7 +292,7 @@ fn recent_rewrite_safety_requires_savings_without_fallbacks() {
         smart_context_recent_rewrite_safety_budget_decision(&SmartContextRecentRewriteSafety {
             safe_rewrites: 2,
             fallback_rewrites: 0,
-            saved_tokens: SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS * 2 - 1,
+            saved_tokens: 511,
         }),
         SmartContextRewriteBudgetDecision::Tighten
     );
@@ -300,7 +300,7 @@ fn recent_rewrite_safety_requires_savings_without_fallbacks() {
         smart_context_recent_rewrite_safety_budget_decision(&SmartContextRecentRewriteSafety {
             safe_rewrites: 1,
             fallback_rewrites: 1,
-            saved_tokens: SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS * 2,
+            saved_tokens: 512,
         }),
         SmartContextRewriteBudgetDecision::Tighten
     );
@@ -308,7 +308,7 @@ fn recent_rewrite_safety_requires_savings_without_fallbacks() {
         smart_context_recent_rewrite_safety_budget_decision(&SmartContextRecentRewriteSafety {
             safe_rewrites: 1,
             fallback_rewrites: 0,
-            saved_tokens: SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS,
+            saved_tokens: 256,
         }),
         SmartContextRewriteBudgetDecision::Relax
     );

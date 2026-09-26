@@ -1154,16 +1154,18 @@ def prodex_smart_context_adaptive_budget_plan_v1(
     return 0
 
 
-@export("prodex_smart_context_budget_adjustment_v1")
-def prodex_smart_context_budget_adjustment_v1(
+@export("prodex_smart_context_budget_adjustment_v2")
+def prodex_smart_context_budget_adjustment_v2(
     tier: Int64,
     mode: Int64,
     max_inline_bytes: UInt64,
+    max_inline_tool_output_bytes: UInt64,
     max_rehydrate_tokens: UInt64,
     decision: Int64,
     available_context_tokens: UInt64,
     available_has_value: Int64,
     adjusted_inline_bytes: Pointer[mut=True, UInt64, _],
+    adjusted_inline_tool_output_bytes: Pointer[mut=True, UInt64, _],
     adjusted_rehydrate_tokens: Pointer[mut=True, UInt64, _],
 ) abi("C") -> Int64:
     if tier < 0 or tier > 3 or mode < 0 or mode > 3 or decision < 0 or decision > 2:
@@ -1171,31 +1173,41 @@ def prodex_smart_context_budget_adjustment_v1(
     if available_has_value < 0 or available_has_value > 1:
         return 1
     var inline_budget = max_inline_bytes
+    var inline_tool_output_budget = max_inline_tool_output_bytes
     var rehydrate_budget = max_rehydrate_tokens
     if mode != 0:
         if decision == 1:
-            if inline_budget != 0 and inline_budget != UINT64_MAX:
+            if inline_tool_output_budget != 0 and inline_tool_output_budget != UINT64_MAX:
                 if tier == 1:
-                    if inline_budget < 65536:
-                        inline_budget = smart_context_calibration_saturating_mul(inline_budget, 2)
-                        if inline_budget > 65536:
-                            inline_budget = 65536
+                    if inline_tool_output_budget < 65536:
+                        inline_tool_output_budget = smart_context_calibration_saturating_mul(inline_tool_output_budget, 2)
+                        if inline_tool_output_budget > 65536:
+                            inline_tool_output_budget = 65536
                 else:
-                    inline_budget = smart_context_budget_scale_ceil(inline_budget, 5, 4)
+                    var original_inline_budget = inline_tool_output_budget
+                    inline_tool_output_budget = smart_context_budget_scale_ceil(inline_tool_output_budget, 5, 4)
+                    if inline_tool_output_budget < original_inline_budget:
+                        inline_tool_output_budget = original_inline_budget
+            var original_rehydrate_budget = rehydrate_budget
             rehydrate_budget = smart_context_budget_scale_ceil(rehydrate_budget, 5, 4)
+            if rehydrate_budget < original_rehydrate_budget:
+                rehydrate_budget = original_rehydrate_budget
         elif decision == 2:
-            if inline_budget > 256:
-                inline_budget = smart_context_budget_scale_floor(inline_budget, 9, 10)
-                if inline_budget < 256:
-                    inline_budget = 256
+            if inline_tool_output_budget > 256:
+                inline_tool_output_budget = smart_context_calibration_saturating_mul(inline_tool_output_budget, 9) / 10
+                if inline_tool_output_budget < 256:
+                    inline_tool_output_budget = 256
             if rehydrate_budget > 1:
-                rehydrate_budget = smart_context_budget_scale_floor(rehydrate_budget, 9, 10)
+                rehydrate_budget = smart_context_calibration_saturating_mul(rehydrate_budget, 9) / 10
                 if rehydrate_budget < 1:
                     rehydrate_budget = 1
+        if decision != 0:
+            inline_budget = inline_tool_output_budget
         if available_has_value == 1 and rehydrate_budget > available_context_tokens:
             rehydrate_budget = available_context_tokens
 
     adjusted_inline_bytes[] = inline_budget
+    adjusted_inline_tool_output_bytes[] = inline_tool_output_budget
     adjusted_rehydrate_tokens[] = rehydrate_budget
     return 0
 
