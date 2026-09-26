@@ -1686,3 +1686,18 @@ The canonical source report counts **52,070 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **528,355 additional Mojo LOC** required at this Rust
 volume.
+
+## Runtime proxy preset hard replacement
+
+The runtime policy crate now resolves all proxy presets through the existing
+Mojo defaults kernel in every feature mode. The feature-off Rust preset table
+was deleted, and the Mojo runtime dependency is mandatory for this policy.
+Public preset and override tests cover low, default, many-terminals, and
+aggressive settings. Native execution evidence is Linux x86_64; macOS and
+Windows runtime execution was not run.
+
+The canonical source report counts **52,072 reachable Mojo LOC** and
+**193,473 Rust production LOC**, totaling **245,545 LOC**: **21.21% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **528,347 additional Mojo LOC** required at this Rust
+volume.

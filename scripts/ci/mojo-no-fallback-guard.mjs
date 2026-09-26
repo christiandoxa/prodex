@@ -172,6 +172,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan/large_pool.rs",
+  "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
   PRECOMMIT_BUDGET_FILE,
   "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
   "crates/prodex-runtime-proxy/src/websocket_message.rs",
@@ -323,6 +324,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan/large_pool.rs",
+  "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
   "crates/prodex-mojo-core/src/runtime/candidate_plan.rs",
   PRECOMMIT_BUDGET_FILE,
   PRECOMMIT_BUDGET_TEST_FILE,
@@ -853,6 +855,8 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/selection_plan.rs",
     "fn runtime_optimistic_current_candidate_decision_rust() {}"]])[0],
     /Rust semantic oracle or copy/u);
+  assert.match(findViolations([["crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+    "fn resolve_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([[PRECOMMIT_BUDGET_FILE,
     "fn runtime_proxy_precommit_budget_for_profile_count_rust() {}"]])[0],
     /Rust semantic oracle or copy/u);
