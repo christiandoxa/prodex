@@ -49,6 +49,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_policy.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs",
@@ -190,6 +191,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-proxy/src/payload_detection/sse.rs",
   "crates/prodex-runtime-proxy/src/payload_detection/error_messages.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs",
   "crates/prodex-runtime-proxy/src/smart_context/safety.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
   "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
@@ -283,6 +285,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-quota/src/render/remaining_percent.rs",
   "crates/prodex-quota/src/render/quota_policy.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-proxy/src/health/score.rs",
   "crates/prodex-runtime-proxy/src/health/latency.rs",
@@ -511,6 +514,13 @@ export function findViolations(files) {
     return body && FEATURE_OFF_RUST_PATH.test(body)
       ? [`${filePath}: rehydration has a feature-off Rust planner`] : [];
   });
+  const budgetTierViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== REHYDRATE_FILE) return [];
+    const body = contents.match(/\bpub fn smart_context_token_budget_tier\([^]*?^\}/mu)?.[0];
+    return body && (FEATURE_OFF_RUST_PATH.test(body) ||
+      !body.includes("smart_context_u64_budget_tier("))
+      ? [`${filePath}: budget tier must use the Mojo policy`] : [];
+  });
   const replacedClassifierViolations = files.flatMap(([filePath, contents]) => {
     const forbidden = new Map([
       [SUPER_OVERRIDE_FILE, /\bfn\s+(?:scan_override_rust|scan_identity_override|scan_boolean_override|scan_runtime_override|scan_feature_value_override|scan_feature_boolean_override)\s*\(/u],
@@ -557,7 +567,7 @@ export function findViolations(files) {
     ...modelSpecViolations,
     ...deepseekShapingViolations,
     ...quotaWindowViolations,
-    ...rehydrateViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
+    ...rehydrateViolations, ...budgetTierViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations,
     ...defaultFeatureViolations];
 }
@@ -672,6 +682,9 @@ function selfTest() {
   assert.match(findViolations([[REHYDRATE_FILE,
     'pub fn smart_context_auto_rehydrate_plan() {\n    #[cfg(not(feature = "mojo"))] rust();\n}\nfn smart_context_auto_rehydrate_plan_mojo() {}']])[0],
     /feature-off Rust planner/u);
+  assert.match(findViolations([[REHYDRATE_FILE,
+    'pub fn smart_context_token_budget_tier() {\n    match tokens { 0 => 0, _ => 1 }\n}']]).join("\n"),
+    /budget tier must use the Mojo policy/u);
   assert.match(findViolations([[SUPER_OVERRIDE_FILE, "fn scan_override_rust() {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([[GEMINI_SCHEMA_FILE, "fn sanitized_required() {}"]]).join("\n"),
