@@ -8,7 +8,6 @@ struct GeminiBucketNumeric {
     exhausted: bool,
 }
 
-#[cfg(feature = "mojo")]
 fn gemini_numeric_input(
     bucket: &GeminiQuotaBucket,
 ) -> prodex_mojo_core::quota::GeminiBucketNumericInput {
@@ -27,63 +26,22 @@ fn gemini_numeric_input(
 }
 
 fn gemini_numeric_batch(buckets: &[GeminiQuotaBucket]) -> Vec<GeminiBucketNumeric> {
-    #[cfg(feature = "mojo")]
-    {
-        let inputs = buckets.iter().map(gemini_numeric_input).collect::<Vec<_>>();
-        crate::mojo::gemini_bucket_numeric_batch(&inputs)
-            .unwrap_or_else(|error| panic!("Mojo Gemini quota numeric batch failed: {error:?}"))
-            .into_iter()
-            .map(|output| GeminiBucketNumeric {
-                remaining: output.remaining,
-                total: output.total,
-                remaining_percent: output.remaining_percent,
-                exhausted: output.exhausted,
-            })
-            .collect()
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    buckets.iter().map(gemini_bucket_numeric_rust).collect()
-}
-
-#[cfg(not(feature = "mojo"))]
-fn gemini_bucket_numeric_rust(bucket: &GeminiQuotaBucket) -> GeminiBucketNumeric {
-    let (remaining, total) = match bucket.remaining_amount.as_deref() {
-        Some(raw) => match raw.trim().parse::<i64>() {
-            Ok(remaining) => (
-                Some(remaining),
-                bucket
-                    .remaining_fraction
-                    .filter(|fraction| *fraction > 0.0)
-                    .map(|fraction| super::round_quota_float(remaining as f64 / fraction))
-                    .filter(|total| *total >= remaining),
-            ),
-            Err(_) => (None, None),
-        },
-        None => match bucket.remaining_fraction {
-            Some(fraction) => (Some(super::round_quota_float(fraction * 100.0)), Some(100)),
-            None => (None, None),
-        },
-    };
-    let remaining_percent = bucket
-        .remaining_fraction
-        .map(|fraction| super::round_quota_float(fraction * 100.0))
-        .or_else(|| {
-            let (Some(remaining), Some(total)) = (remaining, total) else {
-                return None;
-            };
-            (total > 0).then(|| super::round_quota_float(remaining as f64 / total as f64 * 100.0))
-        });
-
-    GeminiBucketNumeric {
-        remaining,
-        total,
-        remaining_percent,
-        exhausted: bucket
-            .remaining_fraction
-            .is_some_and(|fraction| fraction <= 0.0)
-            || remaining.is_some_and(|remaining| remaining <= 0),
-    }
+    // ponytail: 1,024-row ABI batches; raise only with a versioned ABI/capacity review.
+    buckets
+        .chunks(prodex_mojo_core::quota::QUOTA_GEMINI_BUCKET_BATCH_MAX_COUNT)
+        .flat_map(|batch| {
+            let inputs = batch.iter().map(gemini_numeric_input).collect::<Vec<_>>();
+            crate::mojo::gemini_bucket_numeric_batch(&inputs)
+                .unwrap_or_else(|error| panic!("Mojo Gemini quota numeric batch failed: {error:?}"))
+                .into_iter()
+                .map(|output| GeminiBucketNumeric {
+                    remaining: output.remaining,
+                    total: output.total,
+                    remaining_percent: output.remaining_percent,
+                    exhausted: output.exhausted,
+                })
+        })
+        .collect()
 }
 
 fn gemini_bucket_label(bucket: &GeminiQuotaBucket) -> String {
@@ -213,4 +171,34 @@ fn parse_gemini_reset_time(value: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(value.trim())
         .ok()
         .map(|datetime| datetime.timestamp())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_numeric_batches_preserve_full_rendering_after_abi_limit() {
+        let bucket = GeminiQuotaBucket {
+            remaining_amount: Some("50".to_string()),
+            remaining_fraction: Some(0.5),
+            reset_time: None,
+            token_type: None,
+            model_id: None,
+        };
+        let mut buckets =
+            vec![bucket; prodex_mojo_core::quota::QUOTA_GEMINI_BUCKET_BATCH_MAX_COUNT + 1];
+        let last = buckets.last_mut().expect("nonempty bucket list");
+        last.remaining_amount = Some("0".to_string());
+        last.remaining_fraction = Some(0.0);
+        let info = GeminiQuotaInfo {
+            email: None,
+            plan: None,
+            project_id: None,
+            buckets,
+        };
+        assert_eq!(gemini_main_remaining_percent(&info), Some(0));
+        assert!(!gemini_quota_is_ready(&info));
+        assert_eq!(format_gemini_main_quota(&info), "gemini 0% (1025 buckets)");
+    }
 }

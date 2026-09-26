@@ -52,7 +52,6 @@ const RUNTIME_SSE_INSPECTION_RATE_LIMITED: i64 = 2;
 const RUNTIME_SSE_INSPECTION_OVERLOADED: i64 = 3;
 const RUNTIME_SSE_INSPECTION_PREVIOUS_RESPONSE_NOT_FOUND: i64 = 4;
 
-#[cfg(feature = "mojo")]
 unsafe extern "C" {
     fn prodex_runtime_sse_line_plan_v1(address: u64, length: i64, output_address: u64) -> i64;
     fn prodex_runtime_sse_inspection_step_v1(
@@ -67,79 +66,53 @@ unsafe extern "C" {
 }
 
 fn runtime_sse_line_plan(line: &[u8]) -> (i64, usize, usize) {
-    #[cfg(feature = "mojo")]
-    {
-        let mut output = [0_i64; 3];
-        let status = unsafe {
-            prodex_runtime_sse_line_plan_v1(
-                line.as_ptr() as usize as u64,
-                i64::try_from(line.len()).unwrap_or(i64::MAX),
-                output.as_mut_ptr() as usize as u64,
-            )
-        };
-        assert_eq!(status, 0, "Mojo SSE line planner returned invalid status");
-        let start = usize::try_from(output[1]).expect("validated Mojo SSE value start");
-        let end = usize::try_from(output[2]).expect("validated Mojo SSE value end");
-        assert!(
-            start <= end && end <= line.len(),
-            "Mojo SSE line span is invalid"
-        );
-        (output[0], start, end)
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracle::sse_line_plan(line)
-    }
+    let mut output = [0_i64; 3];
+    let status = unsafe {
+        prodex_runtime_sse_line_plan_v1(
+            line.as_ptr() as usize as u64,
+            i64::try_from(line.len()).expect("SSE line length exceeds Mojo ABI"),
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    assert_eq!(status, 0, "Mojo SSE line planner returned invalid status");
+    assert!((0..=2).contains(&output[0]), "Mojo SSE line tag is invalid");
+    let start = usize::try_from(output[1]).expect("validated Mojo SSE value start");
+    let end = usize::try_from(output[2]).expect("validated Mojo SSE value end");
+    assert!(
+        start <= end && end <= line.len(),
+        "Mojo SSE line span is invalid"
+    );
+    (output[0], start, end)
 }
-
-#[cfg(not(feature = "mojo"))]
-#[path = "sse/rust_oracle.rs"]
-mod rust_oracle;
 
 fn runtime_sse_inspection_step(
     committed: bool,
     event: &RuntimeParsedSseEvent,
     precommit_hold: bool,
 ) -> (i64, bool) {
-    #[cfg(feature = "mojo")]
-    {
-        let mut output = [0_i64; 2];
-        let status = unsafe {
-            prodex_runtime_sse_inspection_step_v1(
-                i64::from(committed),
-                i64::from(event.quota_blocked),
-                i64::from(event.rate_limited),
-                i64::from(event.overloaded),
-                i64::from(event.previous_response_not_found),
-                i64::from(precommit_hold),
-                output.as_mut_ptr() as usize as u64,
-            )
-        };
-        assert_eq!(
-            status, 0,
-            "Mojo SSE inspection planner returned invalid status"
-        );
-        assert!(
-            (RUNTIME_SSE_INSPECTION_CONTINUE..=RUNTIME_SSE_INSPECTION_PREVIOUS_RESPONSE_NOT_FOUND)
-                .contains(&output[0])
-                && matches!(output[1], 0 | 1),
-            "Mojo SSE inspection planner returned invalid output"
-        );
-        (output[0], output[1] == 1)
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracle::sse_inspection_step(
-            committed,
-            event.quota_blocked,
-            event.rate_limited,
-            event.overloaded,
-            event.previous_response_not_found,
-            precommit_hold,
+    let mut output = [0_i64; 2];
+    let status = unsafe {
+        prodex_runtime_sse_inspection_step_v1(
+            i64::from(committed),
+            i64::from(event.quota_blocked),
+            i64::from(event.rate_limited),
+            i64::from(event.overloaded),
+            i64::from(event.previous_response_not_found),
+            i64::from(precommit_hold),
+            output.as_mut_ptr() as usize as u64,
         )
-    }
+    };
+    assert_eq!(
+        status, 0,
+        "Mojo SSE inspection planner returned invalid status"
+    );
+    assert!(
+        (RUNTIME_SSE_INSPECTION_CONTINUE..=RUNTIME_SSE_INSPECTION_PREVIOUS_RESPONSE_NOT_FOUND)
+            .contains(&output[0])
+            && matches!(output[1], 0 | 1),
+        "Mojo SSE inspection planner returned invalid output"
+    );
+    (output[0], output[1] == 1)
 }
 
 fn runtime_sse_event_marked_invalid(data_lines: &[String]) -> bool {
@@ -425,8 +398,8 @@ pub fn runtime_sse_body_is_invalid_previous_response_id(body: &[u8]) -> bool {
     invalid
 }
 
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_line_tests {
+#[cfg(test)]
+mod planner_tests {
     use super::*;
 
     #[test]

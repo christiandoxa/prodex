@@ -10,7 +10,6 @@ pub(crate) struct Document<'a> {
 }
 
 impl<'a> Document<'a> {
-    #[cfg(feature = "mojo")]
     pub(crate) fn array(&mut self, values: impl IntoIterator<Item = &'a Value>) {
         self.nodes.push(JsonNode {
             kind: JsonKind::Array,

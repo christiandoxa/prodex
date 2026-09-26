@@ -16,11 +16,7 @@ use crate::{
 };
 use std::sync::LazyLock;
 
-#[cfg(feature = "mojo")]
 #[path = "implementation_registry/mojo.rs"]
-mod mojo;
-#[cfg(not(feature = "mojo"))]
-#[path = "implementation_registry/rust.rs"]
 mod mojo;
 
 pub const PROVIDER_IMPLEMENTATION_ORDER: &[ProviderId] = &[
@@ -211,5 +207,57 @@ pub(crate) const fn builtin_provider_runtime_metadata(
         ProviderId::Gemini => Some(&GEMINI_RUNTIME_METADATA),
         ProviderId::Kiro => Some(&KIRO_RUNTIME_METADATA),
         ProviderId::Local => Some(&LOCAL_RUNTIME_METADATA),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_registry_keeps_descriptor_and_alias_contracts() {
+        use ProviderCapabilityStatus::{Native, Passthrough, Translated};
+        use ProviderId::{Anthropic, Copilot, DeepSeek, Gemini, Kiro, Local, OpenAi};
+        use ProviderWireFormat::{GeminiGenerateContent, OpenAiChatCompletions, OpenAiResponses};
+
+        let registry = provider_implementation_registry();
+        let descriptors = registry
+            .iter()
+            .map(|entry| {
+                (
+                    entry.provider(),
+                    entry.upstream_request_format(),
+                    entry.supports_model_fallback(),
+                    entry.supported_endpoints().len(),
+                    entry.capability_status(ProviderEndpoint::Responses),
+                )
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            descriptors,
+            [
+                (OpenAi, OpenAiResponses, false, 8, Native),
+                (Anthropic, OpenAiChatCompletions, true, 5, Translated),
+                (Copilot, OpenAiResponses, true, 5, Native),
+                (DeepSeek, OpenAiChatCompletions, true, 5, Translated),
+                (Gemini, GeminiGenerateContent, true, 6, Translated),
+                (Kiro, ProviderWireFormat::Passthrough, false, 5, Translated),
+                (Local, OpenAiResponses, false, 11, Passthrough),
+            ]
+        );
+        assert_eq!(registry.resolve_alias("  OPENAI-compatible "), Some(OpenAi));
+        assert_eq!(registry.resolve_alias("claude"), Some(Anthropic));
+        assert_eq!(registry.resolve_alias("github_copilot"), Some(Copilot));
+        assert_eq!(registry.resolve_alias("google"), Some(Gemini));
+        assert_eq!(registry.resolve_alias("prodex-gemini"), None);
+        assert_eq!(
+            registry.resolve_model_provider_id("prodex-gemini"),
+            Some(Gemini)
+        );
+        assert_eq!(
+            registry.resolve_model_provider_id("prodex-local"),
+            Some(Local)
+        );
+        assert_eq!(registry.resolve_model_provider_id("unknown"), None);
     }
 }

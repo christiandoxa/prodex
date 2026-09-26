@@ -2,69 +2,34 @@
 //!
 //! Pure message shaping only; transport, retry, and runtime state stay outside provider-core.
 
-#[cfg(any(not(feature = "mojo"), test))]
-mod adjacency;
-#[cfg(feature = "mojo")]
 mod mojo;
 
-#[cfg(not(feature = "mojo"))]
-pub use self::adjacency::deepseek_provider_core_repair_tool_call_adjacency;
+#[cfg(test)]
+mod mojo_tests;
 
-#[cfg(feature = "mojo")]
+use super::deepseek_provider_core_rtk_wrapped_tool_arguments;
+
 pub fn deepseek_provider_core_repair_tool_call_adjacency(messages: &mut Vec<serde_json::Value>) {
     mojo::repair_adjacency(messages)
 }
 
-use super::deepseek_provider_core_rtk_wrapped_tool_arguments;
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn deepseek_provider_core_normalize_thinking_tool_call_messages_rust(
+pub fn deepseek_provider_core_normalize_thinking_tool_call_messages(
     messages: &mut [serde_json::Value],
 ) {
-    for message in messages {
-        let is_assistant =
-            message.get("role").and_then(serde_json::Value::as_str) == Some("assistant");
-        let has_tool_calls = message
-            .get("tool_calls")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|tool_calls| !tool_calls.is_empty());
-        if !is_assistant || !has_tool_calls {
-            continue;
-        }
-        if message
-            .get("reasoning_content")
-            .and_then(serde_json::Value::as_str)
-            .is_none()
-        {
-            message["reasoning_content"] = serde_json::Value::String(String::new());
-        }
-        if message
-            .get("content")
-            .is_none_or(serde_json::Value::is_null)
-        {
-            message["content"] = serde_json::Value::String(String::new());
-        }
-    }
+    mojo::normalize_thinking(messages)
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
-fn deepseek_provider_core_normalize_assistant_tool_call_content_rust(
-    mut message: serde_json::Value,
+pub fn deepseek_provider_core_normalize_assistant_tool_call_content(
+    message: serde_json::Value,
 ) -> serde_json::Value {
-    let is_assistant = message.get("role").and_then(serde_json::Value::as_str) == Some("assistant");
-    let has_tool_calls = message
-        .get("tool_calls")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|tool_calls| !tool_calls.is_empty());
-    if is_assistant
-        && has_tool_calls
-        && message
-            .get("content")
-            .is_none_or(serde_json::Value::is_null)
-    {
-        message["content"] = serde_json::Value::String(String::new());
-    }
-    message
+    mojo::normalize_content(message)
+}
+
+pub fn deepseek_provider_core_merge_response_metadata(
+    response: &mut serde_json::Value,
+    metadata: Option<serde_json::Value>,
+) {
+    mojo::merge_metadata(response, metadata)
 }
 
 pub fn deepseek_provider_core_chat_assistant_messages_from_response_value(
@@ -112,44 +77,6 @@ pub fn deepseek_provider_core_chat_assistant_messages_from_response_value(
     vec![assistant]
 }
 
-#[cfg(any(not(feature = "mojo"), test))]
-fn deepseek_provider_core_merge_response_metadata_rust(
-    response: &mut serde_json::Value,
-    metadata: Option<serde_json::Value>,
-) {
-    let Some(metadata) = metadata else {
-        return;
-    };
-    let Some(metadata_object) = metadata.as_object() else {
-        return;
-    };
-    let response_metadata = response
-        .as_object_mut()
-        .map(|object| {
-            object
-                .entry("metadata".to_string())
-                .or_insert_with(|| serde_json::json!({}))
-        })
-        .and_then(serde_json::Value::as_object_mut);
-    let Some(response_metadata) = response_metadata else {
-        return;
-    };
-    for (key, value) in metadata_object {
-        match (response_metadata.get_mut(key), value.as_object()) {
-            (Some(existing), Some(next)) => {
-                if let Some(existing) = existing.as_object_mut() {
-                    for (nested_key, nested_value) in next {
-                        existing.insert(nested_key.clone(), nested_value.clone());
-                    }
-                }
-            }
-            _ => {
-                response_metadata.insert(key.clone(), value.clone());
-            }
-        }
-    }
-}
-
 fn deepseek_provider_core_rtk_wrapped_chat_tool_calls(
     mut tool_calls: serde_json::Value,
 ) -> serde_json::Value {
@@ -184,45 +111,3 @@ fn deepseek_provider_core_rtk_wrapped_chat_tool_calls(
     }
     tool_calls
 }
-
-#[cfg(feature = "mojo")]
-pub fn deepseek_provider_core_normalize_thinking_tool_call_messages(
-    messages: &mut [serde_json::Value],
-) {
-    mojo::normalize_thinking(messages)
-}
-#[cfg(not(feature = "mojo"))]
-pub fn deepseek_provider_core_normalize_thinking_tool_call_messages(
-    messages: &mut [serde_json::Value],
-) {
-    deepseek_provider_core_normalize_thinking_tool_call_messages_rust(messages)
-}
-#[cfg(feature = "mojo")]
-pub fn deepseek_provider_core_normalize_assistant_tool_call_content(
-    message: serde_json::Value,
-) -> serde_json::Value {
-    mojo::normalize_content(message)
-}
-#[cfg(not(feature = "mojo"))]
-pub fn deepseek_provider_core_normalize_assistant_tool_call_content(
-    message: serde_json::Value,
-) -> serde_json::Value {
-    deepseek_provider_core_normalize_assistant_tool_call_content_rust(message)
-}
-#[cfg(feature = "mojo")]
-pub fn deepseek_provider_core_merge_response_metadata(
-    response: &mut serde_json::Value,
-    metadata: Option<serde_json::Value>,
-) {
-    mojo::merge_metadata(response, metadata)
-}
-#[cfg(not(feature = "mojo"))]
-pub fn deepseek_provider_core_merge_response_metadata(
-    response: &mut serde_json::Value,
-    metadata: Option<serde_json::Value>,
-) {
-    deepseek_provider_core_merge_response_metadata_rust(response, metadata)
-}
-
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_tests;
