@@ -42,6 +42,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/tests/src/selection_plan/large_pool.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/static_context.rs",
   "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/core.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/rewrite_policy.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/budget.rs",
@@ -202,6 +203,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
   "crates/prodex-runtime-proxy/tests/src/smart_context/static_context.rs",
   "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/core.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/rewrite_policy.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/budget.rs",
@@ -390,6 +392,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/src/smart_context/normalization/static_context.rs",
   "crates/prodex-runtime-proxy/tests/src/smart_context/static_context.rs",
   "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/core.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs",
   "crates/prodex-mojo-core/src/runtime/candidate_plan.rs",
   PRECOMMIT_BUDGET_FILE,
@@ -508,6 +511,7 @@ const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
 const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
 const FINGERPRINT_ARTIFACTS_FILE = "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs";
+const SMART_CONTEXT_CORE_FILE = "crates/prodex-runtime-proxy/src/smart_context/core.rs";
 const DEEPSEEK_SHAPING_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs";
 const RUNTIME_DOCTOR_MARKERS_FILE = "crates/prodex-runtime-doctor/src/markers.rs";
 const CHAT_TOOLS_BRIDGE_FILE = "crates/prodex-provider-core/src/chat_tools_bridge.rs";
@@ -558,6 +562,10 @@ export function findViolations(files) {
       UNCONDITIONAL_MOJO_FILES.has(filePath) && FEATURE_OFF_RUST_PATH.test(contents),
     )
     .map(([filePath]) => `${filePath}: Mojo-owned operation cannot have a feature-off Rust path`);
+  const exactnessPlannerViolations = files
+    .filter(([filePath, contents]) => filePath === SMART_CONTEXT_CORE_FILE &&
+      !contents.includes("prodex_mojo_core::runtime::smart_context_exactness_plan("))
+    .map(([filePath]) => `${filePath}: Smart Context exactness must use the Mojo plan`);
   const anthropicResponseViolations = files.flatMap(([filePath, contents]) =>
     filePath !== ANTHROPIC_RESPONSE_FILE
       ? []
@@ -811,7 +819,8 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
+  return [...markerViolations, ...featureOffViolations, ...exactnessPlannerViolations,
+    ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
     ...superExposeViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations,
@@ -901,6 +910,14 @@ function selfTest() {
     "fn count_critical_signals() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/token_accounting/pressure.rs",
     "fn smart_context_pressure_snapshot_rust() {}"]])[0], /Rust fallback or oracle/u);
+  assert.match(findViolations([[SMART_CONTEXT_CORE_FILE,
+    "fn smart_context_exactness_guard_rust() {}"]]).join("\n"),
+    /Rust semantic oracle or copy/u);
+  assert.match(findViolations([[SMART_CONTEXT_CORE_FILE,
+    "fn smart_context_exactness_guard() {}"]]).join("\n"),
+    /exactness must use the Mojo plan/u);
+  assert.deepEqual(findViolations([[SMART_CONTEXT_CORE_FILE,
+    "prodex_mojo_core::runtime::smart_context_exactness_plan()"]]), []);
   assert.match(findViolations([["crates/prodex-runtime-launch/src/args_oracle.rs",
     "fn normalize_run_codex_args() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-runtime-launch/src/args_resume.rs",
