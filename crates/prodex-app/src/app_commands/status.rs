@@ -7,7 +7,10 @@ use crate::reports::{
 use anyhow::Result;
 use chrono::Local;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use prodex_quota::required_main_window_snapshot_at;
+use prodex_quota::{
+    QuotaPoolWindowInput, StatusQuotaProfileInput, required_main_window_snapshot_at,
+    status_quota_summary_batch,
+};
 use prodex_runtime_doctor::read_runtime_log_tail;
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{self, IsTerminal};
@@ -60,14 +63,14 @@ struct StatusOverview {
     runtime_process_count: usize,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct StatusQuotaWindow {
     profiles: usize,
     total_remaining: i64,
     earliest_reset_at: Option<i64>,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct StatusQuotaSummary {
     compatible_profiles: usize,
     unavailable_profiles: usize,
@@ -359,7 +362,7 @@ fn status_quit_key(key: &crossterm::event::KeyEvent) -> bool {
 fn collect_status_overview(paths: &AppPaths) -> Result<StatusOverview> {
     let state = AppState::load(paths)?;
     let now = Local::now().timestamp();
-    let quota = collect_status_quota(paths, &state, now);
+    let quota = collect_status_quota(paths, &state, now)?;
     let processes = collect_prodex_processes();
     let runtime_logs = collect_active_runtime_log_paths(&processes);
     let runtime_load = collect_info_runtime_load_summary(&runtime_logs, now);
@@ -407,7 +410,11 @@ fn collect_status_overview(paths: &AppPaths) -> Result<StatusOverview> {
     })
 }
 
-fn collect_status_quota(paths: &AppPaths, state: &AppState, now: i64) -> StatusQuotaSummary {
+fn collect_status_quota(
+    paths: &AppPaths,
+    state: &AppState,
+    now: i64,
+) -> Result<StatusQuotaSummary> {
     let profile_names = state
         .profiles
         .iter()
@@ -423,64 +430,79 @@ fn status_quota_from_reports(
     reports: &[crate::RunProfileProbeReport],
     snapshots: &BTreeMap<String, crate::RuntimeProfileUsageSnapshot>,
     now: i64,
-) -> StatusQuotaSummary {
-    let mut summary = StatusQuotaSummary {
-        compatible_profiles: reports
-            .iter()
-            .filter(|report| report.auth.quota_compatible)
-            .count(),
-        ..StatusQuotaSummary::default()
-    };
-
+) -> Result<StatusQuotaSummary> {
+    let mut inputs = Vec::with_capacity(reports.len());
     for report in reports {
-        if !report.auth.quota_compatible {
-            continue;
-        }
-        let usage = match &report.result {
-            Ok(usage) => Some(usage.clone()),
-            Err(_) => snapshots
-                .get(&report.name)
-                .filter(|snapshot| {
-                    runtime_usage_snapshot_is_usable(
-                        snapshot,
-                        now,
-                        RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
-                    )
-                })
-                .map(usage_from_runtime_usage_snapshot),
+        let report_succeeded = report.result.is_ok();
+        let report_windows = report
+            .auth
+            .quota_compatible
+            .then(|| {
+                report
+                    .result
+                    .as_ref()
+                    .ok()
+                    .map(|usage| status_quota_windows(usage, now))
+            })
+            .flatten()
+            .unwrap_or_default();
+        let cached_usage = if report.auth.quota_compatible && !report_succeeded {
+            snapshots.get(&report.name).filter(|snapshot| {
+                runtime_usage_snapshot_is_usable(
+                    snapshot,
+                    now,
+                    RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+                )
+            })
+        } else {
+            None
         };
-        let Some(usage) = usage else {
-            summary.unavailable_profiles += 1;
-            continue;
-        };
-        let five_hour = required_main_window_snapshot_at(&usage, "5h", now);
-        let weekly = required_main_window_snapshot_at(&usage, "weekly", now);
-        if five_hour.is_none() && weekly.is_none() {
-            summary.unavailable_profiles += 1;
-            continue;
-        }
-        if let Some(window) = five_hour {
-            add_quota_window(&mut summary.five_hour, window);
-        }
-        if let Some(window) = weekly {
-            add_quota_window(&mut summary.weekly, window);
-        }
+        let cached_snapshot_usable = cached_usage.is_some();
+        let cached_windows = cached_usage
+            .map(usage_from_runtime_usage_snapshot)
+            .as_ref()
+            .map(|usage| status_quota_windows(usage, now))
+            .unwrap_or_default();
+        inputs.push(StatusQuotaProfileInput {
+            quota_compatible: report.auth.quota_compatible,
+            report_succeeded,
+            cached_snapshot_usable,
+            report_five_hour: report_windows.0,
+            report_weekly: report_windows.1,
+            cached_five_hour: cached_windows.0,
+            cached_weekly: cached_windows.1,
+        });
     }
-    summary
+
+    let summary = status_quota_summary_batch(&inputs)
+        .map_err(|error| anyhow::anyhow!("Mojo status quota summary failed: {error:?}"))?;
+    Ok(StatusQuotaSummary {
+        compatible_profiles: summary.compatible_profiles,
+        unavailable_profiles: summary.unavailable_profiles,
+        five_hour: StatusQuotaWindow {
+            profiles: summary.five_hour.profiles,
+            total_remaining: summary.five_hour.total_remaining,
+            earliest_reset_at: summary.five_hour.earliest_reset_at,
+        },
+        weekly: StatusQuotaWindow {
+            profiles: summary.weekly.profiles,
+            total_remaining: summary.weekly.total_remaining,
+            earliest_reset_at: summary.weekly.earliest_reset_at,
+        },
+    })
 }
 
-fn add_quota_window(window: &mut StatusQuotaWindow, snapshot: crate::MainWindowSnapshot) {
-    window.profiles += 1;
-    window.total_remaining = window
-        .total_remaining
-        .saturating_add(snapshot.remaining_percent);
-    if snapshot.reset_at != i64::MAX {
-        window.earliest_reset_at = Some(
-            window
-                .earliest_reset_at
-                .map_or(snapshot.reset_at, |current| current.min(snapshot.reset_at)),
-        );
-    }
+fn status_quota_windows(
+    usage: &prodex_quota::UsageResponse,
+    now: i64,
+) -> (Option<QuotaPoolWindowInput>, Option<QuotaPoolWindowInput>) {
+    let window = |label| {
+        required_main_window_snapshot_at(usage, label, now).map(|snapshot| QuotaPoolWindowInput {
+            remaining_percent: snapshot.remaining_percent,
+            reset_at: snapshot.reset_at,
+        })
+    };
+    (window("5h"), window("weekly"))
 }
 
 struct StatusTokenData {
@@ -537,217 +559,4 @@ fn token_history(events: &[InfoTokenUsageEvent], limit: usize) -> Vec<u64> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::HashSet;
-
-    #[test]
-    fn proc_parsers_extract_cpu_memory_and_disk_counters() {
-        assert_eq!(
-            parse_process_cpu_ticks("123 (prodex worker) S 1 2 3 4 5 6 7 8 9 10 120 30 0 0 0"),
-            Some(150)
-        );
-        assert_eq!(
-            parse_system_cpu_ticks("cpu  10 20 30 40 50 60 70 80 90\ncpu0 1 2 3 4"),
-            Some(360)
-        );
-        assert_eq!(
-            parse_kib_field("VmRSS: 2048 kB\n", "VmRSS"),
-            Some(2_097_152)
-        );
-        assert_eq!(
-            parse_u64_field("read_bytes: 123\nwrite_bytes: 456\n", "write_bytes"),
-            Some(456)
-        );
-    }
-
-    #[test]
-    fn resource_snapshot_derives_cpu_and_disk_rates() {
-        let previous = StatusResourceCounters {
-            available: true,
-            process_cpu_ticks: 100,
-            system_cpu_ticks: 1_000,
-            disk_read_bytes: 1_000,
-            disk_write_bytes: 2_000,
-            ..StatusResourceCounters::default()
-        };
-        let current = StatusResourceCounters {
-            available: true,
-            process_cpu_ticks: 120,
-            system_cpu_ticks: 1_200,
-            disk_read_bytes: 3_000,
-            disk_write_bytes: 5_000,
-            ..StatusResourceCounters::default()
-        };
-        let snapshot = status_resource_snapshot(Some((previous, Duration::from_secs(2))), current);
-
-        assert_eq!(snapshot.cpu_percent, Some(10.0));
-        assert_eq!(snapshot.disk_read_bytes_per_second, 1_000);
-        assert_eq!(snapshot.disk_write_bytes_per_second, 1_500);
-    }
-
-    #[test]
-    fn status_fields_mark_proc_resources_unavailable_instead_of_zero() {
-        let overview = StatusOverview {
-            updated_at: "now".to_string(),
-            active_profile: "main".to_string(),
-            runtime_profile: "main".to_string(),
-            profile_count: 1,
-            quota: StatusQuotaSummary::default(),
-            five_hour_runway: None,
-            weekly_runway: None,
-            token_summary: InfoTokenUsageSummary::default(),
-            token_history: Vec::new(),
-            token_first_at: None,
-            token_last_at: None,
-            runtime_load: crate::InfoRuntimeLoadSummary::default(),
-            runtime_process_count: 0,
-        };
-        let fields = status_fields(&overview, &StatusResourceSnapshot::default());
-
-        for label in ["Processes", "Memory", "Network", "Disk I/O"] {
-            let value = fields
-                .iter()
-                .find_map(|(field, value)| (field == label).then_some(value))
-                .expect("status resource field should exist");
-            assert_eq!(value, "unavailable");
-        }
-    }
-
-    #[test]
-    fn quota_summary_keeps_weekly_window_when_five_hour_is_absent() {
-        let now = 1_000;
-        let reports = vec![crate::RunProfileProbeReport {
-            name: "main".to_string(),
-            order_index: 0,
-            auth: crate::AuthSummary {
-                label: "chatgpt".to_string(),
-                quota_compatible: true,
-            },
-            result: Ok(crate::UsageResponse {
-                email: None,
-                plan_type: None,
-                rate_limit: Some(crate::WindowPair {
-                    allowed: None,
-                    limit_reached: None,
-                    extra: std::collections::BTreeMap::new(),
-                    primary_window: None,
-                    secondary_window: Some(crate::UsageWindow {
-                        used_percent: Some(40),
-                        reset_at: Some(2_000),
-                        limit_window_seconds: Some(604_800),
-                    }),
-                }),
-                code_review_rate_limit: None,
-                rate_limit_reset_credits: None,
-                additional_rate_limits: Vec::new(),
-            }),
-        }];
-        let summary = status_quota_from_reports(&reports, &BTreeMap::new(), now);
-
-        assert_eq!(summary.five_hour.profiles, 0);
-        assert_eq!(summary.weekly.profiles, 1);
-        assert_eq!(summary.weekly.total_remaining, 60);
-        assert_eq!(summary.weekly.earliest_reset_at, Some(2_000));
-    }
-
-    #[test]
-    fn network_queue_parser_filters_prodex_socket_inodes() {
-        let table = concat!(
-            "sl local_address rem_address st tx_queue:rx_queue tr tm->when retrnsmt uid timeout inode\n",
-            "0: 0100007F:1F90 00000000:0000 0A 00000010:00000020 00:00000000 00000000 1000 0 42\n",
-            "1: 0100007F:1F91 00000000:0000 0A 00000100:00000200 00:00000000 00000000 1000 0 99\n",
-        );
-        assert_eq!(
-            parse_network_queues(table, &HashSet::from([42])),
-            (0x20, 0x10)
-        );
-    }
-
-    #[test]
-    fn token_history_is_chronological_and_bounded() {
-        let event = |timestamp: &str, input_tokens| InfoTokenUsageEvent {
-            timestamp: timestamp.to_string(),
-            input_tokens,
-            output_tokens: 5,
-            ..InfoTokenUsageEvent::default()
-        };
-        let events = vec![event("1", 10), event("2", 20), event("3", 30)];
-        assert_eq!(token_history(&events, 2), vec![25, 35]);
-        assert_eq!(text_sparkline(&[1, 2, 3]).chars().count(), 3);
-    }
-
-    #[test]
-    fn dashboard_renders_at_wide_standard_and_compact_sizes() {
-        use ratatui::Terminal;
-        use ratatui::backend::TestBackend;
-
-        let overview = StatusOverview {
-            updated_at: "2026-07-13 20:00:00".to_string(),
-            active_profile: "main".to_string(),
-            runtime_profile: "main".to_string(),
-            profile_count: 2,
-            quota: StatusQuotaSummary {
-                compatible_profiles: 2,
-                five_hour: StatusQuotaWindow {
-                    profiles: 2,
-                    total_remaining: 140,
-                    earliest_reset_at: Some(2_000),
-                },
-                weekly: StatusQuotaWindow {
-                    profiles: 2,
-                    total_remaining: 120,
-                    earliest_reset_at: Some(10_000),
-                },
-                ..StatusQuotaSummary::default()
-            },
-            five_hour_runway: None,
-            weekly_runway: None,
-            token_summary: InfoTokenUsageSummary::default(),
-            token_history: vec![10, 20, 30],
-            token_first_at: Some("first".to_string()),
-            token_last_at: Some("last".to_string()),
-            runtime_load: crate::InfoRuntimeLoadSummary::default(),
-            runtime_process_count: 1,
-        };
-        let resources = StatusResourceSnapshot {
-            available: true,
-            process_count: 2,
-            runtime_process_count: 1,
-            cpu_percent: Some(12.5),
-            resident_bytes: 64 * 1024 * 1024,
-            memory_total_bytes: 1024 * 1024 * 1024,
-            ..StatusResourceSnapshot::default()
-        };
-
-        for (width, height) in [(120, 40), (80, 24), (60, 12)] {
-            let mut terminal =
-                Terminal::new(TestBackend::new(width, height)).expect("test terminal");
-            terminal
-                .draw(|frame| {
-                    render_status_dashboard(
-                        frame,
-                        Some(&overview),
-                        &resources,
-                        &StatusResourceHistory::default(),
-                        None,
-                        false,
-                    )
-                })
-                .expect("status dashboard should render");
-        }
-    }
-
-    #[test]
-    fn status_keyboard_contract_recognizes_quit_keys() {
-        for (code, modifiers) in [
-            (KeyCode::Char('q'), KeyModifiers::NONE),
-            (KeyCode::Esc, KeyModifiers::NONE),
-            (KeyCode::Char('c'), KeyModifiers::CONTROL),
-            (KeyCode::Char('z'), KeyModifiers::CONTROL),
-        ] {
-            let key = crossterm::event::KeyEvent::new(code, modifiers);
-            assert!(status_quit_key(&key), "{key:?} should quit");
-        }
-    }
-}
+mod tests;

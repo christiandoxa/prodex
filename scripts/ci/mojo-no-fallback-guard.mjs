@@ -30,6 +30,7 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/render/gemini.rs",
   "crates/prodex-quota/src/capacity.rs",
   "crates/prodex-quota/src/render/windows.rs",
+  "crates/prodex-app/src/app_commands/status.rs",
   "crates/prodex-quota/src/render.rs",
   "crates/prodex-quota/src/render/remaining_percent.rs",
   "crates/prodex-quota/src/render/quota_policy.rs",
@@ -174,6 +175,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-quota/src/render/gemini.rs",
   "crates/prodex-quota/src/capacity.rs",
   "crates/prodex-quota/src/render/windows.rs",
+  "crates/prodex-app/src/app_commands/status.rs",
   "crates/prodex-observability/src/lib.rs",
   "crates/prodex-observability/src/metric_label.rs",
   "crates/prodex-runtime-store/src/profile_backoff/score.rs",
@@ -456,6 +458,7 @@ const GEMINI_STATUS_FILE = "crates/prodex-provider-core/src/translators/gemini/r
 const GEMINI_BUFFERED_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/gemini/response/build.rs";
 const RESPONSE_FORWARDING_FILE = "crates/prodex-runtime-proxy/src/response_forwarding.rs";
 const QUOTA_POOL_FILE = "crates/prodex-quota/src/render/pool.rs";
+const STATUS_SUMMARY_FILE = "crates/prodex-app/src/app_commands/status.rs";
 const QUOTA_MODEL_CAPACITY_FILE = "crates/prodex-quota/src/render/model_capacity.rs";
 const RUNTIME_QUOTA_FILE = "crates/prodex-runtime-proxy/src/quota.rs";
 const HEALTH_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/profile_health.rs";
@@ -582,6 +585,10 @@ export function findViolations(files) {
       (!contents.includes("runtime_doctor_marker_known(") ||
         /\b(?:runtime_doctor_marker_registry|RuntimeDoctorMarker|RUNTIME_DOCTOR_MARKERS)\b/u.test(contents)))
     .map(([filePath]) => `${filePath}: marker recognition must use the Mojo classifier`);
+  const statusSummaryViolations = files
+    .filter(([filePath, contents]) => filePath === STATUS_SUMMARY_FILE &&
+      !contents.includes("status_quota_summary_batch(&inputs)"))
+    .map(([filePath]) => `${filePath}: status quota summary must use the Mojo kernel`);
   const geminiBufferedResponseViolations = files
     .filter(([filePath, contents]) => filePath === GEMINI_BUFFERED_RESPONSE_FILE &&
       (!contents.includes("gemini_buffered_response_kernel(input)") ||
@@ -668,6 +675,7 @@ export function findViolations(files) {
       [GEMINI_STATUS_FILE, /\bfn\s+gemini_(?:finish_reason_(?:failure|incomplete)|prompt_feedback_failure)_oracle\s*\(/u],
       [RESPONSE_FORWARDING_FILE, /\bfn\s+(?:should_skip_response_header|response_content_type_is_sse|token_usage_event_is_loggable|response_event_is_generation_start)\s*\(/u],
       [QUOTA_POOL_FILE, /\bfn\s+(?:aggregate_openai_quota|aggregate_main_quota|add_pool_window|add_ready_pool_window)\s*\(/u],
+      [STATUS_SUMMARY_FILE, /\bfn\s+(?:status_quota_from_reports_rust_oracle|add_quota_window)\s*\(/u],
       [QUOTA_MODEL_CAPACITY_FILE, /\bfn\s+(?:normalized_identifier|is_luna_reserve_identifier|openai_usage_advertises_luna_reserve)\s*\(/u],
       [RUNTIME_QUOTA_FILE, /\bfn\s+runtime_proxy_quota_score_for_route_rust\s*\(/u],
       [HEALTH_ABI_TEST_FILE, /\bfn\s+(?:effective|expected)\s*\(/u],
@@ -705,7 +713,7 @@ export function findViolations(files) {
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
     ...geminiFallbackViolations, ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...doctorMarkerViolations,
+    ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
@@ -842,6 +850,10 @@ function selfTest() {
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([[QUOTA_POOL_FILE, "fn aggregate_openai_quota() {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[STATUS_SUMMARY_FILE, "fn add_quota_window() {}"]]).join("\n"),
+    /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[STATUS_SUMMARY_FILE, "fn status_quota_from_reports() {}"]]).join("\n"),
+    /status quota summary must use the Mojo kernel/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn old_stream() {}']])[0], /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/response/status.rs",
