@@ -96,16 +96,19 @@ function operationMetadataViolations(manifest) {
     if (operation.platform_fallback !== false) {
       violations.push(`${operation.name}: platform_fallback must be false`);
     }
-    if (operation.final_state === "authoritative") {
-      const previousOwner = exportOwners.get(operation.mojo_entry);
+    const owners = exportOwners.get(operation.mojo_entry) ?? [];
+    const operationIds = Object.values(operation.mojo_operation_ids ?? {});
+    for (const id of operationIds.length ? operationIds : [null]) {
+      const previousOwner = owners.find((owner) => owner.id === null || id === null || owner.id === id);
       if (previousOwner) {
         violations.push(
-          `${operation.name}: Mojo entry ${operation.mojo_entry} is already claimed by ${previousOwner}`,
+          `${operation.name}: Mojo entry ${operation.mojo_entry} is already claimed by ${previousOwner.name}`,
         );
       } else {
-        exportOwners.set(operation.mojo_entry, operation.name);
+        owners.push({ id, name: operation.name });
       }
     }
+    exportOwners.set(operation.mojo_entry, owners);
     if (!VALID_RUST_STATES.has(operation.rust_state_after)) {
       violations.push(`${operation.name}: rust_state_after must be deleted or adapter-only`);
     }
@@ -184,6 +187,22 @@ function selfTest() {
     }),
     /Mojo entry .* is already claimed by/u,
   );
+  assert.equal(validateManifest({
+    ...manifest,
+    authoritative_operations: [
+      { ...operation, mojo_entry: "shared_entry", mojo_operation_ids: { first: 1 } },
+      { ...operation, name: "other_operation", introduced_in: "0.419.1",
+        mojo_entry: "shared_entry", mojo_operation_ids: { second: 2 } },
+    ],
+  }, []), true);
+  assert.throws(() => validateManifest({
+    ...manifest,
+    authoritative_operations: [
+      { ...operation, mojo_entry: "shared_entry", mojo_operation_ids: { first: 1 } },
+      { ...operation, name: "other_operation", introduced_in: "0.419.1",
+        mojo_entry: "shared_entry", mojo_operation_ids: { second: 1 } },
+    ],
+  }, []), /Mojo entry .* is already claimed by/u);
   const cleanupManifest = {
     baseline_sha: BASELINE_SHA,
     release_target: RELEASE_TARGET,
