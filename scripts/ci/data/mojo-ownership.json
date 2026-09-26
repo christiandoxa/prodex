@@ -1802,13 +1802,13 @@
       "final_state": "adapter-only",
       "cleanup_loc": 32,
       "cleanup_source": {
-        "kind": "feature-gated",
+        "kind": "collapsed-adapter",
         "baseline_range": {
           "start": 204,
           "end": 235
         },
         "release_symbol": "pub fn runtime_profile_health_sort_key",
-        "release_gate": "#[cfg(feature = \"mojo\")]"
+        "release_marker": "runtime_profile_health_sort_keys(&[profile_name]"
       },
       "cleanup_evidence": "The active selection catalog now collects normalized profile health observations and delegates bounded sort-key arithmetic to one Mojo batch; Rust retains state lookup and ordering reconstruction."
     },
