@@ -1272,3 +1272,23 @@ The canonical report counts **51,785 reachable Mojo LOC** and **195,359 Rust
 production LOC**, totaling **247,144 LOC**: **20.95337131388988% Mojo**. The 7%
 release floor and non-regression check pass. The 75% project target remains
 unmet; **534,292 additional Mojo LOC** are required at the current Rust volume.
+
+## Runtime doctor state-plan hard replacement
+
+Quota freshness and degraded-route score decay now call the existing Mojo state
+plan in all doctor feature modes. Their Rust feature-off implementations were
+deleted. A signed-time parity test found that the Mojo boundary rejected a
+negative stale grace accepted by the old Rust helper; state-plan ABI v2 now
+accepts that input for quota planning and uses the shared saturating subtraction
+kernel. Fixed caller tests cover grace boundaries, extreme timestamps, and
+score decay. The no-fallback guard protects both promoted files.
+
+After deletion, runtime-doctor tests pass 20 cases without default features and
+39 with default or Mojo features; `prodex-mojo-core --features mojo-rich`
+passes 47 tests. The changed Mojo module compiles to objects for all six
+release triples; native execution was tested on Linux x86_64 only. The
+canonical report counts **51,779 reachable Mojo LOC** and
+**195,295 Rust production LOC**, totaling **247,074 LOC**:
+**20.956879315508715% Mojo**. The 7% floor and non-regression check pass;
+the 75% project target remains unmet, with **534,106 additional Mojo LOC**
+required at the current Rust volume.

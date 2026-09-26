@@ -1524,7 +1524,7 @@ def prodex_mojo_rich_runtime_doctor_summary_plan_v1(
     return 0
 
 
-comptime RUNTIME_DOCTOR_STATE_PLAN_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_STATE_PLAN_ABI_VERSION: Int64 = 2
 comptime STATE_OP_QUOTA: Int64 = 0
 comptime STATE_OP_SCORE: Int64 = 1
 comptime STATE_OP_CIRCUIT: Int64 = 2
@@ -1600,6 +1600,14 @@ def runtime_doctor_state_hold_expired(
     return status == STATE_STATUS_EXHAUSTED and reset_at != STATE_INT64_MAX and reset_at <= now
 
 
+def runtime_doctor_route_saturating_sub(left: Int64, right: Int64) -> Int64:
+    if right < 0 and left > STATE_INT64_MAX + right:
+        return STATE_INT64_MAX
+    if right > 0 and left < -STATE_INT64_MAX - 1 + right:
+        return -STATE_INT64_MAX - 1
+    return left - right
+
+
 def runtime_doctor_state_freshness(input: ProdexRuntimeDoctorStatePlanInput) -> Int64:
     if runtime_doctor_state_hold_active(input.five_hour_status, input.five_hour_reset_at, input.now):
         return STATE_STATUS_READY
@@ -1609,13 +1617,7 @@ def runtime_doctor_state_freshness(input: ProdexRuntimeDoctorStatePlanInput) -> 
         return STATE_STATUS_THIN
     if runtime_doctor_state_hold_expired(input.weekly_status, input.weekly_reset_at, input.now):
         return STATE_STATUS_THIN
-    if input.now < input.checked_at:
-        return STATE_STATUS_READY
-    var age: Int64 = 0
-    if input.checked_at < 0 and input.now > STATE_INT64_MAX + input.checked_at:
-        age = STATE_INT64_MAX
-    else:
-        age = input.now - input.checked_at
+    var age = runtime_doctor_route_saturating_sub(input.now, input.checked_at)
     if age <= input.stale_grace_seconds:
         return STATE_STATUS_READY
     return STATE_STATUS_THIN
@@ -1659,7 +1661,7 @@ def runtime_doctor_state_validate_input(input: ProdexRuntimeDoctorStatePlanInput
         and input.route_kind <= STATE_ROUTE_STANDARD
         and runtime_doctor_state_status_valid(input.five_hour_status)
         and runtime_doctor_state_status_valid(input.weekly_status)
-        and input.stale_grace_seconds >= 0
+        and (input.operation == STATE_OP_QUOTA or input.stale_grace_seconds >= 0)
         and input.score >= 0
         and input.circuit_until >= -1
         and (input.operation != STATE_OP_SCORE or input.decay_seconds > 0)
@@ -1678,8 +1680,8 @@ def runtime_doctor_state_reset(
     output[].circuit_state = STATE_CIRCUIT_CLOSED
 
 
-@export("prodex_mojo_rich_runtime_doctor_state_plan_v1")
-def prodex_mojo_rich_runtime_doctor_state_plan_v1(
+@export("prodex_mojo_rich_runtime_doctor_state_plan_v2")
+def prodex_mojo_rich_runtime_doctor_state_plan_v2(
     abi_version: Int64,
     input_address: UInt,
     output_address: UInt,
@@ -1763,13 +1765,6 @@ struct ProdexRuntimeDoctorRoutePlan(Copyable):
     var performance_score: Int64
     var transport_backoff_present: Int64
     var transport_backoff_until: Int64
-
-def runtime_doctor_route_saturating_sub(left: Int64, right: Int64) -> Int64:
-    if right < 0 and left > STATE_INT64_MAX + right:
-        return STATE_INT64_MAX
-    if right > 0 and left < -STATE_INT64_MAX - 1 + right:
-        return -STATE_INT64_MAX - 1
-    return left - right
 
 def runtime_doctor_route_effective_score(
     score: Int64,

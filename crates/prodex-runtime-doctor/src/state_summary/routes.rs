@@ -79,20 +79,6 @@ fn runtime_doctor_transport_backoff_key_parts(key: &str) -> Option<(&str, &str)>
     runtime_doctor_route_key_parts(key, "__route_transport_backoff__:")
 }
 
-#[cfg(not(feature = "mojo"))]
-fn runtime_doctor_effective_score(
-    entry: &RuntimeDoctorHealthScore,
-    now: i64,
-    decay_seconds: i64,
-) -> u32 {
-    let decay = now
-        .saturating_sub(entry.updated_at)
-        .saturating_div(decay_seconds.max(1))
-        .clamp(0, i64::from(u32::MAX)) as u32;
-    entry.score.saturating_sub(decay)
-}
-
-#[cfg(feature = "mojo")]
 fn runtime_doctor_effective_score(
     entry: &RuntimeDoctorHealthScore,
     now: i64,

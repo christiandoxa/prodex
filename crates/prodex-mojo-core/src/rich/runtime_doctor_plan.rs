@@ -450,7 +450,7 @@ const _: () = {
     assert!(std::mem::size_of::<RuntimeDoctorSummaryPlan>() == 7 * 8);
 };
 
-pub const RUNTIME_DOCTOR_STATE_PLAN_ABI_VERSION: i64 = 1;
+pub const RUNTIME_DOCTOR_STATE_PLAN_ABI_VERSION: i64 = 2;
 pub const RUNTIME_DOCTOR_STATE_OP_QUOTA: i64 = 0;
 pub const RUNTIME_DOCTOR_STATE_OP_SCORE: i64 = 1;
 pub const RUNTIME_DOCTOR_STATE_OP_CIRCUIT: i64 = 2;
@@ -556,7 +556,7 @@ unsafe extern "C" {
         input: u64,
         output: u64,
     ) -> i64;
-    fn prodex_mojo_rich_runtime_doctor_state_plan_v1(
+    fn prodex_mojo_rich_runtime_doctor_state_plan_v2(
         abi_version: i64,
         input: u64,
         output: u64,
@@ -651,7 +651,7 @@ fn state_plan_input_is_valid(input: &RuntimeDoctorStatePlanInput) -> bool {
             .contains(&input.five_hour_status)
         && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
             .contains(&input.weekly_status)
-        && input.stale_grace_seconds >= 0
+        && (input.operation == RUNTIME_DOCTOR_STATE_OP_QUOTA || input.stale_grace_seconds >= 0)
         && input.score >= 0
         && input.circuit_until >= -1
         && (input.operation != RUNTIME_DOCTOR_STATE_OP_SCORE || input.decay_seconds > 0)
@@ -682,7 +682,7 @@ pub fn runtime_doctor_state_plan(
     }
     let mut output = RuntimeDoctorStatePlan::default();
     let status = unsafe {
-        prodex_mojo_rich_runtime_doctor_state_plan_v1(
+        prodex_mojo_rich_runtime_doctor_state_plan_v2(
             RUNTIME_DOCTOR_STATE_PLAN_ABI_VERSION,
             mojo_pointer_address(&input),
             mojo_mut_pointer_address(&mut output),

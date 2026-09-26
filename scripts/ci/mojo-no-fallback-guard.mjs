@@ -53,6 +53,8 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
   "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+  "crates/prodex-runtime-doctor/src/state_summary/quota.rs",
+  "crates/prodex-runtime-doctor/src/state_summary/routes.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/next_steps.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/next_steps/mojo_render.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
@@ -116,6 +118,8 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
   "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+  "crates/prodex-runtime-doctor/src/state_summary/quota.rs",
+  "crates/prodex-runtime-doctor/src/state_summary/routes.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/next_steps.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
   "crates/prodex-runtime-doctor/src/suggestions.rs",
@@ -207,6 +211,8 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
   "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+  "crates/prodex-runtime-doctor/src/state_summary/quota.rs",
+  "crates/prodex-runtime-doctor/src/state_summary/routes.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/next_steps.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
   "crates/prodex-runtime-doctor/src/suggestions.rs",
@@ -485,6 +491,14 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
     '#[cfg(not(feature = "state-summary-mojo"))] fn rust_summary() {}']])[0],
     /feature-off Rust path/u);
+  for (const filePath of [
+    "crates/prodex-runtime-doctor/src/state_summary/quota.rs",
+    "crates/prodex-runtime-doctor/src/state_summary/routes.rs",
+  ]) {
+    assert.match(findViolations([[filePath,
+      '#[cfg(not(feature = "mojo"))] fn old_path() {}']])[0],
+      /feature-off Rust path/u);
+  }
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
     "fn quota_error_summary_basic(lower: &str) {}"]])[0], /Rust quota error classifier/u);
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
