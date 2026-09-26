@@ -6,33 +6,6 @@ use serde_json::Value;
 use prodex_mojo_core::provider_constraints::{
     GeminiBridgeRequestKernelInput, GeminiBridgeRequestOperation,
 };
-#[cfg(feature = "mojo")]
-use prodex_mojo_core::provider_constraints::{
-    GeminiRequestContentKernelInput, GeminiRequestContentOperation,
-};
-
-#[cfg(feature = "mojo")]
-pub(super) fn gemini_request_content_value(
-    operation: GeminiRequestContentOperation,
-    primary: Option<&[u8]>,
-    secondary: Option<&[u8]>,
-    tertiary: Option<&[u8]>,
-    quaternary: Option<&[u8]>,
-    kind: i64,
-) -> Value {
-    let mut input = GeminiRequestContentKernelInput::new(operation);
-    input.primary = primary;
-    input.secondary = secondary;
-    input.tertiary = tertiary;
-    input.quaternary = quaternary;
-    input.kind = kind;
-    let body = prodex_mojo_core::provider_constraints::gemini_request_content_kernel(input)
-        .unwrap_or_else(|error| panic!("Mojo Gemini request-content kernel failed: {error:?}"));
-    serde_json::from_slice(&body).unwrap_or_else(|error| {
-        panic!("Mojo Gemini request-content kernel returned invalid JSON: {error}")
-    })
-}
-
 fn gemini_bridge_request_bytes(
     input: GeminiBridgeRequestKernelInput<'_>,
 ) -> Result<Vec<u8>, MojoError> {
