@@ -217,6 +217,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
   "crates/prodex-runtime-doctor/src/suggestions.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
+  "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/tools/builtin.rs",
@@ -1037,15 +1038,12 @@ function selfTest() {
     /Rust runtime-feature planner or oracle/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/fallback/chains/gemini.rs",
     "fn provider_gemini_model_fallback_alias_chain() {}"]])[0], /Rust Gemini model fallback table/u);
-  for (const filePath of [
-    "crates/prodex-provider-core/src/translators/anthropic/messages.rs",
-    "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
-  ]) {
-    assert.deepEqual(findViolations([[
-      filePath,
-      '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
-    ]]), []);
-  }
+  assert.deepEqual(findViolations([[ANTHROPIC_MESSAGES_FILE,
+    '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
+  ]]), []);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
+    '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
+  ]])[0], /Mojo-owned operation cannot have a feature-off Rust path/u);
 }
 
 async function main() {

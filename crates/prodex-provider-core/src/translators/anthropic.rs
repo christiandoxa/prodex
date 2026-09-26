@@ -8,7 +8,6 @@ use crate::translators::openai_chat_compat::{
 };
 use crate::translators::{provider_declares_passthrough, unsupported_endpoint_result};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat, provider_supported_endpoints};
-#[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{AnthropicRequestKernelInput, anthropic_request_kernel};
 #[cfg(feature = "mojo")]
 use serde_json::Value;
@@ -22,7 +21,6 @@ pub struct AnthropicTranslator;
 #[derive(Clone, Copy)]
 pub struct AnthropicMessagesTranslator;
 
-#[cfg(feature = "mojo")]
 pub(super) fn anthropic_mojo_body(
     input: AnthropicRequestKernelInput<'_>,
 ) -> Result<Vec<u8>, String> {

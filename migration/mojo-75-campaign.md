@@ -1864,3 +1864,17 @@ The canonical source report counts **52,469 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **526,354 additional Mojo LOC** required at this Rust
 volume.
+
+## Anthropic stream feature-off hard replacement
+
+Anthropic Messages SSE translation now calls the existing Mojo stream kernel in
+every provider-core feature mode. The feature-off unsupported stub was removed;
+the no-fallback guard rejects its return. Caller tests cover stream events,
+malformed framing, Unicode tool IDs and deltas, error events, and invalid UTF-8
+replacement without the `mojo` feature. No new Mojo source or ABI was needed.
+
+The canonical source report counts **52,469 reachable Mojo LOC** and
+**192,934 Rust production LOC**, totaling **245,403 LOC**: **21.38% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **526,333 additional Mojo LOC** required at this Rust
+volume.
