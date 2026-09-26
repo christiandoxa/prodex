@@ -175,61 +175,23 @@ fn smart_context_stabilize_static_context_items_bounded(
             canonical_text,
         };
 
-        #[cfg(feature = "mojo")]
-        {
-            stable.push(candidate);
-            if stable.len() == SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS + 16 {
-                stable = smart_context_reduce_static_context_items_mojo(
-                    stable,
-                    &mut overflow_digest,
-                    SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS,
-                );
-                truncated = true;
-            }
-            continue;
-        }
-
-        #[cfg(not(feature = "mojo"))]
-        if stable.len() < SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS {
-            stable.push(candidate);
-            continue;
-        }
-
-        #[cfg(not(feature = "mojo"))]
-        {
+        stable.push(candidate);
+        if stable.len() == SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS + 16 {
+            stable = smart_context_reduce_static_context_items_mojo(
+                stable,
+                &mut overflow_digest,
+                SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS,
+            );
             truncated = true;
-            let largest_index = stable
-                .iter()
-                .enumerate()
-                .max_by(|(_, left), (_, right)| {
-                    smart_context_static_context_item_order(left, right)
-                })
-                .map(|(index, _)| index)
-                .expect("a full bounded fingerprint set is non-empty");
-            if smart_context_static_context_item_order(&candidate, &stable[largest_index]).is_lt() {
-                let overflow = std::mem::replace(&mut stable[largest_index], candidate);
-                smart_context_add_static_context_overflow_digest(&mut overflow_digest, &overflow);
-            } else {
-                smart_context_add_static_context_overflow_digest(&mut overflow_digest, &candidate);
-            }
         }
     }
 
-    #[cfg(feature = "mojo")]
-    {
-        let maximum_items = stable
-            .len()
-            .min(SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS);
-        truncated |= stable.len() > maximum_items;
-        stable = smart_context_reduce_static_context_items_mojo(
-            stable,
-            &mut overflow_digest,
-            maximum_items,
-        );
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    stable.sort_by(smart_context_static_context_item_order);
+    let maximum_items = stable
+        .len()
+        .min(SMART_CONTEXT_STATIC_CONTEXT_FINGERPRINT_MAX_ITEMS);
+    truncated |= stable.len() > maximum_items;
+    stable =
+        smart_context_reduce_static_context_items_mojo(stable, &mut overflow_digest, maximum_items);
     (
         stable,
         item_count,
@@ -239,7 +201,6 @@ fn smart_context_stabilize_static_context_items_bounded(
     )
 }
 
-#[cfg(feature = "mojo")]
 fn smart_context_reduce_static_context_items_mojo(
     items: Vec<SmartContextStableStaticContextItem>,
     overflow_digest: &mut [u8; 32],

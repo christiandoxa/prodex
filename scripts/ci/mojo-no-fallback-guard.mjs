@@ -39,6 +39,9 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan/large_pool.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/normalization/static_context.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+  "crates/prodex-runtime-proxy/tests/src/smart_context/static_context.rs",
   PRECOMMIT_BUDGET_FILE,
   PRECOMMIT_BUDGET_TEST_FILE,
   "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
@@ -173,6 +176,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-proxy/tests/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan/large_pool.rs",
   "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+  "crates/prodex-runtime-proxy/tests/src/smart_context/static_context.rs",
   PRECOMMIT_BUDGET_FILE,
   "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
   "crates/prodex-runtime-proxy/src/websocket_message.rs",
@@ -325,6 +329,8 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/tests/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan/large_pool.rs",
   "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/normalization/static_context.rs",
+  "crates/prodex-runtime-proxy/tests/src/smart_context/static_context.rs",
   "crates/prodex-mojo-core/src/runtime/candidate_plan.rs",
   PRECOMMIT_BUDGET_FILE,
   PRECOMMIT_BUDGET_TEST_FILE,
@@ -555,6 +561,12 @@ export function findViolations(files) {
       !body.includes("smart_context_u64_budget_tier("))
       ? [`${filePath}: budget tier must use the Mojo policy`] : [];
   });
+  const staticItemViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== "crates/prodex-runtime-proxy/src/smart_context/static_context.rs") return [];
+    const body = contents.match(/\bfn smart_context_stabilize_static_context_items_bounded\([^]*?(?=^fn smart_context_reduce_static_context_items_mojo\()/mu)?.[0];
+    return body && !FEATURE_OFF_RUST_PATH.test(body) && body.includes("smart_context_reduce_static_context_items_mojo(")
+      ? [] : [`${filePath}: static-item selection must use Mojo in every feature mode`];
+  });
   const replacedClassifierViolations = files.flatMap(([filePath, contents]) => {
     const forbidden = new Map([
       [SUPER_OVERRIDE_FILE, /\bfn\s+(?:scan_override_rust|scan_identity_override|scan_boolean_override|scan_runtime_override|scan_feature_value_override|scan_feature_boolean_override)\s*\(/u],
@@ -576,6 +588,7 @@ export function findViolations(files) {
       [PROMPT_CACHE_SELECTION_FILE, /selection_prompt_cache_rust|\bfn\s+runtime_prompt_cache_affinity_score\s*\(/u],
       [GEMINI_TOOL_CALLS_FILE, /\bfn\s+gemini_split_flat_namespace_tool_name\s*\(/u],
       [GEMINI_CHAT_TOOL_CALLS_FILE, /\blet\s+mut\s+item\s*=\s*json!\s*\(/u],
+      ["crates/prodex-runtime-proxy/src/smart_context/normalization/static_context.rs", /\bfn\s+smart_context_(?:static_context_(?:item_order|item_order_key|order_key|noise_line_rust|noise_key|noise_key_is_volatile|noise_value_looks_volatile)|input_static_context_order_key)\s*\(/u],
     ]);
     return forbidden.get(filePath)?.test(contents)
       ? [`${filePath}: contains a replaced Rust semantic implementation`] : [];
@@ -606,7 +619,7 @@ export function findViolations(files) {
     ...modelSpecViolations,
     ...deepseekShapingViolations,
     ...quotaWindowViolations,
-    ...rehydrateViolations, ...budgetTierViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
+    ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations,
     ...defaultFeatureViolations];
 }
@@ -855,6 +868,12 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/selection_plan.rs",
     "fn runtime_optimistic_current_candidate_decision_rust() {}"]])[0],
     /Rust semantic oracle or copy/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/normalization/static_context.rs",
+    "fn smart_context_static_context_noise_key(key: &str) {}"]]).join("\n"),
+    /replaced Rust semantic implementation/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+    'fn smart_context_stabilize_static_context_items_bounded() { #[cfg(not(feature = "mojo"))] old_sort(); }\nfn smart_context_reduce_static_context_items_mojo(']]).join("\n"),
+    /static-item selection must use Mojo/u);
   assert.match(findViolations([["crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
     "fn resolve_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([[PRECOMMIT_BUDGET_FILE,
