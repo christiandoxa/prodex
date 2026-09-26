@@ -1,6 +1,8 @@
 use crate::{
     RuntimeProxyQuotaObservationPair, RuntimeProxyQuotaScore, RuntimeProxyQuotaWindowObservation,
-    RuntimeRouteKind, RuntimeSelectionQuotaPressureBand,
+    RuntimeResponseCandidatePlanInput, RuntimeResponseCandidatePlanOptions, RuntimeRouteKind,
+    RuntimeSelectionQuotaPressureBand, RuntimeSelectionQuotaSource,
+    RuntimeSelectionQuotaWindowStatus,
 };
 
 pub(super) fn route_kind_tag(route_kind: RuntimeRouteKind) -> i64 {
@@ -76,4 +78,88 @@ pub(crate) fn quota_score_batch(
             })
         })
         .collect()
+}
+
+pub(super) fn quota_status_tag(status: RuntimeSelectionQuotaWindowStatus) -> i64 {
+    match status {
+        RuntimeSelectionQuotaWindowStatus::Ready => 0,
+        RuntimeSelectionQuotaWindowStatus::Thin => 1,
+        RuntimeSelectionQuotaWindowStatus::Critical => 2,
+        RuntimeSelectionQuotaWindowStatus::Exhausted => 3,
+        RuntimeSelectionQuotaWindowStatus::Unknown => 4,
+    }
+}
+
+pub(super) fn quota_source_tag(source: Option<RuntimeSelectionQuotaSource>) -> i64 {
+    match source {
+        None => -1,
+        Some(RuntimeSelectionQuotaSource::LiveProbe) => 0,
+        Some(RuntimeSelectionQuotaSource::PersistedSnapshot) => 1,
+    }
+}
+
+pub(crate) fn runtime_response_candidate_plan_batch(
+    candidates: &[RuntimeResponseCandidatePlanInput],
+    options: RuntimeResponseCandidatePlanOptions<'_>,
+) -> Result<prodex_mojo_core::runtime::RuntimeCandidatePlan, prodex_mojo_core::MojoError> {
+    let mut fields = Vec::with_capacity(
+        candidates.len() * prodex_mojo_core::runtime::RUNTIME_CANDIDATE_PLAN_FIELD_COUNT,
+    );
+    let profiles = candidates
+        .iter()
+        .map(|candidate| candidate.name.as_str())
+        .collect::<Vec<_>>();
+    let prompt_cache_affinity = crate::runtime_prompt_cache_affinity_batch(
+        options.prompt_cache_key,
+        options.prompt_cache_owner_profile,
+        &profiles,
+    )
+    .expect("Mojo prompt-cache affinity batch returned invalid output");
+    for (candidate, prompt_cache_affinity_sort_key) in candidates.iter().zip(prompt_cache_affinity)
+    {
+        let push_usize = |fields: &mut Vec<i64>, value: usize| {
+            fields
+                .push(i64::try_from(value).map_err(|_| prodex_mojo_core::MojoError::InvalidInput)?);
+            Ok::<(), prodex_mojo_core::MojoError>(())
+        };
+        fields.push(if candidate.in_selection_backoff { 1 } else { 0 });
+        push_usize(&mut fields, candidate.provider_priority)?;
+        fields.push(i64::from(candidate.quota_sort_key.0));
+        fields.push(candidate.quota_sort_key.1);
+        fields.push(candidate.quota_sort_key.2);
+        fields.push(candidate.quota_sort_key.3);
+        fields.push(candidate.quota_sort_key.4.0);
+        fields.push(candidate.quota_sort_key.5.0);
+        fields.push(candidate.quota_sort_key.6.0);
+        fields.push(candidate.quota_sort_key.7);
+        fields.push(candidate.quota_sort_key.8);
+        fields.push(quota_source_tag(Some(candidate.quota_source)));
+        push_usize(&mut fields, candidate.inflight_count)?;
+        fields.push(i64::from(candidate.health_sort_key));
+        fields.push(i64::from(prompt_cache_affinity_sort_key.0));
+        fields.push(encode_u64_for_signed_order(
+            prompt_cache_affinity_sort_key.1,
+        ));
+        push_usize(&mut fields, candidate.order_index)?;
+        fields.push(encode_u64_for_signed_order(candidate.jitter));
+        push_usize(&mut fields, candidate.backoff_sort_key.0)?;
+        fields.push(candidate.backoff_sort_key.1);
+        fields.push(candidate.backoff_sort_key.2);
+        fields.push(candidate.backoff_sort_key.3);
+        fields.push(i64::from(candidate.auth_failure_active));
+        fields.push(quota_status_tag(candidate.quota_summary.five_hour.status));
+    }
+    let route_kind = route_kind_tag(options.route_kind);
+    let excluded = vec![0_i64; candidates.len()];
+    prodex_mojo_core::runtime::runtime_candidate_plan_batch(
+        &fields,
+        &excluded,
+        route_kind,
+        options.inflight_soft_limit,
+        options.responses_critical_floor_percent,
+    )
+}
+
+fn encode_u64_for_signed_order(value: u64) -> i64 {
+    i64::from_ne_bytes((value ^ (1_u64 << 63)).to_ne_bytes())
 }

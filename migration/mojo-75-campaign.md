@@ -1668,3 +1668,21 @@ The canonical source report counts **51,980 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **528,427 additional Mojo LOC** required at this Rust
 volume.
+
+## Runtime candidate-selection hard replacement
+
+Optimistic-current admission, availability classification, and ready/fallback
+candidate ordering now use the Mojo plan in every feature mode. The feature-off
+Rust selector and test oracle were deleted. Mojo also returns the per-candidate
+inflight soft-limit decision through the versioned v2 ABI; Rust validates tags
+and indices, then maps the plan to profile records. The v1 export remains for
+existing ABI consumers. Expected-value tests cover hard rejection precedence,
+profile affinity, quota and load signals, and 257/513-candidate ordering. Native
+execution evidence is Linux x86_64; macOS and Windows runtime execution was
+not run.
+
+The canonical source report counts **52,070 reachable Mojo LOC** and
+**193,475 Rust production LOC**, totaling **245,545 LOC**: **21.21% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **528,355 additional Mojo LOC** required at this Rust
+volume.
