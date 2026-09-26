@@ -880,31 +880,12 @@ def deepseek_put_primitive_request_fields(
     return deepseek_put_byte(writer, 125)
 
 
-def deepseek_trim_start(view: ProdexRichStringView) -> Int64:
-    var start: Int64 = 0
-    while start < Int64(view.len):
-        var value = deepseek_json_byte(view, start)
-        if value != 9 and value != 10 and value != 13 and value != 32:
-            break
-        start += 1
-    return start
-
-
-def deepseek_trim_end(view: ProdexRichStringView, start: Int64) -> Int64:
-    var end = Int64(view.len)
-    while end > start:
-        var value = deepseek_json_byte(view, end - 1)
-        if value != 9 and value != 10 and value != 13 and value != 32:
-            break
-        end -= 1
-    return end
-
-
-def deepseek_trimmed_ascii_equals(
+def deepseek_trimmed_effort_equals(
     view: ProdexRichStringView, literal: StringSlice
 ) -> Bool:
-    var start = deepseek_trim_start(view)
-    var end = deepseek_trim_end(view, start)
+    var bounds = rich_trim_bounds(view)
+    var start = bounds[0]
+    var end = bounds[1]
     var length = Int64(literal.byte_length())
     if end - start != length:
         return False
@@ -929,13 +910,13 @@ def deepseek_put_reasoning_parameters(
     if input.reasoning_content_present != 1 or input.reasoning_content.len == 0:
         return False
     var effort = input.reasoning_content.copy()
-    var is_xhigh = deepseek_trimmed_ascii_equals(effort, StringSlice("xhigh"))
-    var is_max = deepseek_trimmed_ascii_equals(effort, StringSlice("max"))
-    var is_high = deepseek_trimmed_ascii_equals(effort, StringSlice("high"))
-    var is_medium = deepseek_trimmed_ascii_equals(effort, StringSlice("medium"))
-    var is_low = deepseek_trimmed_ascii_equals(effort, StringSlice("low"))
-    var is_minimal = deepseek_trimmed_ascii_equals(effort, StringSlice("minimal"))
-    var is_none = deepseek_trimmed_ascii_equals(effort, StringSlice("none"))
+    var is_xhigh = deepseek_trimmed_effort_equals(effort, StringSlice("xhigh"))
+    var is_max = deepseek_trimmed_effort_equals(effort, StringSlice("max"))
+    var is_high = deepseek_trimmed_effort_equals(effort, StringSlice("high"))
+    var is_medium = deepseek_trimmed_effort_equals(effort, StringSlice("medium"))
+    var is_low = deepseek_trimmed_effort_equals(effort, StringSlice("low"))
+    var is_minimal = deepseek_trimmed_effort_equals(effort, StringSlice("minimal"))
+    var is_none = deepseek_trimmed_effort_equals(effort, StringSlice("none"))
     if input.stream == 1:
         if is_xhigh or is_max or is_high:
             return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"high"}'))
@@ -1499,7 +1480,7 @@ def deepseek_reasoning_shape_plan(
 ) -> Bool:
     var root = deepseek_input_object_bounds(view)
     if root[0] < 0:
-        return False
+        return deepseek_json_fragment_valid(view)
     var reasoning = deepseek_json_object_member(view, root[0], root[1], StringSlice("reasoning"))
     if reasoning[0] >= 0:
         if not deepseek_json_bounds_is_kind(view, reasoning, 123):
