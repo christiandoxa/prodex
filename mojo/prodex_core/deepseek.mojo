@@ -3,7 +3,10 @@ from std.collections import Array
 from std.memory import Pointer
 
 from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
     rich_trim_bounds,
+    rich_unicode_space,
     rich_view_matches_literal,
     rich_view_ptr,
     rich_view_valid,
@@ -1237,11 +1240,45 @@ def deepseek_json_string_nonempty(view: ProdexRichStringView, bounds: Array[Int6
     var end = bounds[1] - 1
     while index < end:
         var value = ptr[unsafe_offset=index]
+        var codepoint: Int64 = 0
         if value == 92:
-            return index + 1 < end
-        if value != 9 and value != 10 and value != 13 and value != 32:
+            index += 1
+            if index >= end:
+                return False
+            value = ptr[unsafe_offset=index]
+            if value == 117 and index + 4 < end:
+                codepoint = 0
+                for digit_index in range(index + 1, index + 5):
+                    var digit = ptr[unsafe_offset=digit_index]
+                    var hex_value: Int64 = -1
+                    if digit >= 48 and digit <= 57:
+                        hex_value = Int64(digit - 48)
+                    elif digit >= 65 and digit <= 70:
+                        hex_value = Int64(digit - 55)
+                    elif digit >= 97 and digit <= 102:
+                        hex_value = Int64(digit - 87)
+                    if hex_value < 0:
+                        return False
+                    codepoint = codepoint * 16 + hex_value
+                index += 5
+            else:
+                if value == 110:
+                    codepoint = 10
+                elif value == 114:
+                    codepoint = 13
+                elif value == 116:
+                    codepoint = 9
+                elif value == 102:
+                    codepoint = 12
+                else:
+                    codepoint = Int64(value)
+                index += 1
+        else:
+            var width = rich_codepoint_width(value)
+            codepoint = rich_codepoint(ptr, index, width)
+            index += width
+        if not rich_unicode_space(codepoint):
             return True
-        index += 1
     return False
 
 
@@ -1915,7 +1952,7 @@ def deepseek_tool_choice_plan(
         var name = deepseek_json_object_member(
             view, choice[0], choice[1], StringSlice("name")
         )
-        if name[0] < 0:
+        if name[0] < 0 or not deepseek_json_bounds_is_kind(view, name, 34):
             var function = deepseek_json_object_member(
                 view, choice[0], choice[1], StringSlice("function")
             )
@@ -2105,17 +2142,16 @@ def deepseek_policy_tool_name(
     end: Int64,
 ) -> Array[Int64, 2]:
     var name = deepseek_json_object_member(view, start, end, StringSlice("name"))
+    if name[0] < 0 or not deepseek_json_bounds_is_kind(view, name, 34):
+        var function = deepseek_json_object_member(
+            view, start, end, StringSlice("function")
+        )
+        if deepseek_json_bounds_is_kind(view, function, 123):
+            name = deepseek_json_object_member(
+                view, function[0], function[1], StringSlice("name")
+            )
     if deepseek_json_string_nonempty(view, name):
         return name^
-    var function = deepseek_json_object_member(
-        view, start, end, StringSlice("function")
-    )
-    if deepseek_json_bounds_is_kind(view, function, 123):
-        name = deepseek_json_object_member(
-            view, function[0], function[1], StringSlice("name")
-        )
-        if deepseek_json_string_nonempty(view, name):
-            return name^
     return Array[Int64, 2](fill=-1)^
 
 
@@ -2266,8 +2302,10 @@ def deepseek_policy_namespace_tool(
     end: Int64,
     output: Pointer[mut=True, Int64, _],
 ) -> Bool:
-    var namespace = deepseek_policy_tool_name(view, start, end)
-    if namespace[0] < 0:
+    var namespace = deepseek_json_object_member(
+        view, start, end, StringSlice("name")
+    )
+    if not deepseek_json_string_nonempty(view, namespace):
         deepseek_policy_set(output, 12)
         return True
     var tools = deepseek_json_object_member(view, start, end, StringSlice("tools"))
@@ -2347,7 +2385,7 @@ def deepseek_tools_shape_plan(
         var kind = deepseek_json_object_member(
             view, index, tool_end, StringSlice("type")
         )
-        if kind[0] < 0:
+        if kind[0] < 0 or not deepseek_json_bounds_is_kind(view, kind, 34):
             index = deepseek_json_skip_ws(view, tool_end, tools[1] - 1)
             if index < tools[1] - 1 and deepseek_json_byte(view, index) == 44:
                 index = deepseek_json_skip_ws(view, index + 1, tools[1] - 1)
@@ -2475,8 +2513,10 @@ def deepseek_tools_shape_plan(
         elif deepseek_policy_string_starts_with(
             view, kind, StringSlice("mcp")
         ):
-            var name = deepseek_policy_tool_name(view, index, tool_end)
-            if name[0] < 0:
+            var name = deepseek_json_object_member(
+                view, index, tool_end, StringSlice("name")
+            )
+            if not deepseek_json_string_nonempty(view, name):
                 deepseek_policy_set(output, 20)
                 return True
             var has_schema = (

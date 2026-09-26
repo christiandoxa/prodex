@@ -8,8 +8,6 @@ use std::collections::BTreeMap;
 use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
 
 mod function_tools;
-#[cfg(not(feature = "mojo"))]
-mod shape;
 mod strict_schema;
 mod tool_choice;
 mod tool_shape;
