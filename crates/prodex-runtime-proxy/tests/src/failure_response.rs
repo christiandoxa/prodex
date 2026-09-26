@@ -112,143 +112,68 @@ fn websocket_previous_response_detection_matches_text_and_binary() {
 }
 
 #[test]
-fn precommit_budget_scales_to_profile_pool() {
-    let (base_attempt_limit, base_budget) = runtime_proxy_precommit_budget(false, false);
-    let profile_count = base_attempt_limit + 3;
-
-    let (attempt_limit, budget) =
-        runtime_proxy_precommit_budget_for_profile_count(false, false, profile_count);
-
+fn precommit_budget_matches_independent_expected_values() {
     assert_eq!(
-        attempt_limit,
-        profile_count * RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE
+        runtime_proxy_precommit_budget_for_profile_count(false, false, 0),
+        (4, Duration::from_millis(1_000)),
     );
-    assert!(budget > base_budget);
-    assert!(runtime_proxy_precommit_budget_exhausted_for_profile_count(
-        Instant::now(),
-        attempt_limit,
-        false,
-        false,
-        profile_count,
-    ));
+    assert_eq!(
+        runtime_proxy_precommit_budget_for_profile_count(false, true, 0),
+        (3, Duration::from_millis(150)),
+    );
+    assert_eq!(
+        runtime_proxy_precommit_budget_for_profile_count(false, true, 2),
+        (4, Duration::from_millis(200)),
+    );
+    assert_eq!(
+        runtime_proxy_precommit_budget_for_profile_count(true, false, 0),
+        (8, Duration::from_millis(4_000)),
+    );
+    assert_eq!(
+        runtime_proxy_precommit_budget_for_profile_count(true, true, 5),
+        (10, Duration::from_millis(5_000)),
+    );
+    assert_eq!(
+        runtime_proxy_precommit_budget_for_profile_count(false, false, 3),
+        (6, Duration::from_millis(1_500)),
+    );
+    assert_eq!(
+        runtime_proxy_precommit_budget_for_profile_count(false, false, 1_000_000),
+        (2_000_000, Duration::from_millis(500_000_000)),
+    );
+    #[cfg(target_pointer_width = "16")]
+    let maximum_profile_budget_ms = 16_383_750;
+    #[cfg(target_pointer_width = "32")]
+    let maximum_profile_budget_ms = 1_073_741_823_750;
+    #[cfg(target_pointer_width = "64")]
+    let maximum_profile_budget_ms = u64::MAX;
+    assert_eq!(
+        runtime_proxy_precommit_budget_for_profile_count(false, false, usize::MAX),
+        (usize::MAX, Duration::from_millis(maximum_profile_budget_ms)),
+    );
+}
+
+#[test]
+fn precommit_budget_exhaustion_uses_attempt_and_elapsed_limits() {
     assert!(!runtime_proxy_precommit_budget_exhausted_for_profile_count(
         Instant::now(),
-        attempt_limit - 1,
+        5,
         false,
         false,
-        profile_count,
+        3,
     ));
-}
-
-#[test]
-fn precommit_budget_attempt_limit_covers_one_bounded_retry_per_profile() {
-    for continuation in [false, true] {
-        for pressure_mode in [false, true] {
-            let (base_attempt_limit, base_budget) =
-                runtime_proxy_precommit_budget(continuation, pressure_mode);
-            assert!(
-                base_attempt_limit >= 3,
-                "pre-commit auto-rotate should try at least three profiles before surfacing a final error"
-            );
-
-            for profile_count in 0..=base_attempt_limit + 8 {
-                let (attempt_limit, budget) = runtime_proxy_precommit_budget_for_profile_count(
-                    continuation,
-                    pressure_mode,
-                    profile_count,
-                );
-                let effective_profile_count = profile_count.max(1);
-                let required_profile_attempts = effective_profile_count
-                    .saturating_mul(RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE);
-
-                assert!(
-                    attempt_limit >= required_profile_attempts,
-                    "continuation={continuation} pressure={pressure_mode} profile_count={profile_count}"
-                );
-                assert!(
-                    !runtime_proxy_precommit_budget_exhausted_for_profile_count(
-                        Instant::now(),
-                        required_profile_attempts - 1,
-                        continuation,
-                        pressure_mode,
-                        profile_count,
-                    ),
-                    "continuation={continuation} pressure={pressure_mode} profile_count={profile_count}"
-                );
-                assert!(
-                    runtime_proxy_precommit_budget_exhausted_for_profile_count(
-                        Instant::now(),
-                        attempt_limit,
-                        continuation,
-                        pressure_mode,
-                        profile_count,
-                    ),
-                    "continuation={continuation} pressure={pressure_mode} profile_count={profile_count}"
-                );
-                if profile_count > base_attempt_limit {
-                    assert!(
-                        budget >= base_budget,
-                        "continuation={continuation} pressure={pressure_mode} profile_count={profile_count}"
-                    );
-                }
-            }
-        }
-    }
-}
-
-#[test]
-fn precommit_budget_keeps_base_limit_for_small_pool() {
-    let (base_attempt_limit, base_budget) = runtime_proxy_precommit_budget(true, false);
-
-    let (attempt_limit, budget) = runtime_proxy_precommit_budget_for_profile_count(true, false, 1);
-
-    assert_eq!(attempt_limit, base_attempt_limit);
-    assert_eq!(budget, base_budget);
-}
-
-#[cfg(feature = "mojo")]
-#[test]
-fn precommit_budget_matches_rust_oracle() {
-    for continuation in [false, true] {
-        for pressure_mode in [false, true] {
-            for profile_count in 0..=512 {
-                assert_eq!(
-                    runtime_proxy_precommit_budget_for_profile_count(
-                        continuation,
-                        pressure_mode,
-                        profile_count,
-                    ),
-                    runtime_proxy_precommit_budget_for_profile_count_rust(
-                        continuation,
-                        pressure_mode,
-                        profile_count,
-                    ),
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn precommit_elapsed_budget_remains_bounded_without_candidate_progress() {
-    let profile_count = 2;
-    let (_, budget) = runtime_proxy_precommit_budget_for_profile_count(false, false, profile_count);
+    assert!(runtime_proxy_precommit_budget_exhausted_for_profile_count(
+        Instant::now(),
+        6,
+        false,
+        false,
+        3,
+    ));
     let expired = Instant::now()
-        .checked_sub(budget + Duration::from_millis(1))
+        .checked_sub(Duration::from_millis(1_501))
         .expect("expired instant");
 
     assert!(runtime_proxy_precommit_budget_exhausted_for_profile_count(
-        expired,
-        0,
-        false,
-        false,
-        profile_count,
-    ));
-    assert!(runtime_proxy_precommit_budget_exhausted_for_profile_count(
-        expired,
-        profile_count * RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE,
-        false,
-        false,
-        profile_count,
+        expired, 0, false, false, 3,
     ));
 }

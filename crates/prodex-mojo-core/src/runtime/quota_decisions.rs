@@ -59,19 +59,20 @@ pub struct QuotaGatePlan {
 }
 
 unsafe extern "C" {
-    fn prodex_runtime_precommit_budget_plan_v1(
+    fn prodex_runtime_precommit_budget_plan_v2(
         continuation: i64,
         pressure_mode: i64,
-        standard_attempt_limit: i64,
-        standard_budget_ms: i64,
-        continuation_attempt_limit: i64,
-        continuation_budget_ms: i64,
-        pressure_attempt_limit: i64,
-        pressure_budget_ms: i64,
-        profile_count: i64,
-        attempts_per_profile: i64,
-        attempt_limit_out: *mut i64,
-        budget_ms_out: *mut i64,
+        standard_attempt_limit: u64,
+        standard_budget_ms: u64,
+        continuation_attempt_limit: u64,
+        continuation_budget_ms: u64,
+        pressure_attempt_limit: u64,
+        pressure_budget_ms: u64,
+        profile_count: u64,
+        attempts_per_profile: u64,
+        attempt_limit_cap: u64,
+        attempt_limit_out: *mut u64,
+        budget_ms_out: *mut u64,
     ) -> i64;
     fn prodex_runtime_quota_snapshot_plan_v1(
         five_hour_status: i64,
@@ -112,32 +113,33 @@ pub fn precommit_budget_plan(
     profile_count: usize,
     attempts_per_profile: usize,
 ) -> Result<PrecommitBudgetPlan, MojoError> {
-    let usize_to_i64 = |value| i64::try_from(value).map_err(|_| MojoError::InvalidInput);
-    let u64_to_i64 = |value| i64::try_from(value).map_err(|_| MojoError::InvalidInput);
-    let mut attempt_limit = 0;
-    let mut budget_ms = 0;
+    let usize_to_u64 = |value| u64::try_from(value).unwrap_or(u64::MAX);
+    let attempt_limit_cap = usize_to_u64(usize::MAX);
+    let mut attempt_limit = 0_u64;
+    let mut budget_ms = 0_u64;
     let status = unsafe {
-        prodex_runtime_precommit_budget_plan_v1(
+        prodex_runtime_precommit_budget_plan_v2(
             i64::from(continuation),
             i64::from(pressure_mode),
-            usize_to_i64(standard_attempt_limit)?,
-            u64_to_i64(standard_budget_ms)?,
-            usize_to_i64(continuation_attempt_limit)?,
-            u64_to_i64(continuation_budget_ms)?,
-            usize_to_i64(pressure_attempt_limit)?,
-            u64_to_i64(pressure_budget_ms)?,
-            usize_to_i64(profile_count)?,
-            usize_to_i64(attempts_per_profile)?,
+            usize_to_u64(standard_attempt_limit),
+            standard_budget_ms,
+            usize_to_u64(continuation_attempt_limit),
+            continuation_budget_ms,
+            usize_to_u64(pressure_attempt_limit),
+            pressure_budget_ms,
+            usize_to_u64(profile_count),
+            usize_to_u64(attempts_per_profile),
+            attempt_limit_cap,
             &mut attempt_limit,
             &mut budget_ms,
         )
     };
-    if status != 0 || attempt_limit <= 0 || budget_ms < 0 {
+    if status != 0 || attempt_limit == 0 || attempt_limit > attempt_limit_cap {
         return Err(MojoError::InvalidOutput);
     }
     Ok(PrecommitBudgetPlan {
         attempt_limit: usize::try_from(attempt_limit).map_err(|_| MojoError::InvalidOutput)?,
-        budget_ms: u64::try_from(budget_ms).map_err(|_| MojoError::InvalidOutput)?,
+        budget_ms,
     })
 }
 

@@ -1651,3 +1651,20 @@ The canonical source report counts **51,975 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **528,537 additional Mojo LOC** required at this Rust
 volume.
+
+## Runtime precommit budget hard replacement
+
+The precommit attempt and elapsed-time budget now come from the Mojo planner in
+every feature mode. The feature-off Rust planner and the Rust test oracle were
+deleted. The versioned v2 ABI accepts unsigned 64-bit inputs and uses 128-bit
+intermediate arithmetic to preserve saturating behavior at large profile
+counts. Expected-value tests cover standard, pressure, continuation, elapsed,
+and platform-width boundaries. The Mojo kernel compiled to objects for all six
+release targets. Native execution evidence is Linux x86_64; macOS and Windows
+runtime execution was not run.
+
+The canonical source report counts **51,980 reachable Mojo LOC** and
+**193,469 Rust production LOC**, totaling **245,449 LOC**: **21.18% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **528,427 additional Mojo LOC** required at this Rust
+volume.
