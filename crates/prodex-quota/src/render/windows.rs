@@ -20,47 +20,30 @@ pub(super) fn required_window_snapshot_at(
     label: &str,
     now: i64,
 ) -> Option<MainWindowSnapshot> {
-    #[cfg(feature = "mojo")]
-    {
-        let window = find_main_window(pair, label)?;
-        let capacity = crate::capacity::quota_capacity_for_window_pair(pair)
-            .expect("Mojo quota capacity classification failed");
-        if !capacity.admission_allowed && !capacity.any_window_exhausted {
-            return None;
-        }
-        let remaining_percent = remaining_percent(Some(window.used_percent?));
-        let reset_at = window.reset_at.unwrap_or(i64::MAX);
-        let pressure_score = crate::mojo::quota_window_pressure(remaining_percent, reset_at, now)
-            .expect("Mojo quota window pressure failed");
-        Some(MainWindowSnapshot {
-            remaining_percent,
-            reset_at,
-            pressure_score,
-        })
+    let window = find_main_window(pair, label)?;
+    let capacity = crate::capacity::quota_capacity_for_window_pair(pair)
+        .expect("Mojo quota capacity classification failed");
+    if !capacity.admission_allowed && !capacity.any_window_exhausted {
+        return None;
     }
 
-    #[cfg(not(feature = "mojo"))]
-    {
-        let _ = (pair, label, now);
-        None
-    }
+    let remaining_percent = remaining_percent(Some(window.used_percent?));
+    let reset_at = window.reset_at.unwrap_or(i64::MAX);
+    let pressure_score = crate::mojo::quota_window_pressure(remaining_percent, reset_at, now)
+        .expect("Mojo quota window pressure failed");
+    Some(MainWindowSnapshot {
+        remaining_percent,
+        reset_at,
+        pressure_score,
+    })
 }
 
 pub use crate::capacity::additional_rate_limit_is_usable;
 
 pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        crate::capacity::quota_capacity_for_window_pair(pair)
-            .expect("Mojo quota capacity classification failed")
-            .usable
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        let _ = pair;
-        false
-    }
+    crate::capacity::quota_capacity_for_window_pair(pair)
+        .expect("Mojo quota capacity classification failed")
+        .usable
 }
 
 #[cfg(feature = "mojo")]
@@ -71,54 +54,43 @@ pub(crate) fn window_pair_has_blocking_admission(pair: &WindowPair) -> bool {
 }
 
 pub fn openai_quota_runtime_window_pair(usage: &UsageResponse) -> Option<&WindowPair> {
-    #[cfg(feature = "mojo")]
-    {
-        let candidates = crate::capacity::quota_capacity_candidates_for_usage_at(
-            usage,
-            prodex_runtime_state::RuntimeRouteKind::Standard,
-            Local::now().timestamp(),
-        )
+    let candidates = quota_window_capacity_candidates_at(usage, Local::now().timestamp())
         .expect("Mojo quota capacity classification failed");
-        candidates
-            .iter()
-            .find(|candidate| candidate.output.routing_eligible)
-            .map(|candidate| candidate.pair)
-            .or_else(|| {
-                candidates
-                    .iter()
-                    .find(|candidate| {
-                        candidate.output.lane == prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_MAIN
-                    })
-                    .map(|candidate| candidate.pair)
-            })
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        let _ = usage;
-        None
-    }
+    candidates
+        .iter()
+        .find(|candidate| candidate.output.routing_eligible)
+        .map(|candidate| candidate.pair)
+        .or_else(|| {
+            candidates
+                .iter()
+                .find(|candidate| {
+                    candidate.output.lane == prodex_mojo_core::quota::QUOTA_CAPACITY_LANE_MAIN
+                })
+                .map(|candidate| candidate.pair)
+        })
 }
 
 pub fn openai_quota_has_ready_limit(usage: &UsageResponse) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        crate::capacity::quota_capacity_candidates_for_usage_at(
-            usage,
-            prodex_runtime_state::RuntimeRouteKind::Standard,
-            Local::now().timestamp(),
-        )
+    quota_window_capacity_candidates_at(usage, Local::now().timestamp())
         .expect("Mojo quota capacity classification failed")
         .iter()
         .any(|candidate| candidate.output.routing_eligible)
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        let _ = usage;
-        false
-    }
 }
+
+fn quota_window_capacity_candidates_at(
+    usage: &UsageResponse,
+    now: i64,
+) -> Result<Vec<crate::capacity::QuotaCapacityCandidate<'_>>, prodex_mojo_core::MojoError> {
+    crate::capacity::quota_capacity_candidates_for_usage_at(
+        usage,
+        prodex_runtime_state::RuntimeRouteKind::Standard,
+        now,
+    )
+}
+
+#[cfg(test)]
+#[path = "../../tests/src/render/windows.rs"]
+mod tests;
 
 fn openai_quota_has_ready_runtime_limit(usage: &UsageResponse) -> bool {
     openai_quota_has_ready_limit(usage)

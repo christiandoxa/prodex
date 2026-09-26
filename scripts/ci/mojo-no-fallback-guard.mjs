@@ -146,6 +146,8 @@ const PROMOTED_FILES = [
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-quota/src/render/gemini.rs",
+  "crates/prodex-quota/src/capacity.rs",
+  "crates/prodex-quota/src/render/windows.rs",
   "crates/prodex-observability/src/lib.rs",
   "crates/prodex-observability/src/metric_label.rs",
   "crates/prodex-runtime-store/src/profile_backoff/score.rs",
@@ -268,6 +270,7 @@ const REMOVED_ORACLE_FILES = [
 ];
 const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-quota/src/render/gemini.rs",
+  "crates/prodex-quota/src/capacity.rs",
   "crates/prodex-observability/src/lib.rs",
   "crates/prodex-observability/src/metric_label.rs",
   "crates/prodex-runtime-store/src/profile_backoff/score.rs",
@@ -647,8 +650,11 @@ function selfTest() {
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
     "fn quota_error_summary_basic(lower: &str) {}"]])[0], /Rust quota error classifier/u);
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
-    'fn format_blocked_quota_status() {\n    #[cfg(not(feature = "mojo"))] rust();\n}']])[0],
+    'fn format_blocked_quota_status() {\n    #[cfg(not(feature = "mojo"))] rust();\n}']]).join("\n"),
     /feature-off Rust classifier/u);
+  assert.match(findViolations([["crates/prodex-quota/src/capacity.rs",
+    '#[cfg(not(feature = "mojo"))] fn old_capacity() {}']]).join("\n"),
+    /feature-off Rust path/u);
   assert.match(findViolations([[REHYDRATE_FILE,
     'pub fn smart_context_auto_rehydrate_plan() {\n    #[cfg(not(feature = "mojo"))] rust();\n}\nfn smart_context_auto_rehydrate_plan_mojo() {}']])[0],
     /feature-off Rust planner/u);
