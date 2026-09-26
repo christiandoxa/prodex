@@ -20,18 +20,61 @@ def provider_error_ascii_lower(value: UInt8) -> UInt8:
     return value
 
 
+def provider_error_space_width(address: UInt, offset: Int64, end: Int64) -> Int64:
+    if address == 0 or offset < 0 or offset >= end:
+        return 0
+    var ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    var first = ptr[unsafe_offset=offset]
+    if provider_error_ascii_space(first):
+        return 1
+
+    var remaining = end - offset
+    if remaining >= 2:
+        var second = ptr[unsafe_offset=offset + 1]
+        if first == 194 and (second == 133 or second == 160):
+            return 2
+    if remaining >= 3:
+        var second = ptr[unsafe_offset=offset + 1]
+        var third = ptr[unsafe_offset=offset + 2]
+        if (
+            (first == 225 and second == 154 and third == 128)
+            or (
+                first == 226
+                and second == 128
+                and (
+                    (third >= 128 and third <= 138)
+                    or third == 168
+                    or third == 169
+                    or third == 175
+                )
+            )
+            or (first == 226 and second == 129 and third == 159)
+            or (first == 227 and second == 128 and third == 128)
+        ):
+            return 3
+    return 0
+
+
 def provider_error_trim_bounds(address: UInt, length: Int64) -> Tuple[Int64, Int64]:
     var start: Int64 = 0
     var end = length
     if address == 0 or length <= 0:
         return (start, end)
-    var ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
-        unsafe_from_address=Int(address)
-    )
-    while start < end and provider_error_ascii_space(ptr[unsafe_offset=start]):
-        start += 1
-    while end > start and provider_error_ascii_space(ptr[unsafe_offset=end - 1]):
-        end -= 1
+    var width = provider_error_space_width(address, start, end)
+    while width > 0:
+        start += width
+        width = provider_error_space_width(address, start, end)
+    while end > start:
+        width = provider_error_space_width(address, end - 1, end)
+        if width == 0 and end - start >= 2:
+            width = provider_error_space_width(address, end - 2, end)
+        if width == 0 and end - start >= 3:
+            width = provider_error_space_width(address, end - 3, end)
+        if width == 0:
+            break
+        end -= width
     return (start, end)
 
 
@@ -74,7 +117,7 @@ def provider_error_contains_ci(
     )
     var target = literal.unsafe_ptr()
     var start = bounds[0]
-    while start + expected <= bounds[1]:
+    while start <= bounds[1] - expected:
         var matched = True
         for offset in range(expected):
             if provider_error_ascii_lower(ptr[unsafe_offset=start + offset]) != target[unsafe_offset=offset]:

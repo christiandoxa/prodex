@@ -22,92 +22,19 @@ pub fn classify_provider_error(
     code: Option<&str>,
     text: Option<&str>,
 ) -> ProviderErrorClassification {
-    #[cfg(feature = "mojo")]
-    {
-        let (class, cooldown_ms) =
-            prodex_mojo_core::rich::provider_error_classify(status, code, text)
-                .expect("Mojo provider error classifier returned invalid output");
-        ProviderErrorClassification {
-            class: match class {
-                0 => ProviderErrorClass::Auth,
-                1 => ProviderErrorClass::Quota,
-                2 => ProviderErrorClass::RateLimit,
-                3 => ProviderErrorClass::Transient,
-                4 => ProviderErrorClass::NotFound,
-                5 => ProviderErrorClass::Other,
-                _ => unreachable!("validated Mojo provider error class"),
-            },
-            cooldown_ms,
-        }
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        classify_provider_error_rust(status, code, text)
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn classify_provider_error_rust(
-    status: Option<u16>,
-    code: Option<&str>,
-    text: Option<&str>,
-) -> ProviderErrorClassification {
-    let normalized_code = code.unwrap_or_default().trim().to_ascii_lowercase();
-    let normalized_text = text.unwrap_or_default().trim().to_ascii_lowercase();
-    if matches!(status, Some(401 | 403))
-        || matches!(
-            normalized_code.as_str(),
-            "unauthenticated" | "invalid_api_key" | "authentication_error"
-        )
-    {
-        return ProviderErrorClassification {
-            class: ProviderErrorClass::Auth,
-            cooldown_ms: 0,
-        };
-    }
-    if matches!(
-        normalized_code.as_str(),
-        "insufficient_quota"
-            | "credit_balance_exhausted"
-            | "organization_spend_limit_exceeded"
-            | "project_spend_limit_exceeded"
-            | "quota_exhausted"
-            | "quota_exceeded"
-            | "resource_exhausted"
-    ) {
-        return ProviderErrorClassification {
-            class: ProviderErrorClass::Quota,
-            cooldown_ms: 300_000,
-        };
-    }
-    if matches!(
-        normalized_code.as_str(),
-        "rate_limit_exceeded" | "rate_limit_exceeded_error" | "slow_down"
-    ) {
-        return ProviderErrorClassification {
-            class: ProviderErrorClass::RateLimit,
-            cooldown_ms: 60_000,
-        };
-    }
-    if status == Some(404)
-        || normalized_code == "model_not_supported"
-        || normalized_text.contains("model is not supported")
-    {
-        return ProviderErrorClassification {
-            class: ProviderErrorClass::NotFound,
-            cooldown_ms: 0,
-        };
-    }
-    if matches!(status, Some(500 | 502 | 503 | 504)) || normalized_text.contains("overloaded") {
-        return ProviderErrorClassification {
-            class: ProviderErrorClass::Transient,
-            cooldown_ms: 10_000,
-        };
-    }
+    let (class, cooldown_ms) = prodex_mojo_core::rich::provider_error_classify(status, code, text)
+        .expect("Mojo provider error classifier returned invalid output");
     ProviderErrorClassification {
-        class: ProviderErrorClass::Other,
-        cooldown_ms: 0,
+        class: match class {
+            0 => ProviderErrorClass::Auth,
+            1 => ProviderErrorClass::Quota,
+            2 => ProviderErrorClass::RateLimit,
+            3 => ProviderErrorClass::Transient,
+            4 => ProviderErrorClass::NotFound,
+            5 => ProviderErrorClass::Other,
+            _ => unreachable!("validated Mojo provider error class"),
+        },
+        cooldown_ms,
     }
 }
 
@@ -257,8 +184,8 @@ fn provider_error_classification_rank(class: ProviderErrorClass) -> u8 {
     }
 }
 
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_classifier_tests {
+#[cfg(test)]
+mod classifier_tests {
     use super::*;
 
     #[test]
@@ -269,6 +196,13 @@ mod mojo_classifier_tests {
             (
                 None,
                 Some(" UNAUTHENTICATED "),
+                None,
+                ProviderErrorClass::Auth,
+                0,
+            ),
+            (
+                None,
+                Some("\u{2003}INVALID_API_KEY\u{3000}"),
                 None,
                 ProviderErrorClass::Auth,
                 0,
@@ -295,6 +229,41 @@ mod mojo_classifier_tests {
                 60_000,
             ),
             (Some(404), None, None, ProviderErrorClass::NotFound, 0),
+            (
+                Some(401),
+                Some("insufficient_quota"),
+                None,
+                ProviderErrorClass::Auth,
+                0,
+            ),
+            (
+                Some(503),
+                Some("rate_limit_exceeded"),
+                None,
+                ProviderErrorClass::RateLimit,
+                60_000,
+            ),
+            (
+                Some(404),
+                Some("quota_exhausted"),
+                Some("backend overloaded"),
+                ProviderErrorClass::Quota,
+                300_000,
+            ),
+            (
+                Some(404),
+                None,
+                Some("backend overloaded"),
+                ProviderErrorClass::NotFound,
+                0,
+            ),
+            (
+                Some(500),
+                Some("model_not_supported"),
+                None,
+                ProviderErrorClass::NotFound,
+                0,
+            ),
             (
                 None,
                 Some("model_not_supported"),
@@ -331,6 +300,13 @@ mod mojo_classifier_tests {
                 ProviderErrorClass::Other,
                 0,
             ),
+            (
+                None,
+                Some("{\"error\":\"unterminated"),
+                Some("\0 malformed { json �"),
+                ProviderErrorClass::Other,
+                0,
+            ),
         ];
         for (status, code, text, class, cooldown_ms) in cases {
             assert_eq!(
@@ -339,6 +315,44 @@ mod mojo_classifier_tests {
                 "status={status:?} code={code:?} text={text:?}"
             );
         }
+    }
+
+    #[test]
+    fn provider_error_classifier_trims_unicode_whitespace() {
+        for whitespace in [
+            "\u{0085}", "\u{00a0}", "\u{1680}", "\u{2000}", "\u{2003}", "\u{200a}", "\u{2028}",
+            "\u{2029}", "\u{202f}", "\u{205f}", "\u{3000}",
+        ] {
+            let code = format!("{whitespace}invalid_api_key{whitespace}");
+            assert_eq!(
+                classify_provider_error(None, Some(&code), None),
+                super::ProviderErrorClassification {
+                    class: ProviderErrorClass::Auth,
+                    cooldown_ms: 0,
+                },
+                "whitespace={whitespace:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn provider_error_classifier_handles_large_inputs() {
+        let large = "x".repeat(1 << 20);
+        let large_text = format!("{large} overloaded");
+        assert_eq!(
+            classify_provider_error(None, Some(&large), None),
+            super::ProviderErrorClassification {
+                class: ProviderErrorClass::Other,
+                cooldown_ms: 0,
+            }
+        );
+        assert_eq!(
+            classify_provider_error(None, None, Some(&large_text)),
+            super::ProviderErrorClassification {
+                class: ProviderErrorClass::Transient,
+                cooldown_ms: 10_000,
+            }
+        );
     }
 }
 
