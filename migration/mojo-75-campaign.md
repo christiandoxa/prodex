@@ -2077,3 +2077,22 @@ The canonical source report counts **52,820 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **524,047 additional Mojo LOC** required at this Rust
 volume.
+
+## DeepSeek metadata composition hard replacement
+
+Response-format output and request metadata composition now call the existing
+Mojo kernel in every provider-core feature mode. The feature-off Rust map
+mutation and note construction were deleted. The Mojo adapter preserves an
+explicit empty provider metadata bucket and leaves non-object existing
+metadata unchanged when adding a thinking-mode tool-choice note. Fixed caller
+tests cover those boundaries alongside degraded response-format metadata. A
+bounded ABI failure retains the prior metadata rather than panicking.
+The no-fallback guard requires both Mojo operations and rejects feature-off
+routing. The Mojo ABI did not change; native execution evidence remains Linux
+x86_64.
+
+The canonical source report counts **52,820 reachable Mojo LOC** and
+**192,285 Rust production LOC**, totaling **245,105 LOC**: **21.55% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **524,035 additional Mojo LOC** required at this Rust
+volume.

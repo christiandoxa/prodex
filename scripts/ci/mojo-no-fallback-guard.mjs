@@ -166,6 +166,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
@@ -273,6 +274,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
@@ -464,6 +466,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo_tests.rs",
@@ -514,6 +517,7 @@ const DEEPSEEK_RESPONSE_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/trans
 const DEEPSEEK_REQUEST_FILE = "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs";
 const DEEPSEEK_REQUEST_REJECT_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs";
 const DEEPSEEK_REASONING_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs";
+const DEEPSEEK_METADATA_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs";
 const DEEPSEEK_SIMPLE_REQUEST_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs";
 const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
@@ -585,6 +589,11 @@ export function findViolations(files) {
       (!contents.includes("DeepSeekRequestPolicyOperation::SimpleRequest") ||
         !contents.includes("prodex_mojo_core::rich::deepseek_request_policy(")))
     .map(([filePath]) => `${filePath}: DeepSeek simple-request eligibility must use Mojo`);
+  const deepseekMetadataViolations = files
+    .filter(([filePath, contents]) => filePath === DEEPSEEK_METADATA_FILE &&
+      (!contents.includes("DeepSeekKernelOperation::RequestMetadata") ||
+        !contents.includes("DeepSeekKernelOperation::ResponseFormat")))
+    .map(([filePath]) => `${filePath}: DeepSeek metadata and response format must use Mojo`);
   const quotaPlannerViolations = files
     .filter(([filePath, contents]) => filePath === RUNTIME_QUOTA_FILE &&
       (!contents.includes("mojo::quota_snapshot_plan(") ||
@@ -847,6 +856,7 @@ export function findViolations(files) {
   return [...markerViolations, ...featureOffViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
+    ...deepseekMetadataViolations,
     ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
@@ -956,6 +966,10 @@ function selfTest() {
   /DeepSeek simple-request eligibility must use Mojo/u);
   assert.deepEqual(findViolations([[DEEPSEEK_SIMPLE_REQUEST_FILE,
     "DeepSeekRequestPolicyOperation::SimpleRequest; prodex_mojo_core::rich::deepseek_request_policy()"]]), []);
+  assert.match(findViolations([[DEEPSEEK_METADATA_FILE, "fn metadata() {}"]]).join("\n"),
+    /DeepSeek metadata and response format must use Mojo/u);
+  assert.deepEqual(findViolations([[DEEPSEEK_METADATA_FILE,
+    "DeepSeekKernelOperation::RequestMetadata; DeepSeekKernelOperation::ResponseFormat"]]), []);
   assert.match(findViolations([[DEEPSEEK_SIMPLE_REQUEST_FILE,
     "fn deepseek_provider_core_function_tools() {}"]]).join("\n"),
   /replaced Rust semantic implementation/u);
