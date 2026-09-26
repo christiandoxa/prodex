@@ -40,11 +40,14 @@ impl ProviderModelSpec {
     }
 
     pub fn matches_id_or_alias(self, model: &str) -> bool {
-        let model = model.trim();
-        self.id.eq_ignore_ascii_case(model)
-            || self
-                .aliases
-                .iter()
-                .any(|alias| alias.eq_ignore_ascii_case(model))
+        prodex_mojo_core::rich::resolve_catalog_model(
+            &[prodex_mojo_core::rich::CatalogModel {
+                id: self.id,
+                aliases: self.aliases,
+            }],
+            model.trim(),
+        )
+        .expect("Mojo model matcher returned an invalid structured result")
+        .is_some()
     }
 }

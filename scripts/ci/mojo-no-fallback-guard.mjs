@@ -70,6 +70,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/catalog/serialization.rs",
   "crates/prodex-provider-core/src/catalog_tests.rs",
   "crates/prodex-provider-core/src/models.rs",
+  "crates/prodex-provider-core/src/surface/models.rs",
   "crates/prodex-provider-core/src/translators/anthropic/messages.rs",
   "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs",
   "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
@@ -107,6 +108,8 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping_tests.rs",
@@ -154,6 +157,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
   "crates/prodex-provider-core/src/translators/kiro/stream.rs",
@@ -194,6 +198,13 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-provider-core/src/translators/openai_chat_compat_util.rs",
   "crates/prodex-provider-core/src/catalog_parity_tests.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/rust_oracles.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/request.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/request/mojo_parity_tests.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/request/params.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/tooling/messages.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/chat_items.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/input_tool_calls.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/local_shell.rs",
 ];
 const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-context/src/critical_signal.rs",
@@ -247,6 +258,8 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping_tests.rs",
@@ -278,6 +291,8 @@ const QUOTA_POOL_FILE = "crates/prodex-quota/src/render/pool.rs";
 const QUOTA_MODEL_CAPACITY_FILE = "crates/prodex-quota/src/render/model_capacity.rs";
 const HEALTH_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/profile_health.rs";
 const DEEPSEEK_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/deepseek/response.rs";
+const DEEPSEEK_REQUEST_FILE = "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs";
+const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const DEEPSEEK_SHAPING_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs";
 const DEEPSEEK_SHAPING_COMPLETED_FNS = [
   "deepseek_provider_core_response_completed_event",
@@ -362,6 +377,15 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => HARD_REPLACED_RUST_FILES.has(filePath) &&
       /\b(?:rust_oracle|fn\s+[A-Za-z0-9_]+_rust\s*\()/u.test(contents))
     .map(([filePath]) => `${filePath}: contains a Rust semantic oracle or copy`);
+  const deepseekRequestViolations = files
+    .filter(([filePath, contents]) => filePath === DEEPSEEK_REQUEST_FILE &&
+      !contents.includes("DeepSeekKernelOperation::RawCommonRequest"))
+    .map(([filePath]) => `${filePath}: DeepSeek request body must use the Mojo raw kernel`);
+  const modelSpecViolations = files
+    .filter(([filePath, contents]) => filePath === MODEL_SPEC_FILE &&
+      /\bfn\s+matches_id_or_alias\s*\(/u.test(contents) &&
+      !contents.includes("resolve_catalog_model("))
+    .map(([filePath]) => `${filePath}: model matcher must use the Mojo catalog kernel`);
   const deepseekShapingViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== DEEPSEEK_SHAPING_FILE) return [];
     return DEEPSEEK_SHAPING_COMPLETED_FNS.flatMap((name) => {
@@ -403,6 +427,8 @@ export function findViolations(files) {
       [QUOTA_MODEL_CAPACITY_FILE, /\bfn\s+(?:normalized_identifier|is_luna_reserve_identifier|openai_usage_advertises_luna_reserve)\s*\(/u],
       [HEALTH_ABI_TEST_FILE, /\bfn\s+(?:effective|expected)\s*\(/u],
       [DEEPSEEK_RESPONSE_FILE, /\bfn\s+deepseek_stream_event_from_chat_value_rust\s*\(|#\[cfg\(not\(feature\s*=\s*"mojo"\)\)\]\s*pub\(super\)\s+fn\s+deepseek_stream_event_from_chat_value\s*\(/u],
+      [DEEPSEEK_REQUEST_FILE, /\bfn\s+(?:deepseek_request_body_from_responses_rust|deepseek_messages_from_request|deepseek_tool_choice_from_request)\s*\(/u],
+      [MODEL_SPEC_FILE, /\beq_ignore_ascii_case\s*\(/u],
       [GEMINI_TOOL_CALLS_FILE, /\bfn\s+gemini_split_flat_namespace_tool_name\s*\(/u],
       [GEMINI_CHAT_TOOL_CALLS_FILE, /\blet\s+mut\s+item\s*=\s*json!\s*\(/u],
     ]);
@@ -426,7 +452,9 @@ export function findViolations(files) {
   });
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
-    ...geminiFallbackViolations, ...hardReplacementViolations, ...deepseekShapingViolations,
+    ...geminiFallbackViolations, ...hardReplacementViolations, ...deepseekRequestViolations,
+    ...modelSpecViolations,
+    ...deepseekShapingViolations,
     ...quotaWindowViolations,
     ...rehydrateViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations,
@@ -564,6 +592,17 @@ function selfTest() {
   assert.match(findViolations([[DEEPSEEK_RESPONSE_FILE,
     '#[cfg(not(feature = "mojo"))] pub(super) fn deepseek_stream_event_from_chat_value() {}']]).join("\n"),
     /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
+    "fn deepseek_request_body_from_responses_rust() {}"]]).join("\n"),
+    /Rust semantic oracle or copy/u);
+  assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
+    "fn deepseek_request_body_from_responses() {}"]]).join("\n"),
+    /must use the Mojo raw kernel/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/deepseek/request.rs",
+    "fn deepseek_request_body_from_responses() {}"]])[0], /Rust fallback or oracle/u);
+  assert.match(findViolations([[MODEL_SPEC_FILE,
+    "fn matches_id_or_alias() { self.id.eq_ignore_ascii_case(model) }"]]).join("\n"),
+    /model matcher must use the Mojo catalog kernel/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/schema/composition.rs",
     "fn collapse_schema_union() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/kiro/request/validation.rs",

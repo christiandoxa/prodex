@@ -1292,3 +1292,50 @@ canonical report counts **51,779 reachable Mojo LOC** and
 **20.956879315508715% Mojo**. The 7% floor and non-regression check pass;
 the 75% project target remains unmet, with **534,106 additional Mojo LOC**
 required at the current Rust volume.
+
+## Provider catalog, DeepSeek request, and runtime selection hard replacements
+
+Provider catalog identity, picker ordering and deduplication, discovered-model
+merging, reasoning resolution, and model lookup now use the existing Mojo
+kernels in both provider feature modes. The Rust fallbacks and parity oracles
+were deleted; the public `ProviderModelSpec` matcher now forwards to Mojo.
+The Rust adapter trims model lookup input before the bounded Mojo query, so
+IDs with over 4 KiB of leading Unicode whitespace retain their established
+behavior. Mojo still owns identity matching and selection.
+Independent expected-value tests cover ordering, aliases, Unicode, and long
+inputs.
+
+The provider-core DeepSeek Responses-to-chat translator now uses the raw Mojo
+kernel in both feature modes. Non-object input items retain empty user messages,
+Unicode whitespace-only tool choices are omitted, and kernel errors become
+normal transform rejections. The old Rust request builder, parameter helpers,
+message builders, and temporary comparison oracle were deleted. The existing
+`deepseek_bridge/request_params.rs` feature-off parameter-validation helpers
+remain separate cleanup work; they were not the body-shaping implementation
+replaced in this wave. The app's complex live-request rewrite is another
+production path and remains separate migration work. The Mojo build script
+watches `deepseek.mojo`, `json_view.mojo`, and `gemini_config.mojo` so changes to
+imported sources rebuild the archive instead of using stale output.
+
+Runtime proxy selection affinity, quota-release eligibility, WebSocket reuse,
+continuation priority, direct-current fallback, and soft-affinity decisions now
+call Mojo in both feature modes. Their Rust fallback/oracle module was deleted.
+A new versioned WebSocket stale-reuse entrypoint compares seconds and
+nanoseconds, preserving the former Rust boundary for sub-millisecond idle
+durations. Expected-value tests retain hard-affinity precedence, quota states,
+and stale-reuse thresholds; the request and stream commit paths were untouched.
+
+After deletion, provider-core tests pass 233 cases in default and no-default
+modes and 267 with Mojo (two manual tests ignored). Runtime-proxy tests pass
+303 cases in default and no-default modes and 348 with Mojo. The 364-case
+serial app runtime-proxy filter, runtime smoke, offline upstream baseline and
+five replay fixtures, formatter, full-workspace Clippy with warnings denied,
+ownership/authority/no-fallback, hot-path, manifest, and crate-boundary guards
+pass. `npm run ci` passes on the combined checkpoint. Object compilation of
+`candidate_decision.mojo` and the DeepSeek-importing `rich_abi.mojo` passes for
+all six release targets; native execution evidence is Linux x86_64 only.
+
+The canonical report counts **51,907 reachable Mojo LOC** and **194,946 Rust
+production LOC**, totaling **246,853 LOC**: **21.027494095676374% Mojo**. The
+7% release floor and non-regression check pass; the 75% project target remains
+unmet, with **532,931 additional Mojo LOC** required at the current Rust volume.

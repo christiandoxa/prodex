@@ -1,9 +1,84 @@
 //! DeepSeek request translation.
 
-use super::{deepseek_passthrough_endpoint, request::deepseek_request_body_from_responses};
+use std::collections::BTreeMap;
+
+use super::deepseek_passthrough_endpoint;
 use crate::translator::{ProviderTransformInput, ProviderTransformResult};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
+use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
 use serde_json::Value;
+
+type DeepSeekRequestBody = (Vec<u8>, Option<BTreeMap<String, Value>>);
+
+fn deepseek_request_body_from_responses(
+    obj: &serde_json::Map<String, Value>,
+    value: &Value,
+) -> Result<DeepSeekRequestBody, String> {
+    let canonical = serde_json::to_string(value)
+        .map_err(|error| format!("DeepSeek request serialization failed: {error}"))?;
+    #[cfg(feature = "mojo")]
+    crate::deepseek_bridge::deepseek_provider_core_validate_responses_request_params(
+        &canonical, "DeepSeek",
+    )?;
+    #[cfg(not(feature = "mojo"))]
+    {
+        let mut fields = serde_json::Map::new();
+        crate::deepseek_bridge::deepseek_provider_core_insert_primitive_request_fields(
+            value,
+            &mut fields,
+            "DeepSeek",
+        )?;
+        crate::deepseek_bridge::deepseek_provider_core_top_logprobs_from_responses_request(
+            value, "DeepSeek",
+        )?;
+        crate::deepseek_bridge::deepseek_provider_core_stop_from_responses_request(
+            value, "DeepSeek",
+        )?;
+    }
+    let user_id = crate::deepseek_bridge::deepseek_provider_core_user_id_from_responses_request(
+        value, "DeepSeek",
+    )?;
+
+    let mut degraded = None;
+    let response_format_mode = if let Some(response_format) = obj.get("response_format") {
+        match response_format
+            .get("type")
+            .and_then(Value::as_str)
+            .unwrap_or("text")
+        {
+            "text" => 0_u64,
+            "json_object" => 1_u64,
+            "json_schema" | "json" | "structured_output" => {
+                degraded = Some({
+                    let mut map = BTreeMap::new();
+                    map.insert("from".to_string(), Value::String("json_schema".to_string()));
+                    map.insert("to".to_string(), Value::String("json_object".to_string()));
+                    map
+                });
+                1_u64
+            }
+            other => {
+                return Err(format!(
+                    "DeepSeek response_format type `{other}` is not supported"
+                ));
+            }
+        }
+    } else {
+        0_u64
+    };
+    let instructions = value
+        .get("instructions")
+        .and_then(Value::as_str)
+        .filter(|text| !text.trim().is_empty());
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::RawCommonRequest);
+    input.input = Some(&canonical);
+    input.content = user_id.as_deref();
+    input.reasoning_content = instructions;
+    input.sequence_number = response_format_mode;
+    let body = prodex_mojo_core::rich::deepseek_kernel(input)
+        .map_err(|error| format!("DeepSeek request kernel failed: {error:?}"))?;
+    Ok((body, degraded))
+}
 
 pub(super) fn deepseek_transform_request(
     provider: ProviderId,
@@ -121,10 +196,11 @@ mod tests {
     use super::deepseek_transform_request;
     use crate::translator::{ProviderTransformInput, ProviderTransformLoss};
     use crate::{ProviderEndpoint, ProviderId};
+    use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation, deepseek_kernel};
     use serde_json::json;
 
     #[test]
-    fn request_transform_matches_oracle_and_preserves_boundary_metadata() {
+    fn request_transform_matches_expected_body_and_preserves_boundary_metadata() {
         let mut input = ProviderTransformInput::new(
             ProviderEndpoint::Responses,
             serde_json::to_vec(&json!({
@@ -223,6 +299,225 @@ mod tests {
                 "response_format": {"type": "json_object"}
             })
         );
+    }
+
+    #[test]
+    fn request_transform_matches_expected_request_bodies() {
+        let mut cases = vec![
+            (
+                "ASCII whitespace tool choice",
+                json!({"input": "hello", "tool_choice": {"type": "function", "name": " \t\r\n "}}),
+                json!({
+                    "model": "deepseek-chat",
+                    "stream": false,
+                    "messages": [{"role": "user", "content": "hello"}]
+                }),
+                None,
+            ),
+            (
+                "Unicode whitespace tool choice",
+                json!({"input": "hello", "tool_choice": {"type": "function", "function": {"name": "\u{2003}\u{00a0}"}}}),
+                json!({
+                    "model": "deepseek-chat",
+                    "stream": false,
+                    "messages": [{"role": "user", "content": "hello"}]
+                }),
+                None,
+            ),
+            (
+                "non-string top-level name uses nested function name",
+                json!({"input": "hello", "tool_choice": {"type": "function", "name": 7, "function": {"name": "search"}}}),
+                json!({
+                    "model": "deepseek-chat",
+                    "stream": false,
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "tool_choice": {"type": "function", "function": {"name": "search"}}
+                }),
+                None,
+            ),
+            (
+                "malformed scalar input",
+                json!({"input": 7, "instructions": "system"}),
+                json!({
+                    "model": "deepseek-chat",
+                    "stream": false,
+                    "messages": [
+                        {"role": "system", "content": "system"},
+                        {"role": "user", "content": ""}
+                    ]
+                }),
+                None,
+            ),
+            (
+                "non-object input items",
+                json!({
+                    "input": [
+                        null,
+                        7,
+                        "plain text",
+                        [],
+                        true,
+                        {"role": "assistant", "content": "kept"}
+                    ]
+                }),
+                json!({
+                    "model": "deepseek-chat",
+                    "stream": false,
+                    "messages": [
+                        {"role": "user", "content": ""},
+                        {"role": "user", "content": ""},
+                        {"role": "user", "content": ""},
+                        {"role": "user", "content": ""},
+                        {"role": "user", "content": ""},
+                        {"role": "assistant", "content": "kept"}
+                    ]
+                }),
+                None,
+            ),
+            (
+                "parameter alias precedence",
+                json!({
+                    "input": "aliases",
+                    "max_output_tokens": 11,
+                    "max_tokens": 22,
+                    "max_completion_tokens": 33,
+                    "stop": ["first"],
+                    "stop_sequences": ["second"],
+                    "stopSequences": ["third"],
+                    "user_id": "first_user",
+                    "user": "second_user",
+                    "safety_identifier": "third_user"
+                }),
+                json!({
+                    "model": "deepseek-chat",
+                    "stream": false,
+                    "messages": [{"role": "user", "content": "aliases"}],
+                    "max_tokens": 33,
+                    "stop": ["first"],
+                    "user_id": "first_user"
+                }),
+                None,
+            ),
+        ];
+        for (format, expected_format, degraded) in [
+            ("text", None, false),
+            ("json_object", Some(json!({"type": "json_object"})), false),
+            ("json_schema", Some(json!({"type": "json_object"})), true),
+            ("json", Some(json!({"type": "json_object"})), true),
+            (
+                "structured_output",
+                Some(json!({"type": "json_object"})),
+                true,
+            ),
+        ] {
+            let mut expected = json!({
+                "model": "deepseek-chat",
+                "stream": false,
+                "messages": [{"role": "user", "content": "hello"}]
+            });
+            if let Some(format) = expected_format {
+                expected["response_format"] = format;
+            }
+            cases.push((
+                "response format variant",
+                json!({"input": "hello", "response_format": {"type": format}}),
+                expected,
+                degraded.then_some("json_schema"),
+            ));
+        }
+
+        for (label, request, expected_body, degraded_from) in cases {
+            let result = deepseek_transform_request(
+                ProviderId::DeepSeek,
+                ProviderTransformInput::new(
+                    ProviderEndpoint::Responses,
+                    serde_json::to_vec(&request).expect("request serializes"),
+                ),
+            );
+            let body: serde_json::Value =
+                serde_json::from_slice(result.body.as_ref().expect("request body"))
+                    .expect("transformed body is JSON");
+            assert_eq!(body, expected_body, "{label}");
+            match (degraded_from, result.loss) {
+                (Some(from), ProviderTransformLoss::DegradedButSafe { details, .. }) => {
+                    assert_eq!(details["from"], from, "{label}");
+                    assert_eq!(details["to"], "json_object", "{label}");
+                }
+                (None, ProviderTransformLoss::Lossless) => {}
+                (expected, actual) => panic!("{label}: expected {expected:?}, got {actual:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn raw_request_omits_escaped_unicode_whitespace_tool_choice() {
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::RawCommonRequest);
+        input.input =
+            Some(r#"{"input":"hello","tool_choice":{"type":"function","name":"\u2003\u00a0"}}"#);
+        let body = deepseek_kernel(input).expect("raw request kernel");
+        let body: serde_json::Value = serde_json::from_slice(&body).expect("JSON body");
+        assert_eq!(
+            body,
+            json!({
+                "model": "deepseek-chat",
+                "stream": false,
+                "messages": [{"role": "user", "content": "hello"}]
+            })
+        );
+    }
+
+    #[test]
+    fn request_transform_accepts_near_abi_limit_input() {
+        let max_bytes = 4 * 1024 * 1024;
+        let overhead = serde_json::to_vec(&json!({"input": ""}))
+            .expect("empty request serializes")
+            .len();
+        let input_text = "a".repeat(max_bytes - overhead - 1);
+        let request = json!({"input": &input_text});
+        assert_eq!(
+            serde_json::to_vec(&request)
+                .expect("near-limit request serializes")
+                .len(),
+            max_bytes - 1
+        );
+
+        let result = deepseek_transform_request(
+            ProviderId::DeepSeek,
+            ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                serde_json::to_vec(&request).expect("near-limit request serializes"),
+            ),
+        );
+        assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
+        let body: serde_json::Value =
+            serde_json::from_slice(result.body.as_ref().expect("request body"))
+                .expect("transformed body is JSON");
+        assert_eq!(
+            body,
+            json!({
+                "model": "deepseek-chat",
+                "stream": false,
+                "messages": [{"role": "user", "content": input_text}]
+            })
+        );
+    }
+
+    #[test]
+    fn request_transform_rejects_input_over_the_mojo_abi_limit() {
+        let request = json!({"input": "a".repeat(4 * 1024 * 1024)});
+        let result = deepseek_transform_request(
+            ProviderId::DeepSeek,
+            ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                serde_json::to_vec(&request).expect("oversize request serializes"),
+            ),
+        );
+
+        assert!(matches!(
+            result.loss,
+            ProviderTransformLoss::Rejected { .. }
+        ));
+        assert!(result.body.is_none());
     }
 
     #[test]

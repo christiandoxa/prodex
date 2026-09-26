@@ -1,15 +1,8 @@
-#[cfg(any(not(feature = "mojo"), test))]
-#[cfg_attr(all(test, feature = "mojo"), allow(dead_code))]
-#[path = "tooling/messages.rs"]
-mod messages;
 #[path = "tooling/response_tool_calls.rs"]
 mod response_tool_calls;
 #[path = "tooling/messages/thought_signature.rs"]
 mod thought_signature;
 
-#[cfg(any(not(feature = "mojo"), test))]
-#[cfg_attr(all(test, feature = "mojo"), allow(unused_imports))]
-pub(super) use self::messages::deepseek_messages_from_request;
 pub(super) use self::response_tool_calls::deepseek_responses_tool_call_item;
 pub(crate) use self::response_tool_calls::deepseek_rtk_wrapped_tool_arguments;
 pub(crate) use self::thought_signature::deepseek_tool_call_thought_signature_object;
