@@ -216,6 +216,48 @@ fn websocket_stale_previous_response_reuse_uses_injected_threshold() {
         Some(Duration::from_millis(59)),
         Duration::from_millis(60),
     ));
+    assert!(runtime_websocket_previous_response_reuse_is_stale_at(
+        true,
+        Some(Duration::from_nanos(2)),
+        Duration::from_nanos(1),
+    ));
+    assert!(!runtime_websocket_previous_response_reuse_is_stale_at(
+        true,
+        Some(Duration::from_nanos(1)),
+        Duration::from_nanos(2),
+    ));
+    assert!(!runtime_websocket_previous_response_reuse_is_stale_at(
+        false,
+        Some(Duration::from_secs(1)),
+        Duration::ZERO,
+    ));
+    assert!(!runtime_websocket_previous_response_reuse_is_stale_at(
+        true,
+        None,
+        Duration::ZERO,
+    ));
+}
+
+#[test]
+fn websocket_previous_response_reuse_requires_replayable_continuation() {
+    assert!(runtime_websocket_previous_response_reuse_is_nonreplayable(
+        Some("resp_123"),
+        false,
+        None,
+    ));
+    assert!(!runtime_websocket_previous_response_reuse_is_nonreplayable(
+        None, false, None,
+    ));
+    assert!(!runtime_websocket_previous_response_reuse_is_nonreplayable(
+        Some("resp_123"),
+        true,
+        None,
+    ));
+    assert!(!runtime_websocket_previous_response_reuse_is_nonreplayable(
+        Some("resp_123"),
+        false,
+        Some("turn_state"),
+    ));
 }
 
 #[test]
@@ -479,33 +521,113 @@ fn soft_affinity_blocks_fallback_when_weekly_is_exhausted() {
     );
 }
 
-#[cfg(feature = "mojo")]
 #[test]
-fn soft_affinity_mojo_matches_rust_oracle() {
-    let mut summary = healthy_summary();
-    summary.weekly = RuntimeSelectionQuotaWindowSummary {
+fn soft_affinity_expected_values_cover_routes_and_missing_or_exhausted_quota() {
+    let cases = [
+        (
+            RuntimeAffinitySelectionKind::Strict,
+            RuntimeRouteKind::Responses,
+            None,
+            false,
+            false,
+            false,
+            true,
+            "quota_unknown",
+        ),
+        (
+            RuntimeAffinitySelectionKind::Strict,
+            RuntimeRouteKind::Compact,
+            None,
+            false,
+            false,
+            false,
+            false,
+            "quota_windows_unavailable",
+        ),
+        (
+            RuntimeAffinitySelectionKind::Session,
+            RuntimeRouteKind::Compact,
+            None,
+            false,
+            false,
+            false,
+            true,
+            "quota_unknown",
+        ),
+        (
+            RuntimeAffinitySelectionKind::Session,
+            RuntimeRouteKind::Websocket,
+            None,
+            true,
+            false,
+            false,
+            true,
+            "quota_unknown",
+        ),
+        (
+            RuntimeAffinitySelectionKind::Session,
+            RuntimeRouteKind::Websocket,
+            None,
+            true,
+            true,
+            false,
+            false,
+            "quota_windows_unavailable",
+        ),
+        (
+            RuntimeAffinitySelectionKind::Session,
+            RuntimeRouteKind::Responses,
+            Some(RuntimeSelectionQuotaSource::LiveProbe),
+            false,
+            false,
+            true,
+            false,
+            "quota_exhausted",
+        ),
+    ];
+    let mut exhausted = healthy_summary();
+    exhausted.weekly = RuntimeSelectionQuotaWindowSummary {
         status: RuntimeSelectionQuotaWindowStatus::Exhausted,
         remaining_percent: 0,
     };
-    summary.route_band = RuntimeSelectionQuotaPressureBand::Exhausted;
-    let input = RuntimeSoftAffinityPolicyInput {
-        affinity_kind: RuntimeAffinitySelectionKind::Pinned,
-        route_kind: RuntimeRouteKind::Responses,
-        quota_summary: summary,
-        quota_source: Some(RuntimeSelectionQuotaSource::LiveProbe),
-        current_profile_matches_candidate: false,
-        has_route_eligible_quota_fallback: true,
-        responses_critical_floor_percent: 2,
-    };
+    exhausted.route_band = RuntimeSelectionQuotaPressureBand::Exhausted;
 
-    assert_eq!(
-        runtime_soft_affinity_allowed(input),
-        runtime_soft_affinity_allowed_rust(input),
-    );
-    assert_eq!(
-        runtime_soft_affinity_rejection_reason(input),
-        runtime_soft_affinity_rejection_reason_rust(input),
-    );
+    for (
+        affinity_kind,
+        route_kind,
+        quota_source,
+        current_matches,
+        has_fallback,
+        weekly_exhausted,
+        expected,
+        reason,
+    ) in cases
+    {
+        let input = RuntimeSoftAffinityPolicyInput {
+            affinity_kind,
+            route_kind,
+            quota_summary: if weekly_exhausted {
+                exhausted
+            } else {
+                healthy_summary()
+            },
+            quota_source,
+            current_profile_matches_candidate: current_matches,
+            has_route_eligible_quota_fallback: has_fallback,
+            responses_critical_floor_percent: 10,
+        };
+        let label = format!(
+            "{affinity_kind:?} {route_kind:?} {quota_source:?} current={current_matches} fallback={has_fallback}"
+        );
+        assert_eq!(runtime_soft_affinity_allowed(input), expected, "{label}");
+        if !expected {
+            assert_eq!(
+                runtime_soft_affinity_rejection_reason(input),
+                reason,
+                "{label}"
+            );
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

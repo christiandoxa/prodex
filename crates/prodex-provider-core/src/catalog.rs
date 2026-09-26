@@ -1,8 +1,6 @@
 use crate::{ProviderEndpoint, ProviderId, ProviderReasoningEffort};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::BTreeMap;
-#[cfg(any(not(feature = "mojo"), test))]
-use std::collections::BTreeSet;
 use std::fmt;
 use std::sync::OnceLock;
 
@@ -23,9 +21,9 @@ where
     }
 }
 
-#[cfg(all(test, feature = "mojo"))]
-#[path = "catalog_parity_tests.rs"]
-mod catalog_parity_tests;
+#[cfg(test)]
+#[path = "catalog_tests.rs"]
+mod catalog_tests;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProviderModelCatalogLimitError {
@@ -93,19 +91,13 @@ pub enum ProviderModelChoice {
 
 #[path = "catalog/reasoning.rs"]
 mod reasoning;
-#[cfg(all(test, feature = "mojo"))]
-pub(super) use reasoning::provider_model_reasoning_resolution_rust;
 pub use reasoning::{
     ProviderModelReasoningError, ProviderModelReasoningResolution,
     provider_model_reasoning_resolution,
 };
-#[cfg(all(test, feature = "mojo"))]
-pub(super) use reasoning::{reasoning_catalog_data, reasoning_effort_label};
 
 #[path = "catalog/serialization.rs"]
 mod serialization;
-#[cfg(all(test, feature = "mojo"))]
-pub(super) use serialization::merge_catalog_ids_rust;
 pub use serialization::{provider_catalog_json, provider_model_catalog_json, provider_model_json};
 
 pub fn merge_provider_model_catalog_json<'a>(
@@ -115,7 +107,6 @@ pub fn merge_provider_model_catalog_json<'a>(
     serialization::merge_provider_model_catalog_json(provider, additional_models)
 }
 
-#[cfg(feature = "mojo")]
 fn merge_catalog_ids_with_mojo(provider: ProviderId, additional: &[&str]) -> Vec<usize> {
     let entries = provider_catalog_entries_for(provider);
     let aliases = entries
@@ -135,7 +126,6 @@ fn merge_catalog_ids_with_mojo(provider: ProviderId, additional: &[&str]) -> Vec
 }
 
 /// Builds the offline model picker from the canonical catalog plus local configuration.
-#[cfg(feature = "mojo")]
 pub fn resolve_provider_model_choices(
     provider: ProviderId,
     configured_models: &[String],
@@ -182,71 +172,6 @@ pub fn resolve_provider_model_choices(
         .collect()
 }
 
-#[cfg(not(feature = "mojo"))]
-pub fn resolve_provider_model_choices(
-    provider: ProviderId,
-    configured_models: &[String],
-    current_model: Option<&str>,
-) -> Vec<ProviderModelChoice> {
-    resolve_provider_model_choices_rust(provider, configured_models, current_model)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn resolve_provider_model_choices_rust(
-    provider: ProviderId,
-    configured_models: &[String],
-    current_model: Option<&str>,
-) -> Vec<ProviderModelChoice> {
-    let mut choices = vec![ProviderModelChoice::ProviderDefault];
-    let mut seen = BTreeSet::new();
-    let normalize = |model: &str| {
-        provider_catalog_entry_rust(provider, model)
-            .map(|entry| entry.id.as_str())
-            .or_else(|| {
-                crate::models::provider_model_spec_rust(provider, model).map(|spec| spec.id)
-            })
-            .unwrap_or(model)
-            .to_string()
-    };
-    for entry in provider_catalog_entries_for(provider) {
-        let model = normalize(&entry.id);
-        if seen.len() < PROVIDER_MODEL_CATALOG_HARD_LIMIT && seen.insert(model.to_ascii_lowercase())
-        {
-            choices.push(ProviderModelChoice::Model(model));
-        }
-    }
-    let current = current_model
-        .filter(|model| !model.trim().is_empty())
-        .map(normalize);
-    let current_key = current.as_ref().map(|model| model.to_ascii_lowercase());
-    let reserve_current = usize::from(current_key.as_ref().is_some_and(|key| !seen.contains(key)));
-    for model in configured_models {
-        if model.trim().is_empty() {
-            continue;
-        }
-        let model = normalize(model);
-        let key = model.to_ascii_lowercase();
-        if current_key.as_ref() == Some(&key) {
-            continue;
-        }
-        if seen.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT - reserve_current {
-            break;
-        }
-        if seen.insert(key) {
-            choices.push(ProviderModelChoice::Model(model));
-        }
-    }
-    if let Some(model) = current
-        && seen.len() < PROVIDER_MODEL_CATALOG_HARD_LIMIT
-        && seen.insert(model.to_ascii_lowercase())
-    {
-        choices.push(ProviderModelChoice::Model(model));
-    }
-    choices.push(ProviderModelChoice::Custom);
-    choices
-}
-
-#[cfg(feature = "mojo")]
 fn normalize_model(provider: ProviderId, model: &str) -> String {
     provider_catalog_entry(provider, model)
         .map(|entry| entry.id.as_str())
@@ -276,7 +201,6 @@ pub fn provider_catalog_entries_for(provider: ProviderId) -> Vec<&'static Provid
         .collect()
 }
 
-#[cfg(feature = "mojo")]
 pub fn provider_catalog_entry(
     provider: ProviderId,
     model: &str,
@@ -297,33 +221,9 @@ pub fn provider_catalog_entry(
             aliases,
         })
         .collect::<Vec<_>>();
-    prodex_mojo_core::rich::resolve_catalog_model(&catalog, model)
+    prodex_mojo_core::rich::resolve_catalog_model(&catalog, model.trim())
         .expect("Mojo catalog lookup returned an invalid structured result")
         .and_then(|index| entries.get(index).copied())
-}
-
-#[cfg(not(feature = "mojo"))]
-pub fn provider_catalog_entry(
-    provider: ProviderId,
-    model: &str,
-) -> Option<&'static ProviderCatalogEntry> {
-    provider_catalog_entry_rust(provider, model)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn provider_catalog_entry_rust(
-    provider: ProviderId,
-    model: &str,
-) -> Option<&'static ProviderCatalogEntry> {
-    let model = model.trim();
-    provider_catalog_entries_static().iter().find(|entry| {
-        entry.provider == provider
-            && (entry.id.eq_ignore_ascii_case(model)
-                || entry
-                    .aliases
-                    .iter()
-                    .any(|alias| alias.eq_ignore_ascii_case(model)))
-    })
 }
 
 #[cfg(test)]
@@ -635,55 +535,8 @@ mod tests {
         assert_eq!(resolution.selected_reasoning_effort, None);
     }
 
-    #[cfg(feature = "mojo")]
     #[test]
-    fn model_reasoning_resolution_matches_rust_oracle_for_catalog_cases() {
-        for (provider, model, effort) in [
-            (ProviderId::OpenAi, Some("luna"), Some("max")),
-            (ProviderId::Copilot, Some("luna"), Some("max")),
-            (ProviderId::Kiro, Some("luna"), Some("xhigh")),
-            (ProviderId::Gemini, Some("auto"), None),
-            (ProviderId::OpenAi, Some("unknown"), Some("ultra")),
-        ] {
-            let (entries, efforts, _) = reasoning_catalog_data(provider);
-            let expected = provider_model_reasoning_resolution_rust(
-                &entries,
-                &efforts,
-                model,
-                crate::provider_runtime_metadata(provider).map(|metadata| metadata.default_model),
-                effort,
-            )
-            .map(|plan| {
-                (
-                    plan.model_index,
-                    plan.supported_efforts,
-                    plan.default_effort,
-                    plan.selected_effort,
-                )
-            });
-            let actual = provider_model_reasoning_resolution(provider, model, effort).map(|plan| {
-                (
-                    plan.model_index,
-                    plan.supported_reasoning_efforts
-                        .iter()
-                        .filter_map(|effort| reasoning_effort_label(*effort))
-                        .map(str::to_string)
-                        .collect::<Vec<_>>(),
-                    plan.default_reasoning_effort
-                        .and_then(reasoning_effort_label)
-                        .map(str::to_string),
-                    plan.selected_reasoning_effort
-                        .and_then(reasoning_effort_label)
-                        .map(str::to_string),
-                )
-            });
-            assert_eq!(actual, expected, "{provider:?} {model:?} {effort:?}");
-        }
-    }
-
-    #[cfg(feature = "mojo")]
-    #[test]
-    fn mojo_catalog_preserves_provider_scoped_identity_and_order() {
+    fn catalog_preserves_provider_scoped_identity_and_order() {
         let entries = provider_catalog_entries_for(ProviderId::OpenAi);
         let first = entries[0];
         let alias = first

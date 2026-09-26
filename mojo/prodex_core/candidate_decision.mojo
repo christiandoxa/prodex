@@ -444,6 +444,48 @@ def runtime_selection_bool(value: Int64) -> Bool:
     return value == 1
 
 
+def runtime_selection_duration_is_at_least(
+    elapsed_seconds: UInt64,
+    elapsed_nanoseconds: UInt64,
+    stale_after_seconds: UInt64,
+    stale_after_nanoseconds: UInt64,
+) -> Bool:
+    return elapsed_seconds > stale_after_seconds or (
+        elapsed_seconds == stale_after_seconds
+        and elapsed_nanoseconds >= stale_after_nanoseconds
+    )
+
+
+@export("prodex_runtime_websocket_reuse_stale_v1")
+def prodex_runtime_websocket_reuse_stale_v1(
+    nonreplayable_previous_response_reuse: Int64,
+    reuse_terminal_idle_present: Int64,
+    reuse_terminal_idle_seconds: UInt64,
+    reuse_terminal_idle_nanoseconds: UInt64,
+    reuse_stale_after_seconds: UInt64,
+    reuse_stale_after_nanoseconds: UInt64,
+) abi("C") -> Int64:
+    if (
+        nonreplayable_previous_response_reuse < 0
+        or nonreplayable_previous_response_reuse > 1
+        or reuse_terminal_idle_present < 0
+        or reuse_terminal_idle_present > 1
+        or reuse_terminal_idle_nanoseconds >= 1_000_000_000
+        or reuse_stale_after_nanoseconds >= 1_000_000_000
+    ):
+        return -1
+    return Int64(
+        runtime_selection_bool(nonreplayable_previous_response_reuse)
+        and runtime_selection_bool(reuse_terminal_idle_present)
+        and runtime_selection_duration_is_at_least(
+            reuse_terminal_idle_seconds,
+            reuse_terminal_idle_nanoseconds,
+            reuse_stale_after_seconds,
+            reuse_stale_after_nanoseconds,
+        )
+    )
+
+
 @export("prodex_runtime_affinity_selection_plan_v1")
 def prodex_runtime_affinity_selection_plan_v1(
     route_kind: Int64,
@@ -546,7 +588,12 @@ def prodex_runtime_affinity_selection_plan_v1(
     var reuse_stale = (
         reuse_nonreplayable
         and runtime_selection_bool(reuse_terminal_idle_present)
-        and reuse_terminal_idle_ms >= reuse_stale_after_ms
+        and runtime_selection_duration_is_at_least(
+            reuse_terminal_idle_ms // 1000,
+            (reuse_terminal_idle_ms % 1000) * 1_000_000,
+            reuse_stale_after_ms // 1000,
+            (reuse_stale_after_ms % 1000) * 1_000_000,
+        )
     )
     var wait_owner: Int64 = 0
     if runtime_selection_bool(session_profile_present):

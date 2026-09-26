@@ -30,6 +30,9 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/mojo.rs",
   "crates/prodex-runtime-proxy/src/quota.rs",
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
+  "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
+  "crates/prodex-runtime-proxy/tests/src/selection_policy.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
@@ -63,6 +66,9 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/fallback/chains.rs",
   "crates/prodex-provider-core/src/fallback/chains/gemini.rs",
   "crates/prodex-provider-core/src/catalog.rs",
+  "crates/prodex-provider-core/src/catalog/reasoning.rs",
+  "crates/prodex-provider-core/src/catalog/serialization.rs",
+  "crates/prodex-provider-core/src/catalog_tests.rs",
   "crates/prodex-provider-core/src/models.rs",
   "crates/prodex-provider-core/src/translators/anthropic/messages.rs",
   "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs",
@@ -111,6 +117,9 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
+  "crates/prodex-runtime-proxy/tests/src/selection_policy.rs",
   "crates/prodex-runtime-quota/src/selection/scoring.rs",
   "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
   "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
@@ -152,6 +161,10 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/openai_chat_compat_params.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_request_mojo.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_request_mojo_tests.rs",
+  "crates/prodex-provider-core/src/catalog.rs",
+  "crates/prodex-provider-core/src/catalog/reasoning.rs",
+  "crates/prodex-provider-core/src/catalog/serialization.rs",
+  "crates/prodex-provider-core/src/models.rs",
 ]);
 const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|mojo-core|runtime-log-mojo|state-summary-mojo)"\s*\)/u;
 const ANTHROPIC_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs";
@@ -179,6 +192,8 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-provider-core/src/translators/openai_chat_compat_request/validation.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_request/validation/input_content.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_util.rs",
+  "crates/prodex-provider-core/src/catalog_parity_tests.rs",
+  "crates/prodex-runtime-proxy/src/selection_policy/rust_oracles.rs",
 ];
 const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-context/src/critical_signal.rs",
@@ -196,6 +211,8 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/src/smart_context/safety.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
   "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
+  "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
   "crates/prodex-runtime-tuning/src/capacity.rs",
   "crates/prodex-provider-core/src/fallback/chains.rs",
   "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
@@ -237,6 +254,10 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
   "crates/prodex-provider-core/src/translators/kiro/request/semantics_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/stream.rs",
+  "crates/prodex-provider-core/src/catalog.rs",
+  "crates/prodex-provider-core/src/catalog/reasoning.rs",
+  "crates/prodex-provider-core/src/catalog/serialization.rs",
+  "crates/prodex-provider-core/src/models.rs",
 ]);
 const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-app/Cargo.toml", "mojo-core"],

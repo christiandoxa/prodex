@@ -92,7 +92,6 @@ pub fn provider_model_reasoning_resolution(
     let (entries, efforts, aliases) = reasoning_catalog_data(provider);
     let fallback_model = provider_runtime_metadata(provider).map(|metadata| metadata.default_model);
 
-    #[cfg(feature = "mojo")]
     let plan = {
         let models = entries
             .iter()
@@ -129,18 +128,6 @@ pub fn provider_model_reasoning_resolution(
         }
     };
 
-    #[cfg(not(feature = "mojo"))]
-    let _ = &aliases;
-
-    #[cfg(not(feature = "mojo"))]
-    let plan = provider_model_reasoning_resolution_rust(
-        &entries,
-        &efforts,
-        model.filter(|model| !model.trim().is_empty()),
-        fallback_model,
-        requested_effort.filter(|effort| !effort.trim().is_empty()),
-    )?;
-
     let supported_reasoning_efforts = plan
         .supported_efforts
         .iter()
@@ -160,64 +147,5 @@ pub fn provider_model_reasoning_resolution(
             .as_deref()
             .map(ProviderReasoningEffort::parse)
             .filter(|effort| *effort != ProviderReasoningEffort::Unknown),
-    })
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(crate) fn provider_model_reasoning_resolution_rust(
-    entries: &[&ProviderCatalogEntry],
-    efforts: &[Vec<&str>],
-    model: Option<&str>,
-    fallback_model: Option<&str>,
-    requested_effort: Option<&str>,
-) -> Result<ProviderReasoningPlan, ProviderModelReasoningError> {
-    let model_index = model
-        .and_then(|model| find_catalog_entry_rust(entries, model))
-        .or_else(|| fallback_model.and_then(|model| find_catalog_entry_rust(entries, model)));
-    let Some(model_index) = model_index else {
-        return Ok(ProviderReasoningPlan {
-            model_index: None,
-            supported_efforts: Vec::new(),
-            selected_effort: None,
-            default_effort: None,
-        });
-    };
-    let supported_efforts = efforts[model_index]
-        .iter()
-        .map(|effort| (*effort).to_string())
-        .collect::<Vec<_>>();
-    let default_effort = entries[model_index]
-        .default_reasoning_effort
-        .and_then(reasoning_effort_label)
-        .map(str::to_string)
-        .or_else(|| supported_efforts.first().cloned());
-    let selected_effort = if let Some(requested) = requested_effort {
-        Some(
-            supported_efforts
-                .iter()
-                .find(|effort| effort.eq_ignore_ascii_case(requested.trim()))
-                .cloned()
-                .ok_or(ProviderModelReasoningError::UnsupportedEffort)?,
-        )
-    } else {
-        default_effort.clone()
-    };
-    Ok(ProviderReasoningPlan {
-        model_index: Some(model_index),
-        supported_efforts,
-        selected_effort,
-        default_effort,
-    })
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn find_catalog_entry_rust(entries: &[&ProviderCatalogEntry], model: &str) -> Option<usize> {
-    let model = model.trim();
-    entries.iter().position(|entry| {
-        entry.id.eq_ignore_ascii_case(model)
-            || entry
-                .aliases
-                .iter()
-                .any(|alias| alias.eq_ignore_ascii_case(model))
     })
 }

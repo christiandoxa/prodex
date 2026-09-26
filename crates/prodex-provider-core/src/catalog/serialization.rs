@@ -1,14 +1,8 @@
-#[cfg(any(not(feature = "mojo"), test))]
-use super::provider_catalog_entries_static;
-#[cfg(any(not(feature = "mojo"), test))]
-use super::provider_catalog_entry_rust;
 use super::{
     PROVIDER_MODEL_CATALOG_HARD_LIMIT, ProviderCatalogEntry, ProviderId,
     ProviderModelCatalogLimitError, ProviderModelChoice, provider_catalog_entries_for,
     provider_catalog_entry, resolve_provider_model_choices,
 };
-#[cfg(any(not(feature = "mojo"), test))]
-use std::collections::BTreeSet;
 
 pub fn provider_catalog_json(provider: ProviderId) -> Vec<serde_json::Value> {
     provider_catalog_entries_for(provider)
@@ -104,10 +98,7 @@ pub fn merge_provider_model_catalog_json<'a>(
         .iter()
         .map(|(_, id)| id.as_str())
         .collect::<Vec<_>>();
-    #[cfg(feature = "mojo")]
     let accepted = super::merge_catalog_ids_with_mojo(provider, &additional_ids);
-    #[cfg(not(feature = "mojo"))]
-    let accepted = merge_catalog_ids_rust(provider, &additional_ids);
     for index in accepted {
         if models.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
             return Err(ProviderModelCatalogLimitError { provider });
@@ -119,27 +110,4 @@ pub fn merge_provider_model_catalog_json<'a>(
         models.push((*additional_models[original_index]).clone());
     }
     Ok(models)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(crate) fn merge_catalog_ids_rust(provider: ProviderId, additional: &[&str]) -> Vec<usize> {
-    let mut seen = provider_catalog_entries_static()
-        .iter()
-        .filter(|entry| entry.provider == provider)
-        .map(|entry| entry.id.to_ascii_lowercase())
-        .collect::<BTreeSet<_>>();
-    let mut accepted = Vec::new();
-    for (index, id) in additional.iter().enumerate() {
-        if id.trim().is_empty() {
-            continue;
-        }
-        let canonical = provider_catalog_entry_rust(provider, id)
-            .map(|entry| entry.id.as_str())
-            .or_else(|| crate::models::provider_model_spec_rust(provider, id).map(|spec| spec.id))
-            .unwrap_or_else(|| id.trim());
-        if seen.insert(canonical.to_ascii_lowercase()) {
-            accepted.push(index);
-        }
-    }
-    accepted
 }
