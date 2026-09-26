@@ -181,6 +181,8 @@ def registry_model_provider(view: ProdexRichStringView) -> Int64:
     if resolved_alias >= 0:
         return resolved_alias
     var value = registry_trimmed(view)
+    if rich_view_matches_literal["prodex-openai-governed-http"](value, True):
+        return PROVIDER_OPENAI
     if rich_view_matches_literal["prodex-anthropic"](value, True):
         return PROVIDER_ANTHROPIC
     if rich_view_matches_literal["prodex-copilot"](value, True):

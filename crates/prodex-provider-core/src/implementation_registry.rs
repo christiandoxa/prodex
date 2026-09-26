@@ -249,6 +249,11 @@ mod tests {
         assert_eq!(registry.resolve_alias("claude"), Some(Anthropic));
         assert_eq!(registry.resolve_alias("github_copilot"), Some(Copilot));
         assert_eq!(registry.resolve_alias("google"), Some(Gemini));
+        assert_eq!(registry.resolve_alias("prodex-openai-governed-http"), None);
+        assert_eq!(
+            registry.resolve_model_provider_id("prodex-openai-governed-http"),
+            Some(OpenAi)
+        );
         assert_eq!(registry.resolve_alias("prodex-gemini"), None);
         assert_eq!(
             registry.resolve_model_provider_id("prodex-gemini"),

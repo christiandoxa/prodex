@@ -58,7 +58,7 @@ identifies quota or rate-limit exhaustion.
 OpenAI regular usage, additional rate-limit buckets, credits, and reset credits
 remain separate. Additional buckets are retained with explicit backend admission
 state, model mapping, and unknown fields; the current release-qualified Codex
-reference is `rust-v0.157.0`, while runtime accepts compatible Codex 0.153.2+
+reference is `rust-v0.157.1`, while runtime accepts compatible Codex 0.153.2+
 with the required app-server capabilities. The qualified reference exposes these fields, but an explicit source-backed Luna
 Reserve identifier is still required before unknown Reserve state is promoted
 into automatic routing. An explicitly labelled `Luna Reserve`

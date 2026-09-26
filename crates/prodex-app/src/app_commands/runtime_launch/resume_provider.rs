@@ -169,6 +169,10 @@ mod tests {
             resolve_bound_provider_identity(Some(prodex_cli::SUPER_KIRO_PROVIDER_ID)).unwrap(),
             Some(prodex_provider_core::ProviderId::Kiro)
         );
+        assert_eq!(
+            resolve_bound_provider_identity(Some("prodex-openai-governed-http")).unwrap(),
+            Some(prodex_provider_core::ProviderId::OpenAi)
+        );
         let error = resolve_bound_provider_identity(Some("unknown-provider"))
             .unwrap_err()
             .to_string();

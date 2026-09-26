@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.157.0 release",
+      "baseline_source": "openai/codex rust-v0.157.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -144,7 +144,7 @@
         },
         {
           "path": "codex-rs/models-manager/models.json",
-          "reason": "Owns bundled GPT-5.6 plus Codex 0.157.0 GPT-6 Sol/Luna model metadata and context-window contracts. Prodex preserves these upstream values while keeping its provider catalogs independently governed.",
+          "reason": "Owns bundled GPT-5.6 plus Codex 0.157.1 GPT-6 Sol/Luna model metadata and context-window contracts. Prodex preserves these upstream values while keeping its provider catalogs independently governed.",
           "required_contains": [
             "\"display_name\": \"GPT-6-Luna\"",
             "\"display_name\": \"GPT-6-Sol\"",
@@ -1675,7 +1675,7 @@
           "id": "models-manager.gpt-6-sol-luna",
           "kind": "model_catalog",
           "file": "codex-rs/models-manager/models.json",
-          "reason": "Codex 0.157.0 retains GPT-6 Sol and GPT-6 Luna in the picker with a 272,000 base context window and 872,000 maximum context window; Sol supports Ultra while Luna tops out at Max.",
+          "reason": "Codex 0.157.1 retains GPT-6 Sol and GPT-6 Luna in the picker with a 272,000 base context window and 872,000 maximum context window; Sol supports Ultra while Luna tops out at Max.",
           "file_contains_all": [
             "\"slug\": \"gpt-6-sol\"",
             "\"display_name\": \"GPT-6-Sol\"",
@@ -1688,7 +1688,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.157.0",
+      "tested_codex_release": "rust-v0.157.1",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1895,6 +1895,22 @@
           ],
           "prodex_action": "Preserve Codex 0.157 additive app-server fields and typed invalid_prompt behavior; track GPT-6 Sol/Luna Bedrock IDs/default without reimplementing the Bedrock catalog; respect the upstream first-party-only internal metadata gate rather than reconstructing filtered metadata in the Prodex custom provider; retain the 0.431.1 workspace-routing projection and existing proxy affinity/rotation boundaries. Super direct resume additionally trusts the persisted session cwd before TUI startup so prodex s <uuid> remains zero-prompt across workspaces.",
           "compatibility_evidence": "Exact 0.156.1 and 0.157.0 tagged source archives, official release/tag metadata, official Linux musl binary checksum/version smoke, updated critical-file/semantic baseline guards, focused direct-Super-resume trust regression coverage, and runtime/provider compatibility tests are recorded in migration/codex-rust-v0.157.0-audit.md."
+        },
+        {
+          "from": "rust-v0.157.0",
+          "to": "rust-v0.157.1",
+          "upstream_commit": "36650394c5b38c2990ccf2a3457165ca3e9d9726",
+          "upstream_tag_object": "ac0e23e5232692b95268583c8278c50b8c436d2b",
+          "upstream_release_date": "2026-09-26T01:02:31Z",
+          "tree_comparison": "exact tagged source archives; 10 changed files, 441 additions, 55 deletions",
+          "runtime_changes": [
+            "Windows app-server daemon launch no longer rejects valid residual outer Job Object membership after inner-job breakaway, while retaining the suspended breakaway probe.",
+            "Windows detached daemon launches clear inheritable standard-handle flags so launcher output pipes can close even while the daemon remains alive.",
+            "Windows code-mode hosts and local stdio MCP servers use CREATE_NO_WINDOW to avoid spawning console windows; MCP startup-grace tests receive additional timing margin.",
+            "Linux runtime, Responses transport, session persistence, provider routing, model metadata, and app-server protocol surfaces tracked by Prodex are unchanged from 0.157.0."
+          ],
+          "prodex_action": "Advance the tested upstream baseline to 0.157.1 without changing Linux proxy/session semantics. Preserve the upstream Windows process-lifecycle fixes. Separately fix Prodex direct Super resume so the persisted internal model_provider prodex-openai-governed-http resolves to canonical OpenAI instead of being rejected before Codex can resume the thread.",
+          "compatibility_evidence": "Exact 0.157.0 and 0.157.1 source archives, official release/tag metadata, official Linux musl binary checksum/version smoke, all 797 critical-file/semantic markers replayed with zero misses, isolated app-server initialize, focused provider-registry and resume tests, and a dry-run of the originally failing governed-OpenAI Super session are recorded in migration/codex-rust-v0.157.1-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -1917,26 +1933,18 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.157.0",
-      "name": "0.157.0",
-      "published_at": "2026-09-25T02:31:06Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.157.0",
+      "tag_name": "rust-v0.157.1",
+      "name": "0.157.1",
+      "published_at": "2026-09-26T01:02:31Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.157.1",
       "body_head": [
-        "## New Features",
+        "## Chores",
         "",
-        "- Added GPT-6 Sol and Luna, including Amazon Bedrock support and migration prompts for older models. (#47332, #47347)",
-        "- Enabled fullscreen transcripts by default and added Shift-click to extend text selections. (#47178, #47414)",
-        "- Enabled automatic background-server startup for eligible interactive sessions, with recovery choices when server settings are incompatible. (#47179, #47318)",
-        "- Added an f shortcut to fork conversations open in another app, preserving drafts and queued prompts. (#47185)",
-        "- Made /import available in remote sessions and local background-server sessions. (#47317)",
+        "- Release highlights could not be determined: the supplied PR index is empty, and the GitHub tag comparison returned 404.",
         "",
-        "## Bug Fixes",
+        "## Changelog",
         "",
-        "- Preserved active voice conversations when switching threads. (#47381)",
-        "- Fixed configured proxy routing for realtime connections and standalone web search, including search redirects. (#47101, #47142, #47204)",
-        "- Enforced network restrictions across redirects and ongoing HTTP and WebSocket traffic, including cancellation when policy changes revoke access. (#47389, #47407)",
-        "",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.156.0...rust-v0.157.0"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.157.0...rust-v0.157.1"
       ]
     }
   },
