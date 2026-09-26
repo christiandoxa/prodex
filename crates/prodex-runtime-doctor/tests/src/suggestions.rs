@@ -46,6 +46,38 @@ fn runtime_doctor_setting<'a>(
 #[test]
 fn runtime_doctor_policy_suggestions_cover_pressure_fixture_logs() {
     let suggestions = runtime_doctor_fixture_suggestions(LANE_PRESSURE_LOG);
+    assert_eq!(
+        suggestions,
+        vec![RuntimeDoctorPolicySuggestion {
+            id: "lane_pressure".to_string(),
+            title: "Lane pressure".to_string(),
+            severity: "medium".to_string(),
+            reason:
+                "2 lane-limit marker(s) on lane=compact; apply only if host/network headroom exists"
+                    .to_string(),
+            markers: vec!["runtime_proxy_lane_limit_reached".to_string()],
+            settings: vec![
+                RuntimeDoctorPolicySettingSuggestion {
+                    section: "runtime_proxy".to_string(),
+                    key: "compact_active_limit".to_string(),
+                    current_value: 1,
+                    suggested_value: 12,
+                    rationale: "raise the compact lane cap after repeated lane-limit markers"
+                        .to_string(),
+                },
+                RuntimeDoctorPolicySettingSuggestion {
+                    section: "runtime_proxy".to_string(),
+                    key: "active_request_limit".to_string(),
+                    current_value: 8,
+                    suggested_value: 14,
+                    rationale: "keep the global admission cap above the suggested lane cap"
+                        .to_string(),
+                },
+            ],
+            snippet: "[runtime_proxy]\ncompact_active_limit = 12\nactive_request_limit = 14"
+                .to_string(),
+        }]
+    );
     let lane = runtime_doctor_suggestion(&suggestions, "lane_pressure");
     assert_eq!(lane.markers, vec!["runtime_proxy_lane_limit_reached"]);
     assert!(lane.snippet.contains("compact_active_limit = "));

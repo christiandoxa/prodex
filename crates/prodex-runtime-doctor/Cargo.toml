@@ -13,12 +13,12 @@ path = "src/lib.rs"
 [features]
 default = ["runtime-log-mojo", "state-summary-mojo"]
 mojo = ["runtime-log-mojo", "runtime_proxy_crate/mojo", "state-summary-mojo"]
-runtime-log-mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-rich"]
+runtime-log-mojo = []
 state-summary-mojo = ["runtime-log-mojo"]
 
 [dependencies]
 anyhow = { workspace = true }
-prodex_mojo_core = { workspace = true, optional = true }
+prodex_mojo_core = { workspace = true, features = ["mojo-rich"] }
 prodex_quota = { workspace = true }
 prodex_runtime_state = { workspace = true }
 runtime_proxy_crate = { workspace = true }

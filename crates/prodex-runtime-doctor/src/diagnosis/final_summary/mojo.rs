@@ -129,7 +129,11 @@ fn marker_count(summary: &RuntimeDoctorSummary, marker: &str) -> i64 {
 fn input(summary: &RuntimeDoctorSummary) -> RuntimeDoctorSummaryPlanInput {
     let mut marker_counts = [0_i64; RUNTIME_DOCTOR_SUMMARY_MARKER_COUNT];
     for (index, marker) in RUNTIME_DOCTOR_SUMMARY_MARKERS.iter().enumerate() {
-        marker_counts[index] = marker_count(summary, marker);
+        marker_counts[index] = if *marker == "compat_warning" {
+            marker_count_value(summary.compat_warning_count)
+        } else {
+            marker_count(summary, marker)
+        };
     }
     let startup_audit_risk = summary
         .marker_last_fields
@@ -203,11 +207,8 @@ pub(super) fn runtime_doctor_default_diagnosis(
     let kind = plan.diagnosis_kind;
     let values: Vec<Option<Cow<'_, str>>> = match kind {
         RUNTIME_DOCTOR_DIAGNOSIS_LANE_PRESSURE => vec![
-            Some(Cow::Borrowed(field(
-                summary,
-                "runtime_proxy_lane_limit_reached",
-                "lane",
-            ))),
+            runtime_doctor_marker_last_field(summary, "runtime_proxy_lane_limit_reached", "lane")
+                .map(Cow::Borrowed),
             Some(Cow::Owned(runtime_doctor_lane_pressure_next_step(summary))),
         ],
         RUNTIME_DOCTOR_DIAGNOSIS_ACTIVE_PRESSURE => vec![Some(Cow::Owned(
@@ -232,7 +233,7 @@ pub(super) fn runtime_doctor_default_diagnosis(
                 runtime_doctor_marker_scope(summary, "profile_health", "profile", "route")
                     .unwrap_or_else(|| "unknown route".to_string()),
             )),
-            Some(Cow::Borrowed(field(summary, "profile_health", "score"))),
+            runtime_doctor_marker_last_field(summary, "profile_health", "score").map(Cow::Borrowed),
             runtime_doctor_marker_last_field(summary, "profile_health", "reason")
                 .map(Cow::Borrowed),
             Some(Cow::Owned(runtime_doctor_route_health_next_step(summary))),
@@ -241,16 +242,18 @@ pub(super) fn runtime_doctor_default_diagnosis(
             runtime_doctor_profile_auth_recovery_next_step(summary),
         ))],
         RUNTIME_DOCTOR_DIAGNOSIS_PROVIDER_AUTH_FAILURE => vec![
-            Some(Cow::Borrowed(field(
+            runtime_doctor_marker_last_field(
                 summary,
                 "local_rewrite_provider_auth_failure",
                 "provider",
-            ))),
-            Some(Cow::Borrowed(field(
+            )
+            .map(Cow::Borrowed),
+            runtime_doctor_marker_last_field(
                 summary,
                 "local_rewrite_provider_auth_failure",
                 "profile",
-            ))),
+            )
+            .map(Cow::Borrowed),
         ],
         RUNTIME_DOCTOR_DIAGNOSIS_CHAIN_DEAD | RUNTIME_DOCTOR_DIAGNOSIS_CHAIN_RETRIED => {
             vec![summary.latest_chain_event.as_deref().map(Cow::Borrowed)]
@@ -269,7 +272,7 @@ pub(super) fn runtime_doctor_default_diagnosis(
                         summary, marker,
                     ),
                 )),
-                Some(Cow::Borrowed(field(summary, marker, "reason"))),
+                runtime_doctor_marker_last_field(summary, marker, "reason").map(Cow::Borrowed),
                 super::continuations::runtime_doctor_has_context_dependent_fail_closed(summary)
                     .then_some(Cow::Borrowed("1")),
                 Some(Cow::Owned(
@@ -285,23 +288,17 @@ pub(super) fn runtime_doctor_default_diagnosis(
                         summary, marker,
                     ),
                 )),
-                Some(Cow::Borrowed(field(summary, marker, "reason"))),
+                runtime_doctor_marker_last_field(summary, marker, "reason").map(Cow::Borrowed),
             ]
         }
         RUNTIME_DOCTOR_DIAGNOSIS_PREVIOUS_RESPONSE_NOT_FOUND => vec![Some(Cow::Owned(
             runtime_doctor_count_breakdown(&summary.previous_response_not_found_by_route),
         ))],
         RUNTIME_DOCTOR_DIAGNOSIS_COMPACT_FINAL_FAILURE => vec![
-            Some(Cow::Borrowed(field(
-                summary,
-                "compact_final_failure",
-                "exit",
-            ))),
-            Some(Cow::Borrowed(field(
-                summary,
-                "compact_final_failure",
-                "reason",
-            ))),
+            runtime_doctor_marker_last_field(summary, "compact_final_failure", "exit")
+                .map(Cow::Borrowed),
+            runtime_doctor_marker_last_field(summary, "compact_final_failure", "reason")
+                .map(Cow::Borrowed),
             Some(Cow::Owned(runtime_doctor_compact_final_failure_next_step(
                 summary,
             ))),
@@ -311,8 +308,12 @@ pub(super) fn runtime_doctor_default_diagnosis(
             vec![(!exits.is_empty()).then(|| Cow::Owned(runtime_doctor_count_breakdown(&exits)))]
         }
         RUNTIME_DOCTOR_DIAGNOSIS_COMPAT_WARNING => vec![
-            Some(Cow::Borrowed(field(summary, "compat_warning", "client"))),
-            Some(Cow::Borrowed(field(summary, "compat_warning", "warning"))),
+            summary
+                .top_client
+                .as_deref()
+                .or(summary.top_client_family.as_deref())
+                .map(Cow::Borrowed),
+            summary.top_compat_warning.as_deref().map(Cow::Borrowed),
         ],
         RUNTIME_DOCTOR_DIAGNOSIS_DEAD_CONTINUATIONS => vec![Some(Cow::Owned(
             summary.persisted_dead_continuations.to_string(),
@@ -323,57 +324,81 @@ pub(super) fn runtime_doctor_default_diagnosis(
         RUNTIME_DOCTOR_DIAGNOSIS_AUTH_RECOVERED => vec![Some(Cow::Owned(
             runtime_doctor_profile_auth_recovery_next_step(summary),
         ))],
-        RUNTIME_DOCTOR_DIAGNOSIS_GEMINI_QUOTA_RETRY => vec![Some(Cow::Borrowed(field(
-            summary,
-            "gemini_quota_retry",
-            "profile",
-        )))],
-        RUNTIME_DOCTOR_DIAGNOSIS_PROVIDER_MODEL_FALLBACK => vec![
-            Some(Cow::Borrowed(field(
+        RUNTIME_DOCTOR_DIAGNOSIS_GEMINI_QUOTA_RETRY => vec![
+            runtime_doctor_marker_last_field(
                 summary,
-                "provider_model_fallback",
-                "provider",
-            ))),
-            Some(Cow::Borrowed(field(
-                summary,
-                "provider_model_fallback",
-                "from_model",
-            ))),
-            Some(Cow::Borrowed(field(
-                summary,
-                "provider_model_fallback",
-                "to_model",
-            ))),
+                "local_rewrite_gemini_quota_rotate",
+                "profile",
+            )
+            .or_else(|| {
+                runtime_doctor_marker_last_field(
+                    summary,
+                    "local_rewrite_gemini_rate_limit_retry",
+                    "profile",
+                )
+            })
+            .map(Cow::Borrowed),
         ],
-        RUNTIME_DOCTOR_DIAGNOSIS_GEMINI_STREAM_RETRY => vec![Some(Cow::Borrowed(field(
-            summary,
-            "gemini_precommit_stream_retry",
-            "reason",
-        )))],
-        RUNTIME_DOCTOR_DIAGNOSIS_GEMINI_COMPACT_FALLBACK => vec![Some(Cow::Borrowed(field(
-            summary,
-            "gemini_compact_local_fallback",
-            "reason",
-        )))],
+        RUNTIME_DOCTOR_DIAGNOSIS_PROVIDER_MODEL_FALLBACK => vec![
+            runtime_doctor_marker_last_field(
+                summary,
+                "local_rewrite_provider_model_fallback",
+                "provider",
+            )
+            .map(Cow::Borrowed),
+            runtime_doctor_marker_last_field(
+                summary,
+                "local_rewrite_provider_model_fallback",
+                "from_model",
+            )
+            .map(Cow::Borrowed),
+            runtime_doctor_marker_last_field(
+                summary,
+                "local_rewrite_provider_model_fallback",
+                "to_model",
+            )
+            .map(Cow::Borrowed),
+        ],
+        RUNTIME_DOCTOR_DIAGNOSIS_GEMINI_STREAM_RETRY => vec![
+            runtime_doctor_marker_last_field(
+                summary,
+                "local_rewrite_gemini_invalid_stream_retry",
+                "reason",
+            )
+            .or_else(|| {
+                runtime_doctor_marker_last_field(
+                    summary,
+                    "local_rewrite_gemini_invalid_stream_model_fallback",
+                    "reason",
+                )
+            })
+            .map(Cow::Borrowed),
+        ],
+        RUNTIME_DOCTOR_DIAGNOSIS_GEMINI_COMPACT_FALLBACK => vec![
+            runtime_doctor_marker_last_field(
+                summary,
+                "local_rewrite_gemini_compact_fallback",
+                "reason",
+            )
+            .map(Cow::Borrowed),
+        ],
         RUNTIME_DOCTOR_DIAGNOSIS_PERSISTENCE => vec![Some(Cow::Owned(
             runtime_doctor_persistence_backpressure_next_step(summary),
         ))],
         RUNTIME_DOCTOR_DIAGNOSIS_SYNC_PROBE => vec![
-            Some(Cow::Borrowed(field(
-                summary,
-                "selection_skip_sync_probe",
-                "route",
-            ))),
+            runtime_doctor_marker_last_field(summary, "selection_skip_sync_probe", "route")
+                .map(Cow::Borrowed),
             Some(Cow::Owned(runtime_doctor_sync_probe_skip_next_step(
                 summary,
             ))),
         ],
         RUNTIME_DOCTOR_DIAGNOSIS_PROBE_BACKPRESSURE => vec![
-            Some(Cow::Borrowed(field(
+            runtime_doctor_marker_last_field(
                 summary,
                 "profile_probe_refresh_backpressure",
                 "profile",
-            ))),
+            )
+            .map(Cow::Borrowed),
             runtime_doctor_marker_last_usize_field(
                 summary,
                 "profile_probe_refresh_backpressure",
@@ -398,10 +423,6 @@ pub(super) fn runtime_doctor_default_diagnosis(
         .map(|value| value.as_deref())
         .collect::<Vec<_>>();
     render_diagnosis(kind, &views)
-}
-
-fn field<'a>(summary: &'a RuntimeDoctorSummary, marker: &str, name: &str) -> &'a str {
-    runtime_doctor_marker_last_field(summary, marker, name).unwrap_or("-")
 }
 
 fn render_diagnosis(kind: i64, values: &[Option<&str>]) -> String {
