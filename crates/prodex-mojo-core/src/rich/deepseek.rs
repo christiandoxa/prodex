@@ -46,6 +46,7 @@ pub enum DeepSeekKernelOperation {
     RawCommonRequest = 37,
     RequestMetadata = 38,
     RawBridgeInputItem = 39,
+    ResponseToolCallItem = 40,
 }
 
 #[repr(i64)]
@@ -200,7 +201,7 @@ struct DeepSeekKernelFfiInput {
 const _: () = assert!(std::mem::size_of::<DeepSeekKernelFfiInput>() == 608);
 
 unsafe extern "C" {
-    fn prodex_mojo_deepseek_kernel_v1(
+    fn prodex_mojo_deepseek_kernel_v2(
         abi_version: i64,
         input: u64,
         output: u64,
@@ -218,7 +219,10 @@ unsafe extern "C" {
     ) -> i64;
 }
 
-const DEEPSEEK_KERNEL_MAX_BYTES: usize = 4 * 1024 * 1024;
+pub const DEEPSEEK_KERNEL_MAX_BYTES: usize = 4 * 1024 * 1024;
+/// Maximum aggregate input size for bounded large DeepSeek response operations.
+pub const DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES: usize = 16 * 1024 * 1024;
+const DEEPSEEK_KERNEL_ABI_VERSION: i64 = 2;
 
 fn kernel_view(value: Option<&str>) -> RichStringView {
     value.map(view).unwrap_or_default()
@@ -265,6 +269,7 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::RawCommonRequest => 37,
         DeepSeekKernelOperation::RequestMetadata => 38,
         DeepSeekKernelOperation::RawBridgeInputItem => 39,
+        DeepSeekKernelOperation::ResponseToolCallItem => 40,
     }
 }
 
@@ -309,10 +314,23 @@ fn kernel_output_capacity(
     if operation == DeepSeekKernelOperation::UserId {
         return Ok(512 + 2);
     }
+    let multiplier = match operation {
+        DeepSeekKernelOperation::ResponseToolCallItem
+        | DeepSeekKernelOperation::BufferedResponse => 6,
+        _ => 8,
+    };
     input_bytes
-        .checked_mul(8)
+        .checked_mul(multiplier)
         .and_then(|value| value.checked_add(2048))
         .ok_or(MojoError::InvalidInput)
+}
+
+fn kernel_input_limit(operation: DeepSeekKernelOperation) -> usize {
+    match operation {
+        DeepSeekKernelOperation::ResponseToolCallItem
+        | DeepSeekKernelOperation::BufferedResponse => DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES,
+        _ => DEEPSEEK_KERNEL_MAX_BYTES,
+    }
 }
 
 pub fn deepseek_request_policy(
@@ -367,7 +385,7 @@ pub fn deepseek_request_policy(
 pub fn deepseek_kernel(input: DeepSeekKernelInput<'_>) -> Result<Vec<u8>, MojoError> {
     ensure_rich_abi()?;
     let input_bytes = input_bytes(&input)?;
-    if input_bytes > DEEPSEEK_KERNEL_MAX_BYTES {
+    if input_bytes > kernel_input_limit(input.operation) {
         return Err(MojoError::InvalidInput);
     }
     let capacity = kernel_output_capacity(input.operation, input_bytes)?;
@@ -428,8 +446,8 @@ pub fn deepseek_kernel(input: DeepSeekKernelInput<'_>) -> Result<Vec<u8>, MojoEr
     let mut output = vec![0_u8; capacity];
     let mut written = 0_i64;
     let status = unsafe {
-        prodex_mojo_deepseek_kernel_v1(
-            RICH_ABI_VERSION,
+        prodex_mojo_deepseek_kernel_v2(
+            DEEPSEEK_KERNEL_ABI_VERSION,
             mojo_pointer_address(&ffi_input),
             mojo_mut_pointer_address(output.as_mut_ptr()),
             i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,

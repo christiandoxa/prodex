@@ -2,7 +2,12 @@ from std.collections import Array
 
 from std.memory import Pointer
 
-from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
+from rich_text import (
+    rich_trim_bounds,
+    rich_view_matches_literal,
+    rich_view_ptr,
+    rich_view_valid,
+)
 from rich_types import ProdexRichStringView
 from json_view import (
     deepseek_json_byte,
@@ -16,6 +21,8 @@ from json_view import (
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime DEEPSEEK_KERNEL_MAX_BYTES: Int64 = 4_194_304
+comptime DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES: Int64 = 16_777_216
+comptime DEEPSEEK_KERNEL_ABI_VERSION: Int64 = 2
 comptime DEEPSEEK_KERNEL_STATUS_OK: Int64 = 0
 comptime DEEPSEEK_KERNEL_STATUS_INVALID: Int64 = 1
 comptime DEEPSEEK_KERNEL_STATUS_UTF8: Int64 = 2
@@ -61,6 +68,7 @@ comptime DEEPSEEK_STREAM_RESPONSE_METADATA: Int64 = 36
 comptime DEEPSEEK_RAW_COMMON_REQUEST: Int64 = 37
 comptime DEEPSEEK_REQUEST_METADATA: Int64 = 38
 comptime DEEPSEEK_RAW_BRIDGE_INPUT_ITEM: Int64 = 39
+comptime DEEPSEEK_RESPONSE_TOOL_CALL_ITEM: Int64 = 40
 comptime DEEPSEEK_JSON_MAX_DEPTH: Int64 = 256
 
 
@@ -998,6 +1006,150 @@ def deepseek_put_function_call(
             return False
     if input.signature_present == 1:
         if not deepseek_put_literal(writer, StringSlice(',"gemini_thought_signature":')) or not deepseek_put_json_string(writer, input.signature):
+            return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_response_find_separator(
+    name: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    separator: StringSlice,
+) -> Int64:
+    var length = Int64(separator.byte_length())
+    if length == 0 or end - start < length:
+        return -1
+    var actual = rich_view_ptr(name)
+    var expected = separator.unsafe_ptr()
+    for index in range(start, end - length + 1):
+        var matches = True
+        for offset in range(length):
+            if actual[unsafe_offset=index + offset] != expected[unsafe_offset=offset]:
+                matches = False
+                break
+        if matches:
+            return index
+    return -1
+
+
+def deepseek_response_tool_name_parts(
+    name: ProdexRichStringView,
+) -> Array[Int64, 6]:
+    var result = Array[Int64, 6](fill=-1)
+    var bounds = rich_trim_bounds(name)
+    result[4] = bounds[0]
+    result[5] = bounds[1]
+    for separator in [StringSlice("__"), StringSlice("."), StringSlice("/")]:
+        var split = deepseek_response_find_separator(
+            name, bounds[0], bounds[1], separator
+        )
+        if split < 0:
+            continue
+        var separator_end = split + Int64(separator.byte_length())
+        var namespace = ProdexRichStringView(name.ptr, UInt(split))
+        var namespace_bounds = rich_trim_bounds(namespace)
+        var local = ProdexRichStringView(
+            name.ptr + UInt(separator_end), name.len - UInt(separator_end)
+        )
+        var local_bounds = rich_trim_bounds(local)
+        if (
+            namespace_bounds[0] == namespace_bounds[1]
+            or local_bounds[0] == local_bounds[1]
+        ):
+            continue
+        result[0] = namespace_bounds[0]
+        result[1] = namespace_bounds[1]
+        result[2] = separator_end + local_bounds[0]
+        result[3] = separator_end + local_bounds[1]
+        return result^
+    result[2] = bounds[0]
+    result[3] = bounds[1]
+    return result^
+
+
+def deepseek_put_response_call_id(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.call_id_present == 1:
+        return deepseek_put_json_string(writer, input.call_id)
+    return deepseek_put_literal(writer, StringSlice('"call_0"'))
+
+
+def deepseek_put_response_tool_call_item(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.name_present != 1 or input.arguments_present != 1:
+        return False
+    var argument_bounds = rich_trim_bounds(input.arguments)
+    var is_tool_search = rich_view_matches_literal["tool_search"](
+        input.name, False
+    )
+    if argument_bounds[0] == argument_bounds[1]:
+        if is_tool_search:
+            return False
+    elif not deepseek_json_fragment_valid(input.arguments):
+        return False
+    if is_tool_search:
+        if not deepseek_put_literal(
+            writer, StringSlice('{"type":"tool_search_call","call_id":')
+        ):
+            return False
+        if not deepseek_put_response_call_id(writer, input):
+            return False
+        return (
+            deepseek_put_literal(
+                writer, StringSlice(',"execution":"client","arguments":')
+            )
+            and deepseek_put_view(writer, input.arguments)
+            and deepseek_put_byte(writer, 125)
+        )
+    if rich_view_matches_literal["apply_patch"](input.name, False):
+        if not deepseek_put_literal(
+            writer, StringSlice('{"type":"custom_tool_call","call_id":')
+        ):
+            return False
+        if not deepseek_put_response_call_id(writer, input):
+            return False
+        return (
+            deepseek_put_literal(writer, StringSlice(',"name":'))
+            and deepseek_put_json_string(writer, input.name)
+            and deepseek_put_literal(writer, StringSlice(',"input":'))
+            and deepseek_put_json_string(writer, input.arguments)
+            and deepseek_put_byte(writer, 125)
+        )
+    var parts = deepseek_response_tool_name_parts(input.name)
+    if not deepseek_put_literal(
+        writer, StringSlice('{"type":"function_call","call_id":')
+    ):
+        return False
+    if not deepseek_put_response_call_id(writer, input):
+        return False
+    if (
+        not deepseek_put_literal(writer, StringSlice(',"name":'))
+        or not deepseek_put_json_string_range(
+            writer, input.name, parts[2], parts[3]
+        )
+        or not deepseek_put_literal(writer, StringSlice(',"arguments":'))
+        or not deepseek_put_json_string(writer, input.arguments)
+    ):
+        return False
+    if parts[0] >= 0:
+        if not deepseek_put_literal(
+            writer, StringSlice(',"namespace":')
+        ) or not deepseek_put_json_string_range(
+            writer, input.name, parts[0], parts[1]
+        ):
+            return False
+    var signature_bounds = rich_trim_bounds(input.signature)
+    if (
+        input.signature_present == 1
+        and signature_bounds[0] < signature_bounds[1]
+    ):
+        if not deepseek_put_literal(
+            writer, StringSlice(',"gemini_thought_signature":')
+        ) or not deepseek_put_json_string(writer, input.signature):
             return False
     return deepseek_put_byte(writer, 125)
 
@@ -2603,6 +2755,8 @@ def deepseek_write_operation(
         return deepseek_put_byte(writer, 125)
     if operation == DEEPSEEK_FUNCTION_CALL_ITEM:
         return deepseek_put_function_call(writer, input, True)
+    if operation == DEEPSEEK_RESPONSE_TOOL_CALL_ITEM:
+        return deepseek_put_response_tool_call_item(writer, input)
     if operation == DEEPSEEK_ADDED_FUNCTION_CALL_ITEM:
         return deepseek_put_function_call(writer, input, False)
     if operation == DEEPSEEK_TOOL_SEARCH_ITEM:
@@ -2680,7 +2834,7 @@ def deepseek_flag_valid(value: Int64) -> Bool:
 def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
     return (
         input.operation >= DEEPSEEK_REQUEST_BODY
-        and input.operation <= DEEPSEEK_RAW_BRIDGE_INPUT_ITEM
+        and input.operation <= DEEPSEEK_RESPONSE_TOOL_CALL_ITEM
         and
         deepseek_flag_valid(input.stream)
         and deepseek_flag_valid(input.response_id_present)
@@ -2715,14 +2869,30 @@ def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
         and rich_view_valid(input.reasoning_content, DEEPSEEK_KERNEL_MAX_BYTES)
         and rich_view_valid(input.name, DEEPSEEK_KERNEL_MAX_BYTES)
         and rich_view_valid(input.namespace, DEEPSEEK_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.arguments, DEEPSEEK_KERNEL_MAX_BYTES)
+        and (
+            rich_view_valid(input.arguments, DEEPSEEK_KERNEL_MAX_BYTES)
+            or (
+                input.operation == DEEPSEEK_RESPONSE_TOOL_CALL_ITEM
+                and rich_view_valid(
+                    input.arguments, DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES
+                )
+            )
+        )
         and rich_view_valid(input.signature, DEEPSEEK_KERNEL_MAX_BYTES)
         and rich_view_valid(input.delta, DEEPSEEK_KERNEL_MAX_BYTES)
         and rich_view_valid(input.messages, DEEPSEEK_KERNEL_MAX_BYTES)
         and rich_view_valid(input.tools, DEEPSEEK_KERNEL_MAX_BYTES)
         and rich_view_valid(input.tool_choice, DEEPSEEK_KERNEL_MAX_BYTES)
         and rich_view_valid(input.extra, DEEPSEEK_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.output, DEEPSEEK_KERNEL_MAX_BYTES)
+        and (
+            rich_view_valid(input.output, DEEPSEEK_KERNEL_MAX_BYTES)
+            or (
+                input.operation == DEEPSEEK_BUFFERED_RESPONSE
+                and rich_view_valid(
+                    input.output, DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES
+                )
+            )
+        )
         and rich_view_valid(input.usage, DEEPSEEK_KERNEL_MAX_BYTES)
         and rich_view_valid(input.metadata, DEEPSEEK_KERNEL_MAX_BYTES)
         and rich_view_valid(input.item, DEEPSEEK_KERNEL_MAX_BYTES)
@@ -2734,14 +2904,14 @@ def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
     )
 
 
-def deepseek_kernel_v1(
+def deepseek_kernel_v2(
     abi_version: Int64,
     input_address: UInt,
     output_address: UInt,
     output_capacity: Int64,
     written_address: UInt,
 ) abi("C") -> Int64:
-    if abi_version != PRODEX_RICH_ABI_VERSION:
+    if abi_version != DEEPSEEK_KERNEL_ABI_VERSION:
         return DEEPSEEK_KERNEL_STATUS_ABI
     if input_address == 0 or output_address == 0 or written_address == 0 or output_capacity <= 0:
         return DEEPSEEK_KERNEL_STATUS_INVALID

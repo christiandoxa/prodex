@@ -145,6 +145,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
@@ -232,6 +233,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
@@ -386,6 +388,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
@@ -429,6 +432,7 @@ const QUOTA_MODEL_CAPACITY_FILE = "crates/prodex-quota/src/render/model_capacity
 const RUNTIME_QUOTA_FILE = "crates/prodex-runtime-proxy/src/quota.rs";
 const HEALTH_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/profile_health.rs";
 const DEEPSEEK_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/deepseek/response.rs";
+const DEEPSEEK_RESPONSE_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs";
 const DEEPSEEK_REQUEST_FILE = "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
@@ -524,6 +528,11 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === DEEPSEEK_REQUEST_FILE &&
       !contents.includes("DeepSeekKernelOperation::RawCommonRequest"))
     .map(([filePath]) => `${filePath}: DeepSeek request body must use the Mojo raw kernel`);
+  const deepseekResponseToolCallViolations = files
+    .filter(([filePath, contents]) => filePath === DEEPSEEK_RESPONSE_TOOL_CALLS_FILE &&
+      (!contents.includes("DeepSeekKernelOperation::ResponseToolCallItem") ||
+        /\bfn\s+(?:deepseek_split_flat_namespace_tool_name|deepseek_chat_tool_call_thought_signature)\s*\(/u.test(contents)))
+    .map(([filePath]) => `${filePath}: DeepSeek response tool-call shaping must use the Mojo kernel`);
   const modelSpecViolations = files
     .filter(([filePath, contents]) => filePath === MODEL_SPEC_FILE &&
       /\bfn\s+matches_id_or_alias\s*\(/u.test(contents) &&
@@ -628,7 +637,7 @@ export function findViolations(files) {
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
     ...geminiFallbackViolations, ...hardReplacementViolations, ...precommitBudgetOracleViolations,
-    ...deepseekRequestViolations,
+    ...deepseekRequestViolations, ...deepseekResponseToolCallViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...quotaWindowViolations,
@@ -829,6 +838,11 @@ function selfTest() {
   assert.match(findViolations([[DEEPSEEK_RESPONSE_FILE,
     '#[cfg(not(feature = "mojo"))] pub(super) fn deepseek_stream_event_from_chat_value() {}']]).join("\n"),
     /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[DEEPSEEK_RESPONSE_TOOL_CALLS_FILE,
+    "fn deepseek_split_flat_namespace_tool_name() {}"]]).join("\n"),
+    /response tool-call shaping must use the Mojo kernel/u);
+  assert.deepEqual(findViolations([[DEEPSEEK_RESPONSE_TOOL_CALLS_FILE,
+    "fn shape() { DeepSeekKernelOperation::ResponseToolCallItem; }"]]), []);
   assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
     "fn deepseek_request_body_from_responses_rust() {}"]]).join("\n"),
     /Rust semantic oracle or copy/u);
