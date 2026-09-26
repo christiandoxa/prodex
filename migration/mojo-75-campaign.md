@@ -1992,3 +1992,23 @@ The canonical source report counts **52,825 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **524,234 additional Mojo LOC** required at this Rust
 volume.
+
+## DeepSeek reasoning hard replacement
+
+DeepSeek and Gemini-compatible reasoning-shape validation, effort mapping, and
+thinking detection now use the existing Mojo request policy and reasoning
+kernel in every provider-core feature mode. The feature-off Rust mapper and
+its helper functions were deleted. The Rust adapter retains bounded JSON
+serialization, tagged-error formatting, and output application. Valid
+non-object JSON remains a no-op. Unrelated payloads over 4 MiB remain valid;
+oversized reasoning fields return a controlled error. Caller tests cover exact
+mappings, provider labels, Unicode whitespace, malformed fields, and both
+size boundaries. The
+no-fallback guard rejects restored Rust copies or feature-off routing. The
+Mojo ABI did not change; native test evidence is Linux x86_64.
+
+The canonical source report counts **52,810 reachable Mojo LOC** and
+**192,361 Rust production LOC**, totaling **245,171 LOC**: **21.54% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **524,273 additional Mojo LOC** required at this Rust
+volume.

@@ -162,6 +162,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo_tests.rs",
@@ -265,6 +266,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
@@ -450,6 +452,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo_tests.rs",
@@ -499,6 +502,7 @@ const DEEPSEEK_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/deep
 const DEEPSEEK_RESPONSE_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs";
 const DEEPSEEK_REQUEST_FILE = "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs";
 const DEEPSEEK_REQUEST_REJECT_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs";
+const DEEPSEEK_REASONING_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs";
 const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
@@ -644,6 +648,15 @@ export function findViolations(files) {
       return [`${filePath}: request rejection must use both Mojo policies without Rust copies or cfg routing`];
     }
     return [];
+  });
+  const deepseekReasoningViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== DEEPSEEK_REASONING_FILE) return [];
+    const mojoOwned = contents.includes("request_policy::try_plan_value(") &&
+      contents.includes("DeepSeekRequestPolicyOperation::ReasoningShape") &&
+      contents.includes("DeepSeekKernelOperation::ReasoningParameters");
+    const oldMapper = /\b(?:rust_compat|deepseek_provider_core_reasoning_effort(?:_from_responses_request)?|deepseek_provider_core_gemini_openai_reasoning_effort)\b/u.test(contents);
+    return mojoOwned && !oldMapper && !/#\[\s*cfg\s*\(/u.test(contents)
+      ? [] : [`${filePath}: reasoning must use Mojo without Rust copies or cfg routing`];
   });
   const providerErrorMemberViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== PROVIDER_ERROR_FILE) return [];
@@ -804,6 +817,7 @@ export function findViolations(files) {
     ...geminiFallbackViolations, ...geminiGenerationViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
+    ...deepseekReasoningViolations,
     ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...doctorMarkerViolations, ...statusSummaryViolations,
@@ -1059,6 +1073,11 @@ function selfTest() {
     /without Rust copies or cfg routing/u);
   assert.deepEqual(findViolations([[DEEPSEEK_REQUEST_REJECT_FILE,
     `pub fn deepseek_provider_core_reject_unsupported_request_fields(value: &Value, label: &str) -> Result<(), String> {\n  request_policy::try_plan_value(value, DeepSeekRequestPolicyOperation::RequestFields);\n}\npub fn deepseek_provider_core_reject_beta_completion_fields(value: &Value, label: &str) -> Result<(), String> {\n  request_policy::try_plan_value(value, DeepSeekRequestPolicyOperation::BetaFields);\n}`]]), []);
+  assert.match(findViolations([[DEEPSEEK_REASONING_FILE,
+    "mod rust_compat { fn deepseek_provider_core_reasoning_effort() {} }"]]).join("\n"),
+    /reasoning must use Mojo without Rust copies or cfg routing/u);
+  assert.deepEqual(findViolations([[DEEPSEEK_REASONING_FILE,
+    "request_policy::try_plan_value(DeepSeekRequestPolicyOperation::ReasoningShape); DeepSeekKernelOperation::ReasoningParameters"]]), []);
   assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
     "fn deepseek_request_body_from_responses() {}"]]).join("\n"),
     /must use the Mojo raw kernel/u);
