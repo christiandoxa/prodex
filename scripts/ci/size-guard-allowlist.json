@@ -31,8 +31,8 @@
   },
   {
     "file": "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",
-    "maxLines": 1207,
-    "reason": "DeepSeek bridge request, response, stream, tool-call, usage, and error conformance regressions remain colocated with the compatibility bridge until split by fixture family."
+    "maxLines": 1136,
+    "reason": "DeepSeek input-item fixtures moved to a focused sibling module; remaining request, response, stream, tool-call, usage, and error conformance regressions stay colocated until split by fixture family."
   },
   {
     "file": "crates/prodex-shared-codex-fs/tests/src/prepare.rs",
