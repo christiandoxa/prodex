@@ -504,11 +504,19 @@ function runSelfTest() {
   const violations = findViolations({
     packages: [
       { name: "prodex-app" },
+      { name: "prodex-domain" },
       { name: "prodex-provider-core" },
       { name: "prodex-terminal-ui" },
       { name: "prodex-runtime-proxy" },
     ],
     edges: [
+      {
+        from: "prodex-domain",
+        to: "prodex-app",
+        alias: "prodex_app",
+        section: "dependencies",
+        manifestPath: "crates/prodex-domain/Cargo.toml",
+      },
       {
         from: "prodex-provider-core",
         to: "prodex-app",
@@ -535,6 +543,7 @@ function runSelfTest() {
   assertEqual(
     violations.map((violation) => violation.rule.id),
     [
+      "focused-crates-do-not-depend-on-app",
       "low-level-crates-stay-below-orchestration",
       "terminal-ui-stays-generic",
       "runtime-proxy-stays-hot-path-helper",
