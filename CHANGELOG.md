@@ -2,32 +2,78 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.432.1 - 2026-09-25
+## 0.432.2 - 2026-09-26
 
 ### Runtime
 
-- Shorten overlays for Codex daemon sockets (`4ddf7d7`)
-# Prodex 0.432.1
+- Support Codex 0.157.1 resume (`4dec9c0`)
+
+### Claude
+
+- Move Anthropic response defaults into Mojo (`598b5f3`)
+- Move Anthropic web-search shaping into Mojo (`42cf266`)
+
+### Docs
+
+- Record hard replacement authority and current share (`cf17b3c`)
+
+### Misc
+
+- Route Gemini text parts through Mojo (`1e38aac`)
+- Move Kiro chat responses into Mojo (`430336a`)
+- Move Gemini system instructions into Mojo (`c02469a`)
+# Prodex 0.432.2
 
 ## New Features
 
 - No new features in this patch release.
 
+## Compatibility
+
+- Target the official Codex rust-v0.157.1 release.
+- Preserve Codex 0.157.1's Windows daemon breakaway, detached-stdio, and
+  no-console process fixes without changing Prodex's Linux transport/session
+  contracts.
+- Advance the audited upstream baseline after replaying all 797 pinned
+  critical-file and semantic markers against the exact 0.157.1 source tree.
+
 ## Bug Fixes
 
-- Fix `prodex s` startup with Codex 0.157.0 when its automatic background
-  app-server starts. Prodex now uses shorter temporary `CODEX_HOME` overlay
-  names so the nested `app-server-control` Unix socket fits the platform path
-  limit on default profile paths.
-- Preserve the `.prodex-overlay-` marker used to recognize existing overlay
-  paths and repair session state.
+- Fix `prodex s <session-uuid>` for governed OpenAI sessions whose persisted
+  Codex metadata records `model_provider="prodex-openai-governed-http"`.
+- Resolve that internal persisted model-provider identity to canonical OpenAI
+  during direct resume, while keeping the internal name unavailable as a
+  user-facing provider alias and continuing to fail closed on unknown provider
+  identities.
+- Preserve the normal Codex `/resume` behavior and route resumed OpenAI model
+  traffic back through Prodex governance.
+
+## Verification
+
+- Compared exact Codex 0.157.0 and 0.157.1 tagged source archives: 10 changed
+  files, 441 additions, and 55 deletions.
+- Verified the official 0.157.1 Linux musl asset and extracted binary SHA-256;
+  the binary reports `codex-cli 0.157.1`.
+- Ran an isolated official 0.157.1 app-server initialize smoke with
+  `experimentalApi=true`.
+- Passed focused provider-registry and runtime-resume tests.
+- Replayed the originally failing governed-OpenAI session through
+  `prodex s --dry-run`; launch planning completed and retained the governed
+  proxy path instead of returning the unsupported-provider error.
 
 ## Changelog
 
-- Restore Super startup when the Codex background daemon uses its default
-  control socket path.
+- Accommodate Codex rust-v0.157.1 at the audited compatibility boundary.
+- Restore direct Super UUID resume for sessions persisted through Prodex's
+  governed OpenAI provider.
 
-Full Changelog: [0.432.0...0.432.1](https://github.com/christiandoxa/prodex/compare/0.432.0...0.432.1)
+Full Changelog: [0.432.1...0.432.2](https://github.com/christiandoxa/prodex/compare/0.432.1...0.432.2)
+
+## 0.432.1 - 2026-09-25
+
+### Runtime
+
+- Shorten overlays for Codex daemon sockets (`4ddf7d7`)
 
 ## 0.432.0 - 2026-09-25
 
