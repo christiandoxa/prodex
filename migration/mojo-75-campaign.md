@@ -1503,3 +1503,22 @@ The canonical source report counts **51,921 reachable Mojo LOC** and
 **21.122239760467348% Mojo**. The 7% release floor and non-regression check
 pass; the 75% project target remains unmet, with **529,752 additional Mojo
 LOC** required at this Rust volume.
+
+## Previous-response attempt-outcome hard replacement
+
+Previous-response fallback, stale-continuation, WebSocket affinity, and bounded
+retry decisions now use the existing Mojo plan in every feature mode. The
+feature-off Rust decision module, retry schedule, and differential oracle were
+deleted. Rust retains typed input and output mapping for the proxy callers.
+
+Before deletion, differential tests covered route and affinity combinations,
+fallback shapes, turn-state presence, and retry indices. Permanent expected-value
+tests cover fail-closed continuation, session affinity, WebSocket owner binding,
+and the bounded retry schedule. Native validation is Linux x86_64; macOS and
+Windows runtime execution was not run.
+
+The canonical source report counts **51,921 reachable Mojo LOC** and
+**193,869 Rust production LOC**, totaling **245,790 LOC**:
+**21.12413035518125% Mojo**. The 7% release floor and non-regression check
+pass; the 75% project target remains unmet, with **529,686 additional Mojo
+LOC** required at this Rust volume.

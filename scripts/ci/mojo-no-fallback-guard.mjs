@@ -36,6 +36,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
   "crates/prodex-runtime-proxy/src/compatibility_surface.rs",
   "crates/prodex-runtime-proxy/src/error_policy.rs",
   "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
@@ -151,6 +152,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-quota/src/render/remaining_percent.rs",
   "crates/prodex-quota/src/render/quota_policy.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
   "crates/prodex-runtime-proxy/src/compatibility_surface.rs",
   "crates/prodex-runtime-proxy/src/error_policy.rs",
   "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
@@ -283,6 +285,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
   "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
   "crates/prodex-runtime-proxy/src/compatibility_surface.rs",
   "crates/prodex-runtime-proxy/src/error_policy.rs",
   "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
@@ -701,6 +704,9 @@ function selfTest() {
     '#[cfg(not(feature = "mojo"))] fn runtime_http_error_policy_rust() {}']]).join("\n"),
     /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/compatibility_surface.rs",
+    '#[cfg(not(feature = "mojo"))] mod rust_oracle;']]).join("\n"),
+    /feature-off Rust path/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/attempt_outcome.rs",
     '#[cfg(not(feature = "mojo"))] mod rust_oracle;']]).join("\n"),
     /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/error_policy/signal.rs",
