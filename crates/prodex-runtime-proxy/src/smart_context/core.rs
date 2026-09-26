@@ -96,61 +96,24 @@ pub struct SmartContextExactnessGuard {
 pub fn smart_context_exactness_guard(
     input: SmartContextExactnessInput,
 ) -> SmartContextExactnessGuard {
-    #[cfg(feature = "mojo")]
-    {
-        let decision = prodex_mojo_core::runtime::smart_context_exactness_plan(
-            input.exact_mode,
-            input.previous_response_id.as_deref().is_some_and(non_empty),
-            input.turn_state.as_deref().is_some_and(non_empty),
-            input.session_id.as_deref().is_some_and(non_empty),
-            input.tool_output_without_artifact,
-        )
-        .expect("Mojo Smart Context exactness planner returned invalid output");
-        SmartContextExactnessGuard {
-            decision: match decision.0 {
-                0 => SmartContextExactnessDecision::Allow,
-                1 => SmartContextExactnessDecision::RequireExact,
-                _ => unreachable!("Mojo Smart Context exactness decision was validated"),
-            },
-            reasons: smart_context_exactness_reasons_from_bits(decision.1),
-        }
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    smart_context_exactness_guard_rust(input)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-fn smart_context_exactness_guard_rust(
-    input: SmartContextExactnessInput,
-) -> SmartContextExactnessGuard {
-    let mut reasons = Vec::new();
-    if input.exact_mode {
-        reasons.push(SmartContextExactnessReason::ExplicitExactMode);
-    }
-    if input.previous_response_id.as_deref().is_some_and(non_empty) {
-        reasons.push(SmartContextExactnessReason::PreviousResponseAffinity);
-    }
-    if input.turn_state.as_deref().is_some_and(non_empty) {
-        reasons.push(SmartContextExactnessReason::TurnStateAffinity);
-    }
-    if input.session_id.as_deref().is_some_and(non_empty) {
-        reasons.push(SmartContextExactnessReason::SessionAffinity);
-    }
-    if input.tool_output_without_artifact {
-        reasons.push(SmartContextExactnessReason::ToolOutputWithoutArtifact);
-    }
+    let decision = prodex_mojo_core::runtime::smart_context_exactness_plan(
+        input.exact_mode,
+        input.previous_response_id.as_deref().is_some_and(non_empty),
+        input.turn_state.as_deref().is_some_and(non_empty),
+        input.session_id.as_deref().is_some_and(non_empty),
+        input.tool_output_without_artifact,
+    )
+    .expect("Mojo Smart Context exactness planner returned invalid output");
     SmartContextExactnessGuard {
-        decision: if reasons.is_empty() {
-            SmartContextExactnessDecision::Allow
-        } else {
-            SmartContextExactnessDecision::RequireExact
+        decision: match decision.0 {
+            0 => SmartContextExactnessDecision::Allow,
+            1 => SmartContextExactnessDecision::RequireExact,
+            _ => unreachable!("Mojo Smart Context exactness decision was validated"),
         },
-        reasons,
+        reasons: smart_context_exactness_reasons_from_bits(decision.1),
     }
 }
 
-#[cfg(feature = "mojo")]
 fn smart_context_exactness_reasons_from_bits(bits: u64) -> Vec<SmartContextExactnessReason> {
     [
         (1_u64 << 0, SmartContextExactnessReason::ExplicitExactMode),
@@ -170,24 +133,96 @@ fn smart_context_exactness_reasons_from_bits(bits: u64) -> Vec<SmartContextExact
     .collect()
 }
 
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_tests {
+#[cfg(test)]
+mod tests {
     use super::*;
 
     #[test]
-    fn exactness_planner_matches_rust_precedence() {
-        for mask in 0..32_u8 {
-            let input = SmartContextExactnessInput {
-                exact_mode: mask & 1 != 0,
-                previous_response_id: (mask & 2 != 0).then(|| "response".to_string()),
-                turn_state: (mask & 4 != 0).then(|| "turn".to_string()),
-                session_id: (mask & 8 != 0).then(|| "session".to_string()),
-                tool_output_without_artifact: mask & 16 != 0,
-                missing_rehydrate_refs: vec!["not used by this guard".to_string()],
-            };
-            let expected = smart_context_exactness_guard_rust(input.clone());
-            let actual = smart_context_exactness_guard(input);
-            assert_eq!(actual, expected, "exactness case {mask}");
+    fn exactness_planner_preserves_expected_reasons_in_every_feature_mode() {
+        use SmartContextExactnessDecision::{Allow, RequireExact};
+        use SmartContextExactnessReason::{
+            ExplicitExactMode, PreviousResponseAffinity, SessionAffinity,
+            ToolOutputWithoutArtifact, TurnStateAffinity,
+        };
+
+        let cases = [
+            (SmartContextExactnessInput::default(), Allow, vec![]),
+            (
+                SmartContextExactnessInput {
+                    exact_mode: true,
+                    ..Default::default()
+                },
+                RequireExact,
+                vec![ExplicitExactMode],
+            ),
+            (
+                SmartContextExactnessInput {
+                    previous_response_id: Some("response".into()),
+                    ..Default::default()
+                },
+                RequireExact,
+                vec![PreviousResponseAffinity],
+            ),
+            (
+                SmartContextExactnessInput {
+                    turn_state: Some("turn".into()),
+                    ..Default::default()
+                },
+                RequireExact,
+                vec![TurnStateAffinity],
+            ),
+            (
+                SmartContextExactnessInput {
+                    session_id: Some("session".into()),
+                    ..Default::default()
+                },
+                RequireExact,
+                vec![SessionAffinity],
+            ),
+            (
+                SmartContextExactnessInput {
+                    tool_output_without_artifact: true,
+                    ..Default::default()
+                },
+                RequireExact,
+                vec![ToolOutputWithoutArtifact],
+            ),
+            (
+                SmartContextExactnessInput {
+                    exact_mode: true,
+                    previous_response_id: Some("response".into()),
+                    turn_state: Some("turn".into()),
+                    session_id: Some("session".into()),
+                    tool_output_without_artifact: true,
+                    ..Default::default()
+                },
+                RequireExact,
+                vec![
+                    ExplicitExactMode,
+                    PreviousResponseAffinity,
+                    TurnStateAffinity,
+                    SessionAffinity,
+                    ToolOutputWithoutArtifact,
+                ],
+            ),
+            (
+                SmartContextExactnessInput {
+                    previous_response_id: Some(" \t ".into()),
+                    turn_state: Some("".into()),
+                    session_id: Some("  ".into()),
+                    missing_rehydrate_refs: vec!["ignored".into()],
+                    ..Default::default()
+                },
+                Allow,
+                vec![],
+            ),
+        ];
+
+        for (input, decision, reasons) in cases {
+            assert_eq!(
+                smart_context_exactness_guard(input),
+                SmartContextExactnessGuard { decision, reasons }
+            );
         }
     }
 }

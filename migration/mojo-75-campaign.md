@@ -2012,3 +2012,19 @@ The canonical source report counts **52,810 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **524,273 additional Mojo LOC** required at this Rust
 volume.
+
+## Smart Context exactness hard replacement
+
+The exactness decision and ordered reason bits now use the existing Mojo plan
+in every runtime-proxy feature mode. The feature-off Rust decision and the
+Rust test oracle were deleted. Fixed caller expectations cover each affinity
+reason, combined precedence, whitespace-only identifiers, and ignored
+rehydration references. The no-fallback guard requires the Mojo call and
+rejects a restored Rust copy. The Mojo ABI did not change; native execution
+evidence remains Linux x86_64.
+
+The canonical source report counts **52,810 reachable Mojo LOC** and
+**192,332 Rust production LOC**, totaling **245,142 LOC**: **21.54% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **524,186 additional Mojo LOC** required at this Rust
+volume.
