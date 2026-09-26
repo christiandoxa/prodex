@@ -161,6 +161,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo_tests.rs",
@@ -263,6 +264,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
@@ -447,6 +449,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo_tests.rs",
@@ -495,6 +498,7 @@ const HEALTH_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/profile_health.rs";
 const DEEPSEEK_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/deepseek/response.rs";
 const DEEPSEEK_RESPONSE_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs";
 const DEEPSEEK_REQUEST_FILE = "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs";
+const DEEPSEEK_REQUEST_REJECT_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
 const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
@@ -623,6 +627,23 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === DEEPSEEK_REQUEST_FILE &&
       !contents.includes("DeepSeekKernelOperation::RawCommonRequest"))
     .map(([filePath]) => `${filePath}: DeepSeek request body must use the Mojo raw kernel`);
+  const deepseekRequestRejectViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== DEEPSEEK_REQUEST_REJECT_FILE) return [];
+    const operations = [
+      ["deepseek_provider_core_reject_unsupported_request_fields", "RequestFields"],
+      ["deepseek_provider_core_reject_beta_completion_fields", "BetaFields"],
+    ];
+    const missingMojoCalls = operations.some(([name, operation]) => {
+      const body = contents.match(new RegExp(`\\bpub fn ${name}\\([^]*?^\\}`, "mu"))?.[0];
+      return !body?.includes("request_policy::try_plan_value(") ||
+        !body.includes(`DeepSeekRequestPolicyOperation::${operation}`);
+    });
+    const rustPolicy = /\b(?:rust_compat|deepseek_provider_core_reject_(?:deprecated_fields|unsupported_fields|max_tool_calls)|deepseek_provider_core_validate_(?:optional_request_values|background|truncation|text|parallel_tool_calls|stream_options|modalities)|reject_(?:unsupported_request_fields|beta_completion_fields)_rust)\b/u.test(contents);
+    if (missingMojoCalls || rustPolicy || /#\[\s*cfg\s*\(/u.test(contents)) {
+      return [`${filePath}: request rejection must use both Mojo policies without Rust copies or cfg routing`];
+    }
+    return [];
+  });
   const deepseekResponseToolCallViolations = files
     .filter(([filePath, contents]) => filePath === DEEPSEEK_RESPONSE_TOOL_CALLS_FILE &&
       (!contents.includes("DeepSeekKernelOperation::ResponseToolCallItem") ||
@@ -773,7 +794,8 @@ export function findViolations(files) {
     ...superExposeViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
-    ...deepseekRequestViolations, ...deepseekResponseToolCallViolations, ...chatToolViolations,
+    ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
+    ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations,
     ...modelSpecViolations, ...catalogModelViolations,
@@ -1016,6 +1038,17 @@ function selfTest() {
   assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
     "fn deepseek_request_body_from_responses_rust() {}"]]).join("\n"),
     /Rust semantic oracle or copy/u);
+  assert.match(findViolations([[DEEPSEEK_REQUEST_REJECT_FILE,
+    "fn deepseek_provider_core_validate_modalities(value: &Value) {}"]]).join("\n"),
+    /without Rust copies or cfg routing/u);
+  assert.match(findViolations([[DEEPSEEK_REQUEST_REJECT_FILE,
+    "pub fn deepseek_provider_core_reject_unsupported_request_fields(value: &Value, label: &str) -> Result<(), String> { rust_compat::reject(value, label) }"]]).join("\n"),
+    /without Rust copies or cfg routing/u);
+  assert.match(findViolations([[DEEPSEEK_REQUEST_REJECT_FILE,
+    '#[cfg(not(feature = "mojo"))] fn fallback() {}']]).join("\n"),
+    /without Rust copies or cfg routing/u);
+  assert.deepEqual(findViolations([[DEEPSEEK_REQUEST_REJECT_FILE,
+    `pub fn deepseek_provider_core_reject_unsupported_request_fields(value: &Value, label: &str) -> Result<(), String> {\n  request_policy::try_plan_value(value, DeepSeekRequestPolicyOperation::RequestFields);\n}\npub fn deepseek_provider_core_reject_beta_completion_fields(value: &Value, label: &str) -> Result<(), String> {\n  request_policy::try_plan_value(value, DeepSeekRequestPolicyOperation::BetaFields);\n}`]]), []);
   assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
     "fn deepseek_request_body_from_responses() {}"]]).join("\n"),
     /must use the Mojo raw kernel/u);
