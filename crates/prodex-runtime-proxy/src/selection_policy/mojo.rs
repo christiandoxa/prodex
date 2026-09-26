@@ -1,5 +1,17 @@
 use super::*;
 
+unsafe extern "C" {
+    #[link_name = "prodex_runtime_websocket_reuse_stale_v1"]
+    fn mojo_websocket_reuse_stale(
+        nonreplayable_previous_response_reuse: i64,
+        reuse_terminal_idle_present: i64,
+        reuse_terminal_idle_seconds: u64,
+        reuse_terminal_idle_nanoseconds: u64,
+        reuse_stale_after_seconds: u64,
+        reuse_stale_after_nanoseconds: u64,
+    ) -> i64;
+}
+
 fn route_kind_tag(route_kind: RuntimeRouteKind) -> i64 {
     match route_kind {
         RuntimeRouteKind::Responses => 0,
@@ -74,14 +86,26 @@ pub(super) fn websocket_previous_response_reuse_is_stale_at(
     reuse_terminal_idle: Option<Duration>,
     stale_after: Duration,
 ) -> bool {
-    plan(prodex_mojo_core::runtime::AffinitySelectionInput {
-        previous_response_present: nonreplayable_previous_response_reuse,
-        reuse_terminal_idle_ms: reuse_terminal_idle
-            .map(|value| u64::try_from(value.as_millis()).unwrap_or(u64::MAX)),
-        reuse_stale_after_ms: u64::try_from(stale_after.as_millis()).unwrap_or(u64::MAX),
-        ..Default::default()
-    })
-    .reuse_stale
+    // The shared plan bridge only carries millisecond durations; this entrypoint preserves the
+    // full precision of Rust's Duration comparison.
+    let (reuse_terminal_idle_seconds, reuse_terminal_idle_nanoseconds) = reuse_terminal_idle
+        .map(|duration| (duration.as_secs(), u64::from(duration.subsec_nanos())))
+        .unwrap_or_default();
+    let result = unsafe {
+        mojo_websocket_reuse_stale(
+            i64::from(nonreplayable_previous_response_reuse),
+            i64::from(reuse_terminal_idle.is_some()),
+            reuse_terminal_idle_seconds,
+            reuse_terminal_idle_nanoseconds,
+            stale_after.as_secs(),
+            u64::from(stale_after.subsec_nanos()),
+        )
+    };
+    match result {
+        0 => false,
+        1 => true,
+        _ => unreachable!("validated Mojo websocket reuse stale result"),
+    }
 }
 
 pub(super) fn has_continuation_priority(

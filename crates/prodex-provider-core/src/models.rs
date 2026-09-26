@@ -56,7 +56,6 @@ pub fn provider_model_catalog(provider: ProviderId) -> &'static [ProviderModelSp
     builtin_model_catalog(provider)
 }
 
-#[cfg(feature = "mojo")]
 pub fn provider_model_spec(
     provider: ProviderId,
     model: &str,
@@ -74,28 +73,9 @@ pub fn provider_model_spec(
             aliases,
         })
         .collect::<Vec<_>>();
-    prodex_mojo_core::rich::resolve_catalog_model(&catalog, model)
+    prodex_mojo_core::rich::resolve_catalog_model(&catalog, model.trim())
         .expect("Mojo model catalog lookup returned an invalid structured result")
         .and_then(|index| models.get(index))
-}
-
-#[cfg(not(feature = "mojo"))]
-pub fn provider_model_spec(
-    provider: ProviderId,
-    model: &str,
-) -> Option<&'static ProviderModelSpec> {
-    provider_model_spec_rust(provider, model)
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(crate) fn provider_model_spec_rust(
-    provider: ProviderId,
-    model: &str,
-) -> Option<&'static ProviderModelSpec> {
-    let model = model.trim();
-    provider_model_catalog(provider)
-        .iter()
-        .find(|spec| spec.matches_id_or_alias(model))
 }
 
 pub fn provider_model_cost(provider: ProviderId, model: &str) -> ProviderModelCost {
