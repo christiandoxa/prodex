@@ -177,7 +177,7 @@ where
     T: Into<OsString>,
 {
     let raw_args = args.into_iter().map(Into::into).collect::<Vec<_>>();
-    let raw_args = rewrite_super_expose_alias(&raw_args);
+    let raw_args = reassemble_super_expose_alias(&raw_args)?;
     let raw_args = rewrite_super_compat_args(&raw_args);
     let parse_args = if should_default_cli_invocation_to_run(&raw_args) {
         rewrite_cli_args_as_run(&raw_args)
@@ -198,38 +198,17 @@ where
     Ok(command)
 }
 
-fn rewrite_super_expose_alias(args: &[OsString]) -> Vec<OsString> {
-    if !matches!(
-        args.get(1).and_then(|arg| arg.to_str()),
-        Some("super" | "s")
-    ) {
-        return args.to_vec();
-    }
-
-    let mut index = 2;
-    let mut expose_index = None;
-    while index < args.len() {
-        let Some(value) = args[index].to_str() else {
-            break;
-        };
-        if value == "--" {
-            break;
-        }
-        if value == "expose" {
-            expose_index = Some(index);
-            break;
-        }
-        if !value.starts_with('-') {
-            break;
-        }
-        if super_option_takes_value(value) && !value.contains('=') {
-            index = index.saturating_add(2);
-        } else {
-            index = index.saturating_add(1);
-        }
-    }
+fn reassemble_super_expose_alias(args: &[OsString]) -> Result<Vec<OsString>, clap::Error> {
+    let argument_views = args.iter().map(|arg| arg.to_str()).collect::<Vec<_>>();
+    let expose_index = prodex_mojo_core::launch::find_super_expose_alias_index(&argument_views)
+        .map_err(|error| {
+            clap::Error::raw(
+                clap::error::ErrorKind::ValueValidation,
+                format!("failed to scan super expose alias: {error:?}"),
+            )
+        })?;
     let Some(expose_index) = expose_index else {
-        return args.to_vec();
+        return Ok(args.to_vec());
     };
 
     let mut rewritten = Vec::with_capacity(args.len().saturating_sub(1));
@@ -242,32 +221,7 @@ fn rewrite_super_expose_alias(args: &[OsString]) -> Vec<OsString> {
             .filter(|(position, _)| *position != 1 && *position != expose_index)
             .map(|(_, arg)| arg.clone()),
     );
-    rewritten
-}
-
-fn super_option_takes_value(value: &str) -> bool {
-    matches!(
-        value,
-        "-p" | "--profile"
-            | "--base-url"
-            | "--sub-agent-provider"
-            | "--sub-agent-model"
-            | "--sub-agent-model-reasoning-effort"
-            | "--sub-agent-url"
-            | "--sub-agent-max-concurrency"
-            | "--tool"
-            | "--require-tool"
-            | "--url"
-            | "--provider"
-            | "--api-key"
-            | "--model"
-            | "--local-model"
-            | "--context-window"
-            | "--local-context-window"
-            | "--auto-compact-token-limit"
-            | "--local-auto-compact-token-limit"
-            | "-c"
-    )
+    Ok(rewritten)
 }
 
 fn rewrite_positioned_super_alias(

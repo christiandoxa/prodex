@@ -12,6 +12,7 @@ use crate::MojoError;
 const ABI_VERSION: i64 = 1;
 const METADATA_WORDS: usize = 11;
 const SCAN_SUPER_OVERRIDES: i64 = 10;
+const FIND_SUPER_EXPOSE_ALIAS: i64 = 11;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i64)]
@@ -374,6 +375,37 @@ fn decode_launch_argument(
         5 if matches!(operation, Op::RetargetTui | Op::RetargetExec) => Ok(LaunchArgument::Session),
         6 if operation == Op::Prepare => Ok(LaunchArgument::FullAccess),
         _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Find the `expose` argument following the `super` or `s` alias.
+///
+/// Opaque OS arguments stop the scan unless they are consumed as option values.
+/// The caller keeps and reassembles the original OS strings using the index.
+pub fn find_super_expose_alias_index(
+    arguments: &[Option<&str>],
+) -> Result<Option<usize>, MojoError> {
+    let input = views(arguments)?;
+    let mut meta = [0_i64; METADATA_WORDS];
+    // SAFETY: input and metadata live through the synchronous call. Operation
+    // 11 only writes the expose index to metadata[0].
+    status(unsafe {
+        prodex_mojo_launch_args_v1(
+            ABI_VERSION,
+            FIND_SUPER_EXPOSE_ALIAS,
+            0,
+            input.as_ptr() as u64,
+            input.len() as i64,
+            0,
+            0,
+            0,
+            meta.as_mut_ptr() as u64,
+        )
+    })?;
+    if meta[0] == -1 {
+        Ok(None)
+    } else {
+        index(meta[0], input.len()).map(Some)
     }
 }
 

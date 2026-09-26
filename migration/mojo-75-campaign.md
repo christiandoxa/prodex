@@ -1897,3 +1897,19 @@ The canonical source report counts **52,509 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **525,669 additional Mojo LOC** required at this Rust
 volume.
+
+## Super expose alias scan hard replacement
+
+The `prodex super|s ... expose` option scan now uses operation 11 on the
+versioned Mojo launch-argument ABI. The Rust option table and scanner were
+deleted. Rust preserves opaque `OsString` values and reassembles the selected
+arguments. Caller tests cover paired and inline option values, the `--`
+boundary, and non-UTF-8 arguments on Unix. The ownership record extends the
+existing launch-argument authority, and the no-fallback guard rejects a
+restored Rust scanner; no shared-entry authority exception was needed.
+
+The canonical source report counts **52,546 reachable Mojo LOC** and
+**192,707 Rust production LOC**, totaling **245,253 LOC**: **21.43% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **525,575 additional Mojo LOC** required at this Rust
+volume.

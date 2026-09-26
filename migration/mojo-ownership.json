@@ -565,7 +565,7 @@
         "semantic_ranges": [
           {
             "start": 35,
-            "end": 228
+            "end": 266
           }
         ],
         "production_reachable": true,
@@ -1294,27 +1294,30 @@
       "name": "super_override_argument_classification",
       "domain": "cli/super-arguments",
       "introduced_in": "0.431.7",
+      "expanded_in": "0.432.1",
       "baseline_state": "candidate",
       "final_state": "authoritative",
       "mojo_entry": "prodex_mojo_launch_args_v1",
       "mojo_abi_version": 1,
       "mojo_operation_ids": {
-        "super_override_scan": 10
+        "super_override_scan": 10,
+        "super_expose_alias_scan": 11
       },
       "mojo_source": "mojo/prodex_core/launch_args.mojo",
       "consumer": "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
       "consumer_marker": "prodex_mojo_core::launch::scan_super_overrides",
       "production_consumers": [
-        "crates/prodex-cli/src/runtime_args/super_tail_extract.rs"
+        "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
+        "crates/prodex-cli/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/launch_args.rs",
-      "rust_owner_before": "Prodex option classification, inline values, and paired value boundaries",
+      "rust_owner_before": "Prodex option classification, inline values, paired value boundaries, and Super expose alias scanning",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "deleted after parity; independent caller-boundary values cover every override kind",
+      "rust_test_oracle": "deleted after parity; independent caller-boundary values cover override kinds and expose alias boundaries",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "OsString preservation, typed value parsing, and SuperArgs mutation"
+      "rust_adapter_scope": "OsString preservation, typed value parsing, SuperArgs mutation, and expose alias reassembly"
     },
     {
       "name": "codex_runtime_feature_configuration",
