@@ -1827,3 +1827,21 @@ The canonical source report counts **52,367 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **526,255 additional Mojo LOC** required at this Rust
 volume.
+
+## Runtime Doctor marker-registry hard replacement
+
+Runtime Doctor marker recognition now uses the existing versioned Mojo
+classifier. The Rust marker registry, enum mappings, marker-subset constants,
+and test-only descriptors were deleted; the parser's Mojo call adapter remains.
+Before deletion, differential checks confirmed all 167 historical marker IDs.
+A permanent expected-value caller test covers those IDs, unknown and long
+markers, malformed JSON, and invalid UTF-8. The source marker guard now checks
+emitted markers against Mojo directly, and the no-fallback guard rejects
+restoration of the Rust registry. The removed public Rust marker registry API
+had no workspace callers; external source consumers of that API must adapt.
+
+The canonical source report counts **52,367 reachable Mojo LOC** and
+**192,819 Rust production LOC**, totaling **245,186 LOC**: **21.36% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **526,090 additional Mojo LOC** required at this Rust
+volume.
