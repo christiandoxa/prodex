@@ -496,6 +496,16 @@ fn kiro_provider_core_extracts_stream_content_text() {
 }
 
 #[test]
+fn kiro_provider_core_extracts_large_stream_content_text() {
+    let large_text = "line \"quoted\"\n世界 ".repeat(150_000);
+
+    assert_eq!(
+        kiro_provider_core_stream_content_text(&json!({"content": [{"text": &large_text}]})),
+        Some(large_text)
+    );
+}
+
+#[test]
 fn kiro_provider_core_preserves_escaped_stream_content_and_activity_contract() {
     assert_eq!(
         kiro_provider_core_stream_content_text(&json!({
@@ -606,7 +616,7 @@ fn kiro_provider_core_bounds_and_redacts_tool_activity_metadata() {
         true,
         true,
     );
-    assert!(item["name"].as_str().unwrap().len() <= 160);
+    assert_eq!(item["name"], "界".repeat(53));
     assert_eq!(item["status"], "unknown");
     assert_eq!(item["phase"], "started");
     assert!(serde_json::to_vec(&item).unwrap().len() < 512);
@@ -622,6 +632,24 @@ fn kiro_provider_core_bounds_and_redacts_tool_activity_metadata() {
     assert_eq!(private["phase"], "failed");
     let serialized = serde_json::to_string(&private).unwrap();
     assert!(!serialized.contains("/home/"));
+
+    assert_eq!(
+        kiro_provider_core_tool_activity_item(
+            Some("Bearer sk-fake-example-token"),
+            Some("RUNNING"),
+            Some("command"),
+            false,
+            false,
+        ),
+        json!({
+            "type": "kiro_internal_activity",
+            "name": "command",
+            "status": "running",
+            "phase": "updated",
+            "kind": "command",
+            "details_omitted": false,
+        })
+    );
 
     let unicode = kiro_provider_core_tool_activity_item(
         Some("Überprüfung 界"),

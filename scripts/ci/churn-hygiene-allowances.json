@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-mojo-kiro-stream-hard-replacement-20260926",
+    "requiredSubjects": [
+      "refactor(kiro): replace stream fallbacks with Mojo"
+    ],
+    "caps": {
+      "maxFiles": 4,
+      "maxBehaviorFiles": 4,
+      "maxLines": 700,
+      "maxFileLines": 579
+    },
+    "reason": "The reviewed Kiro stream replacement deletes 475 lines of feature-off Rust event and activity semantics from one file. Caller tests check the redaction, Unicode and large-content contract in both provider feature modes, and the no-fallback guard covers the promoted file. The ordinary churn thresholds remain unchanged."
+  },
+  {
     "id": "audited-mojo-kiro-request-hard-replacement-20260926",
     "requiredSubjects": [
       "refactor(kiro): replace request validation and rewriting with Mojo"

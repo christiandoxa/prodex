@@ -100,6 +100,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
   "crates/prodex-provider-core/src/translators/kiro/request/semantics_tests.rs",
+  "crates/prodex-provider-core/src/translators/kiro/stream.rs",
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
@@ -134,6 +135,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/deepseek.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
+  "crates/prodex-provider-core/src/translators/kiro/stream.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_params.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_request_mojo.rs",
@@ -213,6 +215,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
   "crates/prodex-provider-core/src/translators/kiro/request/semantics_tests.rs",
+  "crates/prodex-provider-core/src/translators/kiro/stream.rs",
 ]);
 const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-app/Cargo.toml", "mojo-core"],
@@ -515,6 +518,8 @@ function selfTest() {
     '#[cfg(not(feature = "mojo-core"))] fn old_scan() {}']])[0], /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-cli/Cargo.toml",
     'prodex_mojo_core = { workspace = true, optional = true }']])[0], /requires Mojo/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/kiro/stream.rs",
+    '#[cfg(not(feature = "mojo"))] fn old_stream() {}']])[0], /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-runtime-tuning/src/capacity.rs",
     "fn runtime_proxy_worker_count_default_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
