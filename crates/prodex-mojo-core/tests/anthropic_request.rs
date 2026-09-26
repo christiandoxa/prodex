@@ -74,3 +74,17 @@ fn web_search_call_stream_preserves_query_array_values() {
         r#"{"type":"web_search_call","id":"srv_1","status":"in_progress","action":{"type":"search","queries":["query",7,{"kind":"legacy"}],"sources":[]}}"#
     );
 }
+
+#[test]
+fn response_envelope_defaults_missing_and_non_string_identifiers() {
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseEnvelope);
+    input.model = Some("1");
+    input.blocks = Some("[]");
+    input.created_at = 123;
+
+    assert_eq!(
+        run(input),
+        r#"{"id":"resp_anthropic","object":"response","created_at":123,"model":"unknown","output":[]}"#
+    );
+}

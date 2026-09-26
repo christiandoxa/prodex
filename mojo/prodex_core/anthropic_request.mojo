@@ -1691,21 +1691,37 @@ def anthropic_request_json_u64(view: ProdexRichStringView) -> UInt64:
     return value
 
 
+def anthropic_request_put_json_string_or_default(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    view: ProdexRichStringView,
+    fallback: StringSlice,
+) -> Bool:
+    if (
+        anthropic_request_string_end(view, 0, Int64(view.len)) == Int64(view.len)
+    ):
+        return anthropic_request_put_view(writer, view)
+    return anthropic_request_put_literal(writer, fallback)
+
+
 def anthropic_request_write_response_envelope(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     input: ProdexAnthropicRequestKernelInput,
 ) -> Bool:
-    if input.id.len == 0 or input.model.len == 0 or input.blocks.len == 0:
+    if input.blocks.len == 0:
         return False
     if not (
         anthropic_request_put_literal(writer, StringSlice('{"id":'))
-        and anthropic_request_put_view(writer, input.id)
+        and anthropic_request_put_json_string_or_default(
+            writer, input.id, StringSlice('"resp_anthropic"')
+        )
         and anthropic_request_put_literal(
             writer, StringSlice(',"object":"response","created_at":')
         )
         and anthropic_request_put_u64(writer, input.created_at)
         and anthropic_request_put_literal(writer, StringSlice(',"model":'))
-        and anthropic_request_put_view(writer, input.model)
+        and anthropic_request_put_json_string_or_default(
+            writer, input.model, StringSlice('"unknown"')
+        )
         and anthropic_request_put_literal(writer, StringSlice(',"output":'))
         and anthropic_request_put_view(writer, input.blocks)
     ):

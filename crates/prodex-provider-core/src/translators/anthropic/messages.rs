@@ -228,20 +228,8 @@ fn anthropic_response_envelope_mojo(
     output: Vec<Value>,
     created_at: u64,
 ) -> Result<Value, String> {
-    let id = json_fragment(&Value::String(
-        value
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or("resp_anthropic")
-            .to_string(),
-    ))?;
-    let model = json_fragment(&Value::String(
-        value
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown")
-            .to_string(),
-    ))?;
+    let id = value.get("id").map(json_fragment).transpose()?;
+    let model = value.get("model").map(json_fragment).transpose()?;
     let output = json_fragment(&Value::Array(output))?;
     let usage = value.get("usage").and_then(Value::as_object);
     let stop_reason = value.get("stop_reason").map(json_fragment).transpose()?;
@@ -268,8 +256,8 @@ fn anthropic_response_envelope_mojo(
         .transpose()?;
     let mut input =
         AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseEnvelope);
-    input.id = Some(&id);
-    input.model = Some(&model);
+    input.id = id.as_deref();
+    input.model = model.as_deref();
     input.blocks = Some(&output);
     input.created_at = created_at;
     input.choice_kind = flags;
