@@ -5,6 +5,39 @@ use crate::{
 };
 
 #[test]
+fn prompt_cache_affinity_preserves_trimmed_key_hash_and_owner_priority() {
+    let profiles = ["alpha", "beta", "third"];
+    let expected = [
+        (0, 11_164_400_351_952_061_751),
+        (0, 7_149_616_626_519_032_185),
+        (0, 12_567_574_820_160_767_546),
+    ];
+    assert_eq!(
+        runtime_prompt_cache_affinity_batch(Some("workspace-cache"), None, &profiles).unwrap(),
+        expected
+    );
+    assert_eq!(
+        runtime_prompt_cache_affinity_batch(
+            Some(" \u{2003}workspace-cache\u{2003} "),
+            Some("\u{2003} beta \u{00a0}"),
+            &profiles,
+        )
+        .unwrap(),
+        [(1, expected[0].1), (0, 0), (1, expected[2].1)]
+    );
+    let long_key = format!("{}workspace-cache", " ".repeat(4_100));
+    assert_eq!(
+        runtime_prompt_cache_affinity_batch(Some(&long_key), None, &["alpha"]).unwrap(),
+        [expected[0]]
+    );
+    let many_profiles = vec!["alpha"; 257];
+    assert_eq!(
+        runtime_prompt_cache_affinity_batch(Some("workspace-cache"), None, &many_profiles).unwrap(),
+        vec![expected[0]; many_profiles.len()]
+    );
+}
+
+#[test]
 fn optimistic_current_candidate_keeps_unknown_quota_without_pool_fallback() {
     let decision = runtime_optimistic_current_candidate_decision(optimistic_current_input(
         OptimisticCurrentFixture {

@@ -1,5 +1,5 @@
 from std.memory import Pointer
-from rich_text import rich_view_valid, rich_views_equal
+from rich_text import rich_trim_bounds, rich_view_valid, rich_views_equal
 from rich_types import ProdexRichStringView, rich_view_ptr
 from runtime_math import INT64_MAX, INT64_MIN, runtime_quota_saturating_add
 
@@ -201,32 +201,44 @@ def prodex_runtime_prompt_cache_affinity_batch_v1(
         mut=True, UInt64, MutUntrackedOrigin
     ](unsafe_from_address=Int(scores_address))
     var key = ProdexRichStringView(0, 0)
+    var has_key = False
     if key_present == 1:
         key = Pointer[
             mut=False, ProdexRichStringView, ImmUntrackedOrigin
         ](unsafe_from_address=Int(key_view_address))[].copy()
-        if not rich_view_valid(key, RICH_MAX_IDENTIFIER_BYTES):
+        if not rich_view_valid(key, INT64_MAX):
             return 2
+        var bounds = rich_trim_bounds(key)
+        has_key = bounds[1] > bounds[0]
+        key = ProdexRichStringView(
+            key.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+        )
     var owner = ProdexRichStringView(0, 0)
+    var has_owner = False
     if owner_present == 1:
         owner = Pointer[
             mut=False, ProdexRichStringView, ImmUntrackedOrigin
         ](unsafe_from_address=Int(owner_view_address))[].copy()
-        if not rich_view_valid(owner, RICH_MAX_IDENTIFIER_BYTES):
+        if not rich_view_valid(owner, INT64_MAX):
             return 2
+        var bounds = rich_trim_bounds(owner)
+        has_owner = bounds[1] > bounds[0]
+        owner = ProdexRichStringView(
+            owner.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+        )
     for index in range(count):
         var profile = profiles[unsafe_offset=index].copy()
-        if not rich_view_valid(profile, RICH_MAX_IDENTIFIER_BYTES):
+        if not rich_view_valid(profile, INT64_MAX):
             return 2
         priorities[unsafe_offset=index] = 0
         scores[unsafe_offset=index] = 0
-        if key_present == 0:
+        if not has_key:
             continue
-        if owner_present == 1 and rich_views_equal(profile, owner):
+        if has_owner and rich_views_equal(profile, owner):
             continue
-        if owner_present == 1:
+        if has_owner:
             priorities[unsafe_offset=index] = 1
-        var hash: UInt64 = 1469598103934665603
+        var hash: UInt64 = 14695981039346656037
         hash = runtime_prompt_cache_hash_static["prodex-prompt-cache-affinity-v1"](hash)
         hash = runtime_prompt_cache_hash_byte(hash, 0)
         hash = runtime_prompt_cache_hash_view(hash, key)

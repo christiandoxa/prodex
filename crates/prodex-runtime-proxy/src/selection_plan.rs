@@ -7,11 +7,7 @@ use crate::{
     runtime_selection_quota_pressure_band_reason,
 };
 
-#[cfg(feature = "mojo")]
 #[path = "selection_prompt_cache_mojo.rs"]
-mod prompt_cache;
-#[cfg(not(feature = "mojo"))]
-#[path = "selection_prompt_cache_rust.rs"]
 mod prompt_cache;
 pub use prompt_cache::{
     runtime_prompt_cache_affinity_batch, runtime_prompt_cache_affinity_sort_key,
