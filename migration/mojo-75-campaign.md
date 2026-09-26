@@ -1386,3 +1386,37 @@ The canonical report counts **51,921 reachable Mojo LOC** and **194,782 Rust
 production LOC**, totaling **246,703 LOC**: **21.04595404190464% Mojo**. The
 7% release floor and non-regression check pass; the 75% project target remains
 unmet, with **532,425 additional Mojo LOC** required at the current Rust volume.
+
+## Runtime health, observability, and Retry-After hard replacement
+
+Runtime-store profile-health sort keys now use the existing Mojo batch in every
+feature mode. The Rust feature-off scorer was deleted; expected-value tests cover
+route coupling, stable batch order, the 256-row ABI boundary, saturation, and
+extreme timestamps. The live app selection catalog remains the caller.
+
+Observability metric names, typed labels, and metric-label privacy validation
+now use their existing Mojo kernels in every feature mode. The Rust catalog,
+validator, and parity oracle were deleted. Boundary tests assert exact public
+names, labels, sensitive-key rejection, identifier rejection, and redaction.
+
+The proxy Retry-After numeric conversion now uses the existing Mojo parser in
+every feature mode. Its Rust number parser and test oracle were deleted; 19
+explicit expected-value cases cover rounding, caps, overflow, and malformed
+numbers. The token/header acquisition and error-policy commit rules remain in
+their existing Rust owners. `prodex-runtime-proxy` now declares `mojo-rich` as a
+normal dependency instead of relying on feature unification through tests.
+The no-fallback guard covers all three promoted paths, and the ownership
+manifest records the unconditional runtime-store adapter.
+
+After deletion, runtime-store tests pass 29 cases in default, no-default, and
+Mojo modes; observability passes 11 in each mode; runtime-proxy passes 306 in
+default and no-default modes and 350 with Mojo. The 364-case serial app proxy
+filter, runtime smoke, offline upstream baseline and five replay fixtures,
+formatter, workspace Clippy, docs, changed-tests, ownership/authority/no-fallback,
+hot-path, manifest, crate-boundary, and `npm run ci` checks pass on Linux x86_64.
+No Mojo kernel changed in this wave; native macOS/Windows execution was not run.
+
+The canonical report counts **51,921 reachable Mojo LOC** and **194,714 Rust
+production LOC**, totaling **246,635 LOC**: **21.051756644434082% Mojo**. The
+7% release floor and non-regression check pass; the 75% project target remains
+unmet, with **532,221 additional Mojo LOC** required at the current Rust volume.

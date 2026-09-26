@@ -201,41 +201,6 @@ pub fn runtime_profile_health_score(
         ))
 }
 
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_profile_health_sort_key(
-    profile_name: &str,
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
-    now: i64,
-    route_kind: RuntimeRouteKind,
-) -> u32 {
-    runtime_profile_effective_health_score_from_map(profile_health, profile_name, now)
-        .saturating_add(runtime_profile_route_health_score(
-            profile_health,
-            profile_name,
-            now,
-            route_kind,
-        ))
-        .saturating_add(runtime_profile_effective_score_from_map(
-            profile_health,
-            &runtime_profile_route_bad_pairing_key(profile_name, route_kind),
-            now,
-            crate::RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-        ))
-        .saturating_add(runtime_profile_route_coupling_score(
-            profile_health,
-            profile_name,
-            now,
-            route_kind,
-        ))
-        .saturating_add(runtime_profile_route_performance_score(
-            profile_health,
-            profile_name,
-            now,
-            route_kind,
-        ))
-}
-
-#[cfg(feature = "mojo")]
 pub fn runtime_profile_health_sort_key(
     profile_name: &str,
     profile_health: &BTreeMap<String, RuntimeProfileHealth>,
@@ -248,7 +213,6 @@ pub fn runtime_profile_health_sort_key(
         .expect("single profile health score must be returned")
 }
 
-#[cfg(feature = "mojo")]
 fn profile_health_score_input(
     profile_health: &BTreeMap<String, RuntimeProfileHealth>,
     profile_name: &str,
@@ -299,7 +263,6 @@ fn profile_health_score_input(
     }
 }
 
-#[cfg(feature = "mojo")]
 pub fn runtime_profile_health_sort_keys(
     profile_names: &[&str],
     profile_health: &BTreeMap<String, RuntimeProfileHealth>,
@@ -324,21 +287,6 @@ pub fn runtime_profile_health_sort_keys(
                 crate::RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
             )
             .unwrap_or_else(|error| panic!("Mojo profile health score failed: {error:?}"))
-        })
-        .collect()
-}
-
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_profile_health_sort_keys(
-    profile_names: &[&str],
-    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
-    now: i64,
-    route_kind: RuntimeRouteKind,
-) -> Vec<u32> {
-    profile_names
-        .iter()
-        .map(|profile_name| {
-            runtime_profile_health_sort_key(profile_name, profile_health, now, route_kind)
         })
         .collect()
 }

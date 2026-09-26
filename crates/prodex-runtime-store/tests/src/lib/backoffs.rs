@@ -227,7 +227,6 @@ fn profile_health_sort_key_includes_route_coupling_and_performance() {
     );
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn profile_health_sort_key_batch_preserves_store_order() {
     let scores = BTreeMap::from([
@@ -258,6 +257,33 @@ fn profile_health_sort_key_batch_preserves_store_order() {
     assert_eq!(
         runtime_profile_health_sort_keys(&names, &scores, 100, RuntimeRouteKind::Responses),
         vec![5, 0]
+    );
+}
+
+#[test]
+fn profile_health_sort_key_batch_handles_capacity_and_extreme_timestamps() {
+    let maxed = BTreeMap::from([(
+        "alpha".to_string(),
+        RuntimeProfileHealth {
+            score: u32::MAX,
+            updated_at: 100,
+        },
+    )]);
+    let names = vec!["alpha"; 257];
+    assert_eq!(
+        runtime_profile_health_sort_keys(&names, &maxed, 100, RuntimeRouteKind::Responses),
+        vec![u32::MAX; names.len()]
+    );
+    let stale = BTreeMap::from([(
+        "alpha".to_string(),
+        RuntimeProfileHealth {
+            score: 3,
+            updated_at: i64::MIN,
+        },
+    )]);
+    assert_eq!(
+        runtime_profile_health_sort_key("alpha", &stale, i64::MAX, RuntimeRouteKind::Responses),
+        0
     );
 }
 

@@ -2,12 +2,12 @@
 
 This is a semantic mapping for current Prodex usage, not a syntax translation guide.
 `MOJO` marks a current authoritative owner; `MOVE_NOW` marks a verified seam and may describe an
-already-moved kernel. Check `mojo-ownership.json` for current status. Mojo kernels are enabled
-behind the opt-in `mojo-core` feature, with separate Rust-only builds still supported.
+already-moved kernel. Check `mojo-ownership.json` for current status. Activation follows each
+owning crate's feature graph; some Mojo-owned capabilities are unconditional.
 
 | Rust construct / usage | Current Prodex location | Mojo equivalent verified or expected | Confidence | Complexity | External dependencies | Candidate | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `i64` arithmetic and bounded branches | `prodex-quota::render::remaining_percent` | `Int64`, `def`, `if`, C ABI scalar return | Verified | Low | None | `MOJO` | Mojo quota kernel is authoritative in `mojo-core` builds |
+| `i64` arithmetic and bounded branches | `prodex-quota::render::remaining_percent` | `Int64`, `def`, `if`, C ABI scalar return | Verified | Low | None | `MOJO` | Mojo quota kernel is authoritative in every quota build |
 | `Option<i64>` at an FFI edge | Same function | Explicit `(value, has_value)` scalar pair | Verified | Low | None | `MOJO` | Uses scalar presence flags; no heap data crosses FFI |
 | quota window thresholds | `prodex-quota::render::quota_window_summary` | Explicit status tag plus scalar remaining percent | Verified | Low | None | `MOJO` | Missing-window state stays in the Rust adapter |
 | quota pressure aggregation | `prodex-quota::render::quota_pressure_band_from_windows` | Two status tags and one band tag | Verified | Low | None | `MOJO` | Mojo applies the same ordered max mapping |
@@ -16,11 +16,11 @@ behind the opt-in `mojo-core` feature, with separate Rust-only builds still supp
 | bounded profile scheduling | `prodex-runtime-quota::selection::schedule_ready_profile_candidates_with_view` | Flat 16-field `Int64` rows and stable output indices | Verified | High | None after normalization | `MOJO` | Mojo derives score, reserve bias, hysteresis, and order; Rust retains state/time normalization and a test-only scorer |
 | provider routing plan | `prodex-provider-spi::governed_routing::plan_governed_provider_route` | Flat candidate arrays plus eligibility, score, and stable-order outputs | Verified | High | None after Rust normalization | `MOJO` | Mojo owns capability filtering, score arithmetic, and eligible ordering; Rust owns hard gates, affinity, route construction, and policy |
 | provider capability matching | `prodex-provider-core::constraints` and rich provider routing | Capability masks and provider/model views with tagged outputs | Verified | Medium | None after Rust normalization | `MOJO` | The former SPI matcher is replaced by the authoritative provider-constraints and governed-route kernels |
-| DeepSeek Responses parameter validation | `prodex-provider-core::translators::deepseek::request` | `ResponsesRequestParams` plan plus `DeepSeekKernelOperation::UserId` | Verified | Medium | Serde request acquisition | `MOJO` | Mojo owns primitive-field, `top_logprobs`, stop-sequence, and user-ID grammar checks; Rust retains canonicalization, Unicode trim, error mapping, and feature-off compatibility |
+| DeepSeek Responses parameter validation | `prodex-provider-core::translators::deepseek::request` | `ResponsesRequestParams` plan plus `DeepSeekKernelOperation::UserId` | Verified | Medium | Serde request acquisition | `MOJO` | Mojo owns primitive-field, `top_logprobs`, stop-sequence, and Unicode-trimmed user-ID checks in every build; Rust retains JSON acquisition and error mapping |
 | Gemini Responses function-call history parts | `prodex-provider-core::translators::gemini::request_contents` | `FunctionCallPart` and `FunctionResponsePart` operations | Verified | Low | Serde value acquisition and argument parsing | `MOJO` | Mojo owns Gemini part wire shapes; Rust retains item traversal, argument parsing, call-ID/name correlation, and feature-off compatibility |
-| Telemetry metric-label privacy validation | `prodex-observability::TelemetryAttribute::as_metric_label` | Borrowed key/value byte views and a validation tag | Verified | Low | None | `MOJO` | Mojo owns bounded key/value privacy checks; Rust retains strings and the feature-off implementation, with no fallback after Mojo errors |
+| Telemetry metric-label privacy validation | `prodex-observability::TelemetryAttribute::as_metric_label` | Borrowed key/value byte views and a validation tag | Verified | Low | None | `MOJO` | Mojo owns bounded key/value privacy checks in every build; Rust retains strings and typed error mapping, with no Rust validator |
 | Smart Context byte estimate | `prodex-runtime-proxy::smart_context::token_accounting::smart_context_estimate_tokens_from_body_bytes` | `UInt64` bytes to saturated `UInt64` estimate | Verified | Low | None | `MOJO` | Also used as the conservative floor and invalid-UTF-8 fallback for body estimation |
-| Smart Context body estimate | `prodex-runtime-proxy::smart_context::token_accounting::smart_context_estimate_tokens_from_body` | Borrowed byte view, UTF-8 codepoint scan, and scalar estimate result | Verified | Medium | None | `MOJO` | Mojo owns text classification, byte fallback, and the conservative floor; Rust retains the caller adapter, test oracle, and feature-off implementation |
+| Smart Context body estimate | `prodex-runtime-proxy::smart_context::token_accounting::smart_context_estimate_tokens_from_body` | Borrowed byte view, UTF-8 codepoint scan, and scalar estimate result | Verified | Medium | None | `MOJO` | Mojo owns text classification, byte fallback, and the conservative floor; Rust retains only the caller adapter |
 | `u64` checked/saturating arithmetic | `prodex-domain::accounting` | `UInt64` plus explicit overflow branches | Unverified | Low | None | `KEEP_RUST` | Generic accounting helper has no production Mojo seam; durable accounting remains Rust-owned |
 | fixed-layout Rust structs | context text ABI DTOs | Mojo `struct` with pointer/native-length or fixed integer fields | Verified | Medium | None | `MOVE_NOW` for versioned DTOs | Rust static assertions and Mojo reflection/runtime layout probes are mandatory |
 | Rust enums / tagged decisions | domain and provider plans | Mojo enum-like tagged representation or explicit integer tag | Unverified | Medium | None | `EXPERIMENT` | Keep Rust enum authoritative at first |
@@ -38,8 +38,7 @@ Move a complete deterministic calculation, not a Rust method because its syntax 
 Rust may pass validated text views and structured records when ownership and confidentiality are
 explicit; numeric pre-normalization is no longer universal. Captured vectors and invariants remain
 the compatibility contract after parity covers normal, Unicode, boundary, invalid, and extreme
-inputs. A separate Rust-only build may retain its implementation, but it is never a runtime
-fallback for `MOJO`.
+inputs. Mojo-owned capabilities have no Rust semantic fallback, including feature-off builds.
 
 ## Rich equivalents promoted on 2026-08-26
 

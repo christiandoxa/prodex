@@ -36,6 +36,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
   "crates/prodex-runtime-proxy/src/quota/mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_policy.rs",
@@ -52,6 +53,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-launch/src/args.rs",
   "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
   "crates/prodex-observability/src/lib.rs",
+  "crates/prodex-observability/src/metric_label.rs",
   "crates/prodex-observability/src/mojo.rs",
   "crates/prodex-runtime-tuning/src/lib.rs",
   "crates/prodex-runtime-tuning/src/capacity.rs",
@@ -93,6 +95,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-store/src/continuations/status.rs",
   "crates/prodex-runtime-store/src/continuations/status/mojo.rs",
   "crates/prodex-runtime-store/src/profile_backoff/backoff.rs",
+  "crates/prodex-runtime-store/src/profile_backoff/score.rs",
   "crates/prodex-runtime-proxy/src/health/backoff.rs",
   "crates/prodex-runtime-proxy/src/health/score.rs",
   "crates/prodex-runtime-proxy/src/health/latency.rs",
@@ -127,10 +130,14 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-observability/src/lib.rs",
+  "crates/prodex-observability/src/metric_label.rs",
+  "crates/prodex-runtime-store/src/profile_backoff/score.rs",
   "crates/prodex-quota/src/render.rs",
   "crates/prodex-quota/src/render/remaining_percent.rs",
   "crates/prodex-quota/src/render/quota_policy.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
   "crates/prodex-runtime-proxy/src/quota/mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
@@ -190,6 +197,8 @@ const ANTHROPIC_WEB_SEARCH_FILE = "crates/prodex-provider-core/src/translators/a
 const ANTHROPIC_REQUEST_FALLBACK_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/request_fallback.rs";
 const ANTHROPIC_REQUEST_ORACLE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/mojo_request_tests.rs";
 const REMOVED_ORACLE_FILES = [
+  "crates/prodex-observability/src/rust.rs",
+  "crates/prodex-observability/src/metric_label/mojo_parity_tests.rs",
   ANTHROPIC_REQUEST_FALLBACK_FILE,
   ANTHROPIC_REQUEST_ORACLE_FILE,
   "crates/prodex-context/src/critical_signal/rust_oracle.rs",
@@ -222,6 +231,9 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/local_shell.rs",
 ];
 const HARD_REPLACED_RUST_FILES = new Set([
+  "crates/prodex-observability/src/lib.rs",
+  "crates/prodex-observability/src/metric_label.rs",
+  "crates/prodex-runtime-store/src/profile_backoff/score.rs",
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-quota/src/render/windows.rs",
   "crates/prodex-quota/src/render/remaining_percent.rs",
@@ -240,6 +252,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
   "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
   "crates/prodex-runtime-tuning/src/capacity.rs",
@@ -299,6 +312,7 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
 ]);
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
 const DOCTOR_CARGO_FILE = "crates/prodex-runtime-doctor/Cargo.toml";
+const RUNTIME_PROXY_CARGO_FILE = "crates/prodex-runtime-proxy/Cargo.toml";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
@@ -466,6 +480,10 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === DOCTOR_CARGO_FILE &&
       !/^prodex_mojo_core\s*=\s*\{[^\n]*features\s*=\s*\[[^\]]*"mojo-rich"[^\]]*\][^\n]*\}/mu.test(contents))
     .map(([filePath]) => `${filePath}: doctor next steps and suggestions require Mojo without a feature gate`);
+  const proxyDependencyViolations = files
+    .filter(([filePath, contents]) => filePath === RUNTIME_PROXY_CARGO_FILE &&
+      !/^prodex_mojo_core\s*=\s*\{[^\n]*features\s*=\s*\[[^\]]*"mojo-rich"[^\]]*\][^\n]*\}/mu.test(contents))
+    .map(([filePath]) => `${filePath}: Retry-After parsing requires Mojo rich without a feature gate`);
   const defaultFeatureViolations = files.flatMap(([filePath, contents]) => {
     const required = REQUIRED_DEFAULT_FEATURES.get(filePath);
     if (!required) return [];
@@ -480,7 +498,7 @@ export function findViolations(files) {
     ...deepseekShapingViolations,
     ...quotaWindowViolations,
     ...rehydrateViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
-    ...doctorDependencyViolations,
+    ...doctorDependencyViolations, ...proxyDependencyViolations,
     ...defaultFeatureViolations];
 }
 
@@ -505,6 +523,7 @@ async function promotedFiles() {
     ]),
   ));
   files.push(["crates/prodex-cli/Cargo.toml", await fs.readFile(path.join(repoRoot, "crates/prodex-cli/Cargo.toml"), "utf8")]);
+  files.push([RUNTIME_PROXY_CARGO_FILE, await fs.readFile(path.join(repoRoot, RUNTIME_PROXY_CARGO_FILE), "utf8")]);
   return files;
 }
 
@@ -560,6 +579,9 @@ function selfTest() {
     "fn retarget_codex_tui_resume_args() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-runtime-doctor/Cargo.toml",
     '[features]\ndefault = []\nstate-summary-mojo = []']]).join("\n"), /default features must include state-summary-mojo/u);
+  assert.match(findViolations([[RUNTIME_PROXY_CARGO_FILE,
+    'prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }']]).join("\n"),
+    /Retry-After parsing requires Mojo rich/u);
   assert.match(findViolations([["crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
     '#[cfg(not(feature = "state-summary-mojo"))] fn rust_summary() {}']])[0],
     /feature-off Rust path/u);
@@ -608,6 +630,15 @@ function selfTest() {
     '#[cfg(not(feature = "mojo"))] fn old_estimator() {}']])[0], /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/health/score.rs",
     "fn effective_score_rust() {}"]]).join("\n"), /Rust semantic oracle or copy/u);
+  assert.match(findViolations([["crates/prodex-runtime-store/src/profile_backoff/score.rs",
+    '#[cfg(not(feature = "mojo"))] fn runtime_profile_health_sort_key() {}']]).join("\n"),
+    /feature-off Rust path/u);
+  assert.match(findViolations([["crates/prodex-observability/src/metric_label.rs",
+    '#[cfg(not(feature = "mojo"))] fn validate_telemetry_metric_label_rust() {}']]).join("\n"),
+    /feature-off Rust path/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
+    '#[cfg(not(feature = "mojo"))] fn runtime_retry_after_number_rust() {}']]).join("\n"),
+    /feature-off Rust path/u);
   assert.match(findViolations([[QUOTA_MODEL_CAPACITY_FILE,
     "fn normalized_identifier() {}"]]).join("\n"), /replaced Rust semantic implementation/u);
   assert.match(findViolations([[RUNTIME_QUOTA_FILE,
