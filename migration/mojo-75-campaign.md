@@ -1597,3 +1597,22 @@ The canonical source report counts **51,921 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **528,840 additional Mojo LOC** required at this Rust
 volume.
+
+## Smart Context token-budget hard replacement
+
+Budget-tier selection, memory-capsule token budgets, and capsule admission now
+use the existing Mojo kernels in every feature mode. The feature-off Rust
+thresholds, budget gates, and capsule selector were deleted. Rust maps the
+typed policy inputs, orders capsule records, and splits lists beyond the
+65,536-item ABI bound into Mojo calls while carrying the remaining budget.
+Independent expected-value tests cover threshold and safety boundaries,
+Unicode ordering, integer overflow, malformed ABI inputs, and a 65,537-item
+caller input. The budget tests live in a focused sibling file. Native
+execution evidence is Linux x86_64; macOS and Windows runtime execution was
+not run.
+
+The canonical source report counts **51,921 reachable Mojo LOC** and
+**193,567 Rust production LOC**, totaling **245,488 LOC**: **21.15% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **528,780 additional Mojo LOC** required at this Rust
+volume.

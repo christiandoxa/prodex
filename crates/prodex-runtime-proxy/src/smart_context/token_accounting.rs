@@ -18,16 +18,7 @@ use observed::smart_context_observed_usage_totals;
 use std::collections::BTreeSet;
 
 pub fn smart_context_token_budget_tier(available_tokens: usize) -> SmartContextTokenBudgetTier {
-    #[cfg(feature = "mojo")]
-    return smart_context_u64_budget_tier(u64::try_from(available_tokens).unwrap_or(u64::MAX));
-
-    #[cfg(not(feature = "mojo"))]
-    match available_tokens {
-        16_000.. => SmartContextTokenBudgetTier::Exact,
-        8_000..=15_999 => SmartContextTokenBudgetTier::Large,
-        2_000..=7_999 => SmartContextTokenBudgetTier::Condensed,
-        _ => SmartContextTokenBudgetTier::Minimal,
-    }
+    smart_context_u64_budget_tier(u64::try_from(available_tokens).unwrap_or(u64::MAX))
 }
 
 #[derive(Debug, Clone, PartialEq)]
