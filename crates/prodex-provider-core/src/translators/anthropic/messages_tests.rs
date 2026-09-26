@@ -1,6 +1,5 @@
 use super::*;
 use crate::{ProviderTransformLoss, anthropic_messages_translator};
-#[cfg(feature = "mojo")]
 use serde_json::{Value, json};
 
 #[cfg(feature = "mojo")]
@@ -395,7 +394,6 @@ fn response_plan_preserves_flush_and_web_search_result_order() {
 }
 
 #[test]
-#[cfg(feature = "mojo")]
 fn stream_maps_native_delta_and_tolerates_ping() {
     let ping = anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -473,7 +471,6 @@ fn response_translation_is_explicitly_unsupported_without_mojo() {
 }
 
 #[test]
-#[cfg(feature = "mojo")]
 fn stream_maps_tool_search_and_completion_events() {
     let tool = anthropic_messages_translator().transform_stream_event(
         ProviderTransformInput::new(
@@ -513,7 +510,6 @@ fn stream_maps_tool_search_and_completion_events() {
     );
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn stream_rejects_malformed_sse_without_changing_wire_formats() {
     let malformed =
@@ -530,6 +526,23 @@ fn stream_rejects_malformed_sse_without_changing_wire_formats() {
     assert_eq!(malformed.to_format, ProviderWireFormat::OpenAiResponses);
     assert!(malformed.body.is_none());
 
+    let missing_block =
+        anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            b"event: content_block_start\ndata: {\"type\":\"content_block_start\"}\n\n".to_vec(),
+        ));
+    assert!(matches!(
+        missing_block.loss,
+        ProviderTransformLoss::Rejected { ref reason }
+            if reason == "Anthropic content_block_start requires content_block"
+    ));
+    assert_eq!(
+        missing_block.from_format,
+        ProviderWireFormat::AnthropicMessages
+    );
+    assert_eq!(missing_block.to_format, ProviderWireFormat::OpenAiResponses);
+    assert!(missing_block.body.is_none());
+
     let unframed = anthropic_messages_translator().transform_stream_event(
         ProviderTransformInput::new(ProviderEndpoint::Responses, b"{\"type\":\"ping\"}".to_vec()),
     );
@@ -543,20 +556,89 @@ fn stream_rejects_malformed_sse_without_changing_wire_formats() {
     assert!(unframed.body.is_none());
 }
 
-#[cfg(not(feature = "mojo"))]
 #[test]
-fn stream_translation_is_explicitly_unsupported_without_mojo() {
-    let result =
-        anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
-            ProviderEndpoint::Responses,
-            b"not SSE or JSON; translation must not parse this body".to_vec(),
-        ));
-    assert!(matches!(
-        result.loss,
-        ProviderTransformLoss::UnsupportedUpstream { ref reason }
-            if reason == "Anthropic Messages stream translation requires Mojo support"
+fn stream_translation_preserves_ids_tool_deltas_errors_and_utf8_replacement() {
+    let start = anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"resp_🦀\",\"model\":\"claude\"}}\n\n".as_bytes().to_vec(),
     ));
-    assert_eq!(result.from_format, ProviderWireFormat::AnthropicMessages);
-    assert_eq!(result.to_format, ProviderWireFormat::OpenAiResponses);
-    assert!(result.body.is_none());
+    assert!(matches!(start.loss, ProviderTransformLoss::Lossless));
+    let start = String::from_utf8(start.body.unwrap()).unwrap();
+    let (start_header, start_data) = start.split_once("\ndata: ").unwrap();
+    assert_eq!(start_header, "event: response.created");
+    assert!(start_data.ends_with("\n\n"));
+    let start_data: Value = serde_json::from_str(start_data.trim_end()).unwrap();
+    let created_at = start_data["response"]["created_at"].as_u64().unwrap();
+    assert_eq!(
+        start_data,
+        json!({
+            "type":"response.created",
+            "response":{"id":"resp_🦀","object":"response","created_at":created_at,"model":"claude","output":[]}
+        })
+    );
+
+    let tool = anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":7,\"content_block\":{\"type\":\"tool_use\",\"id\":\"call_🦀\",\"name\":\"read_file\"}}\n\n".as_bytes().to_vec(),
+    ));
+    assert!(matches!(tool.loss, ProviderTransformLoss::Lossless));
+    let tool = String::from_utf8(tool.body.unwrap()).unwrap();
+    assert!(tool.starts_with("event: response.output_item.added\ndata: "));
+    assert!(tool.ends_with("\n\n"));
+    let tool: Value =
+        serde_json::from_str(tool.split_once("\ndata: ").unwrap().1.trim_end()).unwrap();
+    assert_eq!(
+        tool,
+        json!({
+            "type":"response.output_item.added","output_index":7,
+            "item":{"type":"function_call","call_id":"call_🦀","name":"read_file","arguments":""}
+        })
+    );
+
+    let delta = anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":7,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"path\\\":\\\"🦀\\\"}\"}}\n\n".as_bytes().to_vec(),
+    ));
+    assert!(matches!(delta.loss, ProviderTransformLoss::Lossless));
+    let delta = String::from_utf8(delta.body.unwrap()).unwrap();
+    assert!(delta.starts_with("event: response.function_call_arguments.delta\ndata: "));
+    let delta: Value =
+        serde_json::from_str(delta.split_once("\ndata: ").unwrap().1.trim_end()).unwrap();
+    assert_eq!(
+        delta,
+        json!({"type":"response.function_call_arguments.delta","output_index":7,"delta":"{\"path\":\"🦀\"}"})
+    );
+
+    let error = anthropic_messages_translator().transform_stream_event(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"try later 🦀\"}}\n\n".as_bytes().to_vec(),
+    ));
+    assert!(matches!(error.loss, ProviderTransformLoss::Lossless));
+    let error = String::from_utf8(error.body.unwrap()).unwrap();
+    assert!(error.starts_with("event: error\ndata: "));
+    assert!(error.ends_with("\n\n"));
+    let error: Value =
+        serde_json::from_str(error.split_once("\ndata: ").unwrap().1.trim_end()).unwrap();
+    assert_eq!(
+        error,
+        json!({"type":"error","error":{"type":"overloaded_error","message":"try later 🦀"}})
+    );
+
+    let invalid_utf8 = anthropic_messages_translator().transform_stream_event(
+        ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            b"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"bad \xff text\"}}\n\n".to_vec(),
+        ),
+    );
+    assert!(matches!(invalid_utf8.loss, ProviderTransformLoss::Lossless));
+    let invalid_utf8: Value = serde_json::from_str(
+        String::from_utf8(invalid_utf8.body.unwrap())
+            .unwrap()
+            .split_once("\ndata: ")
+            .unwrap()
+            .1
+            .trim_end(),
+    )
+    .unwrap();
+    assert_eq!(invalid_utf8["delta"], "bad � text");
 }

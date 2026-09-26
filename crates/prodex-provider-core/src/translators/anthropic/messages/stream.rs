@@ -1,19 +1,7 @@
 use super::*;
 
-#[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{AnthropicRequestKernelInput, AnthropicRequestKernelOperation};
 
-#[cfg(not(feature = "mojo"))]
-pub(in super::super) fn translate_anthropic_stream_event_to_responses(
-    input: ProviderTransformInput,
-) -> ProviderTransformResult {
-    unsupported_stream(
-        input.endpoint,
-        "Anthropic Messages stream translation requires Mojo support",
-    )
-}
-
-#[cfg(feature = "mojo")]
 pub(in super::super) fn translate_anthropic_stream_event_to_responses(
     input: ProviderTransformInput,
 ) -> ProviderTransformResult {
@@ -65,7 +53,6 @@ fn unsupported_stream(
     )
 }
 
-#[cfg(feature = "mojo")]
 fn anthropic_stream_mojo_value(value: &Value, created_at: u64) -> Result<Option<String>, String> {
     let event = super::json_fragment(value)?;
     let mut input = AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::StreamEvent);
@@ -87,7 +74,7 @@ fn anthropic_stream_mojo_value(value: &Value, created_at: u64) -> Result<Option<
     }
 }
 
-#[cfg(all(test, feature = "mojo"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -290,7 +277,6 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "mojo")]
     #[test]
     fn mojo_stream_event_enforces_kernel_size_boundary() {
         const MAX_BYTES: usize = 4 * 1024 * 1024;

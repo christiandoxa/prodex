@@ -12,13 +12,11 @@ use crate::{
 use prodex_mojo_core::rich::{AnthropicRequestKernelInput, AnthropicRequestKernelOperation};
 #[cfg(feature = "mojo")]
 use serde_json::Map;
-#[cfg(feature = "mojo")]
 use serde_json::Value;
-#[cfg(all(feature = "mojo", test))]
+#[cfg(test)]
 use serde_json::json;
 #[cfg(feature = "mojo")]
 use std::collections::BTreeMap;
-#[cfg(feature = "mojo")]
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "mojo")]
@@ -155,7 +153,6 @@ pub(super) fn translate_chat_request_to_anthropic(
     }
 }
 
-#[cfg(feature = "mojo")]
 fn json_fragment(value: &Value) -> Result<String, String> {
     serde_json::to_string(value).map_err(|error| format!("Anthropic JSON fragment failed: {error}"))
 }
@@ -329,7 +326,6 @@ fn rejected_chat(reason: impl Into<String>) -> ProviderTransformResult {
     )
 }
 
-#[cfg(feature = "mojo")]
 fn rejected_response(reason: impl Into<String>) -> ProviderTransformResult {
     ProviderTransformResult::rejected(
         ProviderId::Anthropic,
@@ -340,12 +336,10 @@ fn rejected_response(reason: impl Into<String>) -> ProviderTransformResult {
     )
 }
 
-#[cfg(feature = "mojo")]
 fn rejected_stream(reason: impl Into<String>) -> ProviderTransformResult {
     rejected_response(reason)
 }
 
-#[cfg(feature = "mojo")]
 fn empty_lossless_stream() -> ProviderTransformResult {
     ProviderTransformResult::lossless(
         ProviderId::Anthropic,
@@ -366,7 +360,6 @@ fn unsupported(endpoint: ProviderEndpoint, reason: impl Into<String>) -> Provide
     )
 }
 
-#[cfg(feature = "mojo")]
 fn unix_now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
