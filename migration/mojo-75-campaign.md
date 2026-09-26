@@ -1579,3 +1579,21 @@ The canonical source report counts **51,921 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **528,906 additional Mojo LOC** required at this Rust
 volume.
+
+## WebSocket response and event policy hard replacement
+
+Committed-profile promotion, precommit hold and transport retry, direct-current
+retry reset, and WebSocket event-kind classification now use the existing Mojo
+plans in every feature mode. The feature-off Rust predicates and three event
+tables were deleted. The app delegates its corresponding promotion and retry
+decisions to the shared Mojo-backed proxy API. Expected-value tests cover
+affinity inputs, fallback reasons, all known event kinds, unknown and oversized
+kinds, and the app's retry policy. The no-fallback guard now rejects renewed
+feature-off paths in both shared WebSocket policy modules. Native execution
+evidence is Linux x86_64; macOS and Windows runtime execution was not run.
+
+The canonical source report counts **51,921 reachable Mojo LOC** and
+**193,587 Rust production LOC**, totaling **245,508 LOC**: **21.15% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **528,840 additional Mojo LOC** required at this Rust
+volume.

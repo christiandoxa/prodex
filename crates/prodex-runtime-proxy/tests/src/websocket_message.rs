@@ -2,9 +2,12 @@ use super::*;
 use std::time::Duration;
 
 #[test]
-fn promote_committed_profile_only_without_existing_affinity() {
+fn committed_profile_promotion_preserves_existing_affinity() {
     assert!(runtime_websocket_should_promote_committed_profile(
         None, None, None, None, None, false, None
+    ));
+    assert!(runtime_websocket_should_promote_committed_profile(
+        None, None, None, None, None, true, None
     ));
     assert!(!runtime_websocket_should_promote_committed_profile(
         Some("resp_1"),
@@ -32,6 +35,34 @@ fn promote_committed_profile_only_without_existing_affinity() {
         None,
         false,
         Some("alpha"),
+    ));
+    assert!(!runtime_websocket_should_promote_committed_profile(
+        None,
+        Some("alpha"),
+        None,
+        None,
+        None,
+        false,
+        None,
+    ));
+    assert!(!runtime_websocket_should_promote_committed_profile(
+        None,
+        None,
+        None,
+        Some("alpha"),
+        None,
+        false,
+        None,
+    ));
+    let compact_followup = ("resp_1".to_string(), "alpha");
+    assert!(!runtime_websocket_should_promote_committed_profile(
+        None,
+        None,
+        None,
+        None,
+        Some(&compact_followup),
+        false,
+        None,
     ));
 }
 
@@ -330,34 +361,87 @@ fn websocket_text_frame_inspection_treats_wrapped_status_error_as_terminal() {
 }
 
 #[test]
-fn websocket_event_kind_helpers_match_stream_boundaries() {
-    assert!(runtime_proxy_precommit_hold_event_kind("codex.rate_limits"));
-    assert!(runtime_proxy_precommit_hold_event_kind(
-        "codex.response.metadata"
-    ));
-    assert!(runtime_proxy_precommit_hold_event_kind("response.metadata"));
-    assert!(runtime_proxy_precommit_hold_event_kind("response.created"));
-    assert!(!runtime_proxy_precommit_hold_event_kind(
-        "response.completed"
-    ));
-    for event_type in [
-        "session.started",
-        "delegation.created",
-        "turn.done",
-        "response.done",
-    ] {
-        assert!(
-            runtime_realtime_websocket_terminal_event_kind(event_type),
-            "{event_type}"
-        );
-    }
-    assert!(!runtime_realtime_websocket_terminal_event_kind(
-        "output_audio.delta"
-    ));
+fn responses_terminal_event_payloads_are_terminal() {
     assert!(is_runtime_terminal_event(
         r#"{"type":"response.completed"}"#
     ));
     assert!(is_runtime_terminal_event(
         r#"{"type":"response.incomplete"}"#
     ));
+}
+
+#[test]
+fn websocket_event_kind_helpers_match_expected_values() {
+    let cases = [
+        ("codex.rate_limits", true, false, false),
+        ("codex.response.metadata", true, false, false),
+        ("response.metadata", true, false, false),
+        ("response.created", true, false, false),
+        ("response.in_progress", true, false, false),
+        ("response.queued", true, false, false),
+        ("response.output_item.added", true, false, false),
+        ("response.content_part.added", true, false, false),
+        ("response.reasoning_summary_part.added", true, false, false),
+        ("session.started", false, true, false),
+        ("session.updated", false, true, false),
+        ("conversation.item.added", false, true, false),
+        ("conversation.item.done", false, true, false),
+        ("delegation.created", false, true, false),
+        ("response.cancelled", false, true, false),
+        ("response.done", false, true, false),
+        ("turn.done", false, true, false),
+        ("error", false, true, false),
+        ("response.completed", false, false, true),
+        ("response.failed", false, false, true),
+        ("response.incomplete", false, false, true),
+        ("", false, false, false),
+        ("response.unknown", false, false, false),
+        ("réponse.created", false, false, false),
+        ("回應.completed", false, false, false),
+        ("🚀", false, false, false),
+    ];
+
+    for (kind, precommit_hold, realtime_terminal, responses_terminal) in cases {
+        let expected = (precommit_hold, realtime_terminal, responses_terminal);
+        let mojo = prodex_mojo_core::rich::websocket_event_kind(kind)
+            .expect("Mojo websocket event classification");
+        assert_eq!(
+            (
+                runtime_proxy_precommit_hold_event_kind(kind),
+                runtime_realtime_websocket_terminal_event_kind(kind),
+                runtime_responses_websocket_terminal_event_kind(kind),
+            ),
+            expected,
+            "runtime event helpers for {kind}"
+        );
+        assert_eq!(
+            (
+                mojo.precommit_hold,
+                mojo.realtime_terminal,
+                mojo.responses_terminal,
+            ),
+            expected,
+            "Mojo adapter for {kind}"
+        );
+    }
+
+    let over_limit_kind = "x".repeat(4_097);
+    let mojo = prodex_mojo_core::rich::websocket_event_kind(&over_limit_kind)
+        .expect("Mojo websocket event classification");
+    assert_eq!(
+        (
+            runtime_proxy_precommit_hold_event_kind(&over_limit_kind),
+            runtime_realtime_websocket_terminal_event_kind(&over_limit_kind),
+            runtime_responses_websocket_terminal_event_kind(&over_limit_kind),
+        ),
+        (false, false, false)
+    );
+    assert_eq!(
+        (
+            mojo.precommit_hold,
+            mojo.realtime_terminal,
+            mojo.responses_terminal,
+        ),
+        (false, false, false)
+    );
 }

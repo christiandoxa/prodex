@@ -8,32 +8,19 @@ pub fn runtime_websocket_precommit_hold_promotion_allowed(
     turn_state_override: Option<&str>,
     promote_committed_profile: bool,
 ) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        prodex_mojo_core::runtime::websocket_response_plan(
-            prodex_mojo_core::runtime::WebsocketResponsePlanInput {
-                reuse_existing_session,
-                request_previous_response_present: request_previous_response_id.is_some(),
-                request_session_present: request_session_id.is_some(),
-                request_turn_state_present: request_turn_state.is_some(),
-                turn_state_override_present: turn_state_override.is_some(),
-                promote_committed_profile,
-                ..Default::default()
-            },
-        )
-        .expect("Mojo websocket response planning returned an invalid result")
-        .hold_promotion_allowed
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        !reuse_existing_session
-            && request_previous_response_id.is_none()
-            && request_session_id.is_none()
-            && request_turn_state.is_none()
-            && turn_state_override.is_none()
-            && promote_committed_profile
-    }
+    prodex_mojo_core::runtime::websocket_response_plan(
+        prodex_mojo_core::runtime::WebsocketResponsePlanInput {
+            reuse_existing_session,
+            request_previous_response_present: request_previous_response_id.is_some(),
+            request_session_present: request_session_id.is_some(),
+            request_turn_state_present: request_turn_state.is_some(),
+            turn_state_override_present: turn_state_override.is_some(),
+            promote_committed_profile,
+            ..Default::default()
+        },
+    )
+    .expect("Mojo websocket response planning returned an invalid result")
+    .hold_promotion_allowed
 }
 
 pub fn runtime_websocket_precommit_transport_retry_allowed(
@@ -43,30 +30,18 @@ pub fn runtime_websocket_precommit_transport_retry_allowed(
     turn_state_override: Option<&str>,
     promote_committed_profile: bool,
 ) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        prodex_mojo_core::runtime::websocket_response_plan(
-            prodex_mojo_core::runtime::WebsocketResponsePlanInput {
-                reuse_existing_session,
-                request_previous_response_present: request_previous_response_id.is_some(),
-                request_turn_state_present: request_turn_state.is_some(),
-                turn_state_override_present: turn_state_override.is_some(),
-                promote_committed_profile,
-                ..Default::default()
-            },
-        )
-        .expect("Mojo websocket retry planning returned an invalid result")
-        .transport_retry_allowed
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        !reuse_existing_session
-            && request_previous_response_id.is_none()
-            && request_turn_state.is_none()
-            && turn_state_override.is_none()
-            && promote_committed_profile
-    }
+    prodex_mojo_core::runtime::websocket_response_plan(
+        prodex_mojo_core::runtime::WebsocketResponsePlanInput {
+            reuse_existing_session,
+            request_previous_response_present: request_previous_response_id.is_some(),
+            request_turn_state_present: request_turn_state.is_some(),
+            turn_state_override_present: turn_state_override.is_some(),
+            promote_committed_profile,
+            ..Default::default()
+        },
+    )
+    .expect("Mojo websocket retry planning returned an invalid result")
+    .transport_retry_allowed
 }
 
 pub fn runtime_websocket_precommit_hold_promotion_event_seen(

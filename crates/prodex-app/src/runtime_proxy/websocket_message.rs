@@ -23,6 +23,7 @@ use super::{
     send_runtime_proxy_stale_continuation_websocket_error, send_runtime_proxy_websocket_error,
 };
 use anyhow::Result;
+use runtime_proxy_crate::runtime_websocket_should_promote_committed_profile;
 use std::collections::BTreeSet;
 
 #[cfg(test)]
@@ -32,23 +33,6 @@ mod continuation_handling;
 mod failure_handling;
 mod loop_control;
 mod setup;
-
-fn runtime_websocket_should_promote_committed_profile(
-    previous_response_id: Option<&str>,
-    bound_profile: Option<&str>,
-    request_turn_state: Option<&str>,
-    turn_state_profile: Option<&str>,
-    compact_followup_profile: Option<&(String, &'static str)>,
-    _request_session_id_header_present: bool,
-    bound_session_profile: Option<&str>,
-) -> bool {
-    previous_response_id.is_none()
-        && bound_profile.is_none()
-        && request_turn_state.is_none()
-        && turn_state_profile.is_none()
-        && compact_followup_profile.is_none()
-        && bound_session_profile.is_none()
-}
 
 pub(super) struct RuntimeWebsocketTextMessageInput<'a> {
     pub(super) session_id: u64,
@@ -191,21 +175,30 @@ enum RuntimeWebsocketDirectCurrentFallbackReason {
 
 impl RuntimeWebsocketDirectCurrentFallbackReason {
     fn as_str(self) -> &'static str {
-        match self {
-            Self::PrecommitBudgetExhausted => "precommit_budget_exhausted",
-            Self::CandidateExhausted => "candidate_exhausted",
-        }
+        self.runtime_reason().as_str()
     }
 
     fn previous_response_not_found_policy(self) -> RuntimePreviousResponseNotFoundPolicy {
         RuntimePreviousResponseNotFoundPolicy::websocket(
-            matches!(self, Self::PrecommitBudgetExhausted),
+            self.reset_previous_response_retry_index_on_local_block(),
             false,
         )
     }
 
+    fn runtime_reason(self) -> runtime_proxy_crate::RuntimeWebsocketDirectCurrentFallbackReason {
+        match self {
+            Self::PrecommitBudgetExhausted => {
+                runtime_proxy_crate::RuntimeWebsocketDirectCurrentFallbackReason::PrecommitBudgetExhausted
+            }
+            Self::CandidateExhausted => {
+                runtime_proxy_crate::RuntimeWebsocketDirectCurrentFallbackReason::CandidateExhausted
+            }
+        }
+    }
+
     fn reset_previous_response_retry_index_on_local_block(self) -> bool {
-        matches!(self, Self::PrecommitBudgetExhausted)
+        self.runtime_reason()
+            .reset_previous_response_retry_index_on_local_block()
     }
 }
 
@@ -380,5 +373,84 @@ pub(super) mod test_support {
             websocket_reuse_fresh_retry_profiles: BTreeSet::new(),
             websocket_reuse_fresh_retry_pending: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod decision_tests {
+    use super::{
+        RuntimeWebsocketDirectCurrentFallbackReason, RuntimeWebsocketSessionState,
+        acquire_test_runtime_lock, test_support,
+    };
+
+    #[test]
+    fn committed_profile_promotion_preserves_affinity_and_session_ownership() {
+        let _guard = acquire_test_runtime_lock();
+        let shared = test_support::test_runtime_shared("promotion-decisions");
+        let (mut local_socket, _peer) = test_support::test_runtime_local_websocket_pair();
+        let mut websocket_session = RuntimeWebsocketSessionState::default();
+        let mut flow = test_support::test_runtime_websocket_flow(
+            &mut local_socket,
+            &shared,
+            &mut websocket_session,
+        );
+
+        assert!(flow.should_promote_committed_profile());
+        flow.request_session_id_header_present = true;
+        assert!(flow.should_promote_committed_profile());
+
+        flow.previous_response_id = Some("resp-existing".to_string());
+        assert!(!flow.should_promote_committed_profile());
+        flow.previous_response_id = None;
+        flow.bound_profile = Some("alpha".to_string());
+        assert!(!flow.should_promote_committed_profile());
+        assert!(flow.candidate_has_hard_affinity("alpha"));
+        assert!(!flow.candidate_has_hard_affinity("beta"));
+        flow.bound_profile = None;
+        flow.request_turn_state = Some("turn-existing".to_string());
+        assert!(!flow.should_promote_committed_profile());
+        flow.request_turn_state = None;
+        flow.turn_state_profile = Some("alpha".to_string());
+        assert!(!flow.should_promote_committed_profile());
+        flow.turn_state_profile = None;
+        flow.compact_followup_profile = Some(("alpha".to_string(), "session_id"));
+        assert!(!flow.should_promote_committed_profile());
+        flow.compact_followup_profile = None;
+        flow.bound_session_profile = Some("alpha".to_string());
+        assert!(!flow.should_promote_committed_profile());
+
+        flow.session_profile = Some("alpha".to_string());
+        assert!(flow.has_continuation_priority());
+        assert!(!flow.candidate_has_hard_affinity("alpha"));
+    }
+
+    #[test]
+    fn direct_current_fallback_maps_precommit_retry_reset_to_runtime_policy() {
+        assert_eq!(
+            RuntimeWebsocketDirectCurrentFallbackReason::PrecommitBudgetExhausted.as_str(),
+            "precommit_budget_exhausted"
+        );
+        assert!(
+            RuntimeWebsocketDirectCurrentFallbackReason::PrecommitBudgetExhausted
+                .reset_previous_response_retry_index_on_local_block()
+        );
+        assert!(
+            RuntimeWebsocketDirectCurrentFallbackReason::PrecommitBudgetExhausted
+                .previous_response_not_found_policy()
+                .reset_previous_response_retry_index_on_rotate
+        );
+        assert_eq!(
+            RuntimeWebsocketDirectCurrentFallbackReason::CandidateExhausted.as_str(),
+            "candidate_exhausted"
+        );
+        assert!(
+            !RuntimeWebsocketDirectCurrentFallbackReason::CandidateExhausted
+                .reset_previous_response_retry_index_on_local_block()
+        );
+        assert!(
+            !RuntimeWebsocketDirectCurrentFallbackReason::CandidateExhausted
+                .previous_response_not_found_policy()
+                .reset_previous_response_retry_index_on_rotate
+        );
     }
 }

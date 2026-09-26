@@ -37,6 +37,8 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
   "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
+  "crates/prodex-runtime-proxy/src/websocket_message.rs",
+  "crates/prodex-runtime-proxy/src/websocket_response_tracking.rs",
   "crates/prodex-runtime-proxy/src/compatibility_surface.rs",
   "crates/prodex-runtime-proxy/src/error_policy.rs",
   "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
@@ -156,6 +158,8 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-quota/src/render/quota_policy.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
   "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
+  "crates/prodex-runtime-proxy/src/websocket_message.rs",
+  "crates/prodex-runtime-proxy/src/websocket_response_tracking.rs",
   "crates/prodex-runtime-proxy/src/compatibility_surface.rs",
   "crates/prodex-runtime-proxy/src/error_policy.rs",
   "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
@@ -284,6 +288,8 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/src/health/latency.rs",
   "crates/prodex-runtime-proxy/src/health/inflight.rs",
   "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
+  "crates/prodex-runtime-proxy/src/websocket_message.rs",
+  "crates/prodex-runtime-proxy/src/websocket_response_tracking.rs",
   "crates/prodex-quota/src/render/model_capacity.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs",
@@ -655,6 +661,14 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-quota/src/capacity.rs",
     '#[cfg(not(feature = "mojo"))] fn old_capacity() {}']]).join("\n"),
     /feature-off Rust path/u);
+  for (const filePath of [
+    "crates/prodex-runtime-proxy/src/websocket_message.rs",
+    "crates/prodex-runtime-proxy/src/websocket_response_tracking.rs",
+  ]) {
+    assert.match(findViolations([[filePath,
+      '#[cfg(not(feature = "mojo"))] fn old_websocket_policy() {}']]).join("\n"),
+      /feature-off Rust path/u);
+  }
   assert.match(findViolations([[REHYDRATE_FILE,
     'pub fn smart_context_auto_rehydrate_plan() {\n    #[cfg(not(feature = "mojo"))] rust();\n}\nfn smart_context_auto_rehydrate_plan_mojo() {}']])[0],
     /feature-off Rust planner/u);
