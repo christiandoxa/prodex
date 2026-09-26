@@ -4645,13 +4645,11 @@ def gemini_translator_write_computer_tool(
     var config = gemini_bridge_request_object_member(
         source, start, end, StringSlice("computerUse")
     )
-    if not gemini_bridge_request_is_object(
-        source, config[0], config[1]
-    ):
+    if config[0] < 0:
         config = gemini_bridge_request_object_member(
             source, start, end, StringSlice("computer_use")
         )
-    if gemini_bridge_request_is_object(source, config[0], config[1]):
+    if config[0] >= 0:
         config_start = config[0]
         config_end = config[1]
 

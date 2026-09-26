@@ -1,7 +1,5 @@
 //! Gemini request tool-shape bridge helpers.
 
-#[cfg(not(feature = "mojo"))]
-use crate::translators::gemini_request_body_without_tool;
 use crate::translators::{
     gemini_builtin_tools_from_request, gemini_function_declaration_from_openai_tool,
     gemini_sanitize_function_schema, gemini_validate_openai_tools,
@@ -81,12 +79,6 @@ pub fn gemini_provider_core_function_tools_from_chat_checked(
     gemini_provider_core_function_tools_from_chat(chat, model, filter_declarations)
 }
 
-fn gemini_provider_core_builtin_tools_from_request(
-    tools: &[serde_json::Value],
-) -> Vec<serde_json::Value> {
-    gemini_builtin_tools_from_request(tools)
-}
-
 pub fn gemini_provider_core_tools_from_requests(
     original: &serde_json::Value,
     chat: &serde_json::Value,
@@ -98,7 +90,7 @@ pub fn gemini_provider_core_tools_from_requests(
     let mut tools = original
         .get("tools")
         .and_then(serde_json::Value::as_array)
-        .map(|tools| gemini_provider_core_builtin_tools_from_request(tools))
+        .map(|tools| gemini_builtin_tools_from_request(tools))
         .unwrap_or_default();
     if let Some(serde_json::Value::Array(function_tools)) =
         gemini_provider_core_function_tools_from_chat(chat, model, filter_declarations)?
@@ -126,20 +118,21 @@ pub fn gemini_provider_core_validate_request_tools(
     }
 }
 
-#[cfg(feature = "mojo")]
 pub fn gemini_provider_core_request_body_without_tool(
     body: &[u8],
     tool_name: &str,
 ) -> Option<Vec<u8>> {
-    super::request_contents::gemini_bridge_request_without_tool(body, tool_name)
-}
-
-#[cfg(not(feature = "mojo"))]
-pub fn gemini_provider_core_request_body_without_tool(
-    body: &[u8],
-    tool_name: &str,
-) -> Option<Vec<u8>> {
-    gemini_request_body_without_tool(body, tool_name)
+    #[cfg(feature = "mojo")]
+    {
+        let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
+        // Normalize escaped property names and duplicate keys before Mojo scans the bytes.
+        let body = serde_json::to_vec(&value).ok()?;
+        super::request_contents::gemini_bridge_request_without_tool(&body, tool_name)
+    }
+    #[cfg(not(feature = "mojo"))]
+    {
+        crate::translators::gemini_request_body_without_tool(body, tool_name)
+    }
 }
 
 pub fn gemini_provider_core_unsupported_tool_fallback_body(
@@ -164,16 +157,26 @@ mod tests {
     fn function_declaration_uses_the_mojo_union_contract() {
         let result = gemini_provider_core_function_tools_from_chat(
             &json!({
-                "tools": [{
-                    "type": "function",
-                    "function": {
-                        "name": "lookup",
-                        "parameters": {
-                            "anyOf": [],
-                            "oneOf": [{"type": "string"}]
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "lookup-雪",
+                            "description": "find ☃",
+                            "parameters": {
+                                "anyOf": [],
+                                "oneOf": [{"type": "string"}]
+                            }
+                        }
+                    },
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "second",
+                            "parameters": {"type": "object"}
                         }
                     }
-                }]
+                ]
             }),
             "gemini-2.5-flash",
             |_| {},
@@ -184,10 +187,91 @@ mod tests {
             result,
             Some(json!([{
                 "functionDeclarations": [{
-                    "name": "lookup",
+                    "name": "lookup-雪",
+                    "description": "find ☃",
                     "parameters": {"type": "string"}
+                }, {
+                    "name": "second",
+                    "parameters": {"type": "object"}
                 }]
             }]))
+        );
+    }
+
+    #[test]
+    fn builtin_tools_use_mojo_grouping_and_canonical_order() {
+        let result = gemini_provider_core_tools_from_requests(
+            &json!({
+                "tools": [
+                    {"type": "url_context"},
+                    {"type": "code_interpreter"},
+                    {"type": "web_search_preview_2099"},
+                    {"type": "computer_use", "computerUse": {
+                        "environment": 7,
+                        "excludedPredefinedFunctions": ["click", "type"]
+                    }},
+                    {"type": "code_execution"}
+                ]
+            }),
+            &json!({}),
+            "gemini-2.5-flash",
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            Some(json!([
+                {"computerUse": {
+                    "environment": "ENVIRONMENT_BROWSER",
+                    "excludedPredefinedFunctions": ["click", "type"]
+                }},
+                {"codeExecution": {}},
+                {"googleSearch": {}},
+                {"urlContext": {}}
+            ]))
+        );
+    }
+
+    #[test]
+    fn wrong_type_computer_use_does_not_fall_back_to_outer_environment() {
+        let result = gemini_provider_core_tools_from_requests(
+            &json!({
+                "tools": [{
+                    "type": "computerUse",
+                    "computerUse": 7,
+                    "environment": "ENVIRONMENT_APP"
+                }]
+            }),
+            &json!({}),
+            "gemini-2.5-flash",
+            |_| {},
+        )
+        .unwrap();
+
+        assert_eq!(
+            result,
+            Some(json!([{"computerUse":{"environment":"ENVIRONMENT_BROWSER"}}]))
+        );
+    }
+
+    #[test]
+    fn request_body_without_tool_preserves_remaining_order() {
+        let body = br#"{"tail":true,"request":{"tools":[{"keep":"a"},{"computer\u0055se":{}},{"keep":"b"}]}}"#;
+        assert_eq!(
+            gemini_provider_core_request_body_without_tool(body, "computerUse"),
+            Some(br#"{"request":{"tools":[{"keep":"a"},{"keep":"b"}]},"tail":true}"#.to_vec())
+        );
+        assert_eq!(
+            gemini_provider_core_request_body_without_tool(
+                br#"{"request":{"tools":[{"keep":true}]}}"#,
+                "computerUse"
+            ),
+            None
+        );
+        assert_eq!(
+            gemini_provider_core_request_body_without_tool(b"{\"request\":", "computerUse"),
+            None
         );
     }
 

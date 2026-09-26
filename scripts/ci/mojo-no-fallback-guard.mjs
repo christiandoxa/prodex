@@ -115,6 +115,9 @@ const PROMOTED_FILES = [
   "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/tools/builtin.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/request/native_project.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/request/simple.rs",
   "crates/prodex-provider-core/src/gemini_bridge/request/tools.rs",
   "crates/prodex-runtime-proxy/src/response_forwarding.rs",
   "crates/prodex-runtime-proxy/src/log_event.rs",
@@ -186,6 +189,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/tools/builtin.rs",
   "crates/prodex-runtime-proxy/src/response_forwarding.rs",
   "crates/prodex-runtime-proxy/src/log_event.rs",
   "crates/prodex-runtime-proxy/src/payload_detection/sse.rs",
@@ -249,6 +253,7 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-runtime-doctor/src/suggestions/compatibility.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema/composition.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/request/simple/builtin.rs",
   "crates/prodex-provider-core/src/translators/kiro/request/controls.rs",
   "crates/prodex-provider-core/src/translators/kiro/request/validation.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_request.rs",
@@ -333,6 +338,9 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/tools/builtin.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/request/native_project.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/request/simple.rs",
   "crates/prodex-runtime-proxy/src/response_forwarding.rs",
   "crates/prodex-runtime-proxy/src/log_event.rs",
   "crates/prodex-runtime-proxy/src/payload_detection/sse.rs",
@@ -526,6 +534,10 @@ export function findViolations(files) {
       [SUPER_OVERRIDE_FILE, /\bfn\s+(?:scan_override_rust|scan_identity_override|scan_boolean_override|scan_runtime_override|scan_feature_value_override|scan_feature_boolean_override)\s*\(/u],
       [GEMINI_SCHEMA_FILE, /\bfn\s+(?:schema_type|supported_schema_type|sanitized_enum|sanitized_properties|sanitized_required)\s*\(/u],
       [GEMINI_TOOLS_FILE, /\bfn\s+gemini_tool_config_from_request_oracle\s*\(/u],
+      ["crates/prodex-provider-core/src/gemini_bridge/request/native_project.rs", /\bfn\s+gemini_provider_core_stamp_native_(?:project|metadata_project)\s*\(/u],
+      ["crates/prodex-provider-core/src/gemini_bridge/request/simple.rs", /\bfn\s+gemini_simple_(?:input_item|content_item|tool_calls|tool_call)\s*\(/u],
+      ["crates/prodex-provider-core/src/translators/gemini/request.rs", /\bfn\s+gemini_request_object_mut\s*\(/u],
+      ["crates/prodex-provider-core/src/translators/gemini/request/tools/builtin.rs", /\bfn\s+gemini_(?:computer_use_tool|is_computer_use_tool|is_code_execution_tool|is_web_search_tool|is_url_context_tool|builtin_tool_value)\s*\(/u],
       [GEMINI_STATUS_FILE, /\bfn\s+gemini_(?:finish_reason_(?:failure|incomplete)|prompt_feedback_failure)_oracle\s*\(/u],
       [RESPONSE_FORWARDING_FILE, /\bfn\s+(?:should_skip_response_header|response_content_type_is_sse|token_usage_event_is_loggable|response_event_is_generation_start)\s*\(/u],
       [QUOTA_POOL_FILE, /\bfn\s+(?:aggregate_openai_quota|aggregate_main_quota|add_pool_window|add_ready_pool_window)\s*\(/u],
@@ -691,6 +703,10 @@ function selfTest() {
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([[GEMINI_TOOLS_FILE, "fn gemini_tool_config_from_request_oracle() {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/gemini_bridge/request/simple.rs",
+    "fn gemini_simple_input_item() {}"]]).join("\n"), /replaced Rust semantic implementation/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/tools/builtin.rs",
+    "fn gemini_is_web_search_tool() {}"]]).join("\n"), /replaced Rust semantic implementation/u);
   assert.match(findViolations([[RESPONSE_FORWARDING_FILE, "fn response_content_type_is_sse() {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([[QUOTA_POOL_FILE, "fn aggregate_openai_quota() {}"]]).join("\n"),
