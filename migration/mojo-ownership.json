@@ -583,6 +583,16 @@
         "operations": [
           "codex_runtime_feature_configuration"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/provider_error.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "provider_error_request_member_rejection"
+        ]
       }
     ],
     "removed": [
@@ -1059,6 +1069,24 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "catalog and provider-boundary DTO collection"
+    },
+    {
+      "name": "provider_error_request_member_rejection",
+      "domain": "provider/error",
+      "introduced_in": "0.432.1",
+      "baseline_state": "rust-authoritative",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_provider_error_rejects_member_v1",
+      "mojo_source": "mojo/prodex_core/provider_error.mojo",
+      "consumer": "crates/prodex-provider-core/src/errors.rs",
+      "consumer_marker": "prodex_mojo_core::json::provider_error_rejects_member",
+      "production_reachability_test": "crates/prodex-provider-core/src/errors.rs",
+      "rust_owner_before": "request-member normalization, rejection marker matching, and recursive JSON rejection decisions",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "bounded Serde error-body parsing and typed JSON-tree FFI adapter"
     },
     {
       "name": "runtime_auto_redeem_capacity_planning",

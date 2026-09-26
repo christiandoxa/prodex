@@ -276,6 +276,29 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_tool_fallback_drops_the_explicitly_rejected_builtin() {
+        let request =
+            br#"{"tail":true,"request":{"tools":[{"keep":"a"},{"googleSearch":{}},{"keep":"b"}]}}"#;
+        let error =
+            br#"{"error":{"status":"INVALID_ARGUMENT","message":["Unknown name googleSearch"]}}"#;
+
+        assert_eq!(
+            gemini_provider_core_unsupported_tool_fallback_body(request, error),
+            Some((
+                "googleSearch",
+                br#"{"request":{"tools":[{"keep":"a"},{"keep":"b"}]},"tail":true}"#.to_vec(),
+            ))
+        );
+        assert_eq!(
+            gemini_provider_core_unsupported_tool_fallback_body(
+                request,
+                br#"{"error":{"message":"request failed for googleSearch"}}"#,
+            ),
+            None
+        );
+    }
+
+    #[test]
     fn function_tool_validation_keeps_missing_and_wrong_type_precedence() {
         for (tool, expected) in [
             (

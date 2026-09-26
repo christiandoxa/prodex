@@ -1972,3 +1972,23 @@ The canonical source report counts **52,579 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **524,531 additional Mojo LOC** required at this Rust
 volume.
+
+## Provider error request-member rejection hard replacement
+
+Request-member rejection now uses the versioned Mojo provider-error ABI in
+every provider feature mode. Rust retains bounded Serde parsing, lossy UTF-8
+fallback, and typed JSON-tree construction; the former Rust normalization,
+marker matching, and recursive rejection logic were deleted. Oversized inputs
+and ABI errors fail closed without triggering an unsupported-field retry.
+Development parity covered 1,024 cases before the Rust oracle was deleted.
+Expected-value provider and app caller tests cover structured errors, nested
+values, malformed text, and Gemini/web-search fallback behavior. The ownership
+manifest and no-fallback guard record Mojo as the sole semantic authority. The
+kernel compiled to objects for all six release targets; native execution
+evidence remains Linux x86_64.
+
+The canonical source report counts **52,825 reachable Mojo LOC** and
+**192,353 Rust production LOC**, totaling **245,178 LOC**: **21.55% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **524,234 additional Mojo LOC** required at this Rust
+volume.

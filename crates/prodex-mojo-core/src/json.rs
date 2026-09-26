@@ -2,6 +2,11 @@
 //! parsing and compatibility serialization remain outside the Mojo bridge.
 use crate::MojoError;
 
+/// Maximum UTF-8 byte length accepted for a provider error body or member.
+pub const PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES: usize = 65_536;
+const PROVIDER_ERROR_REJECTION_MAX_RAW_BYTES: usize = 1_048_576;
+const PROVIDER_ERROR_REJECTION_MAX_NODES: usize = PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES + 1;
+
 #[derive(Clone, Copy, Debug)]
 #[repr(i64)]
 pub enum JsonKind {
@@ -129,7 +134,20 @@ unsafe extern "C" {
         capacity: i64,
         metadata: u64,
     ) -> i64;
-
+    fn prodex_provider_error_rejects_member_v1(
+        abi: i64,
+        nodes: u64,
+        count: i64,
+        raw: u64,
+        raw_length: i64,
+        member: u64,
+        member_length: i64,
+        normalized_member: u64,
+        normalized_member_capacity: i64,
+        prefix: u64,
+        prefix_capacity: i64,
+        output: u64,
+    ) -> i64;
 }
 
 fn signed(value: usize) -> Result<i64, MojoError> {
@@ -150,6 +168,80 @@ fn status(code: i64) -> Result<(), MojoError> {
         4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+fn ffi_nodes(nodes: &[JsonNode<'_>], raw: &str) -> Result<Vec<NodeFfi>, MojoError> {
+    if nodes.is_empty() || nodes.len() > i64::MAX as usize / 80 {
+        return Err(MojoError::InvalidInput);
+    }
+    nodes
+        .iter()
+        .map(|node| {
+            let end = node
+                .raw_start
+                .checked_add(node.raw_length)
+                .ok_or(MojoError::InvalidInput)?;
+            raw.get(node.raw_start..end)
+                .ok_or(MojoError::InvalidInput)?;
+            Ok(NodeFfi {
+                kind: node.kind as i64,
+                first_child: optional_index(node.first_child, nodes.len())?,
+                next_sibling: optional_index(node.next_sibling, nodes.len())?,
+                parent: optional_index(node.parent, nodes.len())?,
+                key: node.key.into(),
+                text: node.text.into(),
+                raw_start: signed(node.raw_start)?,
+                raw_length: signed(node.raw_length)?,
+            })
+        })
+        .collect()
+}
+
+/// Apply the provider error request-member policy to a Serde-built tree.
+pub fn provider_error_rejects_member(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+    member: &str,
+) -> Result<bool, MojoError> {
+    if nodes.len() > PROVIDER_ERROR_REJECTION_MAX_NODES
+        || raw.len() > PROVIDER_ERROR_REJECTION_MAX_RAW_BYTES
+        || member.len() > PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let input = ffi_nodes(nodes, raw)?;
+    let mut normalized_member: Vec<u8> = Vec::new();
+    normalized_member
+        .try_reserve_exact(member.len())
+        .map_err(|_| MojoError::Capacity)?;
+    normalized_member.resize(member.len(), 0);
+    let mut prefix: Vec<i64> = Vec::new();
+    prefix
+        .try_reserve_exact(member.len())
+        .map_err(|_| MojoError::Capacity)?;
+    prefix.resize(member.len(), 0);
+    let mut output = [0_i64; 2];
+    let result = unsafe {
+        prodex_provider_error_rejects_member_v1(
+            1,
+            input.as_ptr() as u64,
+            signed(input.len())?,
+            raw.as_ptr() as u64,
+            signed(raw.len())?,
+            member.as_ptr() as u64,
+            signed(member.len())?,
+            normalized_member.as_mut_ptr() as u64,
+            signed(normalized_member.len())?,
+            prefix.as_mut_ptr() as u64,
+            signed(prefix.len())?,
+            output.as_mut_ptr() as u64,
+        )
+    };
+    status(result)?;
+    if !matches!(output[0], 0 | 1) || output[1] < 0 || output[1] as usize > member.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(output[0] == 1)
 }
 
 pub fn transform_chat_tools(
@@ -177,30 +269,7 @@ pub(super) fn transform_json(
     flag: bool,
     kernel: JsonKernel,
 ) -> Result<Option<Vec<u8>>, MojoError> {
-    if nodes.is_empty() || nodes.len() > i64::MAX as usize / 80 {
-        return Err(MojoError::InvalidInput);
-    }
-    let input = nodes
-        .iter()
-        .map(|node| {
-            let end = node
-                .raw_start
-                .checked_add(node.raw_length)
-                .ok_or(MojoError::InvalidInput)?;
-            raw.get(node.raw_start..end)
-                .ok_or(MojoError::InvalidInput)?;
-            Ok(NodeFfi {
-                kind: node.kind as i64,
-                first_child: optional_index(node.first_child, nodes.len())?,
-                next_sibling: optional_index(node.next_sibling, nodes.len())?,
-                parent: optional_index(node.parent, nodes.len())?,
-                key: node.key.into(),
-                text: node.text.into(),
-                raw_start: signed(node.raw_start)?,
-                raw_length: signed(node.raw_length)?,
-            })
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let input = ffi_nodes(nodes, raw)?;
     let mut scratch = vec![StringView::default(); nodes.len()];
     let mut metadata = [-1_i64; 2];
     let mut invoke = |output: Option<&mut [u8]>| -> Result<(bool, usize), MojoError> {
@@ -338,5 +407,51 @@ pub fn transform_anthropic_chat_request(
             .map(AnthropicChatRequestTransform::Rejected)
             .map_err(|_| MojoError::InvalidOutput),
         _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+#[cfg(test)]
+mod provider_error_tests {
+    use super::{JsonKind, JsonNode, provider_error_rejects_member};
+
+    #[test]
+    fn provider_error_member_kernel_matches_expected_object_fields() {
+        let nodes = [
+            JsonNode {
+                kind: JsonKind::Object,
+                first_child: Some(1),
+                next_sibling: None,
+                parent: None,
+                key: "",
+                text: "",
+                raw_start: 0,
+                raw_length: 2,
+            },
+            JsonNode {
+                kind: JsonKind::String,
+                first_child: None,
+                next_sibling: Some(2),
+                parent: Some(0),
+                key: "code",
+                text: "UNKNOWN_PARAMETER",
+                raw_start: 0,
+                raw_length: 0,
+            },
+            JsonNode {
+                kind: JsonKind::String,
+                first_child: None,
+                next_sibling: None,
+                parent: Some(0),
+                key: "param",
+                text: "WEB_search-options",
+                raw_start: 0,
+                raw_length: 0,
+            },
+        ];
+
+        assert_eq!(
+            provider_error_rejects_member(&nodes, "{}", "webSearchOptions"),
+            Ok(true)
+        );
     }
 }
