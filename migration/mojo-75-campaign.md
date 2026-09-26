@@ -1809,3 +1809,21 @@ The canonical source report counts **52,367 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **527,668 additional Mojo LOC** required at this Rust
 volume.
+
+## Provider chat-tool hard replacement
+
+The public Responses-to-chat tool bridge now uses its existing Mojo JSON kernel
+in every feature mode. The Rust tool-choice, tool-expansion, namespace, web-search,
+feature-off, and differential-oracle implementations were deleted. Rust retains
+Serde tree acquisition and output materialization. The existing Mojo ABI and
+public API remain unchanged. Before deletion, 5,000 seeded differential JSON
+trees and large expansion cases established parity. Permanent expected-value
+tests cover precedence, Unicode, malformed input, MCP ordering and deduplication,
+web-search options, and 1,024-tool expansion. The no-fallback guard rejects
+restoration of the removed modules or feature-off routing.
+
+The canonical source report counts **52,367 reachable Mojo LOC** and
+**192,874 Rust production LOC**, totaling **245,241 LOC**: **21.35% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **526,255 additional Mojo LOC** required at this Rust
+volume.
