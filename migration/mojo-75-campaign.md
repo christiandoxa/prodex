@@ -2116,3 +2116,21 @@ The canonical source report counts **52,820 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **523,750 additional Mojo LOC** required at this Rust
 volume.
+
+## Anthropic web-search result and live-item hard replacement
+
+Anthropic web-search result sources, last-matching-call updates, and live
+search-call items now use the existing Mojo request kernel. The Rust source
+filter and live JSON builder were deleted. Prodex-app calls the provider-core
+adapter so the live path remains available without the app's optional
+`mojo-core` feature; provider-core uses Mojo in both feature modes. Fixed
+caller tests cover malformed source entries, repeated call IDs, incomplete
+stream input, and exact live item shapes. Kernel errors become controlled
+stream failures. The rich ABI version is unchanged; native execution evidence
+remains Linux x86_64.
+
+The canonical source report counts **53,106 reachable Mojo LOC** and
+**192,222 Rust production LOC**, totaling **245,328 LOC**: **21.65% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **523,560 additional Mojo LOC** required at this Rust
+volume.

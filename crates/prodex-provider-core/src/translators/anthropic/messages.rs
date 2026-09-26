@@ -27,7 +27,6 @@ mod mojo_request;
 mod response;
 #[path = "messages/stream.rs"]
 mod stream;
-#[cfg(feature = "mojo")]
 #[path = "messages/web_search.rs"]
 mod web_search;
 
@@ -36,6 +35,19 @@ pub(super) use stream::translate_anthropic_stream_event_to_responses;
 use web_search::anthropic_web_search_call;
 #[cfg(feature = "mojo")]
 use web_search::merge_anthropic_web_search_result;
+
+pub(super) fn anthropic_web_search_result_sources(block: &Value) -> Result<Vec<Value>, String> {
+    web_search::anthropic_web_search_result_sources(block)
+}
+
+pub(super) fn anthropic_web_search_stream_item(
+    id: &str,
+    input_json: &str,
+    sources: &[Value],
+    in_progress: bool,
+) -> Result<Value, String> {
+    web_search::anthropic_web_search_stream_item(id, input_json, sources, in_progress)
+}
 
 #[cfg(not(feature = "mojo"))]
 pub(super) fn translate_responses_request_to_anthropic(

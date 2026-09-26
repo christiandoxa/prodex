@@ -12,8 +12,8 @@ use crate::translator::{ProviderTransformResult, ProviderTranslator};
 use crate::{ProviderEndpoint, ProviderWireFormat};
 
 pub use anthropic::{
-    AnthropicMessagesTranslator, AnthropicTranslator,
-    translate_openai_chat_request_to_anthropic_messages,
+    AnthropicMessagesTranslator, AnthropicTranslator, anthropic_web_search_result_sources,
+    anthropic_web_search_stream_item, translate_openai_chat_request_to_anthropic_messages,
 };
 pub use copilot::{
     copilot_provider_core_request_body_with_canonical_model,

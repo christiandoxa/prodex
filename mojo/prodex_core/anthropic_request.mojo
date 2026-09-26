@@ -41,6 +41,7 @@ comptime ANTHROPIC_STREAM_COMPLETED: Int64 = 28
 comptime ANTHROPIC_STREAM_ERROR: Int64 = 29
 comptime ANTHROPIC_STREAM_EVENT: Int64 = 30
 comptime ANTHROPIC_RESPONSE_ENVELOPE: Int64 = 31
+comptime ANTHROPIC_WEB_SEARCH_RESULT: Int64 = 32
 comptime ANTHROPIC_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
 
 
@@ -538,7 +539,11 @@ def anthropic_request_write_web_search_call(
 ) -> Bool:
     if (
         input.id.len == 0
-        or (input.queries.len == 0 and input.content.len < 2)
+        or (
+            input.queries.len == 0
+            and input.content.len < 2
+            and input.stream == 0
+        )
         or input.choice_kind < 0
         or input.choice_kind > 1
     ):
@@ -563,13 +568,26 @@ def anthropic_request_write_web_search_call(
     if input.queries.len > 0:
         if not anthropic_request_put_view(writer, input.queries):
             return False
+    elif input.stream == 1:
+        if input.input.len == 0:
+            if not anthropic_request_put_literal(writer, StringSlice("[]")):
+                return False
+        elif not anthropic_request_write_web_search_input_queries(
+            writer, input.input.copy(), 0, Int64(input.input.len), True
+        ):
+            return False
     elif not anthropic_request_write_web_search_queries(
         writer, input.content.copy(), 0, Int64(input.content.len)
     ):
         return False
-    return anthropic_request_put_literal(
-        writer, StringSlice(',"sources":[]}')
-    ) and anthropic_request_put_byte(writer, 125)
+    if not anthropic_request_put_literal(writer, StringSlice(',"sources":')):
+        return False
+    if input.blocks.len > 0:
+        if not anthropic_request_put_view(writer, input.blocks):
+            return False
+    elif not anthropic_request_put_literal(writer, StringSlice("[]")):
+        return False
+    return anthropic_request_put_literal(writer, StringSlice("}}"))
 
 
 def anthropic_request_write_tool_use_item(
@@ -1093,8 +1111,20 @@ def anthropic_request_write_web_search_queries(
     var input = anthropic_request_object_field(
         view, block_start, block_end, StringSlice('"input"')
     )
+    return anthropic_request_write_web_search_input_queries(
+        writer, view, input[0], input[1], False
+    )
+
+
+def anthropic_request_write_web_search_input_queries(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    view: ProdexRichStringView,
+    input_start: Int64,
+    input_end: Int64,
+    preserve_non_string_values: Bool,
+) -> Bool:
     var query = anthropic_request_object_field(
-        view, input[0], input[1], StringSlice('"query"')
+        view, input_start, input_end, StringSlice('"query"')
     )
     if anthropic_request_range_is_string(view, query):
         return (
@@ -1105,7 +1135,7 @@ def anthropic_request_write_web_search_queries(
             and anthropic_request_put_byte(writer, 93)
         )
     var queries = anthropic_request_object_field(
-        view, input[0], input[1], StringSlice('"queries"')
+        view, input_start, input_end, StringSlice('"queries"')
     )
     if (
         queries[0] < 0
@@ -1127,7 +1157,10 @@ def anthropic_request_write_web_search_queries(
         var item = Array[Int64, 2](fill=-1)
         item[0] = index
         item[1] = item_end
-        if anthropic_request_range_is_string(view, item):
+        if (
+            preserve_non_string_values
+            or anthropic_request_range_is_string(view, item)
+        ):
             if not first and not anthropic_request_put_byte(writer, 44):
                 return False
             first = False
@@ -1138,6 +1171,259 @@ def anthropic_request_write_web_search_queries(
         index = anthropic_request_skip_ws(view, item_end, queries[1] - 1)
         if index < queries[1] - 1 and anthropic_request_byte(view, index) == 44:
             index = anthropic_request_skip_ws(view, index + 1, queries[1] - 1)
+        else:
+            break
+    return anthropic_request_put_byte(writer, 93)
+
+
+def anthropic_request_write_web_search_sources(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    view: ProdexRichStringView,
+    block_start: Int64,
+    block_end: Int64,
+) -> Bool:
+    var results = anthropic_request_object_field(
+        view, block_start, block_end, StringSlice('"content"')
+    )
+    if (
+        results[0] < 0
+        or results[1] <= results[0] + 1
+        or anthropic_request_byte(view, results[0]) != 91
+        or anthropic_request_byte(view, results[1] - 1) != 93
+    ):
+        return anthropic_request_put_literal(writer, StringSlice("[]"))
+    if not anthropic_request_put_byte(writer, 91):
+        return False
+    var first = True
+    var index = anthropic_request_skip_ws(view, results[0] + 1, results[1] - 1)
+    while index < results[1] - 1:
+        var item_end = anthropic_request_value_end(
+            view, index, results[1] - 1, 0
+        )
+        if item_end < 0:
+            return False
+        var url = anthropic_request_object_field(
+            view, index, item_end, StringSlice('"url"')
+        )
+        if anthropic_request_range_is_string(view, url):
+            var title = anthropic_request_object_field(
+                view, index, item_end, StringSlice('"title"')
+            )
+            if not first and not anthropic_request_put_byte(writer, 44):
+                return False
+            first = False
+            if not (
+                anthropic_request_put_literal(
+                    writer, StringSlice('{"type":"url","url":')
+                )
+                and anthropic_request_put_view_range(
+                    writer, view, url[0], url[1]
+                )
+            ):
+                return False
+            if anthropic_request_range_is_string(view, title) and not (
+                anthropic_request_put_literal(writer, StringSlice(',"title":'))
+                and anthropic_request_put_view_range(
+                    writer, view, title[0], title[1]
+                )
+            ):
+                return False
+            if not anthropic_request_put_byte(writer, 125):
+                return False
+        index = anthropic_request_skip_ws(view, item_end, results[1] - 1)
+        if index < results[1] - 1 and anthropic_request_byte(view, index) == 44:
+            index = anthropic_request_skip_ws(view, index + 1, results[1] - 1)
+        else:
+            break
+    return anthropic_request_put_byte(writer, 93)
+
+
+def anthropic_request_ranges_equal(
+    left: ProdexRichStringView,
+    left_start: Int64,
+    left_end: Int64,
+    right: ProdexRichStringView,
+    right_start: Int64,
+    right_end: Int64,
+) -> Bool:
+    if (
+        left_end - left_start != right_end - right_start
+        or left_start < 0
+        or left_end > Int64(left.len)
+        or right_start < 0
+        or right_end > Int64(right.len)
+    ):
+        return False
+    var left_ptr = rich_view_ptr(left)
+    var right_ptr = rich_view_ptr(right)
+    for index in range(left_end - left_start):
+        if (
+            left_ptr[unsafe_offset=left_start + index]
+            != right_ptr[unsafe_offset=right_start + index]
+        ):
+            return False
+    return True
+
+
+def anthropic_request_web_search_output_matches(
+    output: ProdexRichStringView,
+    item_start: Int64,
+    item_end: Int64,
+    result: ProdexRichStringView,
+    tool_use_id: Array[Int64, 2],
+) -> Bool:
+    if not anthropic_request_range_is_string(result, tool_use_id):
+        return False
+    var kind = anthropic_request_object_field(
+        output, item_start, item_end, StringSlice('"type"')
+    )
+    var id = anthropic_request_object_field(
+        output, item_start, item_end, StringSlice('"id"')
+    )
+    return (
+        anthropic_request_range_matches_literal(
+            output, kind[0], kind[1], StringSlice('"web_search_call"')
+        )
+        and anthropic_request_range_is_string(output, id)
+        and anthropic_request_ranges_equal(
+            output, id[0], id[1], result, tool_use_id[0], tool_use_id[1]
+        )
+    )
+
+
+def anthropic_request_last_web_search_output_index(
+    output: ProdexRichStringView,
+    result: ProdexRichStringView,
+) -> Int64:
+    if (
+        output.len < 2
+        or anthropic_request_byte(output, 0) != 91
+        or anthropic_request_byte(output, Int64(output.len) - 1) != 93
+    ):
+        return -1
+    var tool_use_id = anthropic_request_object_field(
+        result, 0, Int64(result.len), StringSlice('"tool_use_id"')
+    )
+    if not anthropic_request_range_is_string(result, tool_use_id):
+        return -1
+    var target: Int64 = -1
+    var item_index: Int64 = 0
+    var end = Int64(output.len) - 1
+    var index = anthropic_request_skip_ws(output, 1, end)
+    while index < end:
+        var item_end = anthropic_request_value_end(output, index, end, 0)
+        if item_end < 0:
+            return -1
+        if anthropic_request_web_search_output_matches(
+            output, index, item_end, result, tool_use_id
+        ):
+            target = item_index
+        item_index += 1
+        index = anthropic_request_skip_ws(output, item_end, end)
+        if index < end and anthropic_request_byte(output, index) == 44:
+            index = anthropic_request_skip_ws(output, index + 1, end)
+        else:
+            break
+    return target
+
+
+def anthropic_request_write_web_search_output_with_sources(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    output: ProdexRichStringView,
+    item_start: Int64,
+    item_end: Int64,
+    result: ProdexRichStringView,
+) -> Bool:
+    var id = anthropic_request_object_field(
+        output, item_start, item_end, StringSlice('"id"')
+    )
+    var status = anthropic_request_object_field(
+        output, item_start, item_end, StringSlice('"status"')
+    )
+    var action = anthropic_request_object_field(
+        output, item_start, item_end, StringSlice('"action"')
+    )
+    var queries = anthropic_request_object_field(
+        output, action[0], action[1], StringSlice('"queries"')
+    )
+    if (
+        not anthropic_request_range_is_string(output, id)
+        or not anthropic_request_range_is_string(output, status)
+        or queries[0] < 0
+    ):
+        return anthropic_request_put_view_range(
+            writer, output, item_start, item_end
+        )
+    return (
+        anthropic_request_put_literal(
+            writer, StringSlice('{"type":"web_search_call","id":')
+        )
+        and anthropic_request_put_view_range(writer, output, id[0], id[1])
+        and anthropic_request_put_literal(writer, StringSlice(',"status":'))
+        and anthropic_request_put_view_range(
+            writer, output, status[0], status[1]
+        )
+        and anthropic_request_put_literal(
+            writer, StringSlice(',"action":{"type":"search","queries":')
+        )
+        and anthropic_request_put_view_range(
+            writer, output, queries[0], queries[1]
+        )
+        and anthropic_request_put_literal(writer, StringSlice(',"sources":'))
+        and anthropic_request_write_web_search_sources(
+            writer, result, 0, Int64(result.len)
+        )
+        and anthropic_request_put_literal(writer, StringSlice("}}"))
+    )
+
+
+def anthropic_request_write_web_search_result(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    input: ProdexAnthropicRequestKernelInput,
+) -> Bool:
+    if input.content.len == 0 or input.choice_kind < 0 or input.choice_kind > 1:
+        return False
+    if input.choice_kind == 0:
+        return anthropic_request_write_web_search_sources(
+            writer, input.content.copy(), 0, Int64(input.content.len)
+        )
+    if (
+        input.blocks.len < 2
+        or anthropic_request_byte(input.blocks, 0) != 91
+        or anthropic_request_byte(
+            input.blocks, Int64(input.blocks.len) - 1
+        ) != 93
+    ):
+        return False
+    var output = input.blocks.copy()
+    var result = input.content.copy()
+    var target = anthropic_request_last_web_search_output_index(output, result)
+    if target < 0:
+        return anthropic_request_put_view(writer, output)
+    if not anthropic_request_put_byte(writer, 91):
+        return False
+    var first = True
+    var item_index: Int64 = 0
+    var end = Int64(output.len) - 1
+    var index = anthropic_request_skip_ws(output, 1, end)
+    while index < end:
+        var item_end = anthropic_request_value_end(output, index, end, 0)
+        if item_end < 0:
+            return False
+        if not first and not anthropic_request_put_byte(writer, 44):
+            return False
+        first = False
+        if item_index == target:
+            if not anthropic_request_write_web_search_output_with_sources(
+                writer, output, index, item_end, result
+            ):
+                return False
+        elif not anthropic_request_put_view_range(writer, output, index, item_end):
+            return False
+        item_index += 1
+        index = anthropic_request_skip_ws(output, item_end, end)
+        if index < end and anthropic_request_byte(output, index) == 44:
+            index = anthropic_request_skip_ws(output, index + 1, end)
         else:
             break
     return anthropic_request_put_byte(writer, 93)
@@ -1587,7 +1873,10 @@ def anthropic_request_view_valid(view: ProdexRichStringView) -> Bool:
 
 
 def anthropic_request_input_valid(input: ProdexAnthropicRequestKernelInput) -> Bool:
-    if input.operation < ANTHROPIC_REQUEST_BODY or input.operation > ANTHROPIC_RESPONSE_ENVELOPE:
+    if (
+        input.operation < ANTHROPIC_REQUEST_BODY
+        or input.operation > ANTHROPIC_WEB_SEARCH_RESULT
+    ):
         return False
     if input.stream < 0 or input.stream > 1 or input.choice_kind < -1 or input.choice_kind > 7:
         return False
@@ -1607,7 +1896,16 @@ def anthropic_request_input_valid(input: ProdexAnthropicRequestKernelInput) -> B
         and anthropic_request_view_valid(input.id)
         and anthropic_request_view_valid(input.name)
         and anthropic_request_view_valid(input.namespace)
-        and anthropic_request_view_valid(input.input)
+        and (
+            anthropic_request_view_valid(input.input)
+            or (
+                input.operation == ANTHROPIC_WEB_SEARCH_CALL
+                and input.stream == 1
+                and rich_view_valid(
+                    input.input, ANTHROPIC_REQUEST_KERNEL_MAX_BYTES
+                )
+            )
+        )
         and anthropic_request_view_valid(input.content)
         and anthropic_request_view_valid(input.arguments)
         and anthropic_request_view_valid(input.delta)
@@ -1653,6 +1951,8 @@ def anthropic_request_write_operation(
         return anthropic_request_write_response_message(writer, input)
     if input.operation == ANTHROPIC_RESPONSE_REASONING:
         return anthropic_request_write_response_reasoning(writer, input)
+    if input.operation == ANTHROPIC_WEB_SEARCH_RESULT:
+        return anthropic_request_write_web_search_result(writer, input)
     if input.operation == ANTHROPIC_STREAM_EVENT:
         return anthropic_request_write_stream_event_result(writer, input)
     if input.operation == ANTHROPIC_RESPONSE_ENVELOPE:

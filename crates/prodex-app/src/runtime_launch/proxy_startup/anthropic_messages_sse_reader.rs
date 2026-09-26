@@ -246,7 +246,10 @@ impl RuntimeAnthropicMessagesSseState {
             sources: Vec::new(),
             done: false,
         };
-        let item = anthropic_web_search_stream_item(&search, "in_progress");
+        let item = match anthropic_web_search_stream_item(&search, true) {
+            Ok(item) => item,
+            Err(reason) => return self.failed("invalid_anthropic_stream", &reason),
+        };
         self.web_searches.insert(index, search);
         let sequence_number = self.inner.next_sequence_number();
         vec![self.inner.event(
@@ -271,8 +274,12 @@ impl RuntimeAnthropicMessagesSseState {
         else {
             return Vec::new();
         };
+        let sources = match prodex_provider_core::anthropic_web_search_result_sources(block) {
+            Ok(sources) => sources,
+            Err(reason) => return self.failed("invalid_anthropic_stream", &reason),
+        };
         if let Some(search) = self.web_searches.get_mut(&index) {
-            search.sources = anthropic_web_search_stream_sources(block);
+            search.sources = sources;
         }
         self.complete_web_search(index).into_iter().collect()
     }
@@ -292,7 +299,13 @@ impl RuntimeAnthropicMessagesSseState {
                 return None;
             }
             search.done = true;
-            anthropic_web_search_stream_item(search, "completed")
+            match anthropic_web_search_stream_item(search, false) {
+                Ok(item) => item,
+                Err(reason) => {
+                    self.inner.eof = true;
+                    return self.inner.failed_event("invalid_anthropic_stream", &reason);
+                }
+            }
         };
         self.inner.record_external_output_item(item.clone());
         let sequence_number = self.inner.next_sequence_number();
@@ -328,41 +341,16 @@ impl RuntimeAnthropicMessagesSseState {
     }
 }
 
-fn anthropic_web_search_stream_item(search: &RuntimeAnthropicWebSearch, status: &str) -> Value {
-    let input = serde_json::from_str::<Value>(&search.input_json).unwrap_or_else(|_| json!({}));
-    let queries = input
-        .get("query")
-        .and_then(Value::as_str)
-        .map(|query| vec![Value::String(query.to_string())])
-        .or_else(|| input.get("queries").and_then(Value::as_array).cloned())
-        .unwrap_or_default();
-    json!({
-        "type": "web_search_call",
-        "id": search.id,
-        "status": status,
-        "action": {
-            "type": "search",
-            "queries": queries,
-            "sources": search.sources,
-        },
-    })
-}
-
-fn anthropic_web_search_stream_sources(block: &Value) -> Vec<Value> {
-    block
-        .get("content")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|result| {
-            let url = result.get("url").and_then(Value::as_str)?;
-            let mut source = json!({"type": "url", "url": url});
-            if let Some(title) = result.get("title").and_then(Value::as_str) {
-                source["title"] = Value::String(title.to_string());
-            }
-            Some(source)
-        })
-        .collect()
+fn anthropic_web_search_stream_item(
+    search: &RuntimeAnthropicWebSearch,
+    in_progress: bool,
+) -> Result<Value, String> {
+    prodex_provider_core::anthropic_web_search_stream_item(
+        &search.id,
+        &search.input_json,
+        &search.sources,
+        in_progress,
+    )
 }
 
 fn anthropic_finish_reason(reason: Option<&str>) -> Option<&'static str> {
@@ -496,12 +484,54 @@ mod tests {
             "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"text_delta\",\"text\":\"Found it.\"}}\n\n",
             "data: {\"type\":\"message_stop\"}\n\n",
         ));
-        assert!(output.contains("response.output_item.added"), "{output}");
-        assert!(output.contains("response.output_item.done"), "{output}");
-        assert!(output.contains("\"type\":\"web_search_call\""), "{output}");
-        assert!(output.contains("current release"), "{output}");
-        assert!(output.contains("https://example.com/release"), "{output}");
+        let events = data_values(&output);
+        let added = events
+            .iter()
+            .find(|value| value["type"] == "response.output_item.added")
+            .expect("added web search item");
+        assert_eq!(
+            added["item"],
+            json!({
+                "type": "web_search_call",
+                "id": "srv_1",
+                "status": "in_progress",
+                "action": {"type": "search", "queries": [], "sources": []},
+            })
+        );
+        let completed = events
+            .iter()
+            .find(|value| value["type"] == "response.output_item.done")
+            .expect("completed web search item");
+        assert_eq!(
+            completed["item"],
+            json!({
+                "type": "web_search_call",
+                "id": "srv_1",
+                "status": "completed",
+                "action": {
+                    "type": "search",
+                    "queries": ["current release"],
+                    "sources": [{"type": "url", "url": "https://example.com/release", "title": "Release"}],
+                },
+            })
+        );
         assert!(output.contains("Found it."), "{output}");
+    }
+
+    #[test]
+    fn native_anthropic_stream_keeps_invalid_search_fragments_as_empty_queries() {
+        let output = render(concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_search_invalid\"}}\n\n",
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"server_tool_use\",\"id\":\"srv_invalid\",\"name\":\"web_search\",\"input\":{}}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"query\\\":\\\"unfinished\"}}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        ));
+        let completed = data_values(&output)
+            .into_iter()
+            .find(|value| value["type"] == "response.output_item.done")
+            .expect("completed web search item");
+
+        assert_eq!(completed["item"]["action"]["queries"], json!([]));
     }
 
     #[test]

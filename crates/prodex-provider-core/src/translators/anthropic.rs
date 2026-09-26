@@ -9,7 +9,6 @@ use crate::translators::openai_chat_compat::{
 use crate::translators::{provider_declares_passthrough, unsupported_endpoint_result};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat, provider_supported_endpoints};
 use prodex_mojo_core::rich::{AnthropicRequestKernelInput, anthropic_request_kernel};
-#[cfg(feature = "mojo")]
 use serde_json::Value;
 
 #[path = "anthropic/messages.rs"]
@@ -28,7 +27,6 @@ pub(super) fn anthropic_mojo_body(
         .map_err(|error| format!("Anthropic request kernel failed: {error:?}"))
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn anthropic_mojo_value(
     input: AnthropicRequestKernelInput<'_>,
 ) -> Result<Value, String> {
@@ -41,6 +39,21 @@ pub fn translate_openai_chat_request_to_anthropic_messages(
     input: ProviderTransformInput,
 ) -> ProviderTransformResult {
     messages::translate_chat_request_to_anthropic(input)
+}
+
+/// Converts one Anthropic web-search result content block to Responses sources.
+pub fn anthropic_web_search_result_sources(block: &Value) -> Result<Vec<Value>, String> {
+    messages::anthropic_web_search_result_sources(block)
+}
+
+/// Shapes one live Anthropic web-search call item for Responses output.
+pub fn anthropic_web_search_stream_item(
+    id: &str,
+    input_json: &str,
+    sources: &[Value],
+    in_progress: bool,
+) -> Result<Value, String> {
+    messages::anthropic_web_search_stream_item(id, input_json, sources, in_progress)
 }
 
 impl ProviderTranslator for AnthropicTranslator {

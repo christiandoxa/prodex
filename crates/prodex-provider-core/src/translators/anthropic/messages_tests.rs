@@ -363,6 +363,75 @@ fn response_maps_native_web_search_call_sources_and_usage() {
 
 #[test]
 #[cfg(feature = "mojo")]
+fn response_attaches_web_search_sources_to_last_matching_call() {
+    let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
+        ProviderEndpoint::Responses,
+        serde_json::to_vec(&json!({
+            "content": [
+                {"type":"server_tool_use", "id":"srv_duplicate", "name":"web_search", "input":{"query":"first"}},
+                {"type":"server_tool_use", "id":"srv_duplicate", "name":"web_search", "input":{"query":"last"}},
+                {"type":"web_search_tool_result", "tool_use_id":"srv_duplicate", "content":[
+                    {"url":"https://example.com/result", "title":"Result"}
+                ]}
+            ]
+        }))
+        .unwrap(),
+    ));
+    let body: Value = serde_json::from_slice(result.body.as_ref().unwrap()).unwrap();
+    assert!(
+        body["output"][0]["action"]["sources"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        body["output"][1]["action"]["sources"],
+        json!([{"type":"url", "url":"https://example.com/result", "title":"Result"}])
+    );
+}
+
+#[test]
+fn web_search_sources_filter_malformed_entries_at_provider_boundary() {
+    let sources = super::anthropic_web_search_result_sources(&json!({
+        "content": [
+            {"url":"https://example.com/one", "title":"🦀"},
+            {"url": false, "title":"ignored"},
+            {"url":"https://example.com/two", "title":7},
+            "ignored"
+        ]
+    }))
+    .unwrap();
+
+    assert_eq!(
+        sources,
+        vec![
+            json!({"type":"url", "url":"https://example.com/one", "title":"🦀"}),
+            json!({"type":"url", "url":"https://example.com/two"}),
+        ]
+    );
+}
+
+#[test]
+fn web_search_stream_item_uses_mojo_in_every_feature_mode() {
+    assert_eq!(
+        super::anthropic_web_search_stream_item(
+            "srv_1",
+            r#"{"query":"current release"}"#,
+            &[],
+            true,
+        )
+        .unwrap(),
+        json!({
+            "type": "web_search_call",
+            "id": "srv_1",
+            "status": "in_progress",
+            "action": {"type": "search", "queries": ["current release"], "sources": []},
+        })
+    );
+}
+
+#[test]
+#[cfg(feature = "mojo")]
 fn response_plan_preserves_flush_and_web_search_result_order() {
     let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
         ProviderEndpoint::Responses,

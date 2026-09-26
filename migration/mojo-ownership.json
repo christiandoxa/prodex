@@ -606,7 +606,8 @@
         "operations": [
           "deepseek_simple_request_eligibility",
           "deepseek_request_metadata_composition",
-          "deepseek_strict_schema_normalization"
+          "deepseek_strict_schema_normalization",
+          "anthropic_web_search_result_shaping"
         ]
       },
       {
@@ -633,6 +634,26 @@
           "deepseek_simple_request_eligibility",
           "deepseek_request_metadata_composition",
           "deepseek_strict_schema_normalization"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/anthropic_request.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "semantic_ranges": [
+          {
+            "start": 536,
+            "end": 590
+          },
+          {
+            "start": 1114,
+            "end": 1429
+          }
+        ],
+        "operations": [
+          "anthropic_web_search_result_shaping"
         ]
       }
     ],
@@ -1489,6 +1510,34 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Caller-owned validation messages, Serde serialization, and typed Mojo ABI result mapping"
+    },
+    {
+      "name": "anthropic_web_search_result_shaping",
+      "domain": "provider/anthropic",
+      "introduced_in": "0.432.1",
+      "baseline_state": "Rust stream web-search item and result-source assembly",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_anthropic_request_kernel_v1",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "web_search_call": 9,
+        "web_search_result": 32
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
+      "consumer_marker": "AnthropicRequestKernelOperation::WebSearchResult",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/anthropic_messages_sse_reader.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
+      "rust_owner_before": "Rust web-search source filtering and live stream item construction",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; fixed provider and app expectations cover source filtering and stream items",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON serialization, typed ABI result mapping, and live stream state"
     }
   ],
   "rust_semantic_reductions": [
@@ -2105,6 +2154,36 @@
       "production_consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
       "parity_test": "crates/prodex-provider-core/src/deepseek_bridge/tests/strict_schema.rs",
       "performance": "one bounded Mojo normalization call after validation"
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_launch/proxy_startup/anthropic_messages_sse_reader.rs",
+      "symbol": "anthropic_web_search_stream_item",
+      "operation": "anthropic_web_search_result_shaping",
+      "previous_responsibility": "Rust query selection and web-search item JSON construction",
+      "final_state": "adapter-only",
+      "rust_before": "Rust source traversal and JSON object assembly",
+      "rust_after": "Stream state passes bounded JSON fragments to the Mojo-owned provider adapter",
+      "mojo_owner": "mojo/prodex_core/anthropic_request.mojo::anthropic_request_write_web_search_call",
+      "mojo_source": "mojo/prodex_core/anthropic_request.mojo",
+      "mojo_entry": "prodex_mojo_rich_anthropic_request_kernel_v1 operation 9",
+      "production_consumer": "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
+      "parity_test": "crates/prodex-app/src/runtime_launch/proxy_startup/anthropic_messages_sse_reader.rs",
+      "performance": "one bounded Mojo web-search call-item construction per stream update"
+    },
+    {
+      "file": "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
+      "symbol": "merge_anthropic_web_search_result",
+      "operation": "anthropic_web_search_result_shaping",
+      "previous_responsibility": "Rust content-block URL and title filtering and source merge",
+      "final_state": "adapter-only",
+      "rust_before": "Rust source filter and output-array mutation",
+      "rust_after": "Serde fragments and Mojo result application only",
+      "mojo_owner": "mojo/prodex_core/anthropic_request.mojo::anthropic_request_write_web_search_result",
+      "mojo_source": "mojo/prodex_core/anthropic_request.mojo",
+      "mojo_entry": "prodex_mojo_rich_anthropic_request_kernel_v1 operation 32",
+      "production_consumer": "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs",
+      "parity_test": "crates/prodex-provider-core/src/translators/anthropic/messages_tests.rs",
+      "performance": "one bounded Mojo result-source call per content block"
     }
   ],
   "deleted_authoritative_operations": [

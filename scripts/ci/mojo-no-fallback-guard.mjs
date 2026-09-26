@@ -308,6 +308,7 @@ const FEATURE_OFF_RUST_PATH = /\bnot\s*\(\s*feature\s*=\s*"(?:mojo|mojo-core|run
 const ANTHROPIC_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/response.rs";
 const ANTHROPIC_MESSAGES_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages.rs";
 const ANTHROPIC_WEB_SEARCH_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/web_search.rs";
+const ANTHROPIC_SSE_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/anthropic_messages_sse_reader.rs";
 const ANTHROPIC_REQUEST_FALLBACK_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/request_fallback.rs";
 const ANTHROPIC_REQUEST_ORACLE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/mojo_request_tests.rs";
 const REMOVED_ORACLE_FILES = [
@@ -645,6 +646,25 @@ export function findViolations(files) {
     }
     return [];
   });
+  const anthropicWebSearchViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === ANTHROPIC_SSE_FILE &&
+      (!contents.includes("prodex_provider_core::anthropic_web_search_stream_item") ||
+        /\bfn\s+anthropic_web_search_stream_sources\s*\(/u.test(contents) ||
+        contents.includes("Anthropic Messages stream translation requires Mojo support"))) {
+      return [`${filePath}: live Anthropic web-search shaping must use Mojo in every feature mode`];
+    }
+    if (filePath === ANTHROPIC_WEB_SEARCH_FILE &&
+      (!contents.includes("AnthropicRequestKernelOperation::WebSearchCall") ||
+        !contents.includes("AnthropicRequestKernelOperation::WebSearchResult") ||
+        /\bfn\s+anthropic_web_search_sources\s*\(/u.test(contents))) {
+      return [`${filePath}: Anthropic web-search result shaping must use Mojo`];
+    }
+    if (filePath === ANTHROPIC_MESSAGES_FILE &&
+      contents.includes("Anthropic Messages web-search result translation requires Mojo support")) {
+      return [`${filePath}: Anthropic web-search result has a feature-off rejection`];
+    }
+    return [];
+  });
   const cliRuntimeFeatureViolations = files
     .filter(([filePath, contents]) => filePath === CLI_RUNTIME_FEATURE_FILE &&
       /\bfn\s+(?:rust_plan|rollout_budget_reminders|to_codex_config_args_rust|mojo_feature_plan_matches_rust_oracle_for_seeded_inputs)\s*\(/u.test(contents))
@@ -879,7 +899,8 @@ export function findViolations(files) {
     ...deepseekStrictSchemaViolations,
     ...quotaPlannerViolations,
     ...anthropicResponseViolations,
-    ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
+    ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
+    ...anthropicWebSearchViolations, ...cliRuntimeFeatureViolations,
     ...superExposeViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
@@ -1281,6 +1302,11 @@ function selfTest() {
     "fn anthropic_tool_choice() {}"]])[0], /Rust Anthropic request semantics/u);
   assert.match(findViolations([[ANTHROPIC_WEB_SEARCH_FILE,
     "fn anthropic_web_search_tool() {}"]])[0], /Rust Anthropic request web-search semantics/u);
+  assert.match(findViolations([[ANTHROPIC_SSE_FILE,
+    "fn anthropic_web_search_stream_sources() {}"]])[0], /web-search shaping must use Mojo/u);
+  assert.match(findViolations([[ANTHROPIC_MESSAGES_FILE,
+    "Anthropic Messages web-search result translation requires Mojo support"]])[0],
+  /feature-off rejection/u);
   assert.match(findViolations([[CLI_RUNTIME_FEATURE_FILE, "fn rust_plan() {}"]])[0],
     /Rust runtime-feature planner or oracle/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/fallback/chains/gemini.rs",
