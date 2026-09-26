@@ -147,7 +147,6 @@ impl<'a> Document<'a> {
         index
     }
 
-    #[cfg(feature = "mojo")]
     pub(crate) fn member(&mut self, value: &'a Value, key: &'a str) {
         self.nodes.push(JsonNode {
             kind: JsonKind::Object,

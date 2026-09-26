@@ -2,26 +2,10 @@
 //!
 //! Pure provider translation only: no runtime state, auth, or transport.
 
-#[cfg(any(not(feature = "mojo"), test))]
-mod tool_choice;
-#[cfg(any(not(feature = "mojo"), test))]
-mod tools;
-#[cfg(any(not(feature = "mojo"), test))]
-mod util;
-#[cfg(any(not(feature = "mojo"), test))]
-mod web_search;
+mod entry;
+mod mojo;
 
-#[cfg(not(feature = "mojo"))]
-pub use self::tool_choice::provider_core_chat_tool_choice_from_responses_request;
-#[cfg(not(feature = "mojo"))]
-pub use self::tools::provider_core_chat_tools_from_responses_request;
-#[cfg(not(feature = "mojo"))]
-pub use self::util::provider_core_flatten_namespace_tool_name;
-#[cfg(not(feature = "mojo"))]
-pub use self::web_search::{
-    provider_core_chat_request_body_without_web_search_options,
-    provider_core_chat_web_search_options_from_responses_request,
-};
+pub use entry::*;
 
 #[cfg(test)]
 mod tests {
@@ -78,6 +62,13 @@ mod tests {
             ]
         );
         assert_eq!(tools[0]["function"]["parameters"]["required"][0], "input");
+        assert!(
+            tools[0]["function"]["description"]
+                .as_str()
+                .unwrap()
+                .contains("Original custom tool format JSON:")
+        );
+        assert_eq!(tools[2]["function"]["parameters"]["type"], "object");
     }
 
     #[test]
@@ -106,6 +97,110 @@ mod tests {
         let choice = provider_core_chat_tool_choice_from_responses_request(&value, false).unwrap();
         assert_eq!(choice["function"]["name"], "agents--spawn_agent");
         assert!(provider_core_chat_tool_choice_from_responses_request(&value, true).is_none());
+    }
+
+    #[test]
+    fn provider_core_chat_tool_choice_keeps_field_precedence_and_unicode() {
+        let value = serde_json::json!({
+            "tool_choice": {
+                "type": "mcp",
+                "namespace": "東京",
+                "server_label": "ignored",
+                "mcp_server_name": "also_ignored",
+                "function": {"namespace": "nested", "name": "nested_name"},
+                "name": "道具"
+            }
+        });
+
+        assert_eq!(
+            provider_core_chat_tool_choice_from_responses_request(&value, false).unwrap()["function"]
+                ["name"],
+            "mcp__東京__道具"
+        );
+    }
+
+    #[test]
+    fn provider_core_chat_tools_sort_and_deduplicate_mcp_expansion() {
+        let value = serde_json::json!({"tools": [{
+            "type": "mcp",
+            "server_label": "git tools",
+            "allowed_tools": ["z", "a", "a", "mcp__ready"],
+            "configs": {
+                "b": {"enabled": true},
+                "a": {"enabled": true},
+                "off": {"enabled": false},
+                "disabled_by_default": {}
+            },
+            "default_config": {"enabled": false}
+        }]});
+
+        let tools = provider_core_chat_tools_from_responses_request(&value).unwrap();
+        let names = tools
+            .iter()
+            .map(|tool| tool["function"]["name"].as_str().unwrap())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            [
+                "mcp__git_tools__a",
+                "mcp__git_tools__b",
+                "mcp__ready",
+                "mcp__git_tools__z"
+            ]
+        );
+        assert!(
+            tools
+                .iter()
+                .all(|tool| { tool["function"]["parameters"]["additionalProperties"] == true })
+        );
+    }
+
+    #[test]
+    fn provider_core_chat_tool_shapes_reject_malformed_and_preserve_web_search_precedence() {
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!(true),
+            serde_json::json!({}),
+            serde_json::json!({"tools": null}),
+            serde_json::json!({"tools": [null, 7, {}]}),
+        ] {
+            assert!(provider_core_chat_tools_from_responses_request(&value).is_none());
+            assert!(provider_core_chat_web_search_options_from_responses_request(&value).is_none());
+        }
+        assert!(
+            provider_core_chat_tool_choice_from_responses_request(
+                &serde_json::json!({"tool_choice": {"type": "function", "name": 7}}),
+                false
+            )
+            .is_none()
+        );
+        assert!(provider_core_chat_request_body_without_web_search_options(b"not json").is_none());
+
+        let value = serde_json::json!({"tools": [
+            {"type": "web_search", "context_size": "invalid", "search_context_size": "medium",
+             "user_location": null, "location": {"country": "JP"}, "max_uses": 1},
+            {"type": "web_search_preview_v2", "search_context_size": "high", "max_uses": 9}
+        ]});
+        let options = provider_core_chat_web_search_options_from_responses_request(&value).unwrap();
+        assert_eq!(options["search_context_size"], "medium");
+        assert_eq!(options["user_location"], serde_json::Value::Null);
+        assert_eq!(options["max_uses"], 1);
+        assert!(provider_core_chat_tools_from_responses_request(&value).is_none());
+    }
+
+    #[test]
+    fn provider_core_chat_tools_expand_large_bounded_input() {
+        let tools = (0..1024)
+            .map(|index| serde_json::json!({"type": "custom", "name": format!("tool_{index}")}))
+            .collect::<Vec<_>>();
+        let translated =
+            provider_core_chat_tools_from_responses_request(&serde_json::json!({"tools": tools}))
+                .unwrap();
+
+        assert_eq!(translated.len(), 1024);
+        assert_eq!(translated[0]["function"]["name"], "tool_0");
+        assert_eq!(translated[1023]["function"]["name"], "tool_1023");
     }
 
     #[test]
@@ -140,13 +235,3 @@ mod tests {
         );
     }
 }
-
-#[cfg(feature = "mojo")]
-mod entry;
-#[cfg(feature = "mojo")]
-mod mojo;
-#[cfg(feature = "mojo")]
-pub use entry::*;
-
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_tests;

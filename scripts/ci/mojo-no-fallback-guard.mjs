@@ -156,6 +156,9 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo_tests.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/entry.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/mojo.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping_tests.rs",
@@ -245,6 +248,9 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/entry.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/mojo.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
   "crates/prodex-provider-core/src/translators/kiro/stream.rs",
@@ -306,6 +312,15 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/chat_items.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/input_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/local_shell.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/tool_choice.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/tools.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/tools/custom.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/tools/mcp_toolset.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/tools/namespace.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/tools/tool_search.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/util.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/web_search.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/mojo_tests.rs",
 ];
 const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-quota/src/render/gemini.rs",
@@ -405,6 +420,9 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo_tests.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/entry.rs",
+  "crates/prodex-provider-core/src/chat_tools_bridge/mojo.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping_tests.rs",
@@ -448,6 +466,8 @@ const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_p
 const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
 const FINGERPRINT_ARTIFACTS_FILE = "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs";
 const DEEPSEEK_SHAPING_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs";
+const CHAT_TOOLS_BRIDGE_FILE = "crates/prodex-provider-core/src/chat_tools_bridge.rs";
+const CHAT_TOOLS_MOJO_FILE = "crates/prodex-provider-core/src/chat_tools_bridge/mojo.rs";
 const DEEPSEEK_SHAPING_COMPLETED_FNS = [
   "deepseek_provider_core_response_completed_event",
   "deepseek_provider_core_response_created_event",
@@ -544,6 +564,17 @@ export function findViolations(files) {
       (!contents.includes("DeepSeekKernelOperation::ResponseToolCallItem") ||
         /\bfn\s+(?:deepseek_split_flat_namespace_tool_name|deepseek_chat_tool_call_thought_signature)\s*\(/u.test(contents)))
     .map(([filePath]) => `${filePath}: DeepSeek response tool-call shaping must use the Mojo kernel`);
+  const chatToolViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === CHAT_TOOLS_BRIDGE_FILE &&
+      (!contents.includes("pub use entry::*;") ||
+        /\bmod\s+(?:tool_choice|tools|util|web_search)\s*;/u.test(contents))) {
+      return [`${filePath}: chat-tool operations must use the Mojo entrypoints`];
+    }
+    if (filePath === CHAT_TOOLS_MOJO_FILE && !contents.includes("transform_chat_tools(")) {
+      return [`${filePath}: chat-tool operations must invoke the Mojo kernel`];
+    }
+    return [];
+  });
   const geminiBufferedResponseViolations = files
     .filter(([filePath, contents]) => filePath === GEMINI_BUFFERED_RESPONSE_FILE &&
       (!contents.includes("gemini_buffered_response_kernel(input)") ||
@@ -666,7 +697,7 @@ export function findViolations(files) {
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
     ...geminiFallbackViolations, ...hardReplacementViolations, ...precommitBudgetOracleViolations,
-    ...deepseekRequestViolations, ...deepseekResponseToolCallViolations,
+    ...deepseekRequestViolations, ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
@@ -873,6 +904,13 @@ function selfTest() {
     /response tool-call shaping must use the Mojo kernel/u);
   assert.deepEqual(findViolations([[DEEPSEEK_RESPONSE_TOOL_CALLS_FILE,
     "fn shape() { DeepSeekKernelOperation::ResponseToolCallItem; }"]]), []);
+  assert.match(findViolations([[CHAT_TOOLS_BRIDGE_FILE,
+    "mod tools; pub use self::tools::*;"]]).join("\n"), /chat-tool operations must use the Mojo entrypoints/u);
+  assert.match(findViolations([[CHAT_TOOLS_MOJO_FILE,
+    "fn transform_bytes() {}"]]).join("\n"), /chat-tool operations must invoke the Mojo kernel/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/chat_tools_bridge/tools.rs",
+    "fn provider_core_chat_tools_from_responses_request() {}"]]).join("\n"),
+  /Rust fallback or oracle/u);
   assert.match(findViolations([[GEMINI_BUFFERED_RESPONSE_FILE,
     "fn gemini_insert_response_message() {}"]]).join("\n"),
     /buffered response assembly must use the Mojo kernel/u);

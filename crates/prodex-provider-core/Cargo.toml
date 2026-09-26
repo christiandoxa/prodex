@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [features]
 default = []
+# Kept for downstream feature compatibility; chat-tool semantics always use Mojo.
 mojo = []
 
 [dependencies]
