@@ -297,7 +297,7 @@ fn smart_context_budget_expands_large_preview_after_recent_safe_rewrite() {
         &shared,
         RuntimeSmartContextRewriteSafetyObservation {
             safe: true,
-            saved_tokens: runtime_proxy_crate::SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS,
+            saved_tokens: 256,
         },
     );
     let after = runtime_smart_context_budget(RuntimeSmartContextBudgetInput {
@@ -354,7 +354,7 @@ fn smart_context_budget_loads_persisted_recent_safe_rewrite() {
         &first_shared,
         RuntimeSmartContextRewriteSafetyObservation {
             safe: true,
-            saved_tokens: runtime_proxy_crate::SMART_CONTEXT_RECENT_SAFE_REWRITE_MIN_SAVED_TOKENS,
+            saved_tokens: 256,
         },
     );
 

@@ -88,6 +88,7 @@ pub struct SmartContextAdaptiveBudgetPlanInput {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmartContextBudgetAdjustment {
     pub max_inline_bytes: u64,
+    pub max_inline_tool_output_bytes: u64,
     pub max_rehydrate_tokens: u64,
 }
 
@@ -287,15 +288,17 @@ unsafe extern "C" {
         max_rehydrate_tokens: *mut u64,
         reason_bits: *mut u64,
     ) -> i64;
-    fn prodex_smart_context_budget_adjustment_v1(
+    fn prodex_smart_context_budget_adjustment_v2(
         tier: i64,
         mode: i64,
         max_inline_bytes: u64,
+        max_inline_tool_output_bytes: u64,
         max_rehydrate_tokens: u64,
         decision: i64,
         available_context_tokens: u64,
         available_has_value: i64,
         adjusted_inline_bytes: *mut u64,
+        adjusted_inline_tool_output_bytes: *mut u64,
         adjusted_rehydrate_tokens: *mut u64,
     ) -> i64;
     fn prodex_smart_context_rewrite_telemetry_decision_v1(
@@ -600,6 +603,7 @@ pub fn smart_context_budget_adjustment(
     tier: i64,
     mode: i64,
     max_inline_bytes: u64,
+    max_inline_tool_output_bytes: u64,
     max_rehydrate_tokens: u64,
     decision: i64,
     available_context_tokens: Option<u64>,
@@ -612,17 +616,20 @@ pub fn smart_context_budget_adjustment(
         return Err(crate::MojoError::InvalidInput);
     }
     let mut adjusted_inline_bytes = 0;
+    let mut adjusted_inline_tool_output_bytes = 0;
     let mut adjusted_rehydrate_tokens = 0;
     let status = unsafe {
-        prodex_smart_context_budget_adjustment_v1(
+        prodex_smart_context_budget_adjustment_v2(
             tier,
             mode,
             max_inline_bytes,
+            max_inline_tool_output_bytes,
             max_rehydrate_tokens,
             decision,
             available_context_tokens.unwrap_or_default(),
             i64::from(available_context_tokens.is_some()),
             &mut adjusted_inline_bytes,
+            &mut adjusted_inline_tool_output_bytes,
             &mut adjusted_rehydrate_tokens,
         )
     };
@@ -631,6 +638,7 @@ pub fn smart_context_budget_adjustment(
     }
     Ok(SmartContextBudgetAdjustment {
         max_inline_bytes: adjusted_inline_bytes,
+        max_inline_tool_output_bytes: adjusted_inline_tool_output_bytes,
         max_rehydrate_tokens: adjusted_rehydrate_tokens,
     })
 }

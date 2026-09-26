@@ -1913,3 +1913,21 @@ The canonical source report counts **52,546 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **525,575 additional Mojo LOC** required at this Rust
 volume.
+
+## Smart Context rewrite-budget hard replacement
+
+Smart Context telemetry decisions and adaptive rewrite-budget adjustments now
+use the existing Mojo kernels in every runtime-proxy feature mode. The Rust
+decision, scaling, and feature-off copies were deleted. The budget ABI is v2
+so it preserves distinct inline and tool-output limits; exact pass-through
+still leaves its rehydration limit unchanged. Caller tests cover safety,
+quality-risk, rounding, saturation, and available-context boundaries. The
+no-fallback guard now rejects feature-off or Rust-copy restoration in these
+adapters. The changed kernel compiled to objects for all six release targets;
+native execution evidence remains Linux x86_64.
+
+The canonical source report counts **52,558 reachable Mojo LOC** and
+**192,542 Rust production LOC**, totaling **245,100 LOC**: **21.44% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **525,068 additional Mojo LOC** required at this Rust
+volume.
