@@ -2181,3 +2181,18 @@ The canonical source report counts **53,549 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **523,222 additional Mojo LOC** required at this Rust
 volume.
+
+## Gemini request text-part hard replacement
+
+Gemini Responses text parts now use the existing Mojo request-content operation
+in every provider feature mode. Rust retains request traversal and typed error
+propagation. A text part beyond the 4 MiB Mojo boundary now returns a
+controlled request error instead of panicking; fixed caller tests cover wire
+shape and the oversized boundary. The existing ABI version is unchanged;
+native execution evidence remains Linux x86_64.
+
+The canonical source report counts **53,549 reachable Mojo LOC** and
+**192,284 Rust production LOC**, totaling **245,833 LOC**: **21.78% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **523,303 additional Mojo LOC** required at this Rust
+volume.

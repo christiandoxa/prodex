@@ -68,7 +68,7 @@ pub fn gemini_provider_core_generate_content_request(
     let request = gemini_provider_core_generate_content_request_map(
         original,
         system_instruction,
-        runtime_gemini_contents_from_chat(chat),
+        runtime_gemini_contents_from_chat(chat)?,
         tools,
         tool_config,
         generation_config,
@@ -88,26 +88,16 @@ pub fn gemini_provider_core_generate_content_request(
     })
 }
 
-fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json::Value> {
+fn runtime_gemini_contents_from_chat(
+    chat: &serde_json::Value,
+) -> Result<Vec<serde_json::Value>, String> {
     if chat.get("input").is_some() {
         return gemini_contents_from_request(chat);
     }
     if let Some(messages) = chat.get("messages").and_then(serde_json::Value::as_array) {
         return gemini_contents_from_request(&serde_json::json!({ "input": messages }));
     }
-    #[cfg(feature = "mojo")]
-    {
-        vec![request_contents::gemini_request_content_value(
-            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::Content,
-            Some(b"\"user\""),
-            Some(br#"[{"text":""}]"#),
-            None,
-            None,
-            0,
-        )]
-    }
-    #[cfg(not(feature = "mojo"))]
-    vec![serde_json::json!({"role":"user","parts":[{"text":""}]})]
+    gemini_contents_from_request(chat)
 }
 
 pub fn gemini_provider_core_request_body(
@@ -307,5 +297,21 @@ mod tests {
             .is_err()
         );
         assert!(gemini_provider_core_tool_config_from_request(&over_limit).is_err());
+    }
+
+    #[test]
+    fn runtime_chat_contents_reject_text_over_the_mojo_request_content_limit() {
+        let chat = json!({"input": "x".repeat(4 * 1024 * 1024)});
+        let error = super::runtime_gemini_contents_from_chat(&chat).unwrap_err();
+
+        assert!(error.starts_with("Mojo Gemini request-content kernel failed:"));
+    }
+
+    #[test]
+    fn runtime_chat_contents_keep_the_empty_user_message() {
+        assert_eq!(
+            super::runtime_gemini_contents_from_chat(&json!({})).unwrap(),
+            vec![json!({"role":"user","parts":[{"text":""}]})]
+        );
     }
 }

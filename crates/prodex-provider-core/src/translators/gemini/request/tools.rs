@@ -130,15 +130,13 @@ pub(crate) fn gemini_tool_from_openai_tool(tool: &Value, index: usize) -> Result
     let name = serde_json::to_vec(name).expect("Gemini tool name serializes");
     let description = serde_json::to_vec(description).expect("Gemini tool description serializes");
     let parameters = serde_json::to_vec(&parameters).expect("Gemini tool parameters serialize");
-    Ok(
-        crate::translators::gemini::request_contents::gemini_request_content_mojo_value(
-            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::ToolDeclaration,
-            Some(&name),
-            Some(&description),
-            Some(&parameters),
-            None,
-            0,
-        ),
+    crate::translators::gemini::request_contents::gemini_request_content_mojo_value(
+        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::ToolDeclaration,
+        Some(&name),
+        Some(&description),
+        Some(&parameters),
+        None,
+        0,
     )
 }
 
@@ -157,7 +155,7 @@ pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Opti
             serde_json::to_vec(description).expect("Gemini tool description serializes")
         });
     Some(
-        crate::translators::gemini::request_contents::gemini_request_content_mojo_value(
+        crate::translators::gemini::request_contents::gemini_request_content_mojo_value_or_panic(
             prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::ToolDeclaration,
             Some(&name),
             description.as_deref(),

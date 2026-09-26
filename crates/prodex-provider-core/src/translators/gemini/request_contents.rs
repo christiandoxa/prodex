@@ -17,7 +17,7 @@ pub(crate) fn gemini_request_content_mojo_value(
     tertiary: Option<&[u8]>,
     quaternary: Option<&[u8]>,
     kind: i64,
-) -> Value {
+) -> Result<Value, String> {
     let mut input =
         prodex_mojo_core::provider_constraints::GeminiRequestContentKernelInput::new(operation);
     input.primary = primary;
@@ -26,10 +26,22 @@ pub(crate) fn gemini_request_content_mojo_value(
     input.quaternary = quaternary;
     input.kind = kind;
     let body = prodex_mojo_core::provider_constraints::gemini_request_content_kernel(input)
-        .unwrap_or_else(|error| panic!("Mojo Gemini request-content kernel failed: {error:?}"));
-    serde_json::from_slice(&body).unwrap_or_else(|error| {
-        panic!("Mojo Gemini request-content kernel returned invalid JSON: {error}")
+        .map_err(|error| format!("Mojo Gemini request-content kernel failed: {error:?}"))?;
+    serde_json::from_slice(&body).map_err(|error| {
+        format!("Mojo Gemini request-content kernel returned invalid JSON: {error}")
     })
+}
+
+pub(crate) fn gemini_request_content_mojo_value_or_panic(
+    operation: prodex_mojo_core::provider_constraints::GeminiRequestContentOperation,
+    primary: Option<&[u8]>,
+    secondary: Option<&[u8]>,
+    tertiary: Option<&[u8]>,
+    quaternary: Option<&[u8]>,
+    kind: i64,
+) -> Value {
+    gemini_request_content_mojo_value(operation, primary, secondary, tertiary, quaternary, kind)
+        .unwrap_or_else(|error| panic!("{error}"))
 }
 
 #[cfg(feature = "mojo")]
@@ -38,7 +50,7 @@ fn gemini_request_function_part(
     name: &str,
     value: &Value,
     call_id: Option<&str>,
-) -> Value {
+) -> Result<Value, String> {
     let name = serde_json::to_vec(name).expect("Gemini function name serializes");
     let value = serde_json::to_vec(value).expect("Gemini function value serializes");
     let call_id = call_id
