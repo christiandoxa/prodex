@@ -41,6 +41,8 @@ def static_input_order(view: ProdexRichStringView) -> SmartContextStaticOrderKey
         return key^
     var source = rich_view_ptr(view)
     var index = Int64(6)
+    if index < Int64(view.len) and source[unsafe_offset=index] == 43:
+        index += 1
     var start = index
     var value = UInt64(0)
     while index < Int64(view.len) and source[unsafe_offset=index] >= 48 and source[unsafe_offset=index] <= 57:

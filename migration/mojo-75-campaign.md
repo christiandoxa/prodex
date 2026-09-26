@@ -1701,3 +1701,20 @@ The canonical source report counts **52,072 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **528,347 additional Mojo LOC** required at this Rust
 volume.
+
+## Static-context ordering and noise hard replacement
+
+Static item keys, ordering, and volatile metadata classification now use the
+Mojo static-item and normalization kernels in every feature mode. The Rust
+order-key, bounded-selection, and noise-classifier implementations, including
+the temporary parity oracle, were deleted. Expected-value tests cover Unicode
+whitespace, malformed metadata, separator precedence, duplicate items,
+ordering ties, and a 2 MiB line. Both touched Mojo kernels compiled to objects
+for all six release targets. Native execution evidence is Linux x86_64; macOS
+and Windows runtime execution was not run.
+
+The canonical source report counts **52,114 reachable Mojo LOC** and
+**193,391 Rust production LOC**, totaling **245,505 LOC**: **21.23% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **528,059 additional Mojo LOC** required at this Rust
+volume.

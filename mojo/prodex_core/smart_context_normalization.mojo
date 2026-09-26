@@ -581,78 +581,113 @@ def smart_context_key_bounds(
     source: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
 ) -> Array[Int64, 2]:
     var bounds = Array[Int64, 2](fill=0)
-    var lower: Int64 = start
+    var lower = start
     var upper: Int64 = end
-    while lower < upper and smart_context_is_ascii_whitespace(source[unsafe_offset=lower]):
-        lower += 1
-    while upper > lower and smart_context_is_ascii_whitespace(source[unsafe_offset=upper - 1]):
-        upper -= 1
+    while lower < upper:
+        if smart_context_is_ascii_whitespace(source[unsafe_offset=lower]):
+            lower += 1
+            continue
+        var whitespace_len = smart_context_unicode_whitespace_len(source, upper, lower)
+        if whitespace_len == 0:
+            break
+        lower += whitespace_len
+    while upper > lower:
+        if smart_context_is_ascii_whitespace(source[unsafe_offset=upper - 1]):
+            upper -= 1
+            continue
+        if (
+            upper - lower >= 3
+            and smart_context_unicode_whitespace_len(source, upper, upper - 3) == 3
+        ):
+            upper -= 3
+            continue
+        if (
+            upper - lower >= 2
+            and smart_context_unicode_whitespace_len(source, upper, upper - 2) == 2
+        ):
+            upper -= 2
+            continue
+        break
     bounds[0] = lower
     bounds[1] = upper
     return bounds^
 
 
-def smart_context_key_normalized_length(
-    source: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
-) -> Int64:
-    var bounds = smart_context_key_bounds(source, start, end)
-    var output_length: Int64 = 0
-    var pending_space = False
-    for index in range(bounds[0], bounds[1]):
-        var value = source[unsafe_offset=index]
-        if value == 45 or value == 95 or smart_context_is_ascii_whitespace(value):
-            if output_length > 0:
-                pending_space = True
-            continue
-        if pending_space:
-            output_length += 1
-            pending_space = False
-        output_length += 1
-    return output_length
+def smart_context_key_match_byte[literal: StaticString](
+    value: UInt8,
+    index: Int64,
+    plain_matches: Bool,
+    prefixed_matches: Bool,
+) -> Tuple[Bool, Bool]:
+    var literal_length = Int64(literal.byte_length())
+    var right = literal.unsafe_ptr()
+    var plain = plain_matches
+    var prefixed = prefixed_matches
+    if index >= literal_length or value != right[unsafe_offset=index]:
+        plain = False
 
-
-def smart_context_key_normalized_byte(
-    source: Pointer[mut=False, UInt8, _], start: Int64, end: Int64, wanted: Int64
-) -> UInt8:
-    if wanted < 0:
-        return 0
-    var bounds = smart_context_key_bounds(source, start, end)
-    var output_index: Int64 = 0
-    var pending_space = False
-    for index in range(bounds[0], bounds[1]):
-        var value = source[unsafe_offset=index]
-        if value == 45 or value == 95 or smart_context_is_ascii_whitespace(value):
-            if output_index > 0:
-                pending_space = True
-            continue
-        if pending_space:
-            if output_index == wanted:
-                return 32
-            output_index += 1
-            pending_space = False
-        if value >= 65 and value <= 90:
-            value += 32
-        if output_index == wanted:
-            return value
-        output_index += 1
-    return 0
+    if index < 7:
+        var prefix = "prodex ".ptr()
+        if value != prefix[unsafe_offset=index]:
+            prefixed = False
+    else:
+        var literal_index = index - 7
+        if literal_index >= literal_length or value != right[unsafe_offset=literal_index]:
+            prefixed = False
+    return (plain, prefixed)
 
 
 def smart_context_key_matches[literal: StaticString](
     source: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
 ) -> Bool:
-    var length = smart_context_key_normalized_length(source, start, end)
-    var offset: Int64 = 0
-    if length >= 7 and smart_context_key_normalized_byte(source, start, end, 0) == 112 and smart_context_key_normalized_byte(source, start, end, 1) == 114 and smart_context_key_normalized_byte(source, start, end, 2) == 111 and smart_context_key_normalized_byte(source, start, end, 3) == 100 and smart_context_key_normalized_byte(source, start, end, 4) == 101 and smart_context_key_normalized_byte(source, start, end, 5) == 120 and smart_context_key_normalized_byte(source, start, end, 6) == 32:
-        offset = 7
     var literal_length = Int64(literal.byte_length())
-    if length - offset != literal_length:
-        return False
-    var right = literal.unsafe_ptr()
-    for index in range(literal_length):
-        if smart_context_key_normalized_byte(source, start, end, offset + index) != right[unsafe_offset=index]:
+    var bounds = smart_context_key_bounds(source, start, end)
+    var plain_matches = True
+    var prefixed_matches = True
+    var output_index: Int64 = 0
+    var pending_space = False
+    var index = bounds[0]
+    while index < bounds[1]:
+        var value = source[unsafe_offset=index]
+        var whitespace_len = smart_context_unicode_whitespace_len(source, bounds[1], index)
+        if (
+            value == 45
+            or value == 95
+            or smart_context_is_ascii_whitespace(value)
+            or whitespace_len > 0
+        ):
+            if output_index > 0:
+                pending_space = True
+            if whitespace_len > 0:
+                index += whitespace_len
+            else:
+                index += 1
+            continue
+        if pending_space:
+            var space_matches = smart_context_key_match_byte[literal](
+                32, output_index, plain_matches, prefixed_matches
+            )
+            plain_matches = space_matches[0]
+            prefixed_matches = space_matches[1]
+            if not plain_matches and not prefixed_matches:
+                return False
+            output_index += 1
+            pending_space = False
+        if value >= 65 and value <= 90:
+            value += 32
+        var value_matches = smart_context_key_match_byte[literal](
+            value, output_index, plain_matches, prefixed_matches
+        )
+        plain_matches = value_matches[0]
+        prefixed_matches = value_matches[1]
+        if not plain_matches and not prefixed_matches:
             return False
-    return True
+        output_index += 1
+        index += 1
+    return (
+        plain_matches and output_index == literal_length
+        or prefixed_matches and output_index == literal_length + 7
+    )
 
 
 def smart_context_random_id_key_is_volatile(
@@ -747,7 +782,7 @@ def smart_context_static_noise_key(
 
 
 def smart_context_static_noise_value(
-    source: Pointer[mut=False, UInt8, _], length: Int64, start: Int64, end: Int64
+    source: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
 ) -> Bool:
     var bounds = smart_context_key_bounds(source, start, end)
     if bounds[0] >= bounds[1]:
@@ -770,10 +805,14 @@ def smart_context_static_noise(
         var inner = smart_context_key_bounds(source, start, end)
         start = inner[0]
         end = inner[1]
+    var comment_prefix_len: Int64 = 0
     if smart_context_literal_at["//"](source, length, start):
-        start = smart_context_skip_ascii_spaces(source, length, start + 2)
+        comment_prefix_len = 2
     elif smart_context_literal_at["#"](source, length, start) or smart_context_literal_at[";"](source, length, start):
-        start = smart_context_skip_ascii_spaces(source, length, start + 1)
+        comment_prefix_len = 1
+    if comment_prefix_len > 0:
+        var prefix_bounds = smart_context_key_bounds(source, start + comment_prefix_len, end)
+        start = prefix_bounds[0]
 
     var separator: Int64 = -1
     var index = start
@@ -793,7 +832,7 @@ def smart_context_static_noise(
         return False
     if smart_context_key_matches["run id"](source, start, separator) or smart_context_key_matches["request id"](source, start, separator) or smart_context_key_matches["trace id"](source, start, separator) or smart_context_key_matches["session id"](source, start, separator):
         return True
-    return smart_context_static_noise_value(source, length, separator + 1, end)
+    return smart_context_static_noise_value(source, separator + 1, end)
 
 
 def smart_context_normalization_mode_valid(mode: Int64) -> Bool:

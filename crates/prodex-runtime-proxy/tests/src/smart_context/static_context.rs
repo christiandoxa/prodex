@@ -152,6 +152,293 @@ fn static_context_prompt_cache_fingerprint_uses_prompt_prefix_order() {
 }
 
 #[test]
+fn static_context_prompt_cache_payload_format_is_stable() {
+    let payload =
+        smart_context_static_context_prompt_cache_payload(&[SmartContextStableStaticContextItem {
+            id: "AGENTS.md".to_string(),
+            canonical_text: "rules\n".to_string(),
+            content_hash: "ignored-by-payload".to_string(),
+            byte_len: 6,
+        }]);
+
+    assert_eq!(
+        payload,
+        "prodex-smart-context-static-prompt-cache-v1\nid-bytes:9\nAGENTS.md\ntext-bytes:6\nrules\n\n"
+    );
+}
+
+#[test]
+fn static_context_noise_classifier_matches_expected_values() {
+    let cases = [
+        ("generated: 2026-05-04", true),
+        (" Generated-at : today ", true),
+        ("generated_on: yesterday", true),
+        ("<!-- prodex_current_date: 2026-05-04 -->", true),
+        ("\u{00a0}generated\u{00a0}: 2026-05-04", true),
+        (
+            "\u{2003}#\u{3000}generated\u{2007}:\u{2009}2026-05-04",
+            true,
+        ),
+        (
+            "\u{0085}<!--\u{1680}prodex_current_date\u{202f}: 2026-05-04 \u{3000}-->\u{2000}",
+            true,
+        ),
+        ("\u{00a0}//\u{2009}run_id: stable", true),
+        ("# last_generated_at =", true),
+        ("; request_id = stable", true),
+        ("last generated: stable", false),
+        ("last updated: now", true),
+        ("; updated-at: stable", false),
+        ("run_id: stable", true),
+        ("request id=stable", true),
+        ("trace-id: stable", true),
+        ("session_id: stable", true),
+        ("current time: now", true),
+        ("current_datetime: tomorrow", true),
+        ("as_of: yesterday", true),
+        ("timestamp: noon", false),
+        ("timestamp: 2026", true),
+        ("not volatile: 2026", false),
+        ("Generated: stable", false),
+        ("updated_at: \u{0661}", false),
+        ("generated！: 2026", false),
+        ("generated\u{2003}: stable", false),
+        ("generated::", false),
+        ("<!-- generated: 2026", false),
+        ("<!-- generated: 2026 --> trailing", false),
+        ("## generated: 2026", false),
+        ("timestamp = 2026: stable", false),
+        ("timestamp = 2026", true),
+        ("\u{2028}: 2026", false),
+    ];
+
+    for (line, expected) in cases {
+        assert_eq!(
+            smart_context_static_context_noise_line(line),
+            expected,
+            "{line:?}"
+        );
+    }
+
+    for whitespace in [
+        '\u{0009}', '\u{000a}', '\u{000b}', '\u{000c}', '\u{000d}', ' ', '\u{0085}', '\u{00a0}',
+        '\u{1680}', '\u{2000}', '\u{2001}', '\u{2002}', '\u{2003}', '\u{2004}', '\u{2005}',
+        '\u{2006}', '\u{2007}', '\u{2008}', '\u{2009}', '\u{200a}', '\u{2028}', '\u{2029}',
+        '\u{202f}', '\u{205f}', '\u{3000}',
+    ] {
+        assert!(smart_context_static_context_noise_line(&format!(
+            "{whitespace}generated{whitespace}: 2026{whitespace}"
+        )));
+        assert!(smart_context_static_context_noise_line(&format!(
+            "generated{whitespace}at: 2026"
+        )));
+    }
+
+    let large = format!("generated: {}7", "x".repeat(2 * 1024 * 1024));
+    assert!(smart_context_static_context_noise_line(&large));
+}
+
+#[test]
+fn static_context_item_order_matches_expected_values() {
+    let items = [
+        ("README.md", "readme", 1, "readme"),
+        ("input[10].developer", "input-10", 8, "developer ten"),
+        ("developer", "developer", 9, "developer"),
+        ("input[2].system", "input-2", 8, "system two"),
+        ("system", "system", 6, "system"),
+        ("instructions", "instructions", 12, "instructions"),
+        (
+            "input[2].developer",
+            "input-2-developer",
+            13,
+            "developer two",
+        ),
+        ("input[02].system", "input-02", 9, "zero padded"),
+        ("input[0002].system", "input-0002", 10, "more zeroes"),
+        ("input[+2].system", "input-plus-2", 11, "plus index"),
+        ("input[0].system", "input-0", 7, "system zero"),
+        ("input[+].system", "invalid-plus", 13, "invalid plus"),
+        (
+            "input[+x].system",
+            "invalid-plus-text",
+            18,
+            "invalid plus text",
+        ),
+        (
+            "input[-2].system",
+            "invalid-negative",
+            17,
+            "invalid negative",
+        ),
+        ("input[2].other", "invalid-role", 13, "invalid role"),
+        ("input[2x].system", "invalid-digit", 13, "invalid digit"),
+        ("éclair.md", "unicode-e", 10, "accented id"),
+        ("猫.md", "unicode-cat", 7, "CJK id"),
+    ]
+    .map(
+        |(id, content_hash, byte_len, canonical_text)| SmartContextStableStaticContextItem {
+            id: id.to_string(),
+            content_hash: content_hash.to_string(),
+            byte_len,
+            canonical_text: canonical_text.to_string(),
+        },
+    );
+    let inputs = items
+        .iter()
+        .map(
+            |item| prodex_mojo_core::runtime::SmartContextStaticItemPlanInput {
+                id: &item.id,
+                content_hash: &item.content_hash,
+                canonical_text: &item.canonical_text,
+                byte_len: item.byte_len as u64,
+            },
+        )
+        .collect::<Vec<_>>();
+    let expected = [
+        ("instructions", "instructions"),
+        ("system", "system"),
+        ("developer", "developer"),
+        ("input[0].system", "input-0"),
+        ("input[+2].system", "input-plus-2"),
+        ("input[0002].system", "input-0002"),
+        ("input[02].system", "input-02"),
+        ("input[2].system", "input-2"),
+        ("input[2].developer", "input-2-developer"),
+        ("input[10].developer", "input-10"),
+        ("README.md", "readme"),
+        ("input[+].system", "invalid-plus"),
+        ("input[+x].system", "invalid-plus-text"),
+        ("input[-2].system", "invalid-negative"),
+        ("input[2].other", "invalid-role"),
+        ("input[2x].system", "invalid-digit"),
+        ("éclair.md", "unicode-e"),
+        ("猫.md", "unicode-cat"),
+    ];
+    let plan = prodex_mojo_core::runtime::smart_context_static_item_plan(&inputs, items.len())
+        .expect("Mojo orders valid static-context items");
+    let planned = plan
+        .selected_indices
+        .iter()
+        .map(|index| {
+            (
+                items[*index].id.as_str(),
+                items[*index].content_hash.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(planned, expected);
+}
+
+#[test]
+fn static_context_item_order_uses_hash_length_and_text_tiebreakers() {
+    let items = [
+        ("same.md", "hash-b", 1, "a"),
+        ("same.md", "hash-a", 4, "z"),
+        ("same.md", "hash-a", 3, "z"),
+        ("same.md", "hash-a", 3, "a"),
+    ]
+    .map(
+        |(id, content_hash, byte_len, canonical_text)| SmartContextStableStaticContextItem {
+            id: id.to_string(),
+            content_hash: content_hash.to_string(),
+            byte_len,
+            canonical_text: canonical_text.to_string(),
+        },
+    );
+
+    let inputs = items
+        .iter()
+        .map(
+            |item| prodex_mojo_core::runtime::SmartContextStaticItemPlanInput {
+                id: &item.id,
+                content_hash: &item.content_hash,
+                canonical_text: &item.canonical_text,
+                byte_len: item.byte_len as u64,
+            },
+        )
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::runtime::smart_context_static_item_plan(&inputs, items.len())
+        .expect("Mojo orders items by their complete tie-breaker tuple");
+    assert_eq!(
+        plan.selected_indices
+            .iter()
+            .map(|index| (
+                items[*index].content_hash.as_str(),
+                items[*index].byte_len,
+                items[*index].canonical_text.as_str()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("hash-a", 3, "a"),
+            ("hash-a", 3, "z"),
+            ("hash-a", 4, "z"),
+            ("hash-b", 1, "a"),
+        ]
+    );
+}
+
+#[test]
+fn static_context_item_order_handles_usize_extremes_and_exact_ties() {
+    let item = |id: String| SmartContextStableStaticContextItem {
+        id,
+        content_hash: "same-hash".to_string(),
+        byte_len: 9,
+        canonical_text: "same text".to_string(),
+    };
+    let max_index = usize::MAX.to_string();
+    let max_id = format!("input[{max_index}].system");
+    let max_plus_id = format!("input[+{max_index}].system");
+    let max_padded_id = format!("input[000{max_index}].system");
+    let overflow_id = format!("input[{max_index}0].system");
+    let overflow_plus_id = format!("input[+{max_index}0].system");
+    let marker = item("README.md".to_string());
+    let max_item = item(max_id);
+    let max_plus_item = item(max_plus_id);
+    let max_padded_item = item(max_padded_id);
+    let overflow_item = item(overflow_id);
+    let overflow_plus_item = item(overflow_plus_id);
+    let invalid_plus_item = item("input[+x].system".to_string());
+    let invalid_negative_item = item("input[-1].system".to_string());
+    let invalid_role_item = item("input[2].other".to_string());
+
+    for (earlier, later) in [
+        (&max_item, &marker),
+        (&max_plus_item, &max_item),
+        (&max_padded_item, &max_item),
+        (&marker, &overflow_item),
+        (&marker, &overflow_plus_item),
+        (&marker, &invalid_plus_item),
+        (&marker, &invalid_negative_item),
+        (&marker, &invalid_role_item),
+    ] {
+        let inputs = [earlier, later].map(|item| {
+            prodex_mojo_core::runtime::SmartContextStaticItemPlanInput {
+                id: &item.id,
+                content_hash: &item.content_hash,
+                canonical_text: &item.canonical_text,
+                byte_len: item.byte_len as u64,
+            }
+        });
+        let plan = prodex_mojo_core::runtime::smart_context_static_item_plan(&inputs, 2)
+            .expect("Mojo orders the usize-boundary pair");
+        assert_eq!(plan.selected_indices, [0, 1]);
+    }
+
+    let exact_twin = marker.clone();
+    let tie_inputs = [&marker, &exact_twin].map(|item| {
+        prodex_mojo_core::runtime::SmartContextStaticItemPlanInput {
+            id: &item.id,
+            content_hash: &item.content_hash,
+            canonical_text: &item.canonical_text,
+            byte_len: item.byte_len as u64,
+        }
+    });
+    let tie_plan = prodex_mojo_core::runtime::smart_context_static_item_plan(&tie_inputs, 2)
+        .expect("Mojo preserves exact ties");
+    assert_eq!(tie_plan.selected_indices, [0, 1]);
+}
+
+#[test]
 fn static_context_stabilizer_ignores_timestamp_noise() {
     let first = smart_context_static_context_prompt_cache_fingerprint([
         SmartContextStaticContextItem {

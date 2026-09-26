@@ -202,7 +202,9 @@ constructs typed diagnostic, identifier, policy, route-candidate, and context-it
 performs normalization/parsing/grouping/ranking, and returns validated structured records. Rust
 retains the external Serde/TOML/JSON boundaries, tenant/security checks, credentials, IO,
 transport, persistence, and public presentation. A Mojo-enabled result error is hard failure;
-the feature-off Rust implementation is a separate target/oracle and never a runtime fallback.
+hard-replaced operations have no feature-off Rust implementation or test oracle. Smart Context
+static-item ordering and volatile metadata classification use the Mojo planning and normalization
+kernels in every feature mode.
 
 ## Boundary Guard
 
