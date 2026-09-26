@@ -5,7 +5,8 @@ from runtime_math import INT64_MAX, INT64_MIN, runtime_quota_saturating_add
 
 comptime RUNTIME_CANDIDATE_PLAN_FIELD_COUNT: Int64 = 24
 comptime RUNTIME_CANDIDATE_PLAN_MAX_COUNT: Int64 = 256
-comptime RUNTIME_CANDIDATE_DECISION_FIELD_COUNT: Int64 = 5
+comptime RUNTIME_CANDIDATE_DECISION_FIELD_COUNT_V1: Int64 = 5
+comptime RUNTIME_CANDIDATE_DECISION_FIELD_COUNT: Int64 = 6
 comptime RICH_MAX_IDENTIFIER_BYTES: Int64 = 4_096
 comptime UINT64_MAX: UInt64 = 18446744073709551615
 
@@ -146,6 +147,66 @@ def runtime_candidate_less(
         if left_value != right_value:
             return left_value < right_value
     return runtime_candidate_ready_less(fields, left, right, route_kind)
+
+
+def runtime_candidate_sift_down(
+    fields: Pointer[mut=False, Int64, _],
+    indices: Pointer[mut=True, Int64, _],
+    root: Int64,
+    end: Int64,
+    route_kind: Int64,
+    fallback: Bool,
+) -> None:
+    var parent = root
+    while True:
+        var child = parent * 2 + 1
+        if child > end:
+            break
+        if child + 1 <= end and runtime_candidate_less(
+            fields,
+            indices[unsafe_offset=child],
+            indices[unsafe_offset=child + 1],
+            route_kind,
+            fallback,
+        ):
+            child += 1
+        if not runtime_candidate_less(
+            fields,
+            indices[unsafe_offset=parent],
+            indices[unsafe_offset=child],
+            route_kind,
+            fallback,
+        ):
+            break
+        var selected = indices[unsafe_offset=parent]
+        indices[unsafe_offset=parent] = indices[unsafe_offset=child]
+        indices[unsafe_offset=child] = selected
+        parent = child
+
+
+def runtime_candidate_heap_sort(
+    fields: Pointer[mut=False, Int64, _],
+    indices: Pointer[mut=True, Int64, _],
+    count: Int64,
+    route_kind: Int64,
+    fallback: Bool,
+) -> None:
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        runtime_candidate_sift_down(
+            fields, indices, start, count - 1, route_kind, fallback
+        )
+
+    var end = count
+    while end > 1:
+        end -= 1
+        var selected = indices[unsafe_offset=0]
+        indices[unsafe_offset=0] = indices[unsafe_offset=end]
+        indices[unsafe_offset=end] = selected
+        runtime_candidate_sift_down(
+            fields, indices, 0, end - 1, route_kind, fallback
+        )
 
 
 def runtime_prompt_cache_hash_static[literal: StaticString](hash: UInt64) -> UInt64:
@@ -696,8 +757,7 @@ def prodex_runtime_websocket_response_plan_v1(
     return 0
 
 
-@export("prodex_runtime_candidate_plan_batch")
-def prodex_runtime_candidate_plan_batch(
+def runtime_candidate_plan_batch_impl(
     fields: Pointer[mut=False, Int64, _],
     excluded: Pointer[mut=False, Int64, _],
     decision_tags: Pointer[mut=True, Int64, _],
@@ -709,8 +769,9 @@ def prodex_runtime_candidate_plan_batch(
     route_kind: Int64,
     inflight_soft_limit: Int64,
     responses_critical_floor_percent: Int64,
-) abi("C") -> Int64:
-    if count < 0 or count > RUNTIME_CANDIDATE_PLAN_MAX_COUNT:
+    decision_field_count: Int64,
+) -> Int64:
+    if count < 0:
         return 1
     if route_kind < 0 or route_kind > 3:
         return 2
@@ -759,6 +820,9 @@ def prodex_runtime_candidate_plan_batch(
         var quota_guard_reason: Int64 = RUNTIME_CANDIDATE_SKIP_NONE
         var ready_skip_reason: Int64 = RUNTIME_CANDIDATE_SKIP_NONE
         var fallback_skip_reason: Int64 = RUNTIME_CANDIDATE_SKIP_NONE
+        var inflight_soft_limited = (
+            runtime_candidate_field(fields, index, 12) >= inflight_soft_limit
+        )
         if eligible == 0:
             availability = RUNTIME_CANDIDATE_AVAILABILITY_UNKNOWN
             ready_skip_reason = RUNTIME_CANDIDATE_SKIP_EXCLUDED
@@ -780,15 +844,19 @@ def prodex_runtime_candidate_plan_batch(
         if (
             eligible == 1
             and ready_skip_reason == RUNTIME_CANDIDATE_SKIP_NONE
-            and runtime_candidate_field(fields, index, 12) >= inflight_soft_limit
+            and inflight_soft_limited
         ):
             ready_skip_reason = RUNTIME_CANDIDATE_SKIP_INFLIGHT
-        var decision_offset = index * RUNTIME_CANDIDATE_DECISION_FIELD_COUNT
+        var decision_offset = index * decision_field_count
         decision_tags[unsafe_offset=decision_offset] = eligible
         decision_tags[unsafe_offset=decision_offset + 1] = availability
         decision_tags[unsafe_offset=decision_offset + 2] = quota_guard_reason
         decision_tags[unsafe_offset=decision_offset + 3] = ready_skip_reason
         decision_tags[unsafe_offset=decision_offset + 4] = fallback_skip_reason
+        if decision_field_count == RUNTIME_CANDIDATE_DECISION_FIELD_COUNT:
+            decision_tags[unsafe_offset=decision_offset + 5] = Int64(
+                inflight_soft_limited
+            )
 
     var ready_len: Int64 = 0
     for index in range(count):
@@ -807,40 +875,71 @@ def prodex_runtime_candidate_plan_batch(
             fallback_len += 1
     fallback_count[unsafe_offset=0] = fallback_len
 
-    # ponytail: bounded O(n²) selection keeps the ABI allocation-free; replace with
-    # a verified stable sort only if the runtime pool exceeds 256 candidates.
-    for position in range(ready_len):
-        var best = position
-        for offset in range(position + 1, ready_len):
-            var candidate = ready_indices[unsafe_offset=offset]
-            var current = ready_indices[unsafe_offset=best]
-            if runtime_candidate_less(
-                fields, candidate, current, route_kind, False
-            ):
-                best = offset
-        if best != position:
-            var selected = ready_indices[unsafe_offset=best]
-            ready_indices[unsafe_offset=best] = ready_indices[
-                unsafe_offset=position
-            ]
-            ready_indices[unsafe_offset=position] = selected
-
-    for position in range(fallback_len):
-        var best = position
-        for offset in range(position + 1, fallback_len):
-            var candidate = fallback_indices[unsafe_offset=offset]
-            var current = fallback_indices[unsafe_offset=best]
-            if runtime_candidate_less(
-                fields, candidate, current, route_kind, True
-            ):
-                best = offset
-        if best != position:
-            var selected = fallback_indices[unsafe_offset=best]
-            fallback_indices[unsafe_offset=best] = fallback_indices[
-                unsafe_offset=position
-            ]
-            fallback_indices[unsafe_offset=position] = selected
+    runtime_candidate_heap_sort(fields, ready_indices, ready_len, route_kind, False)
+    runtime_candidate_heap_sort(fields, fallback_indices, fallback_len, route_kind, True)
     return 0
+
+
+@export("prodex_runtime_candidate_plan_batch")
+def prodex_runtime_candidate_plan_batch(
+    fields: Pointer[mut=False, Int64, _],
+    excluded: Pointer[mut=False, Int64, _],
+    decision_tags: Pointer[mut=True, Int64, _],
+    ready_indices: Pointer[mut=True, Int64, _],
+    ready_count: Pointer[mut=True, Int64, _],
+    fallback_indices: Pointer[mut=True, Int64, _],
+    fallback_count: Pointer[mut=True, Int64, _],
+    count: Int64,
+    route_kind: Int64,
+    inflight_soft_limit: Int64,
+    responses_critical_floor_percent: Int64,
+) abi("C") -> Int64:
+    if count > RUNTIME_CANDIDATE_PLAN_MAX_COUNT:
+        return 1
+    return runtime_candidate_plan_batch_impl(
+        fields,
+        excluded,
+        decision_tags,
+        ready_indices,
+        ready_count,
+        fallback_indices,
+        fallback_count,
+        count,
+        route_kind,
+        inflight_soft_limit,
+        responses_critical_floor_percent,
+        RUNTIME_CANDIDATE_DECISION_FIELD_COUNT_V1,
+    )
+
+
+@export("prodex_runtime_candidate_plan_batch_v2")
+def prodex_runtime_candidate_plan_batch_v2(
+    fields: Pointer[mut=False, Int64, _],
+    excluded: Pointer[mut=False, Int64, _],
+    decision_tags: Pointer[mut=True, Int64, _],
+    ready_indices: Pointer[mut=True, Int64, _],
+    ready_count: Pointer[mut=True, Int64, _],
+    fallback_indices: Pointer[mut=True, Int64, _],
+    fallback_count: Pointer[mut=True, Int64, _],
+    count: Int64,
+    route_kind: Int64,
+    inflight_soft_limit: Int64,
+    responses_critical_floor_percent: Int64,
+) abi("C") -> Int64:
+    return runtime_candidate_plan_batch_impl(
+        fields,
+        excluded,
+        decision_tags,
+        ready_indices,
+        ready_count,
+        fallback_indices,
+        fallback_count,
+        count,
+        route_kind,
+        inflight_soft_limit,
+        responses_critical_floor_percent,
+        RUNTIME_CANDIDATE_DECISION_FIELD_COUNT,
+    )
 
 
 comptime RUNTIME_ADAPTIVE_QUALITY_FIELD_COUNT: Int64 = 9

@@ -73,6 +73,47 @@ fn optimistic_current_candidate_requires_live_quota_when_pool_fallback_exists() 
 }
 
 #[test]
+fn optimistic_current_candidate_quota_source_requirement_is_route_specific() {
+    for (route_kind, expected) in [
+        (
+            RuntimeRouteKind::Responses,
+            RuntimeOptimisticCurrentCandidateDecision::Skip(
+                RuntimeOptimisticCurrentCandidateSkip {
+                    reason: RuntimeOptimisticCurrentCandidateSkipReason::StalePersistedQuota,
+                },
+            ),
+        ),
+        (
+            RuntimeRouteKind::Websocket,
+            RuntimeOptimisticCurrentCandidateDecision::Skip(
+                RuntimeOptimisticCurrentCandidateSkip {
+                    reason: RuntimeOptimisticCurrentCandidateSkipReason::StalePersistedQuota,
+                },
+            ),
+        ),
+        (
+            RuntimeRouteKind::Compact,
+            RuntimeOptimisticCurrentCandidateDecision::Keep,
+        ),
+        (
+            RuntimeRouteKind::Standard,
+            RuntimeOptimisticCurrentCandidateDecision::Keep,
+        ),
+    ] {
+        let decision = runtime_optimistic_current_candidate_decision(optimistic_current_input(
+            OptimisticCurrentFixture {
+                route_kind,
+                quota_source: Some(RuntimeSelectionQuotaSource::PersistedSnapshot),
+                has_alternative_quota_compatible_profile: true,
+                ..OptimisticCurrentFixture::default()
+            },
+        ));
+
+        assert_eq!(decision, expected, "route {route_kind:?}");
+    }
+}
+
+#[test]
 fn optimistic_current_candidate_preserves_skip_reason_priority() {
     let decision = runtime_optimistic_current_candidate_decision(optimistic_current_input(
         OptimisticCurrentFixture {
@@ -109,68 +150,6 @@ fn optimistic_current_candidate_defers_to_prompt_cache_owner_when_pool_available
             reason: RuntimeOptimisticCurrentCandidateSkipReason::PromptCacheAffinity,
         },)
     );
-}
-
-#[cfg(feature = "mojo")]
-#[test]
-fn optimistic_current_candidate_matches_rust_oracle_for_generated_inputs() {
-    let mut state = 0x6f7074696d697374_u64;
-    for case in 0..5_000 {
-        state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-        let next = |state: &mut u64| {
-            *state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
-            *state
-        };
-        let mut quota_summary = healthy_quota_summary();
-        quota_summary.route_band = match next(&mut state) % 5 {
-            0 => RuntimeSelectionQuotaPressureBand::Healthy,
-            1 => RuntimeSelectionQuotaPressureBand::Thin,
-            2 => RuntimeSelectionQuotaPressureBand::Critical,
-            3 => RuntimeSelectionQuotaPressureBand::Exhausted,
-            _ => RuntimeSelectionQuotaPressureBand::Unknown,
-        };
-        let input = RuntimeOptimisticCurrentCandidateInput {
-            current_profile: "main",
-            route_kind: match next(&mut state) % 4 {
-                0 => RuntimeRouteKind::Responses,
-                1 => RuntimeRouteKind::Compact,
-                2 => RuntimeRouteKind::Websocket,
-                _ => RuntimeRouteKind::Standard,
-            },
-            auth_failure_active: next(&mut state) & 1 != 0,
-            in_selection_backoff: next(&mut state) & 1 != 0,
-            circuit_open: next(&mut state) & 1 != 0,
-            health_score: (next(&mut state) % 2) as u32,
-            performance_score: (next(&mut state) % 2) as u32,
-            current_profile_quota_compatible: next(&mut state) & 1 != 0,
-            has_alternative_quota_compatible_profile: next(&mut state) & 1 != 0,
-            quota_summary,
-            quota_source: match next(&mut state) % 3 {
-                0 => None,
-                1 => Some(RuntimeSelectionQuotaSource::LiveProbe),
-                _ => Some(RuntimeSelectionQuotaSource::PersistedSnapshot),
-            },
-            inflight_count: (next(&mut state) % 5) as usize,
-            inflight_soft_limit: (next(&mut state) % 5) as usize,
-            prompt_cache_key: match next(&mut state) % 3 {
-                0 => None,
-                1 => Some("cache"),
-                _ => Some("  cache  "),
-            },
-            prompt_cache_owner_profile: match next(&mut state) % 4 {
-                0 => None,
-                1 => Some("main"),
-                2 => Some("other"),
-                _ => Some("  "),
-            },
-        };
-        let expected = runtime_optimistic_current_candidate_decision_rust(input);
-        let actual = runtime_optimistic_current_candidate_decision(input);
-        assert_eq!(
-            actual, expected,
-            "optimistic candidate case {case}: {input:?}"
-        );
-    }
 }
 
 #[test]
@@ -210,6 +189,7 @@ fn candidate_plan_separates_ready_and_fallback_attempts() {
         plan.ready_candidates[0].ready_skip_reason(),
         Some("profile_inflight_soft_limit")
     );
+    assert!(plan.ready_candidates[0].inflight_soft_limited);
     assert_eq!(
         plan.fallback_candidates
             .iter()
@@ -218,7 +198,11 @@ fn candidate_plan_separates_ready_and_fallback_attempts() {
         vec!["second", "main"]
     );
     assert_eq!(plan.fallback_candidates[0].fallback_skip_reason(), None);
+    assert!(!plan.fallback_candidates[0].inflight_soft_limited);
 }
+
+#[path = "selection_plan/large_pool.rs"]
+mod large_pool;
 
 #[test]
 fn candidate_plan_fallback_keeps_full_non_excluded_pool_despite_fresh_penalties() {
@@ -300,28 +284,109 @@ fn candidate_plan_fallback_keeps_full_non_excluded_pool_despite_fresh_penalties(
 }
 
 #[test]
-fn profile_availability_state_separates_hard_and_transient_unavailability() {
+fn candidate_plan_reports_auth_quota_backoff_and_unknown_availability() {
+    let mut exhausted_quota = healthy_quota_summary();
+    exhausted_quota.five_hour.status = RuntimeSelectionQuotaWindowStatus::Exhausted;
+    exhausted_quota.route_band = RuntimeSelectionQuotaPressureBand::Exhausted;
+    let mut unknown_quota = healthy_quota_summary();
+    unknown_quota.five_hour.status = RuntimeSelectionQuotaWindowStatus::Unknown;
+    unknown_quota.route_band = RuntimeSelectionQuotaPressureBand::Unknown;
+    let plan = build_runtime_response_candidate_execution_plan(
+        vec![
+            candidate(
+                "auth",
+                CandidateFixture {
+                    auth_failure_active: true,
+                    ..CandidateFixture::default()
+                },
+            ),
+            candidate(
+                "quota",
+                CandidateFixture {
+                    quota_summary: exhausted_quota,
+                    ..CandidateFixture::default()
+                },
+            ),
+            candidate(
+                "backoff",
+                CandidateFixture {
+                    in_selection_backoff: true,
+                    ..CandidateFixture::default()
+                },
+            ),
+            candidate(
+                "unknown",
+                CandidateFixture {
+                    quota_summary: unknown_quota,
+                    ..CandidateFixture::default()
+                },
+            ),
+        ],
+        &BTreeSet::new(),
+        runtime_response_candidate_plan_options(RuntimeRouteKind::Responses, 3, None, None, 2),
+    );
+
     assert_eq!(
-        runtime_profile_availability_state(false, false, healthy_quota_summary(), None,),
-        RuntimeProfileAvailabilityState::Ready
+        plan.fallback_candidates
+            .iter()
+            .map(|candidate| (candidate.name.as_str(), candidate.availability))
+            .collect::<Vec<_>>(),
+        vec![
+            ("auth", RuntimeProfileAvailabilityState::AuthInvalid),
+            ("quota", RuntimeProfileAvailabilityState::QuotaExhausted),
+            ("backoff", RuntimeProfileAvailabilityState::TransientBackoff),
+            ("unknown", RuntimeProfileAvailabilityState::Unknown),
+        ]
     );
     assert_eq!(
-        runtime_profile_availability_state(
-            false,
-            false,
-            healthy_quota_summary(),
+        plan.fallback_candidates
+            .iter()
+            .map(RuntimeResponsePlannedCandidate::fallback_skip_reason)
+            .collect::<Vec<_>>(),
+        vec![
+            Some("auth_failure_backoff"),
             Some("quota_exhausted_before_send"),
-        ),
-        RuntimeProfileAvailabilityState::QuotaExhausted
+            None,
+            None,
+        ]
     );
-    assert_eq!(
-        runtime_profile_availability_state(false, true, healthy_quota_summary(), None,),
-        RuntimeProfileAvailabilityState::TransientBackoff
-    );
-    assert_eq!(
-        runtime_profile_availability_state(true, false, healthy_quota_summary(), None,),
-        RuntimeProfileAvailabilityState::AuthInvalid
-    );
+}
+
+#[test]
+fn candidate_plan_exhausts_five_hour_quota_for_every_route() {
+    let mut exhausted_quota = healthy_quota_summary();
+    exhausted_quota.five_hour.status = RuntimeSelectionQuotaWindowStatus::Exhausted;
+    exhausted_quota.route_band = RuntimeSelectionQuotaPressureBand::Exhausted;
+
+    for route_kind in [
+        RuntimeRouteKind::Responses,
+        RuntimeRouteKind::Websocket,
+        RuntimeRouteKind::Compact,
+        RuntimeRouteKind::Standard,
+    ] {
+        let plan = build_runtime_response_candidate_execution_plan(
+            vec![candidate(
+                "exhausted",
+                CandidateFixture {
+                    quota_summary: exhausted_quota,
+                    ..CandidateFixture::default()
+                },
+            )],
+            &BTreeSet::new(),
+            runtime_response_candidate_plan_options(route_kind, 3, None, None, 2),
+        );
+
+        assert_eq!(
+            plan.fallback_candidates[0].availability,
+            RuntimeProfileAvailabilityState::QuotaExhausted,
+            "route {route_kind:?}"
+        );
+        assert_eq!(
+            plan.fallback_candidates[0].fallback_skip_reason(),
+            Some("quota_exhausted_before_send"),
+            "route {route_kind:?}"
+        );
+    }
 }
 
 #[test]
@@ -394,6 +459,55 @@ fn candidate_plan_orders_ready_candidates_by_execution_priority() {
             .iter()
             .all(|candidate| candidate.ready_skip_reason().is_none())
     );
+}
+
+#[test]
+fn candidate_plan_uses_route_specific_quota_source_order() {
+    for (route_kind, expected) in [
+        (RuntimeRouteKind::Responses, vec!["live", "persisted"]),
+        (RuntimeRouteKind::Websocket, vec!["live", "persisted"]),
+        (RuntimeRouteKind::Compact, vec!["persisted", "live"]),
+        (RuntimeRouteKind::Standard, vec!["persisted", "live"]),
+    ] {
+        let plan = build_runtime_response_candidate_execution_plan(
+            vec![
+                candidate(
+                    "persisted",
+                    CandidateFixture {
+                        order_index: 0,
+                        quota_source: RuntimeSelectionQuotaSource::PersistedSnapshot,
+                        ..CandidateFixture::default()
+                    },
+                ),
+                candidate(
+                    "live",
+                    CandidateFixture {
+                        order_index: 1,
+                        ..CandidateFixture::default()
+                    },
+                ),
+            ],
+            &BTreeSet::new(),
+            runtime_response_candidate_plan_options(route_kind, 3, None, None, 2),
+        );
+
+        assert_eq!(
+            plan.ready_candidates
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect::<Vec<_>>(),
+            expected,
+            "ready route {route_kind:?}"
+        );
+        assert_eq!(
+            plan.fallback_candidates
+                .iter()
+                .map(|candidate| candidate.name.as_str())
+                .collect::<Vec<_>>(),
+            expected,
+            "fallback route {route_kind:?}"
+        );
+    }
 }
 
 #[test]

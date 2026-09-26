@@ -210,9 +210,13 @@ fn candidate_plan_reports_bounded_availability_decisions() {
     let count = 4;
     let mut fields = vec![0_i64; count * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT];
     fields[22] = 1;
+    fields[12] = 7;
     fields[RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + 23] = 3;
+    fields[RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + 12] = 8;
     fields[2 * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT] = 1;
+    fields[2 * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + 12] = 8;
     fields[3 * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + 23] = 4;
+    fields[3 * RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + 12] = 8;
     let excluded = [0, 0, 0, 1];
 
     let plan = runtime_candidate_plan_batch(&fields, &excluded, 0, 8, 2)
@@ -233,6 +237,13 @@ fn candidate_plan_reports_bounded_availability_decisions() {
         prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_TRANSIENT_BACKOFF
     );
     assert!(!plan.decisions[3].eligible);
+    assert_eq!(
+        plan.decisions
+            .iter()
+            .map(|decision| decision.inflight_soft_limited)
+            .collect::<Vec<_>>(),
+        [false, true, true, true]
+    );
 }
 
 #[test]

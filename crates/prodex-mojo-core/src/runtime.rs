@@ -191,7 +191,7 @@ pub struct SmartContextPressureSnapshot {
 
 pub const RUNTIME_CANDIDATE_PLAN_FIELD_COUNT: usize = 24;
 pub const RUNTIME_CANDIDATE_PLAN_MAX_COUNT: usize = 256;
-pub const RUNTIME_CANDIDATE_DECISION_FIELD_COUNT: usize = 5;
+pub const RUNTIME_CANDIDATE_DECISION_FIELD_COUNT: usize = 6;
 
 pub const RUNTIME_CANDIDATE_AVAILABILITY_READY: i64 = 0;
 pub const RUNTIME_CANDIDATE_AVAILABILITY_QUOTA_EXHAUSTED: i64 = 1;
@@ -214,6 +214,7 @@ pub struct RuntimeCandidateDecision {
     pub quota_guard_reason: i64,
     pub ready_skip_reason: i64,
     pub fallback_skip_reason: i64,
+    pub inflight_soft_limited: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -251,6 +252,7 @@ pub fn candidate_plan_self_test() -> bool {
                     && decision.availability == RUNTIME_CANDIDATE_AVAILABILITY_READY
                     && decision.ready_skip_reason == RUNTIME_CANDIDATE_SKIP_NONE
                     && decision.fallback_skip_reason == RUNTIME_CANDIDATE_SKIP_NONE
+                    && !decision.inflight_soft_limited
             })
     })
 }
@@ -372,7 +374,7 @@ unsafe extern "C" {
         absolute_safety_floor_tokens: *mut u64,
         estimator_confidence: *mut i64,
     ) -> i64;
-    fn prodex_runtime_candidate_plan_batch(
+    fn prodex_runtime_candidate_plan_batch_v2(
         fields: *const i64,
         excluded: *const i64,
         decision_tags: *mut i64,
@@ -753,7 +755,7 @@ pub fn runtime_candidate_plan_batch(
     let mut ready_count = 0_i64;
     let mut fallback_count = 0_i64;
     let status = unsafe {
-        prodex_runtime_candidate_plan_batch(
+        prodex_runtime_candidate_plan_batch_v2(
             fields.as_ptr(),
             excluded.as_ptr(),
             decision_tags.as_mut_ptr(),
