@@ -1545,3 +1545,20 @@ The canonical source report counts **51,921 reachable Mojo LOC** and
 **21.145896545123545% Mojo**. The 7% release floor and non-regression check
 pass; the 75% project target remains unmet, with **528,927 additional Mojo
 LOC** required at this Rust volume.
+
+## DeepSeek buffered-response hard replacement
+
+Buffered DeepSeek responses now use the existing Mojo response kernel in every
+feature mode. The feature-off Rust response-object assembly was deleted; Rust
+still extracts upstream fields, translates tool calls, and supplies typed JSON
+to Mojo. Expected whole-response tests cover Unicode text and tool arguments,
+usage and metadata, malformed tool arguments, and missing fields. The focused
+response and end-to-end caller tests pass in default, feature-off, and Mojo
+modes. Native execution evidence is Linux x86_64; macOS and Windows runtime
+execution was not run.
+
+The canonical source report counts **51,921 reachable Mojo LOC** and
+**193,611 Rust production LOC**, totaling **245,532 LOC**: **21.15% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **528,912 additional Mojo LOC** required at this Rust
+volume.
