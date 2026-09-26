@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-mojo-runtime-error-policy-hard-replacement-20260926",
+    "requiredSubjects": [
+      "refactor(runtime): replace error-policy fallbacks with Mojo"
+    ],
+    "caps": {
+      "maxFiles": 10,
+      "maxBehaviorFiles": 8,
+      "maxLines": 1000,
+      "maxFileLines": 598
+    },
+    "reason": "The reviewed error-policy replacement deletes the feature-off Rust rule table and JSON walker from one file. Differential parity preceded deletion; default, feature-off and Mojo proxy suites plus malformed JSON, generic 429 and committed-header fixtures validate the single Mojo authority. The ordinary churn thresholds and other guards remain unchanged."
+  },
+  {
     "id": "audited-mojo-kiro-stream-hard-replacement-20260926",
     "requiredSubjects": [
       "refactor(kiro): replace stream fallbacks with Mojo"
