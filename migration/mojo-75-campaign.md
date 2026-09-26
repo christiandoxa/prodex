@@ -1773,3 +1773,20 @@ The canonical source report counts **52,316 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **527,650 additional Mojo LOC** required at this Rust
 volume.
+
+## Smart Context fingerprint-delta hard replacement
+
+The public fingerprint-delta path now uses the existing Mojo plan in every
+feature mode. The feature-off Rust map/delta implementation and differential
+test oracle were deleted. Rust supplies dense, ordered key and content-hash
+IDs to the plan and maps validated indices back to typed fingerprints.
+Expected-value tests cover duplicate keys, equal hashes, additions, removals,
+changed content, and stable kind/key ordering. The production caller is the
+static-context change observation. Native execution evidence is Linux x86_64;
+macOS and Windows runtime execution was not run.
+
+The canonical source report counts **52,316 reachable Mojo LOC** and
+**193,285 Rust production LOC**, totaling **245,601 LOC**: **21.30% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **527,539 additional Mojo LOC** required at this Rust
+volume.

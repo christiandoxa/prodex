@@ -70,6 +70,80 @@ fn fingerprint_delta_tracks_static_context_across_turns() {
 }
 
 #[test]
+fn fingerprint_delta_uses_last_duplicate_and_stable_kind_order() {
+    fn fingerprint(
+        id: &str,
+        kind: SmartContextFingerprintKind,
+        content_hash: &str,
+    ) -> SmartContextFingerprint {
+        SmartContextFingerprint {
+            id: id.to_string(),
+            kind,
+            content_hash: content_hash.to_string(),
+            byte_len: content_hash.len(),
+        }
+    }
+
+    let previous = vec![
+        fingerprint(
+            "gone",
+            SmartContextFingerprintKind::MemoryCapsule,
+            "removed",
+        ),
+        fingerprint("same", SmartContextFingerprintKind::Artifact, "discarded"),
+        fingerprint("tool", SmartContextFingerprintKind::ToolOutput, "before"),
+        fingerprint("root", SmartContextFingerprintKind::StaticContext, ""),
+        fingerprint("same", SmartContextFingerprintKind::Artifact, "shared"),
+        fingerprint("b", SmartContextFingerprintKind::Artifact, "shared"),
+    ];
+    let current = vec![
+        fingerprint(
+            "same",
+            SmartContextFingerprintKind::Artifact,
+            "discarded-current",
+        ),
+        fingerprint("same", SmartContextFingerprintKind::Artifact, "shared"),
+        fingerprint("tool", SmartContextFingerprintKind::ToolOutput, "after"),
+        fingerprint("turn", SmartContextFingerprintKind::ConversationTurn, "new"),
+        fingerprint("b", SmartContextFingerprintKind::Artifact, "shared"),
+        fingerprint("root", SmartContextFingerprintKind::StaticContext, ""),
+    ];
+
+    assert_eq!(
+        smart_context_fingerprint_delta(previous, current),
+        vec![
+            SmartContextFingerprintChange::Unchanged {
+                fingerprint: fingerprint("root", SmartContextFingerprintKind::StaticContext, ""),
+            },
+            SmartContextFingerprintChange::Added {
+                fingerprint: fingerprint(
+                    "turn",
+                    SmartContextFingerprintKind::ConversationTurn,
+                    "new",
+                ),
+            },
+            SmartContextFingerprintChange::Changed {
+                before: fingerprint("tool", SmartContextFingerprintKind::ToolOutput, "before"),
+                after: fingerprint("tool", SmartContextFingerprintKind::ToolOutput, "after"),
+            },
+            SmartContextFingerprintChange::Unchanged {
+                fingerprint: fingerprint("b", SmartContextFingerprintKind::Artifact, "shared"),
+            },
+            SmartContextFingerprintChange::Unchanged {
+                fingerprint: fingerprint("same", SmartContextFingerprintKind::Artifact, "shared"),
+            },
+            SmartContextFingerprintChange::Removed {
+                fingerprint: fingerprint(
+                    "gone",
+                    SmartContextFingerprintKind::MemoryCapsule,
+                    "removed",
+                ),
+            },
+        ]
+    );
+}
+
+#[test]
 fn static_context_prompt_cache_fingerprint_is_input_order_stable() {
     let left = smart_context_static_context_prompt_cache_fingerprint([
         SmartContextStaticContextItem {

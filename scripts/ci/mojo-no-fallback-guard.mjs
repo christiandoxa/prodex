@@ -41,6 +41,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/tests/src/selection_plan/large_pool.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/static_context.rs",
   "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs",
   "crates/prodex-runtime-proxy/tests/src/smart_context/static_context.rs",
   PRECOMMIT_BUDGET_FILE,
   PRECOMMIT_BUDGET_TEST_FILE,
@@ -180,6 +181,8 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-proxy/tests/src/selection_plan/large_pool.rs",
   "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
   "crates/prodex-runtime-proxy/tests/src/smart_context/static_context.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs",
   PRECOMMIT_BUDGET_FILE,
   "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
   "crates/prodex-runtime-proxy/src/websocket_message.rs",
@@ -337,6 +340,8 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/static_context.rs",
   "crates/prodex-runtime-proxy/tests/src/smart_context/static_context.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs",
   "crates/prodex-mojo-core/src/runtime/candidate_plan.rs",
   PRECOMMIT_BUDGET_FILE,
   PRECOMMIT_BUDGET_TEST_FILE,
@@ -436,6 +441,8 @@ const DEEPSEEK_RESPONSE_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/trans
 const DEEPSEEK_REQUEST_FILE = "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
+const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
+const FINGERPRINT_ARTIFACTS_FILE = "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs";
 const DEEPSEEK_SHAPING_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs";
 const DEEPSEEK_SHAPING_COMPLETED_FNS = [
   "deepseek_provider_core_response_completed_event",
@@ -533,6 +540,19 @@ export function findViolations(files) {
       (!contents.includes("DeepSeekKernelOperation::ResponseToolCallItem") ||
         /\bfn\s+(?:deepseek_split_flat_namespace_tool_name|deepseek_chat_tool_call_thought_signature)\s*\(/u.test(contents)))
     .map(([filePath]) => `${filePath}: DeepSeek response tool-call shaping must use the Mojo kernel`);
+  const fingerprintDeltaViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === FINGERPRINT_ARTIFACTS_FILE && /\bfn\s+smart_context_fingerprint_map\s*\(/u.test(contents)) {
+      return [`${filePath}: contains a replaced Rust fingerprint map`];
+    }
+    if (filePath === FINGERPRINT_DELTA_FILE) {
+      const body = contents.match(/\bpub fn smart_context_fingerprint_delta\([^]*?^\}/mu)?.[0];
+      if (!body?.includes("smart_context_fingerprint_delta_mojo(") ||
+          /\bfn\s+smart_context_fingerprint_delta_rust\s*\(/u.test(contents)) {
+        return [`${filePath}: fingerprint delta must use the Mojo plan`];
+      }
+    }
+    return [];
+  });
   const modelSpecViolations = files
     .filter(([filePath, contents]) => filePath === MODEL_SPEC_FILE &&
       /\bfn\s+matches_id_or_alias\s*\(/u.test(contents) &&
@@ -637,7 +657,7 @@ export function findViolations(files) {
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
     ...geminiFallbackViolations, ...hardReplacementViolations, ...precommitBudgetOracleViolations,
-    ...deepseekRequestViolations, ...deepseekResponseToolCallViolations,
+    ...deepseekRequestViolations, ...deepseekResponseToolCallViolations, ...fingerprintDeltaViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...quotaWindowViolations,
@@ -843,6 +863,12 @@ function selfTest() {
     /response tool-call shaping must use the Mojo kernel/u);
   assert.deepEqual(findViolations([[DEEPSEEK_RESPONSE_TOOL_CALLS_FILE,
     "fn shape() { DeepSeekKernelOperation::ResponseToolCallItem; }"]]), []);
+  assert.match(findViolations([[FINGERPRINT_ARTIFACTS_FILE,
+    "fn smart_context_fingerprint_map() {}"]]).join("\n"),
+    /replaced Rust fingerprint map/u);
+  assert.match(findViolations([[FINGERPRINT_DELTA_FILE,
+    "pub fn smart_context_fingerprint_delta() { smart_context_fingerprint_delta_rust() }"]]).join("\n"),
+    /fingerprint delta must use the Mojo plan/u);
   assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
     "fn deepseek_request_body_from_responses_rust() {}"]]).join("\n"),
     /Rust semantic oracle or copy/u);
