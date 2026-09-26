@@ -44,30 +44,13 @@ pub(crate) use self::tools::{
 
 #[cfg(not(feature = "mojo"))]
 pub(crate) fn gemini_request_body_without_tool(body: &[u8], tool_name: &str) -> Option<Vec<u8>> {
-    let mut value: Value = serde_json::from_slice(body).ok()?;
-    let request = gemini_request_object_mut(&mut value)?;
-    let tools = request.get_mut("tools")?.as_array_mut()?;
-    let original_len = tools.len();
-    tools.retain(|tool| {
-        !tool
-            .as_object()
-            .map(|object| object.contains_key(tool_name))
-            .unwrap_or(false)
-    });
-    if tools.len() == original_len {
-        return None;
-    }
-    if tools.is_empty() {
-        request.remove("tools");
-    }
-    serde_json::to_vec(&value).ok()
-}
-
-#[cfg(not(feature = "mojo"))]
-fn gemini_request_object_mut(value: &mut Value) -> Option<&mut serde_json::Map<String, Value>> {
-    if value.get("request").is_some() {
-        value.get_mut("request")?.as_object_mut()
-    } else {
-        value.as_object_mut()
-    }
+    let value: Value = serde_json::from_slice(body).ok()?;
+    let body = serde_json::to_vec(&value).ok()?;
+    let mut input = prodex_mojo_core::provider_constraints::GeminiBridgeRequestKernelInput::new(
+        prodex_mojo_core::provider_constraints::GeminiBridgeRequestOperation::RequestBodyWithoutTool,
+    );
+    input.primary = Some(&body);
+    input.secondary = Some(tool_name.as_bytes());
+    let body = prodex_mojo_core::provider_constraints::gemini_bridge_request_kernel(input).ok()?;
+    (!matches!(body.as_slice(), b"null")).then_some(body)
 }

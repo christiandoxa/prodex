@@ -1616,3 +1616,20 @@ The canonical source report counts **51,921 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **528,780 additional Mojo LOC** required at this Rust
 volume.
+
+## Gemini request classifier and built-in tool hard replacement
+
+The Gemini simple-request classifier, native project stamping, built-in tool
+grouping, and unsupported-tool removal now use the existing Mojo request
+kernels in both feature modes. Their feature-off Rust classifiers and mapping
+helpers were deleted. Rust canonicalizes JSON before byte-oriented Mojo scans
+so escaped keys, duplicate keys, and object order keep the previous wire
+behavior. Caller tests cover Unicode, malformed input, tool ordering, and
+wrong-type `computerUse` precedence. Native execution evidence is Linux
+x86_64; macOS and Windows runtime execution was not run.
+
+The canonical source report counts **51,919 reachable Mojo LOC** and
+**193,497 Rust production LOC**, totaling **245,416 LOC**: **21.16% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **528,572 additional Mojo LOC** required at this Rust
+volume.
