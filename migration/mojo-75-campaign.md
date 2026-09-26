@@ -1371,3 +1371,18 @@ The canonical report counts **51,921 reachable Mojo LOC** and **194,791 Rust
 production LOC**, totaling **246,712 LOC**: **21.045186290087226% Mojo**. The
 7% release floor and non-regression check pass; the 75% project target remains
 unmet, with **532,452 additional Mojo LOC** required at the current Rust volume.
+
+## Quota display policy hard replacement
+
+The quota renderer now uses the existing Mojo kernels in every feature mode for
+float rounding, remaining percentage, window status, and pressure-band mapping.
+The corresponding Rust feature-off calculations and test oracles were deleted.
+Expected-value tests cover percentage bounds, half-step rounding, absent
+windows, and pressure precedence. The owning crate passes 46 tests without
+default features and 72 with default or Mojo features. Formatter and the
+no-fallback guard pass after deletion.
+
+The canonical report counts **51,921 reachable Mojo LOC** and **194,782 Rust
+production LOC**, totaling **246,703 LOC**: **21.04595404190464% Mojo**. The
+7% release floor and non-regression check pass; the 75% project target remains
+unmet, with **532,425 additional Mojo LOC** required at the current Rust volume.
