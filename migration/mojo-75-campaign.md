@@ -1482,3 +1482,24 @@ The canonical source report counts **51,921 reachable Mojo LOC** and
 **21.107985266975096% Mojo**. The 7% release floor and non-regression check
 pass; the 75% project target remains unmet, with **530,250 additional Mojo
 LOC** required at this Rust volume.
+
+## Compatibility-surface hard replacement
+
+`runtime_detect_request_compatibility_surface` now uses
+`compatibility_surface.mojo` in both feature modes. The feature-off Rust
+classifier and test oracle were deleted. Rust still acquires route, header,
+and JSON facts for the Mojo plan. Tool labels above the 1,024-item ABI limit
+are sent in bounded batches, and only their Mojo-derived tool flags are merged.
+
+Before deletion, differential tests compared request stages and HTTP/WebSocket
+transport against the Rust implementation. After deletion, runtime-proxy tests
+pass 327 cases in default and feature-off modes and 360 with Mojo. Expected-value
+tests cover metadata, malformed and mistyped JSON, and 1,025 tool labels;
+focused Clippy, formatter, and size guards pass. Native execution evidence is
+Linux x86_64; macOS and Windows runtime execution was not run.
+
+The canonical source report counts **51,921 reachable Mojo LOC** and
+**193,891 Rust production LOC**, totaling **245,812 LOC**:
+**21.122239760467348% Mojo**. The 7% release floor and non-regression check
+pass; the 75% project target remains unmet, with **529,752 additional Mojo
+LOC** required at this Rust volume.

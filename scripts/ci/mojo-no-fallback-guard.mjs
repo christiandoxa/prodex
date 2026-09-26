@@ -36,6 +36,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/compatibility_surface.rs",
   "crates/prodex-runtime-proxy/src/error_policy.rs",
   "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
   "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
@@ -150,6 +151,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-quota/src/render/remaining_percent.rs",
   "crates/prodex-quota/src/render/quota_policy.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/compatibility_surface.rs",
   "crates/prodex-runtime-proxy/src/error_policy.rs",
   "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
   "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
@@ -246,6 +248,7 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-provider-core/src/deepseek_bridge/messages/adjacency.rs",
   "crates/prodex-runtime-proxy/src/payload_detection/sse/rust_oracle.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/rust_oracles.rs",
+  "crates/prodex-runtime-proxy/src/compatibility_surface/rust_oracle.rs",
   "crates/prodex-runtime-proxy/src/error_policy/json.rs",
   "crates/prodex-runtime-proxy/src/selection_prompt_cache_rust.rs",
   "crates/prodex-provider-core/src/translators/deepseek/request.rs",
@@ -280,6 +283,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
   "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
+  "crates/prodex-runtime-proxy/src/compatibility_surface.rs",
   "crates/prodex-runtime-proxy/src/error_policy.rs",
   "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
   "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
@@ -695,6 +699,9 @@ function selfTest() {
     /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/error_policy.rs",
     '#[cfg(not(feature = "mojo"))] fn runtime_http_error_policy_rust() {}']]).join("\n"),
+    /feature-off Rust path/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/compatibility_surface.rs",
+    '#[cfg(not(feature = "mojo"))] mod rust_oracle;']]).join("\n"),
     /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/error_policy/signal.rs",
     '#[cfg(not(feature = "mojo"))] fn runtime_error_signal_message_from_text_rust() {}']]).join("\n"),

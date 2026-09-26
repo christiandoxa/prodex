@@ -4,9 +4,8 @@ use crate::{
     runtime_request_previous_response_id, runtime_request_session_id, runtime_request_turn_state,
 };
 
-#[cfg(any(not(feature = "mojo"), test))]
-#[path = "compatibility_surface/rust_oracle.rs"]
-mod rust_oracle;
+// Match the Mojo ABI limit while preserving flags from every tool label.
+const COMPATIBILITY_SURFACE_MAX_TOOL_LABELS_PER_CALL: usize = 1_024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeRequestCompatibilitySurface {
@@ -24,44 +23,7 @@ pub struct RuntimeRequestCompatibilitySurface {
     pub warnings: Vec<&'static str>,
 }
 
-impl RuntimeRequestCompatibilitySurface {
-    #[cfg(any(not(feature = "mojo"), test))]
-    fn new(stage: &'static str, route: &'static str, transport: &'static str) -> Self {
-        Self {
-            stage,
-            family: "unknown",
-            client: "unknown",
-            route,
-            transport,
-            stream: "unary",
-            tool_surface: "none".to_string(),
-            continuation: "none".to_string(),
-            request_origin: "external",
-            approval: false,
-            user_agent: "-".to_string(),
-            warnings: Vec::new(),
-        }
-    }
-}
-
 pub fn runtime_detect_request_compatibility_surface(
-    request: &RuntimeProxyRequest,
-    stage: &'static str,
-    transport: &'static str,
-) -> RuntimeRequestCompatibilitySurface {
-    #[cfg(feature = "mojo")]
-    {
-        runtime_detect_request_compatibility_surface_mojo(request, stage, transport)
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracle::detect(request, stage, transport)
-    }
-}
-
-#[cfg(feature = "mojo")]
-fn runtime_detect_request_compatibility_surface_mojo(
     request: &RuntimeProxyRequest,
     stage: &'static str,
     transport: &'static str,
@@ -92,28 +54,44 @@ fn runtime_detect_request_compatibility_surface_mojo(
         .as_ref()
         .and_then(|value| value.get("stream"))
         .and_then(serde_json::Value::as_bool);
-    let plan = prodex_mojo_core::runtime::compatibility_surface_plan(
-        [
-            match route {
-                "responses" => 0,
-                "compact" => 1,
-                "chat_completions" => 2,
-                _ => 3,
-            },
-            i64::from(transport == "websocket"),
-            i64::from(codex_headers),
-            i64::from(subagent_header),
-            i64::from(runtime_proxy_request_origin(&request.headers).is_some()),
-            explicit_stream.map_or(-1, i64::from),
-            i64::from(runtime_request_previous_response_id(request).is_some()),
-            i64::from(runtime_request_turn_state(request).is_some()),
-            i64::from(runtime_request_session_id(request).is_some()),
-            i64::from(tools.is_some_and(|tools| !tools.is_empty())),
-        ],
+    let mut facts = [
+        match route {
+            "responses" => 0,
+            "compact" => 1,
+            "chat_completions" => 2,
+            _ => 3,
+        },
+        i64::from(transport == "websocket"),
+        i64::from(codex_headers),
+        i64::from(subagent_header),
+        i64::from(runtime_proxy_request_origin(&request.headers).is_some()),
+        explicit_stream.map_or(-1, i64::from),
+        i64::from(runtime_request_previous_response_id(request).is_some()),
+        i64::from(runtime_request_turn_state(request).is_some()),
+        i64::from(runtime_request_session_id(request).is_some()),
+        i64::from(tools.is_some_and(|tools| !tools.is_empty())),
+    ];
+    let first_chunk_length = tool_labels
+        .len()
+        .min(COMPATIBILITY_SURFACE_MAX_TOOL_LABELS_PER_CALL);
+    let mut plan = prodex_mojo_core::runtime::compatibility_surface_plan(
+        facts,
         user_agent.unwrap_or_default(),
-        &tool_labels,
+        &tool_labels[..first_chunk_length],
     )
     .expect("Mojo compatibility-surface planning returned an invalid result");
+    facts[9] = 0;
+    for labels in
+        tool_labels[first_chunk_length..].chunks(COMPATIBILITY_SURFACE_MAX_TOOL_LABELS_PER_CALL)
+    {
+        let extra_plan = prodex_mojo_core::runtime::compatibility_surface_plan(
+            facts,
+            user_agent.unwrap_or_default(),
+            labels,
+        )
+        .expect("Mojo compatibility-surface planning returned an invalid result");
+        plan[3] |= extra_plan[3];
+    }
 
     RuntimeRequestCompatibilitySurface {
         stage,
@@ -165,7 +143,6 @@ fn runtime_detect_request_compatibility_surface_mojo(
     }
 }
 
-#[cfg(feature = "mojo")]
 fn compatibility_tag_label(labels: &'static [&'static str], tag: i64) -> &'static str {
     usize::try_from(tag)
         .ok()
@@ -174,7 +151,6 @@ fn compatibility_tag_label(labels: &'static [&'static str], tag: i64) -> &'stati
         .unwrap_or(labels[0])
 }
 
-#[cfg(feature = "mojo")]
 fn compatibility_flag_labels(
     flags: i64,
     labels: &'static [(i64, &'static str)],
@@ -185,7 +161,6 @@ fn compatibility_flag_labels(
         .collect()
 }
 
-#[cfg(feature = "mojo")]
 fn compatibility_flag_string(
     flags: i64,
     labels: &'static [(i64, &'static str)],
@@ -271,47 +246,185 @@ mod tests {
         assert!(surface.tool_surface.contains("web"));
     }
 
-    #[cfg(feature = "mojo")]
     #[test]
-    fn mojo_compatibility_surface_matches_rust_oracle() {
+    fn compatibility_surface_matches_expected_values() {
+        let oversized_tools = (0..1_025)
+            .map(|index| {
+                serde_json::json!({
+                    "type": if index == 1_024 { "shell_tool" } else { "function" }
+                })
+            })
+            .collect::<Vec<_>>();
         let fixtures = [
-            RuntimeProxyRequest {
-                method: "POST".to_string(),
-                path_and_query: "/backend-api/codex/responses".to_string(),
-                headers: vec![
-                    ("user-agent".to_string(), "Codex CLI".to_string()),
-                    ("session-id".to_string(), "s1".to_string()),
-                ],
-                body: br#"{"tools":[{"type":"web_search"},{"type":"mcp_call"},{"name":"approval_tool"}]}"#.to_vec(),
-            },
-            RuntimeProxyRequest {
-                method: "POST".to_string(),
-                path_and_query: "/v1/chat/completions".to_string(),
-                headers: vec![],
-                body: br#"{"stream":false,"tools":[{"type":"computer_use"}]}"#.to_vec(),
-            },
-            RuntimeProxyRequest {
-                method: "POST".to_string(),
-                path_and_query: "/unknown".to_string(),
-                headers: vec![],
-                body: br#"{"input":[]}"#.to_vec(),
-            },
-            RuntimeProxyRequest {
-                method: "POST".to_string(),
-                path_and_query: "/backend-api/codex/responses".to_string(),
-                headers: vec![("x-openai-subagent".to_string(), "1".to_string())],
-                body: br#"{"stream":true,"previous_response_id":"resp_1"}"#.to_vec(),
-            },
+            (
+                RuntimeProxyRequest {
+                    method: "POST".to_string(),
+                    path_and_query: "/backend-api/codex/responses".to_string(),
+                    headers: vec![
+                        ("User-Agent".to_string(), "  Codex CLI/0.1  ".to_string()),
+                        ("x-openai-subagent".to_string(), "1".to_string()),
+                        (
+                            "x-prodex-internal-request-origin".to_string(),
+                            "runtime".to_string(),
+                        ),
+                        ("x-codex-turn-state".to_string(), "turn-1".to_string()),
+                        (
+                            "x-codex-turn-metadata".to_string(),
+                            r#"{"session_id":"session-turn"}"#.to_string(),
+                        ),
+                    ],
+                    body: br#"{"previous_response_id":"resp_1","stream":false,"tools":[{"type":"web_search"},{"type":"mcp_call"},{"name":"approval_tool"},{"type":"shell_tool"}]}"#.to_vec(),
+                },
+                "handshake",
+                "http",
+                RuntimeRequestCompatibilitySurface {
+                    stage: "handshake",
+                    family: "codex",
+                    client: "codex_subagent",
+                    route: "responses",
+                    transport: "http",
+                    stream: "unary",
+                    tool_surface: "approval+mcp+shell+tools+web".to_string(),
+                    continuation: "previous_response+session+turn_state".to_string(),
+                    request_origin: "internal",
+                    approval: true,
+                    user_agent: "Codex CLI/0.1".to_string(),
+                    warnings: vec![],
+                },
+            ),
+            (
+                RuntimeProxyRequest {
+                    method: "POST".to_string(),
+                    path_and_query: "/backend-api/codex/responses/compact".to_string(),
+                    headers: vec![("session_id".to_string(), " session-42 ".to_string())],
+                    body: br#"{"previous_response_id":"resp_2","stream":true,"tools":[]}"#.to_vec(),
+                },
+                "request",
+                "websocket",
+                RuntimeRequestCompatibilitySurface {
+                    stage: "request",
+                    family: "codex",
+                    client: "codex_cli",
+                    route: "compact",
+                    transport: "websocket",
+                    stream: "unary",
+                    tool_surface: "none".to_string(),
+                    continuation: "previous_response+session".to_string(),
+                    request_origin: "external",
+                    approval: false,
+                    user_agent: "-".to_string(),
+                    warnings: vec!["websocket_previous_response_without_turn_state"],
+                },
+            ),
+            (
+                RuntimeProxyRequest {
+                    method: "POST".to_string(),
+                    path_and_query: "/unknown".to_string(),
+                    headers: vec![("user-agent".to_string(), "  ".to_string())],
+                    body: b"{not-json".to_vec(),
+                },
+                "message",
+                "http",
+                RuntimeRequestCompatibilitySurface {
+                    stage: "message",
+                    family: "unknown",
+                    client: "unknown",
+                    route: "standard",
+                    transport: "http",
+                    stream: "unary",
+                    tool_surface: "none".to_string(),
+                    continuation: "none".to_string(),
+                    request_origin: "external",
+                    approval: false,
+                    user_agent: "-".to_string(),
+                    warnings: vec!["unknown_client_family"],
+                },
+            ),
+            (
+                RuntimeProxyRequest {
+                    method: "POST".to_string(),
+                    path_and_query: "/v1/chat/completions".to_string(),
+                    headers: vec![],
+                    body: br#"{"stream":"true","previous_response_id":7,"session_id":{"id":"x"},"tools":[{"type":4,"name":"web_computer_shell"},null]}"#.to_vec(),
+                },
+                "message",
+                "http",
+                RuntimeRequestCompatibilitySurface {
+                    stage: "message",
+                    family: "openai_compatible",
+                    client: "chat_completions_client",
+                    route: "chat_completions",
+                    transport: "http",
+                    stream: "unary",
+                    tool_surface: "tools".to_string(),
+                    continuation: "none".to_string(),
+                    request_origin: "external",
+                    approval: false,
+                    user_agent: "-".to_string(),
+                    warnings: vec![],
+                },
+            ),
+            (
+                RuntimeProxyRequest {
+                    method: "POST".to_string(),
+                    path_and_query: "/backend-api/codex/responses".to_string(),
+                    headers: vec![],
+                    body: serde_json::json!({"tools": oversized_tools})
+                        .to_string()
+                        .into_bytes(),
+                },
+                "request",
+                "http",
+                RuntimeRequestCompatibilitySurface {
+                    stage: "request",
+                    family: "openai_compatible",
+                    client: "responses_client",
+                    route: "responses",
+                    transport: "http",
+                    stream: "streaming",
+                    tool_surface: "shell+tools".to_string(),
+                    continuation: "none".to_string(),
+                    request_origin: "external",
+                    approval: false,
+                    user_agent: "-".to_string(),
+                    warnings: vec![],
+                },
+            ),
         ];
-        for request in &fixtures {
-            for transport in ["http", "websocket"] {
-                assert_eq!(
-                    runtime_detect_request_compatibility_surface(request, "request", transport),
-                    rust_oracle::detect(request, "request", transport),
-                    "path={} transport={transport}",
-                    request.path_and_query
-                );
-            }
+        for (request, stage, transport, expected) in fixtures {
+            assert_eq!(
+                runtime_detect_request_compatibility_surface(&request, stage, transport),
+                expected,
+                "path={} stage={stage} transport={transport}",
+                request.path_and_query
+            );
         }
+
+        let handshake_request = RuntimeProxyRequest {
+            method: "GET".to_string(),
+            path_and_query: "/backend-api/codex/responses".to_string(),
+            headers: vec![("user-agent".to_string(), "Codex CLI/0.1".to_string())],
+            body: vec![],
+        };
+        assert_eq!(
+            runtime_detect_websocket_message_compatibility_surface(
+                &handshake_request,
+                r#"{"previous_response_id":"resp_3","session_id":"session-3","stream":true}"#,
+            ),
+            RuntimeRequestCompatibilitySurface {
+                stage: "message",
+                family: "codex",
+                client: "codex_cli",
+                route: "responses",
+                transport: "websocket",
+                stream: "streaming",
+                tool_surface: "none".to_string(),
+                continuation: "previous_response+session".to_string(),
+                request_origin: "external",
+                approval: false,
+                user_agent: "Codex CLI/0.1".to_string(),
+                warnings: vec!["websocket_previous_response_without_turn_state"],
+            }
+        );
     }
 }
