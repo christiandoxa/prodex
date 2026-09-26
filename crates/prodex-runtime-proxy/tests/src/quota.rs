@@ -307,110 +307,108 @@ fn precommit_quota_gate_final_blocks_unknown_quota_only_when_pool_fallback_exist
     );
 }
 
-#[cfg(feature = "mojo")]
 #[test]
-fn quota_snapshot_and_gate_plans_match_rust_oracles() {
-    let statuses = [
-        RuntimeSelectionQuotaWindowStatus::Ready,
-        RuntimeSelectionQuotaWindowStatus::Thin,
-        RuntimeSelectionQuotaWindowStatus::Critical,
-        RuntimeSelectionQuotaWindowStatus::Exhausted,
-        RuntimeSelectionQuotaWindowStatus::Unknown,
-    ];
-    let routes = [
+fn quota_snapshot_and_gate_keep_fixed_decisions_without_feature_fallback() {
+    let snapshot = RuntimeProxyUsageSnapshot {
+        checked_at: 100,
+        five_hour_status: RuntimeSelectionQuotaWindowStatus::Exhausted,
+        five_hour_remaining_percent: 0,
+        five_hour_reset_at: 200,
+        weekly_status: RuntimeSelectionQuotaWindowStatus::Ready,
+        weekly_remaining_percent: 80,
+        weekly_reset_at: i64::MAX,
+    };
+    let summary = runtime_proxy_quota_summary_from_usage_snapshot_at(
+        snapshot,
         RuntimeRouteKind::Responses,
-        RuntimeRouteKind::Compact,
-        RuntimeRouteKind::Websocket,
-        RuntimeRouteKind::Standard,
-    ];
-    let sources = [
-        None,
-        Some(RuntimeSelectionQuotaSource::LiveProbe),
-        Some(RuntimeSelectionQuotaSource::PersistedSnapshot),
-    ];
-    for five_hour_status in statuses {
-        for weekly_status in statuses {
-            let snapshot = RuntimeProxyUsageSnapshot {
-                checked_at: 100,
-                five_hour_status,
-                five_hour_remaining_percent: 25,
-                five_hour_reset_at: 180,
-                weekly_status,
-                weekly_remaining_percent: 35,
-                weekly_reset_at: 220,
-            };
-            for route_kind in routes {
-                for now in [50, 150, 250] {
-                    assert_eq!(
-                        runtime_proxy_quota_summary_from_usage_snapshot_at(
-                            snapshot, route_kind, now,
-                        ),
-                        rust_oracles::summary_from_usage_snapshot_at(snapshot, route_kind, now),
-                    );
-                    assert_eq!(
-                        runtime_proxy_usage_snapshot_hold_active(snapshot, now),
-                        rust_oracles::usage_snapshot_hold_active(snapshot, now),
-                    );
-                    assert_eq!(
-                        runtime_proxy_usage_snapshot_hold_expired(snapshot, now),
-                        rust_oracles::usage_snapshot_hold_expired(snapshot, now),
-                    );
-                    assert_eq!(
-                        runtime_proxy_usage_snapshot_is_usable(snapshot, now, 60),
-                        rust_oracles::usage_snapshot_is_usable(snapshot, now, 60),
-                    );
-                }
-                let summary =
-                    rust_oracles::summary_from_usage_snapshot_at(snapshot, route_kind, 150);
-                assert_eq!(
-                    runtime_proxy_precommit_quota_block_reason(summary, route_kind, 2),
-                    rust_oracles::precommit_quota_block_reason(summary, route_kind, 2),
-                );
-                for source in sources {
-                    assert_eq!(
-                        runtime_proxy_quota_summary_requires_precommit_live_probe(
-                            summary, source, route_kind,
-                        ),
-                        rust_oracles::summary_requires_precommit_live_probe(
-                            summary, source, route_kind,
-                        ),
-                    );
-                    assert_eq!(
-                        runtime_proxy_quota_summary_requires_live_source_after_probe(
-                            summary, source, route_kind,
-                        ),
-                        rust_oracles::summary_requires_live_source_after_probe(
-                            summary, source, route_kind,
-                        ),
-                    );
-                    for has_continuation_context in [false, true] {
-                        let input = RuntimeProxyPrecommitQuotaGateInitialInput {
-                            summary,
-                            source,
-                            route_kind,
-                            has_continuation_context,
-                            responses_critical_floor_percent: 2,
-                        };
-                        assert_eq!(
-                            runtime_proxy_precommit_quota_gate_initial_decision(input),
-                            rust_oracles::precommit_quota_gate_initial_decision(input),
-                        );
-                    }
-                    for has_alternative_quota_profile in [false, true] {
-                        let input = RuntimeProxyPrecommitQuotaGateFinalInput {
-                            summary,
-                            source,
-                            route_kind,
-                            has_alternative_quota_profile,
-                            responses_critical_floor_percent: 2,
-                        };
-                        assert_eq!(
-                            runtime_proxy_precommit_quota_gate_final_decision(input),
-                            rust_oracles::precommit_quota_gate_final_decision(input),
-                        );
-                    }
-                }
-            }
+        150,
+    );
+    assert_eq!(
+        summary,
+        RuntimeProxyQuotaSummary {
+            five_hour: RuntimeProxyQuotaWindowSummary {
+                status: RuntimeSelectionQuotaWindowStatus::Exhausted,
+                remaining_percent: 0,
+                reset_at: 200,
+            },
+            weekly: RuntimeProxyQuotaWindowSummary {
+                status: RuntimeSelectionQuotaWindowStatus::Ready,
+                remaining_percent: 80,
+                reset_at: i64::MAX,
+            },
+            route_band: RuntimeSelectionQuotaPressureBand::Exhausted,
         }
-    }
+    );
+    assert_eq!(
+        runtime_proxy_quota_summary_blocking_reset_at(summary, RuntimeRouteKind::Responses, 2),
+        Some(200)
+    );
+    let mut both_exhausted = summary;
+    both_exhausted.weekly.status = RuntimeSelectionQuotaWindowStatus::Exhausted;
+    both_exhausted.weekly.reset_at = 300;
+    assert_eq!(
+        runtime_proxy_quota_summary_blocking_reset_at(
+            both_exhausted,
+            RuntimeRouteKind::Responses,
+            2
+        ),
+        Some(300)
+    );
+    assert!(runtime_proxy_usage_snapshot_is_usable(snapshot, 150, 0));
+    assert!(!runtime_proxy_usage_snapshot_is_usable(snapshot, 250, 60));
+    assert_eq!(
+        runtime_proxy_quota_window_summary_from_usage_snapshot_at(
+            RuntimeSelectionQuotaWindowStatus::Exhausted,
+            0,
+            200,
+            250,
+        ),
+        RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Ready,
+            remaining_percent: 100,
+            reset_at: 200,
+        }
+    );
+
+    let unknown = RuntimeProxyQuotaSummary {
+        five_hour: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Unknown,
+            remaining_percent: 0,
+            reset_at: i64::MAX,
+        },
+        weekly: RuntimeProxyQuotaWindowSummary {
+            status: RuntimeSelectionQuotaWindowStatus::Ready,
+            remaining_percent: 80,
+            reset_at: i64::MAX,
+        },
+        route_band: RuntimeSelectionQuotaPressureBand::Unknown,
+    };
+    assert_eq!(
+        runtime_proxy_quota_summary_blocking_reset_at(unknown, RuntimeRouteKind::Responses, 2),
+        None
+    );
+    assert!(runtime_proxy_quota_summary_requires_precommit_live_probe(
+        unknown,
+        None,
+        RuntimeRouteKind::Responses,
+    ));
+    assert!(
+        runtime_proxy_quota_summary_requires_live_source_after_probe(
+            unknown,
+            None,
+            RuntimeRouteKind::Responses,
+        )
+    );
+    assert!(!runtime_proxy_quota_summary_requires_precommit_live_probe(
+        unknown,
+        Some(RuntimeSelectionQuotaSource::LiveProbe),
+        RuntimeRouteKind::Responses,
+    ));
+    assert!(
+        !runtime_proxy_quota_summary_requires_live_source_after_probe(
+            unknown,
+            None,
+            RuntimeRouteKind::Compact,
+        )
+    );
 }
