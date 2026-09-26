@@ -1,10 +1,7 @@
-#[cfg(feature = "mojo")]
 use super::super::anthropic_mojo_value;
-#[cfg(feature = "mojo")]
 use super::json_fragment;
-#[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{AnthropicRequestKernelInput, AnthropicRequestKernelOperation};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 #[cfg(feature = "mojo")]
 pub(super) fn anthropic_web_search_call(block: &Value) -> Result<Value, String> {
@@ -25,34 +22,54 @@ pub(super) fn anthropic_web_search_call(block: &Value) -> Result<Value, String> 
 }
 
 #[cfg(feature = "mojo")]
-pub(super) fn merge_anthropic_web_search_result(output: &mut [Value], block: &Value) {
-    let Some(tool_use_id) = block.get("tool_use_id").and_then(Value::as_str) else {
-        return;
-    };
-    let sources = anthropic_web_search_sources(block);
-    let Some(call) = output.iter_mut().rev().find(|item| {
-        item.get("type").and_then(Value::as_str) == Some("web_search_call")
-            && item.get("id").and_then(Value::as_str) == Some(tool_use_id)
-    }) else {
-        return;
-    };
-    call["action"]["sources"] = Value::Array(sources);
+pub(super) fn merge_anthropic_web_search_result(
+    output: &mut [Value],
+    block: &Value,
+) -> Result<(), String> {
+    let blocks = json_fragment(&Value::Array(output.to_vec()))?;
+    let content = json_fragment(block)?;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::WebSearchResult);
+    input.choice_kind = 1;
+    input.blocks = Some(&blocks);
+    input.content = Some(&content);
+    let merged = anthropic_mojo_value(input)?;
+    let merged = merged
+        .as_array()
+        .ok_or_else(|| "Anthropic web-search result kernel returned a non-array".to_string())?;
+    if merged.len() != output.len() {
+        return Err("Anthropic web-search result kernel changed output count".to_string());
+    }
+    output.clone_from_slice(merged);
+    Ok(())
 }
 
-#[cfg(feature = "mojo")]
-fn anthropic_web_search_sources(block: &Value) -> Vec<Value> {
-    block
-        .get("content")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(|result| {
-            let url = result.get("url").and_then(Value::as_str)?;
-            let mut source = json!({"type": "url", "url": url});
-            if let Some(title) = result.get("title").and_then(Value::as_str) {
-                source["title"] = Value::String(title.to_string());
-            }
-            Some(source)
-        })
-        .collect()
+pub(super) fn anthropic_web_search_result_sources(block: &Value) -> Result<Vec<Value>, String> {
+    let content = json_fragment(block)?;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::WebSearchResult);
+    input.content = Some(&content);
+    let sources = anthropic_mojo_value(input)?;
+    sources
+        .as_array()
+        .cloned()
+        .ok_or_else(|| "Anthropic web-search source kernel returned a non-array".to_string())
+}
+
+pub(super) fn anthropic_web_search_stream_item(
+    id: &str,
+    input_json: &str,
+    sources: &[Value],
+    in_progress: bool,
+) -> Result<Value, String> {
+    let id = json_fragment(&Value::String(id.to_string()))?;
+    let sources = json_fragment(&Value::Array(sources.to_vec()))?;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::WebSearchCall);
+    input.stream = true;
+    input.choice_kind = if in_progress { 1 } else { 0 };
+    input.id = Some(&id);
+    input.input = Some(input_json);
+    input.blocks = Some(&sources);
+    anthropic_mojo_value(input)
 }

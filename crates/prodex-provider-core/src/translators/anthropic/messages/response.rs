@@ -180,7 +180,7 @@ pub(super) fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>,
                 let block = content.get(item.input_index).ok_or_else(|| {
                     "Anthropic response plan referenced invalid result".to_string()
                 })?;
-                merge_anthropic_web_search_result(&mut output, block);
+                merge_anthropic_web_search_result(&mut output, block)?;
             }
             ResponsePlanKind::Reasoning => {
                 let block = content.get(item.input_index).ok_or_else(|| {
