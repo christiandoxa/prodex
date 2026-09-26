@@ -144,3 +144,101 @@ fn openai_pool_aggregate_rejects_invalid_normalized_percent() {
         Err(MojoError::InvalidInput)
     );
 }
+
+#[test]
+fn status_quota_summary_matches_expected_source_selection_and_aggregation() {
+    let window = |remaining_percent, reset_at| {
+        Some(QuotaPoolWindowInput {
+            remaining_percent,
+            reset_at,
+        })
+    };
+    let inputs = [
+        StatusQuotaProfileInput {
+            quota_compatible: true,
+            report_succeeded: true,
+            cached_snapshot_usable: true,
+            report_five_hour: window(80, 20),
+            report_weekly: None,
+            cached_five_hour: window(5, 1),
+            cached_weekly: window(5, 1),
+        },
+        StatusQuotaProfileInput {
+            quota_compatible: true,
+            report_succeeded: false,
+            cached_snapshot_usable: true,
+            report_five_hour: None,
+            report_weekly: None,
+            cached_five_hour: window(40, 10),
+            cached_weekly: window(70, i64::MAX),
+        },
+        StatusQuotaProfileInput {
+            quota_compatible: true,
+            report_succeeded: false,
+            cached_snapshot_usable: false,
+            report_five_hour: None,
+            report_weekly: None,
+            cached_five_hour: window(99, 1),
+            cached_weekly: None,
+        },
+        StatusQuotaProfileInput {
+            quota_compatible: false,
+            report_succeeded: true,
+            cached_snapshot_usable: false,
+            report_five_hour: window(99, 1),
+            report_weekly: window(99, 1),
+            cached_five_hour: None,
+            cached_weekly: None,
+        },
+        StatusQuotaProfileInput {
+            quota_compatible: true,
+            report_succeeded: true,
+            cached_snapshot_usable: true,
+            report_five_hour: None,
+            report_weekly: None,
+            cached_five_hour: window(99, 1),
+            cached_weekly: window(99, 1),
+        },
+    ];
+    let expected = StatusQuotaSummary {
+        compatible_profiles: 4,
+        unavailable_profiles: 2,
+        five_hour: StatusQuotaWindowAggregation {
+            profiles: 2,
+            total_remaining: 120,
+            earliest_reset_at: Some(10),
+        },
+        weekly: StatusQuotaWindowAggregation {
+            profiles: 1,
+            total_remaining: 70,
+            earliest_reset_at: None,
+        },
+    };
+
+    assert_eq!(status_quota_summary_batch(&inputs), Ok(expected));
+    assert_eq!(
+        status_quota_summary_batch(&inputs.into_iter().rev().collect::<Vec<_>>()),
+        Ok(expected)
+    );
+}
+
+#[test]
+fn status_quota_summary_saturates_window_totals() {
+    let input = |remaining_percent| StatusQuotaProfileInput {
+        quota_compatible: true,
+        report_succeeded: true,
+        cached_snapshot_usable: false,
+        report_five_hour: Some(QuotaPoolWindowInput {
+            remaining_percent,
+            reset_at: i64::MAX,
+        }),
+        report_weekly: None,
+        cached_five_hour: None,
+        cached_weekly: None,
+    };
+    let summary = status_quota_summary_batch(&[input(i64::MAX), input(1)]).unwrap();
+
+    assert_eq!(summary.five_hour.profiles, 2);
+    assert_eq!(summary.five_hour.total_remaining, i64::MAX);
+    assert_eq!(summary.five_hour.earliest_reset_at, None);
+}

@@ -532,7 +532,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "quota_aggregation_kernel"
+          "quota_aggregation_kernel",
+          "status_quota_summary"
         ]
       },
       {
@@ -986,6 +987,24 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "upstream usage acquisition and bounded record conversion"
+    },
+    {
+      "name": "status_quota_summary",
+      "domain": "quota/status-summary",
+      "introduced_in": "0.432.1",
+      "baseline_state": "rust-authoritative",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_status_summary_v1",
+      "mojo_source": "mojo/prodex_core/quota_pool.mojo",
+      "consumer": "crates/prodex-quota/src/render/pool.rs",
+      "consumer_marker": "status_quota_summary_batch",
+      "production_reachability_test": "crates/prodex-mojo-core/tests/quota_pool.rs",
+      "rust_owner_before": "status quota source precedence and per-profile summary aggregation",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "host report/cache acquisition, existing quota-window normalization, and typed input/output mapping"
     },
     {
       "name": "runtime_tuning_capacity_defaults",

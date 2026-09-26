@@ -1,5 +1,9 @@
 use super::*;
 
+pub use prodex_mojo_core::quota_pool::{
+    QuotaPoolWindowInput, StatusQuotaProfileInput, status_quota_summary_batch,
+};
+
 #[derive(Debug, Default, Clone, Copy)]
 pub(super) struct QuotaPoolAggregate {
     total_profiles: usize,

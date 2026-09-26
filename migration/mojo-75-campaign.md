@@ -1845,3 +1845,22 @@ The canonical source report counts **52,367 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **526,090 additional Mojo LOC** required at this Rust
 volume.
+
+## Status quota-summary hard replacement
+
+The `prodex status` quota summary now uses the versioned Mojo pool kernel for
+per-profile source precedence, availability, remaining totals, and earliest
+reset selection. Rust retains report/cache acquisition, existing window
+normalization, and typed input/output mapping. The Rust summary accumulator
+and temporary differential oracle were deleted. Caller tests cover successful
+reports, usable and stale cached snapshots, missing windows, incompatible
+profiles, and report ordering. The ownership manifest records the new operation,
+and the no-fallback guard rejects restoration of the Rust accumulator.
+The updated kernel compiled to objects for all six release targets; native
+execution evidence remains Linux x86_64.
+
+The canonical source report counts **52,469 reachable Mojo LOC** and
+**192,941 Rust production LOC**, totaling **245,410 LOC**: **21.38% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **526,354 additional Mojo LOC** required at this Rust
+volume.
