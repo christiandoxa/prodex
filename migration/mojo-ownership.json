@@ -605,7 +605,8 @@
         "role": "adapter",
         "operations": [
           "deepseek_simple_request_eligibility",
-          "deepseek_request_metadata_composition"
+          "deepseek_request_metadata_composition",
+          "deepseek_strict_schema_normalization"
         ]
       },
       {
@@ -615,6 +616,10 @@
         "production_reachable": true,
         "role": "semantic",
         "semantic_ranges": [
+          {
+            "start": 332,
+            "end": 632
+          },
           {
             "start": 1509,
             "end": 1759
@@ -626,7 +631,8 @@
         ],
         "operations": [
           "deepseek_simple_request_eligibility",
-          "deepseek_request_metadata_composition"
+          "deepseek_request_metadata_composition",
+          "deepseek_strict_schema_normalization"
         ]
       }
     ],
@@ -1457,6 +1463,32 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde field extraction and type validation, JSON serialization, and typed Mojo ABI result mapping"
+    },
+    {
+      "name": "deepseek_strict_schema_normalization",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.432.1",
+      "baseline_state": "feature-off Rust schema sanitizer",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_deepseek_kernel_v2",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "strict_function_schema": 27
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
+      "consumer_marker": "DeepSeekKernelOperation::StrictFunctionSchema",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
+      "rust_owner_before": "Feature-off Rust recursive strict-schema sanitizer",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; caller tests use fixed nested schema expectations",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Caller-owned validation messages, Serde serialization, and typed Mojo ABI result mapping"
     }
   ],
   "rust_semantic_reductions": [
@@ -2058,6 +2090,21 @@
       "production_consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
       "parity_test": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
       "performance": "one bounded Mojo metadata composition call"
+    },
+    {
+      "file": "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
+      "symbol": "deepseek_provider_core_apply_strict_function_schema",
+      "operation": "deepseek_strict_schema_normalization",
+      "previous_responsibility": "feature-off Rust recursive schema defaulting, required-property derivation, and additionalProperties rewriting",
+      "final_state": "adapter-only",
+      "rust_before": "Rust sanitizer in request_tools/strict_schema.rs",
+      "rust_after": "Rust validates caller errors and serializes the schema; Mojo owns recursive normalization in every feature mode",
+      "mojo_owner": "mojo/prodex_core/deepseek.mojo::deepseek_schema_write",
+      "mojo_source": "mojo/prodex_core/deepseek.mojo",
+      "mojo_entry": "prodex_mojo_deepseek_kernel_v2 operation 27",
+      "production_consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
+      "parity_test": "crates/prodex-provider-core/src/deepseek_bridge/tests/strict_schema.rs",
+      "performance": "one bounded Mojo normalization call after validation"
     }
   ],
   "deleted_authoritative_operations": [

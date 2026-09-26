@@ -2096,3 +2096,23 @@ The canonical source report counts **52,820 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **524,035 additional Mojo LOC** required at this Rust
 volume.
+
+## DeepSeek strict schema normalization hard replacement
+
+Strict function-tool schema normalization now uses the existing Mojo writer
+in every provider-core feature mode. The feature-off Rust recursive sanitizer
+and object helper were deleted. Rust retains caller-facing validation errors
+until a typed Mojo diagnostic can replace that separate responsibility. Fixed
+caller expectations cover nested objects, arrays, `anyOf`, and nested error
+paths. The Mojo writer now accepts both empty and populated `anyOf` arrays;
+the previous closing-bracket condition rejected both. The no-fallback guard
+requires Mojo normalization and rejects restored Rust sanitizer functions.
+The authority guard distinguishes operations sharing one exported kernel by
+operation ID and still rejects duplicate IDs.
+The Mojo ABI did not change; native execution evidence remains Linux x86_64.
+
+The canonical source report counts **52,820 reachable Mojo LOC** and
+**192,190 Rust production LOC**, totaling **245,010 LOC**: **21.56% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **523,750 additional Mojo LOC** required at this Rust
+volume.

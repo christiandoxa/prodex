@@ -342,7 +342,7 @@ def deepseek_schema_write_any_of_array(
         return False
     var first = True
     var index = deepseek_json_skip_ws(view, start + 1, end - 1)
-    if index < end - 1 and deepseek_json_byte(view, index) == 93:
+    if index == end - 1:
         return deepseek_put_byte(writer, 93)
     while index < end - 1:
         var value_end = deepseek_json_value_end(view, index, end - 1, depth + 1)
@@ -357,7 +357,7 @@ def deepseek_schema_write_any_of_array(
         if index < end - 1 and deepseek_json_byte(view, index) == 44:
             index = deepseek_json_skip_ws(view, index + 1, end - 1)
             continue
-        if index < end - 1 and deepseek_json_byte(view, index) == 93:
+        if index == end - 1:
             return deepseek_put_byte(writer, 93)
         return False
     return False

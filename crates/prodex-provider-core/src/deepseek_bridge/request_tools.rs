@@ -4,7 +4,6 @@
 
 use std::collections::BTreeMap;
 
-#[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
 
 mod function_tools;
@@ -20,9 +19,6 @@ pub use self::function_tools::{
     deepseek_provider_core_validate_function_name_with_max_bytes,
     deepseek_provider_core_validate_function_parameters,
 };
-#[cfg(not(feature = "mojo"))]
-use self::strict_schema::deepseek_provider_core_sanitize_strict_schema;
-#[cfg(feature = "mojo")]
 use self::strict_schema::deepseek_provider_core_validate_strict_schema;
 pub use self::tool_choice::{
     deepseek_provider_core_validate_tool_choice_name,
@@ -54,25 +50,19 @@ pub fn deepseek_provider_core_apply_strict_function_schema(
     let parameters = function
         .entry("parameters".to_string())
         .or_insert_with(|| serde_json::json!({"type": "object"}));
-    #[cfg(feature = "mojo")]
-    {
-        deepseek_provider_core_validate_strict_schema(parameters, &name, provider_label)?;
-        let schema = serde_json::to_string(parameters).map_err(|error| {
-            format!("{provider_label} strict tool schema serialization failed: {error}")
-        })?;
-        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::StrictFunctionSchema);
-        input.input = Some(&schema);
-        *parameters = deepseek_provider_core_mojo_value(input).map_err(|_| {
-            format!("{provider_label} strict tool schema `{name}` could not be normalized")
-        })?;
-    }
-    #[cfg(not(feature = "mojo"))]
-    deepseek_provider_core_sanitize_strict_schema(parameters, &name, provider_label)?;
+    deepseek_provider_core_validate_strict_schema(parameters, &name, provider_label)?;
+    let schema = serde_json::to_string(parameters).map_err(|error| {
+        format!("{provider_label} strict tool schema serialization failed: {error}")
+    })?;
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::StrictFunctionSchema);
+    input.input = Some(&schema);
+    *parameters = deepseek_provider_core_mojo_value(input).map_err(|_| {
+        format!("{provider_label} strict tool schema `{name}` could not be normalized")
+    })?;
     function.insert("strict".to_string(), serde_json::Value::Bool(true));
     Ok(())
 }
 
-#[cfg(feature = "mojo")]
 fn deepseek_provider_core_mojo_value(
     input: DeepSeekKernelInput<'_>,
 ) -> Result<serde_json::Value, String> {

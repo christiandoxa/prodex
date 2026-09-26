@@ -98,4 +98,7 @@ mod request_reject_tests;
 #[path = "deepseek_bridge/tests/simple_request.rs"]
 mod simple_request_tests;
 #[cfg(test)]
+#[path = "deepseek_bridge/tests/strict_schema.rs"]
+mod strict_schema_tests;
+#[cfg(test)]
 mod tests;
