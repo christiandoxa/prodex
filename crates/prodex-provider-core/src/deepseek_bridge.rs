@@ -88,5 +88,8 @@ pub fn deepseek_provider_core_rtk_wrapped_tool_arguments(name: &str, arguments: 
     deepseek_rtk_wrapped_tool_arguments(name, arguments)
 }
 
+#[cfg(all(test, not(feature = "mojo")))]
+#[path = "deepseek_bridge/tests/request_reject.rs"]
+mod request_reject_tests;
 #[cfg(test)]
 mod tests;

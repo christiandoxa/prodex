@@ -1952,3 +1952,23 @@ The canonical source report counts **52,579 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **524,540 additional Mojo LOC** required at this Rust
 volume.
+
+## DeepSeek request rejection hard replacement
+
+The public unsupported-request-field and beta-completion rejection functions
+now use the existing Mojo `RequestFields` and `BetaFields` policies in every
+provider-core feature mode. The feature-off Rust policy and its helpers were
+deleted with their cfg routing. Rust retains JSON serialization and tagged
+error formatting; non-object values keep their prior no-op behavior. The
+bounded Mojo adapter returns errors for oversized inputs and kernel failures
+instead of panicking. A no-default-features caller test checks exact rejection
+messages, provider labels, precedence, malformed field types, non-object
+inputs, and the input limit. The no-fallback guard requires both Mojo
+operations and rejects restored Rust copies or cfg routing; the Mojo ABI and
+operation IDs did not change.
+
+The canonical source report counts **52,579 reachable Mojo LOC** and
+**192,370 Rust production LOC**, totaling **244,949 LOC**: **21.47% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **524,531 additional Mojo LOC** required at this Rust
+volume.
