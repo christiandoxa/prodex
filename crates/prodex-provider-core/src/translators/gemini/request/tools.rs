@@ -168,6 +168,6 @@ pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Opti
     )
 }
 
-pub(crate) fn gemini_tool_config_from_request(value: &Value) -> Option<Value> {
+pub(crate) fn gemini_tool_config_from_request(value: &Value) -> Result<Option<Value>, String> {
     crate::gemini_provider_core_tool_config_from_request(value)
 }

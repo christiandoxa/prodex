@@ -6,9 +6,6 @@ mod continuation;
 #[path = "request/generation_config.rs"]
 mod generation_config;
 #[cfg(not(feature = "mojo"))]
-#[path = "request/optional_fields.rs"]
-mod optional_fields;
-#[cfg(not(feature = "mojo"))]
 #[path = "request/response_format.rs"]
 mod response_format;
 #[path = "request/schema.rs"]
@@ -19,18 +16,9 @@ mod tool_signatures;
 mod tools;
 
 pub(super) use self::continuation::gemini_continuation_metadata;
-#[cfg(not(feature = "mojo"))]
-pub(crate) use self::generation_config::gemini_generation_config_from_request;
 pub use self::generation_config::gemini_provider_core_model_uses_thinking_level;
 #[cfg(not(feature = "mojo"))]
 pub(crate) use self::generation_config::gemini_validate_candidate_count;
-#[cfg(not(feature = "mojo"))]
-pub(super) use self::generation_config::{
-    gemini_apply_text_format, gemini_insert_basic_generation_config,
-    gemini_insert_extended_generation_config, gemini_thinking_config_from_request,
-};
-#[cfg(not(feature = "mojo"))]
-pub(super) use self::optional_fields::gemini_apply_optional_request_fields;
 #[cfg(not(feature = "mojo"))]
 pub(super) use self::response_format::gemini_apply_response_format;
 pub(crate) use self::schema::sanitize_function_schema;

@@ -152,6 +152,10 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/response/metadata.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/request.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
@@ -305,6 +309,7 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-runtime-doctor/src/suggestions/compatibility.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema/composition.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/optional_fields.rs",
   "crates/prodex-provider-core/src/gemini_bridge/request/simple/builtin.rs",
   "crates/prodex-provider-core/src/translators/kiro/request/controls.rs",
   "crates/prodex-provider-core/src/translators/kiro/request/validation.rs",
@@ -433,6 +438,10 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/response/metadata.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/request.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
@@ -509,6 +518,9 @@ const DEEPSEEK_SHAPING_COMPLETED_FNS = [
 ];
 const GEMINI_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs";
 const GEMINI_CHAT_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs";
+const GEMINI_BRIDGE_REQUEST_FILE = "crates/prodex-provider-core/src/gemini_bridge/request.rs";
+const GEMINI_GENERATION_CONFIG_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs";
+const GEMINI_THINKING_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs";
 const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
   [/\bfn\s+anthropic_response_block_input\s*\(/u, "Rust response block classifier"],
   [/\bfn\s+plan_with_rust\s*\(/u, "Rust response planner"],
@@ -578,6 +590,27 @@ export function findViolations(files) {
       filePath === "crates/prodex-provider-core/src/fallback/chains/gemini.rs" &&
       /\bfn\s+provider_gemini_model_fallback_alias_chain\s*\(/u.test(contents))
     .map(([filePath]) => `${filePath}: contains a Rust Gemini model fallback table`);
+  const geminiGenerationViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === GEMINI_BRIDGE_REQUEST_FILE) {
+      const operations = [
+        ["gemini_provider_core_generation_config_from_request", "gemini_bridge_request_generation_config"],
+        ["gemini_provider_core_generate_content_request_map", "gemini_bridge_request_map"],
+        ["gemini_provider_core_generate_content_body_value", "gemini_bridge_request_body"],
+      ];
+      return operations.flatMap(([name, mojoCall]) => {
+        const body = contents.match(new RegExp(`\\bpub fn ${name}\\([^]*?^\\}`, "mu"))?.[0];
+        return body?.includes(`request_contents::${mojoCall}(`) && !FEATURE_OFF_RUST_PATH.test(body)
+          ? [] : [`${filePath}: ${name} must use Mojo in every feature mode`];
+      });
+    }
+    if (filePath === GEMINI_GENERATION_CONFIG_FILE && /\bfn\s+gemini_generation_config_from_request\s*\(/u.test(contents)) {
+      return [`${filePath}: contains a duplicate Gemini generation-config adapter`];
+    }
+    if (filePath === GEMINI_THINKING_FILE && /\bfn\s+gemini_thinking_config\s*\(/u.test(contents)) {
+      return [`${filePath}: contains replaced Rust thinking-config semantics`];
+    }
+    return [];
+  });
   const hardReplacementViolations = files
     .filter(([filePath, contents]) => HARD_REPLACED_RUST_FILES.has(filePath) &&
       /\b(?:rust_oracle|fn\s+[A-Za-z0-9_]+_rust\s*\()/u.test(contents))
@@ -738,7 +771,8 @@ export function findViolations(files) {
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
     ...superExposeViolations,
-    ...geminiFallbackViolations, ...hardReplacementViolations, ...precommitBudgetOracleViolations,
+    ...geminiFallbackViolations, ...geminiGenerationViolations,
+    ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations,
@@ -1073,6 +1107,13 @@ function selfTest() {
     /Rust runtime-feature planner or oracle/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/fallback/chains/gemini.rs",
     "fn provider_gemini_model_fallback_alias_chain() {}"]])[0], /Rust Gemini model fallback table/u);
+  assert(findViolations([[GEMINI_BRIDGE_REQUEST_FILE,
+    'pub fn gemini_provider_core_generate_content_body_value() {\n#[cfg(not(feature = "mojo"))]\nold_body();\n}']])
+    .some((violation) => violation.includes("gemini_provider_core_generate_content_body_value must use Mojo")));
+  assert.match(findViolations([[GEMINI_GENERATION_CONFIG_FILE,
+    "fn gemini_generation_config_from_request() {}"]])[0], /duplicate Gemini generation-config adapter/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/optional_fields.rs",
+    "fn gemini_apply_optional_request_fields() {}"]])[0], /Rust fallback or oracle/u);
   assert.deepEqual(findViolations([[ANTHROPIC_MESSAGES_FILE,
     '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
   ]]), []);

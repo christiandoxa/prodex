@@ -28,8 +28,6 @@ pub use self::tools::{
 };
 
 use crate::translators::gemini_contents_from_request;
-#[cfg(not(feature = "mojo"))]
-use crate::translators::gemini_generation_config_from_request;
 use crate::{ProviderTransformResult, provider_core_rewritten_body};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +49,7 @@ pub fn gemini_provider_core_generate_content_request(
     system_instruction: Option<serde_json::Value>,
     tools: Option<serde_json::Value>,
     tool_config: Option<serde_json::Value>,
-) -> GeminiProviderCoreGenerateContentRequest {
+) -> Result<GeminiProviderCoreGenerateContentRequest, String> {
     let model = chat
         .get("model")
         .and_then(serde_json::Value::as_str)
@@ -66,7 +64,7 @@ pub fn gemini_provider_core_generate_content_request(
         chat,
         &model,
         thinking_budget_tokens,
-    );
+    )?;
     let request = gemini_provider_core_generate_content_request_map(
         original,
         system_instruction,
@@ -74,16 +72,20 @@ pub fn gemini_provider_core_generate_content_request(
         tools,
         tool_config,
         generation_config,
-    );
-    let body =
-        gemini_provider_core_generate_content_body_value(&model, project_id, code_assist, &request);
+    )?;
+    let body = gemini_provider_core_generate_content_body_value(
+        &model,
+        project_id,
+        code_assist,
+        &request,
+    )?;
 
-    GeminiProviderCoreGenerateContentRequest {
+    Ok(GeminiProviderCoreGenerateContentRequest {
         body,
         request,
         model,
         stream,
-    }
+    })
 }
 
 fn runtime_gemini_contents_from_chat(chat: &serde_json::Value) -> Vec<serde_json::Value> {
@@ -133,18 +135,13 @@ pub fn gemini_provider_core_generation_config_from_request(
     chat: &serde_json::Value,
     model: &str,
     thinking_budget_tokens: Option<u64>,
-) -> serde_json::Value {
-    #[cfg(feature = "mojo")]
-    {
-        request_contents::gemini_bridge_request_generation_config(
-            original,
-            chat,
-            model,
-            thinking_budget_tokens,
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    gemini_generation_config_from_request(original, chat, model, thinking_budget_tokens)
+) -> Result<serde_json::Value, String> {
+    request_contents::gemini_bridge_request_generation_config(
+        original,
+        chat,
+        model,
+        thinking_budget_tokens,
+    )
 }
 
 pub fn gemini_provider_core_validate_candidate_count(
@@ -165,50 +162,15 @@ pub fn gemini_provider_core_generate_content_request_map(
     tools: Option<serde_json::Value>,
     tool_config: Option<serde_json::Value>,
     generation_config: serde_json::Value,
-) -> serde_json::Map<String, serde_json::Value> {
-    #[cfg(feature = "mojo")]
-    {
-        request_contents::gemini_bridge_request_map(
-            original,
-            system_instruction.as_ref(),
-            &contents,
-            tools.as_ref(),
-            tool_config.as_ref(),
-            &generation_config,
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let mut request = serde_json::Map::new();
-        if let Some(system_instruction) = system_instruction {
-            request.insert("systemInstruction".to_string(), system_instruction);
-        }
-        request.insert("contents".to_string(), serde_json::Value::Array(contents));
-        if let Some(tools) = tools {
-            request.insert("tools".to_string(), tools);
-        }
-        if let Some(tool_config) = tool_config {
-            request.insert("toolConfig".to_string(), tool_config);
-        }
-        request.insert("generationConfig".to_string(), generation_config);
-        if let Some(settings) = original
-            .get("safety_settings")
-            .or_else(|| original.get("safetySettings"))
-        {
-            request.insert("safetySettings".to_string(), settings.clone());
-        }
-        if let Some(cached_content) = original
-            .get("cached_content")
-            .or_else(|| original.get("cachedContent"))
-            .filter(|value| !value.is_null())
-        {
-            request.insert("cachedContent".to_string(), cached_content.clone());
-        }
-        if let Some(labels) = original.get("labels").filter(|value| !value.is_null()) {
-            request.insert("labels".to_string(), labels.clone());
-        }
-        request
-    }
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    request_contents::gemini_bridge_request_map(
+        original,
+        system_instruction.as_ref(),
+        &contents,
+        tools.as_ref(),
+        tool_config.as_ref(),
+        &generation_config,
+    )
 }
 
 pub fn gemini_provider_core_generate_content_body_value(
@@ -216,21 +178,134 @@ pub fn gemini_provider_core_generate_content_body_value(
     project_id: Option<&str>,
     code_assist: bool,
     request: &serde_json::Map<String, serde_json::Value>,
-) -> serde_json::Value {
-    #[cfg(feature = "mojo")]
-    {
-        request_contents::gemini_bridge_request_body(model, project_id, code_assist, request)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        if code_assist {
-            serde_json::json!({
-                "model": model,
-                "project": project_id,
-                "request": serde_json::Value::Object(request.clone()),
+) -> Result<serde_json::Value, String> {
+    request_contents::gemini_bridge_request_body(model, project_id, code_assist, request)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        gemini_provider_core_generate_content_request_map,
+        gemini_provider_core_generation_config_from_request,
+        gemini_provider_core_tool_config_from_request,
+    };
+    use serde_json::json;
+
+    #[test]
+    fn generation_config_keeps_alias_defaults_and_u64_budget() {
+        let config = gemini_provider_core_generation_config_from_request(
+            &json!({
+                "top_k": 1,
+                "topK": null,
+                "response_schema": {"title": "日本語"},
+                "responseSchema": null,
+                "candidate_count": 1,
+                "reasoning": {"effort": "xhigh"}
+            }),
+            &json!({"temperature": null, "top_p": 0.25, "max_tokens": u64::MAX}),
+            "gemini-2.5-pro",
+            Some(u64::MAX),
+        )
+        .expect("valid generation config");
+
+        assert_eq!(
+            config,
+            json!({
+                "temperature": null,
+                "topP": 0.25,
+                "maxOutputTokens": u64::MAX,
+                "topK": 1,
+                "responseSchema": {"title": "日本語"},
+                "candidateCount": 1,
+                "thinkingConfig": {
+                    "includeThoughts": true,
+                    "thinkingBudget": u64::MAX
+                }
             })
-        } else {
-            serde_json::Value::Object(request.clone())
-        }
+        );
+    }
+
+    #[test]
+    fn request_map_preserves_optional_field_null_and_alias_rules() {
+        let request = gemini_provider_core_generate_content_request_map(
+            &json!({
+                "safety_settings": null,
+                "safetySettings": [{"category": "ignored"}],
+                "cached_content": null,
+                "cachedContent": "ignored-cache",
+                "labels": {"suite": "日本語"}
+            }),
+            None,
+            Vec::new(),
+            None,
+            None,
+            json!({}),
+        )
+        .expect("valid request map");
+
+        assert_eq!(request["contents"], json!([]));
+        assert_eq!(request["generationConfig"], json!({}));
+        assert!(request["safetySettings"].is_null());
+        assert!(request.get("cachedContent").is_none());
+        assert_eq!(request["labels"], json!({"suite": "日本語"}));
+    }
+
+    fn request_with_serialized_size(size: usize) -> serde_json::Value {
+        let mut request = json!({"padding": ""});
+        let empty_size = serde_json::to_vec(&request).unwrap().len();
+        request["padding"] = serde_json::Value::String("x".repeat(size - empty_size));
+        assert_eq!(serde_json::to_vec(&request).unwrap().len(), size);
+        request
+    }
+
+    #[test]
+    fn bridge_helpers_accept_the_mojo_fragment_limit_and_reject_one_byte_over() {
+        const MAX_BYTES: usize = 4 * 1024 * 1024;
+
+        let at_limit = request_with_serialized_size(MAX_BYTES);
+        assert!(
+            gemini_provider_core_generation_config_from_request(
+                &at_limit,
+                &json!({}),
+                "gemini",
+                None,
+            )
+            .is_ok()
+        );
+        assert_eq!(
+            gemini_provider_core_generate_content_request_map(
+                &at_limit,
+                None,
+                Vec::new(),
+                None,
+                None,
+                json!({}),
+            )
+            .unwrap()["contents"],
+            json!([])
+        );
+
+        let over_limit = request_with_serialized_size(MAX_BYTES + 1);
+        assert!(
+            gemini_provider_core_generation_config_from_request(
+                &over_limit,
+                &json!({}),
+                "gemini",
+                None,
+            )
+            .is_err()
+        );
+        assert!(
+            gemini_provider_core_generate_content_request_map(
+                &over_limit,
+                None,
+                Vec::new(),
+                None,
+                None,
+                json!({}),
+            )
+            .is_err()
+        );
+        assert!(gemini_provider_core_tool_config_from_request(&over_limit).is_err());
     }
 }

@@ -15,7 +15,13 @@ pub fn gemini_provider_core_native_request_body_with_project(
     let body = serde_json::to_vec(&value)?;
     #[cfg(feature = "mojo")]
     {
-        Ok(super::request_contents::gemini_bridge_request_native_project(&body, project_id))
+        super::request_contents::gemini_bridge_request_native_project(&body, project_id).map_err(
+            |error| {
+                <serde_json::Error as serde::ser::Error>::custom(format!(
+                    "Mojo Gemini native project kernel failed: {error}"
+                ))
+            },
+        )
     }
     #[cfg(not(feature = "mojo"))]
     {

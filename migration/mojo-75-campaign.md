@@ -1931,3 +1931,24 @@ The canonical source report counts **52,558 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **525,068 additional Mojo LOC** required at this Rust
 volume.
+
+## Gemini generation-config hard replacement
+
+Gemini generation configuration, thinking-level selection, request-map fields,
+and body envelopes now use the existing Mojo request kernels in every provider
+feature mode. The feature-off Rust field mappers and thinking-config copy were
+deleted, as were duplicate Rust Mojo adapters. Kernel input and output errors,
+including requests over the 4 MiB fragment limit, now reach the caller as
+errors instead of panics or silently omitting tool configuration. Public Rust
+request helpers return `Result` rather
+than a bare value; all workspace callers were updated. Caller tests cover
+aliases, null precedence, Unicode, candidate count, and the exact size limit.
+The no-fallback guard rejects restoration of these Rust decisions. The changed
+kernel compiled to objects for all six release targets; native execution
+evidence remains Linux x86_64.
+
+The canonical source report counts **52,579 reachable Mojo LOC** and
+**192,373 Rust production LOC**, totaling **244,952 LOC**: **21.47% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **524,540 additional Mojo LOC** required at this Rust
+volume.
