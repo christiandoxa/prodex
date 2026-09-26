@@ -93,6 +93,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-doctor/src/suggestions.rs",
   "crates/prodex-provider-core/src/fallback/chains.rs",
   "crates/prodex-provider-core/src/fallback/chains/gemini.rs",
+  "crates/prodex-provider-core/src/errors.rs",
   "crates/prodex-provider-core/src/catalog.rs",
   "crates/prodex-provider-core/src/implementation_registry.rs",
   "crates/prodex-provider-core/src/implementation_registry/mojo.rs",
@@ -243,6 +244,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/openai_chat_compat_params.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_request_mojo.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_request_mojo_tests.rs",
+  "crates/prodex-provider-core/src/errors.rs",
   "crates/prodex-provider-core/src/catalog.rs",
   "crates/prodex-provider-core/src/implementation_registry.rs",
   "crates/prodex-provider-core/src/catalog/reasoning.rs",
@@ -397,6 +399,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
   "crates/prodex-provider-core/src/translators/kiro/request/semantics_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/stream.rs",
+  "crates/prodex-provider-core/src/errors.rs",
   "crates/prodex-provider-core/src/catalog.rs",
   "crates/prodex-provider-core/src/implementation_registry.rs",
   "crates/prodex-provider-core/src/catalog/reasoning.rs",
@@ -858,6 +861,8 @@ function selfTest() {
     "fn old_diagnosis() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/kiro/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn old_stream() {}']])[0], /feature-off Rust path/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/errors.rs",
+    'fn classify_provider_error_rust() {}']])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([["crates/prodex-runtime-tuning/src/capacity.rs",
     "fn runtime_proxy_worker_count_default_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
