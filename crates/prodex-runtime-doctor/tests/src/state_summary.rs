@@ -225,6 +225,56 @@ fn runtime_doctor_quota_freshness_label_preserves_hold_rules() {
 }
 
 #[test]
+fn runtime_doctor_quota_freshness_preserves_signed_time_boundaries() {
+    for (now, checked_at, grace, expected) in [
+        (1_000, 1_000, -1, "stale"),
+        (1_000, 1_001, -1, "fresh"),
+        (1_000, 700, 300, "fresh"),
+        (1_000, 699, 300, "stale"),
+        (i64::MAX, i64::MIN, i64::MAX - 1, "stale"),
+        (i64::MIN, i64::MAX, i64::MIN, "fresh"),
+    ] {
+        let snapshot = ready_snapshot(checked_at);
+        assert_eq!(
+            runtime_doctor_quota_freshness_label(Some(&snapshot), now, grace),
+            expected,
+            "now={now} checked_at={checked_at} grace={grace}"
+        );
+    }
+}
+
+#[test]
+fn runtime_doctor_route_score_preserves_signed_time_boundaries() {
+    let entry = RuntimeDoctorHealthScore {
+        score: 5,
+        updated_at: 90,
+    };
+    let mut config = test_config();
+    assert_eq!(
+        routes::runtime_doctor_effective_health_score(&entry, 100, config),
+        4
+    );
+    config.health_decay_seconds = 0;
+    assert_eq!(
+        routes::runtime_doctor_effective_health_score(&entry, 100, config),
+        0
+    );
+    config.health_decay_seconds = -10;
+    assert_eq!(
+        routes::runtime_doctor_effective_health_score(&entry, 80, config),
+        5
+    );
+    let old = RuntimeDoctorHealthScore {
+        updated_at: i64::MIN,
+        ..entry
+    };
+    assert_eq!(
+        routes::runtime_doctor_effective_health_score(&old, i64::MAX, config),
+        0
+    );
+}
+
+#[test]
 #[cfg(feature = "state-summary-mojo")]
 fn runtime_doctor_route_circuit_state_labels_all_states() {
     assert_eq!(

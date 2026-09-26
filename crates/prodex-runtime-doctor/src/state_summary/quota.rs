@@ -3,7 +3,6 @@ use super::{RuntimeDoctorQuotaWindowStatus, RuntimeDoctorUsageSnapshot};
 #[cfg(feature = "state-summary-mojo")]
 use super::{RuntimeDoctorQuotaPressureBand, RuntimeDoctorRouteKind};
 
-#[cfg(feature = "state-summary-mojo")]
 pub(super) fn runtime_doctor_quota_status_code(status: RuntimeDoctorQuotaWindowStatus) -> i64 {
     match status {
         RuntimeDoctorQuotaWindowStatus::Ready => {
@@ -108,73 +107,6 @@ pub(super) fn runtime_doctor_quota_window_status_reason(
     }
 }
 
-#[cfg(not(feature = "mojo"))]
-fn runtime_doctor_usage_snapshot_hold_active(
-    snapshot: &RuntimeDoctorUsageSnapshot,
-    now: i64,
-) -> bool {
-    [
-        (snapshot.five_hour_status, snapshot.five_hour_reset_at),
-        (snapshot.weekly_status, snapshot.weekly_reset_at),
-    ]
-    .into_iter()
-    .any(|(status, reset_at)| {
-        matches!(status, RuntimeDoctorQuotaWindowStatus::Exhausted)
-            && reset_at != i64::MAX
-            && reset_at > now
-    })
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_doctor_usage_snapshot_hold_expired(
-    snapshot: &RuntimeDoctorUsageSnapshot,
-    now: i64,
-) -> bool {
-    [
-        (snapshot.five_hour_status, snapshot.five_hour_reset_at),
-        (snapshot.weekly_status, snapshot.weekly_reset_at),
-    ]
-    .into_iter()
-    .any(|(status, reset_at)| {
-        matches!(status, RuntimeDoctorQuotaWindowStatus::Exhausted)
-            && reset_at != i64::MAX
-            && reset_at <= now
-    })
-}
-
-#[cfg(not(feature = "mojo"))]
-fn runtime_doctor_usage_snapshot_is_usable(
-    snapshot: &RuntimeDoctorUsageSnapshot,
-    now: i64,
-    stale_grace_seconds: i64,
-) -> bool {
-    if runtime_doctor_usage_snapshot_hold_active(snapshot, now) {
-        return true;
-    }
-    if runtime_doctor_usage_snapshot_hold_expired(snapshot, now) {
-        return false;
-    }
-    now.saturating_sub(snapshot.checked_at) <= stale_grace_seconds
-}
-
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_doctor_quota_freshness_label(
-    snapshot: Option<&RuntimeDoctorUsageSnapshot>,
-    now: i64,
-    stale_grace_seconds: i64,
-) -> &'static str {
-    match snapshot {
-        Some(snapshot)
-            if runtime_doctor_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds) =>
-        {
-            "fresh"
-        }
-        Some(_) => "stale",
-        None => "missing",
-    }
-}
-
-#[cfg(feature = "mojo")]
 pub fn runtime_doctor_quota_freshness_label(
     snapshot: Option<&RuntimeDoctorUsageSnapshot>,
     now: i64,
