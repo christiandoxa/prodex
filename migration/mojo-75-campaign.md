@@ -1878,3 +1878,22 @@ The canonical source report counts **52,469 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **526,333 additional Mojo LOC** required at this Rust
 volume.
+
+## DeepSeek request-tool validator hard replacement
+
+DeepSeek tool-shape, tool-choice-shape, and web-search option/context validation
+now use the existing Mojo request-policy kernel in every provider-core feature
+mode. The feature-off Rust shape validators were deleted. The Mojo policy now
+preserves prior nested-name, null-alias, and Unicode-blank behavior. Rust keeps
+Serde acquisition, bounded 4 MiB kernel input, and provider error mapping.
+Tests cover first-error precedence, Unicode, and the exact input limit. The
+no-fallback guard rejects restoration of the removed validator modules.
+Strict-schema normalization, function-name and parameter checks, and function
+tool deduplication remain separate Rust responsibilities for a later wave.
+The existing Mojo ABI and operation IDs did not change.
+
+The canonical source report counts **52,509 reachable Mojo LOC** and
+**192,726 Rust production LOC**, totaling **245,235 LOC**: **21.41% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **525,669 additional Mojo LOC** required at this Rust
+volume.

@@ -157,6 +157,9 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo_tests.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_choice.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_shape.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/web_search.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
   "crates/prodex-provider-core/src/chat_tools_bridge.rs",
   "crates/prodex-provider-core/src/chat_tools_bridge/entry.rs",
@@ -251,6 +254,9 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_choice.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_shape.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/web_search.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
   "crates/prodex-provider-core/src/chat_tools_bridge.rs",
   "crates/prodex-provider-core/src/chat_tools_bridge/entry.rs",
@@ -316,6 +322,8 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/chat_items.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/input_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/messages/local_shell.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/shape.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/shape/mcp.rs",
   "crates/prodex-provider-core/src/chat_tools_bridge/tool_choice.rs",
   "crates/prodex-provider-core/src/chat_tools_bridge/tools.rs",
   "crates/prodex-provider-core/src/chat_tools_bridge/tools/custom.rs",
@@ -957,6 +965,11 @@ function selfTest() {
     /must use the Mojo raw kernel/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
     '#[cfg(not(feature = "mojo"))] fn validate_primitive_request_fields_rust() {}']]).join("\n"),
+    /feature-off Rust path/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/request_tools/shape.rs",
+    "fn old_validator() {}"]]).join("\n"), /Rust fallback or oracle/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_shape.rs",
+    '#[cfg(not(feature = "mojo"))] fn old_validator() {}']]).join("\n"),
     /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
     '#[cfg(not(feature = "mojo"))] mod push;']]).join("\n"),
