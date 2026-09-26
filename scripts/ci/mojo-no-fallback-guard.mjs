@@ -27,6 +27,9 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/render/gemini.rs",
   "crates/prodex-quota/src/capacity.rs",
   "crates/prodex-quota/src/render/windows.rs",
+  "crates/prodex-quota/src/render.rs",
+  "crates/prodex-quota/src/render/remaining_percent.rs",
+  "crates/prodex-quota/src/render/quota_policy.rs",
   "crates/prodex-runtime-proxy/src/mojo.rs",
   "crates/prodex-runtime-proxy/src/quota.rs",
   "crates/prodex-runtime-proxy/src/quota/mojo.rs",
@@ -124,6 +127,9 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-quota/src/render.rs",
+  "crates/prodex-quota/src/render/remaining_percent.rs",
+  "crates/prodex-quota/src/render/quota_policy.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
   "crates/prodex-runtime-proxy/src/quota/mojo.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
@@ -218,6 +224,8 @@ const REMOVED_ORACLE_FILES = [
 const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-quota/src/render/windows.rs",
+  "crates/prodex-quota/src/render/remaining_percent.rs",
+  "crates/prodex-quota/src/render/quota_policy.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-proxy/src/health/score.rs",

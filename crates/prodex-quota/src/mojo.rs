@@ -1,19 +1,15 @@
-#[cfg(feature = "mojo")]
 pub(super) fn round_f64(value: f64) -> i64 {
     prodex_mojo_core::quota::round_f64(value)
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn remaining_percent(used_percent: Option<i64>) -> i64 {
     prodex_mojo_core::quota::remaining_percent(used_percent)
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn window_status(remaining_percent: i64, has_window: bool) -> i64 {
     prodex_mojo_core::quota::window_status(remaining_percent, has_window)
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn pressure_band(five_hour_status: i64, weekly_status: i64) -> i64 {
     prodex_mojo_core::quota::pressure_band(five_hour_status, weekly_status)
 }

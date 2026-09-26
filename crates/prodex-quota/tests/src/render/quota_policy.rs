@@ -1,7 +1,7 @@
 use super::*;
 
 #[test]
-fn quota_window_status_matches_rust_oracle() {
+fn quota_window_status_matches_expected_boundaries() {
     for (remaining, has_window, expected) in [
         (0, false, RuntimeQuotaWindowStatus::Unknown),
         (0, true, RuntimeQuotaWindowStatus::Exhausted),
@@ -13,67 +13,101 @@ fn quota_window_status_matches_rust_oracle() {
         (100, true, RuntimeQuotaWindowStatus::Ready),
     ] {
         assert_eq!(quota_window_status(remaining, has_window), expected);
-        let rust = if !has_window {
-            RuntimeQuotaWindowStatus::Unknown
-        } else if remaining == 0 {
-            RuntimeQuotaWindowStatus::Exhausted
-        } else if remaining <= 5 {
-            RuntimeQuotaWindowStatus::Critical
-        } else if remaining <= 15 {
-            RuntimeQuotaWindowStatus::Thin
-        } else {
-            RuntimeQuotaWindowStatus::Ready
-        };
-        assert_eq!(quota_window_status(remaining, has_window), rust);
     }
 }
 
 #[test]
-fn quota_pressure_band_matches_rust_oracle() {
-    let statuses = [
-        RuntimeQuotaWindowStatus::Ready,
-        RuntimeQuotaWindowStatus::Thin,
-        RuntimeQuotaWindowStatus::Critical,
-        RuntimeQuotaWindowStatus::Exhausted,
-        RuntimeQuotaWindowStatus::Unknown,
+fn quota_pressure_band_matches_expected_values() {
+    let cases = [
+        (
+            RuntimeQuotaWindowStatus::Ready,
+            RuntimeQuotaPressureBand::Healthy,
+        ),
+        (
+            RuntimeQuotaWindowStatus::Thin,
+            RuntimeQuotaPressureBand::Thin,
+        ),
+        (
+            RuntimeQuotaWindowStatus::Critical,
+            RuntimeQuotaPressureBand::Critical,
+        ),
+        (
+            RuntimeQuotaWindowStatus::Exhausted,
+            RuntimeQuotaPressureBand::Exhausted,
+        ),
+        (
+            RuntimeQuotaWindowStatus::Unknown,
+            RuntimeQuotaPressureBand::Unknown,
+        ),
     ];
-    for status in statuses {
-        let expected = rust_pressure_band(status);
+    for (status, expected) in cases {
         assert_eq!(quota_pressure_band_from_window_status(status), expected);
     }
 
-    for five_hour in statuses {
-        for weekly in statuses {
-            let expected = [rust_pressure_band(five_hour), rust_pressure_band(weekly)]
-                .into_iter()
-                .max()
-                .unwrap_or(RuntimeQuotaPressureBand::Unknown);
-            assert_eq!(
-                quota_pressure_band_from_windows(
-                    RuntimeQuotaWindowSummary {
-                        status: five_hour,
-                        remaining_percent: 0,
-                        reset_at: 0,
-                    },
-                    RuntimeQuotaWindowSummary {
-                        status: weekly,
-                        remaining_percent: 0,
-                        reset_at: 0,
-                    },
-                ),
-                expected
-            );
-        }
+    for (five_hour, weekly, expected) in [
+        (
+            RuntimeQuotaWindowStatus::Ready,
+            RuntimeQuotaWindowStatus::Thin,
+            RuntimeQuotaPressureBand::Thin,
+        ),
+        (
+            RuntimeQuotaWindowStatus::Thin,
+            RuntimeQuotaWindowStatus::Critical,
+            RuntimeQuotaPressureBand::Critical,
+        ),
+        (
+            RuntimeQuotaWindowStatus::Exhausted,
+            RuntimeQuotaWindowStatus::Ready,
+            RuntimeQuotaPressureBand::Exhausted,
+        ),
+        (
+            RuntimeQuotaWindowStatus::Unknown,
+            RuntimeQuotaWindowStatus::Ready,
+            RuntimeQuotaPressureBand::Unknown,
+        ),
+    ] {
+        assert_eq!(
+            quota_pressure_band_from_windows(
+                RuntimeQuotaWindowSummary {
+                    status: five_hour,
+                    remaining_percent: 0,
+                    reset_at: 0
+                },
+                RuntimeQuotaWindowSummary {
+                    status: weekly,
+                    remaining_percent: 0,
+                    reset_at: 0
+                },
+            ),
+            expected
+        );
     }
 }
 
-fn rust_pressure_band(status: RuntimeQuotaWindowStatus) -> RuntimeQuotaPressureBand {
-    match status {
-        RuntimeQuotaWindowStatus::Ready => RuntimeQuotaPressureBand::Healthy,
-        RuntimeQuotaWindowStatus::Thin => RuntimeQuotaPressureBand::Thin,
-        RuntimeQuotaWindowStatus::Critical => RuntimeQuotaPressureBand::Critical,
-        RuntimeQuotaWindowStatus::Exhausted => RuntimeQuotaPressureBand::Exhausted,
-        RuntimeQuotaWindowStatus::Unknown => RuntimeQuotaPressureBand::Unknown,
+#[test]
+fn quota_remaining_and_rounding_match_expected_boundaries() {
+    for (used, expected) in [
+        (None, 0),
+        (Some(i64::MIN), 100),
+        (Some(-1), 100),
+        (Some(0), 100),
+        (Some(42), 58),
+        (Some(100), 0),
+        (Some(101), 0),
+        (Some(i64::MAX), 0),
+    ] {
+        assert_eq!(remaining_percent(used), expected);
+    }
+    for (value, expected) in [
+        (-2.5, -3),
+        (-0.5, -1),
+        (0.5, 1),
+        (2.5, 3),
+        (f64::NAN, 0),
+        (f64::INFINITY, i64::MAX),
+        (f64::NEG_INFINITY, i64::MIN),
+    ] {
+        assert_eq!(round_quota_float(value), expected);
     }
 }
 

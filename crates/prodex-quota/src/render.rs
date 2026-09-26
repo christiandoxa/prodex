@@ -23,14 +23,8 @@ mod reports;
 mod time;
 mod windows;
 
-#[cfg(feature = "mojo")]
 fn round_quota_float(value: f64) -> i64 {
     crate::mojo::round_f64(value)
-}
-
-#[cfg(not(feature = "mojo"))]
-fn round_quota_float(value: f64) -> i64 {
-    value.round() as i64
 }
 
 pub use copilot::*;
