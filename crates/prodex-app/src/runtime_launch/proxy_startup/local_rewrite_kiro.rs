@@ -61,9 +61,9 @@ use prodex_provider_core::kiro_provider_core_responses_items_from_chat_message a
 use prodex_provider_core::{
     ProviderEndpoint, ProviderId, RuntimeProviderBindingIdentity,
     kiro_provider_core_chat_completion_finish_reason as runtime_kiro_chat_completion_finish_reason,
-    kiro_provider_core_chat_completion_value_from_response as runtime_kiro_chat_completion_value_from_response,
     kiro_provider_core_prompt_from_chat_messages as runtime_kiro_prompt_from_messages,
     kiro_provider_core_stream_content_text as runtime_kiro_content_text,
+    kiro_provider_core_try_chat_completion_value_from_response as runtime_kiro_chat_completion_value_from_response,
 };
 use prodex_provider_spi::{ProviderStreamMode, ProviderStreamMode::Streaming};
 use runtime_proxy_crate::path_without_query;
@@ -361,10 +361,12 @@ fn runtime_kiro_buffered_upstream_result(
             );
         }
         let body = if chat_completions_route {
-            serde_json::to_vec(&runtime_kiro_chat_completion_value_from_response(
+            let completion = runtime_kiro_chat_completion_value_from_response(
                 &response, request_id,
-            ))
-            .context("failed to serialize Kiro chat completion JSON")?
+            )
+            .map_err(|error| anyhow::anyhow!("Kiro chat response rewrite failed: {error:?}"))?;
+            serde_json::to_vec(&completion)
+                .context("failed to serialize Kiro chat completion JSON")?
         } else if messages_route {
             let requested_model = requested_model.as_deref().unwrap_or("kiro-cli");
             serde_json::to_vec(

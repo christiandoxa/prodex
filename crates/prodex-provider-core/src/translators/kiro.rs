@@ -3,6 +3,8 @@ use crate::translator::{
     ProviderUnsupportedReason,
 };
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat, provider_supported_endpoints};
+use prodex_mojo_core::MojoError;
+use prodex_mojo_core::rich::KIRO_RESPONSE_MAX_BYTES;
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -49,6 +51,7 @@ pub use self::response::{
     kiro_provider_core_chat_completion_value_from_response,
     kiro_provider_core_invalid_request_error_value, kiro_provider_core_model_list_value,
     kiro_provider_core_model_value_or_not_found, kiro_provider_core_response_has_tool_calls,
+    kiro_provider_core_try_chat_completion_value_from_response,
     kiro_provider_core_unsupported_path_error_value,
 };
 pub use self::stream::{
@@ -205,6 +208,19 @@ impl ProviderTranslator for KiroTranslator {
             );
         }
         if input.endpoint == ProviderEndpoint::ChatCompletions {
+            if input.body.len() > KIRO_RESPONSE_MAX_BYTES {
+                return ProviderTransformResult::rejected(
+                    self.provider(),
+                    input.endpoint,
+                    self.upstream_wire_format(),
+                    self.client_wire_format(),
+                    "Kiro chat completions response body exceeds the safe size limit",
+                )
+                .with_metadata(
+                    "error_code",
+                    Value::String("response_too_large".to_string()),
+                );
+            }
             let response = match serde_json::from_slice::<Value>(&input.body) {
                 Ok(response) => response,
                 Err(_) => {
@@ -231,9 +247,26 @@ impl ProviderTranslator for KiroTranslator {
                     Value::String("invalid_response_body".to_string()),
                 );
             }
-            let body = match serde_json::to_vec(
-                &kiro_provider_core_chat_completion_value_from_response(&response, 0),
-            ) {
+            let response =
+                match response::kiro_provider_core_try_chat_completion_value_from_response(
+                    &response, 0,
+                ) {
+                    Ok(response) => response,
+                    Err(error) => {
+                        return ProviderTransformResult::rejected(
+                            self.provider(),
+                            input.endpoint,
+                            self.upstream_wire_format(),
+                            self.client_wire_format(),
+                            "failed to rewrite Kiro chat completions response body",
+                        )
+                        .with_metadata(
+                            "error_code",
+                            Value::String(kiro_response_error_code(error).to_string()),
+                        );
+                    }
+                };
+            let body = match serde_json::to_vec(&response) {
                 Ok(body) => body,
                 Err(_) => {
                     return ProviderTransformResult::rejected(
@@ -312,6 +345,15 @@ impl ProviderTranslator for KiroTranslator {
 
 fn kiro_supported_endpoint(endpoint: ProviderEndpoint) -> bool {
     provider_supported_endpoints(ProviderId::Kiro).contains(&endpoint)
+}
+
+fn kiro_response_error_code(error: MojoError) -> &'static str {
+    match error {
+        MojoError::InvalidInput => "response_too_large",
+        MojoError::Capacity => "capacity",
+        MojoError::AbiMismatch => "mojo_abi_mismatch",
+        MojoError::InvalidOutput | MojoError::Structured(_) => "invalid_response_body",
+    }
 }
 
 fn kiro_degraded_details(

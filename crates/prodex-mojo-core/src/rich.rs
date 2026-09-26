@@ -94,10 +94,10 @@ pub use openai_compat::{
 #[path = "rich/kiro.rs"]
 mod kiro;
 pub use kiro::{
-    KiroChatRewrite, KiroChatRewriteIssue, KiroKernelInput, KiroKernelOperation,
-    KiroRequestValidationInput, KiroRequestValidationMode, KiroRequestValidationPlan, kiro_kernel,
-    kiro_rewrite_chat_request_json, kiro_rewrite_chat_response_json, kiro_validate_request,
-    kiro_validate_request_json,
+    KIRO_RESPONSE_MAX_BYTES, KiroChatRewrite, KiroChatRewriteIssue, KiroKernelInput,
+    KiroKernelOperation, KiroRequestValidationInput, KiroRequestValidationMode,
+    KiroRequestValidationPlan, kiro_kernel, kiro_rewrite_chat_request_json,
+    kiro_rewrite_chat_response_json, kiro_validate_request, kiro_validate_request_json,
 };
 #[path = "rich/smart_context_normalization.rs"]
 mod smart_context_normalization;

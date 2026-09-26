@@ -24,6 +24,8 @@ from json_view import (
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime KIRO_KERNEL_MAX_BYTES: Int64 = 4_194_304
+comptime KIRO_RESPONSE_MAX_BYTES: Int64 = 33_554_432
+comptime KIRO_RESPONSE_MAX_OUTPUT_BYTES: Int64 = 268_435_456
 comptime KIRO_KERNEL_STATUS_OK: Int64 = 0
 comptime KIRO_KERNEL_STATUS_INVALID: Int64 = 1
 comptime KIRO_KERNEL_STATUS_UTF8: Int64 = 2
@@ -3047,6 +3049,7 @@ def kiro_raw_first_output_message_text(
                             )
                             if kiro_raw_present(text) and deepseek_json_byte(view, text[0]) == 34:
                                 return text^
+                return missing^
             cursor = deepseek_json_skip_ws(view, item_end, output[1] - 1)
             if cursor < output[1] - 1 and deepseek_json_byte(view, cursor) == 44:
                 cursor = deepseek_json_skip_ws(view, cursor + 1, output[1] - 1)
@@ -3233,7 +3236,11 @@ def kiro_raw_chat_response(
             or not kiro_raw_put_chat_tool_calls(writer, view, output)
         ):
             return False
-    if kiro_raw_present(reasoning) and not kiro_raw_string_empty(view, reasoning):
+    if (
+        kiro_raw_present(reasoning)
+        and deepseek_json_byte(view, reasoning[0]) == 34
+        and not kiro_raw_string_empty(view, reasoning)
+    ):
         if (
             not kiro_put_literal(writer, StringSlice(',"reasoning_content":'))
             or not kiro_put_view_range(writer, view, reasoning[0], reasoning[1])
@@ -3242,15 +3249,14 @@ def kiro_raw_chat_response(
     if (
         kiro_raw_present(status)
         and deepseek_json_raw_equals(view, status[0], status[1], StringSlice("failed"))
-        and kiro_raw_present(error_message)
-        and deepseek_json_byte(view, error_message[0]) == 34
+        and kiro_raw_present(error)
     ):
-        if (
-            not kiro_put_literal(writer, StringSlice(',"refusal":'))
-            or not kiro_put_view_range(
-                writer, view, error_message[0], error_message[1]
-            )
-        ):
+        if not kiro_put_literal(writer, StringSlice(',"refusal":')):
+            return False
+        if kiro_raw_present(error_message):
+            if not kiro_put_view_range(writer, view, error_message[0], error_message[1]):
+                return False
+        elif not kiro_put_literal(writer, StringSlice('"Kiro request failed"')):
             return False
     if not kiro_put_literal(writer, StringSlice('},"finish_reason":"')):
         return False
@@ -3301,15 +3307,16 @@ def kiro_chat_response_rewrite_v1(
         return KIRO_KERNEL_STATUS_ABI
     if (
         input_length < 0
-        or input_length > KIRO_KERNEL_MAX_BYTES
+        or input_length > KIRO_RESPONSE_MAX_BYTES
         or output_capacity <= 0
+        or output_capacity > KIRO_RESPONSE_MAX_OUTPUT_BYTES
         or input_address == 0
         or output_address == 0
         or written_address == 0
     ):
         return KIRO_KERNEL_STATUS_INVALID
     var view = ProdexRichStringView(input_address, UInt(input_length))
-    if not rich_view_valid(view, KIRO_KERNEL_MAX_BYTES):
+    if not rich_view_valid(view, KIRO_RESPONSE_MAX_BYTES):
         return KIRO_KERNEL_STATUS_UTF8
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)

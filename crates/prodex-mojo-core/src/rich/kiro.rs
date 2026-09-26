@@ -312,6 +312,9 @@ unsafe extern "C" {
 }
 
 const KIRO_KERNEL_MAX_BYTES: usize = 4 * 1024 * 1024;
+/// Maximum canonical JSON response size accepted by Kiro response transforms.
+pub const KIRO_RESPONSE_MAX_BYTES: usize = 32 * 1024 * 1024;
+const KIRO_RESPONSE_MAX_OUTPUT_BYTES: usize = 256 * 1024 * 1024;
 
 fn kernel_view(value: Option<&str>) -> RichStringView {
     value.map(view).unwrap_or_default()
@@ -549,41 +552,58 @@ pub fn kiro_rewrite_chat_request_json(input: &str) -> Result<KiroChatRewrite, Mo
 /// Rewrite one canonical Kiro Responses JSON value into Chat Completions JSON.
 pub fn kiro_rewrite_chat_response_json(input: &str, request_id: u64) -> Result<Vec<u8>, MojoError> {
     ensure_rich_abi()?;
-    if input.len() > KIRO_KERNEL_MAX_BYTES {
+    if input.len() > KIRO_RESPONSE_MAX_BYTES {
         return Err(MojoError::InvalidInput);
     }
     let capacity = input
         .len()
-        .checked_mul(8)
-        .and_then(|value| value.checked_add(4096))
+        .checked_add(4096)
         .ok_or(MojoError::InvalidInput)?;
-    let mut output = vec![0_u8; capacity];
-    let mut written = 0_i64;
-    let status = unsafe {
-        prodex_mojo_kiro_chat_response_rewrite_v1(
-            RICH_ABI_VERSION,
-            input.as_ptr() as u64,
-            i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
-            request_id,
-            mojo_mut_pointer_address(output.as_mut_ptr()),
-            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
-            mojo_mut_pointer_address(&mut written),
-        )
-    };
-    if status != 0 {
-        return Err(match status {
-            1 | 2 => MojoError::InvalidInput,
-            3 => MojoError::Capacity,
-            4 => MojoError::AbiMismatch,
-            _ => MojoError::InvalidOutput,
-        });
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(capacity)
+        .map_err(|_| MojoError::Capacity)?;
+    output.resize(capacity, 0);
+    loop {
+        let mut written = 0_i64;
+        let status = unsafe {
+            prodex_mojo_kiro_chat_response_rewrite_v1(
+                RICH_ABI_VERSION,
+                input.as_ptr() as u64,
+                i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+                request_id,
+                mojo_mut_pointer_address(output.as_mut_ptr()),
+                i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+                mojo_mut_pointer_address(&mut written),
+            )
+        };
+        if status == 3 {
+            let capacity = output
+                .len()
+                .checked_mul(2)
+                .map(|capacity| capacity.min(KIRO_RESPONSE_MAX_OUTPUT_BYTES))
+                .filter(|capacity| *capacity > output.len())
+                .ok_or(MojoError::Capacity)?;
+            output
+                .try_reserve_exact(capacity - output.len())
+                .map_err(|_| MojoError::Capacity)?;
+            output.resize(capacity, 0);
+            continue;
+        }
+        if status != 0 {
+            return Err(match status {
+                1 | 2 => MojoError::InvalidInput,
+                4 => MojoError::AbiMismatch,
+                _ => MojoError::InvalidOutput,
+            });
+        }
+        let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+        if written > output.len() {
+            return Err(MojoError::InvalidOutput);
+        }
+        output.truncate(written);
+        return Ok(output);
     }
-    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
-    if written > output.len() {
-        return Err(MojoError::InvalidOutput);
-    }
-    output.truncate(written);
-    Ok(output)
 }
 
 /// Apply the authoritative Kiro request capability policy in Mojo.

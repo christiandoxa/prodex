@@ -608,7 +608,8 @@
           "deepseek_simple_request_eligibility",
           "deepseek_request_metadata_composition",
           "deepseek_strict_schema_normalization",
-          "anthropic_web_search_result_shaping"
+          "anthropic_web_search_result_shaping",
+          "kiro_chat_response_mapping"
         ]
       },
       {
@@ -655,6 +656,22 @@
         ],
         "operations": [
           "anthropic_web_search_result_shaping"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/kiro.mojo",
+        "language": "mojo",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "semantic",
+        "semantic_ranges": [
+          {
+            "start": 3014,
+            "end": 3295
+          }
+        ],
+        "operations": [
+          "kiro_chat_response_mapping"
         ]
       }
     ],
@@ -1568,6 +1585,31 @@
       "platform_fallback": false,
       "rust_adapter_scope": "Serde request serialization, bounded Mojo invocation, error mapping, and JSON result decoding",
       "reuse_constraint": "The existing Gemini bridge text operation rejects contextual-user instructions and handles only its text-only subset; this kernel preserves the broader feature-off Responses fallback semantics."
+    },
+    {
+      "name": "kiro_chat_response_mapping",
+      "domain": "provider/kiro",
+      "introduced_in": "0.432.1",
+      "baseline_state": "feature-off Rust response mapping",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_kiro_chat_response_rewrite_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/kiro.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/kiro/response.rs",
+      "consumer_marker": "kiro_rewrite_chat_response_json",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/kiro/response.rs",
+        "crates/prodex-provider-core/src/translators/kiro.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/tests/kiro_response.rs",
+      "rust_owner_before": "Kiro Responses-to-Chat Completions JSON response mapping",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; fixed caller expectations cover complete translated JSON, refusal preservation, size bounds, and rejection metadata",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde parsing and serialization, bounded Mojo ABI invocation, and typed transform result mapping"
     }
   ],
   "rust_semantic_reductions": [
