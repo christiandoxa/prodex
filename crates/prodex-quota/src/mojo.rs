@@ -20,15 +20,19 @@ pub(crate) fn gemini_bucket_numeric_batch(
     prodex_mojo_core::quota::gemini_bucket_numeric_batch(inputs)
 }
 
-#[cfg(feature = "mojo")]
 pub(crate) fn quota_capacity_batch(
     inputs: &[prodex_mojo_core::quota::QuotaCapacityInput],
     route_kind: i64,
 ) -> Result<Vec<prodex_mojo_core::quota::QuotaCapacityOutput>, prodex_mojo_core::MojoError> {
-    prodex_mojo_core::quota::quota_capacity_batch(inputs, route_kind)
+    let mut outputs = Vec::with_capacity(inputs.len());
+    for batch in inputs.chunks(prodex_mojo_core::quota::QUOTA_CAPACITY_BATCH_MAX_COUNT) {
+        outputs.extend(prodex_mojo_core::quota::quota_capacity_batch(
+            batch, route_kind,
+        )?);
+    }
+    Ok(outputs)
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn quota_window_pressure(
     remaining_percent: i64,
     reset_at: i64,

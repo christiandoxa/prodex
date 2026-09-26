@@ -1562,3 +1562,20 @@ The canonical source report counts **51,921 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **528,912 additional Mojo LOC** required at this Rust
 volume.
+
+## Quota window capacity hard replacement
+
+Quota window rendering and selection now call the existing capacity Mojo
+kernel in both feature modes. The feature-off false and empty-result stubs
+were deleted. Both modes share the existing Rust input adapter; it splits
+provider-supplied windows into Mojo batches of at most 256 while preserving
+their order. Expected-value tests cover invalid and missing windows, reset
+pressure, admission holds, Unicode labels, and 256/257/513-row boundaries.
+Native execution evidence is Linux x86_64; macOS and Windows runtime
+execution was not run.
+
+The canonical source report counts **51,921 reachable Mojo LOC** and
+**193,609 Rust production LOC**, totaling **245,530 LOC**: **21.15% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **528,906 additional Mojo LOC** required at this Rust
+volume.

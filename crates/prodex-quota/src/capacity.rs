@@ -1,32 +1,18 @@
-use crate::AdditionalRateLimit;
-#[cfg(feature = "mojo")]
-use crate::{UsageResponse, WindowPair, find_main_window};
+use crate::{AdditionalRateLimit, UsageResponse, WindowPair, find_main_window};
 
 /// Checks explicit backend admission state plus the bucket's own windows.
 pub fn additional_rate_limit_is_usable(additional: &AdditionalRateLimit) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        classify_additional_rate_limit_is_usable(additional)
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        let _ = additional;
-        false
-    }
+    classify_additional_rate_limit_is_usable(additional)
 }
 
-#[cfg(feature = "mojo")]
 use prodex_runtime_state::RuntimeRouteKind;
 
-#[cfg(feature = "mojo")]
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct QuotaCapacityCandidate<'a> {
     pub pair: &'a WindowPair,
     pub output: prodex_mojo_core::quota::QuotaCapacityOutput,
 }
 
-#[cfg(feature = "mojo")]
 pub(crate) fn quota_capacity_candidates_for_usage_at(
     usage: &UsageResponse,
     route_kind: RuntimeRouteKind,
@@ -67,7 +53,6 @@ pub(crate) fn quota_capacity_candidates_for_usage_at(
         .collect())
 }
 
-#[cfg(feature = "mojo")]
 pub(crate) fn classify_additional_rate_limit_is_usable(additional: &AdditionalRateLimit) -> bool {
     let input = quota_capacity_input_for_pair(
         &additional.rate_limit,
@@ -82,7 +67,6 @@ pub(crate) fn classify_additional_rate_limit_is_usable(additional: &AdditionalRa
         .usable
 }
 
-#[cfg(feature = "mojo")]
 pub(crate) fn quota_capacity_for_window_pair(
     pair: &WindowPair,
 ) -> Result<prodex_mojo_core::quota::QuotaCapacityOutput, prodex_mojo_core::MojoError> {
@@ -97,7 +81,6 @@ pub(crate) fn quota_capacity_for_window_pair(
     quota_capacity_output(input, RuntimeRouteKind::Standard)
 }
 
-#[cfg(feature = "mojo")]
 fn quota_capacity_output(
     input: prodex_mojo_core::quota::QuotaCapacityInput,
     route_kind: RuntimeRouteKind,
@@ -108,7 +91,6 @@ fn quota_capacity_output(
         .ok_or(prodex_mojo_core::MojoError::InvalidOutput)
 }
 
-#[cfg(feature = "mojo")]
 fn quota_capacity_input_for_pair(
     pair: &WindowPair,
     lane: i64,
@@ -155,7 +137,6 @@ fn quota_capacity_input_for_pair(
     }
 }
 
-#[cfg(feature = "mojo")]
 fn quota_capacity_window_input(pair: &WindowPair, label: &str) -> (i64, bool, i64) {
     let window = find_main_window(pair, label);
     let used_percent = window.and_then(|window| window.used_percent);
@@ -167,7 +148,6 @@ fn quota_capacity_window_input(pair: &WindowPair, label: &str) -> (i64, bool, i6
     )
 }
 
-#[cfg(feature = "mojo")]
 fn admission_value(
     extra: &std::collections::BTreeMap<String, serde_json::Value>,
     key: &str,
@@ -181,7 +161,6 @@ fn admission_value(
     }
 }
 
-#[cfg(feature = "mojo")]
 fn route_kind_code(route_kind: RuntimeRouteKind) -> i64 {
     match route_kind {
         RuntimeRouteKind::Responses => 0,

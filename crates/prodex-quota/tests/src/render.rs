@@ -335,10 +335,7 @@ fn quota_reports_put_status_in_column_and_resets_on_left_detail_line() {
         .expect("resets");
 
     assert!(header.contains("STATUS"));
-    #[cfg(feature = "mojo")]
     assert!(row.contains("Ready"));
-    #[cfg(not(feature = "mojo"))]
-    assert!(row.contains("Unavailable"));
     assert!(!output.contains("status: Ready"));
     assert!(resets.contains("5h"));
 }
@@ -589,10 +586,7 @@ fn quota_reports_render_copilot_rows_without_falling_back_to_error() {
     let output = render_quota_reports_with_layout(&reports, true, None, 160);
 
     assert!(output.contains("Available:"));
-    #[cfg(feature = "mojo")]
     assert!(output.contains("2/2 profile"));
-    #[cfg(not(feature = "mojo"))]
-    assert!(!output.contains("2/2 profile"));
     assert!(output.contains("copilot-main"));
     assert!(output.contains("copilot-user"));
     assert!(output.contains("individual"));

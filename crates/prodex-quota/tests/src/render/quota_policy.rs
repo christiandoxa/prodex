@@ -271,7 +271,7 @@ fn quota_admission_uses_expected_upstream_flags() {
 
 #[cfg(not(feature = "mojo"))]
 #[test]
-fn quota_capacity_stays_fail_closed_without_feature() {
+fn quota_windows_use_mojo_without_renderer_feature() {
     let pair = WindowPair {
         allowed: None,
         limit_reached: None,
@@ -301,11 +301,17 @@ fn quota_capacity_stays_fail_closed_without_feature() {
         extra: std::collections::BTreeMap::new(),
     };
 
-    assert!(!window_pair_has_ready_limit(&pair));
-    assert!(!openai_quota_has_ready_limit(&usage));
-    assert!(openai_quota_runtime_window_pair(&usage).is_none());
-    assert!(required_main_window_snapshot_at(&usage, "5h", 1_700_000_000).is_none());
-    assert!(!openai_quota_has_ready_limit_for_model(
+    assert!(window_pair_has_ready_limit(&pair));
+    assert!(openai_quota_has_ready_limit(&usage));
+    assert!(std::ptr::eq(
+        openai_quota_runtime_window_pair(&usage).unwrap(),
+        usage.rate_limit.as_ref().unwrap()
+    ));
+    let snapshot = required_main_window_snapshot_at(&usage, "5h", 1_700_000_000).unwrap();
+    assert_eq!(snapshot.remaining_percent, 90);
+    assert_eq!(snapshot.reset_at, 1_700_003_600);
+    assert_eq!(snapshot.pressure_score, 40_000);
+    assert!(openai_quota_has_ready_limit_for_model(
         &usage,
         Some("gpt-5.6-luna")
     ));
@@ -325,7 +331,7 @@ fn quota_capacity_stays_fail_closed_without_feature() {
     assert!(additional_rate_limit_is_luna_reserve(&reserve));
 
     assert!(!openai_usage_has_unknown_luna_capacity(&usage));
-    assert!(!openai_usage_supports_model(
+    assert!(openai_usage_supports_model(
         &usage,
         false,
         Some("gpt-5.6-luna")
@@ -346,7 +352,7 @@ fn quota_capacity_stays_fail_closed_without_feature() {
         false,
         Some("gpt-5.6-luna")
     ));
-    assert!(!additional_rate_limit_is_usable(&additional));
+    assert!(additional_rate_limit_is_usable(&additional));
 }
 
 #[test]
@@ -375,15 +381,9 @@ fn quota_summary_marks_exhausted_window() {
     };
 
     let summary = quota_summary(&usage);
-    #[cfg(feature = "mojo")]
     assert_eq!(
         summary.five_hour.status,
         RuntimeQuotaWindowStatus::Exhausted
     );
-    #[cfg(not(feature = "mojo"))]
-    assert_eq!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown);
-    #[cfg(feature = "mojo")]
     assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Exhausted);
-    #[cfg(not(feature = "mojo"))]
-    assert_eq!(summary.route_band, RuntimeQuotaPressureBand::Unknown);
 }
