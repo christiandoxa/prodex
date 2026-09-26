@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
+#[cfg(feature = "runtime-log-mojo")]
 use std::fs;
-use std::path::{Path, PathBuf};
-
-use super::*;
+use std::path::Path;
+#[cfg(feature = "runtime-log-mojo")]
+use std::path::PathBuf;
 
 const RUNTIME_LOG_FUNCTIONS: &[&str] = &[
     "runtime_proxy_log",
@@ -31,6 +32,7 @@ const RUNTIME_MARKER_PREFIXES: &[&str] = &[
     "websocket",
 ];
 
+#[cfg(feature = "runtime-log-mojo")]
 const RUNTIME_DOCTOR_MARKER_GUARD_ALLOWLIST: &[&str] = &[
     "continuation_journal_save_inline",
     "continuation_journal_save_suppressed",
@@ -49,68 +51,13 @@ const RUNTIME_DOCTOR_MARKER_GUARD_ALLOWLIST: &[&str] = &[
     "websocket_reuse_start",
 ];
 
+#[cfg(feature = "runtime-log-mojo")]
 #[test]
-fn runtime_doctor_typed_marker_facade_matches_string_registry() {
-    let typed_markers = RuntimeDoctorMarker::ALL
-        .iter()
-        .copied()
-        .map(RuntimeDoctorMarker::as_str)
-        .collect::<Vec<_>>();
-
-    assert_eq!(typed_markers, RUNTIME_DOCTOR_MARKERS);
-    assert_eq!(
-        typed_markers.iter().copied().collect::<BTreeSet<_>>().len(),
-        typed_markers.len(),
-        "typed runtime marker registry contains duplicate names"
-    );
-    for marker in RuntimeDoctorMarker::ALL.iter().copied() {
-        assert_eq!(
-            RuntimeDoctorMarker::from_name(marker.as_str()),
-            Some(marker),
-            "typed runtime marker round trip failed for {}",
-            marker.as_str()
-        );
-        let descriptor = runtime_doctor_marker_descriptor(marker.as_str())
-            .expect("known marker should have descriptor");
-        assert_eq!(descriptor.marker, marker);
-        assert_eq!(descriptor.name, marker.as_str());
-    }
-}
-
-#[test]
-fn runtime_doctor_typed_facet_facade_matches_string_registry() {
-    let typed_facets = RuntimeDoctorLogFacet::ALL
-        .iter()
-        .copied()
-        .map(RuntimeDoctorLogFacet::as_str)
-        .collect::<Vec<_>>();
-
-    assert_eq!(typed_facets, RUNTIME_DOCTOR_FACETS);
-    assert_eq!(
-        typed_facets.iter().copied().collect::<BTreeSet<_>>().len(),
-        typed_facets.len(),
-        "typed runtime facet registry contains duplicate names"
-    );
-    for facet in RuntimeDoctorLogFacet::ALL.iter().copied() {
-        assert_eq!(
-            RuntimeDoctorLogFacet::from_name(facet.as_str()),
-            Some(facet),
-            "typed runtime facet round trip failed for {}",
-            facet.as_str()
-        );
-    }
-}
-
-#[test]
-fn runtime_doctor_marker_registry_covers_runtime_log_markers() {
+fn runtime_doctor_mojo_classifier_covers_runtime_log_markers() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let mut source_files = Vec::new();
     collect_rust_source_files(&manifest_dir.join("src"), &mut source_files);
 
-    let known_markers = RUNTIME_DOCTOR_MARKERS
-        .iter()
-        .copied()
-        .collect::<BTreeSet<_>>();
     let allowlist = RUNTIME_DOCTOR_MARKER_GUARD_ALLOWLIST
         .iter()
         .copied()
@@ -139,8 +86,11 @@ fn runtime_doctor_marker_registry_covers_runtime_log_markers() {
 
     let missing = candidates
         .into_iter()
-        .filter(|(marker, _)| !known_markers.contains(marker.as_str()))
         .filter(|(marker, _)| !allowlist.contains(marker.as_str()))
+        .filter(|(marker, _)| {
+            !prodex_mojo_core::rich::runtime_doctor_marker_known(marker)
+                .expect("Mojo runtime-doctor marker classifier failed")
+        })
         .collect::<BTreeMap<_, _>>();
 
     if !missing.is_empty() {
@@ -158,11 +108,12 @@ fn runtime_doctor_marker_registry_covers_runtime_log_markers() {
             .collect::<Vec<_>>()
             .join("\n");
         panic!(
-            "runtime doctor marker registry missing runtime log marker(s). Add diagnostic markers to RUNTIME_DOCTOR_MARKERS, or classify noisy lifecycle tokens in RUNTIME_DOCTOR_MARKER_GUARD_ALLOWLIST.\n{details}"
+            "Mojo runtime-doctor marker classifier missed runtime log marker(s), or noisy lifecycle tokens need the allowlist.\n{details}"
         );
     }
 }
 
+#[cfg(feature = "runtime-log-mojo")]
 fn collect_rust_source_files(root: &Path, files: &mut Vec<PathBuf>) {
     let Ok(entries) = fs::read_dir(root) else {
         return;

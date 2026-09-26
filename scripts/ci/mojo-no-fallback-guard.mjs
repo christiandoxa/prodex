@@ -92,6 +92,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/final_summary/mojo.rs",
   "crates/prodex-runtime-doctor/src/suggestions.rs",
+  "crates/prodex-runtime-doctor/src/markers.rs",
   "crates/prodex-provider-core/src/fallback/chains.rs",
   "crates/prodex-provider-core/src/fallback/chains/gemini.rs",
   "crates/prodex-provider-core/src/errors.rs",
@@ -466,6 +467,7 @@ const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_p
 const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
 const FINGERPRINT_ARTIFACTS_FILE = "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs";
 const DEEPSEEK_SHAPING_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs";
+const RUNTIME_DOCTOR_MARKERS_FILE = "crates/prodex-runtime-doctor/src/markers.rs";
 const CHAT_TOOLS_BRIDGE_FILE = "crates/prodex-provider-core/src/chat_tools_bridge.rs";
 const CHAT_TOOLS_MOJO_FILE = "crates/prodex-provider-core/src/chat_tools_bridge/mojo.rs";
 const DEEPSEEK_SHAPING_COMPLETED_FNS = [
@@ -575,6 +577,11 @@ export function findViolations(files) {
     }
     return [];
   });
+  const doctorMarkerViolations = files
+    .filter(([filePath, contents]) => filePath === RUNTIME_DOCTOR_MARKERS_FILE &&
+      (!contents.includes("runtime_doctor_marker_known(") ||
+        /\b(?:runtime_doctor_marker_registry|RuntimeDoctorMarker|RUNTIME_DOCTOR_MARKERS)\b/u.test(contents)))
+    .map(([filePath]) => `${filePath}: marker recognition must use the Mojo classifier`);
   const geminiBufferedResponseViolations = files
     .filter(([filePath, contents]) => filePath === GEMINI_BUFFERED_RESPONSE_FILE &&
       (!contents.includes("gemini_buffered_response_kernel(input)") ||
@@ -698,6 +705,7 @@ export function findViolations(files) {
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
     ...geminiFallbackViolations, ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekResponseToolCallViolations, ...chatToolViolations,
+    ...doctorMarkerViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
@@ -908,6 +916,9 @@ function selfTest() {
     "mod tools; pub use self::tools::*;"]]).join("\n"), /chat-tool operations must use the Mojo entrypoints/u);
   assert.match(findViolations([[CHAT_TOOLS_MOJO_FILE,
     "fn transform_bytes() {}"]]).join("\n"), /chat-tool operations must invoke the Mojo kernel/u);
+  assert.match(findViolations([[RUNTIME_DOCTOR_MARKERS_FILE,
+    "macro_rules! runtime_doctor_marker_registry {}"]]).join("\n"),
+  /marker recognition must use the Mojo classifier/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/chat_tools_bridge/tools.rs",
     "fn provider_core_chat_tools_from_responses_request() {}"]]).join("\n"),
   /Rust fallback or oracle/u);
