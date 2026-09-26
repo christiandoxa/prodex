@@ -43,32 +43,19 @@ pub fn runtime_websocket_should_promote_committed_profile(
     _request_session_id_header_present: bool,
     bound_session_profile: Option<&str>,
 ) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        prodex_mojo_core::runtime::websocket_response_plan(
-            prodex_mojo_core::runtime::WebsocketResponsePlanInput {
-                request_previous_response_present: previous_response_id.is_some(),
-                request_turn_state_present: request_turn_state.is_some(),
-                bound_profile_present: bound_profile.is_some(),
-                turn_state_profile_present: turn_state_profile.is_some(),
-                compact_followup_profile_present: compact_followup_profile.is_some(),
-                bound_session_profile_present: bound_session_profile.is_some(),
-                ..Default::default()
-            },
-        )
-        .expect("Mojo websocket commit planning returned an invalid result")
-        .committed_profile_promotion_allowed
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        previous_response_id.is_none()
-            && bound_profile.is_none()
-            && request_turn_state.is_none()
-            && turn_state_profile.is_none()
-            && compact_followup_profile.is_none()
-            && bound_session_profile.is_none()
-    }
+    prodex_mojo_core::runtime::websocket_response_plan(
+        prodex_mojo_core::runtime::WebsocketResponsePlanInput {
+            request_previous_response_present: previous_response_id.is_some(),
+            request_turn_state_present: request_turn_state.is_some(),
+            bound_profile_present: bound_profile.is_some(),
+            turn_state_profile_present: turn_state_profile.is_some(),
+            compact_followup_profile_present: compact_followup_profile.is_some(),
+            bound_session_profile_present: bound_session_profile.is_some(),
+            ..Default::default()
+        },
+    )
+    .expect("Mojo websocket commit planning returned an invalid result")
+    .committed_profile_promotion_allowed
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -92,25 +79,17 @@ impl RuntimeWebsocketDirectCurrentFallbackReason {
     }
 
     pub fn reset_previous_response_retry_index_on_local_block(self) -> bool {
-        #[cfg(feature = "mojo")]
-        {
-            prodex_mojo_core::runtime::websocket_response_plan(
-                prodex_mojo_core::runtime::WebsocketResponsePlanInput {
-                    direct_fallback_reason: match self {
-                        Self::PrecommitBudgetExhausted => 0,
-                        Self::CandidateExhausted => 1,
-                    },
-                    ..Default::default()
+        prodex_mojo_core::runtime::websocket_response_plan(
+            prodex_mojo_core::runtime::WebsocketResponsePlanInput {
+                direct_fallback_reason: match self {
+                    Self::PrecommitBudgetExhausted => 0,
+                    Self::CandidateExhausted => 1,
                 },
-            )
-            .expect("Mojo websocket fallback planning returned an invalid result")
-            .reset_retry_index_on_local_block
-        }
-
-        #[cfg(not(feature = "mojo"))]
-        {
-            matches!(self, Self::PrecommitBudgetExhausted)
-        }
+                ..Default::default()
+            },
+        )
+        .expect("Mojo websocket fallback planning returned an invalid result")
+        .reset_retry_index_on_local_block
     }
 }
 
@@ -302,67 +281,17 @@ fn runtime_websocket_wrapped_error_status(value: &serde_json::Value) -> Option<u
 }
 
 pub fn runtime_proxy_precommit_hold_event_kind(kind: &str) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        runtime_websocket_event_kind_mojo(kind).precommit_hold
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        matches!(
-            kind,
-            "codex.rate_limits"
-                | "codex.response.metadata"
-                | "response.metadata"
-                | "response.created"
-                | "response.in_progress"
-                | "response.queued"
-                | "response.output_item.added"
-                | "response.content_part.added"
-                | "response.reasoning_summary_part.added"
-        )
-    }
+    runtime_websocket_event_kind_mojo(kind).precommit_hold
 }
 
 pub fn runtime_realtime_websocket_terminal_event_kind(kind: &str) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        runtime_websocket_event_kind_mojo(kind).realtime_terminal
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        matches!(
-            kind,
-            "session.started"
-                | "session.updated"
-                | "conversation.item.added"
-                | "conversation.item.done"
-                | "delegation.created"
-                | "response.cancelled"
-                | "response.done"
-                | "turn.done"
-                | "error"
-        )
-    }
+    runtime_websocket_event_kind_mojo(kind).realtime_terminal
 }
 
 fn runtime_responses_websocket_terminal_event_kind(kind: &str) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        runtime_websocket_event_kind_mojo(kind).responses_terminal
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        matches!(
-            kind,
-            "response.completed" | "response.failed" | "response.incomplete"
-        )
-    }
+    runtime_websocket_event_kind_mojo(kind).responses_terminal
 }
 
-#[cfg(feature = "mojo")]
 fn runtime_websocket_event_kind_mojo(kind: &str) -> prodex_mojo_core::rich::WebsocketEventKind {
     prodex_mojo_core::rich::websocket_event_kind(kind)
         .expect("Mojo websocket event classification returned an invalid result")
