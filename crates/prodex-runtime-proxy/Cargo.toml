@@ -21,7 +21,7 @@ mojo = [
 
 [dependencies]
 base64 = { workspace = true }
-prodex_mojo_core = { workspace = true, features = ["mojo-runtime", "mojo-rich"] }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime", "mojo-rich", "mojo-quota"] }
 prodex_runtime_tuning = { workspace = true }
 prodex_runtime_state = { workspace = true }
 redaction = { workspace = true }

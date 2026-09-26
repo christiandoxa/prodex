@@ -37,6 +37,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/mojo.rs",
   "crates/prodex-runtime-proxy/src/quota.rs",
   "crates/prodex-runtime-proxy/src/quota/mojo.rs",
+  "crates/prodex-runtime-proxy/tests/src/quota.rs",
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_plan/large_pool.rs",
@@ -62,6 +63,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/error_policy/signal.rs",
   "crates/prodex-runtime-proxy/src/error_policy/stream.rs",
   "crates/prodex-runtime-proxy/src/quota/mojo.rs",
+  "crates/prodex-runtime-proxy/src/quota.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
   "crates/prodex-runtime-proxy/tests/src/selection_policy.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
@@ -307,6 +309,7 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-context/src/critical_signal/rust_oracle.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/oracle.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/pressure.rs",
+  "crates/prodex-runtime-proxy/src/quota/rust_oracles.rs",
   "crates/prodex-runtime-launch/src/args_oracle.rs",
   "crates/prodex-runtime-launch/src/args_resume.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/next_steps/compatibility.rs",
@@ -393,6 +396,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-proxy/tests/src/smart_context/static_context.rs",
   "crates/prodex-runtime-proxy/src/smart_context/static_context.rs",
   "crates/prodex-runtime-proxy/src/smart_context/core.rs",
+  "crates/prodex-runtime-proxy/src/quota.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs",
   "crates/prodex-mojo-core/src/runtime/candidate_plan.rs",
   PRECOMMIT_BUDGET_FILE,
@@ -566,6 +570,11 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === SMART_CONTEXT_CORE_FILE &&
       !contents.includes("prodex_mojo_core::runtime::smart_context_exactness_plan("))
     .map(([filePath]) => `${filePath}: Smart Context exactness must use the Mojo plan`);
+  const quotaPlannerViolations = files
+    .filter(([filePath, contents]) => filePath === RUNTIME_QUOTA_FILE &&
+      (!contents.includes("mojo::quota_snapshot_plan(") ||
+        !contents.includes("mojo::quota_gate_plan(")))
+    .map(([filePath]) => `${filePath}: quota snapshot and gate decisions must use Mojo`);
   const anthropicResponseViolations = files.flatMap(([filePath, contents]) =>
     filePath !== ANTHROPIC_RESPONSE_FILE
       ? []
@@ -820,6 +829,7 @@ export function findViolations(files) {
       ? [] : [`${filePath}: default features must include ${required}`];
   });
   return [...markerViolations, ...featureOffViolations, ...exactnessPlannerViolations,
+    ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
     ...superExposeViolations,
@@ -918,6 +928,14 @@ function selfTest() {
     /exactness must use the Mojo plan/u);
   assert.deepEqual(findViolations([[SMART_CONTEXT_CORE_FILE,
     "prodex_mojo_core::runtime::smart_context_exactness_plan()"]]), []);
+  assert.match(findViolations([[RUNTIME_QUOTA_FILE,
+    "fn runtime_proxy_quota_summary_from_usage_snapshot_at() {}"]]).join("\n"),
+    /quota snapshot and gate decisions must use Mojo/u);
+  assert.deepEqual(findViolations([[RUNTIME_QUOTA_FILE,
+    "mojo::quota_snapshot_plan(); mojo::quota_gate_plan();"]]), []);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/quota/rust_oracles.rs",
+    "fn summary_from_usage_snapshot_at() {}"]]).join("\n"),
+    /retained Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-runtime-launch/src/args_oracle.rs",
     "fn normalize_run_codex_args() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-runtime-launch/src/args_resume.rs",

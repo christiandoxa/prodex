@@ -2028,3 +2028,20 @@ The canonical source report counts **52,810 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **524,186 additional Mojo LOC** required at this Rust
 volume.
+
+## Runtime quota snapshot and precommit gate hard replacement
+
+Quota window status, snapshot reset/hold/usability, blocking reset timing, and
+precommit gate decisions now use the existing Mojo plans in every runtime-proxy
+feature mode. The feature-off Rust decisions and the 265-line Rust test oracle
+were deleted.
+Fixed caller expectations cover exhausted snapshots before and after reset,
+unknown-window reprobes, and source-sensitive gate behavior. The no-fallback
+guard rejects a restored oracle or feature-off path. The Mojo ABI did not
+change; native execution evidence remains Linux x86_64.
+
+The canonical source report counts **52,810 reachable Mojo LOC** and
+**192,293 Rust production LOC**, totaling **245,103 LOC**: **21.55% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **524,069 additional Mojo LOC** required at this Rust
+volume.

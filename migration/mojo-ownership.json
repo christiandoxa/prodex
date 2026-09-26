@@ -23,6 +23,9 @@
       "consumer_marker": "prodex_mojo_core::runtime::quota_route_score_batch",
       "expanded_in": "0.420.0"
     },
+    "quota_pressure_band_and_reserve_scoring": {
+      "rust_adapter_scope": "validated enum mapping and caller-owned quota summary construction; snapshot and precommit gate decisions use Mojo"
+    },
     "runtime_profile_schedule_scoring": {
       "expanded_in": "0.420.0"
     },

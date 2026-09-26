@@ -1,7 +1,8 @@
+#[cfg(feature = "mojo")]
+use crate::RuntimeTokenUsage;
 use crate::{
     RuntimeProxyQuotaSummary, RuntimeProxyQuotaWindowSummary, RuntimeProxyUsageSnapshot,
     RuntimeRouteKind, RuntimeSelectionQuotaSource, RuntimeSelectionQuotaWindowStatus,
-    RuntimeTokenUsage,
 };
 
 #[path = "quota/mojo.rs"]
@@ -100,6 +101,7 @@ pub(crate) fn window_status(
     quota_status_from_tag(status)
 }
 
+#[cfg(feature = "mojo")]
 pub(crate) fn smart_context_pressure_snapshot(
     model_context_window_tokens: Option<u64>,
     reserved_output_tokens: u64,
@@ -120,6 +122,7 @@ pub(crate) fn smart_context_pressure_snapshot(
     )
 }
 
+#[cfg(feature = "mojo")]
 pub(crate) fn smart_context_token_usage_summary(
     usages: &[RuntimeTokenUsage],
 ) -> Result<prodex_mojo_core::runtime::SmartContextTokenUsageSummary, prodex_mojo_core::MojoError> {

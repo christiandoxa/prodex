@@ -2,21 +2,11 @@ use std::cmp::Reverse;
 
 use crate::{
     RuntimeRouteKind, RuntimeSelectionQuotaPressureBand, RuntimeSelectionQuotaSource,
-    RuntimeSelectionQuotaWindowStatus, runtime_quota_precommit_floor_percent_for_route,
-    runtime_quota_window_precommit_guard,
+    RuntimeSelectionQuotaWindowStatus,
 };
 
-#[cfg(feature = "mojo")]
 #[path = "mojo.rs"]
 pub(crate) mod mojo;
-
-#[cfg(not(feature = "mojo"))]
-#[path = "quota/mojo.rs"]
-pub(crate) mod mojo;
-
-#[cfg(any(not(feature = "mojo"), test))]
-#[path = "quota/rust_oracles.rs"]
-mod rust_oracles;
 
 pub type RuntimeProxyQuotaPressureSortKey = (
     RuntimeSelectionQuotaPressureBand,
@@ -177,19 +167,8 @@ pub fn runtime_proxy_quota_window_summary(
             reset_at: i64::MAX,
         };
     };
-    #[cfg(feature = "mojo")]
     let status = mojo::window_status(window.remaining_percent)
         .expect("Mojo quota window status returned an invalid tag");
-    #[cfg(not(feature = "mojo"))]
-    let status = if window.remaining_percent == 0 {
-        RuntimeSelectionQuotaWindowStatus::Exhausted
-    } else if window.remaining_percent <= 5 {
-        RuntimeSelectionQuotaWindowStatus::Critical
-    } else if window.remaining_percent <= 15 {
-        RuntimeSelectionQuotaWindowStatus::Thin
-    } else {
-        RuntimeSelectionQuotaWindowStatus::Ready
-    };
     RuntimeProxyQuotaWindowSummary {
         status,
         remaining_percent: window.remaining_percent,
@@ -236,18 +215,11 @@ fn runtime_proxy_quota_window_summaries(
 pub fn runtime_proxy_quota_summary_blocking_reset_at(
     summary: RuntimeProxyQuotaSummary,
     route_kind: RuntimeRouteKind,
-    responses_critical_floor_percent: i64,
+    _responses_critical_floor_percent: i64,
 ) -> Option<i64> {
-    let floor_percent = runtime_quota_precommit_floor_percent_for_route(
-        route_kind,
-        responses_critical_floor_percent,
-    );
-    [summary.five_hour, summary.weekly]
-        .into_iter()
-        .filter(|window| runtime_proxy_quota_window_precommit_guard(*window, floor_percent))
-        .map(|window| window.reset_at)
-        .filter(|reset_at| *reset_at != i64::MAX)
-        .max()
+    mojo::quota_gate_plan(summary, None, route_kind, false, false)
+        .expect("Mojo quota reset planning returned an invalid result")
+        .blocking_reset_at
 }
 
 #[cfg(test)]
@@ -273,17 +245,9 @@ pub fn runtime_proxy_quota_summary_from_usage_snapshot_at(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> RuntimeProxyQuotaSummary {
-    #[cfg(feature = "mojo")]
-    {
-        mojo::quota_snapshot_plan(snapshot, route_kind, now, 0)
-            .expect("Mojo quota snapshot planning returned an invalid result")
-            .summary
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracles::summary_from_usage_snapshot_at(snapshot, route_kind, now)
-    }
+    mojo::quota_snapshot_plan(snapshot, route_kind, now, 0)
+        .expect("Mojo quota snapshot planning returned an invalid result")
+        .summary
 }
 
 pub fn runtime_proxy_quota_window_summary_from_usage_snapshot_at(
@@ -292,66 +256,37 @@ pub fn runtime_proxy_quota_window_summary_from_usage_snapshot_at(
     reset_at: i64,
     now: i64,
 ) -> RuntimeProxyQuotaWindowSummary {
-    #[cfg(feature = "mojo")]
-    {
-        let snapshot = RuntimeProxyUsageSnapshot {
-            checked_at: now,
-            five_hour_status: status,
-            five_hour_remaining_percent: remaining_percent,
-            five_hour_reset_at: reset_at,
-            weekly_status: status,
-            weekly_remaining_percent: remaining_percent,
-            weekly_reset_at: reset_at,
-        };
-        mojo::quota_snapshot_plan(snapshot, RuntimeRouteKind::Standard, now, 0)
-            .expect("Mojo quota snapshot-window planning returned an invalid result")
-            .summary
-            .five_hour
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracles::window_summary_from_usage_snapshot_at(
-            status,
-            remaining_percent,
-            reset_at,
-            now,
-        )
-    }
+    let snapshot = RuntimeProxyUsageSnapshot {
+        checked_at: now,
+        five_hour_status: status,
+        five_hour_remaining_percent: remaining_percent,
+        five_hour_reset_at: reset_at,
+        weekly_status: status,
+        weekly_remaining_percent: remaining_percent,
+        weekly_reset_at: reset_at,
+    };
+    mojo::quota_snapshot_plan(snapshot, RuntimeRouteKind::Standard, now, 0)
+        .expect("Mojo quota snapshot-window planning returned an invalid result")
+        .summary
+        .five_hour
 }
 
 pub fn runtime_proxy_usage_snapshot_hold_active(
     snapshot: RuntimeProxyUsageSnapshot,
     now: i64,
 ) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        mojo::quota_snapshot_plan(snapshot, RuntimeRouteKind::Standard, now, 0)
-            .expect("Mojo quota hold planning returned an invalid result")
-            .hold_active
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracles::usage_snapshot_hold_active(snapshot, now)
-    }
+    mojo::quota_snapshot_plan(snapshot, RuntimeRouteKind::Standard, now, 0)
+        .expect("Mojo quota hold planning returned an invalid result")
+        .hold_active
 }
 
 pub fn runtime_proxy_usage_snapshot_hold_expired(
     snapshot: RuntimeProxyUsageSnapshot,
     now: i64,
 ) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        mojo::quota_snapshot_plan(snapshot, RuntimeRouteKind::Standard, now, 0)
-            .expect("Mojo quota hold planning returned an invalid result")
-            .hold_expired
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracles::usage_snapshot_hold_expired(snapshot, now)
-    }
+    mojo::quota_snapshot_plan(snapshot, RuntimeRouteKind::Standard, now, 0)
+        .expect("Mojo quota hold planning returned an invalid result")
+        .hold_expired
 }
 
 pub fn runtime_proxy_usage_snapshot_is_usable(
@@ -359,22 +294,14 @@ pub fn runtime_proxy_usage_snapshot_is_usable(
     now: i64,
     stale_grace_seconds: i64,
 ) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        mojo::quota_snapshot_plan(
-            snapshot,
-            RuntimeRouteKind::Standard,
-            now,
-            stale_grace_seconds,
-        )
-        .expect("Mojo quota snapshot usability planning returned an invalid result")
-        .usable
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracles::usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
-    }
+    mojo::quota_snapshot_plan(
+        snapshot,
+        RuntimeRouteKind::Standard,
+        now,
+        stale_grace_seconds,
+    )
+    .expect("Mojo quota snapshot usability planning returned an invalid result")
+    .usable
 }
 
 pub fn runtime_proxy_quota_pressure_sort_key_for_route_from_summary(
@@ -442,17 +369,9 @@ pub fn runtime_proxy_quota_summary_requires_precommit_live_probe(
     source: Option<RuntimeSelectionQuotaSource>,
     route_kind: RuntimeRouteKind,
 ) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        mojo::quota_gate_plan(summary, source, route_kind, false, false)
-            .expect("Mojo quota gate planning returned an invalid result")
-            .requires_precommit_live_probe
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracles::summary_requires_precommit_live_probe(summary, source, route_kind)
-    }
+    mojo::quota_gate_plan(summary, source, route_kind, false, false)
+        .expect("Mojo quota gate planning returned an invalid result")
+        .requires_precommit_live_probe
 }
 
 pub fn runtime_proxy_quota_summary_requires_live_source_after_probe(
@@ -460,17 +379,9 @@ pub fn runtime_proxy_quota_summary_requires_live_source_after_probe(
     source: Option<RuntimeSelectionQuotaSource>,
     route_kind: RuntimeRouteKind,
 ) -> bool {
-    #[cfg(feature = "mojo")]
-    {
-        mojo::quota_gate_plan(summary, source, route_kind, false, false)
-            .expect("Mojo quota post-probe planning returned an invalid result")
-            .requires_live_source_after_probe
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracles::summary_requires_live_source_after_probe(summary, source, route_kind)
-    }
+    mojo::quota_gate_plan(summary, source, route_kind, false, false)
+        .expect("Mojo quota post-probe planning returned an invalid result")
+        .requires_live_source_after_probe
 }
 
 pub fn runtime_proxy_precommit_quota_block_reason(
@@ -478,26 +389,13 @@ pub fn runtime_proxy_precommit_quota_block_reason(
     route_kind: RuntimeRouteKind,
     _responses_critical_floor_percent: i64,
 ) -> Option<RuntimePrecommitQuotaBlockReason> {
-    #[cfg(feature = "mojo")]
-    {
-        runtime_proxy_precommit_quota_block_reason_from_tag(
-            mojo::quota_gate_plan(summary, None, route_kind, false, false)
-                .expect("Mojo quota block planning returned an invalid result")
-                .block_reason,
-        )
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        rust_oracles::precommit_quota_block_reason(
-            summary,
-            route_kind,
-            _responses_critical_floor_percent,
-        )
-    }
+    runtime_proxy_precommit_quota_block_reason_from_tag(
+        mojo::quota_gate_plan(summary, None, route_kind, false, false)
+            .expect("Mojo quota block planning returned an invalid result")
+            .block_reason,
+    )
 }
 
-#[cfg(feature = "mojo")]
 fn runtime_proxy_precommit_quota_block_reason_from_tag(
     reason: i64,
 ) -> Option<RuntimePrecommitQuotaBlockReason> {
@@ -513,69 +411,44 @@ fn runtime_proxy_precommit_quota_block_reason_from_tag(
 pub fn runtime_proxy_precommit_quota_gate_initial_decision(
     input: RuntimeProxyPrecommitQuotaGateInitialInput,
 ) -> RuntimeProxyPrecommitQuotaGateInitialDecision {
-    #[cfg(feature = "mojo")]
-    {
-        let plan = mojo::quota_gate_plan(
-            input.summary,
-            input.source,
-            input.route_kind,
-            input.has_continuation_context,
-            false,
-        )
-        .expect("Mojo initial quota gate planning returned an invalid result");
-        match plan.initial_decision {
-            0 => RuntimeProxyPrecommitQuotaGateInitialDecision::Continue,
-            1 => RuntimeProxyPrecommitQuotaGateInitialDecision::RefreshRequired,
-            2 => RuntimeProxyPrecommitQuotaGateInitialDecision::Block {
-                reason: runtime_proxy_precommit_quota_block_reason_from_tag(plan.initial_reason)
-                    .expect("Mojo blocked initial quota plan omitted reason"),
-            },
-            _ => unreachable!("validated Mojo initial quota decision"),
-        }
+    let plan = mojo::quota_gate_plan(
+        input.summary,
+        input.source,
+        input.route_kind,
+        input.has_continuation_context,
+        false,
+    )
+    .expect("Mojo initial quota gate planning returned an invalid result");
+    match plan.initial_decision {
+        0 => RuntimeProxyPrecommitQuotaGateInitialDecision::Continue,
+        1 => RuntimeProxyPrecommitQuotaGateInitialDecision::RefreshRequired,
+        2 => RuntimeProxyPrecommitQuotaGateInitialDecision::Block {
+            reason: runtime_proxy_precommit_quota_block_reason_from_tag(plan.initial_reason)
+                .expect("Mojo blocked initial quota plan omitted reason"),
+        },
+        _ => unreachable!("validated Mojo initial quota decision"),
     }
-
-    #[cfg(not(feature = "mojo"))]
-    rust_oracles::precommit_quota_gate_initial_decision(input)
 }
 
 pub fn runtime_proxy_precommit_quota_gate_final_decision(
     input: RuntimeProxyPrecommitQuotaGateFinalInput,
 ) -> RuntimeProxyPrecommitQuotaGateFinalDecision {
-    #[cfg(feature = "mojo")]
-    {
-        let plan = mojo::quota_gate_plan(
-            input.summary,
-            input.source,
-            input.route_kind,
-            false,
-            input.has_alternative_quota_profile,
-        )
-        .expect("Mojo final quota gate planning returned an invalid result");
-        if plan.final_blocked {
-            RuntimeProxyPrecommitQuotaGateFinalDecision::Block {
-                reason: runtime_proxy_precommit_quota_block_reason_from_tag(plan.final_reason)
-                    .expect("Mojo blocked final quota plan omitted reason"),
-            }
-        } else {
-            RuntimeProxyPrecommitQuotaGateFinalDecision::Proceed
-        }
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    rust_oracles::precommit_quota_gate_final_decision(input)
-}
-
-fn runtime_proxy_quota_window_precommit_guard(
-    window: RuntimeProxyQuotaWindowSummary,
-    floor_percent: i64,
-) -> bool {
-    runtime_quota_window_precommit_guard(
-        crate::RuntimeSelectionQuotaWindowSummary {
-            status: window.status,
-            remaining_percent: window.remaining_percent,
-        },
-        floor_percent,
+    let plan = mojo::quota_gate_plan(
+        input.summary,
+        input.source,
+        input.route_kind,
+        false,
+        input.has_alternative_quota_profile,
     )
+    .expect("Mojo final quota gate planning returned an invalid result");
+    if plan.final_blocked {
+        RuntimeProxyPrecommitQuotaGateFinalDecision::Block {
+            reason: runtime_proxy_precommit_quota_block_reason_from_tag(plan.final_reason)
+                .expect("Mojo blocked final quota plan omitted reason"),
+        }
+    } else {
+        RuntimeProxyPrecommitQuotaGateFinalDecision::Proceed
+    }
 }
 
 fn runtime_proxy_quota_pressure_band_rank(band: RuntimeSelectionQuotaPressureBand) -> i64 {
