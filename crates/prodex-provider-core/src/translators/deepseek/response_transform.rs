@@ -42,7 +42,18 @@ pub(super) fn deepseek_transform_response(
             );
         }
     };
-    let response = deepseek_responses_value_from_chat_value(&value);
+    let response = match deepseek_responses_value_from_chat_value(&value) {
+        Ok(response) => response,
+        Err(error) => {
+            return ProviderTransformResult::rejected(
+                provider,
+                input.endpoint,
+                ProviderWireFormat::OpenAiChatCompletions,
+                ProviderWireFormat::OpenAiResponses,
+                error,
+            );
+        }
+    };
     ProviderTransformResult::lossless(
         provider,
         input.endpoint,
@@ -57,6 +68,7 @@ mod tests {
     use super::deepseek_transform_response;
     use crate::translator::{ProviderTransformInput, ProviderTransformLoss};
     use crate::{ProviderEndpoint, ProviderId};
+    use prodex_mojo_core::rich::DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES;
     use serde_json::json;
 
     #[test]
@@ -132,5 +144,76 @@ mod tests {
             ProviderTransformLoss::Rejected { .. }
         ));
         assert!(result.body.is_none());
+    }
+
+    #[test]
+    fn response_transform_preserves_tool_arguments_over_four_mib() {
+        let boundary = 4 * 1024 * 1024;
+        let arguments = format!("{{\"v\":\"{}\"}}", "x".repeat(boundary - 7));
+        assert_eq!(arguments.len(), boundary + 1);
+        let input = json!({
+            "choices": [{
+                "message": {
+                    "tool_calls": [{
+                        "id": "call_large",
+                        "function": {"name": "lookup", "arguments": arguments}
+                    }]
+                }
+            }]
+        });
+        let result = deepseek_transform_response(
+            ProviderId::DeepSeek,
+            ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                serde_json::to_vec(&input).unwrap(),
+            ),
+        );
+        assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
+        let response: serde_json::Value =
+            serde_json::from_slice(result.body.as_deref().unwrap()).unwrap();
+        assert_eq!(response["output"][0]["call_id"], "call_large");
+        assert_eq!(response["output"][0]["arguments"], arguments);
+    }
+
+    #[test]
+    fn response_transform_returns_a_provider_error_for_oversized_tool_arguments() {
+        let arguments = format!(
+            "{{\"v\":\"{}\"}}",
+            "x".repeat(DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES)
+        );
+        let input = json!({
+            "id": "chatcmpl_large",
+            "created": 42,
+            "choices": [{
+                "message": {
+                    "tool_calls": [{
+                        "function": {"name": "lookup", "arguments": arguments}
+                    }]
+                }
+            }]
+        });
+        let result = deepseek_transform_response(
+            ProviderId::DeepSeek,
+            ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                serde_json::to_vec(&input).unwrap(),
+            ),
+        );
+        assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(result.body.as_deref().unwrap()).unwrap(),
+            json!({
+                "id": "chatcmpl_large",
+                "object": "response",
+                "created_at": 42,
+                "model": "deepseek-chat",
+                "output": [],
+                "status": "failed",
+                "error": {
+                    "code": "invalid_tool_call_arguments",
+                    "message": "DeepSeek returned JSON arguments exceeding the supported size"
+                }
+            })
+        );
     }
 }

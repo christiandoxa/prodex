@@ -1753,3 +1753,23 @@ The canonical source report counts **52,154 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **527,833 additional Mojo LOC** required at this Rust
 volume.
+
+## DeepSeek buffered-response tool-call hard replacement
+
+Buffered DeepSeek tool calls now use the versioned Mojo response kernel for
+namespace splitting, tool-search and custom-call shaping, and thought-signature
+placement in every feature mode. The Rust feature-off formatter, namespace
+splitter, and signature-shaping helper were deleted. Rust retains Serde acquisition,
+malformed-JSON diagnostics, and the shared shell-command wrapper. Response
+operations have a bounded 16 MiB input limit; oversized input returns a
+controlled provider error rather than a Rust fallback or a kernel panic.
+Expected-value tests cover Unicode, namespace separators, malformed inputs,
+the 4 MiB boundary, oversized arguments, and buffered response propagation.
+Native execution evidence is Linux x86_64; macOS and Windows runtime execution
+was not run.
+
+The canonical source report counts **52,316 reachable Mojo LOC** and
+**193,322 Rust production LOC**, totaling **245,638 LOC**: **21.30% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **527,650 additional Mojo LOC** required at this Rust
+volume.

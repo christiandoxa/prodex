@@ -4,7 +4,7 @@ use crate::bridge::{
 };
 use serde_json::{Value, json};
 
-use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
+use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation, deepseek_kernel};
 
 #[path = "response/metadata.rs"]
 mod metadata;
@@ -17,7 +17,7 @@ pub(super) fn deepseek_stream_event_from_chat_value(value: &Value) -> Option<Vec
         .unwrap_or_else(|error| panic!("Mojo DeepSeek stream event failed: {error:?}"))
 }
 
-pub(super) fn deepseek_responses_value_from_chat_value(value: &Value) -> Value {
+pub(super) fn deepseek_responses_value_from_chat_value(value: &Value) -> Result<Value, String> {
     let response_id = value
         .get("id")
         .and_then(Value::as_str)
@@ -59,13 +59,18 @@ pub(super) fn deepseek_responses_value_from_chat_value(value: &Value) -> Value {
             }
         }
     }
-    let output = serde_json::to_string(&output).expect("DeepSeek response output serializes");
+    let output = serde_json::to_string(&output)
+        .map_err(|error| format!("failed to serialize DeepSeek response output: {error}"))?;
     let usage = value
         .get("usage")
         .and_then(deepseek_responses_usage)
-        .map(|value| serde_json::to_string(&value).expect("DeepSeek response usage serializes"));
+        .map(|value| serde_json::to_string(&value))
+        .transpose()
+        .map_err(|error| format!("failed to serialize DeepSeek response usage: {error}"))?;
     let metadata = metadata::deepseek_response_metadata(value, message)
-        .map(|value| serde_json::to_string(&value).expect("DeepSeek response metadata serializes"));
+        .map(|value| serde_json::to_string(&value))
+        .transpose()
+        .map_err(|error| format!("failed to serialize DeepSeek response metadata: {error}"))?;
     let error_message = tool_call_error.as_deref();
     let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::BufferedResponse);
     input.response_id = Some(response_id);
@@ -81,7 +86,11 @@ pub(super) fn deepseek_responses_value_from_chat_value(value: &Value) -> Value {
     input.metadata = metadata.as_deref();
     input.error_code = error_message.map(|_| "invalid_tool_call_arguments");
     input.error_message = error_message;
-    super::deepseek_mojo_value(input)
+    let body = deepseek_kernel(input).map_err(|_| {
+        "DeepSeek response exceeds the bounded Mojo normalization limit".to_string()
+    })?;
+    serde_json::from_slice(&body)
+        .map_err(|error| format!("DeepSeek Mojo returned invalid response JSON: {error}"))
 }
 
 pub(super) fn deepseek_responses_usage(usage: &Value) -> Option<Value> {
@@ -132,7 +141,7 @@ mod tests {
         });
 
         assert_eq!(
-            deepseek_responses_value_from_chat_value(&value),
+            deepseek_responses_value_from_chat_value(&value).unwrap(),
             json!({
                 "id": "chatcmpl_test_1",
                 "object": "response",
@@ -194,7 +203,7 @@ mod tests {
         });
 
         assert_eq!(
-            deepseek_responses_value_from_chat_value(&value),
+            deepseek_responses_value_from_chat_value(&value).unwrap(),
             json!({
                 "id": "chatcmpl_prodex",
                 "object": "response",
@@ -219,7 +228,7 @@ mod tests {
         let value = json!({"created": 23});
 
         assert_eq!(
-            deepseek_responses_value_from_chat_value(&value),
+            deepseek_responses_value_from_chat_value(&value).unwrap(),
             json!({
                 "id": "chatcmpl_prodex",
                 "object": "response",
