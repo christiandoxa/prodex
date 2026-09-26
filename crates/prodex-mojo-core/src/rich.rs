@@ -65,7 +65,9 @@ pub use gemini_sse_state::{
 #[path = "rich/gemini_response.rs"]
 mod gemini_response;
 pub use gemini_response::{
-    GeminiResponseKernelInput, GeminiResponseKernelOperation, gemini_response_kernel,
+    GEMINI_BUFFERED_RESPONSE_MAX_INPUT_BYTES, GeminiBufferedResponseError,
+    GeminiResponseKernelInput, GeminiResponseKernelOperation, gemini_buffered_response_kernel,
+    gemini_response_kernel,
 };
 #[path = "rich/gemini_config.rs"]
 mod gemini_config;

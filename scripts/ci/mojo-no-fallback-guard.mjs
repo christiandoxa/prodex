@@ -142,6 +142,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
   "crates/prodex-provider-core/src/translators/gemini/response/status.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response/build.rs",
   "crates/prodex-provider-core/src/translators/gemini/response/metadata.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
@@ -232,6 +233,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
   "crates/prodex-provider-core/src/translators/gemini/response/status.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response/build.rs",
   "crates/prodex-provider-core/src/translators/gemini/response/metadata.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
@@ -389,6 +391,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/translators/gemini/stream/events.rs",
   "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
   "crates/prodex-provider-core/src/translators/gemini/response/status.rs",
+  "crates/prodex-provider-core/src/translators/gemini/response/build.rs",
   "crates/prodex-provider-core/src/translators/gemini/response/metadata.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
@@ -431,6 +434,7 @@ const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extra
 const GEMINI_SCHEMA_FILE = "crates/prodex-provider-core/src/translators/gemini/request/schema.rs";
 const GEMINI_TOOLS_FILE = "crates/prodex-provider-core/src/translators/gemini/request/tools.rs";
 const GEMINI_STATUS_FILE = "crates/prodex-provider-core/src/translators/gemini/response/status.rs";
+const GEMINI_BUFFERED_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/gemini/response/build.rs";
 const RESPONSE_FORWARDING_FILE = "crates/prodex-runtime-proxy/src/response_forwarding.rs";
 const QUOTA_POOL_FILE = "crates/prodex-quota/src/render/pool.rs";
 const QUOTA_MODEL_CAPACITY_FILE = "crates/prodex-quota/src/render/model_capacity.rs";
@@ -540,6 +544,11 @@ export function findViolations(files) {
       (!contents.includes("DeepSeekKernelOperation::ResponseToolCallItem") ||
         /\bfn\s+(?:deepseek_split_flat_namespace_tool_name|deepseek_chat_tool_call_thought_signature)\s*\(/u.test(contents)))
     .map(([filePath]) => `${filePath}: DeepSeek response tool-call shaping must use the Mojo kernel`);
+  const geminiBufferedResponseViolations = files
+    .filter(([filePath, contents]) => filePath === GEMINI_BUFFERED_RESPONSE_FILE &&
+      (!contents.includes("gemini_buffered_response_kernel(input)") ||
+        /\bfn\s+gemini_insert_response_message\s*\(/u.test(contents)))
+    .map(([filePath]) => `${filePath}: buffered response assembly must use the Mojo kernel`);
   const fingerprintDeltaViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === FINGERPRINT_ARTIFACTS_FILE && /\bfn\s+smart_context_fingerprint_map\s*\(/u.test(contents)) {
       return [`${filePath}: contains a replaced Rust fingerprint map`];
@@ -657,7 +666,8 @@ export function findViolations(files) {
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
     ...geminiFallbackViolations, ...hardReplacementViolations, ...precommitBudgetOracleViolations,
-    ...deepseekRequestViolations, ...deepseekResponseToolCallViolations, ...fingerprintDeltaViolations,
+    ...deepseekRequestViolations, ...deepseekResponseToolCallViolations,
+    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...quotaWindowViolations,
@@ -863,6 +873,14 @@ function selfTest() {
     /response tool-call shaping must use the Mojo kernel/u);
   assert.deepEqual(findViolations([[DEEPSEEK_RESPONSE_TOOL_CALLS_FILE,
     "fn shape() { DeepSeekKernelOperation::ResponseToolCallItem; }"]]), []);
+  assert.match(findViolations([[GEMINI_BUFFERED_RESPONSE_FILE,
+    "fn gemini_insert_response_message() {}"]]).join("\n"),
+    /buffered response assembly must use the Mojo kernel/u);
+  assert.match(findViolations([[GEMINI_BUFFERED_RESPONSE_FILE,
+    '#[cfg(not(feature = "mojo"))] fn old_response() {}']]).join("\n"),
+    /feature-off Rust path/u);
+  assert.deepEqual(findViolations([[GEMINI_BUFFERED_RESPONSE_FILE,
+    "fn shape() { gemini_buffered_response_kernel(input); }"]]), []);
   assert.match(findViolations([[FINGERPRINT_ARTIFACTS_FILE,
     "fn smart_context_fingerprint_map() {}"]]).join("\n"),
     /replaced Rust fingerprint map/u);

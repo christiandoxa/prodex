@@ -15,6 +15,8 @@ from rich_types import ProdexRichStringView, rich_view_ptr
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 
 comptime GEMINI_KERNEL_MAX_BYTES: Int64 = 4_194_304
+comptime GEMINI_BUFFERED_RESPONSE_ABI_VERSION: Int64 = 2
+comptime GEMINI_BUFFERED_RESPONSE_MAX_BYTES: Int64 = 16_777_216
 comptime GEMINI_KERNEL_STATUS_OK: Int64 = 0
 comptime GEMINI_KERNEL_STATUS_INVALID: Int64 = 1
 comptime GEMINI_KERNEL_STATUS_UTF8: Int64 = 2
@@ -312,7 +314,9 @@ def gemini_put_event_prefix(
     return True
 
 
-def gemini_views_valid(input: ProdexGeminiResponseKernelInput) -> Bool:
+def gemini_views_valid(
+    input: ProdexGeminiResponseKernelInput, maximum_bytes: Int64
+) -> Bool:
     return (
         input.operation >= GEMINI_RESPONSE_CREATED
         and input.operation <= GEMINI_STREAM_EVENT_TRANSFORM
@@ -340,23 +344,23 @@ def gemini_views_valid(input: ProdexGeminiResponseKernelInput) -> Bool:
         and input.include_empty_metadata <= 1
         and input.reason_present >= 0
         and input.reason_present <= 1
-        and rich_view_valid(input.response_id, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.call_id, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.name, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.delta, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.reason, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.message, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.item, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.metadata, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.response, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.content, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.output, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.model, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.usage, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.signature, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.namespace, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.arguments, GEMINI_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.citations, GEMINI_KERNEL_MAX_BYTES)
+        and rich_view_valid(input.response_id, maximum_bytes)
+        and rich_view_valid(input.call_id, maximum_bytes)
+        and rich_view_valid(input.name, maximum_bytes)
+        and rich_view_valid(input.delta, maximum_bytes)
+        and rich_view_valid(input.reason, maximum_bytes)
+        and rich_view_valid(input.message, maximum_bytes)
+        and rich_view_valid(input.item, maximum_bytes)
+        and rich_view_valid(input.metadata, maximum_bytes)
+        and rich_view_valid(input.response, maximum_bytes)
+        and rich_view_valid(input.content, maximum_bytes)
+        and rich_view_valid(input.output, maximum_bytes)
+        and rich_view_valid(input.model, maximum_bytes)
+        and rich_view_valid(input.usage, maximum_bytes)
+        and rich_view_valid(input.signature, maximum_bytes)
+        and rich_view_valid(input.namespace, maximum_bytes)
+        and rich_view_valid(input.arguments, maximum_bytes)
+        and rich_view_valid(input.citations, maximum_bytes)
     )
 
 
@@ -1533,7 +1537,7 @@ def gemini_response_kernel_v1(
         unsafe_from_address=Int(written_address)
     )
     written[] = 0
-    if not gemini_views_valid(input[].copy()):
+    if not gemini_views_valid(input[].copy(), GEMINI_KERNEL_MAX_BYTES):
         return GEMINI_KERNEL_STATUS_UTF8
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
@@ -1541,6 +1545,42 @@ def gemini_response_kernel_v1(
     var writer = GeminiResponseWriter(output, output_capacity, 0)
     var writer_ptr = Pointer(to=writer)
     if not gemini_write_operation(writer_ptr, input[].copy()):
+        if writer.written >= output_capacity:
+            written[] = writer.written
+            return GEMINI_KERNEL_STATUS_CAPACITY
+        return GEMINI_KERNEL_STATUS_INVALID
+    written[] = writer.written
+    return GEMINI_KERNEL_STATUS_OK
+
+
+def gemini_buffered_response_kernel_v2(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_BUFFERED_RESPONSE_ABI_VERSION:
+        return GEMINI_KERNEL_STATUS_ABI
+    if input_address == 0 or output_address == 0 or written_address == 0 or output_capacity <= 0:
+        return GEMINI_KERNEL_STATUS_INVALID
+    var input = Pointer[
+        mut=False, ProdexGeminiResponseKernelInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_address))
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if input[].operation != GEMINI_BUFFERED_RESPONSE:
+        return GEMINI_KERNEL_STATUS_INVALID
+    if not gemini_views_valid(input[].copy(), GEMINI_BUFFERED_RESPONSE_MAX_BYTES):
+        return GEMINI_KERNEL_STATUS_UTF8
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var writer = GeminiResponseWriter(output, output_capacity, 0)
+    var writer_ptr = Pointer(to=writer)
+    if not gemini_put_buffered_response(writer_ptr, input[].copy()):
         if writer.written >= output_capacity:
             written[] = writer.written
             return GEMINI_KERNEL_STATUS_CAPACITY

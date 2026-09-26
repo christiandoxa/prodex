@@ -10,8 +10,16 @@ use super::{
 };
 use crate::{GeminiProviderCoreResponsePartInput, gemini_provider_core_response_part_plan};
 
-#[cfg(feature = "mojo")]
-use prodex_mojo_core::rich::{GeminiResponseKernelInput, GeminiResponseKernelOperation};
+use prodex_mojo_core::rich::{
+    GeminiBufferedResponseError, GeminiResponseKernelInput, GeminiResponseKernelOperation,
+    gemini_buffered_response_kernel,
+};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::translators::gemini) enum GeminiResponseBuildError {
+    InputTooLarge,
+    Kernel,
+}
 
 #[allow(clippy::too_many_arguments)]
 pub(super) fn gemini_build_response_value(
@@ -24,7 +32,7 @@ pub(super) fn gemini_build_response_value(
     suppress_visible_text_when_tool_calls: bool,
     mut visible_text_from_part: impl FnMut(&Value) -> Option<String>,
     mut function_call_item: impl FnMut(&Value, &Value, usize) -> Value,
-) -> Value {
+) -> Result<Value, GeminiResponseBuildError> {
     let parts = value
         .pointer("/candidates/0/content/parts")
         .and_then(Value::as_array)
@@ -40,76 +48,38 @@ pub(super) fn gemini_build_response_value(
         &mut output,
     );
     let citations = gemini_append_grounding_and_citations(&mut output, value, response_id);
-    #[cfg(feature = "mojo")]
-    {
-        let has_visible_output = !output.is_empty()
-            || !text.is_empty()
-            || !content_items.is_empty()
-            || citations.is_some();
-        let output = serde_json::to_string(&output).expect("Gemini response output serializes");
-        let content =
-            serde_json::to_string(&content_items).expect("Gemini response content serializes");
-        let usage = value
-            .get("usageMetadata")
-            .and_then(gemini_responses_usage)
-            .map(|value| serde_json::to_string(&value).expect("Gemini response usage serializes"));
-        let metadata = gemini_response_metadata(value).map(|value| {
-            serde_json::to_string(&value).expect("Gemini response metadata serializes")
-        });
-        let mut input =
-            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::BufferedResponse);
-        input.response_id = Some(response_id);
-        input.model = Some(model);
-        input.created_at = created_at.unwrap_or_default();
-        input.created_at_present = created_at.is_some();
-        input.include_empty_usage = include_empty_usage;
-        input.include_empty_metadata = include_empty_metadata;
-        input.delta = (!text.is_empty()).then_some(text.as_str());
-        input.content = (!content_items.is_empty()).then_some(content.as_str());
-        input.output = Some(&output);
-        input.usage = usage.as_deref();
-        input.metadata = metadata.as_deref();
-        input.citations = citations.as_deref();
-        let mut response = super::super::stream::gemini_mojo_value(input);
-        gemini_apply_response_status(&mut response, value, has_visible_output);
-        response
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        gemini_insert_response_message(&mut output, text, content_items);
-        if let Some(citations) = citations {
-            output.push(json!({
-                "type": "message",
-                "role": "assistant",
-                "content": [{
-                    "type": "output_text",
-                    "text": citations,
-                }],
-            }));
-        }
-        let has_visible_output = !output.is_empty();
-        let mut response = json!({
-            "id": response_id,
-            "object": "response",
-            "model": model,
-            "output": output,
-        });
-        if let Some(created_at) = created_at {
-            response["created_at"] = json!(created_at);
-        }
-        if let Some(usage) = value.get("usageMetadata").and_then(gemini_responses_usage) {
-            response["usage"] = usage;
-        } else if include_empty_usage {
-            response["usage"] = json!({});
-        }
-        if let Some(metadata) = gemini_response_metadata(value) {
-            response["metadata"] = metadata;
-        } else if include_empty_metadata {
-            response["metadata"] = json!({});
-        }
-        gemini_apply_response_status(&mut response, value, has_visible_output);
-        response
-    }
+    let has_visible_output =
+        !output.is_empty() || !text.is_empty() || !content_items.is_empty() || citations.is_some();
+    let output = serde_json::to_string(&output).expect("Gemini response output serializes");
+    let content =
+        serde_json::to_string(&content_items).expect("Gemini response content serializes");
+    let usage = value
+        .get("usageMetadata")
+        .and_then(gemini_responses_usage)
+        .map(|value| serde_json::to_string(&value).expect("Gemini response usage serializes"));
+    let metadata = gemini_response_metadata(value)
+        .map(|value| serde_json::to_string(&value).expect("Gemini response metadata serializes"));
+    let mut input = GeminiResponseKernelInput::new(GeminiResponseKernelOperation::BufferedResponse);
+    input.response_id = Some(response_id);
+    input.model = Some(model);
+    input.created_at = created_at.unwrap_or_default();
+    input.created_at_present = created_at.is_some();
+    input.include_empty_usage = include_empty_usage;
+    input.include_empty_metadata = include_empty_metadata;
+    input.delta = (!text.is_empty()).then_some(text.as_str());
+    input.content = (!content_items.is_empty()).then_some(content.as_str());
+    input.output = Some(&output);
+    input.usage = usage.as_deref();
+    input.metadata = metadata.as_deref();
+    input.citations = citations.as_deref();
+    let body = gemini_buffered_response_kernel(input).map_err(|error| match error {
+        GeminiBufferedResponseError::InputTooLarge => GeminiResponseBuildError::InputTooLarge,
+        GeminiBufferedResponseError::Kernel(_) => GeminiResponseBuildError::Kernel,
+    })?;
+    let mut response =
+        serde_json::from_slice(&body).map_err(|_| GeminiResponseBuildError::Kernel)?;
+    gemini_apply_response_status(&mut response, value, has_visible_output);
+    Ok(response)
 }
 
 fn gemini_collect_response_parts(
@@ -181,35 +151,6 @@ fn gemini_collect_response_parts(
         }
     }
     (text, content_items)
-}
-
-#[cfg(not(feature = "mojo"))]
-fn gemini_insert_response_message(
-    output: &mut Vec<Value>,
-    text: String,
-    content_items: Vec<Value>,
-) {
-    if text.is_empty() && content_items.is_empty() {
-        return;
-    }
-    let content = if text.is_empty() {
-        content_items
-    } else {
-        let mut content = vec![json!({
-            "type":"output_text",
-            "text": text,
-        })];
-        content.extend(content_items);
-        content
-    };
-    output.insert(
-        0,
-        json!({
-            "type":"message",
-            "role":"assistant",
-            "content": content,
-        }),
-    );
 }
 
 fn gemini_append_grounding_and_citations(
