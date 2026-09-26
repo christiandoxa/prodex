@@ -3833,16 +3833,16 @@ def deepseek_raw_put_content_text_string(
             text = deepseek_json_object_member(
                 view, cursor, item_end, StringSlice("text")
             )
-            if not deepseek_raw_present(text):
+            if not deepseek_json_bounds_is_kind(view, text, 34):
                 text = deepseek_json_object_member(
                     view, cursor, item_end, StringSlice("input_text")
                 )
-            if not deepseek_raw_present(text):
+            if not deepseek_json_bounds_is_kind(view, text, 34):
                 text = deepseek_json_object_member(
                     view, cursor, item_end, StringSlice("output_text")
                 )
         if deepseek_raw_present(text) and deepseek_json_byte(view, text[0]) == 34:
-            if not first and not deepseek_put_literal(writer, StringSlice("\n")):
+            if not first and not deepseek_put_literal(writer, StringSlice("\\n")):
                 return False
             first = False
             if not deepseek_put_view_range(writer, view, text[0] + 1, text[1] - 1):

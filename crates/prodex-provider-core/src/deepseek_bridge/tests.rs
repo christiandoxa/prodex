@@ -45,6 +45,8 @@ use crate::{
 };
 use std::collections::BTreeSet;
 
+mod input_items;
+
 #[test]
 fn deepseek_provider_core_simple_request_accepts_plain_text_first_turn() {
     let body = serde_json::to_vec(&serde_json::json!({
@@ -1003,79 +1005,6 @@ fn deepseek_provider_core_validates_web_search_tool_context_size() {
         )
         .unwrap_err()
         .contains("DeepSeek web_search context_size must be low, medium, or high")
-    );
-}
-
-#[test]
-fn deepseek_provider_core_validates_supported_input_items() {
-    for item in [
-        serde_json::json!({"type": "message", "role": "developer", "content": [{"type": "input_text", "text": "hi"}]}),
-        serde_json::json!({"type": "function_call", "call_id": "call_1", "function": {"name": "lookup"}}),
-        serde_json::json!({"type": "custom_tool_call_output", "call_id": "call_1", "output": "ok"}),
-        serde_json::json!({"type": "local_shell_call", "call_id": "call_2", "action": {"command": ["echo", "hi"]}}),
-        serde_json::json!({"type": "message", "content": [{"type": "input_image"}]}),
-    ] {
-        deepseek_provider_core_validate_supported_input_item(&item, true, "DeepSeek").unwrap();
-    }
-}
-
-#[test]
-fn deepseek_provider_core_rejects_unsupported_input_items() {
-    assert!(
-        deepseek_provider_core_validate_supported_input_item(
-            &serde_json::json!(true),
-            false,
-            "DeepSeek",
-        )
-        .unwrap_err()
-        .contains("DeepSeek input items must be objects")
-    );
-    assert!(
-        deepseek_provider_core_validate_supported_input_item(
-            &serde_json::json!({"type": "message", "role": "critic", "content": "no"}),
-            false,
-            "DeepSeek",
-        )
-        .unwrap_err()
-        .contains("DeepSeek message role `critic` is not supported")
-    );
-    assert!(
-        deepseek_provider_core_validate_supported_input_item(
-            &serde_json::json!({"type": "function_call", "call_id": "call_1"}),
-            false,
-            "DeepSeek",
-        )
-        .unwrap_err()
-        .contains("DeepSeek input tool call items require a function name")
-    );
-    assert!(
-        deepseek_provider_core_validate_supported_input_item(
-            &serde_json::json!({"type": "function_call_output", "call_id": "call_1"}),
-            false,
-            "DeepSeek",
-        )
-        .unwrap_err()
-        .contains("DeepSeek input tool output items require output content")
-    );
-    assert!(
-        deepseek_provider_core_validate_supported_input_item(
-            &serde_json::json!({"type": "message", "content": [{"type": "input_image"}]}),
-            false,
-            "DeepSeek",
-        )
-        .unwrap_err()
-        .contains(
-            "DeepSeek text-only adapter does not support message content part type `input_image`"
-        )
-    );
-    assert!(
-        deepseek_provider_core_validate_supported_input_item(
-            &serde_json::json!({"type": "message", "content": [{"type": "input_text"}]}),
-            false,
-            "DeepSeek",
-        )
-        .unwrap_err()
-        .contains("DeepSeek input_text content parts require a text field")
     );
 }
 

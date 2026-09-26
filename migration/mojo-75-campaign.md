@@ -1522,3 +1522,26 @@ The canonical source report counts **51,921 reachable Mojo LOC** and
 **21.12413035518125% Mojo**. The 7% release floor and non-regression check
 pass; the 75% project target remains unmet, with **529,686 additional Mojo
 LOC** required at this Rust volume.
+
+## DeepSeek input-item hard replacement
+
+Input-item shaping now calls the DeepSeek Mojo kernel in every feature mode.
+The feature-off Rust item builder and its field helpers were deleted. Rust
+still performs replay filtering, Serde handoff, and typed ABI mapping. The Mojo
+content parser now emits escaped JSON newlines and skips mistyped `text` fields
+when a valid `input_text` or `output_text` field is present.
+
+Differential tests established parity before removing the Rust builder.
+Permanent expected-value tests cover Unicode and escaping, field precedence,
+message order, empty content, large content, and malformed kernel input. The
+input-item tests moved to a focused sibling module and the old size allowlist
+cap was lowered. Provider-core tests pass in default, feature-off, and Mojo
+modes; focused Clippy, formatter, size, and no-fallback guards pass. Native
+execution evidence is Linux x86_64; macOS and Windows runtime execution was
+not run.
+
+The canonical source report counts **51,921 reachable Mojo LOC** and
+**193,616 Rust production LOC**, totaling **245,537 LOC**:
+**21.145896545123545% Mojo**. The 7% release floor and non-regression check
+pass; the 75% project target remains unmet, with **528,927 additional Mojo
+LOC** required at this Rust volume.
