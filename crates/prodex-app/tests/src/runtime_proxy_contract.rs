@@ -44,6 +44,7 @@ fn runtime_proxy_contract_has_source_level_evidence() {
                 "crates/prodex-app/src/runtime_proxy/health_backoff.rs",
                 "crates/prodex-runtime-proxy/src/error_policy.rs",
                 "crates/prodex-runtime-proxy/src/quota.rs",
+                "mojo/prodex_core/rich_fallback.mojo",
             ],
             required: &[
                 "profile_transport_backoff",
@@ -62,7 +63,7 @@ fn runtime_proxy_contract_has_source_level_evidence() {
             required: &[
                 "runtime_proxy_structured_log_message",
                 "runtime_proxy_log_field",
-                "runtime_doctor_marker_registry_covers_runtime_log_markers",
+                "runtime_doctor_mojo_classifier_covers_runtime_log_markers",
             ],
         },
         ContractEvidence {
