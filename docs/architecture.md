@@ -243,6 +243,6 @@ Mojo owns complete tool shaping and DeepSeek message/adjacency/metadata semantic
 Rust owns JSON compatibility parsing and materialization. A validation error does
 not trigger a Rust semantic fallback. Transport, affinity, process supervision,
 credentials and durable state remain outside these pure transformation calls.
-The shared provider error class and cooldown decision also uses Mojo in every
-feature mode; Rust still parses error bodies and selects among classifications
-from structured codes.
+Provider error class/cooldown and rejected-request-member decisions use Mojo in
+every feature mode. Rust retains bounded Serde error-body parsing and structured
+code selection; Mojo receives the 64 KiB-bounded error tree for member matching.

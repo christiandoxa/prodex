@@ -1,5 +1,6 @@
 mod body;
 use self::body::provider_error_codes;
+use crate::mojo_json::Document;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderErrorClass {
@@ -71,106 +72,19 @@ pub fn classify_provider_error_body(
 
 /// True only when the provider error explicitly identifies a request member as rejected.
 pub fn provider_error_rejects_request_member(body: &[u8], member: &str) -> bool {
-    fn normalized(value: &str) -> String {
-        value
-            .chars()
-            .filter(|character| character.is_ascii_alphanumeric())
-            .flat_map(char::to_lowercase)
-            .collect()
-    }
-
-    fn mentions_member(value: &str, member: &str) -> bool {
-        normalized(value).contains(member)
-    }
-
-    fn has_rejection_marker(value: &str) -> bool {
-        let value = value.to_ascii_lowercase();
-        [
-            "unsupported",
-            "not supported",
-            "does not support",
-            "unknown_parameter",
-            "unknown parameter",
-            "unknown_field",
-            "unknown field",
-            "unknown name",
-            "unrecognized",
-            "unexpected",
-            "not allowed",
-            "invalid_argument",
-            "invalid argument",
-            "invalid_parameter",
-            "invalid parameter",
-            "extra inputs are not permitted",
-        ]
-        .into_iter()
-        .any(|marker| value.contains(marker))
-    }
-
-    fn value_mentions_member(value: &serde_json::Value, member: &str) -> bool {
-        match value {
-            serde_json::Value::String(value) => mentions_member(value, member),
-            serde_json::Value::Array(values) => values
-                .iter()
-                .any(|value| value_mentions_member(value, member)),
-            _ => false,
-        }
-    }
-
-    fn value_has_rejection_marker(value: &serde_json::Value) -> bool {
-        match value {
-            serde_json::Value::String(value) => has_rejection_marker(value),
-            serde_json::Value::Array(values) => values.iter().any(value_has_rejection_marker),
-            _ => false,
-        }
-    }
-
-    fn explicitly_rejects(value: &serde_json::Value, member: &str) -> bool {
-        match value {
-            serde_json::Value::String(value) => {
-                mentions_member(value, member) && has_rejection_marker(value)
-            }
-            serde_json::Value::Array(values) => {
-                values.iter().any(|value| explicitly_rejects(value, member))
-            }
-            serde_json::Value::Object(values) => {
-                let identifies_member = values.iter().any(|(key, value)| {
-                    mentions_member(key, member)
-                        || matches!(
-                            key.to_ascii_lowercase().as_str(),
-                            "param" | "parameter" | "field" | "name" | "path" | "loc" | "location"
-                        ) && value_mentions_member(value, member)
-                });
-                let rejects = values.iter().any(|(key, value)| {
-                    matches!(
-                        key.to_ascii_lowercase().as_str(),
-                        "code" | "status" | "type" | "message" | "detail" | "reason"
-                    ) && value_has_rejection_marker(value)
-                });
-                (identifies_member && rejects)
-                    || values
-                        .values()
-                        .any(|value| explicitly_rejects(value, member))
-            }
-            _ => false,
-        }
-    }
-
-    let member = member
-        .chars()
-        .filter(|character| character.is_ascii_alphanumeric())
-        .flat_map(char::to_lowercase)
-        .collect::<String>();
-    if member.is_empty() {
+    if body.len() > prodex_mojo_core::json::PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES
+        || member.len() > prodex_mojo_core::json::PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES
+    {
         return false;
     }
-    serde_json::from_slice(body).map_or_else(
-        |_| {
-            let text = String::from_utf8_lossy(body);
-            mentions_member(&text, &member) && has_rejection_marker(&text)
-        },
-        |value| explicitly_rejects(&value, &member),
-    )
+    let value = serde_json::from_slice::<serde_json::Value>(body)
+        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(body).into_owned()));
+    let mut document = Document::default();
+    document.push(&value, None, "");
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emitted valid provider error JSON");
+    // An ABI error must not trigger an unsupported-field retry.
+    prodex_mojo_core::json::provider_error_rejects_member(&document.nodes, raw, member)
+        .unwrap_or(false)
 }
 
 fn provider_error_classification_rank(class: ProviderErrorClass) -> u8 {
@@ -462,6 +376,127 @@ mod tests {
         assert!(!provider_error_rejects_request_member(
             br#"{"error":{"code":"invalid_parameter","param":"temperature"},"request":{"web_search_options":{}}}"#,
             "web_search_options",
+        ));
+    }
+
+    #[test]
+    fn request_member_rejection_preserves_expected_json_and_text_cases() {
+        let cases: &[(&[u8], &str, bool)] = &[
+            (
+                br#"{"error":{"code":"unknown_parameter","param":"web_search_options"}}"#,
+                "web_search_options",
+                true,
+            ),
+            (
+                br#"{"nested":[{"status":"INVALID_ARGUMENT","message":["bad"],"loc":[["google-Search"]]}]}"#,
+                "google_search",
+                true,
+            ),
+            (
+                br#"["Unknown name: webSearchOptions"]"#,
+                "web_search_options",
+                true,
+            ),
+            (
+                br#"{"outer":{"nested":{"name":"web_search_options","type":"unsupported"}}}"#,
+                "web_search_options",
+                true,
+            ),
+            (
+                br#"{"error":{"param":{"name":"web_search_options"},"code":"unknown_parameter"}}"#,
+                "web_search_options",
+                false,
+            ),
+            (
+                br#"{"error":{"param":"temperature","code":"unknown_parameter"}}"#,
+                "web_search_options",
+                false,
+            ),
+            (
+                br#"{"error":{"param":"web_search_options","message":"request rejected"}}"#,
+                "web_search_options",
+                false,
+            ),
+            (
+                b"Provider error: WEB-search.options is unsupported",
+                "web_search_options",
+                true,
+            ),
+            (
+                "invalid parameter: web_搜_search-options".as_bytes(),
+                "web_search_options",
+                true,
+            ),
+            (
+                br#""web_search_options is unsupported""#,
+                "web_search_options",
+                true,
+            ),
+            (b"unsupported web_search_options", "", false),
+            (b"unsupported web_search_options", "---", false),
+        ];
+
+        for (body, member, expected) in cases {
+            assert_eq!(
+                provider_error_rejects_request_member(body, member),
+                *expected,
+                "body={body:?} member={member:?}"
+            );
+        }
+
+        assert!(provider_error_rejects_request_member(
+            b"{\"message\":\"unsupported web_search_options\xff\"}",
+            "web_search_options",
+        ));
+        assert!(provider_error_rejects_request_member(
+            b"unknown name web_search_options\xff is unsupported",
+            "web_search_options",
+        ));
+        assert!(!provider_error_rejects_request_member(
+            br#"{"request":{"web_search_options":{}},"error":{"message":"unsupported"}}"#,
+            "web_search_options",
+        ));
+
+        for marker in [
+            "unsupported",
+            "not supported",
+            "does not support",
+            "unknown_parameter",
+            "unknown parameter",
+            "unknown_field",
+            "unknown field",
+            "unknown name",
+            "unrecognized",
+            "unexpected",
+            "not allowed",
+            "invalid_argument",
+            "invalid argument",
+            "invalid_parameter",
+            "invalid parameter",
+            "extra inputs are not permitted",
+        ] {
+            let body = format!("provider rejected web_search_options: {marker}");
+            assert!(
+                provider_error_rejects_request_member(body.as_bytes(), "web_search_options"),
+                "marker={marker:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn request_member_rejection_fails_closed_above_abi_input_bounds() {
+        let oversized =
+            vec![b'x'; prodex_mojo_core::json::PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES + 1];
+        let member =
+            "x".repeat(prodex_mojo_core::json::PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES + 1);
+
+        assert!(!provider_error_rejects_request_member(
+            &oversized,
+            "web_search_options"
+        ));
+        assert!(!provider_error_rejects_request_member(
+            b"unsupported web_search_options",
+            &member
         ));
     }
 }

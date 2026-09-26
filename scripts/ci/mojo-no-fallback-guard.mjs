@@ -499,6 +499,7 @@ const DEEPSEEK_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/deep
 const DEEPSEEK_RESPONSE_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs";
 const DEEPSEEK_REQUEST_FILE = "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs";
 const DEEPSEEK_REQUEST_REJECT_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs";
+const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
 const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
@@ -643,6 +644,14 @@ export function findViolations(files) {
       return [`${filePath}: request rejection must use both Mojo policies without Rust copies or cfg routing`];
     }
     return [];
+  });
+  const providerErrorMemberViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== PROVIDER_ERROR_FILE) return [];
+    const body = contents.match(/\bpub fn provider_error_rejects_request_member\([^]*?^\}/mu)?.[0];
+    const rustMatcher = /\bfn\s+(?:normalized|mentions_member|has_rejection_marker|value_mentions_member|value_has_rejection_marker|explicitly_rejects)\s*\(/u.test(contents);
+    return body?.includes("prodex_mojo_core::json::provider_error_rejects_member(") &&
+      !FEATURE_OFF_RUST_PATH.test(body) && !rustMatcher
+      ? [] : [`${filePath}: request-member rejection must use Mojo without a Rust matcher`];
   });
   const deepseekResponseToolCallViolations = files
     .filter(([filePath, contents]) => filePath === DEEPSEEK_RESPONSE_TOOL_CALLS_FILE &&
@@ -795,6 +804,7 @@ export function findViolations(files) {
     ...geminiFallbackViolations, ...geminiGenerationViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
+    ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations,
@@ -1103,6 +1113,14 @@ function selfTest() {
     '#[cfg(not(feature = "mojo"))] fn old_stream() {}']])[0], /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/errors.rs",
     'fn classify_provider_error_rust() {}']])[0], /Rust semantic oracle or copy/u);
+  assert.match(findViolations([[PROVIDER_ERROR_FILE,
+    'pub fn provider_error_rejects_request_member() { fn mentions_member() {} }']]).join("\n"),
+  /request-member rejection must use Mojo/u);
+  assert.match(findViolations([[PROVIDER_ERROR_FILE,
+    'pub fn provider_error_rejects_request_member() { false }']]).join("\n"),
+  /request-member rejection must use Mojo/u);
+  assert.deepEqual(findViolations([[PROVIDER_ERROR_FILE,
+    'pub fn provider_error_rejects_request_member() {\n  prodex_mojo_core::json::provider_error_rejects_member(nodes, raw, member);\n}']]), []);
   assert.match(findViolations([["crates/prodex-runtime-tuning/src/capacity.rs",
     "fn runtime_proxy_worker_count_default_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/rollout.rs",

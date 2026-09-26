@@ -47,6 +47,16 @@ mod tests {
     use super::*;
 
     #[test]
+    fn provider_error_requires_an_explicit_web_search_rejection() {
+        assert!(runtime_provider_error_rejects_web_search_options(
+            br#"{"error":{"code":"unknown_parameter","param":"web_search_options"}}"#
+        ));
+        assert!(!runtime_provider_error_rejects_web_search_options(
+            br#"{"error":{"message":"web_search_options was rejected"}}"#
+        ));
+    }
+
+    #[test]
     fn provider_tools_normalize_mcp_toolsets() {
         let value = serde_json::json!({
             "tools": [{
