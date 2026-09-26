@@ -95,4 +95,7 @@ mod reasoning_tests;
 #[path = "deepseek_bridge/tests/request_reject.rs"]
 mod request_reject_tests;
 #[cfg(test)]
+#[path = "deepseek_bridge/tests/simple_request.rs"]
+mod simple_request_tests;
+#[cfg(test)]
 mod tests;

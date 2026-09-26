@@ -340,7 +340,11 @@ pub fn deepseek_request_policy(
     scalar: i64,
 ) -> Result<DeepSeekRequestPolicyPlan, MojoError> {
     ensure_rich_abi()?;
-    if input.len() > DEEPSEEK_KERNEL_MAX_BYTES || scalar < 0 {
+    let max_input_bytes = match operation {
+        DeepSeekRequestPolicyOperation::SimpleRequest => DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES,
+        _ => DEEPSEEK_KERNEL_MAX_BYTES,
+    };
+    if input.len() > max_input_bytes || scalar < 0 {
         return Err(MojoError::InvalidInput);
     }
     let mut output = [0_i64; 3];

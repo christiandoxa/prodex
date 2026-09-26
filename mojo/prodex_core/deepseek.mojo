@@ -25,6 +25,7 @@ from json_view import (
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime DEEPSEEK_KERNEL_MAX_BYTES: Int64 = 4_194_304
 comptime DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES: Int64 = 16_777_216
+comptime DEEPSEEK_SIMPLE_REQUEST_MAX_BYTES: Int64 = DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES
 comptime DEEPSEEK_KERNEL_ABI_VERSION: Int64 = 2
 comptime DEEPSEEK_KERNEL_STATUS_OK: Int64 = 0
 comptime DEEPSEEK_KERNEL_STATUS_INVALID: Int64 = 1
@@ -1517,11 +1518,14 @@ def deepseek_simple_content_item(
         or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("text"))
     ):
         return False
-    for key in [StringSlice("text"), StringSlice("input_text"), StringSlice("output_text")]:
-        var value = deepseek_json_object_member(view, start, end, key)
-        if deepseek_json_bounds_is_kind(view, value, 34):
-            return True
-    return False
+    var value = deepseek_json_object_member(view, start, end, StringSlice("text"))
+    if value[0] >= 0:
+        return deepseek_json_bounds_is_kind(view, value, 34)
+    value = deepseek_json_object_member(view, start, end, StringSlice("input_text"))
+    if value[0] >= 0:
+        return deepseek_json_bounds_is_kind(view, value, 34)
+    value = deepseek_json_object_member(view, start, end, StringSlice("output_text"))
+    return deepseek_json_bounds_is_kind(view, value, 34)
 
 
 def deepseek_simple_content(
@@ -1567,9 +1571,12 @@ def deepseek_simple_call_id_shape(
 def deepseek_simple_has_name(
     view: ProdexRichStringView, start: Int64, end: Int64, include_function: Bool
 ) -> Bool:
-    for key in [StringSlice("name"), StringSlice("tool_name")]:
-        if deepseek_simple_has_string_member(view, start, end, key):
-            return True
+    var name = deepseek_json_object_member(view, start, end, StringSlice("name"))
+    if name[0] >= 0:
+        return deepseek_json_bounds_is_kind(view, name, 34)
+    name = deepseek_json_object_member(view, start, end, StringSlice("tool_name"))
+    if name[0] >= 0:
+        return deepseek_json_bounds_is_kind(view, name, 34)
     if include_function:
         var function = deepseek_json_object_member(view, start, end, StringSlice("function"))
         if deepseek_json_bounds_is_kind(view, function, 123):
@@ -2537,7 +2544,10 @@ def deepseek_request_policy_v1(
 ) abi("C") -> Int64:
     if abi_version != PRODEX_RICH_ABI_VERSION:
         return DEEPSEEK_KERNEL_STATUS_ABI
-    if input_length < 0 or input_length > DEEPSEEK_KERNEL_MAX_BYTES or output_address == 0:
+    var max_input_bytes = DEEPSEEK_KERNEL_MAX_BYTES
+    if operation == DEEPSEEK_POLICY_SIMPLE_REQUEST:
+        max_input_bytes = DEEPSEEK_SIMPLE_REQUEST_MAX_BYTES
+    if input_length < 0 or input_length > max_input_bytes or output_address == 0:
         return DEEPSEEK_KERNEL_STATUS_INVALID
     if input_length > 0 and input_address == 0:
         return DEEPSEEK_KERNEL_STATUS_INVALID
@@ -2546,7 +2556,7 @@ def deepseek_request_policy_v1(
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
     deepseek_policy_set(output, 0)
     var view = ProdexRichStringView(input_address, UInt(input_length))
-    if not rich_view_valid(view, DEEPSEEK_KERNEL_MAX_BYTES):
+    if not rich_view_valid(view, max_input_bytes):
         return DEEPSEEK_KERNEL_STATUS_UTF8
     var ok = False
     if operation == DEEPSEEK_POLICY_REQUEST_FIELDS:

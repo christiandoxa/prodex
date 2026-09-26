@@ -166,6 +166,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo_tests.rs",
@@ -272,6 +273,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
@@ -332,6 +334,7 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-provider-core/src/deepseek_bridge/messages/adjacency.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items/push.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items/push/fields.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/request_probe/input.rs",
   "crates/prodex-runtime-proxy/src/payload_detection/sse/rust_oracle.rs",
   "crates/prodex-runtime-proxy/src/selection_policy/rust_oracles.rs",
   "crates/prodex-runtime-proxy/src/compatibility_surface/rust_oracle.rs",
@@ -511,6 +514,7 @@ const DEEPSEEK_RESPONSE_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/trans
 const DEEPSEEK_REQUEST_FILE = "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs";
 const DEEPSEEK_REQUEST_REJECT_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/reject.rs";
 const DEEPSEEK_REASONING_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs";
+const DEEPSEEK_SIMPLE_REQUEST_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs";
 const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
@@ -576,6 +580,11 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === ADAPTIVE_BUDGET_FILE &&
       !contents.includes("prodex_mojo_core::runtime::smart_context_adaptive_budget_plan("))
     .map(([filePath]) => `${filePath}: adaptive budget must use the Mojo plan`);
+  const deepseekSimpleRequestViolations = files
+    .filter(([filePath, contents]) => filePath === DEEPSEEK_SIMPLE_REQUEST_FILE &&
+      (!contents.includes("DeepSeekRequestPolicyOperation::SimpleRequest") ||
+        !contents.includes("prodex_mojo_core::rich::deepseek_request_policy(")))
+    .map(([filePath]) => `${filePath}: DeepSeek simple-request eligibility must use Mojo`);
   const quotaPlannerViolations = files
     .filter(([filePath, contents]) => filePath === RUNTIME_QUOTA_FILE &&
       (!contents.includes("mojo::quota_snapshot_plan(") ||
@@ -806,6 +815,7 @@ export function findViolations(files) {
       [HEALTH_ABI_TEST_FILE, /\bfn\s+(?:effective|expected)\s*\(/u],
       [DEEPSEEK_RESPONSE_FILE, /\bfn\s+deepseek_stream_event_from_chat_value_rust\s*\(|#\[cfg\(not\(feature\s*=\s*"mojo"\)\)\]\s*pub\(super\)\s+fn\s+deepseek_stream_event_from_chat_value\s*\(/u],
       [DEEPSEEK_REQUEST_FILE, /\bfn\s+(?:deepseek_request_body_from_responses_rust|deepseek_messages_from_request|deepseek_tool_choice_from_request)\s*\(/u],
+      [DEEPSEEK_SIMPLE_REQUEST_FILE, /\bfn\s+(?:deepseek_provider_core_(?:function_tools|response_format|tool_choice)|deepseek_simple_input_item)\s*\(/u],
       [MODEL_SPEC_FILE, /\beq_ignore_ascii_case\s*\(/u],
       [PROMPT_CACHE_SELECTION_FILE, /selection_prompt_cache_rust|\bfn\s+runtime_prompt_cache_affinity_score\s*\(/u],
       [GEMINI_TOOL_CALLS_FILE, /\bfn\s+gemini_split_flat_namespace_tool_name\s*\(/u],
@@ -836,6 +846,7 @@ export function findViolations(files) {
   });
   return [...markerViolations, ...featureOffViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
+    ...deepseekSimpleRequestViolations,
     ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
@@ -940,6 +951,17 @@ function selfTest() {
     /adaptive budget must use the Mojo plan/u);
   assert.deepEqual(findViolations([[ADAPTIVE_BUDGET_FILE,
     "prodex_mojo_core::runtime::smart_context_adaptive_budget_plan()"]]), []);
+  assert.match(findViolations([[DEEPSEEK_SIMPLE_REQUEST_FILE,
+    "fn deepseek_provider_core_simple_request() {}"]]).join("\n"),
+  /DeepSeek simple-request eligibility must use Mojo/u);
+  assert.deepEqual(findViolations([[DEEPSEEK_SIMPLE_REQUEST_FILE,
+    "DeepSeekRequestPolicyOperation::SimpleRequest; prodex_mojo_core::rich::deepseek_request_policy()"]]), []);
+  assert.match(findViolations([[DEEPSEEK_SIMPLE_REQUEST_FILE,
+    "fn deepseek_provider_core_function_tools() {}"]]).join("\n"),
+  /replaced Rust semantic implementation/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/request_probe/input.rs",
+    "fn deepseek_simple_input_item() {}"]]).join("\n"),
+  /retained Rust fallback or oracle/u);
   assert.match(findViolations([[RUNTIME_QUOTA_FILE,
     "fn runtime_proxy_quota_summary_from_usage_snapshot_at() {}"]]).join("\n"),
     /quota snapshot and gate decisions must use Mojo/u);

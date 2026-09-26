@@ -596,6 +596,32 @@
         "operations": [
           "provider_error_request_member_rejection"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/rich_abi.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "deepseek_simple_request_eligibility"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/deepseek.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "semantic_ranges": [
+          {
+            "start": 1509,
+            "end": 1759
+          }
+        ],
+        "operations": [
+          "deepseek_simple_request_eligibility"
+        ]
       }
     ],
     "removed": [
@@ -1372,6 +1398,32 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Clap values, fixed-width ABI mapping, validated result mapping, and TOML/OsString rendering"
+    },
+    {
+      "name": "deepseek_simple_request_eligibility",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.432.1",
+      "baseline_state": "feature-off Rust policy",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_deepseek_request_policy_v1",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "simple_request": 4
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
+      "consumer_marker": "DeepSeekRequestPolicyOperation::SimpleRequest",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
+      "rust_owner_before": "Feature-off Rust simple-request eligibility and input-item classification",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted after feature-mode parity cases; focused tests retain independent expected values",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON parsing, previous-response lookup, and typed Mojo ABI mapping"
     }
   ],
   "rust_semantic_reductions": [
@@ -1943,6 +1995,21 @@
       "production_consumer": "crates/prodex-provider-core/src/translators/deepseek/response.rs",
       "parity_test": "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
       "performance": "one two-pass JSON-tree transform per parsed chat event"
+    },
+    {
+      "file": "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
+      "symbol": "deepseek_provider_core_simple_request",
+      "operation": "deepseek_simple_request_eligibility",
+      "previous_responsibility": "feature-off Rust eligibility classification for request fields, input items, tools, tool choice, and response format",
+      "final_state": "adapter-only",
+      "rust_before": "Rust JSON-tree classification in request_probe.rs and request_probe/input.rs",
+      "rust_after": "Serde parses and normalizes the request for a typed SimpleRequest Mojo policy call; Rust performs only existing-response lookup and result mapping",
+      "mojo_owner": "mojo/prodex_core/deepseek.mojo::deepseek_simple_request_plan",
+      "mojo_source": "mojo/prodex_core/deepseek.mojo",
+      "mojo_entry": "prodex_mojo_deepseek_request_policy_v1 operation 4",
+      "production_consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
+      "parity_test": "crates/prodex-provider-core/src/deepseek_bridge/tests/simple_request.rs",
+      "performance": "one bounded Mojo policy call with no Rust eligibility fallback"
     }
   ],
   "deleted_authoritative_operations": [
