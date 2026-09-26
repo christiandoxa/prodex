@@ -2166,3 +2166,18 @@ The canonical source report counts **53,535 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **523,272 additional Mojo LOC** required at this Rust
 volume.
+
+## Anthropic response identifier fallback hard replacement
+
+The existing Anthropic response-envelope Mojo operation now chooses the
+default response ID and model when the upstream fields are missing or are not
+strings. Rust passes the optional serialized fields without applying a second
+fallback decision. Fixed Mojo and provider caller tests cover missing and
+non-string fields, while the existing string path remains unchanged. The rich
+ABI version is unchanged; native execution evidence remains Linux x86_64.
+
+The canonical source report counts **53,549 reachable Mojo LOC** and
+**192,257 Rust production LOC**, totaling **245,806 LOC**: **21.79% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **523,222 additional Mojo LOC** required at this Rust
+volume.
