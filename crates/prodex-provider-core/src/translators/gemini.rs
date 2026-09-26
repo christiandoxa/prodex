@@ -1,7 +1,5 @@
 pub(crate) use self::request::gemini_builtin_tools_from_request;
 pub(crate) use self::request::gemini_function_declaration_from_openai_tool;
-#[cfg(not(feature = "mojo"))]
-pub(crate) use self::request::gemini_generation_config_from_request;
 pub(crate) use self::request::gemini_preserve_tool_call_signatures;
 pub use self::request::gemini_provider_core_model_uses_thinking_level;
 #[cfg(not(feature = "mojo"))]

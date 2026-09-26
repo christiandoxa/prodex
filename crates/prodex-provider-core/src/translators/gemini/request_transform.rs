@@ -5,15 +5,7 @@ use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
 use serde_json::{Value, json};
 
 #[cfg(not(feature = "mojo"))]
-use super::request::{
-    gemini_apply_optional_request_fields, gemini_apply_response_format,
-    gemini_validate_candidate_count,
-};
-#[cfg(not(feature = "mojo"))]
-use super::request::{
-    gemini_apply_text_format, gemini_insert_basic_generation_config,
-    gemini_insert_extended_generation_config, gemini_thinking_config_from_request,
-};
+use super::request::{gemini_apply_response_format, gemini_validate_candidate_count};
 use super::request::{
     gemini_builtin_tools_from_request, gemini_continuation_metadata,
     gemini_is_supported_builtin_tool, gemini_tool_config_from_request,
@@ -92,7 +84,10 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
         return gemini_issue_result(input.endpoint, issue);
     }
 
-    let (system_instruction, contents) = gemini_request_contents(&value);
+    let (system_instruction, contents) = match gemini_request_contents(&value) {
+        Ok(contents) => contents,
+        Err(issue) => return gemini_issue_result(input.endpoint, issue),
+    };
     let model = obj
         .get("model")
         .and_then(Value::as_str)
@@ -190,7 +185,8 @@ fn gemini_validate_request_mojo(
     input: &ProviderTransformInput,
     obj: &serde_json::Map<String, Value>,
 ) -> Result<crate::gemini_bridge::GeminiTranslatorValidationPlan, GeminiTransformIssue> {
-    let plan = crate::gemini_bridge::gemini_bridge_validate_translator(&input.body);
+    let plan = crate::gemini_bridge::gemini_bridge_validate_translator(&input.body)
+        .map_err(GeminiTransformIssue::Rejected)?;
     if plan.tag == 1 {
         return Err(GeminiTransformIssue::Unsupported(
             "Gemini translator does not support local media path inputs".to_string(),
@@ -225,21 +221,26 @@ fn gemini_validate_request_rust(
 }
 
 #[cfg(feature = "mojo")]
-fn gemini_request_contents(value: &Value) -> (Option<Value>, Vec<Value>) {
-    gemini_text_contents_from_request_mojo(value).unwrap_or_else(|| {
-        (
+fn gemini_request_contents(
+    value: &Value,
+) -> Result<(Option<Value>, Vec<Value>), GeminiTransformIssue> {
+    match gemini_text_contents_from_request_mojo(value).map_err(GeminiTransformIssue::Rejected)? {
+        Some(contents) => Ok(contents),
+        None => Ok((
             gemini_system_instruction_from_request(value),
             gemini_contents_from_request(value),
-        )
-    })
+        )),
+    }
 }
 
 #[cfg(not(feature = "mojo"))]
-fn gemini_request_contents(value: &Value) -> (Option<Value>, Vec<Value>) {
-    (
+fn gemini_request_contents(
+    value: &Value,
+) -> Result<(Option<Value>, Vec<Value>), GeminiTransformIssue> {
+    Ok((
         gemini_system_instruction_from_request(value),
         gemini_contents_from_request(value),
-    )
+    ))
 }
 
 #[cfg(feature = "mojo")]
@@ -258,15 +259,17 @@ fn gemini_build_body_mojo(
     } else {
         None
     };
-    let tool_config = gemini_tool_config_from_request(value);
-    Ok(crate::gemini_bridge::gemini_bridge_raw_translator_request(
+    let tool_config =
+        gemini_tool_config_from_request(value).map_err(GeminiTransformIssue::Rejected)?;
+    crate::gemini_bridge::gemini_bridge_raw_translator_request(
         value,
         system_instruction,
         contents,
         tools.as_ref(),
         tool_config.as_ref(),
         model,
-    ))
+    )
+    .map_err(GeminiTransformIssue::Rejected)
 }
 
 #[cfg(not(feature = "mojo"))]
@@ -277,48 +280,42 @@ fn gemini_build_body_rust(
     system_instruction: Option<Value>,
     contents: Vec<Value>,
 ) -> Result<Vec<u8>, GeminiTransformIssue> {
-    let mut request = serde_json::Map::new();
-    if let Some(system_instruction) = system_instruction {
-        request.insert("systemInstruction".to_string(), system_instruction);
-    }
-    request.insert("contents".to_string(), Value::Array(contents));
-    let mut generation_config = gemini_translator_generation_config(value, obj, model);
+    let mut generation_config =
+        crate::gemini_bridge::gemini_provider_core_generation_config_from_request(
+            value, value, model, None,
+        )
+        .map_err(GeminiTransformIssue::Rejected)?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| {
+            GeminiTransformIssue::Rejected(
+                "Mojo Gemini generation config is not an object".to_string(),
+            )
+        })?;
     if let Some(response_format) = obj.get("response_format") {
         gemini_apply_response_format(response_format, &mut generation_config)
             .map_err(GeminiTransformIssue::Rejected)?;
     }
-    if !generation_config.is_empty() {
-        request.insert(
-            "generationConfig".to_string(),
-            Value::Object(generation_config),
-        );
-    }
-    gemini_apply_tools(obj, &mut request).map_err(GeminiTransformIssue::Rejected)?;
-    if let Some(tool_config) = gemini_tool_config_from_request(value) {
-        request.insert("toolConfig".to_string(), tool_config);
-    }
-    gemini_apply_optional_request_fields(obj, &mut request);
-    Ok(serde_json::to_vec(&json!({
+    let mut tool_request = serde_json::Map::new();
+    gemini_apply_tools(obj, &mut tool_request).map_err(GeminiTransformIssue::Rejected)?;
+    let tool_config =
+        gemini_tool_config_from_request(value).map_err(GeminiTransformIssue::Rejected)?;
+    let request = crate::gemini_bridge::gemini_provider_core_generate_content_request_map(
+        value,
+        system_instruction,
+        contents,
+        tool_request.remove("tools"),
+        tool_config,
+        Value::Object(generation_config),
+    )
+    .map_err(GeminiTransformIssue::Rejected)?;
+    serde_json::to_vec(&json!({
         "model": model,
         "request": Value::Object(request)
     }))
-    .expect("gemini request serializes"))
-}
-
-#[cfg(not(feature = "mojo"))]
-fn gemini_translator_generation_config(
-    _value: &Value,
-    obj: &serde_json::Map<String, Value>,
-    model: &str,
-) -> serde_json::Map<String, Value> {
-    let mut generation_config = serde_json::Map::new();
-    gemini_insert_basic_generation_config(obj, &mut generation_config);
-    gemini_insert_extended_generation_config(obj, &mut generation_config);
-    gemini_apply_text_format(obj, &mut generation_config);
-    if let Some(thinking_config) = gemini_thinking_config_from_request(obj, model) {
-        generation_config.insert("thinkingConfig".to_string(), thinking_config);
-    }
-    generation_config
+    .map_err(|error| {
+        GeminiTransformIssue::Rejected(format!("Gemini request serialization failed: {error}"))
+    })
 }
 
 fn gemini_apply_tools(
@@ -413,10 +410,12 @@ mod tests {
         #[cfg(feature = "mojo")]
         assert!(
             super::super::request_contents::gemini_text_contents_from_request_mojo(&request)
+                .expect("valid Gemini text contents")
                 .is_none()
         );
 
-        let (_, contents) = gemini_request_contents(&request);
+        let (_, contents) =
+            gemini_request_contents(&request).expect("valid Gemini request contents");
         assert_eq!(
             serde_json::Value::Array(contents),
             json!([
@@ -742,5 +741,60 @@ mod tests {
         assert!(body["request"]["safetySettings"].is_null());
         assert!(body["request"].get("cachedContent").is_none());
         assert_eq!(body["request"]["labels"]["suite"], "synthetic");
+    }
+
+    #[test]
+    fn null_aliases_unicode_schemas_and_optional_fields_keep_the_expected_values() {
+        let result = transform(json!({
+            "model": "gemini-3-pro",
+            "temperature": 0.25,
+            "top_p": 0.8,
+            "max_tokens": 123,
+            "top_k": 1,
+            "topK": null,
+            "presence_penalty": 0.1,
+            "presencePenalty": null,
+            "response_schema": {"title": "東京 🦀"},
+            "responseSchema": null,
+            "candidate_count": 1,
+            "candidateCount": null,
+            "stop": null,
+            "stop_sequences": ["ignored"],
+            "reasoning": {"effort": "low"},
+            "text": {"format": {"type": "json_schema", "schema": {"description": "λ"}}},
+            "safety_settings": null,
+            "safetySettings": [{"category": "ignored"}],
+            "cached_content": null,
+            "cachedContent": "ignored-cache",
+            "labels": {"suite": "日本語"}
+        }));
+        let body: serde_json::Value = serde_json::from_slice(&result.body.unwrap()).unwrap();
+
+        assert_eq!(
+            body["request"]["generationConfig"],
+            json!({
+                "temperature": 0.25,
+                "topP": 0.8,
+                "maxOutputTokens": 123,
+                "topK": 1,
+                "presencePenalty": 0.1,
+                "responseSchema": {"title": "東京 🦀"},
+                "responseMimeType": "application/json",
+                "responseJsonSchema": {"description": "λ"},
+                "thinkingConfig": {"includeThoughts": true, "thinkingLevel": "LOW"}
+            })
+        );
+        assert!(body["request"]["safetySettings"].is_null());
+        assert!(body["request"].get("cachedContent").is_none());
+        assert_eq!(body["request"]["labels"], json!({"suite": "日本語"}));
+    }
+
+    #[test]
+    fn malformed_request_json_is_rejected_before_mojo_translation() {
+        let result = gemini_transform_request(ProviderTransformInput::new(
+            ProviderEndpoint::Responses,
+            b"{\"model\":".to_vec(),
+        ));
+        assert!(rejection_reason(result).starts_with("failed to parse Responses request JSON:"),);
     }
 }

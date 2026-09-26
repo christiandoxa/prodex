@@ -39,11 +39,11 @@ fn gemini_bridge_request_bytes(
     prodex_mojo_core::provider_constraints::gemini_bridge_request_kernel(input)
 }
 
-fn gemini_bridge_request_value(input: GeminiBridgeRequestKernelInput<'_>) -> Value {
+fn gemini_bridge_request_value(input: GeminiBridgeRequestKernelInput<'_>) -> Result<Value, String> {
     let body = gemini_bridge_request_bytes(input)
-        .unwrap_or_else(|error| panic!("Mojo Gemini bridge request kernel failed: {error:?}"));
-    serde_json::from_slice(&body).unwrap_or_else(|error| {
-        panic!("Mojo Gemini bridge request kernel returned invalid JSON: {error}")
+        .map_err(|error| format!("Mojo Gemini bridge request kernel failed: {error:?}"))?;
+    serde_json::from_slice(&body).map_err(|error| {
+        format!("Mojo Gemini bridge request kernel returned invalid JSON: {error}")
     })
 }
 
@@ -56,18 +56,20 @@ pub(crate) struct GeminiTranslatorValidationPlan {
 }
 
 #[cfg(feature = "mojo")]
-pub(crate) fn gemini_bridge_validate_translator(body: &[u8]) -> GeminiTranslatorValidationPlan {
+pub(crate) fn gemini_bridge_validate_translator(
+    body: &[u8],
+) -> Result<GeminiTranslatorValidationPlan, String> {
     let value = gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::ValidateTranslatorRequest,
         primary: Some(body),
         ..GeminiBridgeRequestKernelInput::new(
             GeminiBridgeRequestOperation::ValidateTranslatorRequest,
         )
-    });
+    })?;
     let tag = value
         .get("tag")
         .and_then(Value::as_i64)
-        .expect("Mojo Gemini translator validation tag is an integer");
+        .ok_or_else(|| "Mojo Gemini translator validation returned an invalid tag".to_string())?;
     let index = value
         .get("index")
         .and_then(Value::as_i64)
@@ -76,7 +78,7 @@ pub(crate) fn gemini_bridge_validate_translator(body: &[u8]) -> GeminiTranslator
         .get("detail")
         .and_then(Value::as_str)
         .map(str::to_string);
-    GeminiTranslatorValidationPlan { tag, index, detail }
+    Ok(GeminiTranslatorValidationPlan { tag, index, detail })
 }
 
 #[cfg(feature = "mojo")]
@@ -87,15 +89,31 @@ pub(crate) fn gemini_bridge_raw_translator_request(
     tools: Option<&Value>,
     tool_config: Option<&Value>,
     model: &str,
-) -> Vec<u8> {
-    let original = serde_json::to_vec(original).expect("Gemini translator request serializes");
+) -> Result<Vec<u8>, String> {
+    let original = serde_json::to_vec(original)
+        .map_err(|error| format!("failed to serialize Gemini translator request: {error}"))?;
     let system_instruction = system_instruction
-        .map(|value| serde_json::to_vec(value).expect("Gemini system instruction serializes"));
-    let contents = serde_json::to_vec(contents).expect("Gemini contents serialize");
-    let tools = tools.map(|value| serde_json::to_vec(value).expect("Gemini tools serialize"));
-    let tool_config =
-        tool_config.map(|value| serde_json::to_vec(value).expect("Gemini tool config serializes"));
-    let model = serde_json::to_vec(model).expect("Gemini model serializes");
+        .map(|value| {
+            serde_json::to_vec(value)
+                .map_err(|error| format!("failed to serialize Gemini system instruction: {error}"))
+        })
+        .transpose()?;
+    let contents = serde_json::to_vec(contents)
+        .map_err(|error| format!("failed to serialize Gemini contents: {error}"))?;
+    let tools = tools
+        .map(|value| {
+            serde_json::to_vec(value)
+                .map_err(|error| format!("failed to serialize Gemini tools: {error}"))
+        })
+        .transpose()?;
+    let tool_config = tool_config
+        .map(|value| {
+            serde_json::to_vec(value)
+                .map_err(|error| format!("failed to serialize Gemini tool config: {error}"))
+        })
+        .transpose()?;
+    let model = serde_json::to_vec(model)
+        .map_err(|error| format!("failed to serialize Gemini model: {error}"))?;
     gemini_bridge_request_bytes(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::RawTranslatorRequest,
         primary: Some(&original),
@@ -106,7 +124,7 @@ pub(crate) fn gemini_bridge_raw_translator_request(
         senary: Some(&model),
         ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::RawTranslatorRequest)
     })
-    .unwrap_or_else(|error| panic!("Mojo Gemini raw translator request failed: {error:?}"))
+    .map_err(|error| format!("Mojo Gemini raw translator request failed: {error:?}"))
 }
 
 #[cfg(feature = "mojo")]
@@ -126,7 +144,8 @@ pub(super) fn gemini_bridge_request_simple(body: &[u8]) -> bool {
 
 #[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_candidate_count(value: &Value) -> Result<(), String> {
-    let input = serde_json::to_vec(value).expect("Gemini candidate-count input serializes");
+    let input = serde_json::to_vec(value)
+        .map_err(|error| format!("failed to serialize Gemini candidate-count input: {error}"))?;
     let body = gemini_bridge_request_bytes(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::ValidateCandidateCount,
         primary: Some(&input),
@@ -140,26 +159,29 @@ pub(super) fn gemini_bridge_request_candidate_count(value: &Value) -> Result<(),
     }
 }
 
-pub(super) fn gemini_bridge_request_tool_config(value: &Value) -> Option<Value> {
-    let input = serde_json::to_vec(value).expect("Gemini tool choice serializes");
+pub(super) fn gemini_bridge_request_tool_config(value: &Value) -> Result<Option<Value>, String> {
+    let input = serde_json::to_vec(value)
+        .map_err(|error| format!("failed to serialize Gemini tool config: {error}"))?;
     let value = gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::ToolConfig,
         primary: Some(&input),
         ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::ToolConfig)
-    });
-    (!value.is_null()).then_some(value)
+    })?;
+    Ok((!value.is_null()).then_some(value))
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_generation_config(
     original: &Value,
     chat: &Value,
     model: &str,
     thinking_budget_tokens: Option<u64>,
-) -> Value {
-    let original = serde_json::to_vec(original).expect("Gemini original request serializes");
-    let chat = serde_json::to_vec(chat).expect("Gemini chat request serializes");
-    let model = serde_json::to_vec(model).expect("Gemini model serializes");
+) -> Result<Value, String> {
+    let original = serde_json::to_vec(original)
+        .map_err(|error| format!("failed to serialize Gemini original request: {error}"))?;
+    let chat = serde_json::to_vec(chat)
+        .map_err(|error| format!("failed to serialize Gemini chat request: {error}"))?;
+    let model = serde_json::to_vec(model)
+        .map_err(|error| format!("failed to serialize Gemini model: {error}"))?;
     let budget = thinking_budget_tokens.map(|value| value.to_string());
     gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::GenerationConfig,
@@ -172,7 +194,6 @@ pub(super) fn gemini_bridge_request_generation_config(
     })
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_map(
     original: &Value,
     system_instruction: Option<&Value>,
@@ -180,16 +201,31 @@ pub(super) fn gemini_bridge_request_map(
     tools: Option<&Value>,
     tool_config: Option<&Value>,
     generation_config: &Value,
-) -> serde_json::Map<String, Value> {
-    let original = serde_json::to_vec(original).expect("Gemini original request serializes");
+) -> Result<serde_json::Map<String, Value>, String> {
+    let original = serde_json::to_vec(original)
+        .map_err(|error| format!("failed to serialize Gemini original request: {error}"))?;
     let system_instruction = system_instruction
-        .map(|value| serde_json::to_vec(value).expect("Gemini system instruction serializes"));
-    let contents = serde_json::to_vec(contents).expect("Gemini contents serialize");
-    let tools = tools.map(|value| serde_json::to_vec(value).expect("Gemini tools serialize"));
-    let tool_config =
-        tool_config.map(|value| serde_json::to_vec(value).expect("Gemini tool config serializes"));
-    let generation_config =
-        serde_json::to_vec(generation_config).expect("Gemini generation config serializes");
+        .map(|value| {
+            serde_json::to_vec(value)
+                .map_err(|error| format!("failed to serialize Gemini system instruction: {error}"))
+        })
+        .transpose()?;
+    let contents = serde_json::to_vec(contents)
+        .map_err(|error| format!("failed to serialize Gemini contents: {error}"))?;
+    let tools = tools
+        .map(|value| {
+            serde_json::to_vec(value)
+                .map_err(|error| format!("failed to serialize Gemini tools: {error}"))
+        })
+        .transpose()?;
+    let tool_config = tool_config
+        .map(|value| {
+            serde_json::to_vec(value)
+                .map_err(|error| format!("failed to serialize Gemini tool config: {error}"))
+        })
+        .transpose()?;
+    let generation_config = serde_json::to_vec(generation_config)
+        .map_err(|error| format!("failed to serialize Gemini generation config: {error}"))?;
     let value = gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::GenerateContentRequest,
         primary: Some(&original),
@@ -199,25 +235,30 @@ pub(super) fn gemini_bridge_request_map(
         quinary: tool_config.as_deref(),
         senary: Some(&generation_config),
         ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::GenerateContentRequest)
-    });
+    })?;
     value
         .as_object()
         .cloned()
-        .expect("Mojo Gemini request map is an object")
+        .ok_or_else(|| "Mojo Gemini request map is not an object".to_string())
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_body(
     model: &str,
     project_id: Option<&str>,
     code_assist: bool,
     request: &serde_json::Map<String, Value>,
-) -> Value {
-    let model = serde_json::to_vec(model).expect("Gemini model serializes");
+) -> Result<Value, String> {
+    let model = serde_json::to_vec(model)
+        .map_err(|error| format!("failed to serialize Gemini model: {error}"))?;
     let project = project_id
-        .map(|value| serde_json::to_vec(value).expect("Gemini project serializes"))
+        .map(|value| {
+            serde_json::to_vec(value)
+                .map_err(|error| format!("failed to serialize Gemini project: {error}"))
+        })
+        .transpose()?
         .unwrap_or_else(|| b"null".to_vec());
-    let request = serde_json::to_vec(request).expect("Gemini request serializes");
+    let request = serde_json::to_vec(request)
+        .map_err(|error| format!("failed to serialize Gemini request: {error}"))?;
     gemini_bridge_request_value(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::GenerateContentBody,
         primary: Some(&model),
@@ -229,15 +270,19 @@ pub(super) fn gemini_bridge_request_body(
 }
 
 #[cfg(feature = "mojo")]
-pub(super) fn gemini_bridge_request_native_project(body: &[u8], project_id: &str) -> Vec<u8> {
-    let project = serde_json::to_vec(project_id).expect("Gemini project serializes");
+pub(super) fn gemini_bridge_request_native_project(
+    body: &[u8],
+    project_id: &str,
+) -> Result<Vec<u8>, String> {
+    let project = serde_json::to_vec(project_id)
+        .map_err(|error| format!("failed to serialize Gemini project: {error}"))?;
     gemini_bridge_request_bytes(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::NativeProject,
         primary: Some(body),
         secondary: Some(&project),
         ..GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::NativeProject)
     })
-    .unwrap_or_else(|error| panic!("Mojo Gemini bridge request kernel failed: {error:?}"))
+    .map_err(|error| format!("Mojo Gemini bridge request kernel failed: {error:?}"))
 }
 
 #[cfg(feature = "mojo")]

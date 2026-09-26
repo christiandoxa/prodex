@@ -61,15 +61,15 @@ pub(in super::super) fn runtime_gemini_generate_request_body_with_config(
             .get_mut("request")
             .and_then(serde_json::Value::as_object_mut)
     {
-        request.insert(
-            "generationConfig".to_string(),
-            gemini_provider_core_generation_config_from_request(
-                &original,
-                &original,
-                &model,
-                Some(budget),
-            ),
-        );
+        let generation_config = gemini_provider_core_generation_config_from_request(
+            &original,
+            &original,
+            &model,
+            Some(budget),
+        )
+        .map_err(anyhow::Error::msg)
+        .context("failed to translate Gemini generation config")?;
+        request.insert("generationConfig".to_string(), generation_config);
     }
 
     let body_value = if code_assist {

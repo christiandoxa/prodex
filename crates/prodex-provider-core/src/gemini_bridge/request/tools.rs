@@ -15,7 +15,7 @@ pub fn gemini_provider_core_sanitize_function_schema(
 
 pub fn gemini_provider_core_tool_config_from_request(
     value: &serde_json::Value,
-) -> Option<serde_json::Value> {
+) -> Result<Option<serde_json::Value>, String> {
     super::request_contents::gemini_bridge_request_tool_config(value)
 }
 

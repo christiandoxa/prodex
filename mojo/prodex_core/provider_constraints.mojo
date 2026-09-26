@@ -2152,7 +2152,9 @@ def gemini_bridge_request_put_source_pair(
     first: Pointer[mut=True, Bool, _],
 ) -> Bool:
     var bounds = gemini_bridge_request_source_bounds(source, object_bounds, first_source)
-    if bounds[0] < 0:
+    if bounds[0] < 0 or omit_null and gemini_bridge_request_is_null(
+        source, bounds[0], bounds[1]
+    ):
         bounds = gemini_bridge_request_source_bounds(source, object_bounds, second_source)
     if bounds[0] < 0 or omit_null and gemini_bridge_request_is_null(source, bounds[0], bounds[1]):
         return True
@@ -2366,6 +2368,27 @@ def gemini_bridge_request_write_thinking_config(
     )
 
 
+def gemini_bridge_request_write_candidate_count_config(
+    source: GeminiRequestContentStringView,
+    object_bounds: Array[Int64, 2],
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    first: Pointer[mut=True, Bool, _],
+) -> Bool:
+    var bounds = gemini_bridge_request_source_bounds(source, object_bounds, 27)
+    if bounds[0] < 0:
+        bounds = gemini_bridge_request_source_bounds(source, object_bounds, 28)
+    if bounds[0] < 0 or not gemini_bridge_request_literal_equals(
+        source, bounds[0], bounds[1], StringSlice("1")
+    ):
+        return True
+    return gemini_bridge_request_put_raw_field(
+        writer,
+        first,
+        StringSlice('"candidateCount":'),
+        gemini_bridge_request_value_view(source, bounds),
+    )
+
+
 def gemini_bridge_request_write_generation_config(
     input: GeminiBridgeRequestInput,
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
@@ -2418,8 +2441,8 @@ def gemini_bridge_request_write_generation_config(
         original, original_bounds, 24, 23, StringSlice("\"audioTimestamp\":"), True, writer, first_ptr
     ) or not gemini_bridge_request_put_source_pair(
         original, original_bounds, 26, 25, StringSlice("\"speechConfig\":"), True, writer, first_ptr
-    ) or not gemini_bridge_request_put_source_pair(
-        original, original_bounds, 27, 28, StringSlice("\"candidateCount\":"), True, writer, first_ptr
+    ) or not gemini_bridge_request_write_candidate_count_config(
+        original, original_bounds, writer, first_ptr
     ):
         return False
     var stop = gemini_bridge_request_object_member(
@@ -4441,8 +4464,8 @@ def gemini_translator_write_generation_config(
         or not gemini_bridge_request_put_source_pair(
             source, root, 26, 25, StringSlice('"speechConfig":'), True, writer, first_ptr
         )
-        or not gemini_bridge_request_put_source_pair(
-            source, root, 27, 28, StringSlice('"candidateCount":'), True, writer, first_ptr
+        or not gemini_bridge_request_write_candidate_count_config(
+            source, root, writer, first_ptr
         )
     ):
         return False
