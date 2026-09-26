@@ -1216,7 +1216,9 @@ def runtime_doctor_summary_any_transport(input: ProdexRuntimeDoctorSummaryPlanIn
 
 def runtime_doctor_summary_any_compact_exit(input: ProdexRuntimeDoctorSummaryPlanInput) -> Bool:
     return (
-        runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_CANDIDATE) > 0
+        runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_CANDIDATE) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_PRECOMMIT) > 0
+        or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_CANDIDATE) > 0
         or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_COMMITTED) > 0
         or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_COMMITTED_OWNER) > 0
         or runtime_doctor_summary_count(input, SUMMARY_MARKER_COMPACT_EXIT_FOLLOWUP_OWNER) > 0
@@ -1358,7 +1360,6 @@ def runtime_doctor_summary_select_diagnosis(
         runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_LIVE_ERROR) > 0
         or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_LIVE_SIDECAR_ERROR) > 0
         or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_LIVE_SESSION_ERROR) > 0
-        or runtime_doctor_summary_count(input, SUMMARY_MARKER_GEMINI_SIDECAR_ACCEPT_ERROR) > 0
     ):
         return SUMMARY_DIAGNOSIS_GEMINI_LIVE_ERROR
 

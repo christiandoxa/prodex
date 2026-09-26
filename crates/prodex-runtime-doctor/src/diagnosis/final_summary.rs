@@ -3,15 +3,9 @@ use super::*;
 
 mod compact;
 mod continuations;
-#[cfg(not(feature = "mojo"))]
-mod default_diagnosis;
 mod log_summary;
-#[cfg(feature = "mojo")]
 mod mojo;
-#[cfg(not(feature = "mojo"))]
-mod pressure;
 
-pub(super) use continuations::runtime_doctor_has_context_dependent_fail_closed;
 pub use log_summary::runtime_doctor_finalize_log_summary;
 
 pub fn runtime_doctor_top_facet(summary: &RuntimeDoctorSummary, facet: &str) -> Option<String> {
@@ -23,20 +17,6 @@ pub fn runtime_doctor_top_facet(summary: &RuntimeDoctorSummary, facet: &str) -> 
     })
 }
 
-#[cfg(not(feature = "mojo"))]
-pub fn runtime_doctor_finalize_summary(summary: &mut RuntimeDoctorSummary) {
-    summary.selection_pressure = pressure::runtime_doctor_selection_pressure(summary);
-    summary.transport_pressure = pressure::runtime_doctor_transport_pressure(summary);
-    summary.persistence_pressure = pressure::runtime_doctor_persistence_pressure(summary);
-    summary.startup_audit_pressure = pressure::runtime_doctor_startup_audit_pressure(summary);
-    summary.quota_freshness_pressure = pressure::runtime_doctor_quota_freshness_pressure(summary);
-    summary.route_health = runtime_doctor_route_health(summary);
-    if summary.diagnosis.is_empty() {
-        summary.diagnosis = default_diagnosis::runtime_doctor_default_diagnosis(summary);
-    }
-}
-
-#[cfg(feature = "mojo")]
 pub fn runtime_doctor_finalize_summary(summary: &mut RuntimeDoctorSummary) {
     let plan = mojo::runtime_doctor_summary_plan(summary);
     summary.selection_pressure = mojo::pressure_label(plan.selection_pressure).to_string();

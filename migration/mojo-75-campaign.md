@@ -1244,3 +1244,31 @@ The canonical report counts **51,784 reachable Mojo LOC** and **195,432 Rust
 production LOC**, totaling **247,216 LOC**: **20.95% Mojo**. The 7% release
 floor passes; the 75% project target remains unmet, with **534,512 additional
 Mojo LOC** required at the current Rust volume.
+
+## Kiro stream and runtime doctor hard replacement
+
+Kiro stream event shaping, content extraction, and tool-activity sanitization
+now call the existing Mojo kernel in both provider feature modes. The Rust
+feature-off stream builders and sanitizers were deleted. Caller tests retain
+explicit expected values for redaction, Unicode truncation, and large escaped
+content below the current 4 MiB Kiro ABI limit.
+
+Runtime doctor next-step guidance, policy suggestions, and final diagnosis now
+use Mojo regardless of the optional `mojo` feature. Their four Rust fallback
+modules and temporary parity oracles were deleted. Differential checks covered
+fixture logs, every registered marker with and without fields, and pairs of
+priority markers before deletion. Mojo diagnosis now matches the former
+default-build behavior for missing fields, compatibility warnings, compact
+exits, provider markers, and Gemini retry markers. Permanent caller tests
+assert complete guidance and diagnosis values. The no-fallback guard covers
+the replaced paths and rejects restored fallback modules.
+
+After deletion, provider-core tests pass 224 cases by default and without
+default features, and 262 with Mojo (two manual tests ignored). Runtime-doctor
+tests pass 18 without default features and 37 by default and with Mojo;
+`prodex-mojo-core --features mojo-rich` passes 47 tests.
+
+The canonical report counts **51,785 reachable Mojo LOC** and **195,359 Rust
+production LOC**, totaling **247,144 LOC**: **20.95337131388988% Mojo**. The 7%
+release floor and non-regression check pass. The 75% project target remains
+unmet; **534,292 additional Mojo LOC** are required at the current Rust volume.

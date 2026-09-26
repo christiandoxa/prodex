@@ -9,16 +9,6 @@ pub fn runtime_doctor_marker_count(
     summary.marker_counts.get(marker).copied().unwrap_or(0)
 }
 
-#[cfg(not(feature = "mojo"))]
-pub(super) fn runtime_doctor_has_any_markers(
-    summary: &RuntimeDoctorSummary,
-    markers: &[&'static str],
-) -> bool {
-    markers
-        .iter()
-        .any(|marker| runtime_doctor_marker_count(summary, marker) > 0)
-}
-
 pub(super) fn runtime_doctor_facet_count(
     summary: &RuntimeDoctorSummary,
     facet: &str,
@@ -79,20 +69,6 @@ pub(super) fn runtime_doctor_marker_scope(
         (Some(profile), None) => Some(profile.to_string()),
         (None, Some(route)) => Some(route.to_string()),
         (None, None) => None,
-    }
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(super) fn runtime_doctor_admission_pressure_load(
-    summary: &RuntimeDoctorSummary,
-    marker: &str,
-) -> String {
-    match (
-        runtime_doctor_marker_last_field(summary, marker, "active"),
-        runtime_doctor_marker_last_field(summary, marker, "limit"),
-    ) {
-        (Some(active), Some(limit)) => format!(" Latest load: {active}/{limit}."),
-        _ => String::new(),
     }
 }
 

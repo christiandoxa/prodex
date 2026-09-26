@@ -1,5 +1,4 @@
 use crate::RuntimeDoctorSummary;
-use crate::diagnosis::final_summary::runtime_doctor_has_context_dependent_fail_closed;
 use crate::diagnosis::marker_accessors::*;
 use crate::diagnosis::runtime_doctor_top_facet;
 use crate::suggestions::runtime_doctor_plan_input;
@@ -68,11 +67,6 @@ fn render_probe(summary: &RuntimeDoctorSummary, operation: i64, detail: i64) -> 
 
 pub(super) fn previous_response(summary: &RuntimeDoctorSummary) -> String {
     let value = plan(summary, RUNTIME_DOCTOR_PLAN_OP_PREVIOUS_RESPONSE);
-    assert_eq!(
-        value.detail == RUNTIME_DOCTOR_PLAN_NEXT_CONTEXT_DEPENDENT,
-        runtime_doctor_has_context_dependent_fail_closed(summary),
-        "Mojo runtime-doctor plan disagreed with continuation guard"
-    );
     render(
         RUNTIME_DOCTOR_PLAN_OP_PREVIOUS_RESPONSE,
         value.detail,

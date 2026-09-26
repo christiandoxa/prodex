@@ -53,6 +53,11 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
   "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/next_steps.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/next_steps/mojo_render.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/final_summary/mojo.rs",
+  "crates/prodex-runtime-doctor/src/suggestions.rs",
   "crates/prodex-provider-core/src/fallback/chains.rs",
   "crates/prodex-provider-core/src/fallback/chains/gemini.rs",
   "crates/prodex-provider-core/src/catalog.rs",
@@ -111,6 +116,9 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
   "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/next_steps.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
+  "crates/prodex-runtime-doctor/src/suggestions.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
@@ -155,6 +163,10 @@ const REMOVED_ORACLE_FILES = [
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/pressure.rs",
   "crates/prodex-runtime-launch/src/args_oracle.rs",
   "crates/prodex-runtime-launch/src/args_resume.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/next_steps/compatibility.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/final_summary/default_diagnosis.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/final_summary/pressure.rs",
+  "crates/prodex-runtime-doctor/src/suggestions/compatibility.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema/composition.rs",
   "crates/prodex-provider-core/src/translators/kiro/request/controls.rs",
@@ -195,6 +207,9 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-runtime-doctor/src/parsing/route_profile.rs",
   "crates/prodex-runtime-doctor/src/parsing/selection.rs",
   "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/next_steps.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
+  "crates/prodex-runtime-doctor/src/suggestions.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
@@ -224,6 +239,7 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
+const DOCTOR_CARGO_FILE = "crates/prodex-runtime-doctor/Cargo.toml";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
@@ -370,6 +386,10 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === "crates/prodex-cli/Cargo.toml" &&
       !/^prodex_mojo_core\s*=\s*\{[^\n]*features\s*=\s*\["mojo-runtime"\][^\n]*\}/mu.test(contents))
     .map(([filePath]) => `${filePath}: Super override scanning requires Mojo without a feature gate`);
+  const doctorDependencyViolations = files
+    .filter(([filePath, contents]) => filePath === DOCTOR_CARGO_FILE &&
+      !/^prodex_mojo_core\s*=\s*\{[^\n]*features\s*=\s*\[[^\]]*"mojo-rich"[^\]]*\][^\n]*\}/mu.test(contents))
+    .map(([filePath]) => `${filePath}: doctor next steps and suggestions require Mojo without a feature gate`);
   const defaultFeatureViolations = files.flatMap(([filePath, contents]) => {
     const required = REQUIRED_DEFAULT_FEATURES.get(filePath);
     if (!required) return [];
@@ -382,6 +402,7 @@ export function findViolations(files) {
     ...geminiFallbackViolations, ...hardReplacementViolations, ...deepseekShapingViolations,
     ...quotaWindowViolations,
     ...rehydrateViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
+    ...doctorDependencyViolations,
     ...defaultFeatureViolations];
 }
 
@@ -460,7 +481,7 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-runtime-launch/src/args_resume.rs",
     "fn retarget_codex_tui_resume_args() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-runtime-doctor/Cargo.toml",
-    '[features]\ndefault = []\nstate-summary-mojo = []']])[0], /default features must include state-summary-mojo/u);
+    '[features]\ndefault = []\nstate-summary-mojo = []']]).join("\n"), /default features must include state-summary-mojo/u);
   assert.match(findViolations([["crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
     '#[cfg(not(feature = "state-summary-mojo"))] fn rust_summary() {}']])[0],
     /feature-off Rust path/u);
@@ -518,6 +539,14 @@ function selfTest() {
     '#[cfg(not(feature = "mojo-core"))] fn old_scan() {}']])[0], /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-cli/Cargo.toml",
     'prodex_mojo_core = { workspace = true, optional = true }']])[0], /requires Mojo/u);
+  assert.match(findViolations([[DOCTOR_CARGO_FILE,
+    'prodex_mojo_core = { workspace = true, optional = true }']])[0], /require Mojo/u);
+  assert.match(findViolations([["crates/prodex-runtime-doctor/src/diagnosis/next_steps.rs",
+    '#[cfg(not(feature = "mojo"))] fn old_next_step() {}']])[0], /feature-off Rust path/u);
+  assert.match(findViolations([["crates/prodex-runtime-doctor/src/suggestions/compatibility.rs",
+    "fn old_suggestion() {}"]])[0], /Rust fallback or oracle/u);
+  assert.match(findViolations([["crates/prodex-runtime-doctor/src/diagnosis/final_summary/default_diagnosis.rs",
+    "fn old_diagnosis() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/kiro/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn old_stream() {}']])[0], /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-runtime-tuning/src/capacity.rs",
