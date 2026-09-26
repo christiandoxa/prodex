@@ -33,6 +33,7 @@ comptime LAUNCH_EXTRACT_DRY_RUN: Int64 = 7
 comptime LAUNCH_PREPARE: Int64 = 8
 comptime LAUNCH_SCOPE_CONFIG: Int64 = 9
 comptime LAUNCH_SCAN_SUPER_OVERRIDES: Int64 = 10
+comptime LAUNCH_FIND_SUPER_EXPOSE_ALIAS: Int64 = 11
 comptime SUPER_VALUE_KIND_LAST: Int64 = 23
 
 
@@ -226,6 +227,43 @@ def launch_scan_super_overrides(
     return count
 
 
+def launch_super_expose_option_takes_value(arg: LaunchArgView) -> Bool:
+    var kind = launch_super_override_kind(arg)
+    # Preserve the expose alias's historical subset: --cli and newer overrides
+    # remain unpaired here even when their own parser consumes a value.
+    return (
+        kind == 1
+        or (kind >= 3 and kind <= 16)
+        or launch_is["-p"](arg)
+        or launch_is["-c"](arg)
+    )
+
+
+def launch_find_super_expose_alias(arguments: UInt64, count: Int64) -> Int64:
+    if count < 3:
+        return -1
+    var alias = launch_arg(arguments, 0, 1)
+    if not launch_is["super"](alias) and not launch_is["s"](alias):
+        return -1
+    var index: Int64 = 2
+    while index < count:
+        var arg = launch_arg(arguments, 0, index)
+        if arg.valid_utf8 == 0 or launch_is["--"](arg):
+            return -1
+        if launch_is["expose"](arg):
+            return index
+        if not launch_prefix["-"](arg):
+            return -1
+        if (
+            launch_super_expose_option_takes_value(arg)
+            and launch_equals_offset(arg) < 0
+        ):
+            index += 2
+        else:
+            index += 1
+    return -1
+
+
 def launch_append_range(
     source: UInt64,
     start: Int64,
@@ -382,7 +420,7 @@ def prodex_mojo_launch_args_v1(
     # Lengths are bounded by caller-owned storage and signed address arithmetic.
     if (
         operation < LAUNCH_INSPECT
-        or operation > LAUNCH_SCAN_SUPER_OVERRIDES
+        or operation > LAUNCH_FIND_SUPER_EXPOSE_ALIAS
         or operation == 4
         or operation == 5
         or full_access < 0
@@ -409,6 +447,11 @@ def prodex_mojo_launch_args_v1(
     var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(metadata_address)
     )
+    if operation == LAUNCH_FIND_SUPER_EXPOSE_ALIAS:
+        metadata[unsafe_offset=0] = launch_find_super_expose_alias(
+            arguments, count
+        )
+        return 0
     if operation == LAUNCH_INSPECT:
         launch_inspect(arguments, count, metadata)
         return 0

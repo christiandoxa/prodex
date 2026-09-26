@@ -2,8 +2,110 @@
 #![allow(unsafe_code)]
 
 use prodex_mojo_core::launch::{
-    LaunchArgument, LaunchArgumentOperation, inspect_launch_arguments, plan_launch_arguments,
+    LaunchArgument, LaunchArgumentOperation, find_super_expose_alias_index,
+    inspect_launch_arguments, plan_launch_arguments,
 };
+
+#[test]
+fn super_expose_alias_scan_matches_versioned_mojo_abi_values() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    let cases = [
+        (vec![Some("prodex"), Some("super"), Some("expose")], Some(2)),
+        (
+            vec![
+                Some("prodex"),
+                Some("s"),
+                Some("--profile"),
+                Some("main"),
+                Some("expose"),
+            ],
+            Some(4),
+        ),
+        (
+            vec![
+                Some("prodex"),
+                Some("super"),
+                Some("--profile"),
+                Some("expose"),
+            ],
+            None,
+        ),
+        (
+            vec![
+                Some("prodex"),
+                Some("super"),
+                Some("--profile=main"),
+                Some("expose"),
+            ],
+            Some(3),
+        ),
+        (
+            vec![Some("prodex"), Some("super"), Some("--"), Some("expose")],
+            None,
+        ),
+        (
+            vec![Some("prodex"), Some("super"), Some("exec"), Some("expose")],
+            None,
+        ),
+        (
+            vec![Some("prodex"), Some("super"), None, Some("expose")],
+            None,
+        ),
+        (
+            vec![
+                Some("prodex"),
+                Some("super"),
+                Some("--profile"),
+                None,
+                Some("expose"),
+            ],
+            Some(4),
+        ),
+        (
+            vec![Some("prodex"), Some("super"), Some("--cli"), Some("expose")],
+            Some(3),
+        ),
+    ];
+    for (arguments, expected) in cases {
+        assert_eq!(find_super_expose_alias_index(&arguments).unwrap(), expected);
+    }
+
+    for option in [
+        "-p",
+        "--profile",
+        "--base-url",
+        "--sub-agent-provider",
+        "--sub-agent-model",
+        "--sub-agent-model-reasoning-effort",
+        "--sub-agent-url",
+        "--sub-agent-max-concurrency",
+        "--tool",
+        "--require-tool",
+        "--url",
+        "--provider",
+        "--api-key",
+        "--model",
+        "--local-model",
+        "--context-window",
+        "--local-context-window",
+        "--auto-compact-token-limit",
+        "--local-auto-compact-token-limit",
+        "-c",
+    ] {
+        assert_eq!(
+            find_super_expose_alias_index(&[
+                Some("prodex"),
+                Some("s"),
+                Some(option),
+                Some("expose"),
+            ])
+            .unwrap(),
+            None,
+            "{option} must consume its separate value"
+        );
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy)]

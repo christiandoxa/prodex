@@ -128,6 +128,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/health/inflight.rs",
   "crates/prodex-runtime-proxy/src/health/health_decisions.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
+  "crates/prodex-cli/src/lib.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/tools/builtin.rs",
@@ -220,6 +221,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-doctor/src/diagnosis/final_summary.rs",
   "crates/prodex-runtime-doctor/src/suggestions.rs",
   "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
+  "crates/prodex-cli/src/lib.rs",
   "crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/schema.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
@@ -461,6 +463,7 @@ const RUNTIME_PROXY_CARGO_FILE = "crates/prodex-runtime-proxy/Cargo.toml";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
+const SUPER_EXPOSE_FILE = "crates/prodex-cli/src/lib.rs";
 const GEMINI_SCHEMA_FILE = "crates/prodex-provider-core/src/translators/gemini/request/schema.rs";
 const GEMINI_TOOLS_FILE = "crates/prodex-provider-core/src/translators/gemini/request/tools.rs";
 const GEMINI_STATUS_FILE = "crates/prodex-provider-core/src/translators/gemini/response/status.rs";
@@ -556,6 +559,11 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === CLI_RUNTIME_FEATURE_FILE &&
       /\bfn\s+(?:rust_plan|rollout_budget_reminders|to_codex_config_args_rust|mojo_feature_plan_matches_rust_oracle_for_seeded_inputs)\s*\(/u.test(contents))
     .map(([filePath]) => `${filePath}: contains a Rust runtime-feature planner or oracle`);
+  const superExposeViolations = files
+    .filter(([filePath, contents]) => filePath === SUPER_EXPOSE_FILE &&
+      (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
+        /\bfn\s+(?:rewrite_super_expose_alias|super_option_takes_value)\s*\(/u.test(contents)))
+    .map(([filePath]) => `${filePath}: Super expose alias scan must use Mojo`);
   const geminiFallbackViolations = files
     .filter(([filePath, contents]) =>
       filePath === "crates/prodex-provider-core/src/fallback/chains/gemini.rs" &&
@@ -720,6 +728,7 @@ export function findViolations(files) {
   });
   return [...markerViolations, ...featureOffViolations, ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations, ...cliRuntimeFeatureViolations,
+    ...superExposeViolations,
     ...geminiFallbackViolations, ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...doctorMarkerViolations, ...statusSummaryViolations,
@@ -847,6 +856,10 @@ function selfTest() {
     /budget tier must use the Mojo policy/u);
   assert.match(findViolations([[SUPER_OVERRIDE_FILE, "fn scan_override_rust() {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);
+  assert.match(findViolations([[SUPER_EXPOSE_FILE, "fn rewrite_super_expose_alias() {}"]]).join("\n"),
+    /Super expose alias scan must use Mojo/u);
+  assert.deepEqual(findViolations([[SUPER_EXPOSE_FILE,
+    'fn reassemble_super_expose_alias() { prodex_mojo_core::launch::find_super_expose_alias_index(); }']]), []);
   assert.match(findViolations([[GEMINI_SCHEMA_FILE, "fn sanitized_required() {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);
   assert.match(findViolations([[GEMINI_TOOLS_FILE, "fn gemini_tool_config_from_request_oracle() {}"]]).join("\n"),
