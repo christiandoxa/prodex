@@ -1,8 +1,6 @@
 use super::*;
 use sha2::{Digest as _, Sha256};
 use std::cmp::Ordering;
-#[cfg(any(not(feature = "mojo"), test))]
-use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
 pub fn smart_context_hash_text(text: &str) -> String {
@@ -23,16 +21,6 @@ pub fn smart_context_normalized_command_output_hash_text(text: &str) -> String {
         "scv:{:016x}",
         smart_context_fnv1a64(normalized.as_ref().as_bytes())
     )
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(in crate::smart_context) fn smart_context_fingerprint_map(
-    fingerprints: impl IntoIterator<Item = SmartContextFingerprint>,
-) -> BTreeMap<(SmartContextFingerprintKind, String), SmartContextFingerprint> {
-    fingerprints
-        .into_iter()
-        .map(|fingerprint| ((fingerprint.kind, fingerprint.id.clone()), fingerprint))
-        .collect()
 }
 
 pub(in crate::smart_context) fn smart_context_capsule_order(

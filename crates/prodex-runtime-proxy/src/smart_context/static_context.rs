@@ -1,6 +1,5 @@
 use super::*;
 use sha2::{Digest as _, Sha256};
-#[cfg(feature = "mojo")]
 use std::collections::BTreeMap;
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -293,19 +292,13 @@ pub fn smart_context_fingerprint_delta(
     previous: impl IntoIterator<Item = SmartContextFingerprint>,
     current: impl IntoIterator<Item = SmartContextFingerprint>,
 ) -> Vec<SmartContextFingerprintChange> {
-    #[cfg(feature = "mojo")]
-    {
-        let previous = previous.into_iter().collect::<Vec<_>>();
-        let current = current.into_iter().collect::<Vec<_>>();
-        smart_context_fingerprint_delta_mojo(previous, current)
-            .expect("Mojo Smart Context fingerprint delta plan returned invalid output")
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    smart_context_fingerprint_delta_rust(previous, current)
+    smart_context_fingerprint_delta_mojo(
+        previous.into_iter().collect(),
+        current.into_iter().collect(),
+    )
+    .expect("Mojo Smart Context fingerprint delta plan returned invalid output")
 }
 
-#[cfg(feature = "mojo")]
 fn smart_context_fingerprint_delta_mojo(
     previous: Vec<SmartContextFingerprint>,
     current: Vec<SmartContextFingerprint>,
@@ -364,78 +357,4 @@ fn smart_context_fingerprint_delta_mojo(
         },
     )
     .collect()
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(in crate::smart_context) fn smart_context_fingerprint_delta_rust(
-    previous: impl IntoIterator<Item = SmartContextFingerprint>,
-    current: impl IntoIterator<Item = SmartContextFingerprint>,
-) -> Vec<SmartContextFingerprintChange> {
-    let previous = smart_context_fingerprint_map(previous);
-    let current = smart_context_fingerprint_map(current);
-    let mut keys = BTreeSet::new();
-    keys.extend(previous.keys().cloned());
-    keys.extend(current.keys().cloned());
-
-    keys.into_iter()
-        .filter_map(|key| match (previous.get(&key), current.get(&key)) {
-            (None, Some(after)) => Some(SmartContextFingerprintChange::Added {
-                fingerprint: after.clone(),
-            }),
-            (Some(before), None) => Some(SmartContextFingerprintChange::Removed {
-                fingerprint: before.clone(),
-            }),
-            (Some(before), Some(after)) if before.content_hash == after.content_hash => {
-                Some(SmartContextFingerprintChange::Unchanged {
-                    fingerprint: after.clone(),
-                })
-            }
-            (Some(before), Some(after)) => Some(SmartContextFingerprintChange::Changed {
-                before: before.clone(),
-                after: after.clone(),
-            }),
-            (None, None) => None,
-        })
-        .collect()
-}
-
-#[cfg(all(test, feature = "mojo"))]
-mod mojo_tests {
-    use super::*;
-
-    fn fingerprint(
-        id: &str,
-        kind: SmartContextFingerprintKind,
-        hash: &str,
-    ) -> SmartContextFingerprint {
-        SmartContextFingerprint {
-            id: id.to_string(),
-            kind,
-            content_hash: hash.to_string(),
-            byte_len: hash.len(),
-        }
-    }
-
-    #[test]
-    fn fingerprint_delta_matches_rust_oracle_with_duplicate_keys() {
-        let previous = vec![
-            fingerprint("b", SmartContextFingerprintKind::StaticContext, "old"),
-            fingerprint("a", SmartContextFingerprintKind::Artifact, "same"),
-            fingerprint("b", SmartContextFingerprintKind::StaticContext, "before"),
-            fingerprint("removed", SmartContextFingerprintKind::ToolOutput, "gone"),
-        ];
-        let current = vec![
-            fingerprint(
-                "added",
-                SmartContextFingerprintKind::ConversationTurn,
-                "new",
-            ),
-            fingerprint("b", SmartContextFingerprintKind::StaticContext, "after"),
-            fingerprint("a", SmartContextFingerprintKind::Artifact, "same"),
-        ];
-        assert_eq!(
-            smart_context_fingerprint_delta(previous.clone(), current.clone()),
-            smart_context_fingerprint_delta_rust(previous, current)
-        );
-    }
 }
