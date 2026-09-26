@@ -8,7 +8,7 @@ from rich_types import ProdexRichStringView
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime SMART_CONTEXT_NORMALIZATION_MAX_BYTES: Int64 = 4 * 1024 * 1024
-comptime SMART_CONTEXT_NORMALIZATION_MAX_OUTPUT_BYTES: Int64 = 8 * 1024 * 1024 + 16
+comptime SMART_CONTEXT_NORMALIZATION_MAX_OUTPUT_BYTES: Int64 = 5 * SMART_CONTEXT_NORMALIZATION_MAX_BYTES + 16
 comptime SMART_CONTEXT_CAPSULE_MAX_COUNT: Int64 = 65_536
 comptime SMART_CONTEXT_STATUS_OK: Int64 = 0
 comptime SMART_CONTEXT_STATUS_INVALID: Int64 = 1
@@ -49,6 +49,59 @@ def smart_context_is_ascii_alnum(value: UInt8) -> Bool:
 
 def smart_context_is_ascii_whitespace(value: UInt8) -> Bool:
     return value == 9 or value >= 10 and value <= 13 or value == 32
+
+
+def smart_context_unicode_whitespace_len(
+    source: Pointer[mut=False, UInt8, _], length: Int64, start: Int64
+) -> Int64:
+    if start < 0 or start >= length:
+        return 0
+    if (
+        start + 1 < length
+        and source[unsafe_offset=start] == 194
+        and (
+            source[unsafe_offset=start + 1] == 133
+            or source[unsafe_offset=start + 1] == 160
+        )
+    ):
+        return 2
+    if start + 2 >= length:
+        return 0
+    var first = source[unsafe_offset=start]
+    var second = source[unsafe_offset=start + 1]
+    var third = source[unsafe_offset=start + 2]
+    if first == 225 and second == 154 and third == 128:
+        return 3
+    if (
+        first == 226
+        and second == 128
+        and (
+            third >= 128
+            and third <= 138
+            or third == 168
+            or third == 169
+            or third == 175
+        )
+    ):
+        return 3
+    if first == 226 and second == 129 and third == 159:
+        return 3
+    if first == 227 and second == 128 and third == 128:
+        return 3
+    return 0
+
+
+def smart_context_unicode_control_len(
+    source: Pointer[mut=False, UInt8, _], length: Int64, start: Int64
+) -> Int64:
+    if (
+        start + 1 < length
+        and source[unsafe_offset=start] == 194
+        and source[unsafe_offset=start + 1] >= 128
+        and source[unsafe_offset=start + 1] <= 159
+    ):
+        return 2
+    return 0
 
 
 def smart_context_is_token_byte(value: UInt8) -> Bool:
@@ -95,7 +148,12 @@ def smart_context_path_token_end(
     source: Pointer[mut=False, UInt8, _], length: Int64, start: Int64
 ) -> Int64:
     var index = start + 1
-    while index < length and not smart_context_path_delimiter(source[unsafe_offset=index]):
+    while (
+        index < length
+        and not smart_context_path_delimiter(source[unsafe_offset=index])
+        and smart_context_unicode_whitespace_len(source, length, index) == 0
+        and smart_context_unicode_control_len(source, length, index) == 0
+    ):
         index += 1
     return index
 
@@ -236,6 +294,8 @@ def smart_context_ansi_escape_len(
                 return index - start + 2
             index += 1
         return length - start
+    if kind >= 128:
+        return 1
     if length - start >= 2:
         return 2
     return 1

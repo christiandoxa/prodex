@@ -29,6 +29,9 @@ pub struct SmartContextCapsulePlan {
 }
 
 const SMART_CONTEXT_NORMALIZATION_MAX_BYTES: usize = 4 * 1024 * 1024;
+const SMART_CONTEXT_NORMALIZATION_INITIAL_OUTPUT_MULTIPLIER: usize = 2;
+const SMART_CONTEXT_NORMALIZATION_MAX_OUTPUT_MULTIPLIER: usize = 5;
+const SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS: i64 = 3;
 const SMART_CONTEXT_CAPSULE_MAX_COUNT: usize = 65_536;
 
 unsafe extern "C" {
@@ -68,12 +71,12 @@ unsafe extern "C" {
     ) -> i64;
 }
 
-fn checked_output_capacity(input_len: usize) -> Result<usize, MojoError> {
+fn checked_output_capacity(input_len: usize, multiplier: usize) -> Result<usize, MojoError> {
     if input_len > SMART_CONTEXT_NORMALIZATION_MAX_BYTES {
         return Err(MojoError::InvalidInput);
     }
     input_len
-        .checked_mul(2)
+        .checked_mul(multiplier)
         .and_then(|value| value.checked_add(16))
         .ok_or(MojoError::InvalidInput)
 }
@@ -88,20 +91,36 @@ pub fn normalize_smart_context_volatile(
     mode: SmartContextNormalizationMode,
 ) -> Result<String, MojoError> {
     ensure_rich_abi()?;
-    let capacity = checked_output_capacity(text.len())?;
+    // `1%` and `1s` expand from two input bytes to ten output bytes.
+    let max_capacity = checked_output_capacity(
+        text.len(),
+        SMART_CONTEXT_NORMALIZATION_MAX_OUTPUT_MULTIPLIER,
+    )?;
+    let mut capacity = checked_output_capacity(
+        text.len(),
+        SMART_CONTEXT_NORMALIZATION_INITIAL_OUTPUT_MULTIPLIER,
+    )?;
     let input = view(text);
     let mut output = vec![0_u8; capacity.max(1)];
     let mut written = 0_i64;
-    let status = unsafe {
-        prodex_mojo_smart_context_normalization_v1(
-            RICH_ABI_VERSION,
-            mojo_pointer_address(&input),
-            mode as i64,
-            mojo_mut_pointer_address(output.as_mut_ptr()),
-            i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
-            mojo_mut_pointer_address(&mut written),
-            0,
-        )
+    let status = loop {
+        let status = unsafe {
+            prodex_mojo_smart_context_normalization_v1(
+                RICH_ABI_VERSION,
+                mojo_pointer_address(&input),
+                mode as i64,
+                mojo_mut_pointer_address(output.as_mut_ptr()),
+                i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
+                mojo_mut_pointer_address(&mut written),
+                0,
+            )
+        };
+        if status != SMART_CONTEXT_NORMALIZATION_CAPACITY_STATUS || capacity == max_capacity {
+            break status;
+        }
+        capacity = max_capacity;
+        output.resize(capacity.max(1), 0);
+        written = 0;
     };
     if status != 0 {
         return Err(normalization_status_error(status));
