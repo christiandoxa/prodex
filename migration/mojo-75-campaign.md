@@ -1633,3 +1633,21 @@ The canonical source report counts **51,919 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **528,572 additional Mojo LOC** required at this Rust
 volume.
+
+## Smart Context volatile normalization hard replacement
+
+Command-output and static-context volatile normalization now call the existing
+Mojo kernel in every feature mode. The 657-line feature-off Rust parser and its
+private oracle were deleted. The typed adapter retries once when replacements
+expand a bounded input beyond its initial output buffer. Expected-output tests
+cover ANSI escapes, Unicode path boundaries, timestamps, counters, IDs, and a
+2.4 MiB input that expands to 8.8 MiB. The production static-context caller
+limits its input to 256 KiB; the Mojo normalization ABI retains its 4 MiB input
+limit. Native execution evidence is Linux x86_64; macOS and Windows runtime
+execution was not run.
+
+The canonical source report counts **51,975 reachable Mojo LOC** and
+**193,504 Rust production LOC**, totaling **245,479 LOC**: **21.17% Mojo**.
+The 7% release floor and non-regression check pass; the 75% project target
+remains unmet, with **528,537 additional Mojo LOC** required at this Rust
+volume.

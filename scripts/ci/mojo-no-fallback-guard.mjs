@@ -50,6 +50,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/tests/src/selection_policy.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/normalization.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/calibration.rs",
@@ -196,6 +197,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-runtime-proxy/src/payload_detection/error_messages.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/normalization.rs",
   "crates/prodex-runtime-proxy/src/smart_context/safety.rs",
   "crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
   "crates/prodex-runtime-proxy/src/smart_context/regression.rs",
@@ -291,6 +293,7 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-quota/src/render/quota_policy.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
   "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs",
+  "crates/prodex-runtime-proxy/src/smart_context/normalization.rs",
   "crates/prodex-runtime-proxy/src/smart_context/token_accounting/estimation.rs",
   "crates/prodex-runtime-proxy/src/health/score.rs",
   "crates/prodex-runtime-proxy/src/health/latency.rs",
@@ -822,6 +825,9 @@ function selfTest() {
     "fn runtime_proxy_worker_count_default_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
     "fn smart_context_rollout_decision_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/normalization.rs",
+    "fn smart_context_normalize_volatile_command_output_rust() {}"]])[0],
+    /Rust semantic oracle or copy/u);
   assert(findViolations([[DEEPSEEK_SHAPING_FILE,
     'pub fn deepseek_provider_core_response_created_event() { #[cfg(not(feature = "mojo"))] fallback(); }']])
     .some((violation) => violation.includes("deepseek_provider_core_response_created_event contains a feature-off Rust path")));
