@@ -2601,3 +2601,21 @@ Clippy, no-fallback self-test, ownership, and authority guards pass; ownership r
 counts **56,853 reachable Mojo LOC** and **192,203 Rust production LOC**, totaling
 **249,056 LOC**: **22.83% Mojo**. The 75% project target remains unmet, with
 **519,756 additional Mojo LOC** required at this Rust volume.
+
+## Profile export policy-limit migration
+
+Profile-export count, size, password-length, PBKDF2 range, and Argon2 numeric
+parameter policies now use mojo/prodex_core/profile_export_policy.mojo.
+The ABI receives only profile/secret-file counts, byte lengths, and numeric KDF
+metadata. Password bytes, auth JSON, secret-file contents, salt, nonce,
+ciphertext, zeroization, KDF execution, and AES-GCM-SIV crypto remain Rust-owned.
+
+Validation passes 56/56 prodex-profile-export tests plus the direct Mojo ABI
+smoke test. Coverage includes exact count/size/KDF boundaries,
+fail-before-password-lookup behavior, encrypted v1/v2 round trips, corrupted
+ciphertext, known-answer compatibility, and redacted secret failures. Clippy,
+prodex-app check, no-fallback self-test, ownership, and authority guards pass;
+ownership now reports **66 authoritative operations**. The canonical broad source
+report counts **56,950 reachable Mojo LOC** and **192,349 Rust production LOC**,
+totaling **249,299 LOC**: **22.84% Mojo**. The 75% project target remains unmet,
+with **520,097 additional Mojo LOC** required at this Rust volume.

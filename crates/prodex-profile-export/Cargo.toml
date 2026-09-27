@@ -11,6 +11,7 @@ name = "prodex_profile_export"
 path = "src/lib.rs"
 
 [dependencies]
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
 aes-gcm-siv = { workspace = true }
 anyhow = { workspace = true }
 argon2 = { workspace = true }
