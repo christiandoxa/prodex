@@ -2373,3 +2373,28 @@ no-fallback guard and no-default compile checks pass. The canonical source repor
 counts **53,551 reachable Mojo LOC** and **191,476 Rust production LOC**, totaling
 **245,027 LOC**: **21.86% Mojo**. The 75% project target remains unmet, with
 **520,877 additional Mojo LOC** required at this Rust volume.
+
+## Governance classification activation and Rust-oracle retirement
+
+Governance inspection finding classification now reaches the existing
+`governance_inspection.mojo` kernel from `prodex-domain`. Finding-kind minimum
+classification and the batch classification-floor check are Mojo-authoritative;
+the duplicate Rust classification table and per-finding comparison loop were
+deleted. The domain keeps typed enums, bounded finding storage, sorting, exact
+model errors, and validated ABI tag reconstruction. Fixed caller tests cover all
+twelve finding kinds plus weak-classification rejection.
+
+The obsolete pre-Mojo quota score/band/scheduler and profile-order Rust test
+oracles were also deleted after the production Mojo schedulers had independent
+caller-boundary coverage. Likewise, generated signal-diff and rich catalog
+configuration Rust oracles inside `prodex-mojo-core` were removed; fixed-value
+Mojo tests remain. The no-fallback guard rejects restoration of the governance
+Rust mapping and quota `_rust` scheduler/score/band implementations.
+
+Focused validation passes the complete `prodex-domain` suite, 27/27
+`prodex-runtime-quota` tests, the Mojo signal-diff self-test, the fixed rich
+catalog configuration test, and governance inspection 4/4. Ownership reports
+**46 authoritative operations**. The canonical broad source report counts
+**53,551 reachable Mojo LOC** and **191,222 Rust production LOC**, totaling
+**244,773 LOC**: **21.88% Mojo**. The 75% project target remains unmet, with
+**520,115 additional Mojo LOC** required at this Rust volume.

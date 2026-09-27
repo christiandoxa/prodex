@@ -473,11 +473,7 @@
         "semantic_ranges": [
           {
             "start": 1,
-            "end": 484
-          },
-          {
-            "start": 570,
-            "end": 574
+            "end": 261
           }
         ]
       },
@@ -682,6 +678,16 @@
           "kiro_response_shape_fallbacks",
           "kiro_acp_shape_fallbacks"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/governance_inspection.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "governance_finding_classification"
+        ]
       }
     ],
     "removed": [
@@ -707,6 +713,30 @@
     "deepseek_chat_stream_event_translation"
   ],
   "authoritative_operations": [
+    {
+      "name": "governance_finding_classification",
+      "domain": "governance/inspection",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_governance_finding_classification_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/governance_inspection.mojo",
+      "consumer": "crates/prodex-domain/src/governance/inspection.rs",
+      "consumer_marker": "governance_findings_exceed_classification",
+      "production_consumers": [
+        "crates/prodex-domain/src/governance/inspection.rs",
+        "crates/prodex-app/src/runtime_proxy/presidio/findings.rs"
+      ],
+      "production_reachability_test": "crates/prodex-domain/src/governance/inspection.rs",
+      "rust_owner_before": "finding-kind minimum classification table and per-finding classification floor loop",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; fixed caller-boundary fixtures cover all finding kinds and weak-classification rejection",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "enum-to-tag mapping, validated classification tag reconstruction, and bounded finding collection"
+    },
     {
       "name": "critical_signal_text_grouping",
       "domain": "text/collections",
