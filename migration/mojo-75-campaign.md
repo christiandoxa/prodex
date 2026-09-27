@@ -2196,3 +2196,23 @@ The canonical source report counts **53,549 reachable Mojo LOC** and
 The 7% release floor and non-regression check pass; the 75% project target
 remains unmet, with **523,303 additional Mojo LOC** required at this Rust
 volume.
+
+## Kiro response helper hard replacement
+
+Kiro model-list and not-found shapes, invalid-request and unsupported-path
+errors, Chat Completions finish-reason selection, Anthropic tool-use blocks,
+Anthropic stop-reason mapping, and Anthropic message assembly now use the
+existing Kiro Mojo kernel in every provider feature mode. The former
+feature-off Rust copies and helper functions were deleted. Rust retains model
+catalog lookup, bounded JSON serialization/decoding, runtime metadata
+attachment, and exact raw-value preservation for malformed JSON field types
+that the current string-valued ABI cannot carry without normalization. The
+no-fallback guard now treats the response adapter as unconditional Mojo and
+requires all seven promoted Kiro operations.
+
+Focused validation passes 40 Kiro provider tests in the default feature mode
+and the same 40 tests with `--features mojo`. The canonical source report
+counts **53,551 reachable Mojo LOC** and **192,259 Rust production LOC**,
+totaling **245,810 LOC**: **21.785525% Mojo**. The 7% release floor and
+non-regression requirement remain satisfied; the 75% project target remains
+unmet, with **523,226 additional Mojo LOC** required at this Rust volume.
