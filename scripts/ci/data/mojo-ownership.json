@@ -1454,7 +1454,7 @@
       "production_reachability_test": "crates/prodex-cli/tests/src/runtime_features.rs",
       "rust_owner_before": "Codex runtime feature eligibility, rollout reminder normalization, and override planning",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "deleted after 2,000 fixed-seed differential cases; permanent CLI tests use independent expected values and feature-off planning is unavailable",
+      "rust_test_oracle": "deleted after 2,000 fixed-seed differential cases; permanent CLI tests use independent expected values in both default and no-default builds",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,

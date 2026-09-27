@@ -1,6 +1,3 @@
-#[cfg(not(feature = "mojo"))]
-compile_error!("prodex-runtime-launch requires the Mojo launch planner");
-
 mod args;
 mod args_mojo;
 mod child;

@@ -18,6 +18,5 @@ mod quota_plan;
 #[path = "lib/state.rs"]
 mod state;
 
-#[cfg(feature = "mojo")]
 #[path = "lib/args_mojo.rs"]
 mod args_mojo;

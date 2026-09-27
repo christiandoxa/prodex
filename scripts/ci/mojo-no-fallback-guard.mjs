@@ -94,6 +94,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-quota/src/selection/scoring.rs",
   "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
   "crates/prodex-runtime-launch/src/args.rs",
+  "crates/prodex-runtime-launch/src/lib.rs",
   "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
   "crates/prodex-observability/src/lib.rs",
   "crates/prodex-observability/src/metric_label.rs",
@@ -219,6 +220,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-cli/src/runtime_features.rs",
+  "crates/prodex-runtime-launch/src/lib.rs",
   "crates/prodex-provider-core/src/translators.rs",
   "crates/prodex-provider-core/src/translators/gemini.rs",
   "crates/prodex-provider-core/src/translators/gemini/request.rs",

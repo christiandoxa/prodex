@@ -1,7 +1,6 @@
 use clap::{Args, ValueEnum};
 use std::{error::Error, ffi::OsString, fmt};
 
-#[cfg(feature = "mojo-core")]
 use prodex_mojo_core::launch::{
     RuntimeFeatureClockSource, RuntimeFeatureConfigInput, RuntimeFeatureConfigPlan,
     RuntimeFeatureWebSearchMode, plan_runtime_feature_config,
@@ -74,7 +73,6 @@ impl fmt::Display for RuntimeFeaturePlanError {
 
 impl Error for RuntimeFeaturePlanError {}
 
-#[cfg(feature = "mojo-core")]
 #[derive(Debug, PartialEq)]
 struct FeaturePlan {
     web_search: Option<CodexWebSearchMode>,
@@ -85,7 +83,6 @@ struct FeaturePlan {
     respect_system_proxy: Option<bool>,
 }
 
-#[cfg(feature = "mojo-core")]
 #[derive(Debug, PartialEq)]
 struct RolloutBudgetPlan {
     limit: u64,
@@ -94,7 +91,6 @@ struct RolloutBudgetPlan {
     prefill_weight: Option<f64>,
 }
 
-#[cfg(feature = "mojo-core")]
 fn mojo_web_search_mode(mode: Option<CodexWebSearchMode>) -> Option<RuntimeFeatureWebSearchMode> {
     mode.map(|mode| match mode {
         CodexWebSearchMode::Disabled => RuntimeFeatureWebSearchMode::Disabled,
@@ -104,7 +100,6 @@ fn mojo_web_search_mode(mode: Option<CodexWebSearchMode>) -> Option<RuntimeFeatu
     })
 }
 
-#[cfg(feature = "mojo-core")]
 fn codex_web_search_mode(mode: Option<RuntimeFeatureWebSearchMode>) -> Option<CodexWebSearchMode> {
     mode.map(|mode| match mode {
         RuntimeFeatureWebSearchMode::Disabled => CodexWebSearchMode::Disabled,
@@ -114,7 +109,6 @@ fn codex_web_search_mode(mode: Option<RuntimeFeatureWebSearchMode>) -> Option<Co
     })
 }
 
-#[cfg(feature = "mojo-core")]
 fn mojo_clock_source(
     source: Option<CodexCurrentTimeClockSource>,
 ) -> Option<RuntimeFeatureClockSource> {
@@ -124,7 +118,6 @@ fn mojo_clock_source(
     })
 }
 
-#[cfg(feature = "mojo-core")]
 fn codex_clock_source(
     source: Option<RuntimeFeatureClockSource>,
 ) -> Option<CodexCurrentTimeClockSource> {
@@ -134,7 +127,6 @@ fn codex_clock_source(
     })
 }
 
-#[cfg(feature = "mojo-core")]
 fn enabled_weight(
     enabled: bool,
     value: Option<f64>,
@@ -145,7 +137,6 @@ fn enabled_weight(
     value.map(Some).ok_or(RuntimeFeaturePlanError)
 }
 
-#[cfg(feature = "mojo-core")]
 fn rollout_budget_from_mojo(
     args: &CodexRuntimeFeatureArgs,
     plan: &RuntimeFeatureConfigPlan,
@@ -173,7 +164,6 @@ fn rollout_budget_from_mojo(
     }))
 }
 
-#[cfg(feature = "mojo-core")]
 fn current_time_interval_from_mojo(
     args: &CodexRuntimeFeatureArgs,
     plan: &RuntimeFeatureConfigPlan,
@@ -188,32 +178,9 @@ fn current_time_interval_from_mojo(
 
 impl CodexRuntimeFeatureArgs {
     pub fn to_codex_config_args(&self) -> Result<Vec<OsString>, RuntimeFeaturePlanError> {
-        #[cfg(feature = "mojo-core")]
-        let result = self.mojo_plan().map(render_plan);
-        #[cfg(not(feature = "mojo-core"))]
-        let result = if self.has_requested_features() {
-            Err(RuntimeFeaturePlanError)
-        } else {
-            Ok(Vec::new())
-        };
-        result
+        self.mojo_plan().map(render_plan)
     }
 
-    #[cfg(not(feature = "mojo-core"))]
-    fn has_requested_features(&self) -> bool {
-        self.web_search.is_some()
-            || self.rollout_budget_tokens.is_some()
-            || !self.rollout_budget_reminders.is_empty()
-            || self.rollout_budget_sampling_weight.is_some()
-            || self.rollout_budget_prefill_weight.is_some()
-            || self.current_time_reminder
-            || self.current_time_reminder_interval.is_some()
-            || self.current_time_clock_source.is_some()
-            || self.respect_system_proxy
-            || self.no_respect_system_proxy
-    }
-
-    #[cfg(feature = "mojo-core")]
     fn mojo_plan(&self) -> Result<FeaturePlan, RuntimeFeaturePlanError> {
         let plan = plan_runtime_feature_config(RuntimeFeatureConfigInput {
             web_search_mode: mojo_web_search_mode(self.web_search),
@@ -240,7 +207,6 @@ impl CodexRuntimeFeatureArgs {
     }
 }
 
-#[cfg(feature = "mojo-core")]
 fn render_plan(plan: FeaturePlan) -> Vec<OsString> {
     let mut overrides = Vec::new();
     if let Some(mode) = plan.web_search {
@@ -303,7 +269,6 @@ fn render_plan(plan: FeaturePlan) -> Vec<OsString> {
     args
 }
 
-#[cfg(feature = "mojo-core")]
 impl CodexWebSearchMode {
     fn config_value(self) -> &'static str {
         match self {
@@ -315,7 +280,6 @@ impl CodexWebSearchMode {
     }
 }
 
-#[cfg(feature = "mojo-core")]
 impl CodexCurrentTimeClockSource {
     fn config_value(self) -> &'static str {
         match self {
@@ -325,7 +289,6 @@ impl CodexCurrentTimeClockSource {
     }
 }
 
-#[cfg(feature = "mojo-core")]
 fn toml_string_literal(value: &str) -> String {
     format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
 }
