@@ -2580,3 +2580,24 @@ reports **65 authoritative operations**. The canonical broad source report count
 **56,799 reachable Mojo LOC** and **192,288 Rust production LOC**, totaling
 **249,087 LOC**: **22.80% Mojo**. The 75% project target remains unmet, with
 **520,065 additional Mojo LOC** required at this Rust volume.
+
+## Gemini translator tool-assembly consolidation
+
+Gemini request translation now removes the remaining per-tool Rust assembly loop.
+Custom, namespace, MCP, tool-search, and standard function declarations are normalized
+through the existing chat-tools Mojo transform once per request; the Gemini raw
+translator kernel then merges those function tools with built-in computer, code, web,
+and URL tools directly in `provider_constraints.mojo`. The retired Rust
+`gemini_apply_tools`, `gemini_tool_from_openai_tool`, and generic `sanitize_schema`
+helpers were deleted. Rust retains JSON parsing, stable rejection-message mapping,
+Serde materialization, and the chat-tools/Gemini kernel call boundaries.
+
+Validation passes 70/70 focused Gemini tests in the default provider build and
+71/71 with the Mojo feature enabled, including custom tools, duplicate/order and
+Unicode schema arrays, built-ins, malformed tool precedence, and tool-choice behavior.
+Clippy, no-fallback self-test, ownership, and authority guards pass; ownership remains
+**65 authoritative operations** because this extends the existing
+`gemini_translator_request_planning` ABI owner. The canonical broad source report
+counts **56,853 reachable Mojo LOC** and **192,203 Rust production LOC**, totaling
+**249,056 LOC**: **22.83% Mojo**. The 75% project target remains unmet, with
+**519,756 additional Mojo LOC** required at this Rust volume.

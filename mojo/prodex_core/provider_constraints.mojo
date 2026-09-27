@@ -5234,62 +5234,117 @@ def gemini_translator_write_function_declaration(
 def gemini_translator_write_tools_field(
     source: GeminiRequestContentStringView,
     root: Array[Int64, 2],
+    supplemental: GeminiRequestContentStringView,
+    supplemental_present: Int64,
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
     first_field: Pointer[mut=True, Bool, _],
 ) -> Bool:
     var tools = gemini_bridge_request_object_member(
         source, root[0], root[1], StringSlice("tools")
     )
-    if tools[0] < 0:
-        return True
-    if not gemini_bridge_request_is_array(source, tools[0], tools[1]):
+    var has_original_tools = tools[0] >= 0
+    if has_original_tools and not gemini_bridge_request_is_array(
+        source, tools[0], tools[1]
+    ):
         return False
+
+    var supplemental_tools = Array[Int64, 2](fill=-1)
+    if supplemental_present == 1:
+        supplemental_tools = gemini_bridge_request_value_bounds(supplemental)
+        if not gemini_bridge_request_is_array(
+            supplemental, supplemental_tools[0], supplemental_tools[1]
+        ):
+            return False
 
     var computer_start: Int64 = -1
     var computer_end: Int64 = -1
     var has_code = False
     var has_web = False
     var has_url = False
-    var has_function = False
-    var cursor = gemini_request_content_skip_ws(
-        source, tools[0] + 1, tools[1] - 1
-    )
-    while cursor < tools[1] - 1:
-        var item_end = gemini_request_content_value_end(
-            source, cursor, tools[1] - 1, 0
-        )
-        if item_end < 0:
-            return False
-        if gemini_translator_is_computer_tool(
-            source, cursor, item_end
-        ) and computer_start < 0:
-            computer_start = cursor
-            computer_end = item_end
-        if gemini_translator_is_code_tool(source, cursor, item_end):
-            has_code = True
-        if gemini_translator_is_web_tool(source, cursor, item_end):
-            has_web = True
-        if gemini_translator_is_url_tool(source, cursor, item_end):
-            has_url = True
-        if gemini_translator_is_function_tool(
-            source, cursor, item_end
-        ):
-            has_function = True
-        cursor = gemini_request_content_skip_ws(
-            source, item_end, tools[1] - 1
-        )
-        if (
-            cursor < tools[1] - 1
-            and gemini_request_content_byte(source, cursor) == 44
-        ):
-            cursor = gemini_request_content_skip_ws(
-                source, cursor + 1, tools[1] - 1
-            )
-            continue
-        if cursor != tools[1] - 1:
-            return False
-        break
+    var has_original_function = False
 
+    if has_original_tools:
+        var cursor = gemini_request_content_skip_ws(
+            source, tools[0] + 1, tools[1] - 1
+        )
+        while cursor < tools[1] - 1:
+            var item_end = gemini_request_content_value_end(
+                source, cursor, tools[1] - 1, 0
+            )
+            if item_end < 0:
+                return False
+            if gemini_translator_is_computer_tool(
+                source, cursor, item_end
+            ) and computer_start < 0:
+                computer_start = cursor
+                computer_end = item_end
+            if gemini_translator_is_code_tool(source, cursor, item_end):
+                has_code = True
+            if gemini_translator_is_web_tool(source, cursor, item_end):
+                has_web = True
+            if gemini_translator_is_url_tool(source, cursor, item_end):
+                has_url = True
+            if (
+                supplemental_present == 0
+                and gemini_translator_is_function_tool(
+                    source, cursor, item_end
+                )
+            ):
+                has_original_function = True
+            cursor = gemini_request_content_skip_ws(
+                source, item_end, tools[1] - 1
+            )
+            if (
+                cursor < tools[1] - 1
+                and gemini_request_content_byte(source, cursor) == 44
+            ):
+                cursor = gemini_request_content_skip_ws(
+                    source, cursor + 1, tools[1] - 1
+                )
+                continue
+            if cursor != tools[1] - 1:
+                return False
+            break
+
+    var has_supplemental_function = False
+    if supplemental_present == 1:
+        var cursor = gemini_request_content_skip_ws(
+            supplemental,
+            supplemental_tools[0] + 1,
+            supplemental_tools[1] - 1,
+        )
+        while cursor < supplemental_tools[1] - 1:
+            var item_end = gemini_request_content_value_end(
+                supplemental, cursor, supplemental_tools[1] - 1, 0
+            )
+            if (
+                item_end < 0
+                or not gemini_translator_is_function_tool(
+                    supplemental, cursor, item_end
+                )
+            ):
+                return False
+            has_supplemental_function = True
+            cursor = gemini_request_content_skip_ws(
+                supplemental, item_end, supplemental_tools[1] - 1
+            )
+            if (
+                cursor < supplemental_tools[1] - 1
+                and gemini_request_content_byte(supplemental, cursor) == 44
+            ):
+                cursor = gemini_request_content_skip_ws(
+                    supplemental, cursor + 1, supplemental_tools[1] - 1
+                )
+                continue
+            if cursor != supplemental_tools[1] - 1:
+                return False
+            break
+
+    var has_function = (
+        has_supplemental_function
+        if supplemental_present == 1
+        else has_original_function
+    )
     if (
         computer_start < 0
         and not has_code
@@ -5361,17 +5416,23 @@ def gemini_translator_write_tools_field(
         ):
             return False
         var first_function = True
-        cursor = gemini_request_content_skip_ws(
-            source, tools[0] + 1, tools[1] - 1
+        var function_source = source.copy()
+        var function_tools = tools.copy()
+        if supplemental_present == 1:
+            function_source = supplemental.copy()
+            function_tools = supplemental_tools.copy()
+
+        var cursor = gemini_request_content_skip_ws(
+            function_source, function_tools[0] + 1, function_tools[1] - 1
         )
-        while cursor < tools[1] - 1:
+        while cursor < function_tools[1] - 1:
             var item_end = gemini_request_content_value_end(
-                source, cursor, tools[1] - 1, 0
+                function_source, cursor, function_tools[1] - 1, 0
             )
             if item_end < 0:
                 return False
             if gemini_translator_is_function_tool(
-                source, cursor, item_end
+                function_source, cursor, item_end
             ):
                 if (
                     not first_function
@@ -5379,22 +5440,22 @@ def gemini_translator_write_tools_field(
                 ):
                     return False
                 if not gemini_translator_write_function_declaration(
-                    source, cursor, item_end, writer
+                    function_source, cursor, item_end, writer
                 ):
                     return False
                 first_function = False
             cursor = gemini_request_content_skip_ws(
-                source, item_end, tools[1] - 1
+                function_source, item_end, function_tools[1] - 1
             )
             if (
-                cursor < tools[1] - 1
-                and gemini_request_content_byte(source, cursor) == 44
+                cursor < function_tools[1] - 1
+                and gemini_request_content_byte(function_source, cursor) == 44
             ):
                 cursor = gemini_request_content_skip_ws(
-                    source, cursor + 1, tools[1] - 1
+                    function_source, cursor + 1, function_tools[1] - 1
                 )
                 continue
-            if cursor != tools[1] - 1:
+            if cursor != function_tools[1] - 1:
                 return False
             break
         if not gemini_request_content_put_literal(
@@ -5461,16 +5522,13 @@ def gemini_bridge_request_write_raw_translator(
     ):
         return False
 
-    if input.quaternary_present == 1:
-        if not gemini_bridge_request_put_raw_field(
-            writer,
-            first_ptr,
-            StringSlice('"tools":'),
-            input.quaternary,
-        ):
-            return False
-    elif not gemini_translator_write_tools_field(
-        input.primary, root, writer, first_ptr
+    if not gemini_translator_write_tools_field(
+        input.primary,
+        root,
+        input.quaternary,
+        input.quaternary_present,
+        writer,
+        first_ptr,
     ):
         return False
     if input.quinary_present == 1 and not gemini_bridge_request_put_raw_field(

@@ -1089,11 +1089,12 @@ export function findViolations(files) {
         "gemini_bridge_validate_translator(",
         "gemini_bridge_raw_translator_request(",
         "gemini_text_contents_from_request_mojo(",
+        "provider_core_chat_tools_from_responses_request(",
       ];
       const violations = required
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Gemini translator hard replacement must retain ${marker}`);
-      if (/fn\s+(?:gemini_validate_request_rust|gemini_build_body_rust|gemini_contains_local_media_path)\s*\(/u.test(contents)) {
+      if (/fn\s+(?:gemini_validate_request_rust|gemini_build_body_rust|gemini_contains_local_media_path|gemini_apply_tools)\s*\(/u.test(contents)) {
         violations.push(`${filePath}: contains restored Rust Gemini translator semantics`);
       }
       return violations;
@@ -1333,8 +1334,8 @@ export function findViolations(files) {
       ["crates/prodex-runtime-quota/src/selection/scoring.rs", /\bfn\s+(?:ready_profile_score_for_route_at_rust|runtime_quota_pressure_band_for_route_at_rust|schedule_ready_profile_candidates_rust)\s*\(/u],
       ["crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs", /\bfn\s+provider_aware_profile_order_rust\s*\(/u],
       [SUPER_OVERRIDE_FILE, /\bfn\s+(?:scan_override_rust|scan_identity_override|scan_boolean_override|scan_runtime_override|scan_feature_value_override|scan_feature_boolean_override)\s*\(/u],
-      [GEMINI_SCHEMA_FILE, /\bfn\s+(?:schema_type|supported_schema_type|sanitized_enum|sanitized_properties|sanitized_required)\s*\(/u],
-      [GEMINI_TOOLS_FILE, /\bfn\s+gemini_tool_config_from_request_oracle\s*\(/u],
+      [GEMINI_SCHEMA_FILE, /\bfn\s+(?:schema_type|supported_schema_type|sanitized_enum|sanitized_properties|sanitized_required|sanitize_schema)\s*\(/u],
+      [GEMINI_TOOLS_FILE, /\bfn\s+(?:gemini_tool_config_from_request_oracle|gemini_tool_from_openai_tool)\s*\(/u],
       ["crates/prodex-provider-core/src/gemini_bridge/request/native_project.rs", /\bfn\s+gemini_provider_core_stamp_native_(?:project|metadata_project)\s*\(/u],
       ["crates/prodex-provider-core/src/gemini_bridge/request/simple.rs", /\bfn\s+gemini_simple_(?:input_item|content_item|tool_calls|tool_call)\s*\(/u],
       ["crates/prodex-provider-core/src/translators/gemini/request.rs", /\bfn\s+gemini_request_object_mut\s*\(/u],
