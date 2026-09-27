@@ -2458,3 +2458,23 @@ groups. The no-fallback and authority guards pass, and ownership now reports
 **55,161 reachable Mojo LOC** and **191,404 Rust production LOC**, totaling
 **246,565 LOC**: **22.37% Mojo**. The 75% project target remains unmet, with
 **519,051 additional Mojo LOC** required at this Rust volume.
+
+## Runtime state background policy migration
+
+Runtime state persistence classification and background queue backpressure now use
+a dedicated Mojo owner in `runtime_state_background.mojo`. The migrated policy
+covers all 32 `RuntimeStateMutation` variants for save sections, continuation-
+journal persistence, hot-continuation debounce, combined schedule planning, queue
+threshold selection, saturating enqueue backlog, and queue-pressure decisions.
+Rust retains the typed mutation/queue-kind tag adapter plus `Duration`, `Instant`,
+`Mutex`, `Condvar`, atomic counters, job extraction, and worker-loop system
+boundaries.
+
+The complete `prodex-runtime-state` suite passes 18/18 tests, including an
+exhaustive fixed-value matrix for every mutation variant and `usize::MAX` queue
+boundaries; the direct Mojo ABI smoke test also passes. No-fallback, ownership,
+and authority guards pass with **52 authoritative operations**. The canonical
+broad source report counts **55,346 reachable Mojo LOC** and **191,506 Rust
+production LOC**, totaling **246,852 LOC**: **22.42% Mojo**. The 75% project
+target remains unmet, with **519,172 additional Mojo LOC** required at this Rust
+volume.

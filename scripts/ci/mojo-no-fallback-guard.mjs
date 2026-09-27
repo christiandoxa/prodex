@@ -8,6 +8,8 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-runtime-state/src/background.rs",
+  "crates/prodex-mojo-core/src/runtime_state.rs",
   "crates/prodex-redaction/src/lib.rs",
   "crates/prodex-mojo-core/src/redaction.rs",
   "crates/prodex-quota/src/models.rs",
@@ -226,6 +228,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-runtime-state/src/background.rs",
   "crates/prodex-redaction/src/lib.rs",
   "crates/prodex-quota/src/models.rs",
   "crates/prodex-profile-identity/src/lib.rs",
@@ -565,6 +568,7 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-runtime-doctor/Cargo.toml", "state-summary-mojo"],
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
+const RUNTIME_STATE_BACKGROUND_FILE = "crates/prodex-runtime-state/src/background.rs";
 const REDACTION_FILE = "crates/prodex-redaction/src/lib.rs";
 const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
@@ -821,6 +825,34 @@ export function findViolations(files) {
       return [`${filePath}: Anthropic web-search result has a feature-off rejection`];
     }
     return [];
+  });
+  const runtimeStateBackgroundViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== RUNTIME_STATE_BACKGROUND_FILE) return [];
+    const required = [
+      "prodex_mojo_core::runtime_state::mutation_policy(",
+      "prodex_mojo_core::runtime_state::queue_pressure_active(",
+      "prodex_mojo_core::runtime_state::enqueue_backlog(",
+      "prodex_mojo_core::runtime_state::queue_threshold(",
+      "prodex_mojo_core::runtime_state::queue_enqueue_plan(",
+    ];
+    const violations = required
+      .filter((call) => !contents.includes(call))
+      .map((call) => `${filePath}: runtime-state migration must retain Mojo call ${call}`);
+    const functions = [
+      "runtime_state_save_requires_continuation_journal",
+      "runtime_state_save_sections",
+      "runtime_hot_continuation_state_mutation",
+    ];
+    for (const name of functions) {
+      const body = contents.match(new RegExp(`\\bpub fn ${name}\\([^]*?^\\}`, "mu"))?.[0];
+      if (!body?.includes("runtime_state_mutation_policy(")) {
+        violations.push(`${filePath}: ${name} must retain Mojo mutation-policy dispatch`);
+      }
+    }
+    if (/\bfn\s+(?:runtime_state_save_sections_rust|runtime_state_save_requires_continuation_journal_rust|runtime_hot_continuation_state_mutation_rust|runtime_background_queue_enqueue_plan_rust)\s*\(/u.test(contents)) {
+      violations.push(`${filePath}: contains restored Rust runtime-state policy semantics`);
+    }
+    return violations;
   });
   const redactionViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== REDACTION_FILE) return [];
@@ -1205,7 +1237,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,

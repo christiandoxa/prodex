@@ -717,6 +717,16 @@
           "redaction_secret_text",
           "redaction_gateway_privacy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_state_background.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_state_background_policy"
+        ]
       }
     ],
     "removed": [
@@ -1997,6 +2007,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "JSON recursion remains Rust; string privacy classification and rewriting are Mojo-authoritative"
+    },
+    {
+      "name": "runtime_state_background_policy",
+      "domain": "runtime/state",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_state_background_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_state_background.mojo",
+      "consumer": "crates/prodex-runtime-state/src/background.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_state::mutation_policy",
+      "production_consumers": [
+        "crates/prodex-runtime-state/src/background.rs",
+        "crates/prodex-app/src/runtime_background/scheduled_save/queues.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_state.rs",
+      "rust_owner_before": "mutation classification for state-save sections/journal/hot debounce plus queue threshold, backlog and backpressure policy",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; exhaustive caller matrix covers all 32 mutation variants, each queue threshold, normal/zero backlog and usize::MAX boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed mutation/queue-kind tag mapping, usize/u64 ABI conversion, Duration/Instant construction and typed section/enqueue-plan reconstruction"
     }
   ],
   "rust_semantic_reductions": [
