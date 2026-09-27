@@ -4,22 +4,16 @@ use crate::translator::{ProviderTransformInput, ProviderTransformResult};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
 use serde_json::{Value, json};
 
-#[cfg(not(feature = "mojo"))]
-use super::request::{gemini_apply_response_format, gemini_validate_candidate_count};
 use super::request::{
     gemini_builtin_tools_from_request, gemini_continuation_metadata,
     gemini_is_supported_builtin_tool, gemini_tool_config_from_request,
     gemini_tool_from_openai_tool, gemini_validate_openai_tools,
 };
-#[cfg(not(feature = "mojo"))]
-use super::request_contents::gemini_contains_local_media_path;
-#[cfg(feature = "mojo")]
 use super::request_contents::gemini_text_contents_from_request_mojo;
 use super::request_contents::{
     gemini_contents_from_request, gemini_system_instruction_from_request,
 };
 
-#[cfg(feature = "mojo")]
 fn gemini_translator_validation_error(
     plan: &crate::gemini_bridge::GeminiTranslatorValidationPlan,
 ) -> Option<String> {
@@ -74,15 +68,10 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
     };
     let obj = value.as_object().expect("validated Gemini request object");
 
-    #[cfg(feature = "mojo")]
     let validation = match gemini_validate_request_mojo(&input, obj) {
         Ok(plan) => plan,
         Err(issue) => return gemini_issue_result(input.endpoint, issue),
     };
-    #[cfg(not(feature = "mojo"))]
-    if let Err(issue) = gemini_validate_request_rust(&value, obj) {
-        return gemini_issue_result(input.endpoint, issue);
-    }
 
     let (system_instruction, contents) = match gemini_request_contents(&value) {
         Ok(contents) => contents,
@@ -94,7 +83,6 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
         .unwrap_or("gemini-2.5-pro")
         .to_string();
 
-    #[cfg(feature = "mojo")]
     let body = match gemini_build_body_mojo(
         &value,
         obj,
@@ -103,11 +91,6 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
         &contents,
         &validation,
     ) {
-        Ok(body) => body,
-        Err(issue) => return gemini_issue_result(input.endpoint, issue),
-    };
-    #[cfg(not(feature = "mojo"))]
-    let body = match gemini_build_body_rust(&value, obj, &model, system_instruction, contents) {
         Ok(body) => body,
         Err(issue) => return gemini_issue_result(input.endpoint, issue),
     };
@@ -180,7 +163,6 @@ fn gemini_unsupported(
     )
 }
 
-#[cfg(feature = "mojo")]
 fn gemini_validate_request_mojo(
     input: &ProviderTransformInput,
     obj: &serde_json::Map<String, Value>,
@@ -203,24 +185,6 @@ fn gemini_validate_request_mojo(
     Ok(plan)
 }
 
-#[cfg(not(feature = "mojo"))]
-fn gemini_validate_request_rust(
-    value: &Value,
-    obj: &serde_json::Map<String, Value>,
-) -> Result<(), GeminiTransformIssue> {
-    if gemini_contains_local_media_path(value) {
-        return Err(GeminiTransformIssue::Unsupported(
-            "Gemini translator does not support local media path inputs".to_string(),
-        ));
-    }
-    gemini_validate_candidate_count(value).map_err(GeminiTransformIssue::Rejected)?;
-    if let Some(tools) = obj.get("tools") {
-        gemini_validate_openai_tools(tools).map_err(GeminiTransformIssue::Rejected)?;
-    }
-    Ok(())
-}
-
-#[cfg(feature = "mojo")]
 fn gemini_request_contents(
     value: &Value,
 ) -> Result<(Option<Value>, Vec<Value>), GeminiTransformIssue> {
@@ -234,17 +198,6 @@ fn gemini_request_contents(
     }
 }
 
-#[cfg(not(feature = "mojo"))]
-fn gemini_request_contents(
-    value: &Value,
-) -> Result<(Option<Value>, Vec<Value>), GeminiTransformIssue> {
-    Ok((
-        gemini_system_instruction_from_request(value).map_err(GeminiTransformIssue::Rejected)?,
-        gemini_contents_from_request(value).map_err(GeminiTransformIssue::Rejected)?,
-    ))
-}
-
-#[cfg(feature = "mojo")]
 fn gemini_build_body_mojo(
     value: &Value,
     obj: &serde_json::Map<String, Value>,
@@ -271,52 +224,6 @@ fn gemini_build_body_mojo(
         model,
     )
     .map_err(GeminiTransformIssue::Rejected)
-}
-
-#[cfg(not(feature = "mojo"))]
-fn gemini_build_body_rust(
-    value: &Value,
-    obj: &serde_json::Map<String, Value>,
-    model: &str,
-    system_instruction: Option<Value>,
-    contents: Vec<Value>,
-) -> Result<Vec<u8>, GeminiTransformIssue> {
-    let mut generation_config =
-        crate::gemini_bridge::gemini_provider_core_generation_config_from_request(
-            value, value, model, None,
-        )
-        .map_err(GeminiTransformIssue::Rejected)?
-        .as_object()
-        .cloned()
-        .ok_or_else(|| {
-            GeminiTransformIssue::Rejected(
-                "Mojo Gemini generation config is not an object".to_string(),
-            )
-        })?;
-    if let Some(response_format) = obj.get("response_format") {
-        gemini_apply_response_format(response_format, &mut generation_config)
-            .map_err(GeminiTransformIssue::Rejected)?;
-    }
-    let mut tool_request = serde_json::Map::new();
-    gemini_apply_tools(obj, &mut tool_request).map_err(GeminiTransformIssue::Rejected)?;
-    let tool_config =
-        gemini_tool_config_from_request(value).map_err(GeminiTransformIssue::Rejected)?;
-    let request = crate::gemini_bridge::gemini_provider_core_generate_content_request_map(
-        value,
-        system_instruction,
-        contents,
-        tool_request.remove("tools"),
-        tool_config,
-        Value::Object(generation_config),
-    )
-    .map_err(GeminiTransformIssue::Rejected)?;
-    serde_json::to_vec(&json!({
-        "model": model,
-        "request": Value::Object(request)
-    }))
-    .map_err(|error| {
-        GeminiTransformIssue::Rejected(format!("Gemini request serialization failed: {error}"))
-    })
 }
 
 fn gemini_apply_tools(
@@ -408,7 +315,6 @@ mod tests {
             ]
         });
 
-        #[cfg(feature = "mojo")]
         assert!(
             super::super::request_contents::gemini_text_contents_from_request_mojo(&request)
                 .expect("valid Gemini text contents")
@@ -455,9 +361,8 @@ mod tests {
         );
     }
 
-    #[cfg(not(feature = "mojo"))]
     #[test]
-    fn feature_off_system_instruction_uses_fixed_mojo_result() {
+    fn system_instruction_uses_fixed_mojo_result() {
         let request = json!({
             "input": [
                 {"role": "system", "content": "system instruction"},

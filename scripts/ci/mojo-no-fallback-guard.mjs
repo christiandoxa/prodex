@@ -157,6 +157,10 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs",
   "crates/prodex-provider-core/src/gemini_bridge/request.rs",
   "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
+  "crates/prodex-provider-core/src/gemini_bridge.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request_contents/items.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request_transform.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs",
   "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
@@ -197,6 +201,9 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-provider-core/src/translators/gemini/request_contents/items.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
+  "crates/prodex-provider-core/src/translators/gemini/request_transform.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response/metadata.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/response_values.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
@@ -599,6 +606,11 @@ const DEEPSEEK_SHAPING_COMPLETED_FNS = [
 const GEMINI_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/gemini/response_tool_calls.rs";
 const GEMINI_CHAT_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/gemini/response_tool_calls/chat.rs";
 const GEMINI_BRIDGE_REQUEST_FILE = "crates/prodex-provider-core/src/gemini_bridge/request.rs";
+const GEMINI_BRIDGE_ROOT_FILE = "crates/prodex-provider-core/src/gemini_bridge.rs";
+const GEMINI_BRIDGE_REQUEST_CONTENTS_FILE = "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs";
+const GEMINI_REQUEST_TRANSFORM_FILE = "crates/prodex-provider-core/src/translators/gemini/request_transform.rs";
+const GEMINI_REQUEST_CONTENTS_FILE = "crates/prodex-provider-core/src/translators/gemini/request_contents.rs";
+const GEMINI_REQUEST_ITEMS_FILE = "crates/prodex-provider-core/src/translators/gemini/request_contents/items.rs";
 const GEMINI_GENERATION_CONFIG_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs";
 const GEMINI_THINKING_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs";
 const GEMINI_SYSTEM_INSTRUCTION_FILE = "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs";
@@ -775,6 +787,49 @@ export function findViolations(files) {
     }
     if (filePath === GEMINI_THINKING_FILE && /\bfn\s+gemini_thinking_config\s*\(/u.test(contents)) {
       return [`${filePath}: contains replaced Rust thinking-config semantics`];
+    }
+    return [];
+  });
+  const geminiTranslatorHardReplacementViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === GEMINI_REQUEST_TRANSFORM_FILE) {
+      const required = [
+        "gemini_bridge_validate_translator(",
+        "gemini_bridge_raw_translator_request(",
+        "gemini_text_contents_from_request_mojo(",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Gemini translator hard replacement must retain ${marker}`);
+      if (/fn\s+(?:gemini_validate_request_rust|gemini_build_body_rust|gemini_contains_local_media_path)\s*\(/u.test(contents)) {
+        violations.push(`${filePath}: contains restored Rust Gemini translator semantics`);
+      }
+      return violations;
+    }
+    if (filePath === GEMINI_REQUEST_CONTENTS_FILE &&
+        !contents.includes("GeminiBridgeRequestOperation::TextContents")) {
+      return [`${filePath}: Gemini text contents must use Mojo`];
+    }
+    if (filePath === GEMINI_REQUEST_ITEMS_FILE) {
+      const required = [
+        "GeminiRequestContentOperation::Content",
+        "GeminiRequestContentOperation::FunctionCallPart",
+        "GeminiRequestContentOperation::FunctionResponsePart",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Gemini content hard replacement must retain ${marker}`);
+      if (/fn\s+gemini_contains_local_media_path\s*\(/u.test(contents)) {
+        violations.push(`${filePath}: contains restored Rust local-media translator scan`);
+      }
+      return violations;
+    }
+    if (filePath === GEMINI_BRIDGE_ROOT_FILE &&
+        /#\[cfg\(feature = "mojo"\)\]\s*pub\(crate\) use self::request::\{/u.test(contents)) {
+      return [`${filePath}: Gemini translator bridge export must be unconditional`];
+    }
+    if (filePath === GEMINI_BRIDGE_REQUEST_CONTENTS_FILE &&
+        /#\[cfg\(feature = "mojo"\)\]\s*(?:#\[[^\]]+\]\s*)?(?:pub\(crate\) struct GeminiTranslatorValidationPlan|pub\(crate\) fn gemini_bridge_(?:validate_translator|raw_translator_request))/u.test(contents)) {
+      return [`${filePath}: Gemini translator bridge helpers must be unconditional`];
     }
     return [];
   });
@@ -1010,7 +1065,7 @@ export function findViolations(files) {
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...cliRuntimeFeatureViolations,
     ...superExposeViolations,
-    ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiSystemInstructionViolations,
+    ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiSystemInstructionViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
     ...deepseekReasoningViolations,

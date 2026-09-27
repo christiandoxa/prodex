@@ -19,55 +19,16 @@ fn gemini_text_part(text: &str) -> Result<Value, String> {
 }
 
 fn gemini_content_value(role: &str, parts: Vec<Value>) -> Result<Value, String> {
-    #[cfg(feature = "mojo")]
-    {
-        let role = serde_json::to_vec(role).expect("Gemini content role serializes");
-        let parts = serde_json::to_vec(&parts).expect("Gemini content parts serialize");
-        super::gemini_request_content_mojo_value(
-            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::Content,
-            Some(&role),
-            Some(&parts),
-            None,
-            None,
-            0,
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        Ok(json!({"role": role, "parts": parts}))
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-pub(crate) fn gemini_contains_local_media_path(value: &Value) -> bool {
-    match value {
-        Value::Array(items) => items.iter().any(gemini_contains_local_media_path),
-        Value::Object(object) => {
-            let ty = object
-                .get("type")
-                .and_then(Value::as_str)
-                .unwrap_or_default();
-            if matches!(
-                ty,
-                "input_image"
-                    | "image_url"
-                    | "input_file"
-                    | "file"
-                    | "media"
-                    | "input_audio"
-                    | "input_video"
-            ) && object
-                .get("path")
-                .or_else(|| object.get("file_path"))
-                .or_else(|| object.get("filePath"))
-                .is_some()
-            {
-                return true;
-            }
-            object.values().any(gemini_contains_local_media_path)
-        }
-        _ => false,
-    }
+    let role = serde_json::to_vec(role).expect("Gemini content role serializes");
+    let parts = serde_json::to_vec(&parts).expect("Gemini content parts serialize");
+    super::gemini_request_content_mojo_value(
+        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::Content,
+        Some(&role),
+        Some(&parts),
+        None,
+        None,
+        0,
+    )
 }
 
 fn gemini_content_parts_from_message_content(message: &Value) -> Result<Vec<Value>, String> {
@@ -214,26 +175,12 @@ fn gemini_function_call_part(
         .and_then(|args| serde_json::from_str::<Value>(args).ok())
         .unwrap_or_else(|| json!({}));
     let call_id = (!call_id.trim().is_empty()).then_some(call_id);
-    #[cfg(feature = "mojo")]
-    {
-        Ok(Some(super::gemini_request_function_part(
-            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::FunctionCallPart,
-            name,
-            &args,
-            call_id,
-        )?))
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let mut function_call = json!({
-            "name": name,
-            "args": args,
-        });
-        if let Some(call_id) = call_id {
-            function_call["id"] = Value::String(call_id.to_string());
-        }
-        Ok(Some(json!({ "functionCall": function_call })))
-    }
+    Ok(Some(super::gemini_request_function_part(
+        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::FunctionCallPart,
+        name,
+        &args,
+        call_id,
+    )?))
 }
 
 fn gemini_append_tool_content(
@@ -271,26 +218,12 @@ fn gemini_function_response_part(
         .unwrap_or_else(|| "tool_call".to_string());
     let response = gemini_tool_response_from_message(tool_item);
     let call_id = (!call_id.trim().is_empty()).then_some(call_id);
-    #[cfg(feature = "mojo")]
-    {
-        super::gemini_request_function_part(
-            prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::FunctionResponsePart,
-            &name,
-            &response,
-            call_id,
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let mut function_response = json!({
-            "name": name,
-            "response": response,
-        });
-        if let Some(call_id) = call_id {
-            function_response["id"] = Value::String(call_id.to_string());
-        }
-        Ok(json!({ "functionResponse": function_response }))
-    }
+    super::gemini_request_function_part(
+        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::FunctionResponsePart,
+        &name,
+        &response,
+        call_id,
+    )
 }
 
 fn gemini_append_user_content(item: &Value, contents: &mut Vec<Value>) -> Result<(), String> {
