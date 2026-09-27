@@ -8,6 +8,7 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-runtime-state/src/quota.rs",
   "crates/prodex-runtime-proxy/src/lib.rs",
   "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
   "crates/prodex-runtime-broker/src/continuity.rs",
@@ -236,6 +237,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-runtime-state/src/quota.rs",
   "crates/prodex-runtime-proxy/src/lib.rs",
   "crates/prodex-runtime-broker/src/continuity.rs",
   "crates/prodex-state/src/provider_capabilities.rs",
@@ -582,6 +584,7 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
 const RUNTIME_STATE_BACKGROUND_FILE = "crates/prodex-runtime-state/src/background.rs";
+const RUNTIME_STATE_QUOTA_FILE = "crates/prodex-runtime-state/src/quota.rs";
 const RUNTIME_PROXY_ROOT_FILE = "crates/prodex-runtime-proxy/src/lib.rs";
 const BROKER_CONTINUITY_FILE = "crates/prodex-runtime-broker/src/continuity.rs";
 const CODEX_CONFIG_FILE = "crates/prodex-codex-config/src/lib.rs";
@@ -894,6 +897,22 @@ export function findViolations(files) {
     }
     if (/\bfn\s+(?:runtime_state_save_sections_rust|runtime_state_save_requires_continuation_journal_rust|runtime_hot_continuation_state_mutation_rust|runtime_background_queue_enqueue_plan_rust)\s*\(/u.test(contents)) {
       violations.push(`${filePath}: contains restored Rust runtime-state policy semantics`);
+    }
+    return violations;
+  });
+  const runtimeStateQuotaViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== RUNTIME_STATE_QUOTA_FILE) return [];
+    const required = [
+      "prodex_mojo_core::runtime_state_quota::timestamp_touch_should_persist(",
+      "prodex_mojo_core::runtime_state_quota::probe_cache_freshness(",
+      "prodex_mojo_core::runtime_state_quota::snapshot_usability(",
+      "prodex_mojo_core::runtime_state_quota::probe_usage_snapshot_apply_plan(",
+    ];
+    const violations = required
+      .filter((call) => !contents.includes(call))
+      .map((call) => filePath + ": runtime-state quota migration must retain Mojo call " + call);
+    if (/now\.saturating_sub\(checked_at\)|now\.saturating_sub\(timestamp\)/u.test(contents)) {
+      violations.push(filePath + ": contains restored Rust runtime-state quota timing policy");
     }
     return violations;
   });
@@ -1358,7 +1377,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...runtimeProxyRootViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,

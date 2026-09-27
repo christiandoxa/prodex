@@ -62,9 +62,12 @@ pub fn runtime_timestamp_touch_should_persist(
     now: i64,
     persist_interval_seconds: i64,
 ) -> bool {
-    // Timestamps are persisted with second precision. Require strictly more
-    // than interval so boundary crossings do not persist almost a second early.
-    now.saturating_sub(timestamp) > persist_interval_seconds
+    prodex_mojo_core::runtime_state_quota::timestamp_touch_should_persist(
+        timestamp,
+        now,
+        persist_interval_seconds,
+    )
+    .expect("Mojo runtime-state timestamp persistence policy returned invalid output")
 }
 
 pub fn runtime_probe_cache_freshness(
@@ -73,14 +76,41 @@ pub fn runtime_probe_cache_freshness(
     fresh_seconds: i64,
     stale_grace_seconds: i64,
 ) -> RuntimeProbeCacheFreshness {
-    let age = now.saturating_sub(checked_at);
-    if age <= fresh_seconds {
-        RuntimeProbeCacheFreshness::Fresh
-    } else if age <= stale_grace_seconds {
-        RuntimeProbeCacheFreshness::StaleUsable
-    } else {
-        RuntimeProbeCacheFreshness::Expired
+    use prodex_mojo_core::runtime_state_quota::ProbeCacheFreshness as MojoFreshness;
+    match prodex_mojo_core::runtime_state_quota::probe_cache_freshness(
+        checked_at,
+        now,
+        fresh_seconds,
+        stale_grace_seconds,
+    )
+    .expect("Mojo runtime-state probe freshness policy returned invalid output")
+    {
+        MojoFreshness::Fresh => RuntimeProbeCacheFreshness::Fresh,
+        MojoFreshness::StaleUsable => RuntimeProbeCacheFreshness::StaleUsable,
+        MojoFreshness::Expired => RuntimeProbeCacheFreshness::Expired,
     }
+}
+
+fn runtime_profile_usage_snapshot_usability<W, F>(
+    snapshot: &RuntimeProfileUsageSnapshot<W>,
+    now: i64,
+    stale_grace_seconds: i64,
+    is_exhausted: F,
+) -> prodex_mojo_core::runtime_state_quota::SnapshotUsabilityPlan
+where
+    W: Copy,
+    F: Fn(W) -> bool + Copy,
+{
+    prodex_mojo_core::runtime_state_quota::snapshot_usability(
+        is_exhausted(snapshot.five_hour_status),
+        snapshot.five_hour_reset_at,
+        is_exhausted(snapshot.weekly_status),
+        snapshot.weekly_reset_at,
+        snapshot.checked_at,
+        now,
+        stale_grace_seconds,
+    )
+    .expect("Mojo runtime-state quota snapshot usability policy returned invalid output")
 }
 
 pub fn runtime_profile_usage_snapshot_hold_active<W, F>(
@@ -92,12 +122,7 @@ where
     W: Copy,
     F: Fn(W) -> bool + Copy,
 {
-    [
-        (snapshot.five_hour_status, snapshot.five_hour_reset_at),
-        (snapshot.weekly_status, snapshot.weekly_reset_at),
-    ]
-    .into_iter()
-    .any(|(status, reset_at)| is_exhausted(status) && reset_at != i64::MAX && reset_at > now)
+    runtime_profile_usage_snapshot_usability(snapshot, now, 0, is_exhausted).hold_active
 }
 
 pub fn runtime_profile_usage_snapshot_hold_expired<W, F>(
@@ -109,12 +134,7 @@ where
     W: Copy,
     F: Fn(W) -> bool + Copy,
 {
-    [
-        (snapshot.five_hour_status, snapshot.five_hour_reset_at),
-        (snapshot.weekly_status, snapshot.weekly_reset_at),
-    ]
-    .into_iter()
-    .any(|(status, reset_at)| is_exhausted(status) && reset_at != i64::MAX && reset_at <= now)
+    runtime_profile_usage_snapshot_usability(snapshot, now, 0, is_exhausted).hold_expired
 }
 
 pub fn runtime_profile_usage_snapshot_is_usable<W, F>(
@@ -127,13 +147,8 @@ where
     W: Copy,
     F: Fn(W) -> bool + Copy,
 {
-    if runtime_profile_usage_snapshot_hold_active(snapshot, now, is_exhausted) {
-        return true;
-    }
-    if runtime_profile_usage_snapshot_hold_expired(snapshot, now, is_exhausted) {
-        return false;
-    }
-    now.saturating_sub(snapshot.checked_at) <= stale_grace_seconds
+    runtime_profile_usage_snapshot_usability(snapshot, now, stale_grace_seconds, is_exhausted)
+        .usable
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -266,35 +281,30 @@ pub struct RuntimeProbeUsageSnapshotApplyInput<'a, W> {
 pub fn runtime_probe_usage_snapshot_apply_plan<W: PartialEq>(
     input: RuntimeProbeUsageSnapshotApplyInput<'_, W>,
 ) -> RuntimeProbeUsageSnapshotApplyPlan {
-    let snapshot_should_persist = runtime_profile_usage_snapshot_should_persist(
-        input.previous_snapshot,
-        input.next_snapshot,
+    let previous_snapshot_present = input.previous_snapshot.is_some();
+    let snapshots_materially_match = input.previous_snapshot.is_some_and(|previous| {
+        runtime_profile_usage_snapshot_materially_matches(previous, input.next_snapshot)
+    });
+    let previous_checked_at = input
+        .previous_snapshot
+        .map_or(0, |previous| previous.checked_at);
+    let plan = prodex_mojo_core::runtime_state_quota::probe_usage_snapshot_apply_plan(
+        previous_snapshot_present,
+        snapshots_materially_match,
+        previous_checked_at,
+        input.previous_retry_backoff_until,
+        input.blocking_reset_at,
+        input.quota_blocked,
         input.now,
+        input.quota_quarantine_fallback_seconds,
         input.touch_persist_interval_seconds,
-    );
-    let blocking_reset_at = input
-        .blocking_reset_at
-        .filter(|reset_at| *reset_at > input.now);
-    let quarantine_until = input.quota_blocked.then(|| {
-        blocking_reset_at.unwrap_or_else(|| {
-            input
-                .now
-                .saturating_add(input.quota_quarantine_fallback_seconds)
-        })
-    });
-    let retry_backoff_until = quarantine_until.map(|until| {
-        input
-            .previous_retry_backoff_until
-            .unwrap_or(until)
-            .max(until)
-    });
-    let retry_backoff_changed =
-        retry_backoff_until.is_some_and(|until| Some(until) != input.previous_retry_backoff_until);
+    )
+    .expect("Mojo runtime-state probe-apply policy returned invalid output");
 
     RuntimeProbeUsageSnapshotApplyPlan {
-        snapshot_should_persist,
-        blocking_reset_at,
-        retry_backoff_until,
-        retry_backoff_changed,
+        snapshot_should_persist: plan.snapshot_should_persist,
+        blocking_reset_at: plan.blocking_reset_at,
+        retry_backoff_until: plan.retry_backoff_until,
+        retry_backoff_changed: plan.retry_backoff_changed,
     }
 }

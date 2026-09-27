@@ -9,7 +9,8 @@ use crate::{
     RuntimeStateSaveStateSection, RuntimeWaitDurationMetrics, runtime_background_enqueue_backlog,
     runtime_background_queue_enqueue_plan, runtime_continuation_journal_save_debounce,
     runtime_continuation_journal_save_enqueue_plan, runtime_hot_continuation_state_mutation,
-    runtime_probe_usage_snapshot_apply_plan, runtime_profile_usage_snapshot_is_usable,
+    runtime_probe_usage_snapshot_apply_plan, runtime_profile_usage_snapshot_hold_active,
+    runtime_profile_usage_snapshot_hold_expired, runtime_profile_usage_snapshot_is_usable,
     runtime_profile_usage_snapshot_should_persist, runtime_profiles_needing_startup_probe_refresh,
     runtime_profiles_needing_startup_probe_refresh_from_snapshots,
     runtime_proxy_queue_pressure_active, runtime_state_save_debounce,
@@ -536,6 +537,31 @@ fn runtime_state_mojo_policy_covers_every_mutation_variant_and_usize_boundaries(
             pressure_active: false,
         },
     );
+}
+
+#[test]
+fn quota_snapshot_can_report_active_and_expired_holds_independently() {
+    let mixed = RuntimeProfileUsageSnapshot {
+        checked_at: 0,
+        plan_type: None,
+        five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+        five_hour_remaining_percent: 0,
+        five_hour_reset_at: 300,
+        weekly_status: RuntimeQuotaWindowStatus::Exhausted,
+        weekly_remaining_percent: 0,
+        weekly_reset_at: 100,
+    };
+    let exhausted = |status| status == RuntimeQuotaWindowStatus::Exhausted;
+
+    assert!(runtime_profile_usage_snapshot_hold_active(
+        &mixed, 200, exhausted
+    ));
+    assert!(runtime_profile_usage_snapshot_hold_expired(
+        &mixed, 200, exhausted
+    ));
+    assert!(runtime_profile_usage_snapshot_is_usable(
+        &mixed, 200, 60, exhausted,
+    ));
 }
 
 #[test]

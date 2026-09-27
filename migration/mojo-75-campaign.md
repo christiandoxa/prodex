@@ -2564,3 +2564,19 @@ authoritative operations**. The canonical broad source report counts **56,677
 reachable Mojo LOC** and **192,079 Rust production LOC**, totaling **248,756 LOC**:
 **22.78% Mojo**. The 75% project target remains unmet, with **519,560 additional
 Mojo LOC** required at this Rust volume.
+
+## Runtime state quota snapshot policy migration
+
+Runtime-state quota timing and snapshot policy now uses
+mojo/prodex_core/runtime_state_quota.mojo. The migrated owner covers timestamp
+touch persistence thresholds, probe-cache freshness, exhausted-window hold
+classification and snapshot usability, plus probe-apply blocking-reset, quarantine,
+and retry-backoff arithmetic. Generic snapshot equality/status projection and
+candidate collection traversal remain Rust adapters.
+
+Validation passes 19/19 prodex-runtime-state tests and the direct Mojo ABI smoke
+test. No-fallback self-test, ownership, and authority guards pass; ownership now
+reports **65 authoritative operations**. The canonical broad source report counts
+**56,799 reachable Mojo LOC** and **192,288 Rust production LOC**, totaling
+**249,087 LOC**: **22.80% Mojo**. The 75% project target remains unmet, with
+**520,065 additional Mojo LOC** required at this Rust volume.

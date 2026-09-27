@@ -125,6 +125,8 @@ pub mod runtime_decisions;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_state;
 #[cfg(feature = "mojo-runtime")]
+pub mod runtime_state_quota;
+#[cfg(feature = "mojo-runtime")]
 pub mod state_policy;
 
 #[cfg(feature = "mojo-runtime")]
