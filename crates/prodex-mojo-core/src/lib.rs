@@ -125,6 +125,8 @@ pub mod runtime_broker_continuity;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_decisions;
 #[cfg(feature = "mojo-runtime")]
+pub mod runtime_repo_map;
+#[cfg(feature = "mojo-runtime")]
 pub mod runtime_state;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_state_quota;
