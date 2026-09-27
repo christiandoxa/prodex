@@ -2286,3 +2286,24 @@ reachable Mojo LOC** and **192,108 Rust production LOC**, totaling **245,659
 LOC**: **21.798916% Mojo**. Release-floor and ownership checks pass; the 75%
 project target remains unmet, with **522,773 additional Mojo LOC** required at
 this Rust volume.
+
+## Provider response feature-off fallback hard replacement
+
+Gemini response-part planning now always calls `gemini_sse_state.mojo`, and
+Gemini citation/web-search grounding shapes always call the existing Gemini
+response kernel operations 27 and 28. The Rust response-part oracle and the
+feature-off citation/web-search JSON builders were deleted. OpenAI Chat
+Completions response and SSE translation now call `openai_chat_response.mojo`
+in every provider-core feature mode; feature-off unsupported branches were
+deleted. Anthropic Messages request/response translation and web-search result
+handling likewise use the existing Mojo request/response owners unconditionally,
+and their feature-off unsupported copies were removed. The no-fallback guard
+now treats these six caller files as unconditional Mojo surfaces.
+
+The complete provider-core suite passes 332 tests in the default feature mode
+and 333 tests with `--features mojo`, plus seven integration tests in each mode.
+The no-fallback, ownership, authority, and broad production-share checks pass.
+The canonical source report counts **53,551 reachable Mojo LOC** and **192,038
+Rust production LOC**, totaling **245,589 LOC**: **21.81% Mojo**. The 75%
+project target remains unmet, with **522,563 additional Mojo LOC** required at
+this Rust volume.

@@ -5,7 +5,6 @@ use super::{
     ProviderWireFormat, Value,
 };
 
-#[cfg(feature = "mojo")]
 fn stream_event_body(
     kind: prodex_mojo_core::rich::OpenAiCompatStreamKind,
     call_id: Option<&str>,
@@ -55,31 +54,18 @@ pub(crate) fn translate_chat_stream_event_to_responses(
     };
 
     if data == "[DONE]" {
-        #[cfg(feature = "mojo")]
-        {
-            return ProviderTransformResult::lossless(
-                provider,
-                input.endpoint,
-                ProviderWireFormat::OpenAiChatCompletions,
-                ProviderWireFormat::OpenAiResponses,
-                stream_event_body(
-                    prodex_mojo_core::rich::OpenAiCompatStreamKind::Done,
-                    None,
-                    None,
-                    None,
-                ),
-            );
-        }
-        #[cfg(not(feature = "mojo"))]
-        {
-            return ProviderTransformResult::unsupported(
-                provider,
-                input.endpoint,
-                ProviderWireFormat::OpenAiChatCompletions,
-                ProviderWireFormat::OpenAiResponses,
-                "OpenAI chat stream translation requires Mojo support",
-            );
-        }
+        return ProviderTransformResult::lossless(
+            provider,
+            input.endpoint,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::OpenAiResponses,
+            stream_event_body(
+                prodex_mojo_core::rich::OpenAiCompatStreamKind::Done,
+                None,
+                None,
+                None,
+            ),
+        );
     }
 
     let value: Value = match serde_json::from_str(data) {
@@ -95,43 +81,28 @@ pub(crate) fn translate_chat_stream_event_to_responses(
         }
     };
 
-    #[cfg(feature = "mojo")]
-    {
-        let mut document = crate::mojo_json::Document::default();
-        document.openai_chat_context(&value, None);
-        let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
-        match prodex_mojo_core::json::transform_openai_chat_stream_event(&document.nodes, raw) {
-            Ok(Some(body)) => ProviderTransformResult::lossless(
-                provider,
-                input.endpoint,
-                ProviderWireFormat::OpenAiChatCompletions,
-                ProviderWireFormat::OpenAiResponses,
-                body,
-            ),
-            Ok(None) => ProviderTransformResult::unsupported(
-                provider,
-                input.endpoint,
-                ProviderWireFormat::OpenAiChatCompletions,
-                ProviderWireFormat::OpenAiResponses,
-                "chat completions SSE event does not contain a supported text delta",
-            ),
-            Err(error) => panic!("Mojo OpenAI compatibility stream event failed: {error:?}"),
-        }
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        let _ = value;
-        ProviderTransformResult::unsupported(
+    let mut document = crate::mojo_json::Document::default();
+    document.openai_chat_context(&value, None);
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    match prodex_mojo_core::json::transform_openai_chat_stream_event(&document.nodes, raw) {
+        Ok(Some(body)) => ProviderTransformResult::lossless(
             provider,
             input.endpoint,
             ProviderWireFormat::OpenAiChatCompletions,
             ProviderWireFormat::OpenAiResponses,
-            "OpenAI chat stream translation requires Mojo support",
-        )
+            body,
+        ),
+        Ok(None) => ProviderTransformResult::unsupported(
+            provider,
+            input.endpoint,
+            ProviderWireFormat::OpenAiChatCompletions,
+            ProviderWireFormat::OpenAiResponses,
+            "chat completions SSE event does not contain a supported text delta",
+        ),
+        Err(error) => panic!("Mojo OpenAI compatibility stream event failed: {error:?}"),
     }
 }
 
-#[cfg(all(test, feature = "mojo"))]
+#[cfg(test)]
 #[path = "stream/mojo_tests.rs"]
 mod mojo_tests;
