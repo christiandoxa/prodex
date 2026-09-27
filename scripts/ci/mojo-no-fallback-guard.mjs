@@ -8,6 +8,8 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/runtime_lineage.rs",
+  "crates/prodex-runtime-state/src/lineage.rs",
   "crates/prodex-mojo-core/src/runtime_repo_map.rs",
   "crates/prodex-app/src/runtime_state_shared/line_index.rs",
   "crates/prodex-mojo-core/src/profile_export.rs",
@@ -242,6 +244,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-mojo-core/src/runtime_lineage.rs",
+  "crates/prodex-runtime-state/src/lineage.rs",
   "crates/prodex-app/src/runtime_state_shared/line_index.rs",
   "crates/prodex-profile-export/src/envelope.rs",
   "crates/prodex-profile-export/src/data_model.rs",
@@ -1367,6 +1371,42 @@ export function findViolations(files) {
     }
     return [];
   });
+  const runtimeLineageViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-state/src/lineage.rs") {
+      const required = [
+        "prodex_mojo_core::runtime_lineage::component_valid(",
+        "prodex_mojo_core::runtime_lineage::response_turn_state_key(",
+        "prodex_mojo_core::runtime_lineage::response_turn_state_parts(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime lineage migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      for (const restored of [
+        "value.chars().all(|character| !character.is_control())",
+        "fn bounded_lineage_key",
+        "response_len.parse::<usize>()",
+        "suffix.split_once(':')",
+      ]) {
+        if (production.includes(restored)) {
+          violations.push(filePath + ": contains restored Rust runtime-lineage semantics");
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_lineage.rs") {
+      const required = [
+        "prodex_runtime_lineage_classify_v1(",
+        "prodex_runtime_lineage_build_v1(",
+        "prodex_runtime_lineage_parts_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime lineage ABI adapter must retain " + call);
+    }
+    return [];
+  });
   const runtimeRepoMapViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-app/src/runtime_state_shared/line_index.rs") return [];
     const required = [
@@ -1451,7 +1491,7 @@ export function findViolations(files) {
     ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...doctorMarkerViolations, ...statusSummaryViolations,
-    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...runtimeRepoMapViolations,
+    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...runtimeLineageViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,

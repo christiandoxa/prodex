@@ -2636,3 +2636,22 @@ ownership now reports **68 authoritative operations**. The canonical broad sourc
 report counts **57,218 reachable Mojo LOC** and **192,376 Rust production LOC**,
 totaling **249,594 LOC**: **22.92% Mojo**. The 75% project target remains unmet,
 with **519,910 additional Mojo LOC** required at this Rust volume.
+
+## Runtime lineage semantic migration
+
+Runtime hard-binding lineage validation, compact lineage key construction,
+response/turn-state lineage encoding, prefix classification, and length-prefixed
+decoding now use mojo/prodex_core/runtime_lineage.mojo through the safe
+prodex_mojo_core::runtime_lineage adapter. Runtime-state retains DTO/Serde
+ownership, normalized optional-string materialization, public owner/resolution
+enums, and borrowed-slice reconstruction only; no Rust fallback semantic copy is
+retained.
+
+Validation passes 29/29 prodex-runtime-store tests, including lineage round trips
+with colon-bearing response IDs, oversized identities, legacy empty fields,
+conflict/unavailable resolution, and continuation compaction. Clippy, prodex-app
+check, no-fallback self-test, ownership, and authority guards pass; ownership now
+reports **71 authoritative operations**. The canonical broad source report counts
+**57,471 reachable Mojo LOC** and **192,482 Rust production LOC**, totaling
+**249,953 LOC**: **22.99% Mojo**. The 75% project target remains unmet, with
+**519,975 additional Mojo LOC** required at this Rust volume.

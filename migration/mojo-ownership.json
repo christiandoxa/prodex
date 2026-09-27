@@ -811,6 +811,18 @@
           "runtime_repo_module_like",
           "runtime_repo_module_path"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_lineage.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_lineage_classification",
+          "runtime_lineage_key_build",
+          "runtime_lineage_response_parts"
+        ]
       }
     ],
     "removed": [
@@ -2489,6 +2501,75 @@
       "rust_owner_before": "source-path prefix, quote, extension, separator and mod/lib/main/index normalization into module names",
       "rust_test_oracle": "deleted; direct ABI fixtures cover src/mod/lib/main/index paths, diff prefixes, quotes, Windows separators and dotted path behavior",
       "rust_adapter_scope": "bounded symbol value handling, nearest-path selection and map aggregation remain Rust"
+    },
+    {
+      "domain": "runtime-state/lineage",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_lineage.mojo",
+      "consumer": "crates/prodex-runtime-state/src/lineage.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-state/src/lineage.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "runtime_lineage_classification",
+      "mojo_entry": "prodex_runtime_lineage_classify_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_lineage::component_valid",
+      "rust_owner_before": "hard-binding component/key length and Unicode-control validation plus lineage-prefix classification",
+      "rust_test_oracle": "deleted; runtime-store continuation tests cover valid/oversized identities, serialized legacy identities and lineage filtering",
+      "rust_adapter_scope": "DTO/Serde ownership and normalized optional-string materialization remain Rust"
+    },
+    {
+      "domain": "runtime-state/lineage",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_lineage.mojo",
+      "consumer": "crates/prodex-runtime-state/src/lineage.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-state/src/lineage.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "runtime_lineage_key_build",
+      "mojo_entry": "prodex_runtime_lineage_build_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_lineage::response_turn_state_key",
+      "rust_owner_before": "compact session/turn-state lineage key construction and length-prefixed response/turn-state lineage encoding",
+      "rust_test_oracle": "deleted; runtime-store continuation tests cover round-trip colon-bearing response ids and bounded invalid keys",
+      "rust_adapter_scope": "Rust allocates the bounded output buffer and materializes validated UTF-8"
+    },
+    {
+      "domain": "runtime-state/lineage",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_lineage.mojo",
+      "consumer": "crates/prodex-runtime-state/src/lineage.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-state/src/lineage.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "runtime_lineage_response_parts",
+      "mojo_entry": "prodex_runtime_lineage_parts_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_lineage::response_turn_state_parts",
+      "rust_owner_before": "response-turn-state length-prefix parsing and validated response/turn-state slice recovery",
+      "rust_test_oracle": "deleted; runtime-store continuation tests cover lineage round-trip, compaction and malformed/unbounded identity behavior",
+      "rust_adapter_scope": "Rust reconstructs borrowed string slices from validated Mojo byte offsets"
     }
   ],
   "rust_semantic_reductions": [

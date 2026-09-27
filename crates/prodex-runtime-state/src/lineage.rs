@@ -82,15 +82,13 @@ fn normalize_identity_part(value: Option<&str>) -> Option<String> {
 }
 
 pub fn runtime_identity_component_is_valid(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= RUNTIME_HARD_BINDING_COMPONENT_MAX_BYTES
-        && value.chars().all(|character| !character.is_control())
+    prodex_mojo_core::runtime_lineage::component_valid(value)
+        .expect("Mojo runtime lineage component classifier returned invalid output")
 }
 
 pub fn runtime_lineage_key_is_bounded(key: &str) -> bool {
-    !key.is_empty()
-        && key.len() <= RUNTIME_HARD_BINDING_KEY_MAX_BYTES
-        && key.chars().all(|character| !character.is_control())
+    prodex_mojo_core::runtime_lineage::key_valid(key)
+        .expect("Mojo runtime lineage key classifier returned invalid output")
 }
 
 impl<'de> Deserialize<'de> for RuntimeHardBindingIdentity {
@@ -224,60 +222,36 @@ impl RuntimeHardBindingOwner {
 }
 
 pub fn runtime_compact_session_lineage_key(session_id: &str) -> String {
-    bounded_lineage_key(RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX, [session_id])
+    prodex_mojo_core::runtime_lineage::compact_session_key(session_id)
+        .expect("Mojo compact-session lineage key builder returned invalid output")
 }
 
 pub fn runtime_compact_turn_state_lineage_key(turn_state: &str) -> String {
-    bounded_lineage_key(RUNTIME_COMPACT_TURN_STATE_LINEAGE_PREFIX, [turn_state])
+    prodex_mojo_core::runtime_lineage::compact_turn_state_key(turn_state)
+        .expect("Mojo compact-turn-state lineage key builder returned invalid output")
 }
 
 pub fn runtime_response_turn_state_lineage_key(response_id: &str, turn_state: &str) -> String {
-    if !runtime_identity_component_is_valid(response_id)
-        || !runtime_identity_component_is_valid(turn_state)
-    {
-        return format!("{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}__invalid__");
-    }
-    format!(
-        "{RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX}{}:{response_id}:{turn_state}",
-        response_id.len()
-    )
+    prodex_mojo_core::runtime_lineage::response_turn_state_key(response_id, turn_state)
+        .expect("Mojo response-turn-state lineage key builder returned invalid output")
 }
 
 pub fn runtime_is_response_turn_state_lineage_key(key: &str) -> bool {
-    key.starts_with(RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX)
+    prodex_mojo_core::runtime_lineage::is_response_turn_key(key)
+        .expect("Mojo response-turn-state lineage classifier returned invalid output")
 }
 
 pub fn runtime_response_turn_state_lineage_parts(key: &str) -> Option<(&str, &str)> {
-    let suffix = key.strip_prefix(RUNTIME_RESPONSE_TURN_STATE_LINEAGE_PREFIX)?;
-    let (response_len, rest) = suffix.split_once(':')?;
-    let response_len = response_len.parse::<usize>().ok()?;
-    let response_and_sep = rest.get(..response_len.saturating_add(1))?;
-    if response_and_sep.as_bytes().get(response_len).copied() != Some(b':') {
-        return None;
-    }
-    let response_id = response_and_sep.get(..response_len)?;
-    let turn_state = rest.get(response_len.saturating_add(1)..)?;
-    (runtime_identity_component_is_valid(response_id)
-        && runtime_identity_component_is_valid(turn_state))
-    .then_some((response_id, turn_state))
+    let (response_start, response_end, turn_start, turn_end) =
+        prodex_mojo_core::runtime_lineage::response_turn_state_parts(key)
+            .expect("Mojo response-turn-state lineage decoder returned invalid output")?;
+    Some((
+        key.get(response_start..response_end)?,
+        key.get(turn_start..turn_end)?,
+    ))
 }
 
 pub fn runtime_is_compact_session_lineage_key(key: &str) -> bool {
-    key.starts_with(RUNTIME_COMPACT_SESSION_LINEAGE_PREFIX)
-}
-
-fn bounded_lineage_key<const N: usize>(prefix: &str, values: [&str; N]) -> String {
-    if values
-        .iter()
-        .copied()
-        .all(runtime_identity_component_is_valid)
-    {
-        let mut key = prefix.to_string();
-        for value in values {
-            key.push_str(value);
-        }
-        key
-    } else {
-        format!("{prefix}__invalid__")
-    }
+    prodex_mojo_core::runtime_lineage::is_compact_session_key(key)
+        .expect("Mojo compact-session lineage classifier returned invalid output")
 }
