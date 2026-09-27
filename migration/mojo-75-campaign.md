@@ -2619,3 +2619,20 @@ ownership now reports **66 authoritative operations**. The canonical broad sourc
 report counts **56,950 reachable Mojo LOC** and **192,349 Rust production LOC**,
 totaling **249,299 LOC**: **22.84% Mojo**. The 75% project target remains unmet,
 with **520,097 additional Mojo LOC** required at this Rust volume.
+
+## Smart-context repo-map semantic migration
+
+Repo-map module-like declaration classification and source-path to module-name
+normalization now use mojo/prodex_core/runtime_repo_map.mojo. Rust no longer
+owns visibility/export/async declaration token parsing or a/b/./src/mod/lib/main/index
+path normalization. Nearest-path selection, DTO aggregation, and bounded symbol
+values remain Rust adapters.
+
+Direct ABI fixtures cover comments/decorators, Rust visibility prefixes, JavaScript
+export/class syntax, async functions, Unicode whitespace, diff prefixes, quotes,
+Windows separators, src/mod/lib/main/index paths, and dotted-path behavior. Clippy,
+prodex-app check, no-fallback self-test, ownership, and authority guards pass;
+ownership now reports **68 authoritative operations**. The canonical broad source
+report counts **57,218 reachable Mojo LOC** and **192,376 Rust production LOC**,
+totaling **249,594 LOC**: **22.92% Mojo**. The 75% project target remains unmet,
+with **519,910 additional Mojo LOC** required at this Rust volume.

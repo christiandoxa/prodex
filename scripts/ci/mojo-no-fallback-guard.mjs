@@ -8,6 +8,8 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/runtime_repo_map.rs",
+  "crates/prodex-app/src/runtime_state_shared/line_index.rs",
   "crates/prodex-mojo-core/src/profile_export.rs",
   "crates/prodex-profile-export/src/envelope.rs",
   "crates/prodex-profile-export/src/data_model.rs",
@@ -240,6 +242,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-app/src/runtime_state_shared/line_index.rs",
   "crates/prodex-profile-export/src/envelope.rs",
   "crates/prodex-profile-export/src/data_model.rs",
   "crates/prodex-runtime-state/src/quota.rs",
@@ -1364,6 +1367,20 @@ export function findViolations(files) {
     }
     return [];
   });
+  const runtimeRepoMapViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== "crates/prodex-app/src/runtime_state_shared/line_index.rs") return [];
+    const required = [
+      "prodex_mojo_core::runtime_repo_map::repo_module_like(",
+      "prodex_mojo_core::runtime_repo_map::repo_module_from_path(",
+    ];
+    const violations = required
+      .filter((call) => !contents.includes(call))
+      .map((call) => `${filePath}: repo-map migration must retain Mojo call ${call}`);
+    if (/\bfn\s+runtime_smart_context_repo_map_declaration_keyword\s*\(|trim_start_matches\("a\/"\)|split\(\['\/',/u.test(contents)) {
+      violations.push(`${filePath}: contains restored Rust repo-map module/path semantics`);
+    }
+    return violations;
+  });
   const replacedClassifierViolations = files.flatMap(([filePath, contents]) => {
     const forbidden = new Map([
       ["crates/prodex-domain/src/governance/inspection.rs", /\bfn\s+minimum_classification_rust\s*\(|\.any\(\|finding\|\s*classification\s*<\s*finding\.kind\.minimum_classification\(\)\)/u],
@@ -1434,7 +1451,7 @@ export function findViolations(files) {
     ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...doctorMarkerViolations, ...statusSummaryViolations,
-    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations,
+    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,

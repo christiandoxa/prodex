@@ -341,55 +341,13 @@ pub(super) fn runtime_smart_context_repo_map_symbol_module(
 }
 
 pub(super) fn runtime_smart_context_repo_map_symbol_is_module_like(text: &str) -> bool {
-    for line in text.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.is_empty()
-            || trimmed.starts_with("#[")
-            || trimmed.starts_with('@')
-            || trimmed.starts_with("//")
-            || trimmed.starts_with('#')
-        {
-            continue;
-        }
-        return runtime_smart_context_repo_map_declaration_keyword(trimmed)
-            .is_some_and(|keyword| matches!(keyword, "mod" | "class"));
-    }
-    false
-}
-
-pub(super) fn runtime_smart_context_repo_map_declaration_keyword(line: &str) -> Option<&str> {
-    let line = line
-        .strip_prefix("pub(crate) ")
-        .or_else(|| line.strip_prefix("pub(super) "))
-        .or_else(|| line.strip_prefix("pub "))
-        .unwrap_or(line);
-    let line = line
-        .strip_prefix("export default ")
-        .or_else(|| line.strip_prefix("export "))
-        .or_else(|| line.strip_prefix("async "))
-        .unwrap_or(line);
-    line.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
-        .find(|part| !part.is_empty())
+    prodex_mojo_core::runtime_repo_map::repo_module_like(text)
+        .expect("Mojo repo-map module classifier returned invalid output")
 }
 
 pub(super) fn runtime_smart_context_repo_map_module_from_path(path: &str) -> Option<String> {
-    let path = path
-        .trim_start_matches("a/")
-        .trim_start_matches("b/")
-        .trim_start_matches("./")
-        .trim_matches('"');
-    let without_extension = path.rsplit_once('.').map(|(base, _)| base).unwrap_or(path);
-    let mut parts = without_extension
-        .split(['/', '\\'])
-        .filter(|part| !part.is_empty() && *part != ".")
-        .collect::<Vec<_>>();
-    if parts.first() == Some(&"src") && parts.len() > 1 {
-        parts.remove(0);
-    }
-    if matches!(parts.last(), Some(&"mod" | &"lib" | &"main" | &"index")) && parts.len() > 1 {
-        parts.pop();
-    }
-    runtime_smart_context_bounded_string(&parts.join("::"))
+    prodex_mojo_core::runtime_repo_map::repo_module_from_path(path)
+        .expect("Mojo repo-map path normalizer returned invalid output")
 }
 
 pub(super) fn runtime_smart_context_insert_repo_map_entry(

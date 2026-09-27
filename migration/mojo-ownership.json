@@ -800,6 +800,17 @@
         "operations": [
           "profile_export_policy_limits"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_repo_map.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_repo_module_like",
+          "runtime_repo_module_path"
+        ]
       }
     ],
     "removed": [
@@ -2430,6 +2441,54 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde sequence ownership and error text mapping, secret bytes and auth JSON ownership, base64 decoding, password/salt/nonce/ciphertext zeroization, KDF execution and AES-GCM-SIV crypto remain Rust; only counts, byte lengths and numeric KDF metadata cross the ABI"
+    },
+    {
+      "domain": "smart-context/repo-map",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_repo_map.mojo",
+      "consumer": "crates/prodex-app/src/runtime_state_shared/line_index.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_state_shared/line_index.rs",
+        "crates/prodex-app/src/runtime_state_shared/artifact_store/projection.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_repo_map.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "runtime_repo_module_like",
+      "mojo_entry": "prodex_runtime_repo_module_like_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_repo_map::repo_module_like",
+      "rust_owner_before": "repo-map module-like declaration classification over source excerpts",
+      "rust_test_oracle": "deleted; direct ABI fixtures cover comments/decorators, Rust visibility prefixes, JS export/class syntax, async functions and Unicode whitespace",
+      "rust_adapter_scope": "repo-map entry-kind DTO mapping remains Rust"
+    },
+    {
+      "domain": "smart-context/repo-map",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_repo_map.mojo",
+      "consumer": "crates/prodex-app/src/runtime_state_shared/line_index.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_state_shared/line_index.rs",
+        "crates/prodex-app/src/runtime_state_shared/artifact_store/projection.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_repo_map.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "runtime_repo_module_path",
+      "mojo_entry": "prodex_runtime_repo_module_path_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_repo_map::repo_module_from_path",
+      "rust_owner_before": "source-path prefix, quote, extension, separator and mod/lib/main/index normalization into module names",
+      "rust_test_oracle": "deleted; direct ABI fixtures cover src/mod/lib/main/index paths, diff prefixes, quotes, Windows separators and dotted path behavior",
+      "rust_adapter_scope": "bounded symbol value handling, nearest-path selection and map aggregation remain Rust"
     }
   ],
   "rust_semantic_reductions": [

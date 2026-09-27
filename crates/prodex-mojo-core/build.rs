@@ -461,6 +461,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/profile_export_policy.mojo");
         sources.push("../../mojo/prodex_core/runtime_state_background.mojo");
         sources.push("../../mojo/prodex_core/runtime_state_quota.mojo");
+        sources.push("../../mojo/prodex_core/runtime_repo_map.mojo");
         sources.push("../../mojo/prodex_core/runtime_broker_continuity.mojo");
         sources.push("../../mojo/prodex_core/runtime_proxy_request.mojo");
         sources.push("../../mojo/prodex_core/state_policy.mojo");
