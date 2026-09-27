@@ -790,6 +790,16 @@
         "operations": [
           "runtime_state_quota_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/profile_export_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "profile_export_policy_limits"
+        ]
       }
     ],
     "removed": [
@@ -2396,6 +2406,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "generic status projection/equality, candidate collection traversal, typed enum/result reconstruction and FFI validation"
+    },
+    {
+      "name": "profile_export_policy_limits",
+      "domain": "profile/export-policy",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/data_model.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::validate_collection",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/data_model.rs",
+        "crates/prodex-profile-export/src/envelope.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export.rs",
+      "rust_owner_before": "profile/secret-file count limits, nested secret byte limit, password byte-length limit, PBKDF2 iteration range and Argon2 numeric parameter range decisions",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; profile-export suite covers exact count/size/KDF boundaries, fail-before-password-lookup behavior, encrypted v1/v2 round trips, corruption and redacted failures",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde sequence ownership and error text mapping, secret bytes and auth JSON ownership, base64 decoding, password/salt/nonce/ciphertext zeroization, KDF execution and AES-GCM-SIV crypto remain Rust; only counts, byte lengths and numeric KDF metadata cross the ABI"
     }
   ],
   "rust_semantic_reductions": [

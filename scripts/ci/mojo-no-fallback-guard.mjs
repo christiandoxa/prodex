@@ -8,6 +8,9 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/profile_export.rs",
+  "crates/prodex-profile-export/src/envelope.rs",
+  "crates/prodex-profile-export/src/data_model.rs",
   "crates/prodex-runtime-state/src/quota.rs",
   "crates/prodex-runtime-proxy/src/lib.rs",
   "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -237,6 +240,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-profile-export/src/envelope.rs",
+  "crates/prodex-profile-export/src/data_model.rs",
   "crates/prodex-runtime-state/src/quota.rs",
   "crates/prodex-runtime-proxy/src/lib.rs",
   "crates/prodex-runtime-broker/src/continuity.rs",
@@ -1328,6 +1333,37 @@ export function findViolations(files) {
     return body && !FEATURE_OFF_RUST_PATH.test(body) && body.includes("smart_context_reduce_static_context_items_mojo(")
       ? [] : [`${filePath}: static-item selection must use Mojo in every feature mode`];
   });
+  const profileExportPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-profile-export/src/data_model.rs") {
+      const required = [
+        "prodex_mojo_core::profile_export::validate_collection(",
+        "prodex_mojo_core::profile_export::validate_profile_secret_files(",
+        "prodex_mojo_core::profile_export::validate_nested_secret_bytes(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: profile-export limits must retain Mojo call ${call}`);
+      if (/profiles\.len\(\)\s*>\s*PROFILE_EXPORT_MAX_PROFILES|secret_files\.len\(\)\s*>\s*PROFILE_EXPORT_MAX_SECRET_FILES_PER_PROFILE|value\.len\(\)\s*>\s*PROFILE_EXPORT_NESTED_JSON_MAX_BYTES/u.test(contents)) {
+        violations.push(`${filePath}: contains restored Rust profile-export count/size policy`);
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-profile-export/src/envelope.rs") {
+      const required = [
+        "prodex_mojo_core::profile_export::validate_password_bytes(",
+        "prodex_mojo_core::profile_export::validate_pbkdf2_iterations(",
+        "prodex_mojo_core::profile_export::validate_argon2(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: profile-export KDF/password limits must retain Mojo call ${call}`);
+      if (/password\.is_empty\(\)|PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS\.\.=PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS|PROFILE_EXPORT_ARGON2_MIN_(?:MEMORY_KIB|ITERATIONS|PARALLELISM)/u.test(contents.split("#[cfg(test)]", 1)[0])) {
+        violations.push(`${filePath}: contains restored Rust profile-export password/KDF range policy`);
+      }
+      return violations;
+    }
+    return [];
+  });
   const replacedClassifierViolations = files.flatMap(([filePath, contents]) => {
     const forbidden = new Map([
       ["crates/prodex-domain/src/governance/inspection.rs", /\bfn\s+minimum_classification_rust\s*\(|\.any\(\|finding\|\s*classification\s*<\s*finding\.kind\.minimum_classification\(\)\)/u],
@@ -1398,7 +1434,7 @@ export function findViolations(files) {
     ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...doctorMarkerViolations, ...statusSummaryViolations,
-    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations,
+    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,

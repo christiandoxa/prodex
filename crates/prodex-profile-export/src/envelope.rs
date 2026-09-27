@@ -13,15 +13,17 @@ use sha2::Sha256;
 use zeroize::Zeroizing;
 
 use crate::data_model::{
-    PROFILE_EXPORT_ARGON2_ITERATIONS, PROFILE_EXPORT_ARGON2_MAX_ITERATIONS,
-    PROFILE_EXPORT_ARGON2_MAX_MEMORY_KIB, PROFILE_EXPORT_ARGON2_MAX_PARALLELISM,
-    PROFILE_EXPORT_ARGON2_MEMORY_KIB, PROFILE_EXPORT_ARGON2_MIN_ITERATIONS,
-    PROFILE_EXPORT_ARGON2_MIN_MEMORY_KIB, PROFILE_EXPORT_ARGON2_MIN_PARALLELISM,
+    PROFILE_EXPORT_ARGON2_ITERATIONS, PROFILE_EXPORT_ARGON2_MEMORY_KIB,
     PROFILE_EXPORT_ARGON2_PARALLELISM, PROFILE_EXPORT_ARGON2_VERSION, PROFILE_EXPORT_FORMAT,
     PROFILE_EXPORT_KEY_BYTES, PROFILE_EXPORT_NONCE_BYTES, PROFILE_EXPORT_PASSWORD_MAX_BYTES,
     PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS, PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS,
     PROFILE_EXPORT_PLAINTEXT_MAX_BYTES, PROFILE_EXPORT_SALT_BYTES, PROFILE_EXPORT_VERSION_V1,
     PROFILE_EXPORT_VERSION_V2,
+};
+#[cfg(test)]
+use crate::data_model::{
+    PROFILE_EXPORT_ARGON2_MAX_ITERATIONS, PROFILE_EXPORT_ARGON2_MAX_MEMORY_KIB,
+    PROFILE_EXPORT_ARGON2_MAX_PARALLELISM,
 };
 use crate::{
     PROFILE_EXPORT_CIPHER, PROFILE_EXPORT_KDF, ProfileExportEnvelope, ProfileExportKdfParameters,
@@ -380,17 +382,17 @@ fn validate_profile_export_cipher(cipher: &str) -> Result<()> {
 }
 
 fn validate_profile_export_pbkdf2_iterations(iterations: u32) -> Result<()> {
-    if !(PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS..=PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS)
-        .contains(&iterations)
-    {
-        bail!(
+    use prodex_mojo_core::profile_export::ProfileExportPolicyViolation;
+    match prodex_mojo_core::profile_export::validate_pbkdf2_iterations(iterations) {
+        Ok(()) => Ok(()),
+        Err(ProfileExportPolicyViolation::Pbkdf2Iterations) => bail!(
             "profile export PBKDF2 iteration count {} is outside safe range {}..={}",
             iterations,
             PROFILE_EXPORT_PBKDF2_MIN_ITERATIONS,
             PROFILE_EXPORT_PBKDF2_MAX_ITERATIONS
-        );
+        ),
+        Err(other) => panic!("unexpected Mojo PBKDF2 policy result: {other:?}"),
     }
-    Ok(())
 }
 
 fn validate_profile_export_argon2id_parameters(
@@ -399,25 +401,28 @@ fn validate_profile_export_argon2id_parameters(
     iterations: u32,
     parallelism: u32,
 ) -> Result<()> {
-    if version != PROFILE_EXPORT_ARGON2_VERSION {
-        bail!("unsupported profile export Argon2id version {}", version);
+    use prodex_mojo_core::profile_export::ProfileExportPolicyViolation;
+    match prodex_mojo_core::profile_export::validate_argon2(
+        version,
+        memory_kib,
+        iterations,
+        parallelism,
+    ) {
+        Ok(()) => Ok(()),
+        Err(ProfileExportPolicyViolation::Argon2Version) => {
+            bail!("unsupported profile export Argon2id version {}", version)
+        }
+        Err(ProfileExportPolicyViolation::Argon2Memory) => {
+            bail!("profile export Argon2id memory cost is outside safe range")
+        }
+        Err(ProfileExportPolicyViolation::Argon2Iterations) => {
+            bail!("profile export Argon2id iteration count is outside safe range")
+        }
+        Err(ProfileExportPolicyViolation::Argon2Parallelism) => {
+            bail!("profile export Argon2id parallelism is outside safe range")
+        }
+        Err(other) => panic!("unexpected Mojo Argon2id policy result: {other:?}"),
     }
-    if !(PROFILE_EXPORT_ARGON2_MIN_MEMORY_KIB..=PROFILE_EXPORT_ARGON2_MAX_MEMORY_KIB)
-        .contains(&memory_kib)
-    {
-        bail!("profile export Argon2id memory cost is outside safe range");
-    }
-    if !(PROFILE_EXPORT_ARGON2_MIN_ITERATIONS..=PROFILE_EXPORT_ARGON2_MAX_ITERATIONS)
-        .contains(&iterations)
-    {
-        bail!("profile export Argon2id iteration count is outside safe range");
-    }
-    if !(PROFILE_EXPORT_ARGON2_MIN_PARALLELISM..=PROFILE_EXPORT_ARGON2_MAX_PARALLELISM)
-        .contains(&parallelism)
-    {
-        bail!("profile export Argon2id parallelism is outside safe range");
-    }
-    Ok(())
 }
 
 fn validate_encrypted_profile_export_fields(
@@ -467,13 +472,15 @@ fn decoded_base64_length(value: &str) -> Result<usize> {
 }
 
 fn validate_profile_export_password(password: &[u8]) -> Result<()> {
-    if password.is_empty() || password.len() > PROFILE_EXPORT_PASSWORD_MAX_BYTES {
-        bail!(
+    use prodex_mojo_core::profile_export::ProfileExportPolicyViolation;
+    match prodex_mojo_core::profile_export::validate_password_bytes(password.len()) {
+        Ok(()) => Ok(()),
+        Err(ProfileExportPolicyViolation::PasswordSize) => bail!(
             "profile export password must contain 1..={} bytes",
             PROFILE_EXPORT_PASSWORD_MAX_BYTES
-        );
+        ),
+        Err(other) => panic!("unexpected Mojo password-length policy result: {other:?}"),
     }
-    Ok(())
 }
 
 fn encrypt_profile_export_payload<T>(

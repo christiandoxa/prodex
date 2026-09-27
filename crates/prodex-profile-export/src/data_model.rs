@@ -43,6 +43,47 @@ pub const PROFILE_LIFECYCLE_JOURNAL_VERSION: u32 = 1;
 
 pub type SummaryFields = Vec<(String, String)>;
 
+fn profile_export_collection_limit_error(
+    profile_count: usize,
+    secret_file_count: usize,
+) -> Option<String> {
+    use prodex_mojo_core::profile_export::ProfileExportPolicyViolation;
+    match prodex_mojo_core::profile_export::validate_collection(profile_count, secret_file_count) {
+        Ok(()) => None,
+        Err(ProfileExportPolicyViolation::ProfileCount) => Some(format!(
+            "profile export exceeds profile count limit ({PROFILE_EXPORT_MAX_PROFILES})"
+        )),
+        Err(ProfileExportPolicyViolation::SecretFileCount) => Some(format!(
+            "profile export exceeds secret-file count limit ({PROFILE_EXPORT_MAX_SECRET_FILES})"
+        )),
+        Err(other) => panic!("unexpected Mojo profile-export collection policy result: {other:?}"),
+    }
+}
+
+fn profile_export_profile_secret_file_limit_error(count: usize) -> Option<String> {
+    use prodex_mojo_core::profile_export::ProfileExportPolicyViolation;
+    match prodex_mojo_core::profile_export::validate_profile_secret_files(count) {
+        Ok(()) => None,
+        Err(ProfileExportPolicyViolation::ProfileSecretFileCount) => Some(format!(
+            "profile export exceeds per-profile secret-file count limit ({PROFILE_EXPORT_MAX_SECRET_FILES_PER_PROFILE})"
+        )),
+        Err(other) => panic!("unexpected Mojo profile-export secret-file policy result: {other:?}"),
+    }
+}
+
+fn profile_export_nested_secret_limit_error(bytes: usize) -> Option<String> {
+    use prodex_mojo_core::profile_export::ProfileExportPolicyViolation;
+    match prodex_mojo_core::profile_export::validate_nested_secret_bytes(bytes) {
+        Ok(()) => None,
+        Err(ProfileExportPolicyViolation::NestedSecretSize) => Some(format!(
+            "profile export nested secret exceeds size limit ({PROFILE_EXPORT_NESTED_JSON_MAX_BYTES} bytes)"
+        )),
+        Err(other) => {
+            panic!("unexpected Mojo profile-export nested-secret policy result: {other:?}")
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ProfileImportIdentity {
     pub email: Option<String>,
@@ -155,19 +196,12 @@ where
     S: Serializer,
     Provider: Serialize,
 {
-    if profiles.len() > PROFILE_EXPORT_MAX_PROFILES {
-        return Err(serde::ser::Error::custom(format_args!(
-            "profile export exceeds profile count limit ({PROFILE_EXPORT_MAX_PROFILES})"
-        )));
-    }
     let secret_file_count = profiles
         .iter()
         .map(|profile| profile.secret_files.len())
         .sum::<usize>();
-    if secret_file_count > PROFILE_EXPORT_MAX_SECRET_FILES {
-        return Err(serde::ser::Error::custom(format_args!(
-            "profile export exceeds secret-file count limit ({PROFILE_EXPORT_MAX_SECRET_FILES})"
-        )));
+    if let Some(error) = profile_export_collection_limit_error(profiles.len(), secret_file_count) {
+        return Err(serde::ser::Error::custom(error));
     }
     let mut sequence = serializer.serialize_seq(Some(profiles.len()))?;
     for profile in profiles {
@@ -205,10 +239,10 @@ where
                 .min(PROFILE_EXPORT_MAX_PROFILES);
             let mut profiles = Vec::with_capacity(capacity);
             while let Some(profile) = sequence.next_element()? {
-                if profiles.len() == PROFILE_EXPORT_MAX_PROFILES {
-                    return Err(serde::de::Error::custom(format_args!(
-                        "profile export exceeds profile count limit ({PROFILE_EXPORT_MAX_PROFILES})"
-                    )));
+                if let Some(error) =
+                    profile_export_collection_limit_error(profiles.len().saturating_add(1), 0)
+                {
+                    return Err(serde::de::Error::custom(error));
                 }
                 profiles.push(profile);
             }
@@ -216,10 +250,10 @@ where
                 .iter()
                 .map(|profile: &ExportedProfile<Provider>| profile.secret_files.len())
                 .sum::<usize>();
-            if secret_file_count > PROFILE_EXPORT_MAX_SECRET_FILES {
-                return Err(serde::de::Error::custom(format_args!(
-                    "profile export exceeds secret-file count limit ({PROFILE_EXPORT_MAX_SECRET_FILES})"
-                )));
+            if let Some(error) =
+                profile_export_collection_limit_error(profiles.len(), secret_file_count)
+            {
+                return Err(serde::de::Error::custom(error));
             }
             Ok(profiles)
         }
@@ -235,10 +269,8 @@ fn serialize_exported_secret_files<S>(
 where
     S: Serializer,
 {
-    if secret_files.len() > PROFILE_EXPORT_MAX_SECRET_FILES_PER_PROFILE {
-        return Err(serde::ser::Error::custom(format_args!(
-            "profile export exceeds per-profile secret-file count limit ({PROFILE_EXPORT_MAX_SECRET_FILES_PER_PROFILE})"
-        )));
+    if let Some(error) = profile_export_profile_secret_file_limit_error(secret_files.len()) {
+        return Err(serde::ser::Error::custom(error));
     }
     let mut sequence = serializer.serialize_seq(Some(secret_files.len()))?;
     for secret_file in secret_files {
@@ -272,10 +304,10 @@ where
                 .min(PROFILE_EXPORT_MAX_SECRET_FILES_PER_PROFILE);
             let mut secret_files = Vec::with_capacity(capacity);
             while let Some(secret_file) = sequence.next_element()? {
-                if secret_files.len() == PROFILE_EXPORT_MAX_SECRET_FILES_PER_PROFILE {
-                    return Err(serde::de::Error::custom(format_args!(
-                        "profile export exceeds per-profile secret-file count limit ({PROFILE_EXPORT_MAX_SECRET_FILES_PER_PROFILE})"
-                    )));
+                if let Some(error) = profile_export_profile_secret_file_limit_error(
+                    secret_files.len().saturating_add(1),
+                ) {
+                    return Err(serde::de::Error::custom(error));
                 }
                 secret_files.push(secret_file);
             }
@@ -290,10 +322,8 @@ fn serialize_bounded_secret_text<S>(value: &str, serializer: S) -> Result<S::Ok,
 where
     S: Serializer,
 {
-    if value.len() > PROFILE_EXPORT_NESTED_JSON_MAX_BYTES {
-        return Err(serde::ser::Error::custom(format_args!(
-            "profile export nested secret exceeds size limit ({PROFILE_EXPORT_NESTED_JSON_MAX_BYTES} bytes)"
-        )));
+    if let Some(error) = profile_export_nested_secret_limit_error(value.len()) {
+        return Err(serde::ser::Error::custom(error));
     }
     serializer.serialize_str(value)
 }
@@ -303,10 +333,8 @@ where
     D: Deserializer<'de>,
 {
     let value = String::deserialize(deserializer)?;
-    if value.len() > PROFILE_EXPORT_NESTED_JSON_MAX_BYTES {
-        return Err(serde::de::Error::custom(format_args!(
-            "profile export nested secret exceeds size limit ({PROFILE_EXPORT_NESTED_JSON_MAX_BYTES} bytes)"
-        )));
+    if let Some(error) = profile_export_nested_secret_limit_error(value.len()) {
+        return Err(serde::de::Error::custom(error));
     }
     Ok(value)
 }
