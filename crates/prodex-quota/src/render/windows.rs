@@ -46,7 +46,6 @@ pub fn window_pair_has_ready_limit(pair: &WindowPair) -> bool {
         .usable
 }
 
-#[cfg(feature = "mojo")]
 pub(crate) fn window_pair_has_blocking_admission(pair: &WindowPair) -> bool {
     !crate::capacity::quota_capacity_for_window_pair(pair)
         .expect("Mojo quota capacity classification failed")

@@ -2307,3 +2307,27 @@ The canonical source report counts **53,551 reachable Mojo LOC** and **192,038
 Rust production LOC**, totaling **245,589 LOC**: **21.81% Mojo**. The 75%
 project target remains unmet, with **522,563 additional Mojo LOC** required at
 this Rust volume.
+
+## Smart Context, critical-signal, and quota feature-off hard replacement
+
+Smart Context observed accounting, calibration, usage summaries, pressure
+snapshots, and rehydration adapters now call their existing Mojo owners in
+every `prodex-runtime-proxy` feature mode. The feature-off `None` accounting
+paths were deleted, and the two runtime-proxy Mojo adapters they depend on are
+now always compiled. Critical-signal counting, diffing, and lost-range planning
+are likewise Mojo-backed in every `prodex-context` feature mode; the Mojo core
+dependency is no longer optional, `critical_signal_available()` is always true,
+and the empty feature-off behavior was deleted. OpenAI model-capacity planning
+now uses the real Mojo-backed quota admission classification even with
+`prodex-quota --no-default-features`, replacing the hard-coded feature-off
+`regular_blocked = true` value. The quota window admission adapter is therefore
+also always compiled.
+
+Focused validation passes in both feature modes: `prodex-context` 3/3 default
+and 3/3 with `--features mojo`; `prodex-quota` 80/80 default and 53/53 with
+`--no-default-features`; Smart Context tests 68/68 in default runtime-proxy and
+100/100 with `--features mojo`. No-fallback, ownership, authority, and broad
+production-share checks pass. The canonical broad source report now counts
+**53,551 reachable Mojo LOC** and **192,027 Rust production LOC**, totaling
+**245,578 LOC**: **21.81% Mojo**. The 75% project target remains unmet, with
+**522,530 additional Mojo LOC** required at this Rust volume.

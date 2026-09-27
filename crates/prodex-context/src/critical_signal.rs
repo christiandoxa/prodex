@@ -26,7 +26,6 @@ impl CriticalSignalCounts {
         self.total() == 0
     }
 
-    #[cfg(feature = "mojo")]
     fn values(self) -> [usize; 7] {
         [
             self.errors,
@@ -39,7 +38,6 @@ impl CriticalSignalCounts {
         ]
     }
 
-    #[cfg(feature = "mojo")]
     fn from_values(values: [usize; 7]) -> Self {
         Self {
             errors: values[0],
@@ -71,12 +69,9 @@ impl CriticalSignalSelfCheck {
     }
 }
 
-/// Reports whether Mojo critical-signal operations are compiled into this crate.
-///
-/// Without the `mojo` feature, counts are empty, ranges are unavailable, and
-/// self-checks fail closed.
+/// Reports whether Mojo critical-signal operations are available.
 pub const fn critical_signal_available() -> bool {
-    cfg!(feature = "mojo")
+    true
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -103,49 +98,29 @@ impl Default for CriticalSignalLineRangeOptions {
 }
 
 pub fn count_critical_signals(input: &str) -> CriticalSignalCounts {
-    #[cfg(feature = "mojo")]
-    {
-        let analysis = prodex_mojo_core::rich::analyze_context(input)
-            .expect("Mojo context analysis returned invalid structured output");
-        CriticalSignalCounts {
-            errors: analysis.counts[0],
-            file_locations: analysis.counts[1],
-            diff_hunks: analysis.counts[2],
-            test_failures: analysis.counts[3],
-            exit_codes: analysis.counts[4],
-            stack_markers: analysis.counts[5],
-            rust_diagnostics: analysis.counts[6],
-        }
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let _ = input;
-        CriticalSignalCounts::default()
+    let analysis = prodex_mojo_core::rich::analyze_context(input)
+        .expect("Mojo context analysis returned invalid structured output");
+    CriticalSignalCounts {
+        errors: analysis.counts[0],
+        file_locations: analysis.counts[1],
+        diff_hunks: analysis.counts[2],
+        test_failures: analysis.counts[3],
+        exit_codes: analysis.counts[4],
+        stack_markers: analysis.counts[5],
+        rust_diagnostics: analysis.counts[6],
     }
 }
 
 pub fn critical_signal_self_check(before: &str, after: &str) -> CriticalSignalSelfCheck {
     let before = count_critical_signals(before);
     let after = count_critical_signals(after);
-    #[cfg(feature = "mojo")]
     let (lost, gained) = prodex_mojo_core::context::signal_diff(&before.values(), &after.values())
         .expect("Mojo critical-signal diff returned invalid output");
-    #[cfg(not(feature = "mojo"))]
-    let (lost, gained) = (
-        CriticalSignalCounts::default(),
-        CriticalSignalCounts::default(),
-    );
     CriticalSignalSelfCheck {
         before,
         after,
-        #[cfg(feature = "mojo")]
         lost: CriticalSignalCounts::from_values(lost),
-        #[cfg(feature = "mojo")]
         gained: CriticalSignalCounts::from_values(gained),
-        #[cfg(not(feature = "mojo"))]
-        lost,
-        #[cfg(not(feature = "mojo"))]
-        gained,
     }
 }
 
@@ -167,41 +142,32 @@ pub fn critical_signal_lost_line_ranges_with_options(
         return Vec::new();
     }
 
-    #[cfg(feature = "mojo")]
-    {
-        let (before_rows, mut after_available, line_count) =
-            critical_signal_rows(before, after).expect("critical-signal rows fit the Mojo ABI");
-        prodex_mojo_core::context::lost_line_ranges_batch(
-            &before_rows,
-            &mut after_available,
-            &check.lost.values(),
+    let (before_rows, mut after_available, line_count) =
+        critical_signal_rows(before, after).expect("critical-signal rows fit the Mojo ABI");
+    prodex_mojo_core::context::lost_line_ranges_batch(
+        &before_rows,
+        &mut after_available,
+        &check.lost.values(),
+        line_count,
+        options.context_lines,
+        options.max_ranges,
+        options.max_range_lines,
+    )
+    .unwrap_or_else(|error| {
+        panic!(
+            "Mojo critical-signal range selection returned invalid output: {error:?}; before_rows={} after_available={} line_count={} lost={:?} options={:?}",
+            before_rows.len(),
+            after_available.len(),
             line_count,
-            options.context_lines,
-            options.max_ranges,
-            options.max_range_lines,
+            check.lost.values(),
+            options,
         )
-        .unwrap_or_else(|error| {
-            panic!(
-                "Mojo critical-signal range selection returned invalid output: {error:?}; before_rows={} after_available={} line_count={} lost={:?} options={:?}",
-                before_rows.len(),
-                after_available.len(),
-                line_count,
-                check.lost.values(),
-                options,
-            )
-        })
-        .into_iter()
-        .map(|(start, end)| CriticalSignalLineRange { start, end })
-        .collect()
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let _ = (before, after, options);
-        Vec::new()
-    }
+    })
+    .into_iter()
+    .map(|(start, end)| CriticalSignalLineRange { start, end })
+    .collect()
 }
 
-#[cfg(feature = "mojo")]
 fn critical_signal_rows(
     before: &str,
     after: &str,
@@ -244,7 +210,6 @@ fn critical_signal_rows(
     Ok((rows.before_rows, rows.after_available, before_lines.len()))
 }
 
-#[cfg(feature = "mojo")]
 fn lines(input: &str) -> Vec<&str> {
     input
         .trim_end_matches('\n')
@@ -257,7 +222,6 @@ fn lines(input: &str) -> Vec<&str> {
 mod tests {
     use super::*;
 
-    #[cfg(feature = "mojo")]
     #[test]
     fn mojo_counts_and_diff_match_expected_fixture() {
         let before = concat!(
@@ -313,7 +277,6 @@ mod tests {
         assert!(check.has_loss());
     }
 
-    #[cfg(feature = "mojo")]
     #[test]
     fn mojo_lost_ranges_match_duplicate_line_fixture() {
         let before = "head\nerror: duplicate\na\nb\nc\nerror: duplicate\ntail\n";
@@ -330,21 +293,9 @@ mod tests {
         assert_eq!(ranges, [CriticalSignalLineRange { start: 5, end: 7 }]);
     }
 
-    #[cfg(feature = "mojo")]
     #[test]
     fn unchanged_text_passes() {
         let text = "error: stable\nsrc/lib.rs:2:1\n";
         assert!(critical_signal_self_check(text, text).passed());
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    #[test]
-    fn critical_signal_capability_is_unavailable_without_mojo() {
-        assert!(!critical_signal_available());
-        assert!(count_critical_signals("error: dropped").is_empty());
-        let check = critical_signal_self_check("error: dropped", "");
-        assert!(!check.passed());
-        assert!(check.has_loss());
-        assert!(critical_signal_lost_line_ranges("error: dropped", "").is_empty());
     }
 }

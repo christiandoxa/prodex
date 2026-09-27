@@ -153,11 +153,7 @@ fn openai_model_capacity_plan_for_usage(
 ) -> prodex_mojo_core::quota::OpenAiModelCapacityPlan {
     let regular = usage.rate_limit.as_ref();
     let regular_ready = openai_quota_has_ready_regular_limit(usage);
-    #[cfg(feature = "mojo")]
     let regular_blocked = regular.is_some_and(super::windows::window_pair_has_blocking_admission);
-    // Preserve no-default mode's fail-closed handling of unknown capacity in the Mojo plan.
-    #[cfg(not(feature = "mojo"))]
-    let regular_blocked = true;
     let (any_unknown_window, any_exhausted_window) = regular.map_or((false, false), |pair| {
         let windows = [pair.primary_window.as_ref(), pair.secondary_window.as_ref()];
         (
