@@ -2541,3 +2541,26 @@ test. The no-fallback self-test and ownership guard pass; ownership now reports
 **56,262 reachable Mojo LOC** and **191,977 Rust production LOC**, totaling
 **248,239 LOC**: **22.66% Mojo**. The 75% project target remains unmet, with
 **519,669 additional Mojo LOC** required at this Rust volume.
+
+## Runtime proxy request metadata and path policy migration
+
+Runtime proxy request metadata and path-routing semantics now use
+mojo/prodex_core/runtime_proxy_request.mojo. The request metadata owner covers
+previous_response_id, session/prompt-cache/turn/thread/window identifiers,
+top-level versus client_metadata precedence, tool-output affinity, fresh-fallback
+shape, and full-history reconstructability. The path owner covers Prodex/OpenAI
+mount normalization (including legacy version segments), responses/chat/compact
+classification, realtime/live path classification, route-lane selection, and
+long-lived request policy. The former Rust JSON decision loops and path/version
+classification helpers were deleted.
+
+Rust retains serde_json parsing/tree adaptation, header precedence, request body
+mutation/serialization, borrowed suffix/query reconstruction, and typed enum/String
+result mapping. Validation passes the complete 348/348 prodex-runtime-proxy suite,
+including mount normalization, realtime paths, lane classification, metadata
+precedence, affinity/fallback shape, and full-history recovery. No-fallback
+self-test, ownership, and authority guards pass; ownership reports **64
+authoritative operations**. The canonical broad source report counts **56,677
+reachable Mojo LOC** and **192,079 Rust production LOC**, totaling **248,756 LOC**:
+**22.78% Mojo**. The 75% project target remains unmet, with **519,560 additional
+Mojo LOC** required at this Rust volume.

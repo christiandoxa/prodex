@@ -107,6 +107,111 @@ impl fmt::Debug for RuntimeProxyRequest {
     }
 }
 
+#[derive(Clone, Default, Debug, PartialEq, Eq)]
+struct RuntimeRequestSemanticPlan {
+    previous_response_id: Option<String>,
+    session_id: Option<String>,
+    prompt_cache_key: Option<String>,
+    turn_state: Option<String>,
+    turn_id: Option<String>,
+    thread_id: Option<String>,
+    window_id: Option<String>,
+    requires_previous_response_affinity: bool,
+    fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+    reconstructable_full_history: bool,
+}
+
+fn runtime_request_json_nodes<'a>(
+    value: &'a serde_json::Value,
+) -> Vec<prodex_mojo_core::json::JsonNode<'a>> {
+    use prodex_mojo_core::json::{JsonKind, JsonNode};
+
+    fn push<'a>(
+        nodes: &mut Vec<JsonNode<'a>>,
+        value: &'a serde_json::Value,
+        key: &'a str,
+        parent: Option<usize>,
+    ) -> usize {
+        let (kind, text) = match value {
+            serde_json::Value::Null => (JsonKind::Null, ""),
+            serde_json::Value::Bool(false) => (JsonKind::False, ""),
+            serde_json::Value::Bool(true) => (JsonKind::True, ""),
+            serde_json::Value::Number(_) => (JsonKind::Number, ""),
+            serde_json::Value::String(value) => (JsonKind::String, value.as_str()),
+            serde_json::Value::Array(_) => (JsonKind::Array, ""),
+            serde_json::Value::Object(_) => (JsonKind::Object, ""),
+        };
+        let index = nodes.len();
+        nodes.push(JsonNode {
+            kind,
+            first_child: None,
+            next_sibling: None,
+            parent,
+            key,
+            text,
+            raw_start: 0,
+            raw_length: 0,
+        });
+
+        let mut previous: Option<usize> = None;
+        match value {
+            serde_json::Value::Array(values) => {
+                for child in values {
+                    let child_index = push(nodes, child, "", Some(index));
+                    if let Some(previous) = previous {
+                        nodes[previous].next_sibling = Some(child_index);
+                    } else {
+                        nodes[index].first_child = Some(child_index);
+                    }
+                    previous = Some(child_index);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for (child_key, child) in map {
+                    let child_index = push(nodes, child, child_key.as_str(), Some(index));
+                    if let Some(previous) = previous {
+                        nodes[previous].next_sibling = Some(child_index);
+                    } else {
+                        nodes[index].first_child = Some(child_index);
+                    }
+                    previous = Some(child_index);
+                }
+            }
+            _ => {}
+        }
+        index
+    }
+
+    let mut nodes = Vec::new();
+    push(&mut nodes, value, "", None);
+    nodes
+}
+
+fn runtime_request_semantic_plan(value: &serde_json::Value) -> RuntimeRequestSemanticPlan {
+    let nodes = runtime_request_json_nodes(value);
+    let plan = prodex_mojo_core::json::runtime_proxy_request_metadata(&nodes, "")
+        .expect("Mojo runtime request metadata returned invalid output");
+    let string_at = |index: Option<usize>| index.map(|index| nodes[index].text.trim().to_string());
+    RuntimeRequestSemanticPlan {
+        previous_response_id: string_at(plan.previous_response_id),
+        session_id: string_at(plan.session_id),
+        prompt_cache_key: string_at(plan.prompt_cache_key),
+        turn_state: string_at(plan.turn_state),
+        turn_id: string_at(plan.turn_id),
+        thread_id: string_at(plan.thread_id),
+        window_id: string_at(plan.window_id),
+        requires_previous_response_affinity: plan.requires_previous_response_affinity,
+        fresh_fallback_shape: plan.fresh_fallback_shape.map(|shape| match shape {
+            0 => RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly,
+            1 => RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation,
+            2 => RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay,
+            3 => RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly,
+            _ => unreachable!("validated Mojo previous-response fallback shape"),
+        }),
+        reconstructable_full_history: plan.reconstructable_full_history,
+    }
+}
+
 pub fn runtime_route_kind_inflight_context(route_kind: RuntimeRouteKind) -> &'static str {
     match route_kind {
         RuntimeRouteKind::Responses => "responses_http",
@@ -124,79 +229,107 @@ pub fn path_without_query(path_and_query: &str) -> &str {
 }
 
 pub fn runtime_proxy_openai_suffix(path: &str) -> Option<&str> {
-    if let Some(suffix) = path.strip_prefix(LEGACY_RUNTIME_PROXY_OPENAI_MOUNT_PATH_PREFIX)
-        && let Some(version_suffix_index) = suffix.find('/')
-        && runtime_proxy_legacy_version_segment(&suffix[..version_suffix_index])
-    {
-        return Some(&suffix[version_suffix_index..]);
-    }
-
-    if let Some(suffix) = path.strip_prefix(RUNTIME_PROXY_OPENAI_MOUNT_PATH)
-        && (suffix.is_empty() || suffix.starts_with('/'))
-    {
-        return Some(suffix);
-    }
-
-    None
-}
-
-fn runtime_proxy_legacy_version_segment(segment: &str) -> bool {
-    !segment.is_empty()
-        && segment.bytes().any(|byte| byte.is_ascii_digit())
-        && segment
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || byte == b'.')
+    let plan = prodex_mojo_core::rich::runtime_proxy_path_plan(path, false)
+        .expect("Mojo runtime proxy path planning returned invalid output");
+    let start = plan.mount_suffix_start?;
+    path.get(start..plan.path_end)
 }
 
 pub fn runtime_proxy_normalize_openai_path(path_and_query: &str) -> Cow<'_, str> {
-    let (path, query) = match path_and_query.split_once('?') {
-        Some((path, query)) => (path, Some(query)),
-        None => (path_and_query, None),
-    };
-    let Some(suffix) = runtime_proxy_openai_suffix(path) else {
+    let plan = prodex_mojo_core::rich::runtime_proxy_path_plan(path_and_query, false)
+        .expect("Mojo runtime proxy path planning returned invalid output");
+    let Some(suffix_start) = plan.mount_suffix_start else {
         return Cow::Borrowed(path_and_query);
     };
 
     let mut normalized =
         String::with_capacity(path_and_query.len() + RUNTIME_PROXY_OPENAI_UPSTREAM_PATH.len());
     normalized.push_str(RUNTIME_PROXY_OPENAI_UPSTREAM_PATH);
-    normalized.push_str(suffix);
-    if let Some(query) = query {
-        normalized.push('?');
-        normalized.push_str(query);
+    normalized.push_str(
+        path_and_query
+            .get(suffix_start..plan.path_end)
+            .expect("validated Mojo runtime path suffix"),
+    );
+    if let Some(query_mark) = plan.query_mark {
+        normalized.push_str(
+            path_and_query
+                .get(query_mark..)
+                .expect("validated Mojo runtime query boundary"),
+        );
     }
     Cow::Owned(normalized)
 }
 
 pub fn is_runtime_responses_path(path_and_query: &str) -> bool {
-    let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
-    path_without_query(normalized_path_and_query.as_ref()).ends_with("/codex/responses")
+    prodex_mojo_core::rich::runtime_proxy_path_plan(path_and_query, false)
+        .expect("Mojo runtime proxy path planning returned invalid output")
+        .responses
 }
 
 pub fn is_runtime_chat_completions_path(path_and_query: &str) -> bool {
-    let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
-    path_without_query(normalized_path_and_query.as_ref()).ends_with("/chat/completions")
+    prodex_mojo_core::rich::runtime_proxy_path_plan(path_and_query, false)
+        .expect("Mojo runtime proxy path planning returned invalid output")
+        .chat_completions
 }
 
 pub fn is_runtime_compact_path(path_and_query: &str) -> bool {
-    let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
-    path_without_query(normalized_path_and_query.as_ref()).ends_with("/responses/compact")
+    prodex_mojo_core::rich::runtime_proxy_path_plan(path_and_query, false)
+        .expect("Mojo runtime proxy path planning returned invalid output")
+        .compact
 }
 
 pub fn runtime_proxy_request_lane(path: &str, websocket: bool) -> RuntimeRouteKind {
-    if websocket {
-        RuntimeRouteKind::Websocket
-    } else if is_runtime_compact_path(path) {
-        RuntimeRouteKind::Compact
-    } else if is_runtime_responses_path(path) || is_runtime_chat_completions_path(path) {
-        RuntimeRouteKind::Responses
-    } else {
-        RuntimeRouteKind::Standard
+    match prodex_mojo_core::rich::runtime_proxy_path_plan(path, websocket)
+        .expect("Mojo runtime proxy path planning returned invalid output")
+        .route_kind
+    {
+        0 => RuntimeRouteKind::Responses,
+        1 => RuntimeRouteKind::Compact,
+        2 => RuntimeRouteKind::Websocket,
+        3 => RuntimeRouteKind::Standard,
+        _ => unreachable!("validated Mojo runtime route kind"),
     }
 }
 
 pub fn runtime_proxy_request_is_long_lived(path: &str, websocket: bool) -> bool {
-    websocket || is_runtime_responses_path(path) || is_runtime_chat_completions_path(path)
+    prodex_mojo_core::rich::runtime_proxy_path_plan(path, websocket)
+        .expect("Mojo runtime proxy path planning returned invalid output")
+        .long_lived
+}
+
+pub fn runtime_proxy_request_prefers_inflight_wait(request: &RuntimeProxyRequest) -> bool {
+    request.method.eq_ignore_ascii_case("GET")
+        || prodex_mojo_core::rich::runtime_proxy_path_plan(&request.path_and_query, false)
+            .expect("Mojo runtime proxy path planning returned invalid output")
+            .long_lived
+}
+
+pub fn runtime_proxy_interactive_wait_budget_ms(_path: &str, base_budget_ms: u64) -> u64 {
+    base_budget_ms
+}
+
+pub fn runtime_proxy_admission_wait_budget(path: &str, pressure_mode: bool) -> std::time::Duration {
+    let base_budget_ms = if pressure_mode {
+        RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS
+    } else {
+        RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS
+    };
+    std::time::Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
+        path,
+        base_budget_ms,
+    ))
+}
+
+pub fn is_runtime_realtime_call_path(path_and_query: &str) -> bool {
+    prodex_mojo_core::rich::runtime_proxy_path_plan(path_and_query, false)
+        .expect("Mojo runtime proxy path planning returned invalid output")
+        .realtime_call
+}
+
+pub fn is_runtime_realtime_websocket_path(path_and_query: &str) -> bool {
+    prodex_mojo_core::rich::runtime_proxy_path_plan(path_and_query, false)
+        .expect("Mojo runtime proxy path planning returned invalid output")
+        .realtime_websocket
 }
 
 pub fn runtime_proxy_request_header_value<'a>(
@@ -218,84 +351,28 @@ pub fn runtime_proxy_request_origin(headers: &[(String, String)]) -> Option<&str
     runtime_proxy_request_header_value(headers, PRODEX_INTERNAL_REQUEST_ORIGIN_HEADER)
 }
 
-pub fn runtime_proxy_request_prefers_inflight_wait(request: &RuntimeProxyRequest) -> bool {
-    request.method.eq_ignore_ascii_case("GET")
-        || is_runtime_responses_path(&request.path_and_query)
-        || is_runtime_chat_completions_path(&request.path_and_query)
-}
-
-pub fn runtime_proxy_interactive_wait_budget_ms(_path: &str, base_budget_ms: u64) -> u64 {
-    base_budget_ms
-}
-
-pub fn runtime_proxy_admission_wait_budget(path: &str, pressure_mode: bool) -> std::time::Duration {
-    let base_budget_ms = if pressure_mode {
-        RUNTIME_PROXY_PRESSURE_ADMISSION_WAIT_BUDGET_MS
-    } else {
-        RUNTIME_PROXY_ADMISSION_WAIT_BUDGET_MS
-    };
-    std::time::Duration::from_millis(runtime_proxy_interactive_wait_budget_ms(
-        path,
-        base_budget_ms,
-    ))
-}
-
-pub fn is_runtime_realtime_call_path(path_and_query: &str) -> bool {
-    let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
-    let path = path_without_query(normalized_path_and_query.as_ref());
-    path.ends_with("/realtime/calls") || path.ends_with("/live")
-}
-
-pub fn is_runtime_realtime_websocket_path(path_and_query: &str) -> bool {
-    let normalized_path_and_query = runtime_proxy_normalize_openai_path(path_and_query);
-    let path = path_without_query(normalized_path_and_query.as_ref());
-    path.ends_with("/realtime")
-        || path.ends_with("/live")
-        || path
-            .rsplit_once("/live/")
-            .is_some_and(|(_, call_id)| !call_id.is_empty() && !call_id.contains('/'))
-}
-
 pub fn runtime_request_previous_response_id(request: &RuntimeProxyRequest) -> Option<String> {
     runtime_request_previous_response_id_from_bytes(&request.body)
 }
 
 pub fn runtime_request_prompt_cache_key(request: &RuntimeProxyRequest) -> Option<String> {
-    if request.body.is_empty() {
-        return None;
-    }
-
     let value = serde_json::from_slice::<serde_json::Value>(&request.body).ok()?;
-    runtime_request_prompt_cache_key_from_value(&value)
+    runtime_request_semantic_plan(&value).prompt_cache_key
 }
 
 pub fn runtime_request_previous_response_id_from_bytes(body: &[u8]) -> Option<String> {
-    if body.is_empty() {
-        return None;
-    }
-
     let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
-    runtime_request_previous_response_id_from_value(&value)
+    runtime_request_semantic_plan(&value).previous_response_id
 }
 
 pub fn runtime_request_previous_response_id_from_value(
     value: &serde_json::Value,
 ) -> Option<String> {
-    value
-        .get("previous_response_id")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    runtime_request_semantic_plan(value).previous_response_id
 }
 
 pub fn runtime_request_prompt_cache_key_from_value(value: &serde_json::Value) -> Option<String> {
-    value
-        .get("prompt_cache_key")
-        .and_then(serde_json::Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    runtime_request_semantic_plan(value).prompt_cache_key
 }
 
 #[derive(Clone, Default, Debug, PartialEq, Eq)]
@@ -314,85 +391,32 @@ pub fn parse_runtime_websocket_request_metadata(
     let Ok(value) = serde_json::from_str::<serde_json::Value>(request_text) else {
         return RuntimeWebsocketRequestMetadata::default();
     };
+    let plan = runtime_request_semantic_plan(&value);
     RuntimeWebsocketRequestMetadata {
-        previous_response_id: runtime_request_previous_response_id_from_value(&value),
-        session_id: runtime_request_session_id_from_value(&value),
-        prompt_cache_key: runtime_request_prompt_cache_key_from_value(&value),
-        turn_state: runtime_request_turn_state_from_value(&value),
-        requires_previous_response_affinity:
-            runtime_request_value_requires_previous_response_affinity(&value),
-        previous_response_fresh_fallback_shape:
-            runtime_request_value_previous_response_fresh_fallback_shape(&value),
+        previous_response_id: plan.previous_response_id,
+        session_id: plan.session_id,
+        prompt_cache_key: plan.prompt_cache_key,
+        turn_state: plan.turn_state,
+        requires_previous_response_affinity: plan.requires_previous_response_affinity,
+        previous_response_fresh_fallback_shape: plan.fresh_fallback_shape,
     }
 }
 
 pub fn runtime_request_previous_response_id_from_text(request_text: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(request_text).ok()?;
-    runtime_request_previous_response_id_from_value(&value)
+    runtime_request_semantic_plan(&value).previous_response_id
 }
 
 pub fn runtime_request_value_requires_previous_response_affinity(
     value: &serde_json::Value,
 ) -> bool {
-    if runtime_request_previous_response_id_from_value(value).is_none() {
-        return false;
-    }
-
-    value
-        .get("input")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|items| {
-            items
-                .iter()
-                .any(runtime_request_value_previous_response_input_item_is_tool_output)
-        })
-}
-
-fn runtime_request_value_previous_response_input_item_is_tool_output(
-    item: &serde_json::Value,
-) -> bool {
-    let Some(object) = item.as_object() else {
-        return false;
-    };
-    let item_type = object
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let has_call_id = object
-        .get("call_id")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|call_id| !call_id.trim().is_empty());
-    has_call_id && item_type.ends_with("_call_output")
+    runtime_request_semantic_plan(value).requires_previous_response_affinity
 }
 
 pub fn runtime_request_value_previous_response_fresh_fallback_shape(
     value: &serde_json::Value,
 ) -> Option<RuntimePreviousResponseFreshFallbackShape> {
-    runtime_request_previous_response_id_from_value(value)?;
-
-    let has_session_affinity = runtime_request_session_id_from_value(value).is_some();
-    let input = value
-        .get("input")
-        .and_then(serde_json::Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    let has_context_dependent_input = input
-        .iter()
-        .any(|item| !runtime_request_value_previous_response_input_item_is_tool_output(item));
-    let tool_output_only = !input.is_empty()
-        && input
-            .iter()
-            .all(runtime_request_value_previous_response_input_item_is_tool_output);
-
-    Some(if tool_output_only {
-        RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly
-    } else if has_context_dependent_input {
-        RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation
-    } else if has_session_affinity {
-        RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay
-    } else {
-        RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly
-    })
+    runtime_request_semantic_plan(value).fresh_fallback_shape
 }
 
 pub fn runtime_request_previous_response_fresh_fallback_shape(
@@ -400,7 +424,7 @@ pub fn runtime_request_previous_response_fresh_fallback_shape(
 ) -> Option<RuntimePreviousResponseFreshFallbackShape> {
     let body_shape = serde_json::from_slice::<serde_json::Value>(&request.body)
         .ok()
-        .and_then(|value| runtime_request_value_previous_response_fresh_fallback_shape(&value));
+        .and_then(|value| runtime_request_semantic_plan(&value).fresh_fallback_shape);
     runtime_previous_response_fresh_fallback_shape_with_session(
         body_shape,
         runtime_request_explicit_session_id(request).is_some()
@@ -410,7 +434,7 @@ pub fn runtime_request_previous_response_fresh_fallback_shape(
 
 pub fn runtime_request_requires_previous_response_affinity(request: &RuntimeProxyRequest) -> bool {
     serde_json::from_slice::<serde_json::Value>(&request.body)
-        .map(|value| runtime_request_value_requires_previous_response_affinity(&value))
+        .map(|value| runtime_request_semantic_plan(&value).requires_previous_response_affinity)
         .unwrap_or(false)
 }
 
@@ -419,33 +443,11 @@ pub fn runtime_request_turn_state(request: &RuntimeProxyRequest) -> Option<Strin
 }
 
 pub fn runtime_request_turn_state_from_value(value: &serde_json::Value) -> Option<String> {
-    value
-        .get("x-codex-turn-state")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            value
-                .get("client_metadata")
-                .and_then(|metadata| metadata.get("x-codex-turn-state"))
-                .and_then(serde_json::Value::as_str)
-        })
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    runtime_request_semantic_plan(value).turn_state
 }
 
 pub fn runtime_request_session_id_from_value(value: &serde_json::Value) -> Option<String> {
-    value
-        .get("session_id")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            value
-                .get("client_metadata")
-                .and_then(|metadata| metadata.get("session_id"))
-                .and_then(serde_json::Value::as_str)
-        })
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    runtime_request_semantic_plan(value).session_id
 }
 
 pub fn runtime_request_session_id_from_turn_metadata(
@@ -459,7 +461,7 @@ pub fn runtime_request_session_id_from_turn_metadata(
                 .then_some(value.as_str())
         })
         .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
-        .and_then(|value| runtime_request_session_id_from_value(&value))
+        .and_then(|value| runtime_request_semantic_plan(&value).session_id)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -509,18 +511,7 @@ pub fn runtime_request_session_id(request: &RuntimeProxyRequest) -> Option<Strin
 }
 
 pub fn runtime_request_turn_id_from_value(value: &serde_json::Value) -> Option<String> {
-    value
-        .get("turn_id")
-        .and_then(serde_json::Value::as_str)
-        .or_else(|| {
-            value
-                .get("client_metadata")
-                .and_then(|metadata| metadata.get("turn_id"))
-                .and_then(serde_json::Value::as_str)
-        })
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    runtime_request_semantic_plan(value).turn_id
 }
 
 pub fn runtime_request_turn_id(request: &RuntimeProxyRequest) -> Option<String> {
@@ -532,11 +523,11 @@ pub fn runtime_request_turn_id(request: &RuntimeProxyRequest) -> Option<String> 
                 .then_some(value.as_str())
         })
         .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
-        .and_then(|value| runtime_request_turn_id_from_value(&value))
+        .and_then(|value| runtime_request_semantic_plan(&value).turn_id)
         .or_else(|| {
             serde_json::from_slice::<serde_json::Value>(&request.body)
                 .ok()
-                .and_then(|value| runtime_request_turn_id_from_value(&value))
+                .and_then(|value| runtime_request_semantic_plan(&value).turn_id)
         })
 }
 
@@ -552,12 +543,7 @@ pub fn runtime_request_thread_id(request: &RuntimeProxyRequest) -> Option<String
                         .then_some(value.as_str())
                 })
                 .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
-                .and_then(|value| {
-                    value
-                        .get("thread_id")
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string)
-                })
+                .and_then(|value| runtime_request_semantic_plan(&value).thread_id)
         })
 }
 
@@ -570,22 +556,11 @@ pub fn runtime_request_compaction_generation(request: &RuntimeProxyRequest) -> O
                 .then_some(value.as_str())
         })
         .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
-        .and_then(|value| {
-            value
-                .get("window_id")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        })
+        .and_then(|value| runtime_request_semantic_plan(&value).window_id)
         .or_else(|| {
             serde_json::from_slice::<serde_json::Value>(&request.body)
                 .ok()
-                .and_then(|value| {
-                    value
-                        .get("client_metadata")
-                        .and_then(|metadata| metadata.get("x-codex-window-id"))
-                        .and_then(serde_json::Value::as_str)
-                        .map(str::to_string)
-                })
+                .and_then(|value| runtime_request_semantic_plan(&value).window_id)
         })?;
     window_id.rsplit_once(':')?.1.parse().ok()
 }
@@ -610,50 +585,13 @@ pub fn runtime_request_full_history_without_previous_response_id(
 ) -> Option<RuntimeProxyRequest> {
     runtime_request_session_id(request)?;
     let mut value = serde_json::from_slice::<serde_json::Value>(&request.body).ok()?;
-    if !value
-        .get("input")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|input| runtime_input_is_reconstructable_full_history(input))
-    {
+    if !runtime_request_semantic_plan(&value).reconstructable_full_history {
         return None;
     }
     remove_previous_response_id(&mut value)?;
     let mut request = request.clone();
     request.body = serde_json::to_vec(&value).ok()?;
     Some(request)
-}
-
-fn runtime_input_is_reconstructable_full_history(input: &[serde_json::Value]) -> bool {
-    fn item_type(item: &serde_json::Value) -> &str {
-        item.get("type")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-    }
-    fn item_role(item: &serde_json::Value) -> &str {
-        item.get("role")
-            .and_then(serde_json::Value::as_str)
-            .unwrap_or_default()
-    }
-
-    if input
-        .iter()
-        .enumerate()
-        .any(|(index, item)| item_type(item) == "compaction" && index + 1 < input.len())
-    {
-        return true;
-    }
-
-    input.iter().enumerate().any(|(user_index, item)| {
-        item_role(item) == "user"
-            && input
-                .iter()
-                .enumerate()
-                .skip(user_index + 1)
-                .any(|(output_index, output)| {
-                    (item_role(output) == "assistant" || item_type(output) == "function_call")
-                        && output_index + 1 < input.len()
-                })
-    })
 }
 
 pub fn runtime_request_text_without_previous_response_id(request_text: &str) -> Option<String> {
