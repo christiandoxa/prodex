@@ -2,7 +2,6 @@ use super::*;
 use crate::{ProviderTransformLoss, anthropic_messages_translator};
 use serde_json::{Value, json};
 
-#[cfg(feature = "mojo")]
 #[test]
 fn mojo_response_envelope_matches_expected_fixtures() {
     let output = vec![json!({"type": "message", "content": [{"text": "x\n\u{1f980}"}]})];
@@ -66,7 +65,6 @@ fn mojo_response_envelope_matches_expected_fixtures() {
     }
 }
 
-#[cfg(feature = "mojo")]
 fn request(value: Value) -> ProviderTransformResult {
     anthropic_messages_translator().transform_request(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -74,7 +72,6 @@ fn request(value: Value) -> ProviderTransformResult {
     ))
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn request_maps_system_tools_and_tool_history_to_native_messages() {
     let result = request(json!({
@@ -133,7 +130,6 @@ fn request_maps_system_tools_and_tool_history_to_native_messages() {
     );
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn request_rejects_unmappable_sampling_fields() {
     let result = request(json!({
@@ -148,7 +144,6 @@ fn request_rejects_unmappable_sampling_fields() {
     assert!(result.body.is_none());
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn chat_request_rejects_every_unmapped_top_level_field() {
     for (field, value) in [
@@ -183,7 +178,6 @@ fn chat_request_rejects_every_unmapped_top_level_field() {
     }
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn chat_request_accepts_benign_ignored_transport_fields() {
     let result = translate_chat_request_to_anthropic(ProviderTransformInput::new(
@@ -200,7 +194,6 @@ fn chat_request_accepts_benign_ignored_transport_fields() {
     assert!(matches!(result.loss, ProviderTransformLoss::Lossless));
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn chat_request_normalizes_namespaced_tools_in_the_authoritative_path() {
     let result = translate_chat_request_to_anthropic(ProviderTransformInput::new(
@@ -221,7 +214,6 @@ fn chat_request_normalizes_namespaced_tools_in_the_authoritative_path() {
     assert_eq!(body["tool_choice"]["name"], "functions--lookup");
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn chat_request_maps_native_web_search_tool_and_reports_context_degradation() {
     let result = translate_chat_request_to_anthropic(ProviderTransformInput::new(
@@ -250,7 +242,6 @@ fn chat_request_maps_native_web_search_tool_and_reports_context_degradation() {
     assert!(body["tools"][0].get("search_context_size").is_none());
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn chat_request_rejects_disabled_parallel_tool_calls() {
     let result = translate_chat_request_to_anthropic(ProviderTransformInput::new(
@@ -269,33 +260,7 @@ fn chat_request_rejects_disabled_parallel_tool_calls() {
     assert!(result.body.is_none());
 }
 
-#[cfg(not(feature = "mojo"))]
 #[test]
-fn request_translation_is_explicitly_unsupported_without_mojo() {
-    let response = anthropic_messages_translator().transform_request(ProviderTransformInput::new(
-        ProviderEndpoint::Responses,
-        b"invalid JSON is not parsed without the request kernel".to_vec(),
-    ));
-    let chat = crate::translate_openai_chat_request_to_anthropic_messages(
-        ProviderTransformInput::new(ProviderEndpoint::Responses, b"{}".to_vec()),
-    );
-    for (result, from_format) in [
-        (response, ProviderWireFormat::OpenAiResponses),
-        (chat, ProviderWireFormat::OpenAiChatCompletions),
-    ] {
-        assert!(matches!(
-            result.loss,
-            ProviderTransformLoss::UnsupportedUpstream { ref reason }
-                if reason == "Anthropic Messages request translation requires Mojo support"
-        ));
-        assert!(result.body.is_none());
-        assert_eq!(result.from_format, from_format);
-        assert_eq!(result.to_format, ProviderWireFormat::AnthropicMessages);
-    }
-}
-
-#[test]
-#[cfg(feature = "mojo")]
 fn response_maps_text_tools_and_usage_to_responses() {
     let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -323,7 +288,6 @@ fn response_maps_text_tools_and_usage_to_responses() {
 }
 
 #[test]
-#[cfg(feature = "mojo")]
 fn response_maps_native_web_search_call_sources_and_usage() {
     let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -362,7 +326,6 @@ fn response_maps_native_web_search_call_sources_and_usage() {
 }
 
 #[test]
-#[cfg(feature = "mojo")]
 fn response_attaches_web_search_sources_to_last_matching_call() {
     let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -431,7 +394,6 @@ fn web_search_stream_item_uses_mojo_in_every_feature_mode() {
 }
 
 #[test]
-#[cfg(feature = "mojo")]
 fn response_plan_preserves_flush_and_web_search_result_order() {
     let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -499,7 +461,6 @@ fn stream_maps_native_delta_and_tolerates_ping() {
 }
 
 #[test]
-#[cfg(feature = "mojo")]
 fn response_preserves_escaped_text_and_reasoning() {
     let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
         ProviderEndpoint::Responses,
@@ -520,23 +481,6 @@ fn response_preserves_escaped_text_and_reasoning() {
     assert_eq!(body["output"][1]["type"], "reasoning");
     assert_eq!(body["output"][1]["summary"][0]["text"], "hidden \"step\"");
     assert_eq!(body["output"][2]["content"][0]["text"], "done");
-}
-
-#[cfg(not(feature = "mojo"))]
-#[test]
-fn response_translation_is_explicitly_unsupported_without_mojo() {
-    let result = anthropic_messages_translator().transform_response(ProviderTransformInput::new(
-        ProviderEndpoint::Responses,
-        br#"{"content":[]}"#.to_vec(),
-    ));
-    assert!(matches!(
-        result.loss,
-        ProviderTransformLoss::UnsupportedUpstream { ref reason }
-            if reason == "Anthropic Messages response translation requires Mojo support"
-    ));
-    assert!(result.body.is_none());
-    assert_eq!(result.from_format, ProviderWireFormat::AnthropicMessages);
-    assert_eq!(result.to_format, ProviderWireFormat::OpenAiResponses);
 }
 
 #[test]

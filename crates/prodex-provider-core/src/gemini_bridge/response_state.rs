@@ -59,22 +59,21 @@ impl std::error::Error for GeminiProviderCoreResponsePartPlanError {}
 pub fn gemini_provider_core_response_part_plan(
     input: GeminiProviderCoreResponsePartInput,
 ) -> Result<GeminiProviderCoreResponsePartPlan, GeminiProviderCoreResponsePartPlanError> {
-    #[cfg(feature = "mojo")]
-    let actions = {
-        let input = prodex_mojo_core::rich::GeminiResponsePartInput {
-            has_text: input.has_text,
-            is_thought: input.is_thought,
-            has_visible_text: input.has_visible_text,
-            has_special_text: input.has_special_text,
-            has_media: input.has_media,
-            has_video_metadata: input.has_video_metadata,
-            has_image_generation: input.has_image_generation,
-            has_function_call: input.has_function_call,
-            command_output_only: input.command_output_only,
-            forced_output: input.forced_output,
-            internal_instruction_echo: input.internal_instruction_echo,
-            suppress_visible_text: input.suppress_visible_text,
-        };
+    let input = prodex_mojo_core::rich::GeminiResponsePartInput {
+        has_text: input.has_text,
+        is_thought: input.is_thought,
+        has_visible_text: input.has_visible_text,
+        has_special_text: input.has_special_text,
+        has_media: input.has_media,
+        has_video_metadata: input.has_video_metadata,
+        has_image_generation: input.has_image_generation,
+        has_function_call: input.has_function_call,
+        command_output_only: input.command_output_only,
+        forced_output: input.forced_output,
+        internal_instruction_echo: input.internal_instruction_echo,
+        suppress_visible_text: input.suppress_visible_text,
+    };
+    let actions =
         prodex_mojo_core::rich::plan_gemini_response_part(input).map_err(|error| match error {
             prodex_mojo_core::MojoError::InvalidInput => {
                 GeminiProviderCoreResponsePartPlanError::InvalidInput
@@ -87,11 +86,7 @@ pub fn gemini_provider_core_response_part_plan(
             | prodex_mojo_core::MojoError::Structured(_) => {
                 GeminiProviderCoreResponsePartPlanError::InvalidOutput
             }
-        })?
-    };
-
-    #[cfg(not(feature = "mojo"))]
-    let actions = gemini_provider_core_response_part_plan_rust(input);
+        })?;
 
     Ok(GeminiProviderCoreResponsePartPlan {
         emit_reasoning: actions & ACTION_REASONING != 0,
@@ -103,39 +98,6 @@ pub fn gemini_provider_core_response_part_plan(
         emit_function: actions & ACTION_FUNCTION != 0,
         flush_pending: actions & ACTION_FLUSH_PENDING != 0,
     })
-}
-
-#[cfg(any(not(feature = "mojo"), test))]
-pub(crate) fn gemini_provider_core_response_part_plan_rust(
-    input: GeminiProviderCoreResponsePartInput,
-) -> u8 {
-    let mut actions = 0;
-    if input.has_text && input.is_thought {
-        actions |= ACTION_REASONING;
-    } else if input.has_visible_text
-        && !input.command_output_only
-        && !input.forced_output
-        && !input.internal_instruction_echo
-        && !input.suppress_visible_text
-    {
-        actions |= ACTION_VISIBLE_TEXT;
-    }
-    if input.has_special_text && !input.command_output_only && !input.forced_output {
-        actions |= ACTION_SPECIAL_TEXT;
-    }
-    if input.has_media {
-        actions |= ACTION_MEDIA | ACTION_NATIVE;
-    }
-    if input.has_video_metadata {
-        actions |= ACTION_NATIVE;
-    }
-    if input.has_image_generation {
-        actions |= ACTION_IMAGE;
-    }
-    if input.has_function_call && !input.forced_output {
-        actions |= ACTION_FUNCTION | ACTION_FLUSH_PENDING;
-    }
-    actions
 }
 
 #[cfg(test)]

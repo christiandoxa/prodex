@@ -1,28 +1,20 @@
-#[cfg(feature = "mojo")]
 use super::super::openai_chat_compat::translate_responses_request_to_chat;
-#[cfg(feature = "mojo")]
 use super::anthropic_mojo_value;
-#[cfg(feature = "mojo")]
 use crate::ProviderTransformLoss;
 use crate::{
     ProviderEndpoint, ProviderId, ProviderTransformInput, ProviderTransformResult,
     ProviderWireFormat,
 };
-#[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{AnthropicRequestKernelInput, AnthropicRequestKernelOperation};
-#[cfg(feature = "mojo")]
 use serde_json::Map;
 use serde_json::Value;
 #[cfg(test)]
 use serde_json::json;
-#[cfg(feature = "mojo")]
 use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(feature = "mojo")]
 #[path = "messages/mojo_request.rs"]
 mod mojo_request;
-#[cfg(feature = "mojo")]
 #[path = "messages/response.rs"]
 mod response;
 #[path = "messages/stream.rs"]
@@ -31,9 +23,7 @@ mod stream;
 mod web_search;
 
 pub(super) use stream::translate_anthropic_stream_event_to_responses;
-#[cfg(feature = "mojo")]
 use web_search::anthropic_web_search_call;
-#[cfg(feature = "mojo")]
 use web_search::merge_anthropic_web_search_result;
 
 pub(super) fn anthropic_web_search_result_sources(block: &Value) -> Result<Vec<Value>, String> {
@@ -49,17 +39,6 @@ pub(super) fn anthropic_web_search_stream_item(
     web_search::anthropic_web_search_stream_item(id, input_json, sources, in_progress)
 }
 
-#[cfg(not(feature = "mojo"))]
-pub(super) fn translate_responses_request_to_anthropic(
-    input: ProviderTransformInput,
-) -> ProviderTransformResult {
-    unsupported(
-        input.endpoint,
-        "Anthropic Messages request translation requires Mojo support",
-    )
-}
-
-#[cfg(feature = "mojo")]
 pub(super) fn translate_responses_request_to_anthropic(
     input: ProviderTransformInput,
 ) -> ProviderTransformResult {
@@ -101,20 +80,6 @@ pub(super) fn translate_responses_request_to_anthropic(
     result
 }
 
-#[cfg(not(feature = "mojo"))]
-pub(super) fn translate_chat_request_to_anthropic(
-    input: ProviderTransformInput,
-) -> ProviderTransformResult {
-    ProviderTransformResult::unsupported(
-        ProviderId::Anthropic,
-        input.endpoint,
-        ProviderWireFormat::OpenAiChatCompletions,
-        ProviderWireFormat::AnthropicMessages,
-        "Anthropic Messages request translation requires Mojo support",
-    )
-}
-
-#[cfg(feature = "mojo")]
 pub(super) fn translate_chat_request_to_anthropic(
     input: ProviderTransformInput,
 ) -> ProviderTransformResult {
@@ -169,20 +134,6 @@ fn json_fragment(value: &Value) -> Result<String, String> {
     serde_json::to_string(value).map_err(|error| format!("Anthropic JSON fragment failed: {error}"))
 }
 
-#[cfg(not(feature = "mojo"))]
-pub(super) fn translate_anthropic_response_to_responses(
-    input: ProviderTransformInput,
-) -> ProviderTransformResult {
-    ProviderTransformResult::unsupported(
-        ProviderId::Anthropic,
-        input.endpoint,
-        ProviderWireFormat::AnthropicMessages,
-        ProviderWireFormat::OpenAiResponses,
-        "Anthropic Messages response translation requires Mojo support",
-    )
-}
-
-#[cfg(feature = "mojo")]
 pub(super) fn translate_anthropic_response_to_responses(
     input: ProviderTransformInput,
 ) -> ProviderTransformResult {
@@ -222,7 +173,6 @@ pub(super) fn translate_anthropic_response_to_responses(
     )
 }
 
-#[cfg(feature = "mojo")]
 fn anthropic_response_envelope_mojo(
     value: &Value,
     output: Vec<Value>,
@@ -271,7 +221,6 @@ fn anthropic_response_envelope_mojo(
     anthropic_mojo_value(input)
 }
 
-#[cfg(feature = "mojo")]
 fn anthropic_tool_use_item(block: &Value) -> Result<Value, String> {
     let Some(id) = block.get("id").and_then(Value::as_str) else {
         return Err("Anthropic tool_use block must contain id".to_string());
@@ -298,13 +247,11 @@ fn anthropic_tool_use_item(block: &Value) -> Result<Value, String> {
     anthropic_mojo_value(input)
 }
 
-#[cfg(feature = "mojo")]
 fn remap_result(mut result: ProviderTransformResult) -> ProviderTransformResult {
     result.to_format = ProviderWireFormat::AnthropicMessages;
     result
 }
 
-#[cfg(feature = "mojo")]
 fn rejected(reason: impl Into<String>) -> ProviderTransformResult {
     ProviderTransformResult::rejected(
         ProviderId::Anthropic,
@@ -315,7 +262,6 @@ fn rejected(reason: impl Into<String>) -> ProviderTransformResult {
     )
 }
 
-#[cfg(feature = "mojo")]
 fn rejected_chat(reason: impl Into<String>) -> ProviderTransformResult {
     ProviderTransformResult::rejected(
         ProviderId::Anthropic,

@@ -3,7 +3,6 @@ use super::json_fragment;
 use prodex_mojo_core::rich::{AnthropicRequestKernelInput, AnthropicRequestKernelOperation};
 use serde_json::Value;
 
-#[cfg(feature = "mojo")]
 pub(super) fn anthropic_web_search_call(block: &Value) -> Result<Value, String> {
     let Some(id) = block.get("id").and_then(Value::as_str) else {
         return Err("Anthropic server_tool_use block must contain id".to_string());
@@ -21,7 +20,6 @@ pub(super) fn anthropic_web_search_call(block: &Value) -> Result<Value, String> 
     anthropic_mojo_value(input)
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn merge_anthropic_web_search_result(
     output: &mut [Value],
     block: &Value,

@@ -6,7 +6,6 @@ use super::{
     ProviderEndpoint, ProviderId, ProviderTransformInput, ProviderTransformResult,
     ProviderWireFormat, Value,
 };
-#[cfg(feature = "mojo")]
 use crate::mojo_json::Document;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -48,34 +47,18 @@ fn translate_chat_response_to_responses_at(
         }
     };
 
-    #[cfg(feature = "mojo")]
-    {
-        let mut document = Document::default();
-        document.openai_chat_context(&value, Some(now_secs));
-        let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
-        let body = prodex_mojo_core::json::transform_openai_chat_response(&document.nodes, raw)
-            .unwrap_or_else(|error| {
-                panic!("Mojo OpenAI chat response transform failed: {error:?}")
-            });
-        ProviderTransformResult::lossless(
-            provider,
-            input.endpoint,
-            ProviderWireFormat::OpenAiChatCompletions,
-            ProviderWireFormat::OpenAiResponses,
-            body,
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let _ = (value, now_secs);
-        ProviderTransformResult::unsupported(
-            provider,
-            input.endpoint,
-            ProviderWireFormat::OpenAiChatCompletions,
-            ProviderWireFormat::OpenAiResponses,
-            "OpenAI chat response translation requires Mojo support",
-        )
-    }
+    let mut document = Document::default();
+    document.openai_chat_context(&value, Some(now_secs));
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let body = prodex_mojo_core::json::transform_openai_chat_response(&document.nodes, raw)
+        .unwrap_or_else(|error| panic!("Mojo OpenAI chat response transform failed: {error:?}"));
+    ProviderTransformResult::lossless(
+        provider,
+        input.endpoint,
+        ProviderWireFormat::OpenAiChatCompletions,
+        ProviderWireFormat::OpenAiResponses,
+        body,
+    )
 }
 
 fn unix_now_secs() -> u64 {
@@ -85,7 +68,7 @@ fn unix_now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-#[cfg(all(test, feature = "mojo"))]
+#[cfg(test)]
 #[path = "openai_chat_compat_response/mojo_tests.rs"]
 mod mojo_tests;
 
@@ -162,46 +145,6 @@ mod tests {
         assert_eq!(malformed_json.body, None);
     }
 
-    #[cfg(not(feature = "mojo"))]
-    #[test]
-    fn valid_response_and_stream_translation_require_mojo() {
-        let response = response(ProviderEndpoint::Responses, br#"{"choices":[]}"#);
-        assert_eq!(
-            response.loss,
-            ProviderTransformLoss::UnsupportedUpstream {
-                reason: "OpenAI chat response translation requires Mojo support".into(),
-            }
-        );
-        assert_eq!(response.endpoint, ProviderEndpoint::Responses);
-        assert_eq!(
-            response.from_format,
-            ProviderWireFormat::OpenAiChatCompletions
-        );
-        assert_eq!(response.to_format, ProviderWireFormat::OpenAiResponses);
-        assert_eq!(response.body, None);
-
-        for event in [
-            "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n",
-            "data: [DONE]\n\n",
-        ] {
-            let result = stream(ProviderEndpoint::Responses, event);
-            assert_eq!(
-                result.loss,
-                ProviderTransformLoss::UnsupportedUpstream {
-                    reason: "OpenAI chat stream translation requires Mojo support".into(),
-                }
-            );
-            assert_eq!(result.endpoint, ProviderEndpoint::Responses);
-            assert_eq!(
-                result.from_format,
-                ProviderWireFormat::OpenAiChatCompletions
-            );
-            assert_eq!(result.to_format, ProviderWireFormat::OpenAiResponses);
-            assert_eq!(result.body, None);
-        }
-    }
-
-    #[cfg(feature = "mojo")]
     #[test]
     fn valid_stream_without_supported_delta_remains_unsupported() {
         let result = stream(
