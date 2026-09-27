@@ -9,6 +9,14 @@ pub const SOFT_AFFINITY_POLICY_QUOTA_THIN: i64 = 5;
 pub const SOFT_AFFINITY_POLICY_QUOTA_CRITICAL: i64 = 6;
 pub const SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN: i64 = 7;
 
+pub const QUOTA_SELECTION_MODE_BAND_REASON: i64 = 0;
+pub const QUOTA_SELECTION_MODE_PRECOMMIT_FLOOR: i64 = 1;
+pub const QUOTA_SELECTION_MODE_WINDOW_GUARD: i64 = 2;
+pub const QUOTA_SELECTION_MODE_PRECOMMIT_REASON: i64 = 3;
+pub const QUOTA_SELECTION_MODE_WINDOW_USABLE: i64 = 4;
+pub const QUOTA_SELECTION_MODE_SUMMARY_ALLOWS: i64 = 5;
+pub const QUOTA_SELECTION_MODE_REJECTION_REASON: i64 = 6;
+
 pub const ADAPTIVE_QUALITY_FIELD_COUNT: usize = 9;
 pub const ADAPTIVE_ROUTING_MAX_COUNT: usize = 256;
 pub const ADAPTIVE_PLAN_REASON_INSUFFICIENT_SAMPLES: i64 = 0;
@@ -27,6 +35,16 @@ pub struct SoftAffinityPolicyInput {
     pub quota_source_present: bool,
     pub current_profile_matches_candidate: bool,
     pub has_route_eligible_quota_fallback: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QuotaSelectionPolicyInput {
+    pub route_kind: i64,
+    pub five_hour_status: i64,
+    pub weekly_status: i64,
+    pub quota_band: i64,
+    pub quota_source_present: bool,
+    pub responses_critical_floor_percent: i64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,6 +135,16 @@ unsafe extern "C" {
         quota_source_present: i64,
         current_profile_matches_candidate: i64,
         has_route_eligible_quota_fallback: i64,
+    ) -> i64;
+    fn prodex_runtime_quota_selection_policy_v1(
+        mode: i64,
+        route_kind: i64,
+        five_hour_status: i64,
+        weekly_status: i64,
+        quota_band: i64,
+        quota_source_present: i64,
+        responses_critical_floor_percent: i64,
+        output: *mut i64,
     ) -> i64;
     fn prodex_runtime_gateway_adaptive_plan_v1(
         quality_fields: *const u64,
@@ -255,6 +283,55 @@ pub fn affinity_selection_plan(
     })
 }
 
+pub fn quota_selection_policy(
+    mode: i64,
+    input: QuotaSelectionPolicyInput,
+) -> Result<i64, MojoError> {
+    if !(QUOTA_SELECTION_MODE_BAND_REASON..=QUOTA_SELECTION_MODE_REJECTION_REASON).contains(&mode)
+        || !(0..=3).contains(&input.route_kind)
+        || !(0..=4).contains(&input.five_hour_status)
+        || !(0..=4).contains(&input.weekly_status)
+        || !(0..=4).contains(&input.quota_band)
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = 0_i64;
+    let status = unsafe {
+        prodex_runtime_quota_selection_policy_v1(
+            mode,
+            input.route_kind,
+            input.five_hour_status,
+            input.weekly_status,
+            input.quota_band,
+            i64::from(input.quota_source_present),
+            input.responses_critical_floor_percent,
+            &mut output,
+        )
+    };
+    if status != 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    match mode {
+        QUOTA_SELECTION_MODE_PRECOMMIT_FLOOR => Ok(output),
+        QUOTA_SELECTION_MODE_WINDOW_GUARD
+        | QUOTA_SELECTION_MODE_WINDOW_USABLE
+        | QUOTA_SELECTION_MODE_SUMMARY_ALLOWS
+            if matches!(output, 0 | 1) =>
+        {
+            Ok(output)
+        }
+        QUOTA_SELECTION_MODE_BAND_REASON
+        | QUOTA_SELECTION_MODE_PRECOMMIT_REASON
+        | QUOTA_SELECTION_MODE_REJECTION_REASON
+            if (SOFT_AFFINITY_POLICY_ALLOWED..=SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN)
+                .contains(&output) =>
+        {
+            Ok(output)
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 pub fn soft_affinity_policy(input: SoftAffinityPolicyInput) -> Result<i64, MojoError> {
     if !(0..=3).contains(&input.affinity_kind)
         || !(0..=3).contains(&input.route_kind)
@@ -355,4 +432,72 @@ pub fn adaptive_routing_plan(
         quality_score_bps: (quality_score_present == 1).then_some(quality_score_bps),
         reason,
     })
+}
+
+#[cfg(test)]
+mod quota_selection_tests {
+    use super::*;
+
+    fn input(
+        route_kind: i64,
+        five_hour_status: i64,
+        weekly_status: i64,
+        quota_band: i64,
+        quota_source_present: bool,
+        responses_critical_floor_percent: i64,
+    ) -> QuotaSelectionPolicyInput {
+        QuotaSelectionPolicyInput {
+            route_kind,
+            five_hour_status,
+            weekly_status,
+            quota_band,
+            quota_source_present,
+            responses_critical_floor_percent,
+        }
+    }
+
+    #[test]
+    fn quota_selection_policy_keeps_authoritative_window_contract() {
+        let healthy = input(0, 0, 0, 0, true, 10);
+        assert_eq!(
+            quota_selection_policy(QUOTA_SELECTION_MODE_PRECOMMIT_FLOOR, healthy).unwrap(),
+            10
+        );
+        assert_eq!(
+            quota_selection_policy(QUOTA_SELECTION_MODE_SUMMARY_ALLOWS, healthy).unwrap(),
+            1
+        );
+
+        let critical = input(0, 2, 0, 2, true, 10);
+        assert_eq!(
+            quota_selection_policy(QUOTA_SELECTION_MODE_PRECOMMIT_REASON, critical).unwrap(),
+            SOFT_AFFINITY_POLICY_ALLOWED
+        );
+
+        let weekly_exhausted = input(0, 0, 3, 3, true, 10);
+        assert_eq!(
+            quota_selection_policy(QUOTA_SELECTION_MODE_REJECTION_REASON, weekly_exhausted)
+                .unwrap(),
+            SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED
+        );
+
+        let five_hour_exhausted = input(0, 3, 0, 3, true, 10);
+        assert_eq!(
+            quota_selection_policy(QUOTA_SELECTION_MODE_PRECOMMIT_REASON, five_hour_exhausted)
+                .unwrap(),
+            SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND
+        );
+
+        let unknown = input(2, 4, 0, 4, false, 10);
+        assert_eq!(
+            quota_selection_policy(QUOTA_SELECTION_MODE_REJECTION_REASON, unknown).unwrap(),
+            SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE
+        );
+
+        let compact = input(1, 0, 0, 0, true, 99);
+        assert_eq!(
+            quota_selection_policy(QUOTA_SELECTION_MODE_PRECOMMIT_FLOOR, compact).unwrap(),
+            1
+        );
+    }
 }

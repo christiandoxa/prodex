@@ -500,6 +500,12 @@
           "quota_capacity_lane_planning",
           "quota_model_policy"
         ]
+      },
+      "mojo/prodex_core/candidate_decision.mojo": {
+        "operations": [
+          "runtime_candidate_decision_kernel",
+          "quota_selection_policy"
+        ]
       }
     },
     "additions": [
@@ -2031,6 +2037,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "typed mutation/queue-kind tag mapping, usize/u64 ABI conversion, Duration/Instant construction and typed section/enqueue-plan reconstruction"
+    },
+    {
+      "name": "quota_selection_policy",
+      "domain": "runtime/selection",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_quota_selection_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/candidate_decision.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/selection_policy.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::quota_selection_policy",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/selection_policy.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime/selection_planning.rs",
+      "rust_owner_before": "quota pressure-band reason, precommit floor/guard classification, usable-window classification, soft-affinity quota summary admission and rejection reason selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; fixed selection-policy caller tests plus direct ABI fixtures cover route floors, critical advisory quota, exhausted windows and unavailable quota sources",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed route/status/band tag mapping and stable reason-label reconstruction"
     }
   ],
   "rust_semantic_reductions": [

@@ -588,6 +588,7 @@ const QUOTA_POOL_FILE = "crates/prodex-quota/src/render/pool.rs";
 const STATUS_SUMMARY_FILE = "crates/prodex-app/src/app_commands/status.rs";
 const QUOTA_MODEL_CAPACITY_FILE = "crates/prodex-quota/src/render/model_capacity.rs";
 const RUNTIME_QUOTA_FILE = "crates/prodex-runtime-proxy/src/quota.rs";
+const SELECTION_POLICY_FILE = "crates/prodex-runtime-proxy/src/selection_policy.rs";
 const HEALTH_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/profile_health.rs";
 const DEEPSEEK_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/deepseek/response.rs";
 const DEEPSEEK_RESPONSE_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs";
@@ -825,6 +826,30 @@ export function findViolations(files) {
       return [`${filePath}: Anthropic web-search result has a feature-off rejection`];
     }
     return [];
+  });
+  const quotaSelectionPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== SELECTION_POLICY_FILE) return [];
+    const functions = [
+      "runtime_selection_quota_pressure_band_reason",
+      "runtime_quota_precommit_floor_percent_for_route",
+      "runtime_quota_window_precommit_guard",
+      "runtime_quota_precommit_guard_reason",
+      "runtime_quota_window_usable_for_auto_rotate",
+      "runtime_quota_summary_allows_soft_affinity",
+      "runtime_quota_soft_affinity_rejection_reason",
+    ];
+    const violations = [];
+    for (const name of functions) {
+      const body = contents.match(new RegExp(`\\bpub fn ${name}\\([^]*?^\\}`, "mu"))?.[0];
+      if (!body?.includes("runtime_quota_selection_policy_code(") &&
+          !body?.includes("runtime_quota_summary_policy_code(")) {
+        violations.push(`${filePath}: ${name} must retain Mojo quota-selection dispatch`);
+      }
+    }
+    if (!contents.includes("prodex_mojo_core::runtime::quota_selection_policy(")) {
+      violations.push(`${filePath}: quota selection adapter must call prodex-mojo-core`);
+    }
+    return violations;
   });
   const runtimeStateBackgroundViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== RUNTIME_STATE_BACKGROUND_FILE) return [];
@@ -1237,7 +1262,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
