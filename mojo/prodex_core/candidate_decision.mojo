@@ -434,6 +434,101 @@ comptime SOFT_AFFINITY_POLICY_QUOTA_CRITICAL: Int64 = 6
 comptime SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN: Int64 = 7
 
 
+comptime QUOTA_SELECTION_MODE_BAND_REASON: Int64 = 0
+comptime QUOTA_SELECTION_MODE_PRECOMMIT_FLOOR: Int64 = 1
+comptime QUOTA_SELECTION_MODE_WINDOW_GUARD: Int64 = 2
+comptime QUOTA_SELECTION_MODE_PRECOMMIT_REASON: Int64 = 3
+comptime QUOTA_SELECTION_MODE_WINDOW_USABLE: Int64 = 4
+comptime QUOTA_SELECTION_MODE_SUMMARY_ALLOWS: Int64 = 5
+comptime QUOTA_SELECTION_MODE_REJECTION_REASON: Int64 = 6
+
+
+def runtime_quota_selection_band_reason(band: Int64) -> Int64:
+    if band == 0:
+        return SOFT_AFFINITY_POLICY_QUOTA_HEALTHY
+    if band == 1:
+        return SOFT_AFFINITY_POLICY_QUOTA_THIN
+    if band == 2:
+        return SOFT_AFFINITY_POLICY_QUOTA_CRITICAL
+    if band == 3:
+        return SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED
+    return SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN
+
+
+@export("prodex_runtime_quota_selection_policy_v1")
+def prodex_runtime_quota_selection_policy_v1(
+    mode: Int64,
+    route_kind: Int64,
+    five_hour_status: Int64,
+    weekly_status: Int64,
+    quota_band: Int64,
+    quota_source_present: Int64,
+    responses_critical_floor_percent: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        mode < QUOTA_SELECTION_MODE_BAND_REASON
+        or mode > QUOTA_SELECTION_MODE_REJECTION_REASON
+        or route_kind < 0
+        or route_kind > 3
+        or five_hour_status < 0
+        or five_hour_status > 4
+        or weekly_status < 0
+        or weekly_status > 4
+        or quota_band < 0
+        or quota_band > 4
+        or quota_source_present < 0
+        or quota_source_present > 1
+    ):
+        return 1
+
+    if mode == QUOTA_SELECTION_MODE_BAND_REASON:
+        output[] = runtime_quota_selection_band_reason(quota_band)
+        return 0
+
+    if mode == QUOTA_SELECTION_MODE_PRECOMMIT_FLOOR:
+        output[] = (
+            responses_critical_floor_percent
+            if route_kind == 0 or route_kind == 2
+            else 1
+        )
+        return 0
+
+    if mode == QUOTA_SELECTION_MODE_WINDOW_GUARD:
+        output[] = Int64(five_hour_status == 3)
+        return 0
+
+    if mode == QUOTA_SELECTION_MODE_PRECOMMIT_REASON:
+        output[] = (
+            SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND
+            if five_hour_status == 3
+            else SOFT_AFFINITY_POLICY_ALLOWED
+        )
+        return 0
+
+    if mode == QUOTA_SELECTION_MODE_WINDOW_USABLE:
+        output[] = Int64(five_hour_status <= 2)
+        return 0
+
+    if mode == QUOTA_SELECTION_MODE_SUMMARY_ALLOWS:
+        output[] = Int64(
+            quota_source_present == 1
+            and five_hour_status <= 2
+            and weekly_status <= 2
+        )
+        return 0
+
+    if quota_source_present == 0 or five_hour_status == 4 or weekly_status == 4:
+        output[] = SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE
+    elif five_hour_status == 3:
+        output[] = SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND
+    elif weekly_status == 3:
+        output[] = SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED
+    else:
+        output[] = runtime_quota_selection_band_reason(quota_band)
+    return 0
+
+
 def runtime_soft_affinity_policy_band_reason(band: Int64) -> Int64:
     if band == 0:
         return SOFT_AFFINITY_POLICY_QUOTA_HEALTHY

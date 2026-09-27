@@ -281,37 +281,138 @@ pub enum RuntimeSelectionQuotaSource {
     PersistedSnapshot,
 }
 
+fn runtime_selection_route_kind_tag(route_kind: RuntimeRouteKind) -> i64 {
+    match route_kind {
+        RuntimeRouteKind::Responses => 0,
+        RuntimeRouteKind::Compact => 1,
+        RuntimeRouteKind::Websocket => 2,
+        RuntimeRouteKind::Standard => 3,
+    }
+}
+
+fn runtime_selection_quota_window_status_tag(status: RuntimeSelectionQuotaWindowStatus) -> i64 {
+    match status {
+        RuntimeSelectionQuotaWindowStatus::Ready => 0,
+        RuntimeSelectionQuotaWindowStatus::Thin => 1,
+        RuntimeSelectionQuotaWindowStatus::Critical => 2,
+        RuntimeSelectionQuotaWindowStatus::Exhausted => 3,
+        RuntimeSelectionQuotaWindowStatus::Unknown => 4,
+    }
+}
+
+fn runtime_selection_quota_pressure_band_tag(band: RuntimeSelectionQuotaPressureBand) -> i64 {
+    match band {
+        RuntimeSelectionQuotaPressureBand::Healthy => 0,
+        RuntimeSelectionQuotaPressureBand::Thin => 1,
+        RuntimeSelectionQuotaPressureBand::Critical => 2,
+        RuntimeSelectionQuotaPressureBand::Exhausted => 3,
+        RuntimeSelectionQuotaPressureBand::Unknown => 4,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn runtime_quota_selection_policy_code(
+    mode: i64,
+    five_hour_status: RuntimeSelectionQuotaWindowStatus,
+    weekly_status: RuntimeSelectionQuotaWindowStatus,
+    band: RuntimeSelectionQuotaPressureBand,
+    source_present: bool,
+    route_kind: RuntimeRouteKind,
+    responses_critical_floor_percent: i64,
+) -> i64 {
+    prodex_mojo_core::runtime::quota_selection_policy(
+        mode,
+        prodex_mojo_core::runtime::QuotaSelectionPolicyInput {
+            route_kind: runtime_selection_route_kind_tag(route_kind),
+            five_hour_status: runtime_selection_quota_window_status_tag(five_hour_status),
+            weekly_status: runtime_selection_quota_window_status_tag(weekly_status),
+            quota_band: runtime_selection_quota_pressure_band_tag(band),
+            quota_source_present: source_present,
+            responses_critical_floor_percent,
+        },
+    )
+    .expect("Mojo quota-selection policy returned an invalid result")
+}
+
+fn runtime_quota_summary_policy_code(
+    mode: i64,
+    summary: RuntimeSelectionQuotaSummary,
+    source: Option<RuntimeSelectionQuotaSource>,
+    route_kind: RuntimeRouteKind,
+    responses_critical_floor_percent: i64,
+) -> i64 {
+    runtime_quota_selection_policy_code(
+        mode,
+        summary.five_hour.status,
+        summary.weekly.status,
+        summary.route_band,
+        source.is_some(),
+        route_kind,
+        responses_critical_floor_percent,
+    )
+}
+
+fn runtime_quota_policy_reason(code: i64) -> Option<&'static str> {
+    match code {
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE => {
+            Some("quota_windows_unavailable")
+        }
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND => {
+            Some("quota_exhausted_before_send")
+        }
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED => Some("quota_exhausted"),
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_HEALTHY => Some("quota_healthy"),
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_THIN => Some("quota_thin"),
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_CRITICAL => Some("quota_critical"),
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN => Some("quota_unknown"),
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_ALLOWED => None,
+        _ => None,
+    }
+}
+
 pub fn runtime_selection_quota_pressure_band_reason(
     band: RuntimeSelectionQuotaPressureBand,
 ) -> &'static str {
-    match band {
-        RuntimeSelectionQuotaPressureBand::Healthy => "quota_healthy",
-        RuntimeSelectionQuotaPressureBand::Thin => "quota_thin",
-        RuntimeSelectionQuotaPressureBand::Critical => "quota_critical",
-        RuntimeSelectionQuotaPressureBand::Exhausted => "quota_exhausted",
-        RuntimeSelectionQuotaPressureBand::Unknown => "quota_unknown",
-    }
+    let code = runtime_quota_selection_policy_code(
+        prodex_mojo_core::runtime::QUOTA_SELECTION_MODE_BAND_REASON,
+        RuntimeSelectionQuotaWindowStatus::Ready,
+        RuntimeSelectionQuotaWindowStatus::Ready,
+        band,
+        false,
+        RuntimeRouteKind::Responses,
+        0,
+    );
+    runtime_quota_policy_reason(code).unwrap_or("quota_unknown")
 }
 
 pub fn runtime_quota_precommit_floor_percent_for_route(
     route_kind: RuntimeRouteKind,
     responses_critical_floor_percent: i64,
 ) -> i64 {
-    match route_kind {
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => {
-            responses_critical_floor_percent
-        }
-        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => 1,
-    }
+    runtime_quota_selection_policy_code(
+        prodex_mojo_core::runtime::QUOTA_SELECTION_MODE_PRECOMMIT_FLOOR,
+        RuntimeSelectionQuotaWindowStatus::Ready,
+        RuntimeSelectionQuotaWindowStatus::Ready,
+        RuntimeSelectionQuotaPressureBand::Healthy,
+        false,
+        route_kind,
+        responses_critical_floor_percent,
+    )
 }
 
 pub fn runtime_quota_window_precommit_guard(
     window: RuntimeSelectionQuotaWindowSummary,
-    _floor_percent: i64,
+    floor_percent: i64,
 ) -> bool {
-    // A displayed percentage is rounded and is not authoritative exhaustion evidence. The
-    // upstream error response (or an exact zero snapshot) decides whether a request is blocked.
-    matches!(window.status, RuntimeSelectionQuotaWindowStatus::Exhausted)
+    runtime_quota_selection_policy_code(
+        prodex_mojo_core::runtime::QUOTA_SELECTION_MODE_WINDOW_GUARD,
+        window.status,
+        RuntimeSelectionQuotaWindowStatus::Ready,
+        RuntimeSelectionQuotaPressureBand::Healthy,
+        false,
+        RuntimeRouteKind::Responses,
+        floor_percent,
+    ) == 1
 }
 
 pub fn runtime_quota_precommit_guard_reason(
@@ -319,37 +420,27 @@ pub fn runtime_quota_precommit_guard_reason(
     route_kind: RuntimeRouteKind,
     responses_critical_floor_percent: i64,
 ) -> Option<&'static str> {
-    let floor_percent = runtime_quota_precommit_floor_percent_for_route(
+    runtime_quota_policy_reason(runtime_quota_summary_policy_code(
+        prodex_mojo_core::runtime::QUOTA_SELECTION_MODE_PRECOMMIT_REASON,
+        summary,
+        None,
         route_kind,
         responses_critical_floor_percent,
-    );
-    if matches!(
-        summary.five_hour.status,
-        RuntimeSelectionQuotaWindowStatus::Exhausted
-    ) {
-        return Some("quota_exhausted_before_send");
-    }
-
-    if matches!(
-        route_kind,
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-    ) && runtime_quota_window_precommit_guard(summary.five_hour, floor_percent)
-    {
-        return Some("quota_critical_floor_before_send");
-    }
-
-    None
+    ))
 }
 
 pub fn runtime_quota_window_usable_for_auto_rotate(
     status: RuntimeSelectionQuotaWindowStatus,
 ) -> bool {
-    matches!(
+    runtime_quota_selection_policy_code(
+        prodex_mojo_core::runtime::QUOTA_SELECTION_MODE_WINDOW_USABLE,
         status,
-        RuntimeSelectionQuotaWindowStatus::Ready
-            | RuntimeSelectionQuotaWindowStatus::Thin
-            | RuntimeSelectionQuotaWindowStatus::Critical
-    )
+        RuntimeSelectionQuotaWindowStatus::Ready,
+        RuntimeSelectionQuotaPressureBand::Healthy,
+        false,
+        RuntimeRouteKind::Responses,
+        0,
+    ) == 1
 }
 
 pub fn runtime_quota_summary_allows_soft_affinity(
@@ -358,15 +449,13 @@ pub fn runtime_quota_summary_allows_soft_affinity(
     route_kind: RuntimeRouteKind,
     responses_critical_floor_percent: i64,
 ) -> bool {
-    source.is_some()
-        && runtime_quota_window_usable_for_auto_rotate(summary.five_hour.status)
-        && runtime_quota_window_usable_for_auto_rotate(summary.weekly.status)
-        && runtime_quota_precommit_guard_reason(
-            summary,
-            route_kind,
-            responses_critical_floor_percent,
-        )
-        .is_none()
+    runtime_quota_summary_policy_code(
+        prodex_mojo_core::runtime::QUOTA_SELECTION_MODE_SUMMARY_ALLOWS,
+        summary,
+        source,
+        route_kind,
+        responses_critical_floor_percent,
+    ) == 1
 }
 
 pub fn runtime_quota_soft_affinity_rejection_reason(
@@ -375,32 +464,14 @@ pub fn runtime_quota_soft_affinity_rejection_reason(
     route_kind: RuntimeRouteKind,
     responses_critical_floor_percent: i64,
 ) -> &'static str {
-    if source.is_none()
-        || matches!(
-            summary.five_hour.status,
-            RuntimeSelectionQuotaWindowStatus::Unknown
-        )
-        || matches!(
-            summary.weekly.status,
-            RuntimeSelectionQuotaWindowStatus::Unknown
-        )
-    {
-        "quota_windows_unavailable"
-    } else if let Some(reason) =
-        runtime_quota_precommit_guard_reason(summary, route_kind, responses_critical_floor_percent)
-    {
-        reason
-    } else if matches!(
-        summary.five_hour.status,
-        RuntimeSelectionQuotaWindowStatus::Exhausted
-    ) || matches!(
-        summary.weekly.status,
-        RuntimeSelectionQuotaWindowStatus::Exhausted
-    ) {
-        "quota_exhausted"
-    } else {
-        runtime_selection_quota_pressure_band_reason(summary.route_band)
-    }
+    runtime_quota_policy_reason(runtime_quota_summary_policy_code(
+        prodex_mojo_core::runtime::QUOTA_SELECTION_MODE_REJECTION_REASON,
+        summary,
+        source,
+        route_kind,
+        responses_critical_floor_percent,
+    ))
+    .unwrap_or("quota_unknown")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -442,57 +513,20 @@ fn runtime_soft_affinity_policy_mojo(input: RuntimeSoftAffinityPolicyInput) -> i
                 RuntimeAffinitySelectionKind::TurnState => 2,
                 RuntimeAffinitySelectionKind::Session => 3,
             },
-            route_kind: match input.route_kind {
-                RuntimeRouteKind::Responses => 0,
-                RuntimeRouteKind::Compact => 1,
-                RuntimeRouteKind::Websocket => 2,
-                RuntimeRouteKind::Standard => 3,
-            },
-            five_hour_status: match input.quota_summary.five_hour.status {
-                RuntimeSelectionQuotaWindowStatus::Ready => 0,
-                RuntimeSelectionQuotaWindowStatus::Thin => 1,
-                RuntimeSelectionQuotaWindowStatus::Critical => 2,
-                RuntimeSelectionQuotaWindowStatus::Exhausted => 3,
-                RuntimeSelectionQuotaWindowStatus::Unknown => 4,
-            },
-            weekly_status: match input.quota_summary.weekly.status {
-                RuntimeSelectionQuotaWindowStatus::Ready => 0,
-                RuntimeSelectionQuotaWindowStatus::Thin => 1,
-                RuntimeSelectionQuotaWindowStatus::Critical => 2,
-                RuntimeSelectionQuotaWindowStatus::Exhausted => 3,
-                RuntimeSelectionQuotaWindowStatus::Unknown => 4,
-            },
-            quota_band: match input.quota_summary.route_band {
-                RuntimeSelectionQuotaPressureBand::Healthy => 0,
-                RuntimeSelectionQuotaPressureBand::Thin => 1,
-                RuntimeSelectionQuotaPressureBand::Critical => 2,
-                RuntimeSelectionQuotaPressureBand::Exhausted => 3,
-                RuntimeSelectionQuotaPressureBand::Unknown => 4,
-            },
+            route_kind: runtime_selection_route_kind_tag(input.route_kind),
+            five_hour_status: runtime_selection_quota_window_status_tag(
+                input.quota_summary.five_hour.status,
+            ),
+            weekly_status: runtime_selection_quota_window_status_tag(
+                input.quota_summary.weekly.status,
+            ),
+            quota_band: runtime_selection_quota_pressure_band_tag(input.quota_summary.route_band),
             quota_source_present: input.quota_source.is_some(),
             current_profile_matches_candidate: input.current_profile_matches_candidate,
             has_route_eligible_quota_fallback: input.has_route_eligible_quota_fallback,
         },
     )
     .expect("Mojo soft affinity policy returned an invalid result")
-}
-
-fn runtime_soft_affinity_policy_reason(code: i64) -> Option<&'static str> {
-    match code {
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE => {
-            Some("quota_windows_unavailable")
-        }
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND => {
-            Some("quota_exhausted_before_send")
-        }
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED => Some("quota_exhausted"),
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_HEALTHY => Some("quota_healthy"),
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_THIN => Some("quota_thin"),
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_CRITICAL => Some("quota_critical"),
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN => Some("quota_unknown"),
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_ALLOWED => None,
-        _ => None,
-    }
 }
 
 pub fn runtime_soft_affinity_allowed(input: RuntimeSoftAffinityPolicyInput) -> bool {
@@ -503,8 +537,7 @@ pub fn runtime_soft_affinity_allowed(input: RuntimeSoftAffinityPolicyInput) -> b
 pub fn runtime_soft_affinity_rejection_reason(
     input: RuntimeSoftAffinityPolicyInput,
 ) -> &'static str {
-    runtime_soft_affinity_policy_reason(runtime_soft_affinity_policy_mojo(input))
-        .unwrap_or("quota_unknown")
+    runtime_quota_policy_reason(runtime_soft_affinity_policy_mojo(input)).unwrap_or("quota_unknown")
 }
 
 #[cfg(test)]

@@ -2478,3 +2478,23 @@ broad source report counts **55,346 reachable Mojo LOC** and **191,506 Rust
 production LOC**, totaling **246,852 LOC**: **22.42% Mojo**. The 75% project
 target remains unmet, with **519,172 additional Mojo LOC** required at this Rust
 volume.
+
+## Runtime quota selection policy hard replacement
+
+Quota-window usability, precommit-floor/guard decisions, quota pressure-band
+reason selection, and soft-affinity quota admission/rejection now use the new
+`prodex_runtime_quota_selection_policy_v1` operation in the existing
+`candidate_decision.mojo` owner. The duplicate Rust branch logic in
+`selection_policy.rs` was collapsed to typed route/status/band tag conversion
+and stable reason-label reconstruction; the existing soft-affinity operation
+reuses the same tag adapters.
+
+Focused selection-policy validation passes 16/16 caller tests, including the
+advisory positive-floor contract, exhausted weekly/five-hour windows, missing
+quota sources, and all affinity routes. A direct Mojo ABI test covers response
+and compact floors, critical-but-usable quota, exhausted windows, and unknown
+quota. No-fallback, ownership, and authority guards pass with **53 authoritative
+operations**. The canonical broad source report counts **55,427 reachable Mojo
+LOC** and **191,610 Rust production LOC**, totaling **247,037 LOC**: **22.44%
+Mojo**. The 75% project target remains unmet, with **519,403 additional Mojo
+LOC** required at this Rust volume.
