@@ -2,12 +2,10 @@
 
 use crate::translator::{ProviderTransformInput, ProviderTransformResult};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::request::{
-    gemini_builtin_tools_from_request, gemini_continuation_metadata,
-    gemini_is_supported_builtin_tool, gemini_tool_config_from_request,
-    gemini_tool_from_openai_tool, gemini_validate_openai_tools,
+    gemini_continuation_metadata, gemini_tool_config_from_request, gemini_validate_openai_tools,
 };
 use super::request_contents::gemini_text_contents_from_request_mojo;
 use super::request_contents::{
@@ -85,7 +83,6 @@ pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> Provide
 
     let body = match gemini_build_body_mojo(
         &value,
-        obj,
         &model,
         system_instruction.as_ref(),
         &contents,
@@ -200,68 +197,25 @@ fn gemini_request_contents(
 
 fn gemini_build_body_mojo(
     value: &Value,
-    obj: &serde_json::Map<String, Value>,
     model: &str,
     system_instruction: Option<&Value>,
     contents: &[Value],
-    plan: &crate::gemini_bridge::GeminiTranslatorValidationPlan,
+    _plan: &crate::gemini_bridge::GeminiTranslatorValidationPlan,
 ) -> Result<Vec<u8>, GeminiTransformIssue> {
-    let tools = if plan.tag == 16 {
-        let mut tool_request = serde_json::Map::new();
-        gemini_apply_tools(obj, &mut tool_request).map_err(GeminiTransformIssue::Rejected)?;
-        tool_request.remove("tools")
-    } else {
-        None
-    };
+    let function_tools =
+        crate::chat_tools_bridge::provider_core_chat_tools_from_responses_request(value)
+            .map(Value::Array);
     let tool_config =
         gemini_tool_config_from_request(value).map_err(GeminiTransformIssue::Rejected)?;
     crate::gemini_bridge::gemini_bridge_raw_translator_request(
         value,
         system_instruction,
         contents,
-        tools.as_ref(),
+        function_tools.as_ref(),
         tool_config.as_ref(),
         model,
     )
     .map_err(GeminiTransformIssue::Rejected)
-}
-
-fn gemini_apply_tools(
-    obj: &serde_json::Map<String, Value>,
-    request: &mut serde_json::Map<String, Value>,
-) -> Result<(), String> {
-    let Some(tools) = obj.get("tools").and_then(Value::as_array) else {
-        return Ok(());
-    };
-    let mut translated_tools = gemini_builtin_tools_from_request(tools);
-    let mut declarations = Vec::new();
-    for (index, tool) in tools.iter().enumerate() {
-        if tool.get("function").is_some()
-            || tool.get("type").and_then(Value::as_str) == Some("function")
-        {
-            declarations.push(gemini_tool_from_openai_tool(tool, index)?);
-            continue;
-        }
-        if gemini_is_supported_builtin_tool(tool) {
-            continue;
-        }
-        if let Some(translated) =
-            crate::chat_tools_bridge::provider_core_chat_tools_from_responses_request(
-                &json!({"tools": [tool]}),
-            )
-        {
-            for translated_tool in translated {
-                declarations.push(gemini_tool_from_openai_tool(&translated_tool, index)?);
-            }
-        }
-    }
-    if !declarations.is_empty() {
-        translated_tools.push(json!({"functionDeclarations": declarations}));
-    }
-    if !translated_tools.is_empty() {
-        request.insert("tools".to_string(), Value::Array(translated_tools));
-    }
-    Ok(())
 }
 
 #[cfg(test)]

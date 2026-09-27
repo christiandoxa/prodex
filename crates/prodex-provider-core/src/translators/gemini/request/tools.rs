@@ -8,7 +8,7 @@ pub(crate) use self::builtin::{
 };
 use serde_json::{Value, json};
 
-use super::schema::{sanitize_function_schema, sanitize_schema};
+use super::schema::sanitize_function_schema;
 
 pub(crate) fn gemini_validate_openai_tools(value: &Value) -> Result<(), String> {
     let Some(tools) = value.as_array() else {
@@ -101,43 +101,6 @@ fn gemini_validate_function_tool(
         ));
     }
     Ok(())
-}
-
-pub(crate) fn gemini_tool_from_openai_tool(tool: &Value, index: usize) -> Result<Value, String> {
-    let Some(function) = tool.get("function") else {
-        return Err(format!(
-            "invalid_tool_declaration: Gemini request field `tools[{index}].function` must be an object"
-        ));
-    };
-    let Some(name) = function.get("name").and_then(Value::as_str) else {
-        return Err(format!(
-            "invalid_tool_declaration: Gemini request field `tools[{index}].function.name` must be a non-empty string"
-        ));
-    };
-    if name.trim().is_empty() {
-        return Err(format!(
-            "invalid_tool_declaration: Gemini request field `tools[{index}].function.name` must be a non-empty string"
-        ));
-    }
-    let description = function
-        .get("description")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    let parameters = function
-        .get("parameters")
-        .map(sanitize_schema)
-        .unwrap_or_else(|| json!({"type":"object","properties":{}}));
-    let name = serde_json::to_vec(name).expect("Gemini tool name serializes");
-    let description = serde_json::to_vec(description).expect("Gemini tool description serializes");
-    let parameters = serde_json::to_vec(&parameters).expect("Gemini tool parameters serialize");
-    crate::translators::gemini::request_contents::gemini_request_content_mojo_value(
-        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::ToolDeclaration,
-        Some(&name),
-        Some(&description),
-        Some(&parameters),
-        None,
-        0,
-    )
 }
 
 pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Option<Value> {

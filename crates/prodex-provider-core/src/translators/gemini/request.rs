@@ -13,9 +13,7 @@ pub(super) use self::continuation::gemini_continuation_metadata;
 pub use self::generation_config::gemini_provider_core_model_uses_thinking_level;
 pub(crate) use self::schema::sanitize_function_schema;
 pub(crate) use self::tool_signatures::gemini_preserve_tool_call_signatures;
-pub(super) use self::tools::gemini_tool_from_openai_tool;
 pub(crate) use self::tools::{
     gemini_builtin_tools_from_request, gemini_function_declaration_from_openai_tool,
-    gemini_is_supported_builtin_tool, gemini_tool_config_from_request,
-    gemini_validate_openai_tools,
+    gemini_tool_config_from_request, gemini_validate_openai_tools,
 };

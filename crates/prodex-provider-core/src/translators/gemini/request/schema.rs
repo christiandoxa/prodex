@@ -17,13 +17,6 @@ fn sanitize_with_mojo(
     )
 }
 
-pub(crate) fn sanitize_schema(schema: &Value) -> Value {
-    sanitize_with_mojo(
-        schema,
-        prodex_mojo_core::provider_constraints::GeminiRequestContentOperation::SanitizeSchema,
-    )
-}
-
 pub(crate) fn sanitize_function_schema(schema: &Value) -> Value {
     sanitize_with_mojo(
         schema,

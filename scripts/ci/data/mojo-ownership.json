@@ -1929,16 +1929,18 @@
         "crates/prodex-provider-core/src/gemini_bridge.rs",
         "crates/prodex-provider-core/src/gemini_bridge/request.rs",
         "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
-        "crates/prodex-provider-core/src/translators/gemini/request_contents.rs"
+        "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
+        "crates/prodex-provider-core/src/translators/gemini/request/tools.rs",
+        "crates/prodex-provider-core/src/chat_tools_bridge.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
-      "rust_owner_before": "feature-off local-media scan, candidate validation orchestration, generation-config/body assembly and direct request serialization",
+      "rust_owner_before": "feature-off local-media scan, candidate validation orchestration, generation-config/body assembly, direct request serialization, and per-tool Rust grouping/translation for built-in, function and custom tool shapes",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "Deleted; Gemini translator suite exercises validation, alias precedence, tool history, system instructions, tools, and malformed inputs in both feature modes",
+      "rust_test_oracle": "Deleted; Gemini translator suite exercises validation, alias precedence, tool history, system instructions, built-in/function/custom tools, duplicate/order and unicode schemas, and malformed inputs in both feature modes",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "JSON parsing, issue mapping, tool compatibility fallback when TextContents declines non-text history, and serialization around the Mojo bridge kernel"
+      "rust_adapter_scope": "JSON parsing, issue mapping, one whole-request chat-tools Mojo transform for custom/namespace/MCP shapes, tool-config serialization, and result materialization around the Mojo bridge kernel"
     },
     {
       "name": "gemini_request_content_shape_fallbacks",
