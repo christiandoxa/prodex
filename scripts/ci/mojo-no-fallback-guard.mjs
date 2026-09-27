@@ -184,6 +184,8 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/chat_tools_bridge/mojo.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/response/metadata.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream/response_values.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping_tests.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
@@ -195,6 +197,9 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-provider-core/src/translators/deepseek/response/metadata.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream/response_values.rs",
+  "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
   "crates/prodex-provider-core/src/translators/kiro/acp.rs",
   "crates/prodex-provider-core/src/translators/kiro/response.rs",
   "crates/prodex-quota/src/render/gemini.rs",
@@ -566,6 +571,15 @@ const FINGERPRINT_ARTIFACTS_FILE = "crates/prodex-runtime-proxy/src/smart_contex
 const SMART_CONTEXT_CORE_FILE = "crates/prodex-runtime-proxy/src/smart_context/core.rs";
 const ADAPTIVE_BUDGET_FILE = "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs";
 const DEEPSEEK_SHAPING_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs";
+const DEEPSEEK_STREAM_RESPONSE_VALUES_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/response_values.rs";
+const DEEPSEEK_RESPONSE_METADATA_FILE = "crates/prodex-provider-core/src/translators/deepseek/response/metadata.rs";
+const DEEPSEEK_STREAM_PROMOTED_OPERATIONS = [
+  "DeepSeekKernelOperation::StreamToolCallDelta",
+  "DeepSeekKernelOperation::StreamChunkMetadata",
+  "DeepSeekKernelOperation::StreamChoiceMetadata",
+  "DeepSeekKernelOperation::StreamChoiceDelta",
+  "DeepSeekKernelOperation::StreamResponseMetadata",
+];
 const RUNTIME_DOCTOR_MARKERS_FILE = "crates/prodex-runtime-doctor/src/markers.rs";
 const CHAT_TOOLS_BRIDGE_FILE = "crates/prodex-provider-core/src/chat_tools_bridge.rs";
 const CHAT_TOOLS_MOJO_FILE = "crates/prodex-provider-core/src/chat_tools_bridge/mojo.rs";
@@ -886,6 +900,23 @@ export function findViolations(files) {
         ? [`${filePath}: ${name} contains a feature-off Rust path`] : [];
     });
   });
+  const deepseekStreamFallbackViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === DEEPSEEK_SHAPING_FILE) {
+      return DEEPSEEK_STREAM_PROMOTED_OPERATIONS
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: DeepSeek stream hard replacement must retain ${marker}`);
+    }
+    if (filePath === DEEPSEEK_STREAM_RESPONSE_VALUES_FILE) {
+      return ["DeepSeekKernelOperation::StreamResponseValue", "DeepSeekKernelOperation::StreamAssistantMessage"]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: DeepSeek stream response hard replacement must retain ${marker}`);
+    }
+    if (filePath === DEEPSEEK_RESPONSE_METADATA_FILE &&
+        !contents.includes("DeepSeekKernelOperation::ResponseMetadata")) {
+      return [`${filePath}: DeepSeek response metadata must use Mojo`];
+    }
+    return [];
+  });
   const quotaWindowViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== QUOTA_WINDOWS_FILE) return [];
     const violations = [];
@@ -989,6 +1020,7 @@ export function findViolations(files) {
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
+    ...deepseekStreamFallbackViolations,
     ...quotaWindowViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations,
