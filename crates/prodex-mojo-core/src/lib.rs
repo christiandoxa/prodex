@@ -108,6 +108,8 @@ pub mod provider_registry;
 pub mod quota;
 #[cfg(feature = "mojo-quota")]
 pub mod quota_pool;
+#[cfg(feature = "mojo-runtime")]
+pub mod redaction;
 #[cfg(feature = "mojo-rich")]
 pub mod rich;
 #[cfg(feature = "mojo-routing")]

@@ -197,3 +197,53 @@ fn redaction_env_values_mask_sensitive_keys_and_secret_like_values() {
         "1"
     );
 }
+
+#[test]
+fn redaction_mojo_boundary_matrix_preserves_exact_fail_closed_contracts() {
+    for key in [
+        "X-API-Key",
+        "proxy_authorization",
+        "PROFILE_NAME_UPSTREAM",
+        "github_login",
+        "customCredentialValue",
+        "refresh-token",
+    ] {
+        assert!(redaction_key_looks_sensitive(key), "key={key}");
+    }
+    assert!(!redaction_key_looks_sensitive("model_name"));
+
+    for (input, expected) in [
+        ("Authorization: BASIC x", "Authorization: BASIC <redacted>"),
+        ("Token x", "Token <redacted>"),
+        ("password='x'", "password='<redacted>'"),
+        ("password='x", "password='<redacted>'"),
+        ("Cookie: a=b; c=d", "Cookie: <redacted>"),
+        ("SK-12345678", "sk-<redacted>"),
+        ("sk-proj-12345678", "sk-proj-<redacted>"),
+        ("sk-1234567", "sk-1234567"),
+        ("prefix🙂suffix", "prefix🙂suffix"),
+    ] {
+        assert_eq!(
+            redaction_redact_secret_like_text(input),
+            expected,
+            "input={input:?}"
+        );
+    }
+
+    let uuid = "019ffa02-3993-7e50-b331-5604955720ad";
+    for (input, expected) in [
+        ("a@b.c".to_string(), REDACTED.to_string()),
+        ("a@b".to_string(), "a@b".to_string()),
+        ("4111111111111".to_string(), REDACTED.to_string()),
+        ("411111111111".to_string(), "411111111111".to_string()),
+        (uuid.to_string(), uuid.to_string()),
+        (
+            format!("🙂 user@example.test {uuid}"),
+            format!("🙂 {REDACTED} {uuid}"),
+        ),
+    ] {
+        let mut value = serde_json::Value::String(input);
+        redaction_redact_json(&mut value);
+        assert_eq!(value, serde_json::Value::String(expected));
+    }
+}

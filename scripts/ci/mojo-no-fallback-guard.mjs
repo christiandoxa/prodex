@@ -8,6 +8,8 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-redaction/src/lib.rs",
+  "crates/prodex-mojo-core/src/redaction.rs",
   "crates/prodex-quota/src/models.rs",
   "crates/prodex-profile-identity/src/lib.rs",
   "crates/prodex-mojo-core/src/profile_identity.rs",
@@ -224,6 +226,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-redaction/src/lib.rs",
   "crates/prodex-quota/src/models.rs",
   "crates/prodex-profile-identity/src/lib.rs",
   "crates/prodex-domain/src/governance/inspection.rs",
@@ -562,6 +565,7 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-runtime-doctor/Cargo.toml", "state-summary-mojo"],
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
+const REDACTION_FILE = "crates/prodex-redaction/src/lib.rs";
 const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
 const DOCTOR_CARGO_FILE = "crates/prodex-runtime-doctor/Cargo.toml";
@@ -817,6 +821,22 @@ export function findViolations(files) {
       return [`${filePath}: Anthropic web-search result has a feature-off rejection`];
     }
     return [];
+  });
+  const redactionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== REDACTION_FILE) return [];
+    const required = [
+      "prodex_mojo_core::redaction::key_looks_sensitive(",
+      "prodex_mojo_core::redaction::redact_secret_like_text(",
+      "prodex_mojo_core::redaction::redact_gateway_text(",
+    ];
+    const violations = required
+      .filter((call) => !contents.includes(call))
+      .map((call) => `${filePath}: redaction migration must retain Mojo call ${call}`);
+    const retired = /\bfn\s+(?:redaction_redact_email_tokens|redaction_redact_long_digit_tokens|redaction_redact_matching_tokens|redaction_redact_sensitive_key_value_text|redaction_process_field_name|redaction_sensitive_field_replacement|redaction_parse_potential_field_name|redaction_redacted_field_value|redaction_redact_authorization_like_values|redaction_try_authorization_value|redaction_redact_prefixed_api_key_tokens|redaction_secret_token_end)\s*\(/u;
+    if (retired.test(contents)) {
+      violations.push(`${filePath}: contains retired Rust redaction semantics`);
+    }
+    return violations;
   });
   const governanceInspectionViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-domain/src/governance/inspection.rs") return [];
@@ -1185,7 +1205,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
