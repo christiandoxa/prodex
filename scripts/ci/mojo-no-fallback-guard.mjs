@@ -190,10 +190,12 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/kiro/request/semantics_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/stream.rs",
   "crates/prodex-provider-core/src/translators/kiro/response.rs",
+  "crates/prodex-provider-core/src/translators/kiro/acp.rs",
   "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-provider-core/src/translators/kiro/acp.rs",
   "crates/prodex-provider-core/src/translators/kiro/response.rs",
   "crates/prodex-quota/src/render/gemini.rs",
   "crates/prodex-quota/src/capacity.rs",
@@ -530,6 +532,21 @@ const DEEPSEEK_REASONING_FILE = "crates/prodex-provider-core/src/deepseek_bridge
 const DEEPSEEK_METADATA_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs";
 const DEEPSEEK_SIMPLE_REQUEST_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs";
 const KIRO_CHAT_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/kiro/response.rs";
+const KIRO_ACP_FILE = "crates/prodex-provider-core/src/translators/kiro/acp.rs";
+const KIRO_ACP_OPERATIONS = [
+  "KiroKernelOperation::AcpInitializeRequest",
+  "KiroKernelOperation::AcpSessionNewRequest",
+  "KiroKernelOperation::AcpSessionPromptRequest",
+  "KiroKernelOperation::AcpModel",
+  "KiroKernelOperation::AcpAssistantOutput",
+  "KiroKernelOperation::AcpResponse",
+  "KiroKernelOperation::AcpChatAssistant",
+  "KiroKernelOperation::AcpPlanEntry",
+  "KiroKernelOperation::AcpError",
+  "KiroKernelOperation::AcpSessionInfo",
+  "KiroKernelOperation::AcpMetadata",
+  "KiroKernelOperation::AcpIncompleteDetails",
+];
 const KIRO_RESPONSE_HELPER_OPERATIONS = [
   "KiroKernelOperation::ModelList",
   "KiroKernelOperation::ModelNotFound",
@@ -635,6 +652,18 @@ export function findViolations(files) {
       .map((marker) => `${filePath}: Kiro response hard replacement must retain ${marker}`);
     if (/\bfn\s+kiro_provider_core_anthropic_(?:stop_reason|tool_use_block)\s*\(/u.test(contents)) {
       violations.push(`${filePath}: contains replaced Rust Kiro Anthropic response semantics`);
+    }
+    return violations;
+  });
+  const kiroAcpViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== KIRO_ACP_FILE) return [];
+    const violations = KIRO_ACP_OPERATIONS
+      .filter((marker) => !contents.includes(marker))
+      .map((marker) => `${filePath}: Kiro ACP hard replacement must retain ${marker}`);
+    if (contents.includes("KIRO_PROVIDER_CORE_MAX_TOOL_ACTIVITY_EVENTS") ||
+        contents.includes("kiro_provider_core_truncated_tool_activity_item") ||
+        contents.includes("serde_json::json")) {
+      violations.push(`${filePath}: contains restored Rust Kiro ACP shaping semantics`);
     }
     return violations;
   });
@@ -943,6 +972,7 @@ export function findViolations(files) {
     ...deepseekMetadataViolations,
     ...kiroChatResponseViolations,
     ...kiroResponseHelperViolations,
+    ...kiroAcpViolations,
     ...deepseekStrictSchemaViolations,
     ...quotaPlannerViolations,
     ...anthropicResponseViolations,

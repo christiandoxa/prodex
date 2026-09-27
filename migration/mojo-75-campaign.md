@@ -2216,3 +2216,21 @@ counts **53,551 reachable Mojo LOC** and **192,259 Rust production LOC**,
 totaling **245,810 LOC**: **21.785525% Mojo**. The 7% release floor and
 non-regression requirement remain satisfied; the 75% project target remains
 unmet, with **523,226 additional Mojo LOC** required at this Rust volume.
+
+## Kiro ACP shape hard replacement
+
+The twelve existing Kiro ACP request/response, assistant, plan, error, session,
+metadata, and incomplete-details shape operations now run through the Kiro Mojo
+kernel in every provider feature mode. The duplicate feature-off Rust JSON
+builders and metadata truncation copy were deleted; Rust retains JSON
+serialization/decoding at the ABI plus the separate stop-reason extraction and
+incomplete-reason classification helpers that do not yet have Mojo operations.
+The no-fallback guard treats the ACP adapter as unconditional Mojo and requires
+operations 32 through 43.
+
+Focused ACP validation passes 13 tests in the default provider feature mode and
+the same 13 tests with --features mojo. The canonical source report counts
+**53,551 reachable Mojo LOC** and **192,235 Rust production LOC**, totaling
+**245,786 LOC**: **21.787653% Mojo**. The 7% release floor and non-regression
+requirement remain satisfied; the 75% project target remains unmet, with
+**523,154 additional Mojo LOC** required at this Rust volume.
