@@ -2355,3 +2355,21 @@ broad production-share checks pass. The canonical source report counts **53,551
 reachable Mojo LOC** and **191,477 Rust production LOC**, totaling **245,028 LOC**:
 **21.86% Mojo**. The 75% project target remains unmet, with **520,880 additional
 Mojo LOC** required at this Rust volume.
+
+## CLI runtime-feature and launch feature-off hard replacement
+
+Codex runtime-feature configuration now invokes the existing Mojo planner in every
+`prodex-cli` feature mode. The feature-off request detector/error path and all
+`mojo-core` compilation gates around the adapter and renderer were deleted, while
+the public compatibility feature remains harmless. `prodex-runtime-launch` now
+links `prodex_mojo_core` unconditionally, so `--no-default-features` executes the
+same Mojo launch planner instead of failing compilation; the Mojo launch tests are
+therefore compiled in both modes. The no-fallback guard now treats the CLI runtime
+feature adapter and runtime-launch root as unconditional Mojo surfaces.
+
+Focused validation passes 6/6 runtime-feature tests in both default and no-default
+`prodex-cli`, and 64/64 `prodex-runtime-launch` library tests in both modes. The
+no-fallback guard and no-default compile checks pass. The canonical source report
+counts **53,551 reachable Mojo LOC** and **191,476 Rust production LOC**, totaling
+**245,027 LOC**: **21.86% Mojo**. The 75% project target remains unmet, with
+**520,877 additional Mojo LOC** required at this Rust volume.
