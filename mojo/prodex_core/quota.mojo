@@ -1,5 +1,8 @@
 from std.memory import Pointer
 
+from rich_text import rich_trim_bounds, rich_view_valid
+from rich_types import ProdexRichStringView, rich_view_ptr
+
 comptime INT64_MAX: Int64 = 9223372036854775807
 comptime INT64_MIN: Int64 = -9223372036854775808
 
@@ -930,3 +933,269 @@ def prodex_quota_blocked_limit_kind(
     if quota_text_contains_ascii_case_insensitive(address, length, StringSlice("weekly")):
         return QUOTA_BLOCKED_KIND_WEEKLY
     return QUOTA_BLOCKED_KIND_EXHAUSTED
+
+comptime QUOTA_MODEL_POLICY_ABI_VERSION: Int64 = 1
+comptime QUOTA_MODEL_POLICY_OK: Int64 = 0
+comptime QUOTA_MODEL_POLICY_INVALID: Int64 = 1
+comptime QUOTA_MODEL_POLICY_CAPACITY: Int64 = 2
+comptime QUOTA_MODEL_POLICY_ABI: Int64 = 4
+
+comptime QUOTA_AUTH_FILTER_ALL: Int64 = 0
+comptime QUOTA_AUTH_FILTER_LABEL: Int64 = 1
+comptime QUOTA_AUTH_FILTER_COMPATIBLE: Int64 = 2
+comptime QUOTA_AUTH_FILTER_INCOMPATIBLE: Int64 = 3
+
+
+def quota_model_policy_view(address: UInt, length: Int64) -> ProdexRichStringView:
+    return ProdexRichStringView(address, UInt(length))
+
+
+def quota_model_policy_ascii_lower(value: UInt8) -> UInt8:
+    if value >= 65 and value <= 90:
+        return value + 32
+    return value
+
+
+def quota_model_policy_trimmed_matches(
+    view: ProdexRichStringView, literal: StringSlice
+) -> Bool:
+    var bounds = rich_trim_bounds(view)
+    var length = bounds[1] - bounds[0]
+    if length != Int64(literal.byte_length()):
+        return False
+    var source = rich_view_ptr(view)
+    var target = literal.unsafe_ptr()
+    for index in range(length):
+        if quota_model_policy_ascii_lower(
+            source[unsafe_offset=bounds[0] + index]
+        ) != target[unsafe_offset=index]:
+            return False
+    return True
+
+
+def quota_plan_type_matches(
+    view: ProdexRichStringView, literal: StringSlice
+) -> Bool:
+    var bounds = rich_trim_bounds(view)
+    var source = rich_view_ptr(view)
+    var target = literal.unsafe_ptr()
+    var target_index: Int64 = 0
+    for index in range(bounds[0], bounds[1]):
+        var value = source[unsafe_offset=index]
+        if value == 32 or value == 45 or value == 95:
+            continue
+        if value >= 0x80:
+            return False
+        if (
+            target_index >= Int64(literal.byte_length())
+            or quota_model_policy_ascii_lower(value)
+            != target[unsafe_offset=target_index]
+        ):
+            return False
+        target_index += 1
+    return target_index == Int64(literal.byte_length())
+
+
+@export("prodex_quota_plan_capacity_pressure_scale_bps_v1")
+def prodex_quota_plan_capacity_pressure_scale_bps_v1(
+    abi_version: Int64,
+    plan_address: UInt,
+    plan_length: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != QUOTA_MODEL_POLICY_ABI_VERSION
+        or plan_length < 0
+        or (plan_length > 0 and plan_address == 0)
+    ):
+        return -1
+    var plan = quota_model_policy_view(plan_address, plan_length)
+    if not rich_view_valid(plan, plan_length):
+        return -1
+    if (
+        quota_plan_type_matches(plan, StringSlice("pro20x"))
+        or quota_plan_type_matches(plan, StringSlice("pro20"))
+        or quota_plan_type_matches(plan, StringSlice("20x"))
+        or quota_plan_type_matches(plan, StringSlice("ultra"))
+        or quota_plan_type_matches(plan, StringSlice("max"))
+    ):
+        return 2_000
+    if (
+        quota_plan_type_matches(plan, StringSlice("pro"))
+        or quota_plan_type_matches(plan, StringSlice("prolite"))
+        or quota_plan_type_matches(plan, StringSlice("pro5x"))
+        or quota_plan_type_matches(plan, StringSlice("5x"))
+    ):
+        return 5_000
+    if (
+        quota_plan_type_matches(plan, StringSlice("free"))
+        or quota_plan_type_matches(plan, StringSlice("basic"))
+    ):
+        return 12_000
+    return 10_000
+
+
+@export("prodex_quota_scale_pressure_for_plan_v1")
+def prodex_quota_scale_pressure_for_plan_v1(
+    abi_version: Int64,
+    pressure: Int64,
+    scale_bps: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if output_address == 0:
+        return QUOTA_MODEL_POLICY_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if pressure == INT64_MAX:
+        output[] = INT64_MAX
+        return QUOTA_MODEL_POLICY_OK
+    var scale = scale_bps
+    if scale < 0:
+        scale = 0
+    var product = Int128(pressure) * Int128(scale)
+    if product > Int128(INT64_MAX):
+        product = Int128(INT64_MAX)
+    elif product < Int128(INT64_MIN):
+        product = Int128(INT64_MIN)
+    output[] = Int64(product) / 10_000
+    return QUOTA_MODEL_POLICY_OK
+
+
+@export("prodex_quota_auth_filter_parse_v1")
+def prodex_quota_auth_filter_parse_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    kind_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if (
+        input_length < 0
+        or output_capacity < 0
+        or written_address == 0
+        or kind_address == 0
+        or (input_length > 0 and input_address == 0)
+        or (output_capacity > 0 and output_address == 0)
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+
+    var view = quota_model_policy_view(input_address, input_length)
+    if not rich_view_valid(view, input_length):
+        return QUOTA_MODEL_POLICY_INVALID
+    var bounds = rich_trim_bounds(view)
+    if bounds[0] == bounds[1]:
+        return QUOTA_MODEL_POLICY_INVALID
+
+    var kind = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(kind_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    kind[] = QUOTA_AUTH_FILTER_LABEL
+    written[] = 0
+
+    if (
+        quota_model_policy_trimmed_matches(view, StringSlice("all"))
+        or quota_model_policy_trimmed_matches(view, StringSlice("*"))
+    ):
+        kind[] = QUOTA_AUTH_FILTER_ALL
+        return QUOTA_MODEL_POLICY_OK
+    if (
+        quota_model_policy_trimmed_matches(
+            view, StringSlice("quota-compatible")
+        )
+        or quota_model_policy_trimmed_matches(view, StringSlice("compatible"))
+    ):
+        kind[] = QUOTA_AUTH_FILTER_COMPATIBLE
+        return QUOTA_MODEL_POLICY_OK
+    if (
+        quota_model_policy_trimmed_matches(
+            view, StringSlice("non-quota-compatible")
+        )
+        or quota_model_policy_trimmed_matches(
+            view, StringSlice("not-quota-compatible")
+        )
+        or quota_model_policy_trimmed_matches(
+            view, StringSlice("quota-incompatible")
+        )
+        or quota_model_policy_trimmed_matches(view, StringSlice("incompatible"))
+    ):
+        kind[] = QUOTA_AUTH_FILTER_INCOMPATIBLE
+        return QUOTA_MODEL_POLICY_OK
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var source = rich_view_ptr(view)
+    var length = bounds[1] - bounds[0]
+    if length > output_capacity:
+        return QUOTA_MODEL_POLICY_CAPACITY
+    for index in range(length):
+        output[unsafe_offset=index] = quota_model_policy_ascii_lower(
+            source[unsafe_offset=bounds[0] + index]
+        )
+    written[] = length
+    return QUOTA_MODEL_POLICY_OK
+
+
+@export("prodex_quota_auth_filter_matches_v1")
+def prodex_quota_auth_filter_matches_v1(
+    abi_version: Int64,
+    kind: Int64,
+    filter_address: UInt,
+    filter_length: Int64,
+    auth_address: UInt,
+    auth_length: Int64,
+    quota_compatible: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != QUOTA_MODEL_POLICY_ABI_VERSION
+        or kind < QUOTA_AUTH_FILTER_ALL
+        or kind > QUOTA_AUTH_FILTER_INCOMPATIBLE
+        or filter_length < 0
+        or auth_length < 0
+        or (filter_length > 0 and filter_address == 0)
+        or (auth_length > 0 and auth_address == 0)
+        or quota_compatible < 0
+        or quota_compatible > 1
+    ):
+        return -1
+    if kind == QUOTA_AUTH_FILTER_ALL:
+        return 1
+    if kind == QUOTA_AUTH_FILTER_COMPATIBLE:
+        return quota_compatible
+    if kind == QUOTA_AUTH_FILTER_INCOMPATIBLE:
+        return 1 - quota_compatible
+
+    var filter = quota_model_policy_view(filter_address, filter_length)
+    var auth = quota_model_policy_view(auth_address, auth_length)
+    if (
+        not rich_view_valid(filter, filter_length)
+        or not rich_view_valid(auth, auth_length)
+        or filter.len != auth.len
+    ):
+        return 0
+    var filter_ptr = rich_view_ptr(filter)
+    var auth_ptr = rich_view_ptr(auth)
+    for index in range(filter_length):
+        if quota_model_policy_ascii_lower(
+            filter_ptr[unsafe_offset=index]
+        ) != quota_model_policy_ascii_lower(auth_ptr[unsafe_offset=index]):
+            return 0
+    return 1
+
+
+@export("prodex_quota_report_sort_next_v1")
+def prodex_quota_report_sort_next_v1(
+    abi_version: Int64, sort: Int64
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION or sort < 0 or sort > 5:
+        return -1
+    return (sort + 1) % 6

@@ -8,6 +8,7 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-quota/src/models.rs",
   "crates/prodex-profile-identity/src/lib.rs",
   "crates/prodex-mojo-core/src/profile_identity.rs",
   "crates/prodex-domain/src/governance/inspection.rs",
@@ -223,6 +224,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-quota/src/models.rs",
   "crates/prodex-profile-identity/src/lib.rs",
   "crates/prodex-domain/src/governance/inspection.rs",
   "crates/prodex-cli/src/runtime_features.rs",
@@ -564,6 +566,7 @@ const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
 const DOCTOR_CARGO_FILE = "crates/prodex-runtime-doctor/Cargo.toml";
 const RUNTIME_PROXY_CARGO_FILE = "crates/prodex-runtime-proxy/Cargo.toml";
+const QUOTA_MODELS_FILE = "crates/prodex-quota/src/models.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
@@ -750,6 +753,19 @@ export function findViolations(files) {
       return [`${filePath}: contains replaced Rust strict schema normalization`];
     }
     return [];
+  });
+  const quotaModelPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== QUOTA_MODELS_FILE) return [];
+    const required = [
+      "prodex_mojo_core::quota::quota_report_sort_next(",
+      "prodex_mojo_core::quota::quota_auth_filter_parse(",
+      "prodex_mojo_core::quota::quota_auth_filter_matches(",
+      "prodex_mojo_core::quota::plan_capacity_pressure_scale_bps(",
+      "prodex_mojo_core::quota::scale_quota_pressure_for_plan(",
+    ];
+    return required
+      .filter((call) => !contents.includes(call))
+      .map((call) => filePath + ": quota model policy must retain Mojo call " + call);
   });
   const quotaPlannerViolations = files
     .filter(([filePath, contents]) => filePath === RUNTIME_QUOTA_FILE &&
@@ -1177,7 +1193,7 @@ export function findViolations(files) {
     ...kiroResponseHelperViolations,
     ...kiroAcpViolations,
     ...deepseekStrictSchemaViolations,
-    ...quotaPlannerViolations,
+    ...quotaModelPolicyViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...cliRuntimeFeatureViolations,

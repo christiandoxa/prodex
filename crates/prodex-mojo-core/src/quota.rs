@@ -623,6 +623,166 @@ pub fn pressure_band(five_hour_status: i64, weekly_status: i64) -> i64 {
     unsafe { prodex_quota_pressure_band(five_hour_status, weekly_status) }
 }
 
+const QUOTA_MODEL_POLICY_ABI_VERSION: i64 = 1;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QuotaAuthFilterPlan {
+    All,
+    Label(String),
+    QuotaCompatible,
+    NonQuotaCompatible,
+}
+
+unsafe extern "C" {
+    fn prodex_quota_plan_capacity_pressure_scale_bps_v1(
+        abi_version: i64,
+        plan_address: u64,
+        plan_length: i64,
+    ) -> i64;
+    fn prodex_quota_scale_pressure_for_plan_v1(
+        abi_version: i64,
+        pressure: i64,
+        scale_bps: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_quota_auth_filter_parse_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+        kind_address: u64,
+    ) -> i64;
+    fn prodex_quota_auth_filter_matches_v1(
+        abi_version: i64,
+        kind: i64,
+        filter_address: u64,
+        filter_length: i64,
+        auth_address: u64,
+        auth_length: i64,
+        quota_compatible: i64,
+    ) -> i64;
+    fn prodex_quota_report_sort_next_v1(abi_version: i64, sort: i64) -> i64;
+}
+
+fn quota_model_policy_status(status: i64) -> Result<(), crate::MojoError> {
+    match status {
+        0 => Ok(()),
+        1 => Err(crate::MojoError::InvalidInput),
+        2 => Err(crate::MojoError::Capacity),
+        4 => Err(crate::MojoError::AbiMismatch),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn plan_capacity_pressure_scale_bps(plan: &str) -> Result<i64, crate::MojoError> {
+    let value = unsafe {
+        prodex_quota_plan_capacity_pressure_scale_bps_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            plan.as_ptr() as usize as u64,
+            i64::try_from(plan.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+        )
+    };
+    (value >= 0)
+        .then_some(value)
+        .ok_or(crate::MojoError::InvalidOutput)
+}
+
+pub fn scale_quota_pressure_for_plan(
+    pressure: i64,
+    scale_bps: i64,
+) -> Result<i64, crate::MojoError> {
+    let mut output = 0_i64;
+    let status = unsafe {
+        prodex_quota_scale_pressure_for_plan_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            pressure,
+            scale_bps,
+            (&mut output as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    Ok(output)
+}
+
+pub fn quota_auth_filter_parse(raw: &str) -> Result<QuotaAuthFilterPlan, crate::MojoError> {
+    let mut output = vec![0_u8; raw.len().max(1)];
+    let mut written = 0_i64;
+    let mut kind = -1_i64;
+    let status = unsafe {
+        prodex_quota_auth_filter_parse_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            raw.as_ptr() as usize as u64,
+            i64::try_from(raw.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+            (&mut kind as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    match kind {
+        0 => Ok(QuotaAuthFilterPlan::All),
+        1 => String::from_utf8(output[..written].to_vec())
+            .map(QuotaAuthFilterPlan::Label)
+            .map_err(|_| crate::MojoError::InvalidOutput),
+        2 => Ok(QuotaAuthFilterPlan::QuotaCompatible),
+        3 => Ok(QuotaAuthFilterPlan::NonQuotaCompatible),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn quota_auth_filter_matches(
+    kind: i64,
+    filter_label: &str,
+    auth_label: &str,
+    quota_compatible: bool,
+) -> Result<bool, crate::MojoError> {
+    let value = unsafe {
+        prodex_quota_auth_filter_matches_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            kind,
+            filter_label.as_ptr() as usize as u64,
+            i64::try_from(filter_label.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            auth_label.as_ptr() as usize as u64,
+            i64::try_from(auth_label.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::from(quota_compatible),
+        )
+    };
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn quota_report_sort_next(sort: i64) -> Result<i64, crate::MojoError> {
+    let value = unsafe { prodex_quota_report_sort_next_v1(QUOTA_MODEL_POLICY_ABI_VERSION, sort) };
+    (0..=5)
+        .contains(&value)
+        .then_some(value)
+        .ok_or(crate::MojoError::InvalidOutput)
+}
+
+#[cfg(all(test, feature = "mojo-quota"))]
+#[test]
+fn quota_model_policy_kernel_preserves_expected_contracts() {
+    assert_eq!(plan_capacity_pressure_scale_bps(" Pro-20x "), Ok(2_000));
+    assert_eq!(scale_quota_pressure_for_plan(-10, 5_000), Ok(-5));
+    assert_eq!(quota_report_sort_next(5), Ok(0));
+    let filter = quota_auth_filter_parse(" CHATGPT ").expect("filter parse");
+    assert_eq!(filter, QuotaAuthFilterPlan::Label("chatgpt".to_string()));
+    assert_eq!(
+        quota_auth_filter_matches(1, "chatgpt", "ChatGPT", true),
+        Ok(true)
+    );
+}
+
 #[cfg(all(test, feature = "mojo-quota"))]
 #[test]
 fn round_f64_matches_rust_float_to_int_semantics() {
