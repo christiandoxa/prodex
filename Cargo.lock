@@ -2938,6 +2938,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "prodex-core",
+ "prodex-mojo-core",
  "prodex-state",
  "rusqlite",
  "same-file",

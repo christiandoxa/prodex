@@ -1,4 +1,4 @@
-use super::first_string_value;
+use super::report::session_value_metadata;
 use std::path::Path;
 
 pub(super) fn session_lines_start_resume_metadata<'a>(
@@ -18,11 +18,8 @@ pub(super) fn session_line_starts_resume_metadata(line: &str) -> bool {
 }
 
 pub(super) fn session_value_starts_resume_metadata(value: &serde_json::Value) -> bool {
-    session_value_resume_id(value).is_some()
-        && value
-            .get("type")
-            .and_then(serde_json::Value::as_str)
-            .is_none_or(|kind| kind == "session_meta")
+    let metadata = session_value_metadata(value);
+    metadata.resume_id.is_some() && matches!(metadata.type_class, 0 | 1)
 }
 
 pub(super) fn session_line_resume_id_matches(line: &str, selector: &str) -> bool {
@@ -49,15 +46,7 @@ pub(super) fn session_line_resume_id_matching_mode(
 }
 
 pub(super) fn session_value_resume_id(value: &serde_json::Value) -> Option<String> {
-    first_string_value(
-        value,
-        &[
-            &["payload", "id"],
-            &["payload", "session_id"],
-            &["id"],
-            &["session_id"],
-        ],
-    )
+    session_value_metadata(value).resume_id
 }
 
 pub(super) fn session_path_id_matches_selector(path: &Path, selector: &str, exact: bool) -> bool {
