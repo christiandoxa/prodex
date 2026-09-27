@@ -2783,6 +2783,7 @@ dependencies = [
 name = "prodex-runtime-broker"
 version = "0.432.2"
 dependencies = [
+ "prodex-mojo-core",
  "prodex-runtime-state",
  "serde",
  "serde_json",
