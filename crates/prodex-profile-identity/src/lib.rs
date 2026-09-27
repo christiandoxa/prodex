@@ -1,5 +1,6 @@
 use anyhow::{Context, Result, bail};
 use base64::Engine;
+use prodex_mojo_core::profile_identity as mojo_profile_identity;
 use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::fmt;
@@ -29,49 +30,22 @@ pub fn find_matching_profile_identity(
     discovered: &[(String, ProfileIdentity)],
     target: &ProfileIdentity,
 ) -> Option<String> {
-    let target_account_id = target.account_id.as_deref().map(normalize_account_id);
-    let target_email = target.email.as_deref().map(normalize_email);
-
-    if let Some(target_account_id) = target_account_id.as_deref() {
-        for (name, identity) in discovered {
-            if identity
-                .account_id
-                .as_deref()
-                .is_some_and(|account_id| normalize_account_id(account_id) == target_account_id)
-                && profile_identity_email_matches_target(identity, target_email.as_deref())
-            {
-                return Some(name.clone());
-            }
-        }
-    }
-
-    let target_email = target_email.as_deref()?;
-    let mut legacy_email_matches = discovered
+    let records = discovered
         .iter()
-        .filter(|(_, identity)| {
-            identity.account_id.is_none()
-                && identity
-                    .email
-                    .as_deref()
-                    .is_some_and(|email| normalize_email(email) == target_email)
-        })
-        .map(|(name, _)| name.clone());
-    let match_name = legacy_email_matches.next()?;
-    legacy_email_matches.next().is_none().then_some(match_name)
-}
-
-fn profile_identity_email_matches_target(
-    identity: &ProfileIdentity,
-    target_email: Option<&str>,
-) -> bool {
-    let Some(target_email) = target_email else {
-        return true;
-    };
-
-    identity
-        .email
-        .as_deref()
-        .is_some_and(|email| normalize_email(email) == target_email)
+        .map(
+            |(_, identity)| mojo_profile_identity::ProfileIdentityRecord {
+                email: identity.email.as_deref(),
+                account_id: identity.account_id.as_deref(),
+            },
+        )
+        .collect::<Vec<_>>();
+    let index = mojo_profile_identity::find_matching_profile_identity(
+        &records,
+        target.account_id.as_deref(),
+        target.email.as_deref(),
+    )
+    .expect("Mojo profile identity matcher returned invalid output")?;
+    discovered.get(index).map(|(name, _)| name.clone())
 }
 
 #[derive(Deserialize)]
@@ -283,7 +257,8 @@ where
 }
 
 pub fn normalize_email(email: &str) -> String {
-    email.trim().to_ascii_lowercase()
+    mojo_profile_identity::normalize_email(email)
+        .expect("Mojo profile email normalization returned invalid output")
 }
 
 pub fn normalize_optional_email(email: impl AsRef<str>) -> Option<String> {
@@ -297,103 +272,43 @@ pub fn normalize_optional_account_id(account_id: impl AsRef<str>) -> Option<Stri
 }
 
 pub fn normalize_account_id(account_id: &str) -> String {
-    account_id.trim().to_string()
+    mojo_profile_identity::normalize_account_id(account_id)
+        .expect("Mojo profile account normalization returned invalid output")
 }
 
 pub fn canonical_profile_identity_key(
     account_id: Option<&str>,
     email: Option<&str>,
 ) -> Option<String> {
-    let account_id = account_id.and_then(normalize_optional_account_id);
-    let email = email.map(normalize_email).filter(|email| !email.is_empty());
-    match (account_id, email) {
-        (Some(account_id), Some(email)) => Some(format!("account:{account_id}|email:{email}")),
-        (Some(account_id), None) => Some(format!("account:{account_id}")),
-        (None, Some(email)) => Some(format!("email:{email}")),
-        (None, None) => None,
-    }
+    mojo_profile_identity::canonical_profile_identity_key(account_id, email)
+        .expect("Mojo canonical profile identity key returned invalid output")
 }
 
 pub fn profile_name_from_email(email: &str) -> String {
-    let normalized = normalize_email(email);
-    let mut profile_name = String::new();
-
-    for ch in normalized.chars() {
-        match ch {
-            'a'..='z' | '0'..='9' | '.' | '_' | '-' => profile_name.push(ch),
-            '@' => profile_name.push('_'),
-            _ => profile_name.push('-'),
-        }
-    }
-
-    let profile_name = profile_name
-        .trim_matches(|ch| matches!(ch, '.' | '_' | '-'))
-        .to_string();
-    if profile_name.is_empty() || profile_name == "." || profile_name == ".." {
-        "profile".to_string()
-    } else {
-        profile_name
-    }
+    mojo_profile_identity::profile_name_from_email(email)
+        .expect("Mojo profile name normalization returned invalid output")
 }
 
 pub fn profile_name_looks_email_derived_for_other_email(profile_name: &str, email: &str) -> bool {
-    let target_base = profile_name_from_email(email);
-    let candidate_base = strip_unique_profile_suffix(profile_name);
-
-    candidate_base != target_base && profile_name_base_looks_email_derived(candidate_base)
-}
-
-fn strip_unique_profile_suffix(profile_name: &str) -> &str {
-    let Some((base, suffix)) = profile_name.rsplit_once('-') else {
-        return profile_name;
-    };
-
-    if !suffix.is_empty()
-        && suffix.chars().all(|ch| ch.is_ascii_digit())
-        && profile_name_base_looks_email_derived(base)
-    {
-        base
-    } else {
-        profile_name
-    }
-}
-
-fn profile_name_base_looks_email_derived(profile_name: &str) -> bool {
-    let Some((local, domain)) = profile_name.rsplit_once('_') else {
-        return false;
-    };
-
-    !local.is_empty()
-        && domain.contains('.')
-        && domain
-            .chars()
-            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '-'))
-        && domain
-            .split('.')
-            .all(|label| !label.is_empty() && !label.starts_with('-') && !label.ends_with('-'))
+    mojo_profile_identity::profile_name_looks_email_derived_for_other_email(profile_name, email)
+        .expect("Mojo profile name derivation check returned invalid output")
 }
 
 pub fn validate_profile_name(name: &str) -> Result<()> {
-    if name.is_empty() {
-        bail!("profile name cannot be empty");
-    }
-
-    if name.contains('/') || name.contains('\\') {
-        bail!("profile name cannot contain path separators");
-    }
-
-    if name == "." || name == ".." {
-        bail!("profile name cannot be '.' or '..'");
-    }
-
-    if !name
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    use mojo_profile_identity::ProfileNameValidation;
+    match mojo_profile_identity::validate_profile_name(name)
+        .expect("Mojo profile name validation returned invalid output")
     {
-        bail!("profile name may only contain letters, numbers, '.', '_' or '-'");
+        ProfileNameValidation::Valid => Ok(()),
+        ProfileNameValidation::Empty => bail!("profile name cannot be empty"),
+        ProfileNameValidation::PathSeparator => {
+            bail!("profile name cannot contain path separators")
+        }
+        ProfileNameValidation::DotPath => bail!("profile name cannot be '.' or '..'"),
+        ProfileNameValidation::InvalidCharacter => {
+            bail!("profile name may only contain letters, numbers, '.', '_' or '-'")
+        }
     }
-
-    Ok(())
 }
 
 pub fn validate_add_profile_options(
@@ -401,15 +316,8 @@ pub fn validate_add_profile_options(
     copy_from_provided: bool,
     copy_current: bool,
 ) -> Result<()> {
-    if codex_home_provided && (copy_from_provided || copy_current) {
-        bail!("--codex-home cannot be combined with --copy-from or --copy-current");
-    }
-
-    if copy_from_provided && copy_current {
-        bail!("use either --copy-from or --copy-current");
-    }
-
-    Ok(())
+    resolve_add_profile_source_kind(codex_home_provided, copy_from_provided, copy_current)
+        .map(|_| ())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -431,20 +339,28 @@ pub fn resolve_add_profile_source_kind(
     copy_from_provided: bool,
     copy_current: bool,
 ) -> Result<AddProfileSourceKind> {
-    validate_add_profile_options(codex_home_provided, copy_from_provided, copy_current)?;
-    Ok(if codex_home_provided {
-        AddProfileSourceKind::ExternalHome
-    } else if copy_current {
-        AddProfileSourceKind::CopyCurrent
-    } else if copy_from_provided {
-        AddProfileSourceKind::CopyFrom
-    } else {
-        AddProfileSourceKind::EmptyManaged
-    })
+    use mojo_profile_identity::AddProfileSourcePlan;
+    match mojo_profile_identity::add_profile_source_plan(
+        codex_home_provided,
+        copy_from_provided,
+        copy_current,
+    )
+    .expect("Mojo add-profile source planner returned invalid output")
+    {
+        AddProfileSourcePlan::ExternalHome => Ok(AddProfileSourceKind::ExternalHome),
+        AddProfileSourcePlan::CopyFrom => Ok(AddProfileSourceKind::CopyFrom),
+        AddProfileSourcePlan::CopyCurrent => Ok(AddProfileSourceKind::CopyCurrent),
+        AddProfileSourcePlan::EmptyManaged => Ok(AddProfileSourceKind::EmptyManaged),
+        AddProfileSourcePlan::ExternalHomeConflict => {
+            bail!("--codex-home cannot be combined with --copy-from or --copy-current")
+        }
+        AddProfileSourcePlan::CopyConflict => bail!("use either --copy-from or --copy-current"),
+    }
 }
 
 pub fn should_activate_profile(active_profile_exists: bool, activate_requested: bool) -> bool {
-    !active_profile_exists || activate_requested
+    mojo_profile_identity::should_activate_profile(active_profile_exists, activate_requested)
+        .expect("Mojo profile activation planner returned invalid output")
 }
 
 pub fn unique_profile_name_for_email(
@@ -492,44 +408,42 @@ pub fn resolve_remove_profile_targets<'a>(
     requested_name: Option<&str>,
     delete_home: bool,
 ) -> Result<Vec<String>> {
+    use mojo_profile_identity::RemoveProfileTargetsPlan;
+
     let profiles = profiles
         .into_iter()
         .map(|(name, managed)| (name.to_string(), managed))
         .collect::<Vec<_>>();
-
-    let target_names = if remove_all {
-        profiles
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>()
-    } else {
-        let Some(name) = requested_name else {
-            bail!("provide a profile name or pass --all");
-        };
-        if !profiles
-            .iter()
-            .any(|(profile_name, _)| profile_name == name)
-        {
-            bail!("profile '{}' does not exist", name);
-        }
-        vec![name.to_string()]
-    };
-
-    if remove_all && delete_home {
-        let external_profiles = profiles
-            .iter()
-            .filter(|(name, managed)| !managed && target_names.contains(name))
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>();
-        if !external_profiles.is_empty() {
+    let records = profiles
+        .iter()
+        .map(
+            |(name, managed)| mojo_profile_identity::ProfileRemovalRecord {
+                name,
+                managed: *managed,
+            },
+        )
+        .collect::<Vec<_>>();
+    match mojo_profile_identity::remove_profile_targets_plan(
+        &records,
+        remove_all,
+        requested_name,
+        delete_home,
+    )
+    .expect("Mojo remove-profile target planner returned invalid output")
+    {
+        RemoveProfileTargetsPlan::All => Ok(profiles.into_iter().map(|(name, _)| name).collect()),
+        RemoveProfileTargetsPlan::One(index) => Ok(vec![profiles[index].0.clone()]),
+        RemoveProfileTargetsPlan::MissingRequested => bail!("provide a profile name or pass --all"),
+        RemoveProfileTargetsPlan::NotFound => {
             bail!(
-                "--delete-home with --all refuses to delete external profiles: {}",
-                external_profiles.join(", ")
-            );
+                "profile '{}' does not exist",
+                requested_name.unwrap_or_default()
+            )
         }
+        RemoveProfileTargetsPlan::ExternalBulk(external_profiles) => bail!(
+            "--delete-home with --all refuses to delete external profiles: {external_profiles}"
+        ),
     }
-
-    Ok(target_names)
 }
 
 pub fn should_delete_profile_home(
@@ -537,16 +451,16 @@ pub fn should_delete_profile_home(
     delete_home: bool,
     codex_home_label: impl std::fmt::Display,
 ) -> Result<bool> {
-    let should_delete_home = delete_home;
-    if !should_delete_home {
-        return Ok(false);
+    use mojo_profile_identity::ProfileHomeDeletePlan;
+    match mojo_profile_identity::profile_home_delete_plan(managed_profile, delete_home)
+        .expect("Mojo profile-home delete planner returned invalid output")
+    {
+        ProfileHomeDeletePlan::Keep => Ok(false),
+        ProfileHomeDeletePlan::Delete => Ok(true),
+        ProfileHomeDeletePlan::RejectExternal => {
+            bail!("refusing to delete external path {}", codex_home_label)
+        }
     }
-
-    if !managed_profile && delete_home {
-        bail!("refusing to delete external path {}", codex_home_label);
-    }
-
-    Ok(true)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
