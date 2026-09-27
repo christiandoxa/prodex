@@ -8,6 +8,8 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-profile-identity/src/lib.rs",
+  "crates/prodex-mojo-core/src/profile_identity.rs",
   "crates/prodex-domain/src/governance/inspection.rs",
   "crates/prodex-mojo-core/build.rs",
   "crates/prodex-mojo-core/src/lib.rs",
@@ -221,6 +223,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-profile-identity/src/lib.rs",
   "crates/prodex-domain/src/governance/inspection.rs",
   "crates/prodex-cli/src/runtime_features.rs",
   "crates/prodex-runtime-launch/src/lib.rs",
@@ -557,6 +560,7 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-runtime-doctor/Cargo.toml", "state-summary-mojo"],
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
+const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
 const DOCTOR_CARGO_FILE = "crates/prodex-runtime-doctor/Cargo.toml";
 const RUNTIME_PROXY_CARGO_FILE = "crates/prodex-runtime-proxy/Cargo.toml";
@@ -807,6 +811,34 @@ export function findViolations(files) {
     return required
       .filter((call) => !contents.includes(call))
       .map((call) => `${filePath}: governance classification must retain Mojo call ${call}`);
+  });
+  const profileIdentityViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== PROFILE_IDENTITY_FILE) return [];
+    const functions = [
+      ["find_matching_profile_identity", "mojo_profile_identity::find_matching_profile_identity("],
+      ["normalize_email", "mojo_profile_identity::normalize_email("],
+      ["normalize_account_id", "mojo_profile_identity::normalize_account_id("],
+      ["canonical_profile_identity_key", "mojo_profile_identity::canonical_profile_identity_key("],
+      ["profile_name_from_email", "mojo_profile_identity::profile_name_from_email("],
+      ["profile_name_looks_email_derived_for_other_email", "mojo_profile_identity::profile_name_looks_email_derived_for_other_email("],
+      ["validate_profile_name", "mojo_profile_identity::validate_profile_name("],
+      ["resolve_add_profile_source_kind", "mojo_profile_identity::add_profile_source_plan("],
+      ["should_activate_profile", "mojo_profile_identity::should_activate_profile("],
+      ["resolve_remove_profile_targets", "mojo_profile_identity::remove_profile_targets_plan("],
+      ["should_delete_profile_home", "mojo_profile_identity::profile_home_delete_plan("],
+    ];
+    const violations = [];
+    for (const [name, requiredCall] of functions) {
+      const expression = new RegExp("\\bpub fn " + name + "(?:<[^>]+>)?\\([^]*?^\\}", "mu");
+      const body = contents.match(expression)?.[0];
+      if (!body?.includes(requiredCall)) {
+        violations.push(filePath + ": " + name + " must retain Mojo profile-identity planning");
+      }
+    }
+    if (/\bfn\s+(?:profile_identity_email_matches_target|strip_unique_profile_suffix|profile_name_base_looks_email_derived)\s*\(/u.test(contents)) {
+      violations.push(filePath + ": contains a retired Rust profile-identity semantic helper");
+    }
+    return violations;
   });
   const cliRuntimeFeatureViolations = files
     .filter(([filePath, contents]) => filePath === CLI_RUNTIME_FEATURE_FILE &&
@@ -1137,7 +1169,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
@@ -1268,6 +1300,13 @@ function selfTest() {
     pub(super) fn kiro_provider_core_try_chat_completion_value_from_response(value: &Value, id: u64) {
       prodex_mojo_core::rich::kiro_rewrite_chat_response_json(value, id)
     }
+    KiroKernelOperation::ModelList;
+    KiroKernelOperation::ModelNotFound;
+    KiroKernelOperation::InvalidRequestError;
+    KiroKernelOperation::UnsupportedPathError;
+    KiroKernelOperation::FinishReason;
+    KiroKernelOperation::AnthropicToolUseBlock;
+    KiroKernelOperation::AnthropicResponse;
     pub fn kiro_provider_core_apply_response_runtime_metadata() {}
   `), []);
   assert.match(kiroChatResponseViolations(`
@@ -1588,9 +1627,9 @@ function selfTest() {
     "pub(crate) fn gemini_system_instruction_from_request() {\n  GeminiRequestContentOperation::SystemInstructionFromRequest;\n  gemini_request_content_kernel();\n}"]]), []);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/optional_fields.rs",
     "fn gemini_apply_optional_request_fields() {}"]])[0], /Rust fallback or oracle/u);
-  assert.deepEqual(findViolations([[ANTHROPIC_MESSAGES_FILE,
+  assert.match(findViolations([[ANTHROPIC_MESSAGES_FILE,
     '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
-  ]]), []);
+  ]]).join("\n"), /feature-off Rust path/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
   ]])[0], /Mojo-owned operation cannot have a feature-off Rust path/u);

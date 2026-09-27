@@ -436,6 +436,38 @@ fn profile_home_delete_and_removed_state_are_planned() {
     assert_eq!(plan.active_profile.as_deref(), Some("backup"));
 }
 
+#[test]
+fn profile_identity_mojo_kernel_preserves_unicode_trim_and_ascii_case_rules() {
+    assert_eq!(
+        normalize_email("\u{2003}ÜSER@Example.COM\u{3000}"),
+        "Üser@example.com"
+    );
+    assert_eq!(profile_name_from_email("雪@EXAMPLE.com"), "example.com");
+    assert_eq!(
+        normalize_account_id("\u{00a0} acct-unicode \u{202f}"),
+        "acct-unicode"
+    );
+
+    let discovered = vec![(
+        "unicode".to_string(),
+        ProfileIdentity {
+            email: Some("ÜSER@Example.COM".to_string()),
+            account_id: Some(" acct-unicode ".to_string()),
+        },
+    )];
+    assert_eq!(
+        find_matching_profile_identity(
+            &discovered,
+            &ProfileIdentity {
+                email: Some("Üser@example.com".to_string()),
+                account_id: Some("\u{2003}acct-unicode\u{3000}".to_string()),
+            },
+        )
+        .as_deref(),
+        Some("unicode")
+    );
+}
+
 fn chatgpt_id_token(email: &str, account_id: Option<&str>) -> String {
     let mut auth = serde_json::Map::new();
     if let Some(account_id) = account_id {

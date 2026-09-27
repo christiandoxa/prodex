@@ -2398,3 +2398,24 @@ catalog configuration test, and governance inspection 4/4. Ownership reports
 **53,551 reachable Mojo LOC** and **191,222 Rust production LOC**, totaling
 **244,773 LOC**: **21.88% Mojo**. The 75% project target remains unmet, with
 **520,115 additional Mojo LOC** required at this Rust volume.
+
+## Profile identity planning migration
+
+Profile identity metadata planning now uses a dedicated reachable Mojo kernel in
+`mojo/prodex_core/profile_identity.mojo`. The migrated owner covers identity
+matching, Unicode-aware email/account normalization, canonical identity keys,
+profile-name derivation and validation, add/remove source policy, activation,
+and managed/external home-deletion decisions. Rust retains JWT/base64 token
+parsing, zeroized secret ownership, caller callbacks for unique-name availability,
+collection reconstruction, and exact human-readable error mapping; no token or
+secret payload crosses the new ABI.
+
+The caller suite passes 22/22 tests, including Unicode White_Space trimming,
+ASCII-only case folding compatibility, ambiguous legacy identity matching, exact
+profile-name validation precedence, add-source conflicts, bulk-removal protection,
+and home-deletion policy. The Mojo ABI has a direct smoke test, the no-fallback
+guard requires the promoted caller functions to retain Mojo dispatch, and ownership
+now reports **47 authoritative operations**. The canonical broad source report
+counts **54,155 reachable Mojo LOC** and **191,548 Rust production LOC**, totaling
+**245,703 LOC**: **22.04% Mojo**. The 75% project target remains unmet, with
+**520,489 additional Mojo LOC** required at this Rust volume.

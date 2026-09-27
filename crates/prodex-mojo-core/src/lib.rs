@@ -98,6 +98,8 @@ pub mod log;
 pub mod observability;
 #[cfg(feature = "mojo-runtime")]
 pub mod policy;
+#[cfg(feature = "mojo-runtime")]
+pub mod profile_identity;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_constraints;
 #[cfg(feature = "mojo-provider-constraints")]
