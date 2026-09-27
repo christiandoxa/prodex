@@ -11,6 +11,7 @@ name = "codex_config"
 path = "src/lib.rs"
 
 [dependencies]
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
 toml = { workspace = true }
 
 [lints]

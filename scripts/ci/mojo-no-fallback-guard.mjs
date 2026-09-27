@@ -8,6 +8,11 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/state_policy.rs",
+  "crates/prodex-state/src/provider_capabilities.rs",
+  "crates/prodex-state/src/lib.rs",
+  "crates/prodex-mojo-core/src/codex_config.rs",
+  "crates/prodex-codex-config/src/lib.rs",
   "crates/prodex-runtime-state/src/background.rs",
   "crates/prodex-mojo-core/src/runtime_state.rs",
   "crates/prodex-redaction/src/lib.rs",
@@ -228,6 +233,9 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-state/src/provider_capabilities.rs",
+  "crates/prodex-state/src/lib.rs",
+  "crates/prodex-codex-config/src/lib.rs",
   "crates/prodex-runtime-state/src/background.rs",
   "crates/prodex-redaction/src/lib.rs",
   "crates/prodex-quota/src/models.rs",
@@ -569,6 +577,9 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
 const RUNTIME_STATE_BACKGROUND_FILE = "crates/prodex-runtime-state/src/background.rs";
+const CODEX_CONFIG_FILE = "crates/prodex-codex-config/src/lib.rs";
+const STATE_FILE = "crates/prodex-state/src/lib.rs";
+const STATE_PROVIDER_FILE = "crates/prodex-state/src/provider_capabilities.rs";
 const REDACTION_FILE = "crates/prodex-redaction/src/lib.rs";
 const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
@@ -876,6 +887,50 @@ export function findViolations(files) {
     }
     if (/\bfn\s+(?:runtime_state_save_sections_rust|runtime_state_save_requires_continuation_journal_rust|runtime_hot_continuation_state_mutation_rust|runtime_background_queue_enqueue_plan_rust)\s*\(/u.test(contents)) {
       violations.push(`${filePath}: contains restored Rust runtime-state policy semantics`);
+    }
+    return violations;
+  });
+  const codexConfigViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== CODEX_CONFIG_FILE) return [];
+    const required = [
+      "prodex_mojo_core::codex_config::profile_name_valid(",
+      "prodex_mojo_core::codex_config::profile_v2_name(",
+      "prodex_mojo_core::codex_config::config_override(",
+      "prodex_mojo_core::codex_config::normalize_value(",
+    ];
+    const violations = required
+      .filter((call) => !contents.includes(call))
+      .map((call) => `${filePath}: Codex config migration must retain Mojo call ${call}`);
+    if (/\bfn\s+(?:parse_config_override_string|parse_config_override_exact_string)\s*\(/u.test(contents) ||
+        /while\s+index\s*<\s*args\.len\(\)/u.test(contents)) {
+      violations.push(`${filePath}: contains retired Rust Codex config argument scanning semantics`);
+    }
+    return violations;
+  });
+  const statePolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === STATE_PROVIDER_FILE) {
+      const required = "prodex_mojo_core::state_policy::provider_capabilities(";
+      const violations = contents.includes(required)
+        ? [] : [`${filePath}: provider capabilities must retain Mojo state policy`];
+      if (contents.includes("ProviderCapabilities::new(")) {
+        violations.push(`${filePath}: contains restored Rust provider capability table`);
+      }
+      return violations;
+    }
+    if (filePath !== STATE_FILE) return [];
+    const required = [
+      "prodex_mojo_core::state_policy::last_run_selection_keep(",
+      "prodex_mojo_core::state_policy::binding_merge_plan(",
+      "prodex_mojo_core::state_policy::binding_keep(",
+      "prodex_mojo_core::state_policy::active_profile_choice(",
+    ];
+    const violations = required
+      .filter((call) => !contents.includes(call))
+      .map((call) => `${filePath}: state migration must retain Mojo call ${call}`);
+    if (/\blet\s+oldest_allowed\s*=\s*now\.saturating_sub\(/u.test(contents) ||
+        /right\.bound_at\s*>\s*left\.bound_at/u.test(contents) ||
+        /existing_selected_at\s*>\s*incoming_selected_at/u.test(contents)) {
+      violations.push(`${filePath}: contains restored Rust state merge/retention semantics`);
     }
     return violations;
   });
@@ -1262,7 +1317,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,

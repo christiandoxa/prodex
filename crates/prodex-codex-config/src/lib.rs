@@ -69,6 +69,10 @@ impl std::error::Error for CodexConfigError {
 pub type CodexConfigResult<T> = Result<T, CodexConfigError>;
 const CODEX_CONFIG_MAX_BYTES: u64 = 1024 * 1024;
 
+fn codex_mojo_args(args: &[OsString]) -> Vec<Option<&str>> {
+    args.iter().map(|arg| arg.to_str()).collect()
+}
+
 impl CodexModelProviderSetting {
     pub fn is_openai(&self) -> bool {
         self.provider_id.eq_ignore_ascii_case("openai")
@@ -171,10 +175,8 @@ pub fn codex_config_exact_value(codex_home: &Path, key: &str) -> CodexConfigResu
 }
 
 pub fn is_valid_codex_profile_v2_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    prodex_mojo_core::codex_config::profile_name_valid(name)
+        .expect("Mojo Codex profile-v2 name validation returned invalid output")
 }
 
 pub fn codex_profile_v2_config_path(codex_home: &Path, profile_v2_name: &str) -> Option<PathBuf> {
@@ -183,30 +185,8 @@ pub fn codex_profile_v2_config_path(codex_home: &Path, profile_v2_name: &str) ->
 }
 
 pub fn codex_cli_profile_v2_name(args: &[OsString]) -> Option<String> {
-    let mut index = 0;
-    while index < args.len() {
-        let Some(arg) = args[index].to_str() else {
-            index += 1;
-            continue;
-        };
-        if arg == "--" {
-            break;
-        }
-        let profile_v2_name = if matches!(arg, "--profile" | "--profile-v2") {
-            index += 1;
-            args.get(index).and_then(|value| value.to_str())
-        } else {
-            arg.strip_prefix("--profile=")
-                .or_else(|| arg.strip_prefix("--profile-v2="))
-        };
-        if let Some(profile_v2_name) =
-            profile_v2_name.filter(|name| is_valid_codex_profile_v2_name(name))
-        {
-            return Some(profile_v2_name.to_string());
-        }
-        index += 1;
-    }
-    None
+    prodex_mojo_core::codex_config::profile_v2_name(&codex_mojo_args(args))
+        .expect("Mojo Codex profile-v2 argument scan returned invalid output")
 }
 
 pub fn codex_config_value_with_profile_v2(
@@ -263,63 +243,18 @@ fn codex_configured_model_provider_with_profile_v2(
 }
 
 pub fn codex_cli_config_override_value(args: &[OsString], key: &str) -> Option<String> {
-    let mut index = 0;
-    let mut found = None;
-    while index < args.len() {
-        let Some(arg) = args[index].to_str() else {
-            index += 1;
-            continue;
-        };
-        if arg == "--" {
-            break;
-        }
-        let assignment = if matches!(arg, "-c" | "--config") {
-            index += 1;
-            args.get(index).and_then(|value| value.to_str())
-        } else if let Some(value) = arg.strip_prefix("--config=") {
-            Some(value)
-        } else if let Some(value) = arg.strip_prefix("-c") {
-            (!value.is_empty() && value.contains('=')).then_some(value)
-        } else {
-            None
-        };
-        if let Some(value) = assignment.and_then(|value| parse_config_override_string(value, key)) {
-            found = Some(value);
-        }
-        index += 1;
-    }
-    found
+    prodex_mojo_core::codex_config::config_override(&codex_mojo_args(args), key)
+        .expect("Mojo Codex config override scan returned invalid output")
+        .and_then(|selection| selection.normalized_value)
 }
 
 pub fn codex_cli_config_override_exact_value(args: &[OsString], key: &str) -> Option<String> {
-    let mut index = 0;
-    let mut found = None;
-    while index < args.len() {
-        let Some(arg) = args[index].to_str() else {
-            index += 1;
-            continue;
-        };
-        if arg == "--" {
-            break;
-        }
-        let assignment = if matches!(arg, "-c" | "--config") {
-            index += 1;
-            args.get(index).and_then(|value| value.to_str())
-        } else if let Some(value) = arg.strip_prefix("--config=") {
-            Some(value)
-        } else if let Some(value) = arg.strip_prefix("-c") {
-            (!value.is_empty() && value.contains('=')).then_some(value)
-        } else {
-            None
-        };
-        if let Some(value) =
-            assignment.and_then(|value| parse_config_override_exact_string(value, key))
-        {
-            found = Some(value);
-        }
-        index += 1;
-    }
-    found
+    let selection = prodex_mojo_core::codex_config::config_override(&codex_mojo_args(args), key)
+        .expect("Mojo Codex exact config override scan returned invalid output")?;
+    let raw_value = selection.raw_value.trim();
+    parse_toml_document_string_value(&format!("{key} = {raw_value}"), key)
+        .ok()
+        .flatten()
 }
 
 pub fn codex_effective_config_value(
@@ -414,44 +349,9 @@ fn codex_non_openai_model_provider_for_args(
     )
 }
 
-fn parse_config_override_string(assignment: &str, expected_key: &str) -> Option<String> {
-    let (key, raw_value) = assignment.split_once('=')?;
-    if key.trim() != expected_key {
-        return None;
-    }
-    normalize_model_provider_value(raw_value)
-}
-
-fn parse_config_override_exact_string(assignment: &str, expected_key: &str) -> Option<String> {
-    let (key, raw_value) = assignment.split_once('=')?;
-    if key.trim() != expected_key {
-        return None;
-    }
-    let raw_value = raw_value.trim();
-    parse_toml_document_string_value(&format!("{expected_key} = {raw_value}"), expected_key)
-        .ok()
-        .flatten()
-}
-
 fn normalize_model_provider_value(raw_value: &str) -> Option<String> {
-    let trimmed = raw_value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let unquoted = if trimmed.len() >= 2 {
-        let first = trimmed.chars().next()?;
-        let last = trimmed.chars().last()?;
-        if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
-            &trimmed[1..trimmed.len() - 1]
-        } else {
-            trimmed
-        }
-    } else {
-        trimmed
-    };
-    let normalized = unquoted.trim();
-    (!normalized.is_empty()).then(|| normalized.to_string())
+    prodex_mojo_core::codex_config::normalize_value(raw_value)
+        .expect("Mojo Codex model-provider normalization returned invalid output")
 }
 
 #[cfg(test)]

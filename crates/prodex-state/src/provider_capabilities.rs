@@ -48,63 +48,45 @@ pub struct ProviderCapabilities {
     pub supports_websocket_reuse: bool,
 }
 
-impl ProviderCapabilities {
-    const fn new(
-        runtime_route_policy: RuntimeRoutePolicy,
-        quota_shape: ProviderQuotaShape,
-        uses_openai_client_format: bool,
-        supports_runtime_rotation: bool,
-    ) -> Self {
-        Self {
-            runtime_route_policy,
-            quota_shape,
-            uses_openai_client_format,
-            supports_runtime_rotation,
-            supports_remote_compact_affinity: supports_runtime_rotation,
-            supports_websocket_reuse: supports_runtime_rotation,
-        }
+fn provider_policy_tag(provider: &ProfileProvider) -> u8 {
+    match provider {
+        ProfileProvider::Openai => 0,
+        ProfileProvider::Gemini { .. } => 1,
+        ProfileProvider::Anthropic { .. } => 2,
+        ProfileProvider::Copilot { .. } => 3,
+        ProfileProvider::Kiro { .. } => 4,
+        ProfileProvider::Agy { .. } => 5,
     }
+}
+
+pub(super) fn provider_runtime_pool_priority(provider: &ProfileProvider) -> usize {
+    prodex_mojo_core::state_policy::provider_capabilities(provider_policy_tag(provider))
+        .expect("Mojo provider capability policy returned invalid output")
+        .provider_priority
 }
 
 impl ProfileProvider {
     pub fn capabilities(&self) -> ProviderCapabilities {
-        match self {
-            Self::Openai => ProviderCapabilities::new(
-                RuntimeRoutePolicy::NativeCodex,
-                ProviderQuotaShape::OpenAiWindows,
-                true,
-                true,
-            ),
-            Self::Gemini { .. } => ProviderCapabilities::new(
-                RuntimeRoutePolicy::ResponsesAdapter,
-                ProviderQuotaShape::GeminiBuckets,
-                true,
-                false,
-            ),
-            Self::Copilot { .. } => ProviderCapabilities::new(
-                RuntimeRoutePolicy::ResponsesAdapter,
-                ProviderQuotaShape::CopilotMonthly,
-                true,
-                false,
-            ),
-            Self::Kiro { .. } => ProviderCapabilities::new(
-                RuntimeRoutePolicy::ResponsesAdapter,
-                ProviderQuotaShape::ExternalStatus,
-                true,
-                false,
-            ),
-            Self::Anthropic { .. } => ProviderCapabilities::new(
-                RuntimeRoutePolicy::ResponsesAdapter,
-                ProviderQuotaShape::ExternalStatus,
-                true,
-                false,
-            ),
-            Self::Agy { .. } => ProviderCapabilities::new(
-                RuntimeRoutePolicy::ExternalCli,
-                ProviderQuotaShape::ExternalStatus,
-                false,
-                false,
-            ),
+        let plan = prodex_mojo_core::state_policy::provider_capabilities(provider_policy_tag(self))
+            .expect("Mojo provider capability policy returned invalid output");
+        ProviderCapabilities {
+            runtime_route_policy: match plan.route_policy {
+                0 => RuntimeRoutePolicy::NativeCodex,
+                1 => RuntimeRoutePolicy::ResponsesAdapter,
+                2 => RuntimeRoutePolicy::ExternalCli,
+                _ => unreachable!("validated Mojo provider route-policy tag"),
+            },
+            quota_shape: match plan.quota_shape {
+                0 => ProviderQuotaShape::OpenAiWindows,
+                1 => ProviderQuotaShape::GeminiBuckets,
+                2 => ProviderQuotaShape::CopilotMonthly,
+                3 => ProviderQuotaShape::ExternalStatus,
+                _ => unreachable!("validated Mojo provider quota-shape tag"),
+            },
+            uses_openai_client_format: plan.uses_openai_client_format,
+            supports_runtime_rotation: plan.supports_runtime_rotation,
+            supports_remote_compact_affinity: plan.supports_remote_compact_affinity,
+            supports_websocket_reuse: plan.supports_websocket_reuse,
         }
     }
 

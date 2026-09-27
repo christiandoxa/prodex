@@ -2612,6 +2612,7 @@ dependencies = [
 name = "prodex-codex-config"
 version = "0.432.2"
 dependencies = [
+ "prodex-mojo-core",
  "toml",
 ]
 
@@ -2972,6 +2973,7 @@ dependencies = [
 name = "prodex-state"
 version = "0.432.2"
 dependencies = [
+ "prodex-mojo-core",
  "prodex-provider-core",
  "serde",
  "serde_json",

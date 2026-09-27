@@ -112,11 +112,7 @@ impl ProfileProvider {
     }
 
     pub fn runtime_pool_priority(&self) -> usize {
-        match self {
-            // Native OpenAI/Codex pool stays primary; other providers are fallback candidates.
-            Self::Openai => 0,
-            _ => 1,
-        }
+        provider_capabilities::provider_runtime_pool_priority(self)
     }
 
     pub fn copilot_matches(&self, host: &str, login: &str) -> bool {
@@ -262,9 +258,14 @@ pub fn prune_last_run_selection_with_retention(
     now: i64,
     retention_seconds: i64,
 ) {
-    let oldest_allowed = now.saturating_sub(retention_seconds);
     selections.retain(|profile_name, timestamp| {
-        profiles.contains_key(profile_name) && *timestamp >= oldest_allowed
+        prodex_mojo_core::state_policy::last_run_selection_keep(
+            profiles.contains_key(profile_name),
+            *timestamp,
+            now,
+            retention_seconds,
+        )
+        .expect("Mojo last-run selection retention policy returned invalid output")
     });
 }
 
@@ -284,34 +285,58 @@ pub fn merge_response_profile_binding(
     left: &ResponseProfileBinding,
     right: &ResponseProfileBinding,
 ) -> ResponseProfileBinding {
-    let bound_at = left.bound_at.max(right.bound_at);
-    if is_hard_binding_conflict_profile(&left.profile_name)
-        || is_hard_binding_conflict_profile(&right.profile_name)
-        || left.profile_name != right.profile_name
-        || matches!(
-            (&left.binding_identity, &right.binding_identity),
-            (Some(left), Some(right)) if left != right
-        )
-    {
-        return ResponseProfileBinding {
-            profile_name: HARD_BINDING_CONFLICT_PROFILE.to_string(),
-            bound_at,
-            binding_identity: None,
-        };
-    }
+    use prodex_mojo_core::state_policy::BindingMergeChoice;
 
-    match (&left.binding_identity, &right.binding_identity) {
-        (Some(_), None) => ResponseProfileBinding {
-            bound_at,
+    let identities_conflict = matches!(
+        (&left.binding_identity, &right.binding_identity),
+        (Some(left), Some(right)) if left != right
+    );
+    let plan = prodex_mojo_core::state_policy::binding_merge_plan(
+        is_hard_binding_conflict_profile(&left.profile_name),
+        is_hard_binding_conflict_profile(&right.profile_name),
+        left.profile_name == right.profile_name,
+        left.binding_identity.is_some(),
+        right.binding_identity.is_some(),
+        identities_conflict,
+        left.bound_at,
+        right.bound_at,
+    )
+    .expect("Mojo response-profile binding merge policy returned invalid output");
+
+    match plan.choice {
+        BindingMergeChoice::Conflict => ResponseProfileBinding {
+            profile_name: HARD_BINDING_CONFLICT_PROFILE.to_string(),
+            bound_at: plan.bound_at,
+            binding_identity: None,
+        },
+        BindingMergeChoice::Left => ResponseProfileBinding {
+            bound_at: plan.bound_at,
             ..left.clone()
         },
-        (None, Some(_)) => ResponseProfileBinding {
-            bound_at,
+        BindingMergeChoice::Right => ResponseProfileBinding {
+            bound_at: plan.bound_at,
             ..right.clone()
         },
-        _ if right.bound_at > left.bound_at => right.clone(),
-        _ => left.clone(),
     }
+}
+
+fn state_policy_binding_keep(
+    binding: &ResponseProfileBinding,
+    profiles: &BTreeMap<String, ProfileEntry>,
+    now: i64,
+    retention_seconds: i64,
+    apply_retention: bool,
+) -> bool {
+    prodex_mojo_core::state_policy::binding_keep(
+        is_hard_binding_conflict_profile(&binding.profile_name),
+        binding.binding_identity.is_some(),
+        profiles.contains_key(&binding.profile_name),
+        binding.bound_at,
+        now,
+        retention_seconds,
+        apply_retention,
+    )
+    .expect("Mojo profile-binding retention policy returned invalid output")
 }
 
 /// Merge hard-owner bindings without selecting one side of a conflicting write.
@@ -333,10 +358,7 @@ pub fn merge_hard_profile_bindings(
             (Some(binding), None) | (None, Some(binding)) => binding.clone(),
             (None, None) => continue,
         };
-        if is_hard_binding_conflict_profile(&binding.profile_name)
-            || profiles.contains_key(&binding.profile_name)
-            || binding.binding_identity.is_some()
-        {
+        if state_policy_binding_keep(&binding, profiles, 0, 0, false) {
             merged.insert(key, binding);
         }
     }
@@ -376,11 +398,8 @@ pub fn prune_profile_bindings_for_housekeeping(
     retention_seconds: i64,
     max_entries: usize,
 ) {
-    let oldest_allowed = now.saturating_sub(retention_seconds);
     bindings.retain(|_, binding| {
-        is_hard_binding_conflict_profile(&binding.profile_name)
-            || (binding.binding_identity.is_some() && binding.bound_at >= oldest_allowed)
-            || (profiles.contains_key(&binding.profile_name) && binding.bound_at >= oldest_allowed)
+        state_policy_binding_keep(binding, profiles, now, retention_seconds, true)
     });
     prune_profile_bindings(bindings, max_entries);
 }
@@ -389,11 +408,7 @@ pub fn prune_profile_bindings_for_housekeeping_without_retention(
     bindings: &mut BTreeMap<String, ResponseProfileBinding>,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) {
-    bindings.retain(|_, binding| {
-        is_hard_binding_conflict_profile(&binding.profile_name)
-            || binding.binding_identity.is_some()
-            || profiles.contains_key(&binding.profile_name)
-    });
+    bindings.retain(|_, binding| state_policy_binding_keep(binding, profiles, 0, 0, false));
 }
 
 pub fn compact_app_state(state: AppState, now: i64) -> AppState {
@@ -521,6 +536,8 @@ fn merge_active_profile(
     incoming: &AppState,
     profiles: &BTreeMap<String, ProfileEntry>,
 ) -> Option<String> {
+    use prodex_mojo_core::state_policy::ActiveProfileChoice;
+
     let existing_active = existing
         .active_profile
         .as_ref()
@@ -529,19 +546,25 @@ fn merge_active_profile(
         .active_profile
         .as_ref()
         .filter(|profile_name| profiles.contains_key(*profile_name));
-    match (existing_active, incoming_active) {
-        (Some(existing_name), Some(incoming_name)) if existing_name != incoming_name => {
-            let existing_selected_at = existing.last_run_selected_at.get(existing_name).copied();
-            let incoming_selected_at = incoming.last_run_selected_at.get(incoming_name).copied();
-            if existing_selected_at > incoming_selected_at {
-                Some(existing_name.clone())
-            } else {
-                Some(incoming_name.clone())
-            }
-        }
-        (_, Some(incoming_name)) => Some(incoming_name.clone()),
-        (Some(existing_name), None) => Some(existing_name.clone()),
-        (None, None) => None,
+    let existing_selected_at =
+        existing_active.and_then(|name| existing.last_run_selected_at.get(name).copied());
+    let incoming_selected_at =
+        incoming_active.and_then(|name| incoming.last_run_selected_at.get(name).copied());
+    let choice = prodex_mojo_core::state_policy::active_profile_choice(
+        existing_active.is_some(),
+        incoming_active.is_some(),
+        matches!(
+            (existing_active, incoming_active),
+            (Some(existing), Some(incoming)) if existing == incoming
+        ),
+        existing_selected_at,
+        incoming_selected_at,
+    )
+    .expect("Mojo active-profile merge policy returned invalid output");
+    match choice {
+        ActiveProfileChoice::None => None,
+        ActiveProfileChoice::Existing => existing_active.cloned(),
+        ActiveProfileChoice::Incoming => incoming_active.cloned(),
     }
 }
 

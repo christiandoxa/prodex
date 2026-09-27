@@ -733,6 +733,28 @@
         "operations": [
           "runtime_state_background_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/state_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "state_core_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/codex_config.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "codex_profile_v2_arg_selection",
+          "codex_config_override_selection",
+          "codex_config_value_normalization"
+        ]
       }
     ],
     "removed": [
@@ -2060,6 +2082,99 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "typed route/status/band tag mapping and stable reason-label reconstruction"
+    },
+    {
+      "name": "codex_profile_v2_arg_selection",
+      "domain": "config/arguments",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_codex_config_profile_v2_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/codex_config.mojo",
+      "consumer": "crates/prodex-codex-config/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::codex_config::profile_v2_name",
+      "production_consumers": [
+        "crates/prodex-codex-config/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/codex_config.rs",
+      "rust_owner_before": "--profile/--profile-v2 scanning, literal-boundary handling and profile-name validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; Codex config tests cover split/inline valid and path-like invalid profile names",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "OsString UTF-8 view preparation, borrowed-slice validation and owned String reconstruction"
+    },
+    {
+      "name": "codex_config_override_selection",
+      "domain": "config/arguments",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_codex_config_override_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/codex_config.mojo",
+      "consumer": "crates/prodex-codex-config/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::codex_config::config_override",
+      "production_consumers": [
+        "crates/prodex-codex-config/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/codex_config.rs",
+      "rust_owner_before": "-c/--config scanning, assignment-key matching, last-value precedence and -- literal cutoff",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; caller tests cover split/inline, repeated override precedence and literal boundary",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "OsString views, TOML decoding of exact selected raw value and result reconstruction"
+    },
+    {
+      "name": "codex_config_value_normalization",
+      "domain": "config/strings",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_codex_config_normalize_value_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/codex_config.mojo",
+      "consumer": "crates/prodex-codex-config/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::codex_config::normalize_value",
+      "production_consumers": [
+        "crates/prodex-codex-config/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/codex_config.rs",
+      "rust_owner_before": "provider-value Unicode trim, matching quote removal and empty-value filtering",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; exact/non-exact override tests preserve whitespace and quote behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "slice-to-owned-String mapping and provider source attribution"
+    },
+    {
+      "name": "state_core_policy",
+      "domain": "state/core-policy",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_state_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/state_policy.mojo",
+      "consumer": "crates/prodex-state/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::state_policy::binding_merge_plan",
+      "production_consumers": [
+        "crates/prodex-state/src/lib.rs",
+        "crates/prodex-state/src/provider_capabilities.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/state_policy.rs",
+      "rust_owner_before": "provider capability table and pool priority, hard-binding merge/retention, active-profile merge precedence, and last-run retention decisions",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; prodex-state caller suite plus direct ABI smoke cover provider classes, binding conflicts, compaction, concurrent state merge and timestamp precedence",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "provider/identity/profile existence mapping, BTreeMap traversal, cloning and validated enum/result reconstruction"
     }
   ],
   "rust_semantic_reductions": [
