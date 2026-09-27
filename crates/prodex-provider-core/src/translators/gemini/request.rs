@@ -5,9 +5,6 @@ use serde_json::Value;
 mod continuation;
 #[path = "request/generation_config.rs"]
 mod generation_config;
-#[cfg(not(feature = "mojo"))]
-#[path = "request/response_format.rs"]
-mod response_format;
 #[path = "request/schema.rs"]
 mod schema;
 #[path = "request/tool_signatures.rs"]
@@ -19,8 +16,6 @@ pub(super) use self::continuation::gemini_continuation_metadata;
 pub use self::generation_config::gemini_provider_core_model_uses_thinking_level;
 #[cfg(not(feature = "mojo"))]
 pub(crate) use self::generation_config::gemini_validate_candidate_count;
-#[cfg(not(feature = "mojo"))]
-pub(super) use self::response_format::gemini_apply_response_format;
 pub(crate) use self::schema::sanitize_function_schema;
 pub(crate) use self::tool_signatures::gemini_preserve_tool_call_signatures;
 pub(super) use self::tools::gemini_tool_from_openai_tool;

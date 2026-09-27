@@ -492,7 +492,9 @@
           "gemini_tool_call_indexing",
           "gemini_request_content_kernel",
           "gemini_system_instruction_from_request",
-          "gemini_bridge_request_kernel"
+          "gemini_bridge_request_kernel",
+          "gemini_translator_request_planning",
+          "gemini_request_content_shape_fallbacks"
         ]
       }
     },
@@ -1725,6 +1727,67 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "typed JSON deserialization, provider usage conversion, tool-call serialization, and pre-kernel field collection"
+    },
+    {
+      "name": "gemini_translator_request_planning",
+      "domain": "provider/gemini",
+      "introduced_in": "0.432.3",
+      "baseline_state": "feature-off Rust request validation/body assembly alongside Mojo translator validation and raw-request kernels",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_gemini_bridge_request_kernel_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "text_contents": 9,
+        "raw_translator_request": 10,
+        "validate_translator_request": 11
+      },
+      "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
+      "consumer_marker": "GeminiBridgeRequestOperation::ValidateTranslatorRequest",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/gemini/request_transform.rs",
+        "crates/prodex-provider-core/src/gemini_bridge.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/request.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
+        "crates/prodex-provider-core/src/translators/gemini/request_contents.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
+      "rust_owner_before": "feature-off local-media scan, candidate validation orchestration, generation-config/body assembly and direct request serialization",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; Gemini translator suite exercises validation, alias precedence, tool history, system instructions, tools, and malformed inputs in both feature modes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "JSON parsing, issue mapping, tool compatibility fallback when TextContents declines non-text history, and serialization around the Mojo bridge kernel"
+    },
+    {
+      "name": "gemini_request_content_shape_fallbacks",
+      "domain": "provider/gemini",
+      "introduced_in": "0.432.3",
+      "baseline_state": "feature-off Rust JSON builders for Gemini content, function-call and function-response parts alongside the Mojo content kernel",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_gemini_request_content_kernel_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "content": 3,
+        "function_call_part": 6,
+        "function_response_part": 7
+      },
+      "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/gemini/request_contents/items.rs",
+      "consumer_marker": "GeminiRequestContentOperation::FunctionCallPart",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/gemini/request_contents/items.rs",
+        "crates/prodex-provider-core/src/translators/gemini/request_contents.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
+      "rust_owner_before": "feature-off JSON assembly for role/parts values, functionCall values and functionResponse values",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; fixed Gemini request-content and translator tests cover text, function calls, tool responses, unicode, malformed arguments and preserved history",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "message/tool parsing, argument decoding, call-id extraction and collection ordering before invoking the content kernel"
     }
   ],
   "rust_semantic_reductions": [

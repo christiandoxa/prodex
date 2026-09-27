@@ -20,7 +20,6 @@ fn gemini_bridge_request_value(input: GeminiBridgeRequestKernelInput<'_>) -> Res
     })
 }
 
-#[cfg(feature = "mojo")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GeminiTranslatorValidationPlan {
     pub tag: i64,
@@ -28,7 +27,6 @@ pub(crate) struct GeminiTranslatorValidationPlan {
     pub detail: Option<String>,
 }
 
-#[cfg(feature = "mojo")]
 pub(crate) fn gemini_bridge_validate_translator(
     body: &[u8],
 ) -> Result<GeminiTranslatorValidationPlan, String> {
@@ -54,7 +52,6 @@ pub(crate) fn gemini_bridge_validate_translator(
     Ok(GeminiTranslatorValidationPlan { tag, index, detail })
 }
 
-#[cfg(feature = "mojo")]
 pub(crate) fn gemini_bridge_raw_translator_request(
     original: &Value,
     system_instruction: Option<&Value>,

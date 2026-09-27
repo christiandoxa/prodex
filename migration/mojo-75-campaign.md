@@ -2252,3 +2252,21 @@ counts **53,551 reachable Mojo LOC** and **192,219 Rust production LOC**,
 totaling **245,770 LOC**: **21.789071% Mojo**. The release floor and ownership
 non-regression checks pass; the 75% project target remains unmet, with
 **523,106 additional Mojo LOC** required at this Rust volume.
+
+## Gemini translator and request-content hard replacement
+
+Gemini translator validation, text-content projection, raw translator request
+assembly, generic content values, function-call parts, and function-response
+parts now use the existing Gemini Mojo request kernels in every provider
+feature mode. The feature-off Rust local-media scan, candidate/body orchestration
+copy, direct request serialization, and three JSON content builders were
+deleted. The tool-history compatibility path remains in Rust only when the
+TextContents kernel intentionally declines non-text histories. The now-unused
+Rust response_format mapper file was removed as dead production source.
+
+The Gemini translator suite passes 43 tests in the default feature mode and 44
+tests with --features mojo. The canonical source report counts **53,551
+reachable Mojo LOC** and **192,116 Rust production LOC**, totaling **245,667
+LOC**: **21.798207% Mojo**. The release floor and ownership non-regression
+checks pass; the 75% project target remains unmet, with **522,797 additional
+Mojo LOC** required at this Rust volume.

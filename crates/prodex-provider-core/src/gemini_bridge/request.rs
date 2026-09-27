@@ -11,7 +11,6 @@ pub use self::exact_output::{
     gemini_provider_core_exact_output_generate_chunk, gemini_provider_core_exact_output_sse_stream,
 };
 pub use self::native_project::gemini_provider_core_native_request_body_with_project;
-#[cfg(feature = "mojo")]
 pub(crate) use self::request_contents::{
     GeminiTranslatorValidationPlan, gemini_bridge_raw_translator_request,
     gemini_bridge_validate_translator,

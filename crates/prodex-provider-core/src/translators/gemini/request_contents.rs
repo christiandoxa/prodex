@@ -7,7 +7,6 @@ mod text;
 
 use serde_json::Value;
 
-#[cfg(feature = "mojo")]
 type GeminiRequestContents = (Option<Value>, Vec<Value>);
 
 pub(crate) fn gemini_request_content_mojo_value(
@@ -44,7 +43,6 @@ pub(crate) fn gemini_request_content_mojo_value_or_panic(
         .unwrap_or_else(|error| panic!("{error}"))
 }
 
-#[cfg(feature = "mojo")]
 fn gemini_request_function_part(
     operation: prodex_mojo_core::provider_constraints::GeminiRequestContentOperation,
     name: &str,
@@ -65,7 +63,6 @@ fn gemini_request_function_part(
     )
 }
 
-#[cfg(feature = "mojo")]
 pub(crate) fn gemini_text_contents_from_request_mojo(
     value: &Value,
 ) -> Result<Option<GeminiRequestContents>, String> {
@@ -98,7 +95,5 @@ pub(crate) fn gemini_text_contents_from_request_mojo(
     Ok(Some((system_instruction, contents)))
 }
 
-#[cfg(not(feature = "mojo"))]
-pub(crate) use self::items::gemini_contains_local_media_path;
 pub(crate) use self::items::gemini_contents_from_request;
 pub(super) use self::system_instruction::gemini_system_instruction_from_request;
