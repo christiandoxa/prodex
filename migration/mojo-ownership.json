@@ -705,6 +705,18 @@
         "operations": [
           "profile_identity_planning"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/redaction.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "redaction_sensitive_key_classification",
+          "redaction_secret_text",
+          "redaction_gateway_privacy"
+        ]
       }
     ],
     "removed": [
@@ -1916,6 +1928,75 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde normalization, error mapping, bridge helper dispatch and public API boundary handling"
+    },
+    {
+      "name": "redaction_sensitive_key_classification",
+      "domain": "privacy/redaction",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_redaction_key_sensitive_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/redaction.mojo",
+      "consumer": "crates/prodex-redaction/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::redaction::key_looks_sensitive",
+      "production_consumers": [
+        "crates/prodex-redaction/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/redaction.rs",
+      "rust_owner_before": "sensitive-key normalization and classification table/pattern matching",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; caller boundary matrix covers exact keys, normalized spellings, suffix and substring sensitivity",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "FFI status mapping and fail-closed caller behavior"
+    },
+    {
+      "name": "redaction_secret_text",
+      "domain": "privacy/redaction",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_redaction_secret_like_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/redaction.mojo",
+      "consumer": "crates/prodex-redaction/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::redaction::redact_secret_like_text",
+      "production_consumers": [
+        "crates/prodex-redaction/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/redaction.rs",
+      "rust_owner_before": "plain-text sensitive field parsing, authorization credential redaction and prefixed API-key token redaction",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; fixed tests cover quoted/unquoted values, cookies, authorization schemes, API-key prefixes, Unicode passthrough and large inputs",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "bounded caller-owned scratch/output buffers, UTF-8 result mapping and fail-closed replacement on ABI errors"
+    },
+    {
+      "name": "redaction_gateway_privacy",
+      "domain": "privacy/redaction",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_redaction_gateway_extra_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/redaction.mojo",
+      "consumer": "crates/prodex-redaction/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::redaction::redact_gateway_text",
+      "production_consumers": [
+        "crates/prodex-redaction/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/redaction.rs",
+      "rust_owner_before": "email-token redaction, canonical UUID preservation and 13-19 digit group redaction",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; fixed tests cover email shape boundaries, UUID preservation, long digit/card groups and mixed Unicode text",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "JSON recursion remains Rust; string privacy classification and rewriting are Mojo-authoritative"
     }
   ],
   "rust_semantic_reductions": [

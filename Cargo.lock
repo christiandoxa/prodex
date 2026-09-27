@@ -2774,6 +2774,7 @@ dependencies = [
 name = "prodex-redaction"
 version = "0.432.2"
 dependencies = [
+ "prodex-mojo-core",
  "serde_json",
 ]
 

@@ -12,6 +12,7 @@ path = "src/lib.rs"
 
 [dependencies]
 serde_json = { workspace = true }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
 
 [lints]
 workspace = true

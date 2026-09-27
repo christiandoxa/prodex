@@ -2437,3 +2437,24 @@ authoritative operations**. The canonical broad source report counts **54,391
 reachable Mojo LOC** and **191,678 Rust production LOC**, totaling **246,069 LOC**:
 **22.10% Mojo**. The 75% project target remains unmet, with **520,643 additional
 Mojo LOC** required at this Rust volume.
+
+## Redaction semantic migration
+
+Sensitive-key classification, secret-like plain-text rewriting, and gateway
+privacy redaction now use a dedicated reachable Mojo owner in
+`mojo/prodex_core/redaction.mojo`. The former Rust implementations for normalized
+secret-key matching, quoted/unquoted sensitive field handling, authorization
+credentials, prefixed API keys, email-token masking, canonical UUID preservation,
+and 13-19 digit group masking were deleted. Rust retains JSON-tree traversal, OS
+argument/environment presentation, caller-owned bounded ABI buffers, UTF-8 result
+mapping, and fail-closed replacement if the Mojo call fails.
+
+Validation passes 10/10 `prodex-redaction` caller tests and the direct Mojo ABI
+smoke test. Boundary fixtures cover cookies, BASIC/Bearer/Token credentials,
+quoted fields, case-insensitive API-key prefixes, Unicode passthrough, large
+non-secret inputs, email-shape boundaries, UUID preservation, and card-like digit
+groups. The no-fallback and authority guards pass, and ownership now reports
+**51 authoritative operations**. The canonical broad source report counts
+**55,161 reachable Mojo LOC** and **191,404 Rust production LOC**, totaling
+**246,565 LOC**: **22.37% Mojo**. The 75% project target remains unmet, with
+**519,051 additional Mojo LOC** required at this Rust volume.
