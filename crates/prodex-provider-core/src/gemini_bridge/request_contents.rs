@@ -97,7 +97,6 @@ pub(crate) fn gemini_bridge_raw_translator_request(
     .map_err(|error| format!("Mojo Gemini raw translator request failed: {error:?}"))
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_simple(body: &[u8]) -> bool {
     let Ok(body) = gemini_bridge_request_bytes(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::SimpleRequest,
@@ -112,7 +111,6 @@ pub(super) fn gemini_bridge_request_simple(body: &[u8]) -> bool {
         .unwrap_or(false)
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_candidate_count(value: &Value) -> Result<(), String> {
     let input = serde_json::to_vec(value)
         .map_err(|error| format!("failed to serialize Gemini candidate-count input: {error}"))?;
@@ -239,7 +237,6 @@ pub(super) fn gemini_bridge_request_body(
     })
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_native_project(
     body: &[u8],
     project_id: &str,
@@ -255,7 +252,6 @@ pub(super) fn gemini_bridge_request_native_project(
     .map_err(|error| format!("Mojo Gemini bridge request kernel failed: {error:?}"))
 }
 
-#[cfg(feature = "mojo")]
 pub(super) fn gemini_bridge_request_without_tool(body: &[u8], tool_name: &str) -> Option<Vec<u8>> {
     let result = gemini_bridge_request_bytes(GeminiBridgeRequestKernelInput {
         operation: GeminiBridgeRequestOperation::RequestBodyWithoutTool,

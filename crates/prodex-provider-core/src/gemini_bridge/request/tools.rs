@@ -122,17 +122,10 @@ pub fn gemini_provider_core_request_body_without_tool(
     body: &[u8],
     tool_name: &str,
 ) -> Option<Vec<u8>> {
-    #[cfg(feature = "mojo")]
-    {
-        let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
-        // Normalize escaped property names and duplicate keys before Mojo scans the bytes.
-        let body = serde_json::to_vec(&value).ok()?;
-        super::request_contents::gemini_bridge_request_without_tool(&body, tool_name)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        crate::translators::gemini_request_body_without_tool(body, tool_name)
-    }
+    let value = serde_json::from_slice::<serde_json::Value>(body).ok()?;
+    // Normalize escaped property names and duplicate keys before Mojo scans the bytes.
+    let body = serde_json::to_vec(&value).ok()?;
+    super::request_contents::gemini_bridge_request_without_tool(&body, tool_name)
 }
 
 pub fn gemini_provider_core_unsupported_tool_fallback_body(

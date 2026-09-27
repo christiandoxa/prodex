@@ -494,7 +494,8 @@
           "gemini_system_instruction_from_request",
           "gemini_bridge_request_kernel",
           "gemini_translator_request_planning",
-          "gemini_request_content_shape_fallbacks"
+          "gemini_request_content_shape_fallbacks",
+          "gemini_bridge_request_fallbacks"
         ]
       }
     },
@@ -1788,6 +1789,39 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "message/tool parsing, argument decoding, call-id extraction and collection ordering before invoking the content kernel"
+    },
+    {
+      "name": "gemini_bridge_request_fallbacks",
+      "domain": "provider/gemini",
+      "introduced_in": "0.432.3",
+      "baseline_state": "feature-gated duplicate bridge/translator adapters for native project stamping, request-body tool removal, simple-request classification and candidate-count validation",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_gemini_bridge_request_kernel_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "native_project": 4,
+        "request_body_without_tool": 5,
+        "simple_request": 6,
+        "validate_candidate_count": 7
+      },
+      "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
+      "consumer_marker": "GeminiBridgeRequestOperation::ValidateCandidateCount",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/request.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/request/native_project.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/request/simple.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/request/tools.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs",
+      "rust_owner_before": "feature-off direct Mojo ABI adapter copies plus translator-level candidate-count and request-body-without-tool fallback helpers",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; Gemini request/translator tests cover simple classification, candidate validation, project stamping, unsupported-tool removal, unicode and malformed input in both feature modes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde normalization, error mapping, bridge helper dispatch and public API boundary handling"
     }
   ],
   "rust_semantic_reductions": [

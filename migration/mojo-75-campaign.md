@@ -2270,3 +2270,19 @@ reachable Mojo LOC** and **192,116 Rust production LOC**, totaling **245,667
 LOC**: **21.798207% Mojo**. The release floor and ownership non-regression
 checks pass; the 75% project target remains unmet, with **522,797 additional
 Mojo LOC** required at this Rust volume.
+
+## Gemini bridge adapter fallback removal
+
+Gemini NativeProject, RequestBodyWithoutTool, SimpleRequest, and
+ValidateCandidateCount now dispatch through the shared bridge request helpers
+in every feature mode. The duplicate direct ABI calls and the translator-level
+candidate-count/request-body fallback helpers and re-exports were deleted.
+Nine wrapper modules involved in this chain are now feature-independent and are
+covered by the unconditional no-fallback guard.
+
+The Gemini translator suite passes 43 tests in the default feature mode and 44
+tests with --features mojo. The canonical source report counts **53,551
+reachable Mojo LOC** and **192,108 Rust production LOC**, totaling **245,659
+LOC**: **21.798916% Mojo**. Release-floor and ownership checks pass; the 75%
+project target remains unmet, with **522,773 additional Mojo LOC** required at
+this Rust volume.

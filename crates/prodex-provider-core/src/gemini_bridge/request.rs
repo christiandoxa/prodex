@@ -136,12 +136,7 @@ pub fn gemini_provider_core_generation_config_from_request(
 pub fn gemini_provider_core_validate_candidate_count(
     value: &serde_json::Value,
 ) -> Result<(), String> {
-    #[cfg(feature = "mojo")]
-    {
-        request_contents::gemini_bridge_request_candidate_count(value)
-    }
-    #[cfg(not(feature = "mojo"))]
-    crate::translators::gemini_validate_candidate_count(value)
+    request_contents::gemini_bridge_request_candidate_count(value)
 }
 
 pub fn gemini_provider_core_generate_content_request_map(
