@@ -2331,3 +2331,27 @@ production-share checks pass. The canonical broad source report now counts
 **53,551 reachable Mojo LOC** and **192,027 Rust production LOC**, totaling
 **245,578 LOC**: **21.81% Mojo**. The 75% project target remains unmet, with
 **522,530 additional Mojo LOC** required at this Rust volume.
+
+## Prodex app feature-off fallback hard replacement
+
+`prodex-app` now carries `prodex_mojo_core` as an unconditional dependency and
+uses the existing Mojo owners even under `--no-default-features`. Rust feature-off
+semantic copies were removed for operational event source/detail planning, ping
+JSONL validation and failure classification, dynamic main-model catalog planning,
+main model/effort resolution, Super Expose route/tool/tunnel policy, Gemini SSE
+tool-call indexing, external catalog index planning, and the DeepSeek native
+web-search capability gate. The obsolete log-summary Rust oracle was deleted.
+Doctor now reports the compiled Mojo runtime instead of a synthetic feature-off
+Rust implementation. The no-fallback guard promotes these app surfaces so a
+`not(feature = "mojo-core")` semantic branch cannot be restored.
+
+Focused validation passes `prodex-app` checks with default features and with
+`--no-default-features`. No-default focused suites pass for ping (28), log stream
+(4), main-model prompt/catalog (10), Super Expose (78), external provider catalog
+(12), Gemini SSE (53), DeepSeek local rewrite (18), and doctor (26, serialized).
+Default focused suites pass for ping (28), log stream (4), main-model prompt/catalog
+(10), and Super Expose (78). No-fallback, ownership, authority, formatting, and
+broad production-share checks pass. The canonical source report counts **53,551
+reachable Mojo LOC** and **191,477 Rust production LOC**, totaling **245,028 LOC**:
+**21.86% Mojo**. The 75% project target remains unmet, with **520,880 additional
+Mojo LOC** required at this Rust volume.

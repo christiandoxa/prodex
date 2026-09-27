@@ -17,7 +17,6 @@ default = ["mojo-core"]
 bench-support = ["dep:prodex_bench_support"]
 allocation-bench-support = ["dep:prodex_bench_support"]
 mojo-quota = [
-    "dep:prodex_mojo_core",
     "prodex_mojo_core/mojo-runtime",
     "prodex_quota/mojo",
     "runtime_proxy_crate/mojo",
@@ -33,7 +32,6 @@ mojo-core = [
     "prodex_provider_core/mojo",
     "prodex_runtime_store/mojo",
     "prodex_runtime_tuning/mojo",
-    "dep:prodex_mojo_core",
     "prodex_mojo_core/mojo-core",
     "prodex_cli/mojo-core",
     "prodex_runtime_quota/mojo",
@@ -62,7 +60,7 @@ prodex_cli = { workspace = true }
 prodex_config = { workspace = true }
 prodex_context = { workspace = true }
 prodex_domain = { workspace = true }
-prodex_mojo_core = { workspace = true, optional = true }
+prodex_mojo_core = { workspace = true, features = ["mojo-core"] }
 prodex_core = { workspace = true }
 prodex_housekeeping = { workspace = true }
 prodex_mcp_stdio = { workspace = true }

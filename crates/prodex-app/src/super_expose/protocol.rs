@@ -105,7 +105,6 @@ impl ExposeTool {
     }
 }
 
-#[cfg(feature = "mojo-core")]
 fn expose_route(method: &str, tool: Option<&str>) -> (ExposeMethod, ExposeTool) {
     use prodex_mojo_core::rich::{SuperExposeMethod, SuperExposeTool};
     let route = prodex_mojo_core::rich::super_expose_route(method, tool)
@@ -136,57 +135,9 @@ fn expose_route(method: &str, tool: Option<&str>) -> (ExposeMethod, ExposeTool) 
     )
 }
 
-#[cfg(not(feature = "mojo-core"))]
-fn expose_route(method: &str, tool: Option<&str>) -> (ExposeMethod, ExposeTool) {
-    let method = match method {
-        "server/discover" => ExposeMethod::ServerDiscover,
-        "initialize" => ExposeMethod::Initialize,
-        "ping" => ExposeMethod::Ping,
-        "tools/list" => ExposeMethod::ToolsList,
-        "tools/call" => ExposeMethod::ToolsCall,
-        "notifications/initialized" | "notifications/cancelled" => ExposeMethod::Notification,
-        _ => ExposeMethod::Unknown,
-    };
-    let tool = match tool.unwrap_or_default() {
-        "prodex_super_start" => ExposeTool::Start,
-        "prodex_super_status" => ExposeTool::Status,
-        "prodex_super_events" => ExposeTool::Events,
-        "prodex_super_result" => ExposeTool::Result,
-        "prodex_super_cancel" => ExposeTool::Cancel,
-        "prodex_super_list" => ExposeTool::List,
-        "prodex_super_exec" => ExposeTool::Exec,
-        "prodex_session_prompt_write" => ExposeTool::SessionPromptWrite,
-        "prodex_session_preempt" => ExposeTool::SessionPreempt,
-        "prodex_session_output_read" => ExposeTool::SessionOutputRead,
-        _ => ExposeTool::Unknown,
-    };
-    (method, tool)
-}
-
-#[cfg(feature = "mojo-core")]
 fn tool_allowed(mode: SuperExposeMode, tool_name: &str) -> bool {
     prodex_mojo_core::rich::super_expose_tool_allowed(mode.exec_only(), tool_name)
         .expect("Mojo Super expose tool policy returned invalid output")
-}
-
-#[cfg(not(feature = "mojo-core"))]
-fn tool_allowed(mode: SuperExposeMode, tool_name: &str) -> bool {
-    if mode.exec_only() {
-        return tool_name == "prodex_super_exec";
-    }
-    matches!(
-        tool_name,
-        "prodex_super_start"
-            | "prodex_super_status"
-            | "prodex_super_events"
-            | "prodex_super_result"
-            | "prodex_super_cancel"
-            | "prodex_super_list"
-            | "prodex_super_exec"
-            | "prodex_session_prompt_write"
-            | "prodex_session_preempt"
-            | "prodex_session_output_read"
-    )
 }
 
 pub(super) struct DispatchContext<'a> {

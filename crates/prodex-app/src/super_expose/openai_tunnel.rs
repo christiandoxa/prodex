@@ -27,8 +27,6 @@ const OPENAI_TUNNEL_CLIENT_READY_POLL: Duration = Duration::from_millis(100);
 const OPENAI_TUNNEL_CLIENT_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
 const OPENAI_TUNNEL_HEALTH_REQUEST_TIMEOUT: Duration = Duration::from_millis(750);
 const OPENAI_TUNNEL_HEALTH_URL_MAX_BYTES: u64 = 4096;
-#[cfg(not(feature = "mojo-core"))]
-const OPENAI_TUNNEL_ID_LENGTH: usize = "tunnel_".len() + 32;
 const OPENAI_TUNNEL_API_KEY_MAX_BYTES: usize = 4096;
 static NEXT_OPENAI_TUNNEL_CONFIG_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -355,15 +353,8 @@ fn remove_inherited_tunnel_configuration(command: &mut Command) {
 }
 
 fn validate_openai_tunnel_id(value: &str) -> Result<()> {
-    #[cfg(feature = "mojo-core")]
     let valid = prodex_mojo_core::rich::super_expose_tunnel_id_valid(value)
         .unwrap_or_else(|error| panic!("Mojo OpenAI tunnel id policy failed: {error:?}"));
-    #[cfg(not(feature = "mojo-core"))]
-    let valid = value.len() == OPENAI_TUNNEL_ID_LENGTH
-        && value.starts_with("tunnel_")
-        && value["tunnel_".len()..]
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit());
     if !valid {
         bail!("OpenAI tunnel id must match tunnel_<32 lowercase letters or digits>")
     }
@@ -418,7 +409,6 @@ fn safe_client_version(output: &Output) -> Option<String> {
         String::from_utf8_lossy(&output.stderr)
     );
     let version = supported_client_version_from_text(&text)?;
-    #[cfg(feature = "mojo-core")]
     {
         let valid = prodex_mojo_core::rich::super_expose_tunnel_client_version_output_valid(&text)
             .unwrap_or_else(|error| {

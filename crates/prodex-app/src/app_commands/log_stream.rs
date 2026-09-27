@@ -312,11 +312,6 @@ fn short_request_id(request: u64) -> String {
     format!("r{:04x}", request & 0xffff)
 }
 
-#[cfg(any(not(feature = "mojo-core"), test))]
-#[path = "log_stream/summary_oracle.rs"]
-mod summary_oracle;
-
-#[cfg(feature = "mojo-core")]
 #[derive(Clone, Copy)]
 enum OperationalDetailFormat {
     Plain,
@@ -324,7 +319,6 @@ enum OperationalDetailFormat {
     Endpoint,
 }
 
-#[cfg(feature = "mojo-core")]
 const OPERATIONAL_DETAIL_SPECS: [(&str, &str, OperationalDetailFormat); 62] = [
     ("profile", "profile", OperationalDetailFormat::Plain),
     ("route", "route", OperationalDetailFormat::Plain),
@@ -427,36 +421,28 @@ fn operational_event_summary(
     source: &str,
     fields: &BTreeMap<String, String>,
 ) -> String {
-    #[cfg(feature = "mojo-core")]
-    {
-        let plan = prodex_mojo_core::observability::operational_event_detail_plan(
-            source,
-            event == "first_local_chunk",
-        )
-        .unwrap_or_else(|error| panic!("Mojo operational detail plan failed: {error:?}"));
-        let mut details = Vec::new();
-        for detail in plan {
-            let (key, label, format) = OPERATIONAL_DETAIL_SPECS
-                .get(usize::try_from(detail).expect("validated Mojo detail index"))
-                .copied()
-                .expect("validated Mojo operational detail");
-            match format {
-                OperationalDetailFormat::Plain => add_log_detail(&mut details, fields, key, label),
-                OperationalDetailFormat::Percent => {
-                    add_log_percent_detail(&mut details, fields, key, label)
-                }
-                OperationalDetailFormat::Endpoint => {
-                    add_log_endpoint_detail(&mut details, fields, key, label)
-                }
+    let plan = prodex_mojo_core::observability::operational_event_detail_plan(
+        source,
+        event == "first_local_chunk",
+    )
+    .unwrap_or_else(|error| panic!("Mojo operational detail plan failed: {error:?}"));
+    let mut details = Vec::new();
+    for detail in plan {
+        let (key, label, format) = OPERATIONAL_DETAIL_SPECS
+            .get(usize::try_from(detail).expect("validated Mojo detail index"))
+            .copied()
+            .expect("validated Mojo operational detail");
+        match format {
+            OperationalDetailFormat::Plain => add_log_detail(&mut details, fields, key, label),
+            OperationalDetailFormat::Percent => {
+                add_log_percent_detail(&mut details, fields, key, label)
+            }
+            OperationalDetailFormat::Endpoint => {
+                add_log_endpoint_detail(&mut details, fields, key, label)
             }
         }
-        join_log_details(&human_event_name(event), details)
     }
-
-    #[cfg(not(feature = "mojo-core"))]
-    {
-        summary_oracle::operational_event_summary(event, source, fields)
-    }
+    join_log_details(&human_event_name(event), details)
 }
 
 fn display_log_field<'a>(fields: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {

@@ -2,7 +2,6 @@ use super::*;
 use std::ffi::OsString;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[cfg(feature = "mojo-core")]
 #[test]
 fn external_catalog_model_indices_preserve_unicode_and_long_ids() {
     let long_upper = format!("{}-MODEL", "A".repeat(65_537));
@@ -28,7 +27,6 @@ fn external_catalog_model_indices_preserve_unicode_and_long_ids() {
     );
 }
 
-#[cfg(feature = "mojo-core")]
 #[test]
 fn external_provider_launch_uses_first_dynamic_match_and_preserves_os_args() {
     let duplicate_ids = [" gpt-5.3-codex ", "GPT-5.3-CODEX", "copilot-dynamic-only"];

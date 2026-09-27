@@ -760,9 +760,6 @@ fn runtime_deepseek_uses_native_web_search(
         .ok()
         .and_then(|value| value.get("web_search_options").cloned())
         .is_some();
-    if native && !cfg!(feature = "mojo-core") {
-        anyhow::bail!("DeepSeek native Anthropic web-search translation requires Mojo support");
-    }
     Ok(native)
 }
 

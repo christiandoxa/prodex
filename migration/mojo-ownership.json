@@ -2087,7 +2087,7 @@
       "previous_responsibility": "Rust catalog filtering, ordering, deduplication, visibility, and selectable-choice construction",
       "final_state": "adapter-only",
       "rust_before": "crates/prodex-app/src/app_commands/super_main_catalog.rs::main_model_choices_from_catalog",
-      "rust_after": "adapter-only; Mojo owns catalog choice planning in the production mojo-core build",
+      "rust_after": "adapter-only; Mojo owns catalog choice planning in every app feature mode",
       "mojo_owner": "mojo/prodex_core/rich_catalog.mojo::prodex_mojo_rich_catalog_choices_v2",
       "mojo_source": "mojo/prodex_core/rich_catalog.mojo",
       "mojo_entry": "prodex_mojo_rich_catalog_choices_v2",
@@ -2095,15 +2095,15 @@
       "parity_test": "crates/prodex-provider-core/src/catalog_parity_tests.rs",
       "cleanup_loc": 84,
       "cleanup_source": {
-        "kind": "feature-gated",
+        "kind": "collapsed-adapter",
         "baseline_range": {
           "start": 233,
           "end": 318
         },
-        "release_symbol": "main_model_choices_from_catalog_rust",
-        "release_gate": "#[cfg(any(not(feature = \"mojo-core\"), test))]"
+        "release_symbol": "pub(super) fn main_model_choices_from_catalog",
+        "release_marker": "main_model_choices_from_catalog_mojo("
       },
-      "cleanup_evidence": "The production feature path constructs bounded DTOs, calls Mojo, and maps validated choice tags; the Rust algorithm remains only for non-mojo/test compilation."
+      "cleanup_evidence": "The public Rust entry is now an unconditional adapter to the Mojo-backed catalog planner; the feature-off Rust catalog algorithm and test oracle were deleted."
     },
     {
       "file": "crates/prodex-app/src/app_commands/super_main_prompt.rs",
@@ -2120,15 +2120,15 @@
       "parity_test": "crates/prodex-app/src/app_commands/super_main_prompt/tests/super_main_prompt_tests.rs",
       "cleanup_loc": 78,
       "cleanup_source": {
-        "kind": "feature-gated",
+        "kind": "collapsed-adapter",
         "baseline_range": {
           "start": 18,
           "end": 98
         },
-        "release_symbol": "resolve_main_model_and_effort",
-        "release_gate": "#[cfg(not(feature = \"mojo-core\"))]"
+        "release_symbol": "pub(super) fn resolve_main_model_and_effort",
+        "release_marker": "resolve_main_model_and_effort_mojo("
       },
-      "cleanup_evidence": "The mojo-core production path supplies explicit, remembered, provider-default, catalog-default, and supported-effort inputs to one Mojo plan and maps its validated output."
+      "cleanup_evidence": "The public Rust entry now delegates unconditionally to the Mojo-backed configuration adapter; the feature-off Rust precedence resolver was deleted."
     },
     {
       "file": "crates/prodex-runtime-policy/src/types.rs",

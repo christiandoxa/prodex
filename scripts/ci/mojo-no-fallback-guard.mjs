@@ -33,6 +33,17 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/render/model_capacity.rs",
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-app/src/app_commands/status.rs",
+  "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
+  "crates/prodex-app/src/super_expose/protocol.rs",
+  "crates/prodex-app/src/super_expose/openai_tunnel.rs",
+  "crates/prodex-app/src/app_commands/log_event_source.rs",
+  "crates/prodex-app/src/app_commands/log_stream.rs",
+  "crates/prodex-app/src/app_commands/ping.rs",
+  "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+  "crates/prodex-app/src/app_commands/super_main_prompt.rs",
+  "crates/prodex-app/src/app_commands/doctor.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_tool_calls.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_deepseek_send.rs",
   "crates/prodex-quota/src/render.rs",
   "crates/prodex-quota/src/render/remaining_percent.rs",
   "crates/prodex-quota/src/render/quota_policy.rs",
@@ -997,9 +1008,9 @@ export function findViolations(files) {
     if (filePath !== "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs") return [];
     const body = contents.match(/\bpub\(super\) fn external_catalog_model_indices\([^]*?^\}/mu)?.[0];
     return body?.includes("merge_catalog_ids(") &&
-      body.includes('bail!("external provider catalog planning requires') &&
+      !FEATURE_OFF_RUST_PATH.test(body) &&
       !/\b(?:BTreeSet|to_ascii_lowercase)\b/u.test(body)
-      ? [] : [`${filePath}: catalog dedup must use Mojo or reject feature-off use`];
+      ? [] : [`${filePath}: catalog dedup must use Mojo without a feature-off Rust path`];
   });
   const deepseekShapingViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== DEEPSEEK_SHAPING_FILE) return [];
