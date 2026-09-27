@@ -1,0 +1,282 @@
+from std.memory import Pointer
+
+from rich_text import rich_codepoint, rich_codepoint_width, rich_view_ptr, rich_view_valid
+from rich_types import ProdexRichStringView
+
+comptime LINEAGE_ABI_VERSION: Int64 = 1
+comptime LINEAGE_OK: Int64 = 0
+comptime LINEAGE_INVALID: Int64 = 1
+comptime LINEAGE_CAPACITY: Int64 = 3
+comptime COMPONENT_MAX_BYTES: Int64 = 1024
+comptime KEY_MAX_BYTES: Int64 = 4096
+
+comptime COMPACT_SESSION_PREFIX = "__compact_session__:"
+comptime COMPACT_TURN_PREFIX = "__compact_turn_state__:"
+comptime RESPONSE_TURN_PREFIX = "__response_turn_state__:"
+comptime INVALID_SUFFIX = "__invalid__"
+
+def view(address: UInt, length: Int64) -> ProdexRichStringView:
+    return ProdexRichStringView(address, UInt(length))
+
+def valid_text(address: UInt, length: Int64, limit: Int64) -> Bool:
+    if length < 0 or length > limit or (length > 0 and address == 0):
+        return False
+    return rich_view_valid(view(address, length), limit)
+
+def text_has_control(address: UInt, length: Int64) -> Bool:
+    if length == 0:
+        return False
+    var input = view(address, length)
+    var source = rich_view_ptr(input)
+    var index: Int64 = 0
+    while index < length:
+        var width = rich_codepoint_width(source[unsafe_offset=index])
+        var codepoint = rich_codepoint(source, index, width)
+        if codepoint <= 31 or (codepoint >= 127 and codepoint <= 159):
+            return True
+        index += width
+    return False
+
+def valid_component(address: UInt, length: Int64) -> Bool:
+    return (
+        length > 0
+        and valid_text(address, length, COMPONENT_MAX_BYTES)
+        and not text_has_control(address, length)
+    )
+
+def valid_key(address: UInt, length: Int64) -> Bool:
+    return (
+        length > 0
+        and valid_text(address, length, KEY_MAX_BYTES)
+        and not text_has_control(address, length)
+    )
+
+def prefix_matches[address_literal: StaticString](
+    address: UInt, length: Int64
+) -> Bool:
+    var n = Int64(address_literal.byte_length())
+    if length < n or address == 0:
+        return False
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](unsafe_from_address=Int(address))
+    var wanted = address_literal.unsafe_ptr()
+    for index in range(n):
+        if source[unsafe_offset=index] != wanted[unsafe_offset=index]:
+            return False
+    return True
+
+@export("prodex_runtime_lineage_classify_v1")
+def prodex_runtime_lineage_classify_v1(
+    abi_version: Int64,
+    kind: Int64,
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if abi_version != LINEAGE_ABI_VERSION:
+        return -1
+    if kind == 0:
+        return Int64(valid_component(address, length))
+    if kind == 1:
+        return Int64(valid_key(address, length))
+    if length < 0 or (length > 0 and address == 0):
+        return -1
+    if kind == 2:
+        return Int64(prefix_matches[RESPONSE_TURN_PREFIX](address, length))
+    if kind == 3:
+        return Int64(prefix_matches[COMPACT_SESSION_PREFIX](address, length))
+    return -1
+
+def emit_literal[literal: StaticString](
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var n = Int64(literal.byte_length())
+    if written[] < 0 or written[] + n > capacity:
+        return False
+    var source = literal.unsafe_ptr()
+    for index in range(n):
+        output[unsafe_offset=written[] + index] = source[unsafe_offset=index]
+    written[] += n
+    return True
+
+def emit_input(
+    address: UInt,
+    length: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if length < 0 or written[] < 0 or written[] + length > capacity:
+        return False
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](unsafe_from_address=Int(address))
+    for index in range(length):
+        output[unsafe_offset=written[] + index] = source[unsafe_offset=index]
+    written[] += length
+    return True
+
+def decimal_digit(value: Int64) -> UInt8:
+    if value == 0:
+        return 48
+    if value == 1:
+        return 49
+    if value == 2:
+        return 50
+    if value == 3:
+        return 51
+    if value == 4:
+        return 52
+    if value == 5:
+        return 53
+    if value == 6:
+        return 54
+    if value == 7:
+        return 55
+    if value == 8:
+        return 56
+    return 57
+
+def emit_decimal_component_length(
+    value: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if value < 0 or value > COMPONENT_MAX_BYTES:
+        return False
+    var digits: Int64 = 1
+    if value >= 1000:
+        digits = 4
+    elif value >= 100:
+        digits = 3
+    elif value >= 10:
+        digits = 2
+    if written[] + digits > capacity:
+        return False
+    if value >= 1000:
+        output[unsafe_offset=written[]] = decimal_digit((value // 1000) % 10)
+        written[] += 1
+    if value >= 100:
+        output[unsafe_offset=written[]] = decimal_digit((value // 100) % 10)
+        written[] += 1
+    if value >= 10:
+        output[unsafe_offset=written[]] = decimal_digit((value // 10) % 10)
+        written[] += 1
+    output[unsafe_offset=written[]] = decimal_digit(value % 10)
+    written[] += 1
+    return True
+
+@export("prodex_runtime_lineage_build_v1")
+def prodex_runtime_lineage_build_v1(
+    abi_version: Int64,
+    kind: Int64,
+    first_address: UInt,
+    first_length: Int64,
+    second_address: UInt,
+    second_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != LINEAGE_ABI_VERSION
+        or kind < 0
+        or kind > 2
+        or output_address == 0
+        or written_address == 0
+        or output_capacity < 1
+        or output_capacity > KEY_MAX_BYTES
+    ):
+        return LINEAGE_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))
+    written[] = 0
+
+    var first_valid = valid_component(first_address, first_length)
+    var second_valid = kind != 2 or valid_component(second_address, second_length)
+    if kind == 0:
+        if not emit_literal[COMPACT_SESSION_PREFIX](output, output_capacity, written):
+            return LINEAGE_CAPACITY
+    elif kind == 1:
+        if not emit_literal[COMPACT_TURN_PREFIX](output, output_capacity, written):
+            return LINEAGE_CAPACITY
+    else:
+        if not emit_literal[RESPONSE_TURN_PREFIX](output, output_capacity, written):
+            return LINEAGE_CAPACITY
+
+    if not first_valid or not second_valid:
+        if not emit_literal[INVALID_SUFFIX](output, output_capacity, written):
+            return LINEAGE_CAPACITY
+        return LINEAGE_OK
+
+    if kind == 0 or kind == 1:
+        if not emit_input(first_address, first_length, output, output_capacity, written):
+            return LINEAGE_CAPACITY
+        return LINEAGE_OK
+
+    if (
+        not emit_decimal_component_length(first_length, output, output_capacity, written)
+        or not emit_literal[":"](output, output_capacity, written)
+        or not emit_input(first_address, first_length, output, output_capacity, written)
+        or not emit_literal[":"](output, output_capacity, written)
+        or not emit_input(second_address, second_length, output, output_capacity, written)
+    ):
+        return LINEAGE_CAPACITY
+    return LINEAGE_OK
+
+@export("prodex_runtime_lineage_parts_v1")
+def prodex_runtime_lineage_parts_v1(
+    abi_version: Int64,
+    address: UInt,
+    length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LINEAGE_ABI_VERSION or output_address == 0:
+        return LINEAGE_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    for index in range(4):
+        output[unsafe_offset=index] = -1
+    if length < 0 or (length > 0 and address == 0):
+        return LINEAGE_INVALID
+    if not prefix_matches[RESPONSE_TURN_PREFIX](address, length):
+        return LINEAGE_OK
+
+    var prefix_length = Int64(RESPONSE_TURN_PREFIX.byte_length())
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](unsafe_from_address=Int(address))
+    var cursor = prefix_length
+    var digits_start = cursor
+    var response_length: Int64 = 0
+    while cursor < length:
+        var byte = source[unsafe_offset=cursor]
+        if byte == 58:
+            break
+        if byte < 48 or byte > 57:
+            return LINEAGE_OK
+        var digit = Int64(byte) - 48
+        if response_length <= COMPONENT_MAX_BYTES:
+            response_length = response_length * 10 + digit
+            if response_length > COMPONENT_MAX_BYTES:
+                response_length = COMPONENT_MAX_BYTES + 1
+        cursor += 1
+    if cursor == digits_start or cursor >= length or source[unsafe_offset=cursor] != 58:
+        return LINEAGE_OK
+    if response_length > COMPONENT_MAX_BYTES:
+        return LINEAGE_OK
+
+    var response_start = cursor + 1
+    var response_end = response_start + response_length
+    if response_end >= length or source[unsafe_offset=response_end] != 58:
+        return LINEAGE_OK
+    var turn_start = response_end + 1
+    var turn_end = length
+    if not valid_component(
+        address + UInt(response_start), response_end - response_start
+    ):
+        return LINEAGE_OK
+    if not valid_component(address + UInt(turn_start), turn_end - turn_start):
+        return LINEAGE_OK
+
+    output[unsafe_offset=0] = response_start
+    output[unsafe_offset=1] = response_end
+    output[unsafe_offset=2] = turn_start
+    output[unsafe_offset=3] = turn_end
+    return LINEAGE_OK
