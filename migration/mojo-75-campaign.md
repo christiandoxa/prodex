@@ -2498,3 +2498,27 @@ operations**. The canonical broad source report counts **55,427 reachable Mojo
 LOC** and **191,610 Rust production LOC**, totaling **247,037 LOC**: **22.44%
 Mojo**. The 75% project target remains unmet, with **519,403 additional Mojo
 LOC** required at this Rust volume.
+
+## State core policy and Codex config argument migration
+
+prodex-state now delegates its deterministic core policy to
+mojo/prodex_core/state_policy.mojo: provider route/quota capability selection
+and pool priority, hard-binding conflict/winner policy, active-profile merge
+precedence, last-run retention, and binding retention. Rust retains profile and
+identity lookups, BTreeMap traversal, cloning, size pruning, filesystem-backed
+state ownership, and validated enum/result reconstruction.
+
+prodex-codex-config now delegates profile-v2 argument selection, -c/--config
+override scanning (including last-value precedence and -- cutoff), profile-name
+validation, and provider-value Unicode trim/quote normalization to
+mojo/prodex_core/codex_config.mojo. Rust retains OsString ownership,
+non-UTF-8 opacity, bounded config-file I/O, TOML parsing, profile path
+construction, and source attribution.
+
+Focused validation passes 11/11 prodex-state tests, 19/19
+prodex-codex-config tests, and direct Mojo ABI smoke tests for both kernels.
+The no-fallback self-test, ownership, and authority guards pass; ownership now
+reports **57 authoritative operations**. The canonical broad source report counts
+**55,946 reachable Mojo LOC** and **191,882 Rust production LOC**, totaling
+**247,828 LOC**: **22.57% Mojo**. The 75% project target remains unmet, with
+**519,700 additional Mojo LOC** required at this Rust volume.

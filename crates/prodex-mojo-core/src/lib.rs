@@ -90,6 +90,8 @@ fn compiled_core_self_test_passes() {
 }
 
 #[cfg(feature = "mojo-runtime")]
+pub mod codex_config;
+#[cfg(feature = "mojo-runtime")]
 pub mod context;
 #[cfg(feature = "mojo-routing")]
 #[cfg(feature = "mojo-rich")]
@@ -120,6 +122,8 @@ pub mod runtime;
 pub mod runtime_decisions;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_state;
+#[cfg(feature = "mojo-runtime")]
+pub mod state_policy;
 
 #[cfg(feature = "mojo-runtime")]
 pub mod launch;
