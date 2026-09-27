@@ -769,6 +769,17 @@
           "broker_continuity_route_classification",
           "broker_health_key_classification"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_proxy_request.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_proxy_request_metadata_policy",
+          "runtime_proxy_path_policy"
+        ]
       }
     ],
     "removed": [
@@ -2304,6 +2315,52 @@
       "rust_owner_before": "route-health/internal/profile key prefix classification",
       "rust_test_oracle": "deleted; degraded-health metrics fixtures cover route, profile and internal keys",
       "rust_adapter_scope": "metric counter mutation after validated key-kind tag"
+    },
+    {
+      "name": "runtime_proxy_request_metadata_policy",
+      "domain": "runtime-proxy/request-metadata",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_proxy_request_metadata_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_proxy_request.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::json::runtime_proxy_request_metadata",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/lib.rs",
+      "rust_owner_before": "request JSON field precedence, previous-response tool-output affinity classification, fresh-fallback shape classification, and full-history reconstructability scan",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the runtime-proxy caller suite covers metadata precedence, tool-output affinity, fallback shapes, session/turn/thread/window identifiers and full-history recovery",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "serde_json parsing/tree adaptation, caller-owned request mutation/serialization, header precedence and validated String reconstruction"
+    },
+    {
+      "name": "runtime_proxy_path_policy",
+      "domain": "runtime-proxy/path-routing",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_proxy_path_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_proxy_request.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_proxy_path_plan",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/lib.rs",
+      "rust_owner_before": "Prodex/OpenAI mount normalization, legacy version-segment recognition, responses/chat/compact/realtime path classification, route-lane selection and long-lived request classification",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; runtime-proxy path tests cover legacy/current mounts, queries, realtime live paths, route lanes and long-lived classification",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed suffix/query reconstruction and RuntimeRouteKind mapping from validated Mojo tags"
     }
   ],
   "rust_semantic_reductions": [

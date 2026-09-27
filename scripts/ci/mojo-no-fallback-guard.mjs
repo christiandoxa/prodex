@@ -8,6 +8,7 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-runtime-proxy/src/lib.rs",
   "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
   "crates/prodex-runtime-broker/src/continuity.rs",
   "crates/prodex-mojo-core/src/state_policy.rs",
@@ -235,6 +236,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-runtime-proxy/src/lib.rs",
   "crates/prodex-runtime-broker/src/continuity.rs",
   "crates/prodex-state/src/provider_capabilities.rs",
   "crates/prodex-state/src/lib.rs",
@@ -580,6 +582,7 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
 const RUNTIME_STATE_BACKGROUND_FILE = "crates/prodex-runtime-state/src/background.rs";
+const RUNTIME_PROXY_ROOT_FILE = "crates/prodex-runtime-proxy/src/lib.rs";
 const BROKER_CONTINUITY_FILE = "crates/prodex-runtime-broker/src/continuity.rs";
 const CODEX_CONFIG_FILE = "crates/prodex-codex-config/src/lib.rs";
 const STATE_FILE = "crates/prodex-state/src/lib.rs";
@@ -891,6 +894,23 @@ export function findViolations(files) {
     }
     if (/\bfn\s+(?:runtime_state_save_sections_rust|runtime_state_save_requires_continuation_journal_rust|runtime_hot_continuation_state_mutation_rust|runtime_background_queue_enqueue_plan_rust)\s*\(/u.test(contents)) {
       violations.push(`${filePath}: contains restored Rust runtime-state policy semantics`);
+    }
+    return violations;
+  });
+  const runtimeProxyRootViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== RUNTIME_PROXY_ROOT_FILE) return [];
+    const required = [
+      "prodex_mojo_core::json::runtime_proxy_request_metadata(",
+      "prodex_mojo_core::rich::runtime_proxy_path_plan(",
+    ];
+    const violations = required
+      .filter((call) => !contents.includes(call))
+      .map((call) => filePath + ": runtime proxy root migration must retain Mojo call " + call);
+    if (/\bfn\s+(?:runtime_proxy_legacy_version_segment|runtime_request_value_previous_response_input_item_is_tool_output|runtime_input_is_reconstructable_full_history)\s*\(/u.test(contents)) {
+      violations.push(filePath + ": contains retired Rust runtime proxy path/request semantic helper");
+    }
+    if (/\.get\("previous_response_id"\)[^;]{0,500}previous_response_fresh_fallback_shape/su.test(contents)) {
+      violations.push(filePath + ": contains restored Rust previous-response request-shape semantics");
     }
     return violations;
   });
@@ -1338,7 +1358,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...runtimeProxyRootViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,

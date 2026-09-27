@@ -14,7 +14,9 @@ pub const RICH_ABI_VERSION: i64 = 6;
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
 mod routing;
-pub use routing::{WebsocketEventKind, websocket_event_kind};
+pub use routing::{
+    RuntimeProxyPathPlan, WebsocketEventKind, runtime_proxy_path_plan, websocket_event_kind,
+};
 #[path = "rich/log_parser.rs"]
 mod log_parser;
 pub use log_parser::{LogFieldSpan, LogParsePlan, parse_log_message};
@@ -371,6 +373,13 @@ unsafe extern "C" {
     ) -> i64;
     fn prodex_runtime_websocket_event_kind_v1(abi_version: i64, kind: u64, output: *mut i64)
     -> i64;
+    fn prodex_runtime_proxy_path_plan_v1(
+        abi_version: i64,
+        path_address: u64,
+        path_length: i64,
+        websocket: i64,
+        output: *mut i64,
+    ) -> i64;
     fn prodex_provider_error_classify_v1(
         status: i64,
         status_present: i64,
