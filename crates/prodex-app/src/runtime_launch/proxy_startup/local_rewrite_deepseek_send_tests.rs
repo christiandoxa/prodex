@@ -8,15 +8,7 @@ fn native_web_search_route_is_selected_only_for_native_modes_with_options() {
         RuntimeDeepSeekWebSearchMode::Auto,
         RuntimeDeepSeekWebSearchMode::Anthropic,
     ] {
-        let result = runtime_deepseek_uses_native_web_search(mode, body);
-        if cfg!(feature = "mojo-core") {
-            assert!(result.unwrap());
-        } else {
-            assert_eq!(
-                result.unwrap_err().to_string(),
-                "DeepSeek native Anthropic web-search translation requires Mojo support"
-            );
-        }
+        assert!(runtime_deepseek_uses_native_web_search(mode, body).unwrap());
     }
     assert!(
         !runtime_deepseek_uses_native_web_search(RuntimeDeepSeekWebSearchMode::OpenAiChat, body)

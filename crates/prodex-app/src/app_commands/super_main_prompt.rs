@@ -7,20 +7,14 @@ use crate::{
 mod catalog;
 #[cfg(test)]
 use catalog::main_model_choices_from_catalog;
-#[cfg(all(test, feature = "mojo-core"))]
-use catalog::main_model_choices_from_catalog_rust;
 #[cfg(test)]
 use catalog::openai_main_model_choices;
-#[cfg(not(feature = "mojo-core"))]
-use catalog::{first_main_catalog_model, main_model_choice_is_selectable};
 use catalog::{main_model_choices, main_model_efforts, prompt_main_model};
 use prodex_cli::{SubAgentReasoningEffort, SuperArgs, SuperExternalProvider};
-#[cfg(feature = "mojo-core")]
 use prodex_mojo_core::rich::{
     CatalogConfigurationInput, CatalogPlanModel, CatalogPlanRole, plan_catalog_configuration,
 };
 
-#[cfg(feature = "mojo-core")]
 pub(super) fn resolve_main_model_and_effort(
     args: &SuperArgs,
     provider: prodex_provider_core::ProviderId,
@@ -29,76 +23,6 @@ pub(super) fn resolve_main_model_and_effort(
     resolve_main_model_and_effort_mojo(args, provider, prompt_model_and_effort)
 }
 
-#[cfg(not(feature = "mojo-core"))]
-pub(super) fn resolve_main_model_and_effort(
-    args: &SuperArgs,
-    provider: prodex_provider_core::ProviderId,
-    prompt_model_and_effort: bool,
-) -> anyhow::Result<(Option<String>, Option<String>)> {
-    let explicit_model = args
-        .local_model
-        .clone()
-        .or_else(|| codex_cli_config_override_value(&args.codex_args, "model"));
-    let explicit_effort =
-        codex_cli_config_override_value(&args.codex_args, "model_reasoning_effort");
-    let remembered_selection = current_main_selection(args, provider);
-    let remembered_model = explicit_model
-        .is_none()
-        .then(|| {
-            remembered_selection
-                .as_ref()
-                .map(|selection| selection.0.clone())
-        })
-        .flatten();
-    // Do not add an unknown remembered value as a synthetic picker choice: ordinary
-    // Super has no model picker, so stale catalog entries must fall back.
-    let model_choices = main_model_choices(provider, None);
-    let current_model = explicit_model
-        .clone()
-        .or_else(|| {
-            remembered_model.filter(|model| main_model_choice_is_selectable(&model_choices, model))
-        })
-        .or_else(|| {
-            (provider == prodex_provider_core::ProviderId::OpenAi)
-                .then(|| first_main_catalog_model(&model_choices))
-                .flatten()
-        })
-        .or_else(|| default_main_model(provider));
-    let model = if prompt_model_and_effort && explicit_model.is_none() {
-        prompt_main_model("Main-agent model", provider, current_model.as_deref())?
-    } else {
-        current_model
-    };
-    let remembered_effort = explicit_effort
-        .is_none()
-        .then(|| remembered_effort_for_model(remembered_selection.as_ref(), model.as_deref()))
-        .flatten();
-    let reasoning_effort = if let Some(explicit_effort) = explicit_effort {
-        ensure_supported_main_effort(provider, model.as_deref(), &explicit_effort)?;
-        Some(explicit_effort)
-    } else if prompt_model_and_effort {
-        prompt_main_reasoning_effort(
-            "Main-agent reasoning effort",
-            provider,
-            model.as_deref(),
-            remembered_effort.as_deref().filter(|effort| {
-                main_model_efforts(provider, model.as_deref())
-                    .iter()
-                    .any(|candidate| candidate.eq_ignore_ascii_case(effort))
-            }),
-        )?
-        .map(|effort| effort.to_string())
-    } else {
-        remembered_effort
-            .filter(|effort| {
-                ensure_supported_main_effort(provider, model.as_deref(), effort).is_ok()
-            })
-            .or_else(|| default_main_effort(provider, model.as_deref()))
-    };
-    Ok((model, reasoning_effort))
-}
-
-#[cfg(feature = "mojo-core")]
 fn resolve_main_model_and_effort_mojo(
     args: &SuperArgs,
     provider: prodex_provider_core::ProviderId,
@@ -242,7 +166,6 @@ fn resolve_main_model_and_effort_mojo(
     Ok((model, effort))
 }
 
-#[cfg(feature = "mojo-core")]
 fn catalog_configuration_error(error: prodex_mojo_core::MojoError) -> anyhow::Error {
     match error {
         prodex_mojo_core::MojoError::Structured(issue) if issue.kind == 5 => {
@@ -252,7 +175,6 @@ fn catalog_configuration_error(error: prodex_mojo_core::MojoError) -> anyhow::Er
     }
 }
 
-#[cfg(feature = "mojo-core")]
 fn provider_reasoning_effort_label(
     effort: prodex_provider_core::ProviderReasoningEffort,
 ) -> Option<&'static str> {
@@ -267,38 +189,6 @@ fn provider_reasoning_effort_label(
         prodex_provider_core::ProviderReasoningEffort::Ultra => "ultra",
         prodex_provider_core::ProviderReasoningEffort::Unknown => return None,
     })
-}
-
-#[cfg(not(feature = "mojo-core"))]
-fn ensure_supported_main_effort(
-    provider: prodex_provider_core::ProviderId,
-    model: Option<&str>,
-    effort: &str,
-) -> anyhow::Result<()> {
-    if provider != prodex_provider_core::ProviderId::OpenAi {
-        return ensure_supported_effort(provider, model, effort);
-    }
-    if main_model_efforts(provider, model)
-        .iter()
-        .any(|candidate| candidate.eq_ignore_ascii_case(effort))
-    {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
-            "reasoning effort is unsupported for the selected model"
-        ))
-    }
-}
-
-#[cfg(not(feature = "mojo-core"))]
-fn ensure_supported_effort(
-    provider: prodex_provider_core::ProviderId,
-    model: Option<&str>,
-    effort: &str,
-) -> anyhow::Result<()> {
-    prodex_provider_core::provider_model_reasoning_resolution(provider, model, Some(effort))
-        .map(|_| ())
-        .map_err(|error| anyhow::anyhow!(error.to_string()))
 }
 
 fn current_main_selection(
@@ -363,31 +253,6 @@ fn default_main_model(provider: prodex_provider_core::ProviderId) -> Option<Stri
                 .first()
                 .map(|entry| entry.id.clone())
         })
-}
-
-#[cfg(not(feature = "mojo-core"))]
-fn default_main_effort(
-    provider: prodex_provider_core::ProviderId,
-    model: Option<&str>,
-) -> Option<String> {
-    let resolution =
-        prodex_provider_core::provider_model_reasoning_resolution(provider, model, None)
-            .expect("provider model reasoning resolution failed");
-    resolution
-        .selected_reasoning_effort
-        .and_then(|effort| match effort {
-            prodex_provider_core::ProviderReasoningEffort::None => Some("none"),
-            prodex_provider_core::ProviderReasoningEffort::Minimal => Some("minimal"),
-            prodex_provider_core::ProviderReasoningEffort::Low => Some("low"),
-            prodex_provider_core::ProviderReasoningEffort::Medium => Some("medium"),
-            prodex_provider_core::ProviderReasoningEffort::High => Some("high"),
-            prodex_provider_core::ProviderReasoningEffort::XHigh => Some("xhigh"),
-            prodex_provider_core::ProviderReasoningEffort::Max => Some("max"),
-            prodex_provider_core::ProviderReasoningEffort::Ultra => Some("ultra"),
-            prodex_provider_core::ProviderReasoningEffort::Unknown => None,
-        })
-        .map(str::to_string)
-        .or_else(|| main_model_efforts(provider, model).first().cloned())
 }
 
 pub(super) fn prompt_super_model(

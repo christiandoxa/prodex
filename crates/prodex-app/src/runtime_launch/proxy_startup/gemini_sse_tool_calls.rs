@@ -4,7 +4,6 @@ use super::super::super::provider_bridge::{
 use super::RuntimeGeminiSseState;
 use super::runtime_gemini_blocked_tool_call_message_with_config;
 use prodex_domain::CallId;
-#[cfg(feature = "mojo-core")]
 use prodex_mojo_core::provider_constraints::{
     GeminiToolCallIndexBinding, GeminiToolCallIndexRecord, gemini_tool_call_index,
 };
@@ -131,7 +130,6 @@ impl RuntimeGeminiSseState {
         events
     }
 
-    #[cfg(feature = "mojo-core")]
     fn function_call_index(
         &self,
         part_index: usize,
@@ -155,48 +153,6 @@ impl RuntimeGeminiSseState {
             .collect::<Vec<_>>();
         gemini_tool_call_index(part_index, explicit_call_id, name, &records, &bindings)
             .unwrap_or_else(|error| panic!("Mojo Gemini tool-call index failed: {error:?}"))
-    }
-
-    #[cfg(not(feature = "mojo-core"))]
-    fn function_call_index(
-        &self,
-        part_index: usize,
-        explicit_call_id: Option<&str>,
-        name: &str,
-    ) -> usize {
-        if let Some(call_id) = explicit_call_id
-            && let Some(index) = self.tool_call_indices_by_id.get(call_id)
-        {
-            return *index;
-        }
-        if explicit_call_id.is_none()
-            && let Some(tool_call) = self.tool_calls.get(&part_index)
-            && !tool_call.done
-            && !tool_call.explicit_call_id
-            && tool_call
-                .name
-                .as_deref()
-                .is_none_or(|existing| existing == name)
-        {
-            return part_index;
-        }
-        if explicit_call_id.is_none()
-            && let Some((index, _)) = self.tool_calls.iter().find(|(_, tool_call)| {
-                !tool_call.done
-                    && !tool_call.explicit_call_id
-                    && tool_call.name.as_deref() == Some(name)
-            })
-        {
-            return *index;
-        }
-        if !self.tool_calls.contains_key(&part_index) {
-            return part_index;
-        }
-        let mut index = self.tool_calls.len();
-        while self.tool_calls.contains_key(&index) {
-            index = index.saturating_add(1);
-        }
-        index
     }
 
     pub(super) fn complete_tool_call_events(&mut self) -> Vec<String> {

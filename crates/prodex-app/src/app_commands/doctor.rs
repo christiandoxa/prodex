@@ -253,93 +253,75 @@ fn append_doctor_runtime_json_fields(
 }
 
 fn mojo_core_json_value() -> serde_json::Value {
-    #[cfg(feature = "mojo-core")]
-    {
-        let real_mojo = prodex_mojo_core::MOJO_ACTIVE;
-        let self_test = prodex_mojo_core::self_test();
-        let quota = real_mojo && prodex_mojo_core::quota::self_test();
-        let quota_aggregation =
-            real_mojo && prodex_mojo_core::quota::main_quota_aggregation_self_test();
-        let runtime_quota = real_mojo && prodex_mojo_core::runtime::profile_schedule_self_test();
-        let routing = real_mojo && prodex_mojo_core::routing::self_test();
-        let smart_context_pressure =
-            real_mojo && prodex_mojo_core::runtime::smart_context_pressure_snapshot_self_test();
-        let runtime_candidate_plan =
-            real_mojo && prodex_mojo_core::runtime::candidate_plan_self_test();
-        let smart_context_rehydrate =
-            real_mojo && prodex_mojo_core::runtime_decisions::rehydrate_plan_self_test();
-        let runtime_tuning =
-            real_mojo && prodex_mojo_core::runtime_decisions::tuning_defaults_self_test();
-        let provider_constraints = real_mojo && prodex_mojo_core::provider_constraints::self_test();
-        let runtime_profile_order = runtime_quota;
-        let runtime_policy_numeric = real_mojo && prodex_mojo_core::policy::self_test();
-        let context_signal_diff = real_mojo && prodex_mojo_core::context::self_test();
-        let rich_domain = real_mojo && prodex_mojo_core::rich::rich_self_test();
-        let log_semantics = real_mojo && prodex_mojo_core::log::self_test();
-        let context_text = context_signal_diff
-            && prodex_mojo_core::context::text_abi_version().is_ok()
-            && prodex_mojo_core::context::text_abi_layout_matches();
-        serde_json::json!({
-            "feature_enabled": true,
-            "active": prodex_mojo_core::MOJO_ACTIVE,
-            "fallback": false,
-            "compiler_required": false,
-            "build_strict": prodex_mojo_core::MOJO_REQUIRED,
-            "version": prodex_mojo_core::MOJO_VERSION,
-            "abi_version": prodex_mojo_core::routing::abi_version().ok(),
-            "rich_abi_version": if real_mojo {
-                Some(prodex_mojo_core::rich::RICH_ABI_VERSION)
-            } else {
-                None
-            },
-            "runtime_dependency_mode": "arena-static",
-            "mojo_packages": [],
-            "implementation": if prodex_mojo_core::MOJO_ACTIVE {
-                "mojo-compiled-in"
-            } else {
-                "invalid-mojo-build"
-            },
-            "self_test": if self_test { "passed" } else { "failed" },
-            "modules": {
-                "quota": quota,
-                "quota_aggregation": quota_aggregation,
-                "runtime_quota": runtime_quota,
-                "routing_score": routing,
-                "candidate_filter": routing,
-                "routing_plan": routing,
-                "provider_capability": routing,
-                "provider_constraints": provider_constraints,
-                "smart_context": real_mojo && prodex_mojo_core::runtime::smart_context_estimate_tokens_from_body_bytes(7) == 2,
-                "smart_context_pressure": smart_context_pressure,
-                "smart_context_rehydrate": smart_context_rehydrate,
-                "runtime_candidate_plan": runtime_candidate_plan,
-                "runtime_profile_order": runtime_profile_order,
-                "runtime_policy_numeric": runtime_policy_numeric,
-                "context_signal_diff": context_signal_diff,
-                "context_text": context_text,
-                "rich_domain": rich_domain,
-                "rich_context_parser": rich_domain,
-                "rich_policy_parser": rich_domain,
-                "rich_provider_routing": rich_domain,
-                "rich_context_planner": rich_domain,
-                "log_semantics": log_semantics,
-                "runtime_tuning": runtime_tuning,
-            },
-        })
-    }
-
-    #[cfg(not(feature = "mojo-core"))]
+    let real_mojo = prodex_mojo_core::MOJO_ACTIVE;
+    let self_test = prodex_mojo_core::self_test();
+    let quota = real_mojo && prodex_mojo_core::quota::self_test();
+    let quota_aggregation =
+        real_mojo && prodex_mojo_core::quota::main_quota_aggregation_self_test();
+    let runtime_quota = real_mojo && prodex_mojo_core::runtime::profile_schedule_self_test();
+    let routing = real_mojo && prodex_mojo_core::routing::self_test();
+    let smart_context_pressure =
+        real_mojo && prodex_mojo_core::runtime::smart_context_pressure_snapshot_self_test();
+    let runtime_candidate_plan = real_mojo && prodex_mojo_core::runtime::candidate_plan_self_test();
+    let smart_context_rehydrate =
+        real_mojo && prodex_mojo_core::runtime_decisions::rehydrate_plan_self_test();
+    let runtime_tuning =
+        real_mojo && prodex_mojo_core::runtime_decisions::tuning_defaults_self_test();
+    let provider_constraints = real_mojo && prodex_mojo_core::provider_constraints::self_test();
+    let runtime_profile_order = runtime_quota;
+    let runtime_policy_numeric = real_mojo && prodex_mojo_core::policy::self_test();
+    let context_signal_diff = real_mojo && prodex_mojo_core::context::self_test();
+    let rich_domain = real_mojo && prodex_mojo_core::rich::rich_self_test();
+    let log_semantics = real_mojo && prodex_mojo_core::log::self_test();
+    let context_text = context_signal_diff
+        && prodex_mojo_core::context::text_abi_version().is_ok()
+        && prodex_mojo_core::context::text_abi_layout_matches();
     serde_json::json!({
-        "feature_enabled": false,
-        "active": false,
+        "feature_enabled": true,
+        "active": prodex_mojo_core::MOJO_ACTIVE,
         "fallback": false,
         "compiler_required": false,
-        "build_strict": false,
-        "version": serde_json::Value::Null,
-        "abi_version": serde_json::Value::Null,
-        "implementation": "rust",
-        "self_test": "not-enabled",
-        "modules": {},
+        "build_strict": prodex_mojo_core::MOJO_REQUIRED,
+        "version": prodex_mojo_core::MOJO_VERSION,
+        "abi_version": prodex_mojo_core::routing::abi_version().ok(),
+        "rich_abi_version": if real_mojo {
+            Some(prodex_mojo_core::rich::RICH_ABI_VERSION)
+        } else {
+            None
+        },
+        "runtime_dependency_mode": "arena-static",
+        "mojo_packages": [],
+        "implementation": if prodex_mojo_core::MOJO_ACTIVE {
+            "mojo-compiled-in"
+        } else {
+            "invalid-mojo-build"
+        },
+        "self_test": if self_test { "passed" } else { "failed" },
+        "modules": {
+            "quota": quota,
+            "quota_aggregation": quota_aggregation,
+            "runtime_quota": runtime_quota,
+            "routing_score": routing,
+            "candidate_filter": routing,
+            "routing_plan": routing,
+            "provider_capability": routing,
+            "provider_constraints": provider_constraints,
+            "smart_context": real_mojo && prodex_mojo_core::runtime::smart_context_estimate_tokens_from_body_bytes(7) == 2,
+            "smart_context_pressure": smart_context_pressure,
+            "smart_context_rehydrate": smart_context_rehydrate,
+            "runtime_candidate_plan": runtime_candidate_plan,
+            "runtime_profile_order": runtime_profile_order,
+            "runtime_policy_numeric": runtime_policy_numeric,
+            "context_signal_diff": context_signal_diff,
+            "context_text": context_text,
+            "rich_domain": rich_domain,
+            "rich_context_parser": rich_domain,
+            "rich_policy_parser": rich_domain,
+            "rich_provider_routing": rich_domain,
+            "rich_context_planner": rich_domain,
+            "log_semantics": log_semantics,
+            "runtime_tuning": runtime_tuning,
+        },
     })
 }
 

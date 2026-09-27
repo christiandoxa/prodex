@@ -1,7 +1,6 @@
 use super::super_prompt;
 use crate::{canonical_sub_agent_efforts, effective_provider_model_catalog, provider_display_name};
 use prodex_cli::SubAgentReasoningEffort;
-#[cfg(feature = "mojo-core")]
 use prodex_mojo_core::rich::{CatalogPlanModel, plan_dynamic_catalog};
 use std::collections::BTreeSet;
 
@@ -168,14 +167,6 @@ pub(super) fn main_model_choice_is_selectable(choices: &[MainModelChoice], model
         .any(|choice| main_model_choice_matches(choice, model))
 }
 
-#[cfg(not(feature = "mojo-core"))]
-pub(super) fn first_main_catalog_model(choices: &[MainModelChoice]) -> Option<String> {
-    choices.iter().find_map(|choice| match &choice.choice {
-        prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.clone()),
-        _ => None,
-    })
-}
-
 fn sub_agent_effort(
     effort: prodex_provider_core::ProviderReasoningEffort,
 ) -> Option<SubAgentReasoningEffort> {
@@ -256,7 +247,6 @@ fn merge_bundled_openai_choices(choices: &mut Vec<MainModelChoice>) {
     choices.splice(insert_at..insert_at, bundled);
 }
 
-#[cfg(feature = "mojo-core")]
 #[derive(Debug)]
 struct DynamicCatalogModel {
     id: String,
@@ -270,7 +260,6 @@ struct DynamicCatalogModel {
     default_effort: Option<String>,
 }
 
-#[cfg(feature = "mojo-core")]
 fn dynamic_catalog_model(entry: serde_json::Value) -> DynamicCatalogModel {
     let id = catalog_entry_model_id(&entry).to_string();
     let label = ["display_name", "displayName"]
@@ -362,8 +351,13 @@ fn dynamic_catalog_input_is_bounded(entries: &[serde_json::Value]) -> bool {
     true
 }
 
-#[cfg(feature = "mojo-core")]
 pub(super) fn main_model_choices_from_catalog(
+    entries: Vec<serde_json::Value>,
+) -> Option<Vec<MainModelChoice>> {
+    main_model_choices_from_catalog_mojo(entries)
+}
+
+fn main_model_choices_from_catalog_mojo(
     entries: Vec<serde_json::Value>,
 ) -> Option<Vec<MainModelChoice>> {
     if !dynamic_catalog_input_is_bounded(&entries)
@@ -444,117 +438,6 @@ pub(super) fn main_model_choices_from_catalog(
         default_effort: None,
     });
     Some(choices)
-}
-
-#[cfg(any(not(feature = "mojo-core"), test))]
-pub(super) fn main_model_choices_from_catalog_rust(
-    mut entries: Vec<serde_json::Value>,
-) -> Option<Vec<MainModelChoice>> {
-    if !dynamic_catalog_input_is_bounded(&entries)
-        || entries.iter().any(|entry| {
-            entry
-                .get("priority")
-                .and_then(serde_json::Value::as_u64)
-                .is_some_and(|priority| priority > CATALOG_MAX_PRIORITY)
-        })
-    {
-        return None;
-    }
-    entries.sort_by(|left, right| {
-        let left_priority = left
-            .get("priority")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(CATALOG_MAX_PRIORITY);
-        let right_priority = right
-            .get("priority")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(CATALOG_MAX_PRIORITY);
-        left_priority
-            .cmp(&right_priority)
-            .then_with(|| catalog_entry_model_id(left).cmp(catalog_entry_model_id(right)))
-    });
-    let mut seen = BTreeSet::new();
-    let mut choices = vec![MainModelChoice {
-        choice: prodex_provider_core::ProviderModelChoice::ProviderDefault,
-        label: "provider default".to_string(),
-        efforts: None,
-        aliases: Vec::new(),
-        default_effort: None,
-    }];
-    for entry in entries {
-        if entry
-            .get("supported_in_api")
-            .and_then(serde_json::Value::as_bool)
-            == Some(false)
-            || entry.get("hidden").and_then(serde_json::Value::as_bool) == Some(true)
-            || entry
-                .get("visibility")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|visibility| !visibility.eq_ignore_ascii_case("list"))
-        {
-            continue;
-        }
-        let model = catalog_entry_model_id(&entry).to_string();
-        if model.is_empty() || !seen.insert(model.to_ascii_lowercase()) {
-            continue;
-        }
-        let efforts = entry
-            .get("supported_reasoning_levels")
-            .and_then(serde_json::Value::as_array)
-            .map(|levels| {
-                let mut seen = BTreeSet::new();
-                levels
-                    .iter()
-                    .filter_map(|level| {
-                        level
-                            .get("effort")
-                            .and_then(serde_json::Value::as_str)
-                            .map(str::trim)
-                            .filter(|effort| !effort.is_empty())
-                            .filter(|effort| seen.insert(effort.to_ascii_lowercase()))
-                            .map(str::to_string)
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .filter(|efforts| !efforts.is_empty());
-        let aliases = catalog_entry_aliases(&entry);
-        let default_effort = valid_default_effort(
-            catalog_entry_default_effort(&entry).as_deref(),
-            efforts.as_deref().unwrap_or_default(),
-        );
-        let label = ["display_name", "displayName"]
-            .into_iter()
-            .find_map(|key| entry.get(key).and_then(serde_json::Value::as_str))
-            .map(str::trim)
-            .filter(|label| !label.is_empty())
-            .unwrap_or(model.as_str())
-            .to_string();
-        choices.push(MainModelChoice {
-            choice: prodex_provider_core::ProviderModelChoice::Model(model),
-            label,
-            efforts,
-            aliases,
-            default_effort,
-        });
-    }
-    if choices.len() == 1 {
-        return None;
-    }
-    choices.push(MainModelChoice {
-        choice: prodex_provider_core::ProviderModelChoice::Custom,
-        label: "custom model...".to_string(),
-        efforts: None,
-        aliases: Vec::new(),
-        default_effort: None,
-    });
-    Some(choices)
-}
-
-#[cfg(not(feature = "mojo-core"))]
-pub(super) fn main_model_choices_from_catalog(
-    entries: Vec<serde_json::Value>,
-) -> Option<Vec<MainModelChoice>> {
-    main_model_choices_from_catalog_rust(entries)
 }
 
 fn catalog_entry_model_id(entry: &serde_json::Value) -> &str {

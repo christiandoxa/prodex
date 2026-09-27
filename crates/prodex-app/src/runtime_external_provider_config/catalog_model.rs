@@ -172,16 +172,8 @@ pub(super) fn external_catalog_models(
 }
 
 pub(super) fn external_catalog_model_indices(ids: &[&str]) -> Result<Vec<usize>> {
-    #[cfg(feature = "mojo-core")]
-    {
-        prodex_mojo_core::rich::merge_catalog_ids(&[], ids)
-            .map_err(|error| anyhow::anyhow!("external model catalog merge failed: {error:?}"))
-    }
-    #[cfg(not(feature = "mojo-core"))]
-    {
-        let _ = ids;
-        bail!("external provider catalog planning requires the mojo-core feature")
-    }
+    prodex_mojo_core::rich::merge_catalog_ids(&[], ids)
+        .map_err(|error| anyhow::anyhow!("external model catalog merge failed: {error:?}"))
 }
 
 #[derive(Clone, Debug)]

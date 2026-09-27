@@ -1,11 +1,9 @@
+use super::main_model_choices_from_catalog;
 use super::{catalog_model, main_model_choices, openai_main_model_choices};
-#[cfg(feature = "mojo-core")]
-use super::{main_model_choices_from_catalog, main_model_choices_from_catalog_rust};
 use serde_json::json;
 
-#[cfg(feature = "mojo-core")]
 #[test]
-fn dynamic_catalog_mojo_matches_the_test_only_rust_owner() {
+fn dynamic_catalog_mojo_keeps_order_dedup_and_visibility_contract() {
     let entries = vec![
         catalog_model("gpt-5.6-luna", "Luna", 3, &[" low ", "LOW", "medium"]),
         catalog_model("future/model:alpha", "Future", 1, &["max"]),
@@ -20,13 +18,20 @@ fn dynamic_catalog_mojo_matches_the_test_only_rust_owner() {
         json!({"slug": "hidden", "visibility": "hide", "priority": 0}),
         json!({"slug": "unsupported", "supported_in_api": false, "priority": 0}),
     ];
+    let choices = main_model_choices_from_catalog(entries).expect("Mojo catalog plan");
+    let models = choices
+        .iter()
+        .filter_map(|choice| match &choice.choice {
+            prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
     assert_eq!(
-        main_model_choices_from_catalog(entries.clone()),
-        main_model_choices_from_catalog_rust(entries),
+        models,
+        ["future/model:alpha", "GPT-5.6-LUNA", "fallback-id"]
     );
 }
 
-#[cfg(feature = "mojo-core")]
 #[test]
 fn dynamic_catalog_bounds_match_the_mojo_input_contract() {
     for (field, value) in [
@@ -43,10 +48,6 @@ fn dynamic_catalog_bounds_match_the_mojo_input_contract() {
         assert!(
             main_model_choices_from_catalog(entries.clone()).is_none(),
             "Mojo accepted oversized {field}"
-        );
-        assert!(
-            main_model_choices_from_catalog_rust(entries).is_none(),
-            "Rust oracle accepted oversized {field}"
         );
     }
 }
