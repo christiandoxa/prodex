@@ -610,7 +610,8 @@
           "deepseek_strict_schema_normalization",
           "anthropic_web_search_result_shaping",
           "kiro_chat_response_mapping",
-          "kiro_response_shape_fallbacks"
+          "kiro_response_shape_fallbacks",
+          "kiro_acp_shape_fallbacks"
         ]
       },
       {
@@ -673,7 +674,8 @@
         ],
         "operations": [
           "kiro_chat_response_mapping",
-          "kiro_response_shape_fallbacks"
+          "kiro_response_shape_fallbacks",
+          "kiro_acp_shape_fallbacks"
         ]
       }
     ],
@@ -1646,6 +1648,45 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "catalog lookup, JSON serialization and decoding, raw malformed-field preservation where the string ABI cannot represent the original JSON type, and runtime metadata attachment"
+    },
+    {
+      "name": "kiro_acp_shape_fallbacks",
+      "domain": "provider/kiro",
+      "introduced_in": "0.432.3",
+      "baseline_state": "feature-off Rust ACP request, response, metadata, and error JSON shaping alongside the Mojo feature path",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_kiro_kernel_v1",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "acp_initialize_request": 32,
+        "acp_session_new_request": 33,
+        "acp_session_prompt_request": 34,
+        "acp_model": 35,
+        "acp_assistant_output": 36,
+        "acp_response": 37,
+        "acp_chat_assistant": 38,
+        "acp_plan_entry": 39,
+        "acp_error": 40,
+        "acp_session_info": 41,
+        "acp_metadata": 42,
+        "acp_incomplete_details": 43
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/kiro.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/kiro/acp.rs",
+      "consumer_marker": "KiroKernelOperation::AcpMetadata",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/kiro/acp.rs",
+        "crates/prodex-provider-core/src/translators/kiro.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/kiro/acp.rs",
+      "rust_owner_before": "feature-off Rust ACP request/response shapes, assistant projections, plan/error/session values, metadata assembly and incomplete-details JSON",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; fixed ACP caller expectations cover all promoted shapes in both provider feature modes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "JSON serialization/decoding around the existing typed Kiro kernel; stop-reason extraction and incomplete-reason classification remain separate Rust-only helpers outside this operation"
     }
   ],
   "rust_semantic_reductions": [
