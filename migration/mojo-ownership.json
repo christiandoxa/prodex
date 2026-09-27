@@ -611,7 +611,8 @@
           "anthropic_web_search_result_shaping",
           "kiro_chat_response_mapping",
           "kiro_response_shape_fallbacks",
-          "kiro_acp_shape_fallbacks"
+          "kiro_acp_shape_fallbacks",
+          "deepseek_stream_shape_fallbacks"
         ]
       },
       {
@@ -637,7 +638,8 @@
         "operations": [
           "deepseek_simple_request_eligibility",
           "deepseek_request_metadata_composition",
-          "deepseek_strict_schema_normalization"
+          "deepseek_strict_schema_normalization",
+          "deepseek_stream_shape_fallbacks"
         ]
       },
       {
@@ -1687,6 +1689,42 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "JSON serialization/decoding around the existing typed Kiro kernel; stop-reason extraction and incomplete-reason classification remain separate Rust-only helpers outside this operation"
+    },
+    {
+      "name": "deepseek_stream_shape_fallbacks",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.432.3",
+      "baseline_state": "feature-off Rust stream projections, response envelope/assistant shaping, and buffered response metadata wrapping alongside Mojo feature paths",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_deepseek_kernel_v2",
+      "mojo_abi_version": 2,
+      "mojo_operation_ids": {
+        "stream_response_value": 16,
+        "stream_assistant_message": 17,
+        "response_metadata": 26,
+        "stream_tool_call_delta": 32,
+        "stream_chunk_metadata": 33,
+        "stream_choice_metadata": 34,
+        "stream_choice_delta": 35,
+        "stream_response_metadata": 36
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/deepseek.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "consumer_marker": "DeepSeekKernelOperation::StreamResponseMetadata",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+        "crates/prodex-provider-core/src/translators/deepseek/stream/response_values.rs",
+        "crates/prodex-provider-core/src/translators/deepseek/response/metadata.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs",
+      "rust_owner_before": "feature-off Rust stream field projection, stream response/assistant shaping, metadata assembly, and buffered metadata wrapper",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; DeepSeek translator and stream suites assert fixed production shapes in default and mojo feature modes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed JSON deserialization, provider usage conversion, tool-call serialization, and pre-kernel field collection"
     }
   ],
   "rust_semantic_reductions": [

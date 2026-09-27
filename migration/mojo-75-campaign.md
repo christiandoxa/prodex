@@ -2234,3 +2234,21 @@ the same 13 tests with --features mojo. The canonical source report counts
 **245,786 LOC**: **21.787653% Mojo**. The 7% release floor and non-regression
 requirement remain satisfied; the 75% project target remains unmet, with
 **523,154 additional Mojo LOC** required at this Rust volume.
+
+## DeepSeek stream shape hard replacement
+
+DeepSeek stream tool-call/chunk/choice projections, stream response metadata,
+stream response envelope and assistant-message shaping, and buffered response
+metadata wrapping now use the existing DeepSeek Mojo kernel in every provider
+feature mode. The feature-off Rust copies were deleted from the three stream
+and response adapters. Rust remains responsible for JSON deserialization,
+provider usage conversion, tool-call serialization, validation, and collecting
+fields before invoking the kernel. The no-fallback guard now makes these files
+unconditional and requires operations 16, 17, 26, and 32 through 36.
+
+The full DeepSeek provider-core suite passes 43 tests in the default feature
+mode and the same 43 tests with --features mojo. The canonical source report
+counts **53,551 reachable Mojo LOC** and **192,219 Rust production LOC**,
+totaling **245,770 LOC**: **21.789071% Mojo**. The release floor and ownership
+non-regression checks pass; the 75% project target remains unmet, with
+**523,106 additional Mojo LOC** required at this Rust volume.
