@@ -823,6 +823,16 @@
           "runtime_lineage_key_build",
           "runtime_lineage_response_parts"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/session_report.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "session_report_metadata_policy"
+        ]
       }
     ],
     "removed": [
@@ -2570,6 +2580,30 @@
       "rust_owner_before": "response-turn-state length-prefix parsing and validated response/turn-state slice recovery",
       "rust_test_oracle": "deleted; runtime-store continuation tests cover lineage round-trip, compaction and malformed/unbounded identity behavior",
       "rust_adapter_scope": "Rust reconstructs borrowed string slices from validated Mojo byte offsets"
+    },
+    {
+      "name": "session_report_metadata_policy",
+      "domain": "session/report-metadata",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_session_report_metadata_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/session_report.mojo",
+      "consumer": "crates/prodex-session-store/src/report.rs",
+      "consumer_marker": "prodex_mojo_core::json::session_report_metadata",
+      "production_consumers": [
+        "crates/prodex-session-store/src/report.rs",
+        "crates/prodex-session-store/src/session_selector.rs"
+      ],
+      "production_reachability_test": "crates/prodex-session-store/src/report.rs",
+      "rust_owner_before": "fixed JSON path precedence for session resume id, turn-context model/effort, thread name, cwd/workdir, updated string timestamp, subagent parent thread and model provider plus session-meta type gating",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; prodex-session-store suite covers JSONL metadata, latest turn settings, subagent parents, legacy/missing metadata, nested fallbacks, decoded Unicode whitespace and blank type behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "serde_json decoding and borrowed JsonNode tree construction, numeric timestamp fallback, chrono formatting, PathBuf/canonicalization, file discovery and report DTO mutation remain Rust"
     }
   ],
   "rust_semantic_reductions": [

@@ -62,3 +62,31 @@ fn sorting_is_stable_for_equal_timestamps() {
         ["new", "a", "b"]
     );
 }
+
+#[test]
+fn session_metadata_mojo_preserves_blank_type_and_decoded_whitespace_precedence() {
+    let mut report = SessionReport::from_path(Path::new("/tmp/original.jsonl"), 0);
+    apply_session_json_line(
+        &mut report,
+        r#"{"type":"   ","payload":{"id":"must-not-replace","thread_name":" ","title":"Fallback title","cwd":"　","workdir":"/tmp/fallback"}}"#,
+    );
+
+    assert_eq!(report.id, "original");
+    assert_eq!(report.thread_name.as_deref(), Some("Fallback title"));
+    assert_eq!(report.cwd.as_deref(), Some("/tmp/fallback"));
+}
+
+#[test]
+fn session_metadata_mojo_keeps_nested_precedence_and_model_provider_fallbacks() {
+    let mut report = SessionReport::from_path(Path::new("/tmp/nested.jsonl"), 0);
+    apply_session_json_line(
+        &mut report,
+        r#"{"type":"session_meta","payload":{"session_id":"nested-id","metadata":{"thread_name":"Nested title","cwd":"/tmp/nested","model_provider":"nested-provider"},"source":{"subagent":{"thread_spawn":{"parent_thread_id":"parent-nested"}}}}}"#,
+    );
+
+    assert_eq!(report.id, "nested-id");
+    assert_eq!(report.thread_name.as_deref(), Some("Nested title"));
+    assert_eq!(report.cwd.as_deref(), Some("/tmp/nested"));
+    assert_eq!(report.model_provider.as_deref(), Some("nested-provider"));
+    assert_eq!(report.parent_thread_id.as_deref(), Some("parent-nested"));
+}

@@ -2655,3 +2655,21 @@ reports **71 authoritative operations**. The canonical broad source report count
 **57,471 reachable Mojo LOC** and **192,482 Rust production LOC**, totaling
 **249,953 LOC**: **22.99% Mojo**. The 75% project target remains unmet, with
 **519,975 additional Mojo LOC** required at this Rust volume.
+
+## Session report metadata migration
+
+Fixed JSON path precedence for session resume IDs, turn-context model/effort,
+thread names, cwd/workdir, string timestamps, subagent parent thread IDs, and
+model providers now uses mojo/prodex_core/session_report.mojo through the typed
+prodex_mojo_core::json tree adapter. Rust retains serde_json decoding, numeric
+timestamp fallback, chrono formatting, PathBuf/canonicalization, file discovery,
+and report DTO mutation.
+
+Validation passes 52/52 prodex-session-store tests, including blank type handling,
+decoded Unicode whitespace fallback, nested metadata precedence, subagent parents,
+latest turn settings, repair flows, large/compressed rollouts, and state-db paths.
+Clippy, prodex-app check, no-fallback self-test, ownership, and authority guards
+pass; ownership now reports **72 authoritative operations**. The canonical broad
+source report counts **57,680 reachable Mojo LOC** and **192,548 Rust production
+LOC**, totaling **250,228 LOC**: **23.05% Mojo**. The 75% project target remains
+unmet, with **519,964 additional Mojo LOC** required at this Rust volume.

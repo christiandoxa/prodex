@@ -8,6 +8,9 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/json.rs",
+  "crates/prodex-session-store/src/session_selector.rs",
+  "crates/prodex-session-store/src/report.rs",
   "crates/prodex-mojo-core/src/runtime_lineage.rs",
   "crates/prodex-runtime-state/src/lineage.rs",
   "crates/prodex-mojo-core/src/runtime_repo_map.rs",
@@ -244,6 +247,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-session-store/src/session_selector.rs",
+  "crates/prodex-session-store/src/report.rs",
   "crates/prodex-mojo-core/src/runtime_lineage.rs",
   "crates/prodex-runtime-state/src/lineage.rs",
   "crates/prodex-app/src/runtime_state_shared/line_index.rs",
@@ -1371,6 +1376,46 @@ export function findViolations(files) {
     }
     return [];
   });
+  const sessionReportViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-session-store/src/report.rs") {
+      const violations = [];
+      if (!contents.includes("prodex_mojo_core::json::session_report_metadata(")) {
+        violations.push(filePath + ": session report metadata must retain Mojo planning");
+      }
+      for (const restored of [
+        '&["payload", "thread_name"]',
+        '&["payload", "model"]',
+        '&["payload", "cwd"]',
+        '&["payload", "model_provider"]',
+      ]) {
+        if (contents.includes(restored)) {
+          violations.push(filePath + ": contains restored Rust fixed session-metadata path precedence");
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-session-store/src/session_selector.rs") {
+      const violations = [];
+      if (!contents.includes("session_value_metadata(")) {
+        violations.push(filePath + ": session selector must retain Mojo-backed metadata selection");
+      }
+      if (contents.includes("first_string_value(") || contents.includes('.get("type")')) {
+        violations.push(filePath + ": contains restored Rust session selector metadata semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/json.rs") {
+      const required = [
+        "prodex_session_report_metadata_v1(",
+        "pub fn session_report_metadata(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": session-report ABI adapter must retain " + call);
+    }
+    return [];
+  });
   const runtimeLineageViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-runtime-state/src/lineage.rs") {
       const required = [
@@ -1491,7 +1536,7 @@ export function findViolations(files) {
     ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...doctorMarkerViolations, ...statusSummaryViolations,
-    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...runtimeLineageViolations, ...runtimeRepoMapViolations,
+    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,

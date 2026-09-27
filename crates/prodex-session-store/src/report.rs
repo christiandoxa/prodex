@@ -1,4 +1,3 @@
-use super::session_selector::session_value_resume_id;
 use chrono::{Local, TimeZone};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -23,6 +22,103 @@ pub struct SessionReport {
     updated_sort_key: i64,
     #[serde(skip)]
     cwd_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct SessionValueMetadata {
+    pub(super) type_class: i64,
+    pub(super) resume_id: Option<String>,
+    pub(super) model: Option<String>,
+    pub(super) effort: Option<String>,
+    pub(super) thread_name: Option<String>,
+    pub(super) cwd: Option<String>,
+    pub(super) updated_at: Option<String>,
+    pub(super) parent_thread_id: Option<String>,
+    pub(super) model_provider: Option<String>,
+}
+
+fn session_json_nodes<'a>(
+    value: &'a serde_json::Value,
+) -> Vec<prodex_mojo_core::json::JsonNode<'a>> {
+    use prodex_mojo_core::json::{JsonKind, JsonNode};
+
+    fn push<'a>(
+        nodes: &mut Vec<JsonNode<'a>>,
+        value: &'a serde_json::Value,
+        key: &'a str,
+        parent: Option<usize>,
+    ) -> usize {
+        let (kind, text) = match value {
+            serde_json::Value::Null => (JsonKind::Null, ""),
+            serde_json::Value::Bool(false) => (JsonKind::False, ""),
+            serde_json::Value::Bool(true) => (JsonKind::True, ""),
+            serde_json::Value::Number(_) => (JsonKind::Number, ""),
+            serde_json::Value::String(value) => (JsonKind::String, value.as_str()),
+            serde_json::Value::Array(_) => (JsonKind::Array, ""),
+            serde_json::Value::Object(_) => (JsonKind::Object, ""),
+        };
+        let index = nodes.len();
+        nodes.push(JsonNode {
+            kind,
+            first_child: None,
+            next_sibling: None,
+            parent,
+            key,
+            text,
+            raw_start: 0,
+            raw_length: 0,
+        });
+
+        let mut previous: Option<usize> = None;
+        match value {
+            serde_json::Value::Array(values) => {
+                for child in values {
+                    let child_index = push(nodes, child, "", Some(index));
+                    if let Some(previous) = previous {
+                        nodes[previous].next_sibling = Some(child_index);
+                    } else {
+                        nodes[index].first_child = Some(child_index);
+                    }
+                    previous = Some(child_index);
+                }
+            }
+            serde_json::Value::Object(map) => {
+                for (child_key, child) in map {
+                    let child_index = push(nodes, child, child_key.as_str(), Some(index));
+                    if let Some(previous) = previous {
+                        nodes[previous].next_sibling = Some(child_index);
+                    } else {
+                        nodes[index].first_child = Some(child_index);
+                    }
+                    previous = Some(child_index);
+                }
+            }
+            _ => {}
+        }
+        index
+    }
+
+    let mut nodes = Vec::new();
+    push(&mut nodes, value, "", None);
+    nodes
+}
+
+pub(super) fn session_value_metadata(value: &serde_json::Value) -> SessionValueMetadata {
+    let nodes = session_json_nodes(value);
+    let plan = prodex_mojo_core::json::session_report_metadata(&nodes)
+        .expect("Mojo session-report metadata planner returned invalid output");
+    let string_at = |index: Option<usize>| index.map(|index| nodes[index].text.trim().to_string());
+    SessionValueMetadata {
+        type_class: plan.type_class,
+        resume_id: string_at(plan.resume_id),
+        model: string_at(plan.model),
+        effort: string_at(plan.effort),
+        thread_name: string_at(plan.thread_name),
+        cwd: string_at(plan.cwd),
+        updated_at: string_at(plan.updated_at),
+        parent_thread_id: string_at(plan.parent_thread_id),
+        model_provider: string_at(plan.model_provider),
+    }
 }
 
 impl SessionReport {
@@ -108,70 +204,31 @@ pub fn apply_session_json_line(report: &mut SessionReport, line: &str) {
 }
 
 pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value) {
-    if value.get("type").and_then(serde_json::Value::as_str) == Some("turn_context") {
-        if let Some(model) = first_string_value(value, &[&["payload", "model"], &["model"]]) {
-            report.last_model = Some(model);
-        }
-        if let Some(effort) = first_string_value(
-            value,
-            &[
-                &["payload", "effort"],
-                &["payload", "reasoning_effort"],
-                &["effort"],
-                &["reasoning_effort"],
-            ],
-        ) {
-            report.last_reasoning_effort = Some(effort);
-        }
+    let metadata = session_value_metadata(value);
+
+    if let Some(model) = metadata.model {
+        report.last_model = Some(model);
+    }
+    if let Some(effort) = metadata.effort {
+        report.last_reasoning_effort = Some(effort);
     }
 
-    if value
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .is_none_or(|kind| kind == "session_meta")
-        && let Some(id) = session_value_resume_id(value)
+    if matches!(metadata.type_class, 0 | 1)
+        && let Some(id) = metadata.resume_id
     {
         report.id = id;
     }
 
-    if let Some(thread_name) = first_string_value(
-        value,
-        &[
-            &["payload", "thread_name"],
-            &["payload", "title"],
-            &["payload", "metadata", "thread_name"],
-            &["thread_name"],
-            &["title"],
-            &["metadata", "thread_name"],
-        ],
-    ) {
+    if let Some(thread_name) = metadata.thread_name {
         report.thread_name = Some(thread_name);
     }
 
-    if let Some(cwd) = first_string_value(
-        value,
-        &[
-            &["payload", "cwd"],
-            &["payload", "metadata", "cwd"],
-            &["payload", "workdir"],
-            &["cwd"],
-            &["metadata", "cwd"],
-            &["workdir"],
-        ],
-    ) {
+    if let Some(cwd) = metadata.cwd {
         report.cwd_path = Some(PathBuf::from(&cwd));
         report.cwd = Some(cwd);
     }
 
-    if let Some(updated_at) = first_string_value(
-        value,
-        &[
-            &["updated_at"],
-            &["timestamp"],
-            &["payload", "updated_at"],
-            &["payload", "timestamp"],
-        ],
-    ) {
+    if let Some(updated_at) = metadata.updated_at {
         report.updated_sort_key =
             timestamp_label_sort_key(&updated_at).unwrap_or(report.updated_sort_key);
         report.updated_at = Some(updated_at);
@@ -190,33 +247,11 @@ pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value
         report.updated_at = Some(format_epoch(epoch));
     }
 
-    if let Some(parent_thread_id) = first_string_value(
-        value,
-        &[
-            &[
-                "payload",
-                "source",
-                "subagent",
-                "thread_spawn",
-                "parent_thread_id",
-            ],
-            &["source", "subagent", "thread_spawn", "parent_thread_id"],
-            &["payload", "parent_thread_id"],
-            &["parent_thread_id"],
-        ],
-    ) {
+    if let Some(parent_thread_id) = metadata.parent_thread_id {
         report.parent_thread_id = Some(parent_thread_id);
     }
 
-    if let Some(model_provider) = first_string_value(
-        value,
-        &[
-            &["payload", "model_provider"],
-            &["payload", "metadata", "model_provider"],
-            &["model_provider"],
-            &["metadata", "model_provider"],
-        ],
-    ) {
+    if let Some(model_provider) = metadata.model_provider {
         report.model_provider = Some(model_provider);
     }
 }
