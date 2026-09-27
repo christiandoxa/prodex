@@ -2522,3 +2522,22 @@ reports **57 authoritative operations**. The canonical broad source report count
 **55,946 reachable Mojo LOC** and **191,882 Rust production LOC**, totaling
 **247,828 LOC**: **22.57% Mojo**. The 75% project target remains unmet, with
 **519,700 additional Mojo LOC** required at this Rust volume.
+
+## Runtime broker continuity migration
+
+Runtime broker continuity semantics now use
+mojo/prodex_core/runtime_broker_continuity.mojo. The migrated owner covers
+continuity event/reason planning for text and JSON-derived log messages,
+health-score decay, stale-verified continuation classification, known-route
+classification, and route/internal/profile health-key classification. The custom
+Rust JSON-string parser, log-field scanner, event classifier, timestamp-max
+staleness helper, and score-decay arithmetic were deleted. Rust retains generic
+serde_json tree decoding, map aggregation, caller-owned string slicing, metric DTO
+construction, and process/registry boundaries.
+
+Validation passes 32/32 prodex-runtime-broker tests and the direct Mojo ABI smoke
+test. The no-fallback self-test and ownership guard pass; ownership now reports
+**62 authoritative operations**. The canonical broad source report counts
+**56,262 reachable Mojo LOC** and **191,977 Rust production LOC**, totaling
+**248,239 LOC**: **22.66% Mojo**. The 75% project target remains unmet, with
+**519,669 additional Mojo LOC** required at this Rust volume.

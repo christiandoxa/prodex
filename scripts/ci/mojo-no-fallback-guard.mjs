@@ -8,6 +8,8 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+  "crates/prodex-runtime-broker/src/continuity.rs",
   "crates/prodex-mojo-core/src/state_policy.rs",
   "crates/prodex-state/src/provider_capabilities.rs",
   "crates/prodex-state/src/lib.rs",
@@ -233,6 +235,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-runtime-broker/src/continuity.rs",
   "crates/prodex-state/src/provider_capabilities.rs",
   "crates/prodex-state/src/lib.rs",
   "crates/prodex-codex-config/src/lib.rs",
@@ -577,6 +580,7 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
 const RUNTIME_STATE_BACKGROUND_FILE = "crates/prodex-runtime-state/src/background.rs";
+const BROKER_CONTINUITY_FILE = "crates/prodex-runtime-broker/src/continuity.rs";
 const CODEX_CONFIG_FILE = "crates/prodex-codex-config/src/lib.rs";
 const STATE_FILE = "crates/prodex-state/src/lib.rs";
 const STATE_PROVIDER_FILE = "crates/prodex-state/src/provider_capabilities.rs";
@@ -887,6 +891,23 @@ export function findViolations(files) {
     }
     if (/\bfn\s+(?:runtime_state_save_sections_rust|runtime_state_save_requires_continuation_journal_rust|runtime_hot_continuation_state_mutation_rust|runtime_background_queue_enqueue_plan_rust)\s*\(/u.test(contents)) {
       violations.push(`${filePath}: contains restored Rust runtime-state policy semantics`);
+    }
+    return violations;
+  });
+  const brokerContinuityViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== BROKER_CONTINUITY_FILE) return [];
+    const required = [
+      "prodex_mojo_core::runtime_broker_continuity::continuity_line_plan",
+      "prodex_mojo_core::runtime_broker_continuity::effective_score",
+      "prodex_mojo_core::runtime_broker_continuity::stale_verified",
+      "prodex_mojo_core::runtime_broker_continuity::route_kind",
+      "prodex_mojo_core::runtime_broker_continuity::health_key_kind",
+    ];
+    const violations = required
+      .filter((call) => !contents.includes(call))
+      .map((call) => `${filePath}: broker continuity migration must retain Mojo call ${call}`);
+    if (/\bfn\s+(?:runtime_broker_continuation_status_last_event_at|runtime_broker_continuity_failure_event|runtime_broker_continuity_failure_reason|runtime_broker_known_continuity_failure_event|runtime_broker_parse_json_string|runtime_broker_log_field_value|runtime_broker_skip_log_whitespace|runtime_broker_skip_log_field_value|runtime_broker_parse_log_field_value)\s*\(/u.test(contents)) {
+      violations.push(`${filePath}: contains retired Rust broker continuity parsing/policy semantics`);
     }
     return violations;
   });
@@ -1317,7 +1338,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,

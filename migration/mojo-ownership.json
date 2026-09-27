@@ -755,6 +755,20 @@
           "codex_config_override_selection",
           "codex_config_value_normalization"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_broker_continuity.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "broker_continuity_log_semantics",
+          "broker_continuity_health_decay",
+          "broker_continuity_stale_verification",
+          "broker_continuity_route_classification",
+          "broker_health_key_classification"
+        ]
       }
     ],
     "removed": [
@@ -2175,6 +2189,121 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "provider/identity/profile existence mapping, BTreeMap traversal, cloning and validated enum/result reconstruction"
+    },
+    {
+      "domain": "runtime-broker/continuity",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/continuity.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_continuity_log_semantics",
+      "mojo_entry": "prodex_runtime_broker_continuity_line_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::continuity_line_plan",
+      "rust_owner_before": "custom JSON-string scanner, event token classifier, reason key/value scanner and quoted log-value parser",
+      "rust_test_oracle": "deleted; broker continuity caller tests cover text/JSON event and quoted reason parsing",
+      "rust_adapter_scope": "serde_json generic tree decoding, BTreeMap aggregation, reason slice decoding and metric DTO reconstruction"
+    },
+    {
+      "domain": "runtime-broker/continuity",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/continuity.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_continuity_health_decay",
+      "mojo_entry": "prodex_runtime_broker_effective_score_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::effective_score",
+      "rust_owner_before": "saturating health-score decay arithmetic",
+      "rust_test_oracle": "deleted; previous-response and degraded-health metrics fixtures cover decay behavior",
+      "rust_adapter_scope": "RuntimeProfileHealth field projection and u32 result mapping"
+    },
+    {
+      "domain": "runtime-broker/continuity",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/continuity.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_continuity_stale_verification",
+      "mojo_entry": "prodex_runtime_broker_stale_verified_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::stale_verified",
+      "rust_owner_before": "latest continuation event timestamp selection and stale-verified threshold decision",
+      "rust_test_oracle": "deleted; continuation metrics fixtures cover verified staleness and non-verified states",
+      "rust_adapter_scope": "lifecycle enum projection and optional timestamp passing"
+    },
+    {
+      "domain": "runtime-broker/continuity",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/continuity.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_continuity_route_classification",
+      "mojo_entry": "prodex_runtime_broker_route_kind_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::route_kind",
+      "rust_owner_before": "known continuity route string dispatch",
+      "rust_test_oracle": "deleted; previous-response continuity fixtures cover known and unknown routes",
+      "rust_adapter_scope": "metric counter mutation after validated route tag"
+    },
+    {
+      "domain": "runtime-broker/continuity",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/continuity.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/continuity.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_health_key_classification",
+      "mojo_entry": "prodex_runtime_broker_health_key_kind_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::health_key_kind",
+      "rust_owner_before": "route-health/internal/profile key prefix classification",
+      "rust_test_oracle": "deleted; degraded-health metrics fixtures cover route, profile and internal keys",
+      "rust_adapter_scope": "metric counter mutation after validated key-kind tag"
     }
   ],
   "rust_semantic_reductions": [
