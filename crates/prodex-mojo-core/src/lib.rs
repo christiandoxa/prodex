@@ -118,6 +118,8 @@ pub mod routing;
 pub mod runtime;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_decisions;
+#[cfg(feature = "mojo-runtime")]
+pub mod runtime_state;
 
 #[cfg(feature = "mojo-runtime")]
 pub mod launch;

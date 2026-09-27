@@ -458,6 +458,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/policy_validation.mojo");
         sources.push("../../mojo/prodex_core/governance_inspection.mojo");
         sources.push("../../mojo/prodex_core/profile_identity.mojo");
+        sources.push("../../mojo/prodex_core/runtime_state_background.mojo");
         sources.push("../../mojo/prodex_core/redaction.mojo");
         sources.push("../../mojo/prodex_core/context.mojo");
         sources.push("../../mojo/prodex_core/context_text.mojo");

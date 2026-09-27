@@ -128,6 +128,85 @@ impl RuntimeStateMutation {
     }
 }
 
+fn runtime_state_mutation_kind(mutation: &RuntimeStateMutation) -> u8 {
+    match mutation {
+        RuntimeStateMutation::FullState => 0,
+        RuntimeStateMutation::StartupAudit => 1,
+        RuntimeStateMutation::StartupContinuationMigration => 2,
+        RuntimeStateMutation::StartupBackoffSoften => 3,
+        RuntimeStateMutation::ResponseIds(_) => 4,
+        RuntimeStateMutation::PreviousResponseOwner(_) => 5,
+        RuntimeStateMutation::PreviousResponseNegativeCache(_) => 6,
+        RuntimeStateMutation::PreviousResponseRelease(_) => 7,
+        RuntimeStateMutation::ResponseTouch(_) => 8,
+        RuntimeStateMutation::TurnState(_) => 9,
+        RuntimeStateMutation::TurnStateTouch(_) => 10,
+        RuntimeStateMutation::SessionId(_) => 11,
+        RuntimeStateMutation::SessionTouch(_) => 12,
+        RuntimeStateMutation::SessionAffinityRelease(_) => 13,
+        RuntimeStateMutation::CompactLineage(_) => 14,
+        RuntimeStateMutation::CompactLineageRelease(_) => 15,
+        RuntimeStateMutation::CompactSessionTouch(_) => 16,
+        RuntimeStateMutation::CompactTurnStateTouch(_) => 17,
+        RuntimeStateMutation::DeadResponseBindingClear(_) => 18,
+        RuntimeStateMutation::QuotaRelease(_) => 19,
+        RuntimeStateMutation::AuthFailedRelease(_) => 20,
+        RuntimeStateMutation::ContinuationStale(_) => 21,
+        RuntimeStateMutation::ProfileCommit(_) => 22,
+        RuntimeStateMutation::UsageSnapshot(_) => 23,
+        RuntimeStateMutation::ProfileRetryBackoff(_) => 24,
+        RuntimeStateMutation::ProfileTransportBackoff(_) => 25,
+        RuntimeStateMutation::ProfileCircuitHalfOpenProbe(_) => 26,
+        RuntimeStateMutation::ProfileHealth(_) => 27,
+        RuntimeStateMutation::ProfileCircuitClear(_) => 28,
+        RuntimeStateMutation::ProfileBadPairing(_) => 29,
+        RuntimeStateMutation::ProfileAuthBackoff(_) => 30,
+        RuntimeStateMutation::ProfileAuthBackoffCleared(_) => 31,
+    }
+}
+
+fn runtime_state_mutation_policy(
+    mutation: &RuntimeStateMutation,
+) -> prodex_mojo_core::runtime_state::RuntimeStateMutationPolicy {
+    prodex_mojo_core::runtime_state::mutation_policy(runtime_state_mutation_kind(mutation))
+        .expect("Mojo runtime-state mutation policy returned invalid output")
+}
+
+fn runtime_state_sections_from_policy(
+    policy: prodex_mojo_core::runtime_state::RuntimeStateMutationPolicy,
+) -> RuntimeStateSaveSections {
+    RuntimeStateSaveSections {
+        state: match policy.state_section {
+            0 => RuntimeStateSaveStateSection::None,
+            1 => RuntimeStateSaveStateSection::Core,
+            2 => RuntimeStateSaveStateSection::Full,
+            _ => unreachable!("validated Mojo runtime-state section tag"),
+        },
+        continuations: policy.continuations,
+        profile_scores: policy.profile_scores,
+        usage_snapshots: policy.usage_snapshots,
+        backoffs: policy.backoffs,
+    }
+}
+
+fn runtime_background_queue_kind(kind: RuntimeBackgroundQueueKind) -> u8 {
+    match kind {
+        RuntimeBackgroundQueueKind::StateSave => 0,
+        RuntimeBackgroundQueueKind::ContinuationJournal => 1,
+        RuntimeBackgroundQueueKind::ProbeRefresh => 2,
+    }
+}
+
+fn runtime_background_thresholds(
+    thresholds: RuntimeBackgroundQueuePressureThresholds,
+) -> [usize; 3] {
+    [
+        thresholds.state_save,
+        thresholds.continuation_journal,
+        thresholds.probe_refresh,
+    ]
+}
+
 impl RuntimeStateSaveSections {
     pub fn full() -> Self {
         Self {
@@ -171,13 +250,20 @@ pub fn runtime_proxy_queue_pressure_active(
     probe_refresh_backlog: usize,
     thresholds: RuntimeBackgroundQueuePressureThresholds,
 ) -> bool {
-    state_save_backlog >= thresholds.state_save
-        || continuation_journal_backlog >= thresholds.continuation_journal
-        || probe_refresh_backlog >= thresholds.probe_refresh
+    prodex_mojo_core::runtime_state::queue_pressure_active(
+        [
+            state_save_backlog,
+            continuation_journal_backlog,
+            probe_refresh_backlog,
+        ],
+        runtime_background_thresholds(thresholds),
+    )
+    .expect("Mojo runtime background queue-pressure policy returned invalid output")
 }
 
 pub fn runtime_background_enqueue_backlog(pending_len_after_enqueue: usize) -> usize {
-    pending_len_after_enqueue.saturating_sub(1)
+    prodex_mojo_core::runtime_state::enqueue_backlog(pending_len_after_enqueue)
+        .expect("Mojo runtime background backlog policy returned invalid output")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,11 +275,11 @@ pub enum RuntimeBackgroundQueueKind {
 
 impl RuntimeBackgroundQueuePressureThresholds {
     pub fn threshold_for(self, kind: RuntimeBackgroundQueueKind) -> usize {
-        match kind {
-            RuntimeBackgroundQueueKind::StateSave => self.state_save,
-            RuntimeBackgroundQueueKind::ContinuationJournal => self.continuation_journal,
-            RuntimeBackgroundQueueKind::ProbeRefresh => self.probe_refresh,
-        }
+        prodex_mojo_core::runtime_state::queue_threshold(
+            runtime_background_queue_kind(kind),
+            runtime_background_thresholds(self),
+        )
+        .expect("Mojo runtime background threshold policy returned invalid output")
     }
 }
 
@@ -208,10 +294,15 @@ pub fn runtime_background_queue_enqueue_plan(
     pending_len_after_enqueue: usize,
     thresholds: RuntimeBackgroundQueuePressureThresholds,
 ) -> RuntimeBackgroundQueueEnqueuePlan {
-    let backlog = runtime_background_enqueue_backlog(pending_len_after_enqueue);
+    let plan = prodex_mojo_core::runtime_state::queue_enqueue_plan(
+        runtime_background_queue_kind(kind),
+        pending_len_after_enqueue,
+        runtime_background_thresholds(thresholds),
+    )
+    .expect("Mojo runtime background enqueue policy returned invalid output");
     RuntimeBackgroundQueueEnqueuePlan {
-        backlog,
-        pressure_active: backlog >= thresholds.threshold_for(kind),
+        backlog: plan.backlog,
+        pressure_active: plan.pressure_active,
     }
 }
 
@@ -258,10 +349,15 @@ pub fn runtime_state_save_schedule_plan(
     mutation: &RuntimeStateMutation,
     debounce: Duration,
 ) -> RuntimeStateSaveSchedulePlan {
+    let policy = runtime_state_mutation_policy(mutation);
     RuntimeStateSaveSchedulePlan {
-        sections: runtime_state_save_sections(mutation),
-        debounce: runtime_state_save_debounce(mutation, debounce),
-        requires_continuation_journal: runtime_state_save_requires_continuation_journal(mutation),
+        sections: runtime_state_sections_from_policy(policy),
+        debounce: if policy.hot_continuation_state {
+            debounce
+        } else {
+            Duration::ZERO
+        },
+        requires_continuation_journal: policy.requires_continuation_journal,
     }
 }
 
@@ -289,153 +385,15 @@ pub fn runtime_continuation_journal_save_enqueue_plan(
 }
 
 pub fn runtime_state_save_requires_continuation_journal(mutation: &RuntimeStateMutation) -> bool {
-    matches!(
-        mutation,
-        RuntimeStateMutation::ResponseIds(_)
-            | RuntimeStateMutation::PreviousResponseOwner(_)
-            | RuntimeStateMutation::PreviousResponseRelease(_)
-            | RuntimeStateMutation::TurnState(_)
-            | RuntimeStateMutation::SessionId(_)
-            | RuntimeStateMutation::SessionAffinityRelease(_)
-            | RuntimeStateMutation::CompactLineage(_)
-            | RuntimeStateMutation::CompactLineageRelease(_)
-            | RuntimeStateMutation::DeadResponseBindingClear(_)
-            | RuntimeStateMutation::QuotaRelease(_)
-            | RuntimeStateMutation::AuthFailedRelease(_)
-    )
+    runtime_state_mutation_policy(mutation).requires_continuation_journal
 }
 
 pub fn runtime_state_save_sections(mutation: &RuntimeStateMutation) -> RuntimeStateSaveSections {
-    if matches!(
-        mutation,
-        RuntimeStateMutation::FullState
-            | RuntimeStateMutation::StartupAudit
-            | RuntimeStateMutation::StartupContinuationMigration
-            | RuntimeStateMutation::AuthFailedRelease(_)
-    ) {
-        return RuntimeStateSaveSections::full();
-    }
-
-    if matches!(
-        mutation,
-        RuntimeStateMutation::ResponseIds(_)
-            | RuntimeStateMutation::PreviousResponseOwner(_)
-            | RuntimeStateMutation::PreviousResponseNegativeCache(_)
-            | RuntimeStateMutation::PreviousResponseRelease(_)
-            | RuntimeStateMutation::ResponseTouch(_)
-            | RuntimeStateMutation::TurnState(_)
-            | RuntimeStateMutation::TurnStateTouch(_)
-            | RuntimeStateMutation::SessionId(_)
-            | RuntimeStateMutation::SessionTouch(_)
-            | RuntimeStateMutation::SessionAffinityRelease(_)
-            | RuntimeStateMutation::CompactLineage(_)
-            | RuntimeStateMutation::CompactLineageRelease(_)
-            | RuntimeStateMutation::CompactSessionTouch(_)
-            | RuntimeStateMutation::CompactTurnStateTouch(_)
-            | RuntimeStateMutation::DeadResponseBindingClear(_)
-            | RuntimeStateMutation::QuotaRelease(_)
-            | RuntimeStateMutation::ContinuationStale(_)
-    ) {
-        let profile_scores = matches!(
-            mutation,
-            RuntimeStateMutation::ResponseIds(_)
-                | RuntimeStateMutation::PreviousResponseOwner(_)
-                | RuntimeStateMutation::PreviousResponseNegativeCache(_)
-                | RuntimeStateMutation::PreviousResponseRelease(_)
-        );
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::Core,
-            continuations: true,
-            profile_scores,
-            usage_snapshots: false,
-            backoffs: false,
-        };
-    }
-
-    if matches!(mutation, RuntimeStateMutation::ProfileCommit(_)) {
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::Core,
-            continuations: false,
-            profile_scores: true,
-            usage_snapshots: false,
-            backoffs: true,
-        };
-    }
-
-    if matches!(
-        mutation,
-        RuntimeStateMutation::UsageSnapshot(_) | RuntimeStateMutation::ProfileRetryBackoff(_)
-    ) {
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::None,
-            continuations: false,
-            profile_scores: false,
-            usage_snapshots: true,
-            backoffs: true,
-        };
-    }
-
-    if matches!(
-        mutation,
-        RuntimeStateMutation::ProfileTransportBackoff(_)
-            | RuntimeStateMutation::ProfileCircuitHalfOpenProbe(_)
-            | RuntimeStateMutation::StartupBackoffSoften
-    ) {
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::None,
-            continuations: false,
-            profile_scores: false,
-            usage_snapshots: false,
-            backoffs: true,
-        };
-    }
-
-    if matches!(
-        mutation,
-        RuntimeStateMutation::ProfileHealth(_) | RuntimeStateMutation::ProfileCircuitClear(_)
-    ) {
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::None,
-            continuations: false,
-            profile_scores: true,
-            usage_snapshots: false,
-            backoffs: true,
-        };
-    }
-
-    if matches!(
-        mutation,
-        RuntimeStateMutation::ProfileBadPairing(_)
-            | RuntimeStateMutation::ProfileAuthBackoff(_)
-            | RuntimeStateMutation::ProfileAuthBackoffCleared(_)
-    ) {
-        return RuntimeStateSaveSections {
-            state: RuntimeStateSaveStateSection::None,
-            continuations: false,
-            profile_scores: true,
-            usage_snapshots: false,
-            backoffs: false,
-        };
-    }
-
-    RuntimeStateSaveSections::full()
+    runtime_state_sections_from_policy(runtime_state_mutation_policy(mutation))
 }
 
 pub fn runtime_hot_continuation_state_mutation(mutation: &RuntimeStateMutation) -> bool {
-    matches!(
-        mutation,
-        RuntimeStateMutation::ResponseIds(_)
-            | RuntimeStateMutation::PreviousResponseOwner(_)
-            | RuntimeStateMutation::ResponseTouch(_)
-            | RuntimeStateMutation::TurnState(_)
-            | RuntimeStateMutation::TurnStateTouch(_)
-            | RuntimeStateMutation::SessionId(_)
-            | RuntimeStateMutation::SessionTouch(_)
-            | RuntimeStateMutation::CompactLineage(_)
-            | RuntimeStateMutation::CompactLineageRelease(_)
-            | RuntimeStateMutation::CompactSessionTouch(_)
-            | RuntimeStateMutation::CompactTurnStateTouch(_)
-    )
+    runtime_state_mutation_policy(mutation).hot_continuation_state
 }
 
 pub fn runtime_state_save_debounce(
