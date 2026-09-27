@@ -269,9 +269,8 @@ fn quota_admission_uses_expected_upstream_flags() {
     )));
 }
 
-#[cfg(not(feature = "mojo"))]
 #[test]
-fn quota_windows_use_mojo_without_renderer_feature() {
+fn quota_windows_use_mojo_in_every_renderer_feature_mode() {
     let pair = WindowPair {
         allowed: None,
         limit_reached: None,
@@ -346,8 +345,8 @@ fn quota_windows_use_mojo_without_renderer_feature() {
         .as_mut()
         .unwrap()
         .used_percent = None;
-    assert!(!openai_usage_has_unknown_luna_capacity(&unknown_usage));
-    assert!(!openai_usage_supports_model(
+    assert!(openai_usage_has_unknown_luna_capacity(&unknown_usage));
+    assert!(openai_usage_supports_model(
         &unknown_usage,
         false,
         Some("gpt-5.6-luna")
