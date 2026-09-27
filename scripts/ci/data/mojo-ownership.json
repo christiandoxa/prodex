@@ -780,6 +780,16 @@
           "runtime_proxy_request_metadata_policy",
           "runtime_proxy_path_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_state_quota.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_state_quota_policy"
+        ]
       }
     ],
     "removed": [
@@ -2361,6 +2371,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "borrowed suffix/query reconstruction and RuntimeRouteKind mapping from validated Mojo tags"
+    },
+    {
+      "name": "runtime_state_quota_policy",
+      "domain": "runtime-state/quota",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_state_quota_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_state_quota.mojo",
+      "consumer": "crates/prodex-runtime-state/src/quota.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_state_quota::snapshot_usability",
+      "production_consumers": [
+        "crates/prodex-runtime-state/src/quota.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_state_quota.rs",
+      "rust_owner_before": "probe-cache freshness, timestamp persistence, exhausted-window hold classification/usability, and probe snapshot quarantine/backoff arithmetic",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; runtime-state tests cover freshness, holds, persistence, startup refresh and probe apply behavior, with direct ABI smoke coverage",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "generic status projection/equality, candidate collection traversal, typed enum/result reconstruction and FFI validation"
     }
   ],
   "rust_semantic_reductions": [
