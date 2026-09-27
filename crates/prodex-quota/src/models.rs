@@ -106,6 +106,7 @@ pub struct RenderedQuotaReportWindow {
     pub hidden_after: usize,
 }
 
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuotaReportSort {
     Current,
@@ -118,13 +119,16 @@ pub enum QuotaReportSort {
 
 impl QuotaReportSort {
     pub fn next(self) -> Self {
-        match self {
-            Self::Current => Self::Remaining,
-            Self::Remaining => Self::Profile,
-            Self::Profile => Self::Auth,
-            Self::Auth => Self::Account,
-            Self::Account => Self::Plan,
-            Self::Plan => Self::Current,
+        match prodex_mojo_core::quota::quota_report_sort_next(self as i64)
+            .expect("Mojo quota report sort planner returned invalid output")
+        {
+            0 => Self::Current,
+            1 => Self::Remaining,
+            2 => Self::Profile,
+            3 => Self::Auth,
+            4 => Self::Account,
+            5 => Self::Plan,
+            _ => unreachable!("validated Mojo quota report sort tag"),
         }
     }
 
@@ -150,29 +154,35 @@ pub enum QuotaAuthFilter {
 
 impl QuotaAuthFilter {
     pub fn parse(raw: &str) -> Result<Self> {
-        let value = raw.trim().to_ascii_lowercase();
-        if value.is_empty() {
-            bail!("quota auth filter cannot be empty");
-        }
-
-        Ok(match value.as_str() {
-            "all" | "*" => Self::All,
-            "quota-compatible" | "compatible" => Self::QuotaCompatible,
-            "non-quota-compatible"
-            | "not-quota-compatible"
-            | "quota-incompatible"
-            | "incompatible" => Self::NonQuotaCompatible,
-            _ => Self::Label(value),
-        })
+        use prodex_mojo_core::quota::QuotaAuthFilterPlan;
+        Ok(
+            match prodex_mojo_core::quota::quota_auth_filter_parse(raw) {
+                Ok(QuotaAuthFilterPlan::All) => Self::All,
+                Ok(QuotaAuthFilterPlan::Label(label)) => Self::Label(label),
+                Ok(QuotaAuthFilterPlan::QuotaCompatible) => Self::QuotaCompatible,
+                Ok(QuotaAuthFilterPlan::NonQuotaCompatible) => Self::NonQuotaCompatible,
+                Err(prodex_mojo_core::MojoError::InvalidInput) => {
+                    bail!("quota auth filter cannot be empty")
+                }
+                Err(error) => panic!("Mojo quota auth filter parser failed: {error:?}"),
+            },
+        )
     }
 
     pub fn matches(&self, auth: &AuthSummary) -> bool {
-        match self {
-            Self::All => true,
-            Self::Label(label) => auth.label.eq_ignore_ascii_case(label),
-            Self::QuotaCompatible => auth.quota_compatible,
-            Self::NonQuotaCompatible => !auth.quota_compatible,
-        }
+        let (kind, label) = match self {
+            Self::All => (0, ""),
+            Self::Label(label) => (1, label.as_str()),
+            Self::QuotaCompatible => (2, ""),
+            Self::NonQuotaCompatible => (3, ""),
+        };
+        prodex_mojo_core::quota::quota_auth_filter_matches(
+            kind,
+            label,
+            &auth.label,
+            auth.quota_compatible,
+        )
+        .expect("Mojo quota auth filter matcher returned invalid output")
     }
 }
 
@@ -413,30 +423,13 @@ pub fn usage_plan_capacity_pressure_scale_bps(usage: &UsageResponse) -> i64 {
 }
 
 pub fn plan_capacity_pressure_scale_bps(plan_type: &str) -> i64 {
-    let normalized = plan_type
-        .trim()
-        .to_ascii_lowercase()
-        .chars()
-        .filter(|ch| !matches!(ch, ' ' | '-' | '_'))
-        .collect::<String>();
-
-    match normalized.as_str() {
-        "pro20x" | "pro20" | "20x" | "ultra" | "max" => 2_000,
-        "pro" | "prolite" | "pro5x" | "5x" => 5_000,
-        "free" | "basic" => 12_000,
-        _ => 10_000,
-    }
+    prodex_mojo_core::quota::plan_capacity_pressure_scale_bps(plan_type)
+        .expect("Mojo plan capacity pressure scale returned invalid output")
 }
 
 pub fn scale_quota_pressure_for_plan(pressure: i64, scale_bps: i64) -> i64 {
-    if pressure == i64::MAX {
-        return i64::MAX;
-    }
-
-    pressure
-        .saturating_mul(scale_bps.max(0))
-        .checked_div(10_000)
-        .unwrap_or(i64::MAX)
+    prodex_mojo_core::quota::scale_quota_pressure_for_plan(pressure, scale_bps)
+        .expect("Mojo quota pressure scaling returned invalid output")
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

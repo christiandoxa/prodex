@@ -2419,3 +2419,21 @@ now reports **47 authoritative operations**. The canonical broad source report
 counts **54,155 reachable Mojo LOC** and **191,548 Rust production LOC**, totaling
 **245,703 LOC**: **22.04% Mojo**. The 75% project target remains unmet, with
 **520,489 additional Mojo LOC** required at this Rust volume.
+
+## Quota model policy migration
+
+Quota model policy now extends the existing reachable `quota.mojo` owner rather
+than creating a parallel module. Mojo owns quota auth-filter parsing and matching,
+report-sort cycling, plan-capacity pressure scaling, and signed saturating pressure
+scaling. Rust retains provider payload DTOs, serde/credential zeroization boundaries,
+static display labels, and typed enum/tag mapping. No feature-off or recomputation
+fallback remains in the promoted model-policy functions.
+
+The complete `prodex-quota` suite passes **81/81** tests, including new Unicode
+trim/alias, signed saturation, filter-case and sort-cycle boundaries; the direct
+Mojo-core policy test also passes and focused clippy is warning-free. No-fallback
+plus its self-test, ownership, and authority guards pass. Ownership reports **48
+authoritative operations**. The canonical broad source report counts **54,391
+reachable Mojo LOC** and **191,678 Rust production LOC**, totaling **246,069 LOC**:
+**22.10% Mojo**. The 75% project target remains unmet, with **520,643 additional
+Mojo LOC** required at this Rust volume.

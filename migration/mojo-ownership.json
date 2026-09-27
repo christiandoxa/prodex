@@ -493,6 +493,13 @@
           "gemini_request_content_shape_fallbacks",
           "gemini_bridge_request_fallbacks"
         ]
+      },
+      "mojo/prodex_core/quota.mojo": {
+        "operations": [
+          "quota_aggregation_kernel",
+          "quota_capacity_lane_planning",
+          "quota_model_policy"
+        ]
       }
     },
     "additions": [
@@ -1150,6 +1157,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "upstream usage acquisition and bounded record conversion"
+    },
+    {
+      "name": "quota_model_policy",
+      "domain": "quota/model-policy",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_auth_filter_parse_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "consumer": "crates/prodex-quota/src/models.rs",
+      "consumer_marker": "prodex_mojo_core::quota::quota_auth_filter_parse",
+      "production_consumers": [
+        "crates/prodex-quota/src/models.rs",
+        "crates/prodex-quota/src/capacity.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/quota.rs",
+      "rust_owner_before": "quota auth-filter parsing/matching, report sort cycling, plan-capacity pressure scaling and signed pressure scaling",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; fixed caller and Mojo-core tests cover aliases, Unicode trimming, sort cycling and signed saturation boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed enum/tag mapping, static display labels, provider payload DTOs and serialization; model-policy decisions delegate to Mojo"
     },
     {
       "name": "status_quota_summary",

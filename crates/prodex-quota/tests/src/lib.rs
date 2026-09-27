@@ -53,6 +53,49 @@ fn quota_auth_filter_matches_labels_and_compatibility() {
 }
 
 #[test]
+fn quota_model_policy_mojo_preserves_boundaries_and_unicode() {
+    assert_eq!(
+        plan_capacity_pressure_scale_bps("\u{2003}PRO_20 X\u{3000}"),
+        2_000
+    );
+    assert_eq!(plan_capacity_pressure_scale_bps("Prö"), 10_000);
+    assert_eq!(scale_quota_pressure_for_plan(i64::MAX, 2_000), i64::MAX);
+    assert_eq!(scale_quota_pressure_for_plan(-10, 5_000), -5);
+    assert_eq!(
+        scale_quota_pressure_for_plan(i64::MIN, 10_000),
+        i64::MIN / 10_000
+    );
+    assert_eq!(scale_quota_pressure_for_plan(42, -1), 0);
+
+    let mixed = AuthSummary {
+        label: "ChatGPT".to_string(),
+        quota_compatible: true,
+    };
+    assert!(
+        QuotaAuthFilter::parse("  CHATGPT  ")
+            .unwrap()
+            .matches(&mixed)
+    );
+    assert_eq!(
+        QuotaAuthFilter::parse("   ").unwrap_err().to_string(),
+        "quota auth filter cannot be empty"
+    );
+
+    let mut sort = QuotaReportSort::Current;
+    for expected in [
+        QuotaReportSort::Remaining,
+        QuotaReportSort::Profile,
+        QuotaReportSort::Auth,
+        QuotaReportSort::Account,
+        QuotaReportSort::Plan,
+        QuotaReportSort::Current,
+    ] {
+        sort = sort.next();
+        assert_eq!(sort, expected);
+    }
+}
+
+#[test]
 fn credential_debug_is_redacted_through_nested_dtos() {
     const ACCESS: &str = "debug-access-sentinel";
     const ACCOUNT: &str = "debug-account-sentinel";
