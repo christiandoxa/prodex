@@ -609,7 +609,8 @@
           "deepseek_request_metadata_composition",
           "deepseek_strict_schema_normalization",
           "anthropic_web_search_result_shaping",
-          "kiro_chat_response_mapping"
+          "kiro_chat_response_mapping",
+          "kiro_response_shape_fallbacks"
         ]
       },
       {
@@ -671,7 +672,8 @@
           }
         ],
         "operations": [
-          "kiro_chat_response_mapping"
+          "kiro_chat_response_mapping",
+          "kiro_response_shape_fallbacks"
         ]
       }
     ],
@@ -1610,6 +1612,40 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde parsing and serialization, bounded Mojo ABI invocation, and typed transform result mapping"
+    },
+    {
+      "name": "kiro_response_shape_fallbacks",
+      "domain": "provider/kiro",
+      "introduced_in": "0.432.3",
+      "baseline_state": "feature-off Rust model/error/finish-reason and Anthropic response shaping alongside the Mojo feature path",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_kiro_kernel_v1",
+      "mojo_abi_version": 6,
+      "mojo_operation_ids": {
+        "anthropic_tool_use_block": 9,
+        "anthropic_response": 10,
+        "finish_reason": 27,
+        "model_list": 44,
+        "model_not_found": 45,
+        "invalid_request_error": 46,
+        "unsupported_path_error": 47
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/kiro.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/kiro/response.rs",
+      "consumer_marker": "KiroKernelOperation::AnthropicResponse",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/kiro/response.rs",
+        "crates/prodex-provider-core/src/translators/kiro.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/tests/kiro_response.rs",
+      "rust_owner_before": "feature-off Kiro model/error JSON shapes, finish-reason classification, Anthropic tool-use blocks, stop-reason mapping, and message assembly",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; fixed provider caller expectations cover model and error shapes, finish reasons, Anthropic content/tool ordering, defaults, and usage mapping",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "catalog lookup, JSON serialization and decoding, raw malformed-field preservation where the string ABI cannot represent the original JSON type, and runtime metadata attachment"
     }
   ],
   "rust_semantic_reductions": [

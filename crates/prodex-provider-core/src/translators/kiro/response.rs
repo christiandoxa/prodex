@@ -5,9 +5,7 @@ use prodex_mojo_core::MojoError;
 use prodex_mojo_core::rich::KIRO_RESPONSE_MAX_BYTES;
 use serde_json::{Value, json};
 
-#[cfg(feature = "mojo")]
 use super::stream::{kiro_mojo_body, kiro_mojo_value};
-#[cfg(feature = "mojo")]
 use prodex_mojo_core::rich::{KiroKernelInput, KiroKernelOperation};
 
 /// Legacy value-returning adapter. Use the fallible variant for untrusted responses.
@@ -63,18 +61,10 @@ pub fn kiro_provider_core_response_has_tool_calls(response: &Value) -> bool {
 }
 
 pub fn kiro_provider_core_model_list_value(model_catalog: &[Value]) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let catalog = serde_json::to_string(model_catalog).expect("Kiro model catalog serializes");
-        let mut input = KiroKernelInput::new(KiroKernelOperation::ModelList);
-        input.output = Some(&catalog);
-        kiro_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    json!({
-        "object": "list",
-        "data": model_catalog,
-    })
+    let catalog = serde_json::to_string(model_catalog).expect("Kiro model catalog serializes");
+    let mut input = KiroKernelInput::new(KiroKernelOperation::ModelList);
+    input.output = Some(&catalog);
+    kiro_mojo_value(input)
 }
 
 pub fn kiro_provider_core_model_value_or_not_found(
@@ -89,93 +79,40 @@ pub fn kiro_provider_core_model_value_or_not_found(
     }) {
         return (200, model.clone());
     }
-    #[cfg(feature = "mojo")]
-    {
-        let mut input = KiroKernelInput::new(KiroKernelOperation::ModelNotFound);
-        input.model = Some(model_id);
-        (404, kiro_mojo_value(input))
-    }
-    #[cfg(not(feature = "mojo"))]
-    (
-        404,
-        json!({
-            "error": {
-                "message": format!("model '{model_id}' is not available for kiro"),
-                "type": "invalid_request_error",
-                "code": "model_not_found",
-            }
-        }),
-    )
+    let mut input = KiroKernelInput::new(KiroKernelOperation::ModelNotFound);
+    input.model = Some(model_id);
+    (404, kiro_mojo_value(input))
 }
 
 pub fn kiro_provider_core_invalid_request_error_value(message: &str, code: &str) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let mut input = KiroKernelInput::new(KiroKernelOperation::InvalidRequestError);
-        input.content = Some(message);
-        input.status = Some(code);
-        kiro_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    json!({
-        "error": {
-            "message": message,
-            "type": "invalid_request_error",
-            "code": code,
-        }
-    })
+    let mut input = KiroKernelInput::new(KiroKernelOperation::InvalidRequestError);
+    input.content = Some(message);
+    input.status = Some(code);
+    kiro_mojo_value(input)
 }
 
 pub fn kiro_provider_core_unsupported_path_error_value(path: &str) -> Value {
-    #[cfg(feature = "mojo")]
-    {
-        let mut input = KiroKernelInput::new(KiroKernelOperation::UnsupportedPathError);
-        input.content = Some(path);
-        input.status = Some("unsupported_path");
-        kiro_mojo_value(input)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        kiro_provider_core_invalid_request_error_value(
-            &format!("Kiro provider does not support {path} yet"),
-            "unsupported_path",
-        )
-    }
+    let mut input = KiroKernelInput::new(KiroKernelOperation::UnsupportedPathError);
+    input.content = Some(path);
+    input.status = Some("unsupported_path");
+    kiro_mojo_value(input)
 }
 
 pub fn kiro_provider_core_chat_completion_finish_reason(
     response: &Value,
     has_tool_calls: bool,
 ) -> &'static str {
-    #[cfg(feature = "mojo")]
-    {
-        let mut input = KiroKernelInput::new(KiroKernelOperation::FinishReason);
-        input.has_tool_calls = has_tool_calls;
-        input.incomplete_reason = response
-            .pointer("/incomplete_details/reason")
-            .and_then(Value::as_str);
-        let reason: String = serde_json::from_slice(&kiro_mojo_body(input))
-            .expect("Mojo Kiro finish reason is a JSON string");
-        match reason.as_str() {
-            "tool_calls" => "tool_calls",
-            "length" => "length",
-            _ => "stop",
-        }
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        if has_tool_calls {
-            return "tool_calls";
-        }
-        if response
-            .get("incomplete_details")
-            .and_then(|details| details.get("reason"))
-            .and_then(Value::as_str)
-            == Some("max_output_tokens")
-        {
-            return "length";
-        }
-        "stop"
+    let mut input = KiroKernelInput::new(KiroKernelOperation::FinishReason);
+    input.has_tool_calls = has_tool_calls;
+    input.incomplete_reason = response
+        .pointer("/incomplete_details/reason")
+        .and_then(Value::as_str);
+    let reason: String = serde_json::from_slice(&kiro_mojo_body(input))
+        .expect("Mojo Kiro finish reason is a JSON string");
+    match reason.as_str() {
+        "tool_calls" => "tool_calls",
+        "length" => "length",
+        _ => "stop",
     }
 }
 
@@ -198,143 +135,85 @@ pub fn kiro_provider_core_anthropic_message_value_from_response(
         .map(Vec::as_slice)
         .unwrap_or_default();
 
-    #[cfg(feature = "mojo")]
-    {
-        let text = output
-            .iter()
-            .find(|item| item.get("type").and_then(Value::as_str) == Some("message"))
-            .and_then(|item| item.get("content"))
-            .and_then(kiro_provider_core_stream_content_text)
-            .unwrap_or_default();
-        let tool_use_blocks = output
-            .iter()
-            .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
-            .map(|item| {
-                let arguments = item
-                    .get("arguments")
+    let text = output
+        .iter()
+        .find(|item| item.get("type").and_then(Value::as_str) == Some("message"))
+        .and_then(|item| item.get("content"))
+        .and_then(kiro_provider_core_stream_content_text)
+        .unwrap_or_default();
+    let tool_use_blocks = output
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
+        .map(|item| {
+            let arguments = item
+                .get("arguments")
+                .and_then(Value::as_str)
+                .and_then(|arguments| serde_json::from_str::<Value>(arguments).ok())
+                .unwrap_or_else(|| json!({}));
+            let arguments =
+                serde_json::to_string(&arguments).expect("Kiro Anthropic tool input serializes");
+            let mut input = KiroKernelInput::new(KiroKernelOperation::AnthropicToolUseBlock);
+            input.call_id = Some(
+                item.get("call_id")
                     .and_then(Value::as_str)
-                    .and_then(|arguments| serde_json::from_str::<Value>(arguments).ok())
-                    .unwrap_or_else(|| json!({}));
-                let arguments = serde_json::to_string(&arguments)
-                    .expect("Kiro Anthropic tool input serializes");
-                let mut input = KiroKernelInput::new(KiroKernelOperation::AnthropicToolUseBlock);
-                input.call_id = Some(
-                    item.get("call_id")
-                        .and_then(Value::as_str)
-                        .unwrap_or("call_kiro"),
-                );
-                input.name = Some(
-                    item.get("name")
-                        .and_then(Value::as_str)
-                        .unwrap_or("tool_call"),
-                );
-                input.input = Some(&arguments);
-                kiro_mojo_value(input)
-            })
-            .collect::<Vec<_>>();
-        let has_tool_calls = !tool_use_blocks.is_empty();
-        let tool_calls = has_tool_calls.then(|| {
-            serde_json::to_string(&tool_use_blocks).expect("Kiro Anthropic tool blocks serialize")
-        });
-        let response_id = response
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or("msg_kiro");
-        let usage = response.get("usage");
-        let used = usage
-            .and_then(|usage| usage.get("input_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let size = usage
-            .and_then(|usage| usage.get("output_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let reason = response
-            .pointer("/incomplete_details/reason")
-            .or_else(|| response.pointer("/metadata/kiro/stop_reason"))
-            .and_then(Value::as_str);
-        let mut input = KiroKernelInput::new(KiroKernelOperation::AnthropicResponse);
-        input.response_id = Some(response_id);
-        input.requested_model = Some(requested_model);
-        input.content = (!text.is_empty()).then_some(text.as_str());
-        input.tool_calls = tool_calls.as_deref();
-        input.has_tool_calls = has_tool_calls;
-        input.reason = reason;
-        input.used = used;
-        input.size = size;
-        kiro_mojo_value(input)
-    }
-
-    #[cfg(not(feature = "mojo"))]
-    {
-        let text = output
-            .iter()
-            .find(|item| item.get("type").and_then(Value::as_str) == Some("message"))
-            .and_then(|item| item.get("content"))
-            .and_then(kiro_provider_core_stream_content_text)
-            .unwrap_or_default();
-        let tool_use_blocks = output
-            .iter()
-            .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
-            .map(kiro_provider_core_anthropic_tool_use_block)
-            .collect::<Vec<_>>();
-        let mut content = tool_use_blocks;
-        if !text.is_empty() {
-            content.push(json!({
-                "type": "text",
-                "text": text,
-            }));
-        }
-        let usage = response.get("usage").cloned().unwrap_or_else(|| json!({}));
-        let stop_reason = if content
-            .iter()
-            .any(|block| block.get("type").and_then(Value::as_str) == Some("tool_use"))
-        {
-            "tool_use"
-        } else {
-            kiro_provider_core_anthropic_stop_reason(response)
-        };
-        json!({
-            "id": response.get("id").cloned().unwrap_or_else(|| Value::String("msg_kiro".to_string())),
-            "type": "message",
-            "role": "assistant",
-            "model": requested_model,
-            "content": content,
-            "stop_reason": stop_reason,
-            "stop_sequence": Value::Null,
-            "usage": {
-                "input_tokens": usage.get("input_tokens").cloned().unwrap_or(Value::from(0)),
-                "output_tokens": usage.get("output_tokens").cloned().unwrap_or(Value::from(0)),
+                    .unwrap_or("call_kiro"),
+            );
+            input.name = Some(
+                item.get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or("tool_call"),
+            );
+            input.input = Some(&arguments);
+            let mut block = kiro_mojo_value(input);
+            // Preserve raw JSON fields that the string-only ABI cannot represent.
+            if let Some(call_id) = item.get("call_id") {
+                block["id"] = call_id.clone();
             }
+            if let Some(name) = item.get("name") {
+                block["name"] = name.clone();
+            }
+            block
         })
-    }
-}
-
-#[cfg(not(feature = "mojo"))]
-fn kiro_provider_core_anthropic_stop_reason(response: &Value) -> &'static str {
-    response
+        .collect::<Vec<_>>();
+    let has_tool_calls = !tool_use_blocks.is_empty();
+    let tool_calls = has_tool_calls.then(|| {
+        serde_json::to_string(&tool_use_blocks).expect("Kiro Anthropic tool blocks serialize")
+    });
+    let response_id = response
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("msg_kiro");
+    let usage = response.get("usage");
+    let used = usage
+        .and_then(|usage| usage.get("input_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let size = usage
+        .and_then(|usage| usage.get("output_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let reason = response
         .pointer("/incomplete_details/reason")
         .or_else(|| response.pointer("/metadata/kiro/stop_reason"))
-        .and_then(Value::as_str)
-        .map(|reason| match reason {
-            "max_output_tokens" | "max_tokens" => "max_tokens",
-            "tool_use" => "tool_use",
-            _ => "end_turn",
-        })
-        .unwrap_or("end_turn")
-}
-
-#[cfg(not(feature = "mojo"))]
-fn kiro_provider_core_anthropic_tool_use_block(item: &Value) -> Value {
-    let input = item
-        .get("arguments")
-        .and_then(Value::as_str)
-        .and_then(|arguments| serde_json::from_str::<Value>(arguments).ok())
-        .unwrap_or_else(|| json!({}));
-    json!({
-        "type": "tool_use",
-        "id": item.get("call_id").cloned().unwrap_or_else(|| Value::String("call_kiro".to_string())),
-        "name": item.get("name").cloned().unwrap_or_else(|| Value::String("tool_call".to_string())),
-        "input": input,
-    })
+        .and_then(Value::as_str);
+    let mut input = KiroKernelInput::new(KiroKernelOperation::AnthropicResponse);
+    input.response_id = Some(response_id);
+    input.requested_model = Some(requested_model);
+    input.content = (!text.is_empty()).then_some(text.as_str());
+    input.tool_calls = tool_calls.as_deref();
+    input.has_tool_calls = has_tool_calls;
+    input.reason = reason;
+    input.used = used;
+    input.size = size;
+    let mut message = kiro_mojo_value(input);
+    // Copy through raw values without normalizing their JSON types at the ABI.
+    if let Some(id) = response.get("id") {
+        message["id"] = id.clone();
+    }
+    for field in ["input_tokens", "output_tokens"] {
+        if let Some(value) = usage.and_then(|usage| usage.get(field)) {
+            message["usage"][field] = value.clone();
+        }
+    }
+    message
 }
