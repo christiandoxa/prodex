@@ -13,32 +13,13 @@ pub fn gemini_provider_core_native_request_body_with_project(
     };
     // Mojo consumes raw bytes; canonicalize with Serde to preserve the old wire ordering.
     let body = serde_json::to_vec(&value)?;
-    #[cfg(feature = "mojo")]
-    {
-        super::request_contents::gemini_bridge_request_native_project(&body, project_id).map_err(
-            |error| {
-                <serde_json::Error as serde::ser::Error>::custom(format!(
-                    "Mojo Gemini native project kernel failed: {error}"
-                ))
-            },
-        )
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let project_id = serde_json::to_vec(project_id)?;
-        let mut input = prodex_mojo_core::provider_constraints::GeminiBridgeRequestKernelInput::new(
-            prodex_mojo_core::provider_constraints::GeminiBridgeRequestOperation::NativeProject,
-        );
-        input.primary = Some(&body);
-        input.secondary = Some(&project_id);
-        let body = prodex_mojo_core::provider_constraints::gemini_bridge_request_kernel(input)
-            .map_err(|error| {
-                <serde_json::Error as serde::ser::Error>::custom(format!(
-                    "Mojo Gemini native project kernel failed: {error:?}"
-                ))
-            })?;
-        Ok(body)
-    }
+    super::request_contents::gemini_bridge_request_native_project(&body, project_id).map_err(
+        |error| {
+            <serde_json::Error as serde::ser::Error>::custom(format!(
+                "Mojo Gemini native project kernel failed: {error}"
+            ))
+        },
+    )
 }
 
 #[cfg(test)]

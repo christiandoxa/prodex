@@ -59,11 +59,7 @@ pub(crate) use gemini::gemini_custom_apply_patch_input;
 pub(crate) use gemini::gemini_function_declaration_from_openai_tool;
 pub(crate) use gemini::gemini_normalized_response_value;
 pub(crate) use gemini::gemini_preserve_tool_call_signatures;
-#[cfg(not(feature = "mojo"))]
-pub(crate) use gemini::gemini_request_body_without_tool;
 pub(crate) use gemini::gemini_sanitize_function_schema;
-#[cfg(not(feature = "mojo"))]
-pub(crate) use gemini::gemini_validate_candidate_count;
 pub(crate) use gemini::gemini_validate_openai_tools;
 pub use gemini::{
     GeminiProviderCoreStreamChunkMetadata, GeminiProviderCoreStreamFunctionCallDelta,

@@ -8,21 +8,7 @@ pub fn gemini_provider_core_simple_request(body: &[u8]) -> bool {
     let Ok(body) = serde_json::to_vec(&value) else {
         return false;
     };
-    #[cfg(feature = "mojo")]
-    {
-        super::request_contents::gemini_bridge_request_simple(&body)
-    }
-    #[cfg(not(feature = "mojo"))]
-    {
-        let mut input = prodex_mojo_core::provider_constraints::GeminiBridgeRequestKernelInput::new(
-            prodex_mojo_core::provider_constraints::GeminiBridgeRequestOperation::SimpleRequest,
-        );
-        input.primary = Some(&body);
-        prodex_mojo_core::provider_constraints::gemini_bridge_request_kernel(input)
-            .ok()
-            .and_then(|body| serde_json::from_slice::<bool>(&body).ok())
-            .unwrap_or(false)
-    }
+    super::request_contents::gemini_bridge_request_simple(&body)
 }
 
 #[cfg(test)]
