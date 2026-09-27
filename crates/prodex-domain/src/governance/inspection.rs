@@ -10,6 +10,7 @@ pub const MAX_INSPECTION_REASON_CODES: usize = 32;
 pub const MAX_INSPECTION_TOKEN_BYTES: usize = 128;
 pub const MAX_CONTENT_LOCATION_PATH_BYTES: usize = 256;
 
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DataClassification {
@@ -60,6 +61,7 @@ impl InspectionCoverage {
     }
 }
 
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingKind {
@@ -94,25 +96,23 @@ impl FindingKind {
     ];
 
     pub fn minimum_classification(self) -> DataClassification {
-        self.minimum_classification_rust()
+        let classification =
+            prodex_mojo_core::policy::governance_finding_minimum_classification(self as u8)
+                .expect("Mojo governance finding classification returned invalid output");
+        data_classification_from_tag(classification)
+            .expect("Mojo governance finding classification returned an unknown tag")
     }
+}
 
-    fn minimum_classification_rust(self) -> DataClassification {
-        match self {
-            Self::EmailAddress
-            | Self::PhoneNumber
-            | Self::PersonName
-            | Self::PhysicalAddress
-            | Self::TenantSensitive => DataClassification::Confidential,
-            Self::GovernmentId
-            | Self::FinancialAccount
-            | Self::PaymentCard
-            | Self::AccessToken
-            | Self::ApiKey
-            | Self::PrivateKey
-            | Self::Password => DataClassification::Restricted,
-        }
-    }
+fn data_classification_from_tag(value: u8) -> Option<DataClassification> {
+    [
+        DataClassification::Public,
+        DataClassification::Internal,
+        DataClassification::Confidential,
+        DataClassification::Restricted,
+    ]
+    .get(usize::from(value))
+    .copied()
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -353,9 +353,16 @@ impl InspectionResult {
         {
             return Err(InspectionModelError::LimitExceeded);
         }
-        let classification_too_low = findings
+        let finding_kinds = findings
             .iter()
-            .any(|finding| classification < finding.kind.minimum_classification());
+            .map(|finding| finding.kind as u8)
+            .collect::<Vec<_>>();
+        let classification_too_low =
+            prodex_mojo_core::policy::governance_findings_exceed_classification(
+                &finding_kinds,
+                classification as u8,
+            )
+            .expect("Mojo governance finding classification returned invalid output");
         if classification_too_low {
             return Err(InspectionModelError::ClassificationTooLow);
         }

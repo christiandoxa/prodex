@@ -1,21 +1,15 @@
 use super::{ProfileSelectionProvider, ProfileSelectionRead, RUN_SELECTION_COOLDOWN_SECONDS};
-#[cfg(test)]
-use super::{RUN_SELECTION_HYSTERESIS_BPS, RUN_SELECTION_NEAR_OPTIMAL_BPS};
 use chrono::Local;
 use prodex_mojo_core::runtime::{
     ProfileScheduleInput as MojoProfileScheduleInput, ProfileScoreInput as MojoProfileScoreInput,
     QuotaRouteScoreInput as MojoQuotaRouteScoreInput,
 };
 pub use prodex_quota::required_main_window_snapshot_at;
-#[cfg(test)]
-use prodex_quota::scale_quota_pressure_for_plan;
 use prodex_quota::{
     RuntimeQuotaPressureBand, UsageResponse, usage_plan_capacity_pressure_scale_bps,
 };
 use prodex_runtime_state::RuntimeRouteKind;
 use prodex_shared_types::{ReadyProfileCandidate, ReadyProfileScore, RuntimeQuotaSource};
-#[cfg(test)]
-use std::cmp::Reverse;
 
 pub fn schedule_ready_profile_candidates_with_view<S: ProfileSelectionRead>(
     candidates: Vec<ReadyProfileCandidate>,
@@ -111,136 +105,6 @@ fn schedule_ready_profile_candidates_with_view_for_model_at<S: ProfileSelectionR
         .collect()
 }
 
-#[cfg(test)]
-type ReadyProfileSortKey = (
-    usize,
-    i64,
-    i64,
-    i64,
-    Reverse<i64>,
-    Reverse<i64>,
-    Reverse<i64>,
-    i64,
-    i64,
-    usize,
-    usize,
-    usize,
-);
-
-#[cfg(test)]
-type ReadyProfileRuntimeSortKey = (usize, usize, usize, i64, ReadyProfileSortKey);
-
-#[cfg(test)]
-fn ready_profile_runtime_sort_key_from_score<S: ProfileSelectionRead>(
-    candidate: &ReadyProfileCandidate,
-    selection: S,
-    best_provider_priority: usize,
-    best_total_pressure: i64,
-    now: i64,
-    score: ReadyProfileScore,
-) -> ReadyProfileRuntimeSortKey {
-    let near_optimal = candidate.provider_priority == best_provider_priority
-        && score_within_bps(
-            score.total_pressure,
-            best_total_pressure,
-            RUN_SELECTION_NEAR_OPTIMAL_BPS,
-        );
-    let recently_used = near_optimal
-        && profile_in_run_selection_cooldown_with_view(selection, &candidate.name, now);
-    let last_selected_at = if near_optimal {
-        selection
-            .last_run_selected_at(&candidate.name)
-            .unwrap_or(i64::MIN)
-    } else {
-        i64::MIN
-    };
-
-    (
-        candidate.provider_priority,
-        if near_optimal { 0usize } else { 1usize },
-        if recently_used { 1usize } else { 0usize },
-        last_selected_at,
-        ready_profile_sort_key_from_score(candidate, score),
-    )
-}
-
-#[cfg(test)]
-fn ready_profile_sort_key_from_score(
-    candidate: &ReadyProfileCandidate,
-    score: ReadyProfileScore,
-) -> ReadyProfileSortKey {
-    (
-        candidate.provider_priority,
-        score.total_pressure,
-        score.weekly_pressure,
-        score.five_hour_pressure,
-        Reverse(score.reserve_floor),
-        Reverse(score.weekly_remaining),
-        Reverse(score.five_hour_remaining),
-        score.weekly_reset_at,
-        score.five_hour_reset_at,
-        runtime_quota_source_sort_key(RuntimeRouteKind::Responses, candidate.quota_source),
-        if candidate.preferred { 0usize } else { 1usize },
-        candidate.order_index,
-    )
-}
-
-#[cfg(test)]
-fn ready_profile_scores_for_candidates(
-    candidates: &[ReadyProfileCandidate],
-    route_kind: RuntimeRouteKind,
-    now: i64,
-    requested_model: Option<&str>,
-) -> Vec<ReadyProfileScore> {
-    candidates
-        .iter()
-        .map(|candidate| {
-            if let Some(model) = requested_model {
-                let usages = [&candidate.usage];
-                let sort_key =
-                    crate::pressure::runtime_quota_pressure_sort_keys_for_route_at_with_model(
-                        &usages,
-                        route_kind,
-                        Some(model),
-                        now,
-                    )
-                    .into_iter()
-                    .next()
-                    .expect("model-aware quota score returned no score");
-                return ready_profile_score_from_pressure_sort_key(sort_key);
-            }
-            ready_profile_score_for_route_at_rust(&candidate.usage, route_kind, now)
-        })
-        .collect()
-}
-
-#[cfg(test)]
-fn ready_profile_score_from_pressure_sort_key(
-    sort_key: crate::pressure::RuntimeQuotaPressureSortKey,
-) -> ReadyProfileScore {
-    let (
-        _,
-        total_pressure,
-        weekly_pressure,
-        five_hour_pressure,
-        Reverse(reserve_floor),
-        Reverse(weekly_remaining),
-        Reverse(five_hour_remaining),
-        weekly_reset_at,
-        five_hour_reset_at,
-    ) = sort_key;
-    ReadyProfileScore {
-        total_pressure,
-        weekly_pressure,
-        five_hour_pressure,
-        reserve_floor,
-        weekly_remaining,
-        five_hour_remaining,
-        weekly_reset_at,
-        five_hour_reset_at,
-    }
-}
-
 fn ready_profile_window_snapshot_at(
     usage: &UsageResponse,
     label: &str,
@@ -321,49 +185,6 @@ fn ready_profile_score_for_route_at_mojo(
     }
 }
 
-#[cfg(test)]
-fn ready_profile_score_for_route_at_rust(
-    usage: &UsageResponse,
-    route_kind: RuntimeRouteKind,
-    now: i64,
-) -> ReadyProfileScore {
-    let weekly = required_main_window_snapshot_at(usage, "weekly", now);
-    let five_hour = required_main_window_snapshot_at(usage, "5h", now);
-
-    let weekly_pressure = weekly.map_or(i64::MAX, |window| window.pressure_score);
-    let five_hour_pressure = five_hour.map_or(i64::MAX, |window| window.pressure_score);
-    let plan_pressure_scale_bps = usage_plan_capacity_pressure_scale_bps(usage);
-    let scaled_weekly_pressure =
-        scale_quota_pressure_for_plan(weekly_pressure, plan_pressure_scale_bps);
-    let scaled_five_hour_pressure =
-        scale_quota_pressure_for_plan(five_hour_pressure, plan_pressure_scale_bps);
-    let weekly_remaining = weekly.map_or(0, |window| window.remaining_percent);
-    let five_hour_remaining = five_hour.map_or(0, |window| window.remaining_percent);
-    let weekly_weight = match route_kind {
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => 10,
-        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => 8,
-    };
-    let reserve_bias = match runtime_quota_pressure_band_for_route_at_rust(usage, route_kind, now) {
-        RuntimeQuotaPressureBand::Healthy => 0,
-        RuntimeQuotaPressureBand::Thin => 250_000,
-        RuntimeQuotaPressureBand::Critical => 1_000_000,
-        RuntimeQuotaPressureBand::Exhausted | RuntimeQuotaPressureBand::Unknown => i64::MAX / 4,
-    };
-
-    ReadyProfileScore {
-        total_pressure: reserve_bias
-            .saturating_add(scaled_weekly_pressure.saturating_mul(weekly_weight))
-            .saturating_add(scaled_five_hour_pressure),
-        weekly_pressure: scaled_weekly_pressure,
-        five_hour_pressure: scaled_five_hour_pressure,
-        reserve_floor: weekly_remaining.min(five_hour_remaining),
-        weekly_remaining,
-        five_hour_remaining,
-        weekly_reset_at: weekly.map_or(i64::MAX, |window| window.reset_at),
-        five_hour_reset_at: five_hour.map_or(i64::MAX, |window| window.reset_at),
-    }
-}
-
 pub fn runtime_quota_pressure_band_for_route(
     usage: &UsageResponse,
     route_kind: RuntimeRouteKind,
@@ -402,39 +223,6 @@ pub fn runtime_quota_pressure_band_for_route_at(
     }
 }
 
-#[cfg(test)]
-fn runtime_quota_pressure_band_for_route_at_rust(
-    usage: &UsageResponse,
-    route_kind: RuntimeRouteKind,
-    now: i64,
-) -> RuntimeQuotaPressureBand {
-    let Some(weekly) = required_main_window_snapshot_at(usage, "weekly", now) else {
-        return RuntimeQuotaPressureBand::Unknown;
-    };
-    let Some(five_hour) = required_main_window_snapshot_at(usage, "5h", now) else {
-        return RuntimeQuotaPressureBand::Unknown;
-    };
-
-    let weekly_remaining = weekly.remaining_percent;
-    let five_hour_remaining = five_hour.remaining_percent;
-    if weekly_remaining == 0 || five_hour_remaining == 0 {
-        return RuntimeQuotaPressureBand::Exhausted;
-    }
-
-    let (thin_weekly, thin_five_hour, critical_weekly, critical_five_hour) = match route_kind {
-        RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket => (20, 10, 10, 5),
-        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard => (10, 5, 5, 3),
-    };
-
-    if weekly_remaining <= critical_weekly || five_hour_remaining <= critical_five_hour {
-        RuntimeQuotaPressureBand::Critical
-    } else if weekly_remaining <= thin_weekly || five_hour_remaining <= thin_five_hour {
-        RuntimeQuotaPressureBand::Thin
-    } else {
-        RuntimeQuotaPressureBand::Healthy
-    }
-}
-
 pub fn runtime_quota_source_sort_key(
     route_kind: RuntimeRouteKind,
     source: RuntimeQuotaSource,
@@ -462,17 +250,6 @@ pub fn profile_in_run_selection_cooldown_with_view<S: ProfileSelectionRead>(
     };
 
     now.saturating_sub(last_selected_at) < RUN_SELECTION_COOLDOWN_SECONDS
-}
-
-#[cfg(test)]
-fn score_within_bps(candidate_score: i64, best_score: i64, bps: i64) -> bool {
-    if candidate_score <= best_score {
-        return true;
-    }
-
-    let lhs = i128::from(candidate_score).saturating_mul(10_000);
-    let rhs = i128::from(best_score).saturating_mul(i128::from(10_000 + bps));
-    lhs <= rhs
 }
 
 pub fn active_profile_selection_order_with_view<S: ProfileSelectionRead>(
@@ -528,77 +305,3 @@ fn profile_selection_order_with_mojo<S: ProfileSelectionRead>(
 #[path = "scoring/profile_order.rs"]
 mod profile_order;
 pub use profile_order::provider_aware_profile_order_with_view;
-
-#[cfg(test)]
-fn schedule_ready_profile_candidates_rust<S: ProfileSelectionRead>(
-    candidates: Vec<ReadyProfileCandidate>,
-    selection: S,
-    preferred_profile: Option<&str>,
-    requested_model: Option<&str>,
-    now: i64,
-) -> Vec<ReadyProfileCandidate> {
-    if candidates.len() <= 1 {
-        return candidates;
-    }
-    let scores = ready_profile_scores_for_candidates(
-        &candidates,
-        RuntimeRouteKind::Responses,
-        now,
-        requested_model,
-    );
-    let mut scored_candidates = candidates.into_iter().zip(scores).collect::<Vec<_>>();
-    let best_provider_priority = scored_candidates
-        .iter()
-        .map(|(candidate, _)| candidate.provider_priority)
-        .min()
-        .unwrap_or(usize::MAX);
-    let best_total_pressure = scored_candidates
-        .iter()
-        .filter(|(candidate, _)| candidate.provider_priority == best_provider_priority)
-        .map(|(_, score)| score.total_pressure)
-        .min()
-        .unwrap_or(i64::MAX);
-
-    scored_candidates.sort_by_key(|(candidate, score)| {
-        ready_profile_runtime_sort_key_from_score(
-            candidate,
-            selection,
-            best_provider_priority,
-            best_total_pressure,
-            now,
-            *score,
-        )
-    });
-
-    if let Some(preferred_name) = preferred_profile
-        && let Some(preferred_index) = scored_candidates.iter().position(|(candidate, _)| {
-            candidate.name == preferred_name
-                && !profile_in_run_selection_cooldown_with_view(selection, &candidate.name, now)
-        })
-    {
-        let preferred_score = scored_candidates[preferred_index].1.total_pressure;
-        let selected_score = scored_candidates[0].1.total_pressure;
-
-        if preferred_index > 0
-            && scored_candidates[preferred_index].0.provider_priority
-                == scored_candidates[0].0.provider_priority
-            && score_within_bps(
-                preferred_score,
-                selected_score,
-                RUN_SELECTION_HYSTERESIS_BPS,
-            )
-        {
-            let preferred_candidate = scored_candidates.remove(preferred_index);
-            scored_candidates.insert(0, preferred_candidate);
-        }
-    }
-
-    scored_candidates
-        .into_iter()
-        .map(|(candidate, _)| candidate)
-        .collect()
-}
-
-#[cfg(test)]
-#[path = "../../tests/src/scoring_mojo_parity.rs"]
-mod mojo_selection_parity_tests;

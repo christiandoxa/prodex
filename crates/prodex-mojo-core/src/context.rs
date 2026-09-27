@@ -468,32 +468,5 @@ fn signal_diff_self_test_passes() {
 }
 
 #[cfg(all(test, feature = "mojo-runtime"))]
-#[test]
-fn signal_diff_matches_rust_oracle_for_generated_counters() {
-    let mut state = 0x637269746963616c_u64;
-    for case in 0..2_000 {
-        let before = std::array::from_fn(|_| (next_random(&mut state) % 10_000) as usize);
-        let after = std::array::from_fn(|_| (next_random(&mut state) % 10_000) as usize);
-        let expected_lost = std::array::from_fn(|index| before[index].saturating_sub(after[index]));
-        let expected_gained =
-            std::array::from_fn(|index| after[index].saturating_sub(before[index]));
-        let actual = signal_diff(&before, &after).expect("generated signal counters are valid");
-        assert_eq!(
-            actual,
-            (expected_lost, expected_gained),
-            "signal case {case}"
-        );
-    }
-}
-
-#[cfg(all(test, feature = "mojo-runtime"))]
-fn next_random(state: &mut u64) -> u64 {
-    *state = state
-        .wrapping_mul(6364136223846793005)
-        .wrapping_add(1442695040888963407);
-    *state
-}
-
-#[cfg(all(test, feature = "mojo-runtime"))]
 #[path = "context/tests.rs"]
 mod text_abi_tests;

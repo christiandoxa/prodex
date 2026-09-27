@@ -8,6 +8,7 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-domain/src/governance/inspection.rs",
   "crates/prodex-mojo-core/build.rs",
   "crates/prodex-mojo-core/src/lib.rs",
   "crates/prodex-mojo-core/src/quota.rs",
@@ -220,6 +221,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-domain/src/governance/inspection.rs",
   "crates/prodex-cli/src/runtime_features.rs",
   "crates/prodex-runtime-launch/src/lib.rs",
   "crates/prodex-provider-core/src/translators.rs",
@@ -796,6 +798,16 @@ export function findViolations(files) {
     }
     return [];
   });
+  const governanceInspectionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== "crates/prodex-domain/src/governance/inspection.rs") return [];
+    const required = [
+      "governance_finding_minimum_classification(",
+      "governance_findings_exceed_classification(",
+    ];
+    return required
+      .filter((call) => !contents.includes(call))
+      .map((call) => `${filePath}: governance classification must retain Mojo call ${call}`);
+  });
   const cliRuntimeFeatureViolations = files
     .filter(([filePath, contents]) => filePath === CLI_RUNTIME_FEATURE_FILE &&
       /\bfn\s+(?:rust_plan|rollout_budget_reminders|to_codex_config_args_rust|mojo_feature_plan_matches_rust_oracle_for_seeded_inputs)\s*\(/u.test(contents))
@@ -1077,6 +1089,9 @@ export function findViolations(files) {
   });
   const replacedClassifierViolations = files.flatMap(([filePath, contents]) => {
     const forbidden = new Map([
+      ["crates/prodex-domain/src/governance/inspection.rs", /\bfn\s+minimum_classification_rust\s*\(|\.any\(\|finding\|\s*classification\s*<\s*finding\.kind\.minimum_classification\(\)\)/u],
+      ["crates/prodex-runtime-quota/src/selection/scoring.rs", /\bfn\s+(?:ready_profile_score_for_route_at_rust|runtime_quota_pressure_band_for_route_at_rust|schedule_ready_profile_candidates_rust)\s*\(/u],
+      ["crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs", /\bfn\s+provider_aware_profile_order_rust\s*\(/u],
       [SUPER_OVERRIDE_FILE, /\bfn\s+(?:scan_override_rust|scan_identity_override|scan_boolean_override|scan_runtime_override|scan_feature_value_override|scan_feature_boolean_override)\s*\(/u],
       [GEMINI_SCHEMA_FILE, /\bfn\s+(?:schema_type|supported_schema_type|sanitized_enum|sanitized_properties|sanitized_required)\s*\(/u],
       [GEMINI_TOOLS_FILE, /\bfn\s+gemini_tool_config_from_request_oracle\s*\(/u],
@@ -1122,7 +1137,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,

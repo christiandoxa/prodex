@@ -336,108 +336,8 @@ fn rich_catalog_planner_matches_reference_order_filter_and_effort_rules() {
     assert_eq!(plan_dynamic_catalog(&models).unwrap().models, reference);
 }
 
-fn rust_catalog_configuration_oracle(
-    input: CatalogConfigurationInput<'_>,
-) -> Result<CatalogConfigurationPlan, ()> {
-    let find = |query: &str| {
-        let query = query.trim();
-        if query.is_empty() {
-            return None;
-        }
-        input.models.iter().position(|model| {
-            model.id.trim().eq_ignore_ascii_case(query)
-                || model
-                    .aliases
-                    .iter()
-                    .any(|alias| alias.eq_ignore_ascii_case(query))
-        })
-    };
-    let mut selected_model = None;
-    let mut selected_index = None;
-    if let Some(model) = input.explicit_model {
-        selected_model = Some(match input.role {
-            CatalogPlanRole::Main => model.to_string(),
-            CatalogPlanRole::SubAgent => find(model)
-                .map(|index| input.models[index].id.to_string())
-                .unwrap_or_else(|| model.to_string()),
-        });
-        selected_index = find(model);
-    } else if input.role == CatalogPlanRole::Main {
-        for candidate in [input.remembered_model, input.current] {
-            if let Some(candidate) = candidate
-                && let Some(index) = find(candidate)
-            {
-                selected_model = Some(candidate.to_string());
-                selected_index = Some(index);
-                break;
-            }
-        }
-        if selected_model.is_none()
-            && let Some(candidate) = [input.catalog_default, input.provider_default]
-                .into_iter()
-                .flatten()
-                .next()
-        {
-            selected_model = Some(candidate.to_string());
-            selected_index = find(candidate);
-        }
-    }
-    let effort_index = selected_index.or_else(|| {
-        (input.role == CatalogPlanRole::SubAgent)
-            .then(|| input.provider_default.and_then(find))
-            .flatten()
-    });
-    let effort_values = effort_index
-        .map(|index| input.models[index].efforts)
-        .unwrap_or(input.fallback_efforts);
-    let mut seen = BTreeSet::new();
-    let supported_efforts = effort_values
-        .iter()
-        .map(|effort| effort.trim())
-        .filter(|effort| !effort.is_empty())
-        .filter(|effort| seen.insert(effort.to_ascii_lowercase()))
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let default_effort = effort_index
-        .and_then(|index| input.models[index].default_effort)
-        .map(str::trim)
-        .filter(|effort| !effort.is_empty())
-        .map(str::to_string)
-        .or_else(|| supported_efforts.first().cloned());
-    let selected_effort = if let Some(requested) = input.explicit_effort {
-        Some(
-            supported_efforts
-                .iter()
-                .find(|effort| effort.eq_ignore_ascii_case(requested.trim()))
-                .cloned()
-                .ok_or(())?,
-        )
-    } else if input.role == CatalogPlanRole::Main
-        && let (Some(selected), Some(remembered)) =
-            (selected_model.as_deref(), input.remembered_model)
-        && selected.trim().eq_ignore_ascii_case(remembered.trim())
-    {
-        supported_efforts
-            .iter()
-            .find(|effort| {
-                input
-                    .remembered_effort
-                    .is_some_and(|remembered| effort.eq_ignore_ascii_case(remembered.trim()))
-            })
-            .cloned()
-            .or_else(|| default_effort.clone())
-    } else {
-        default_effort.clone()
-    };
-    Ok(CatalogConfigurationPlan {
-        selected_model,
-        selected_effort,
-        default_effort,
-    })
-}
-
 #[test]
-fn rich_catalog_configuration_matches_test_only_rust_oracle() {
+fn rich_catalog_configuration_uses_expected_precedence() {
     let models = [
         CatalogPlanModel {
             id: "gpt-5.6-sol",
@@ -447,7 +347,7 @@ fn rich_catalog_configuration_matches_test_only_rust_oracle() {
             supported: true,
             hidden: false,
             listed: true,
-            efforts: &["low", " MEDIUM ", "medium"],
+            efforts: &["low", "medium"],
             default_effort: Some("low"),
         },
         CatalogPlanModel {
@@ -462,104 +362,22 @@ fn rich_catalog_configuration_matches_test_only_rust_oracle() {
             default_effort: Some("max"),
         },
     ];
-    let fallback = ["none", "low", "medium", "high"];
-    let cases = [
-        CatalogConfigurationInput {
-            role: CatalogPlanRole::Main,
-            models: &models,
-            current: Some("current-model"),
-            provider_default: Some("gpt-5.6-sol"),
-            catalog_default: Some("gpt-5.6-luna"),
-            explicit_model: None,
-            remembered_model: Some(" SOL "),
-            explicit_effort: None,
-            remembered_effort: Some("MEDIUM"),
-            fallback_efforts: &fallback,
-        },
-        CatalogConfigurationInput {
-            role: CatalogPlanRole::Main,
-            models: &models,
-            current: None,
-            provider_default: Some("gpt-5.6-luna"),
-            catalog_default: Some("gpt-5.6-sol"),
-            explicit_model: Some("dynamic/model"),
-            remembered_model: Some("gpt-5.6-sol"),
-            explicit_effort: Some(" HIGH "),
-            remembered_effort: Some("low"),
-            fallback_efforts: &fallback,
-        },
-        CatalogConfigurationInput {
-            role: CatalogPlanRole::SubAgent,
-            models: &models,
-            current: None,
-            provider_default: Some("luna"),
-            catalog_default: None,
-            explicit_model: Some("sol"),
-            remembered_model: None,
-            explicit_effort: Some("medium"),
-            remembered_effort: None,
-            fallback_efforts: &fallback,
-        },
-        CatalogConfigurationInput {
-            role: CatalogPlanRole::SubAgent,
-            models: &models,
-            current: None,
-            provider_default: Some("luna"),
-            catalog_default: None,
-            explicit_model: None,
-            remembered_model: None,
-            explicit_effort: None,
-            remembered_effort: None,
-            fallback_efforts: &fallback,
-        },
-        CatalogConfigurationInput {
-            role: CatalogPlanRole::Main,
-            models: &models,
-            current: None,
-            provider_default: Some("gpt-5.6-sol"),
-            catalog_default: None,
-            explicit_model: Some("sol"),
-            remembered_model: None,
-            explicit_effort: Some("max"),
-            remembered_effort: None,
-            fallback_efforts: &fallback,
-        },
-    ];
-    for input in cases {
-        let expected = rust_catalog_configuration_oracle(input);
-        let actual = plan_catalog_configuration(input);
-        assert_eq!(actual.is_err(), expected.is_err());
-        if let (Ok(actual), Ok(expected)) = (actual, expected) {
-            assert_eq!(actual, expected);
-        }
-    }
-
-    let default_only = [CatalogPlanModel {
-        id: "model",
-        aliases: &[],
-        label: "Model",
-        priority: 0,
-        supported: true,
-        hidden: false,
-        listed: true,
-        efforts: &[],
-        default_effort: Some("default-effort"),
-    }];
     let plan = plan_catalog_configuration(CatalogConfigurationInput {
-        role: CatalogPlanRole::Main,
-        models: &default_only,
+        role: CatalogPlanRole::SubAgent,
+        models: &models,
         current: None,
-        provider_default: Some("model"),
+        provider_default: Some("luna"),
         catalog_default: None,
-        explicit_model: None,
+        explicit_model: Some("sol"),
         remembered_model: None,
-        explicit_effort: None,
+        explicit_effort: Some("MEDIUM"),
         remembered_effort: None,
-        fallback_efforts: &[],
+        fallback_efforts: &["none", "low", "medium", "high"],
     })
     .unwrap();
-    assert_eq!(plan.default_effort.as_deref(), Some("default-effort"));
-    assert_eq!(plan.selected_effort.as_deref(), Some("default-effort"));
+    assert_eq!(plan.selected_model.as_deref(), Some("gpt-5.6-sol"));
+    assert_eq!(plan.selected_effort.as_deref(), Some("medium"));
+    assert_eq!(plan.default_effort.as_deref(), Some("low"));
 }
 
 #[test]

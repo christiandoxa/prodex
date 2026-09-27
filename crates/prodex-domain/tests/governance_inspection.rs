@@ -94,3 +94,23 @@ fn classification_and_coverage_only_move_conservatively() {
         InspectionCoverage::Unsupported
     );
 }
+#[test]
+fn finding_minimum_classifications_follow_the_mojo_policy() {
+    let expected = [
+        DataClassification::Confidential,
+        DataClassification::Confidential,
+        DataClassification::Confidential,
+        DataClassification::Confidential,
+        DataClassification::Restricted,
+        DataClassification::Restricted,
+        DataClassification::Restricted,
+        DataClassification::Restricted,
+        DataClassification::Restricted,
+        DataClassification::Restricted,
+        DataClassification::Restricted,
+        DataClassification::Confidential,
+    ];
+    for (kind, expected) in FindingKind::ALL.into_iter().zip(expected) {
+        assert_eq!(kind.minimum_classification(), expected, "kind={kind:?}");
+    }
+}
