@@ -1,15 +1,26 @@
+use prodex_mojo_core::super_provider_config::{
+    RuntimeExternalProviderClass,
+    runtime_external_provider_class as mojo_runtime_external_provider_class,
+};
+
+pub(super) fn runtime_external_provider_class(
+    provider: &str,
+) -> Option<RuntimeExternalProviderClass> {
+    mojo_runtime_external_provider_class(provider)
+        .expect("runtime external provider classification should accept Rust strings")
+}
+
 pub(super) fn runtime_external_provider_has_rotation_summary(provider: &str) -> bool {
     matches!(
-        provider.to_ascii_lowercase().as_str(),
-        "gemini"
-            | "gemini-oauth"
-            | "anthropic"
-            | "claude"
-            | "copilot"
-            | "github-copilot"
-            | "github_copilot"
-            | "deepseek"
-            | "kiro"
+        runtime_external_provider_class(provider),
+        Some(
+            RuntimeExternalProviderClass::Gemini
+                | RuntimeExternalProviderClass::GeminiOauth
+                | RuntimeExternalProviderClass::Anthropic
+                | RuntimeExternalProviderClass::Copilot
+                | RuntimeExternalProviderClass::DeepSeek
+                | RuntimeExternalProviderClass::Kiro
+        )
     )
 }
 
@@ -18,7 +29,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn runtime_external_provider_has_rotation_summary_accepts_kiro() {
-        assert!(runtime_external_provider_has_rotation_summary("kiro"));
+    fn runtime_external_provider_has_rotation_summary_uses_mojo_alias_policy() {
+        for provider in [
+            "kiro",
+            "CLAUDE",
+            "github_copilot",
+            "deepseek",
+            "gemini-oauth",
+        ] {
+            assert!(runtime_external_provider_has_rotation_summary(provider));
+        }
+        for provider in ["unknown", " gemini ", "gemini-native", "antigravity"] {
+            assert!(!runtime_external_provider_has_rotation_summary(provider));
+        }
     }
 }

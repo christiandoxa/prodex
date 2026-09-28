@@ -2956,3 +2956,22 @@ tool-call, non-tool, empty-response, and length finish-reason behavior. The cano
 broad report counts **61,055 reachable Mojo LOC** and **194,036 Rust production LOC**,
 totaling **255,091 LOC**: **23.93% Mojo**. The 75% project target remains unmet, with
 **521,053 additional Mojo LOC** required at the current Rust volume.
+
+
+## Runtime external-provider classification migration
+
+Runtime launch external-provider classification now has one authoritative Mojo
+classifier in super_provider_config.mojo. Anthropic/Claude, Copilot aliases,
+DeepSeek, Gemini, Gemini OAuth, Kiro, Gemini native, and Antigravity are classified
+once with the exact case-insensitive semantics used by the previous Rust callers.
+The repeated Rust alias tables in provider summary, API-key mode, local-rewrite
+dispatch, profile-home selection, and launch selection were deleted. Rust retains
+auth acquisition, profile/state access, option construction, and stable error text;
+there is no Rust semantic fallback for provider-name classification.
+
+Focused validation passes the direct Mojo classifier test plus the runtime provider
+mode, alias-to-local-rewrite, Gemini OAuth guidance, rotation-summary, and native
+Gemini profileless-selection tests. The canonical broad report counts **61,086
+reachable Mojo LOC** and **194,091 Rust production LOC**, totaling **255,177 LOC**:
+**23.94% Mojo**. The 75% project target remains unmet, with **521,187 additional Mojo
+LOC** required at the current Rust volume.

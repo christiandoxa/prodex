@@ -12,8 +12,26 @@ pub enum ExternalProviderAliasPlan {
     Kiro,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeExternalProviderClass {
+    Anthropic,
+    Copilot,
+    DeepSeek,
+    Gemini,
+    GeminiOauth,
+    Kiro,
+    GeminiNative,
+    Antigravity,
+}
+
 unsafe extern "C" {
     fn prodex_super_external_provider_alias_v1(abi_version: i64, address: u64, length: i64) -> i64;
+
+    fn prodex_runtime_external_provider_class_v1(
+        abi_version: i64,
+        address: u64,
+        length: i64,
+    ) -> i64;
 
     fn prodex_super_toml_string_v1(
         abi_version: i64,
@@ -79,6 +97,31 @@ pub fn external_provider_alias(
         2 => Ok(Some(ExternalProviderAliasPlan::DeepSeek)),
         3 => Ok(Some(ExternalProviderAliasPlan::Gemini)),
         4 => Ok(Some(ExternalProviderAliasPlan::Kiro)),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn runtime_external_provider_class(
+    value: &str,
+) -> Result<Option<RuntimeExternalProviderClass>, MojoError> {
+    let result = unsafe {
+        prodex_runtime_external_provider_class_v1(
+            ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            signed_len(value)?,
+        )
+    };
+    match result {
+        -1 => Ok(None),
+        -2 => Err(MojoError::InvalidInput),
+        0 => Ok(Some(RuntimeExternalProviderClass::Anthropic)),
+        1 => Ok(Some(RuntimeExternalProviderClass::Copilot)),
+        2 => Ok(Some(RuntimeExternalProviderClass::DeepSeek)),
+        3 => Ok(Some(RuntimeExternalProviderClass::Gemini)),
+        4 => Ok(Some(RuntimeExternalProviderClass::GeminiOauth)),
+        5 => Ok(Some(RuntimeExternalProviderClass::Kiro)),
+        6 => Ok(Some(RuntimeExternalProviderClass::GeminiNative)),
+        7 => Ok(Some(RuntimeExternalProviderClass::Antigravity)),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -200,6 +243,20 @@ mod tests {
             Some(ExternalProviderAliasPlan::Copilot)
         );
         assert_eq!(external_provider_alias("unknown").unwrap(), None);
+        assert_eq!(
+            runtime_external_provider_class("GITHUB_COPILOT").unwrap(),
+            Some(RuntimeExternalProviderClass::Copilot)
+        );
+        assert_eq!(
+            runtime_external_provider_class("gemini-oauth").unwrap(),
+            Some(RuntimeExternalProviderClass::GeminiOauth)
+        );
+        assert_eq!(
+            runtime_external_provider_class("gemini-native").unwrap(),
+            Some(RuntimeExternalProviderClass::GeminiNative)
+        );
+        assert_eq!(runtime_external_provider_class(" gemini ").unwrap(), None);
+        assert_eq!(runtime_external_provider_class("unknown").unwrap(), None);
         assert_eq!(toml_string_literal("a\\b\"c").unwrap(), "\"a\\\\b\\\"c\"");
 
         let entries = provider_config_entries(ProviderConfigInput {

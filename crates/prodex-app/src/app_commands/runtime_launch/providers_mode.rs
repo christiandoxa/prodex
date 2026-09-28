@@ -1,13 +1,15 @@
 use super::{
     RuntimeLaunchRequest, RuntimeLaunchSelection, runtime_anthropic_api_keys_from_request_or_env,
     runtime_copilot_api_keys_from_request_or_env, runtime_deepseek_api_keys_from_request_or_env,
-    runtime_external_provider_oauth_profile_count, runtime_gemini_api_keys_from_request_or_env,
+    runtime_external_provider_class, runtime_external_provider_oauth_profile_count,
+    runtime_gemini_api_keys_from_request_or_env,
 };
 use crate::{
     AppState, CodexModelProviderSetting, SUPER_ANTHROPIC_PROVIDER_ID, SUPER_COPILOT_PROVIDER_ID,
     SUPER_DEEPSEEK_PROVIDER_ID, SUPER_GEMINI_PROVIDER_ID, SUPER_KIRO_PROVIDER_ID,
     SUPER_LOCAL_PROVIDER_ID,
 };
+use prodex_mojo_core::super_provider_config::RuntimeExternalProviderClass;
 
 pub(crate) fn runtime_launch_model_provider_uses_local_rewrite(
     provider: &CodexModelProviderSetting,
@@ -51,27 +53,33 @@ pub(crate) fn runtime_provider_mode_uses_single_api_key(
     external_provider: Option<&str>,
     external_provider_api_key: Option<&str>,
 ) -> bool {
-    external_provider.is_some_and(|provider| {
-        ((provider.eq_ignore_ascii_case("anthropic") || provider.eq_ignore_ascii_case("claude"))
-            && runtime_anthropic_api_keys_from_request_or_env(external_provider_api_key)
+    let Some(provider) = external_provider.and_then(runtime_external_provider_class) else {
+        return false;
+    };
+    match provider {
+        RuntimeExternalProviderClass::Anthropic => {
+            runtime_anthropic_api_keys_from_request_or_env(external_provider_api_key)
                 .ok()
                 .flatten()
-                .is_some())
-            || provider.eq_ignore_ascii_case("deepseek")
-            || ((provider.eq_ignore_ascii_case("copilot")
-                || provider.eq_ignore_ascii_case("github-copilot")
-                || provider.eq_ignore_ascii_case("github_copilot"))
-                && runtime_copilot_api_keys_from_request_or_env(external_provider_api_key)
-                    .ok()
-                    .flatten()
-                    .is_some())
-            || (provider.eq_ignore_ascii_case("gemini")
-                && runtime_gemini_api_keys_from_request_or_env(external_provider_api_key)
-                    .ok()
-                    .flatten()
-                    .is_some())
-            || provider.eq_ignore_ascii_case("kiro")
-    })
+                .is_some()
+        }
+        RuntimeExternalProviderClass::Copilot => {
+            runtime_copilot_api_keys_from_request_or_env(external_provider_api_key)
+                .ok()
+                .flatten()
+                .is_some()
+        }
+        RuntimeExternalProviderClass::DeepSeek | RuntimeExternalProviderClass::Kiro => true,
+        RuntimeExternalProviderClass::Gemini => {
+            runtime_gemini_api_keys_from_request_or_env(external_provider_api_key)
+                .ok()
+                .flatten()
+                .is_some()
+        }
+        RuntimeExternalProviderClass::GeminiOauth
+        | RuntimeExternalProviderClass::GeminiNative
+        | RuntimeExternalProviderClass::Antigravity => false,
+    }
 }
 
 pub(crate) fn runtime_external_provider_rotation_summary(
@@ -91,9 +99,10 @@ pub(crate) fn runtime_external_provider_rotation_summary(
         }
         return "Using one provider API key; API-key rotation is skipped and quota preflight stays disabled.".to_string();
     }
-    if external_provider.eq_ignore_ascii_case("gemini")
-        || external_provider.eq_ignore_ascii_case("gemini-oauth")
-    {
+    if matches!(
+        runtime_external_provider_class(external_provider),
+        Some(RuntimeExternalProviderClass::Gemini | RuntimeExternalProviderClass::GeminiOauth)
+    ) {
         return crate::GEMINI_OAUTH_DISABLED_GUIDANCE.to_string();
     }
     if !allow_auto_rotate {
@@ -116,24 +125,17 @@ pub(crate) fn runtime_external_provider_rotation_summary(
 }
 
 fn runtime_external_provider_local_rewrite_id(provider: &str) -> Option<&'static str> {
-    if provider.eq_ignore_ascii_case("deepseek") {
-        Some(SUPER_DEEPSEEK_PROVIDER_ID)
-    } else if provider.eq_ignore_ascii_case("gemini")
-        || provider.eq_ignore_ascii_case("gemini-oauth")
-    {
-        Some(SUPER_GEMINI_PROVIDER_ID)
-    } else if provider.eq_ignore_ascii_case("anthropic") || provider.eq_ignore_ascii_case("claude")
-    {
-        Some(SUPER_ANTHROPIC_PROVIDER_ID)
-    } else if provider.eq_ignore_ascii_case("copilot")
-        || provider.eq_ignore_ascii_case("github-copilot")
-        || provider.eq_ignore_ascii_case("github_copilot")
-    {
-        Some(SUPER_COPILOT_PROVIDER_ID)
-    } else if provider.eq_ignore_ascii_case("kiro") {
-        Some(SUPER_KIRO_PROVIDER_ID)
-    } else {
-        None
+    match runtime_external_provider_class(provider)? {
+        RuntimeExternalProviderClass::DeepSeek => Some(SUPER_DEEPSEEK_PROVIDER_ID),
+        RuntimeExternalProviderClass::Gemini | RuntimeExternalProviderClass::GeminiOauth => {
+            Some(SUPER_GEMINI_PROVIDER_ID)
+        }
+        RuntimeExternalProviderClass::Anthropic => Some(SUPER_ANTHROPIC_PROVIDER_ID),
+        RuntimeExternalProviderClass::Copilot => Some(SUPER_COPILOT_PROVIDER_ID),
+        RuntimeExternalProviderClass::Kiro => Some(SUPER_KIRO_PROVIDER_ID),
+        RuntimeExternalProviderClass::GeminiNative | RuntimeExternalProviderClass::Antigravity => {
+            None
+        }
     }
 }
 
@@ -141,36 +143,36 @@ fn runtime_external_provider_api_key_count(
     external_provider: &str,
     external_provider_api_key: Option<&str>,
 ) -> Option<usize> {
-    if external_provider.eq_ignore_ascii_case("anthropic")
-        || external_provider.eq_ignore_ascii_case("claude")
-    {
-        return runtime_anthropic_api_keys_from_request_or_env(external_provider_api_key)
-            .ok()
-            .flatten()
-            .map(|keys| keys.len());
+    match runtime_external_provider_class(external_provider)? {
+        RuntimeExternalProviderClass::Anthropic => {
+            runtime_anthropic_api_keys_from_request_or_env(external_provider_api_key)
+                .ok()
+                .flatten()
+                .map(|keys| keys.len())
+        }
+        RuntimeExternalProviderClass::DeepSeek => {
+            runtime_deepseek_api_keys_from_request_or_env(external_provider_api_key)
+                .ok()
+                .flatten()
+                .map(|keys| keys.len())
+        }
+        RuntimeExternalProviderClass::Copilot => {
+            runtime_copilot_api_keys_from_request_or_env(external_provider_api_key)
+                .ok()
+                .flatten()
+                .map(|keys| keys.len())
+        }
+        RuntimeExternalProviderClass::Gemini => {
+            runtime_gemini_api_keys_from_request_or_env(external_provider_api_key)
+                .ok()
+                .flatten()
+                .map(|keys| keys.len())
+        }
+        RuntimeExternalProviderClass::GeminiOauth
+        | RuntimeExternalProviderClass::Kiro
+        | RuntimeExternalProviderClass::GeminiNative
+        | RuntimeExternalProviderClass::Antigravity => None,
     }
-    if external_provider.eq_ignore_ascii_case("deepseek") {
-        return runtime_deepseek_api_keys_from_request_or_env(external_provider_api_key)
-            .ok()
-            .flatten()
-            .map(|keys| keys.len());
-    }
-    if external_provider.eq_ignore_ascii_case("copilot")
-        || external_provider.eq_ignore_ascii_case("github-copilot")
-        || external_provider.eq_ignore_ascii_case("github_copilot")
-    {
-        return runtime_copilot_api_keys_from_request_or_env(external_provider_api_key)
-            .ok()
-            .flatten()
-            .map(|keys| keys.len());
-    }
-    if external_provider.eq_ignore_ascii_case("gemini") {
-        return runtime_gemini_api_keys_from_request_or_env(external_provider_api_key)
-            .ok()
-            .flatten()
-            .map(|keys| keys.len());
-    }
-    None
 }
 
 #[cfg(test)]

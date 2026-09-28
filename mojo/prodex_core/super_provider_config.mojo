@@ -40,6 +40,40 @@ def config_range_equals[literal: StaticString](
     return True
 
 
+@export("prodex_runtime_external_provider_class_v1")
+def prodex_runtime_external_provider_class_v1(
+    abi_version: Int64,
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if abi_version != SUPER_PROVIDER_CONFIG_ABI_VERSION:
+        return -2
+    if not config_valid_view(address, length):
+        return -2
+    var view = config_view(address, length)
+    if config_range_equals["anthropic"](view, 0, length) or config_range_equals["claude"](view, 0, length):
+        return 0
+    if (
+        config_range_equals["copilot"](view, 0, length)
+        or config_range_equals["github-copilot"](view, 0, length)
+        or config_range_equals["github_copilot"](view, 0, length)
+    ):
+        return 1
+    if config_range_equals["deepseek"](view, 0, length):
+        return 2
+    if config_range_equals["gemini"](view, 0, length):
+        return 3
+    if config_range_equals["gemini-oauth"](view, 0, length):
+        return 4
+    if config_range_equals["kiro"](view, 0, length):
+        return 5
+    if config_range_equals["gemini-native"](view, 0, length):
+        return 6
+    if config_range_equals["antigravity"](view, 0, length):
+        return 7
+    return -1
+
+
 @export("prodex_super_external_provider_alias_v1")
 def prodex_super_external_provider_alias_v1(
     abi_version: Int64,
