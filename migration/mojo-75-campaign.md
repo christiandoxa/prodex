@@ -2757,3 +2757,20 @@ The canonical broad source report counts **58,583 reachable Mojo LOC** and
 **192,771 Rust production LOC**, totaling **251,354 LOC**: **23.31% Mojo**. The
 75% project target remains unmet, with **519,730 additional Mojo LOC** required at
 this Rust volume.
+
+## Route-decision safe identifier migration
+
+Route-decision identifier trim and UTF-8-safe 96-byte truncation now use the
+existing runtime_route_reason.mojo owner through a new span ABI. Rust retains
+only owned String materialization and the stable trace DTO/Serde surface; the
+byte-boundary loop is no longer duplicated in Rust.
+
+Focused route-decision tests (5/5), the direct Mojo route-reason smoke test,
+prodex-app check, no-fallback self-test, ownership, and authority guards pass.
+The strict clippy command is currently blocked by two pre-existing dead-code
+warnings in smart-context token-accounting test helpers; this wave introduces no
+new clippy warning. Ownership now reports **78 authoritative operations**. The
+canonical broad source report counts **58,622 Mojo LOC** and **192,796 Rust
+production LOC**, totaling **251,418 LOC**: **23.32% Mojo**. The 75% project
+target remains unmet, with **519,766 additional Mojo LOC** required at the
+current Rust volume.

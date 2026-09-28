@@ -301,15 +301,9 @@ impl RuntimeRouteDecisionTraceBuilder {
 }
 
 pub fn runtime_route_decision_safe_identifier(value: &str) -> (String, bool) {
-    let value = value.trim();
-    if value.len() <= RUNTIME_ROUTE_DECISION_TRACE_MAX_IDENTIFIER_BYTES {
-        return (value.to_string(), false);
-    }
-    let mut end = RUNTIME_ROUTE_DECISION_TRACE_MAX_IDENTIFIER_BYTES;
-    while !value.is_char_boundary(end) {
-        end = end.saturating_sub(1);
-    }
-    (value[..end].to_string(), true)
+    let (safe, truncated) = prodex_mojo_core::runtime_route_reason::safe_identifier(value)
+        .expect("Mojo route-decision identifier policy returned invalid output");
+    (safe.to_string(), truncated)
 }
 
 #[cfg(test)]
