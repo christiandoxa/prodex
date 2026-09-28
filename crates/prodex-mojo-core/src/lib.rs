@@ -129,6 +129,8 @@ pub mod runtime_lineage;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_repo_map;
 #[cfg(feature = "mojo-runtime")]
+pub mod runtime_route_reason;
+#[cfg(feature = "mojo-runtime")]
 pub mod runtime_state;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_state_quota;

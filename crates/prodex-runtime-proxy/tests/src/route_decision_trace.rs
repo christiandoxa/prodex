@@ -71,6 +71,65 @@ fn trace_reason_preserves_known_and_sanitizes_unknown_labels() {
 }
 
 #[test]
+fn route_reason_known_labels_keep_fixed_stage_contract() {
+    use RuntimeRouteDecisionStage::{
+        Admission, Affinity, Authentication, CircuitAndBackoff, EndpointCapability, FinalSelection,
+        ModelResolution, Quota, Ranking, RequestConstraints,
+    };
+
+    let cases = [
+        ("auth_failure_backoff", Authentication),
+        ("selection_backoff", CircuitAndBackoff),
+        ("route_circuit_open", CircuitAndBackoff),
+        ("route_circuit_half_open_probe_wait", CircuitAndBackoff),
+        ("profile_health", Ranking),
+        ("profile_performance", Ranking),
+        ("quota_probe_unavailable", Quota),
+        ("stale_persisted_quota", Quota),
+        ("quota_healthy", Quota),
+        ("quota_thin", Quota),
+        ("quota_critical", Quota),
+        ("quota_exhausted", Quota),
+        ("quota_unknown", Quota),
+        ("quota_exhausted_before_send", Quota),
+        ("quota_windows_unavailable", Quota),
+        ("profile_inflight_soft_limit", Admission),
+        ("auth_not_quota_compatible", Authentication),
+        ("prompt_cache_affinity", Ranking),
+        ("negative_cache", Affinity),
+        ("excluded", Affinity),
+        ("affinity_owner_unavailable", Affinity),
+        ("selection_failed", FinalSelection),
+        ("compatible", RequestConstraints),
+        ("endpoint_unsupported", EndpointCapability),
+        ("required_capability_missing", EndpointCapability),
+        ("catalog_entry_unavailable", ModelResolution),
+        ("context_window_unknown", RequestConstraints),
+        ("context_window_exceeded", RequestConstraints),
+        ("output_limit_unknown", RequestConstraints),
+        ("requested_output_exceeds_model_limit", RequestConstraints),
+        ("reasoning_reserve_unsupported", RequestConstraints),
+        ("reasoning_reserve_excessive", RequestConstraints),
+        ("malformed_request_limits", RequestConstraints),
+        ("output_limit_clamped", RequestConstraints),
+    ];
+
+    for (label, stage) in cases {
+        let reason = RuntimeRouteDecisionReason::from_label(label);
+        assert_eq!(reason.as_str(), label, "label={label}");
+        assert_eq!(reason.rejection_stage(), Some(stage), "label={label}");
+    }
+
+    let exact_miss = RuntimeRouteDecisionReason::from_label(" quota_exhausted ");
+    assert_eq!(exact_miss.as_str(), "quota_exhausted");
+    assert_eq!(exact_miss.rejection_stage(), None);
+    assert_eq!(
+        RuntimeRouteDecisionReason::from_label("UPPER").as_str(),
+        "unknown"
+    );
+}
+
+#[test]
 fn safe_identifier_is_utf8_boundary_aware_and_bounded() {
     let long = "表".repeat(RUNTIME_ROUTE_DECISION_TRACE_MAX_IDENTIFIER_BYTES);
     let (safe, truncated) = runtime_route_decision_safe_identifier(&long);

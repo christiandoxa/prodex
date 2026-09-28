@@ -853,6 +853,18 @@
         "operations": [
           "smart_context_semantic_marker_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_route_reason.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_route_reason_lookup",
+          "runtime_route_reason_stage",
+          "runtime_route_reason_unknown_label"
+        ]
       }
     ],
     "removed": [
@@ -2672,6 +2684,75 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "line/token iteration, diff-hunk end scanning, command-kind aggregation precedence, DTO/string materialization and semantic-range storage remain Rust"
+    },
+    {
+      "domain": "runtime-proxy/route-decision",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_route_reason.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_route_reason.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "runtime_route_reason_lookup",
+      "mojo_entry": "prodex_runtime_route_reason_lookup_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_route_reason::lookup",
+      "rust_owner_before": "known route-decision reason label lookup table",
+      "rust_test_oracle": "deleted; fixed 34-label caller matrix covers every known reason label",
+      "rust_adapter_scope": "stable Rust enum and Serde API plus validated numeric-tag reconstruction"
+    },
+    {
+      "domain": "runtime-proxy/route-decision",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_route_reason.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_route_reason.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "runtime_route_reason_stage",
+      "mojo_entry": "prodex_runtime_route_reason_stage_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_route_reason::stage",
+      "rust_owner_before": "reason-kind to rejection-stage decision table",
+      "rust_test_oracle": "deleted; fixed 34-label caller matrix covers every reason-to-stage contract",
+      "rust_adapter_scope": "stable stage enum plus validated numeric-tag reconstruction"
+    },
+    {
+      "domain": "runtime-proxy/route-decision",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_route_reason.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_route_reason.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "runtime_route_reason_unknown_label",
+      "mojo_entry": "prodex_runtime_route_reason_unknown_span_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_route_reason::normalize_unknown",
+      "rust_owner_before": "trim, maximum-length and safe-character normalization for unknown reason labels",
+      "rust_test_oracle": "deleted; fixed tests cover trimmed safe unknown labels, unsafe labels, uppercase labels and exact-known misses",
+      "rust_adapter_scope": "borrowed UTF-8 slice materialization and unknown-string ownership"
     }
   ],
   "rust_semantic_reductions": [
