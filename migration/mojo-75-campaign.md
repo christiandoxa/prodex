@@ -3064,3 +3064,11 @@ the repeated lowercase alias tables were deleted without fallback recomputation.
 Two focused caller-boundary tests pass for strict/compat runtime flags and Presidio
 auto-start values. The canonical broad report counts **61,177 Mojo LOC** and **194,237
 Rust production LOC**, totaling **255,414 LOC**: **23.95% Mojo**.
+
+
+## Gemini sticky-fresh OAuth boolean cleanup
+
+PRODEX_GEMINI_STICKY_FRESH_OAUTH now reuses the authoritative runtime boolean
+Mojo classifier after preserving its historical trim/default behavior. The Rust
+lowercase false-token table was deleted; unknown and empty compatibility values
+still preserve the previous enabled default.
