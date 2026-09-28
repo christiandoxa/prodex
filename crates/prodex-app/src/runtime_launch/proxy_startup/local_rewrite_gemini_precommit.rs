@@ -1,5 +1,6 @@
 use super::super::local_rewrite::RuntimeLocalRewriteAsyncResponse;
 use anyhow::{Context, Result};
+use prodex_mojo_core::rich::ascii_casefold_contains;
 use prodex_provider_core::gemini_provider_core_internal_instruction_corpus;
 pub(super) use prodex_provider_core::{
     GeminiProviderCorePrecommitDecision as RuntimeGeminiPrecommitDecision,
@@ -27,7 +28,10 @@ pub(super) fn runtime_gemini_response_is_sse(response: &RuntimeLocalRewriteAsync
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok())
-        .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"))
+        .is_some_and(|value| {
+            ascii_casefold_contains(value, "text/event-stream")
+                .expect("Mojo Gemini SSE content-type comparison failed")
+        })
 }
 
 pub(super) fn runtime_gemini_peek_stream_for_retry(

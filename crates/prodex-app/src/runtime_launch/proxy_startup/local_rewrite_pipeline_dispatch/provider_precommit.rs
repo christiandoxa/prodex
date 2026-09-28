@@ -17,6 +17,7 @@ use crate::{
     RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY, RuntimeHeapTrimmedBufferedResponseParts,
     RuntimeRouteKind,
 };
+use prodex_mojo_core::rich::ascii_casefold_contains;
 use prodex_provider_core::ProviderErrorClass;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -128,8 +129,10 @@ fn runtime_local_rewrite_buffered_fallback_class(
         ProviderErrorClass::Quota | ProviderErrorClass::Transient => Some(class),
         ProviderErrorClass::RateLimit
             if std::str::from_utf8(&parts.body).is_ok_and(|body| {
-                let body = body.to_ascii_lowercase();
-                body.contains("rate_limit_exceeded") || body.contains("rate_limit_exceeded_error")
+                ascii_casefold_contains(body, "rate_limit_exceeded")
+                    .expect("Mojo provider rate-limit body comparison failed")
+                    || ascii_casefold_contains(body, "rate_limit_exceeded_error")
+                        .expect("Mojo provider rate-limit body comparison failed")
             }) =>
         {
             Some(class)
@@ -322,7 +325,10 @@ fn runtime_local_rewrite_should_prefetch_provider_response(
             .headers
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"))
+            .is_some_and(|value| {
+                ascii_casefold_contains(value, "text/event-stream")
+                    .expect("Mojo provider SSE content-type comparison failed")
+            })
         && live.prefix.is_empty()
 }
 

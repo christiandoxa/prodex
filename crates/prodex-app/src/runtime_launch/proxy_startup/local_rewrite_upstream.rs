@@ -26,6 +26,7 @@ use crate::{
     prepare_runtime_smart_context_http_body, runtime_proxy_log,
 };
 use anyhow::Result;
+use prodex_mojo_core::rich::ascii_casefold_contains;
 use prodex_provider_core::{
     ProviderEndpoint, ProviderErrorClass, ProviderId, RuntimeProviderBindingIdentity,
 };
@@ -286,7 +287,10 @@ pub(super) fn runtime_local_rewrite_precommit_native_first_event(
             .headers
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value.to_ascii_lowercase().contains("text/event-stream"))
+            .is_some_and(|value| {
+                ascii_casefold_contains(value, "text/event-stream")
+                    .expect("Mojo upstream SSE content-type comparison failed")
+            })
     {
         return Ok(RuntimeLocalRewriteNativeFirstEvent::Commit);
     }

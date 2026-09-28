@@ -2,6 +2,7 @@ use super::provider_bridge::{
     RuntimeProviderBridgeKind, RuntimeProviderErrorClass, runtime_provider_error_class,
 };
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 #[cfg(test)]
 use prodex_provider_core::gemini_provider_core_body_has_terminal_quota;
 use prodex_provider_core::{
@@ -39,10 +40,10 @@ pub(super) fn runtime_gemini_normalized_error_parts(
         return parts;
     };
     parts.headers.retain(|(name, _)| {
-        !matches!(
-            name.to_ascii_lowercase().as_str(),
-            "content-length" | "content-type"
-        )
+        !ascii_casefold_equal_exact(name, "content-length")
+            .expect("Mojo Gemini content-length header comparison failed")
+            && !ascii_casefold_equal_exact(name, "content-type")
+                .expect("Mojo Gemini content-type header comparison failed")
     });
     parts.headers.push((
         "content-type".to_string(),
@@ -55,6 +56,45 @@ pub(super) fn runtime_gemini_normalized_error_parts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gemini_normalized_error_replaces_mixed_case_content_headers() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "error": {"message": "bad request"}
+        }))
+        .unwrap();
+        let parts = RuntimeHeapTrimmedBufferedResponseParts {
+            status: 400,
+            headers: vec![
+                ("Content-Length".to_string(), b"999".to_vec()),
+                ("CONTENT-TYPE".to_string(), b"text/plain".to_vec()),
+                ("x-extra".to_string(), b"keep".to_vec()),
+            ],
+            body: body.into(),
+        };
+
+        let normalized = runtime_gemini_normalized_error_parts(400, parts);
+        assert!(
+            normalized
+                .headers
+                .iter()
+                .all(|(name, _)| !name.eq_ignore_ascii_case("content-length"))
+        );
+        assert_eq!(
+            normalized
+                .headers
+                .iter()
+                .filter(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+                .count(),
+            1
+        );
+        assert!(
+            normalized
+                .headers
+                .iter()
+                .any(|(name, value)| { name == "x-extra" && value.as_slice() == b"keep" })
+        );
+    }
 
     #[test]
     fn gemini_google_resource_exhausted_is_quota_blocked() {

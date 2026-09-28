@@ -203,13 +203,7 @@ pub(in super::super) fn send_runtime_gemini_upstream_request(
         .as_ref()
         .and_then(|pool| pool.selected_model_for_scope(model_scope.as_deref()))
         .filter(|_| {
-            matches!(
-                original_requested_model
-                    .trim()
-                    .to_ascii_lowercase()
-                    .as_str(),
-                "" | "auto" | "default"
-            )
+            prodex_provider_core::provider_model_allows_session_memory(&original_requested_model)
         })
         .unwrap_or_else(|| common_model_selection.model.clone());
     if responses_route
