@@ -10,7 +10,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "unused_imports": 0,
   "clippy::large_enum_variant": 9,
   "clippy::result_large_err": 2,
-  "clippy::too_many_arguments": 19,
+  "clippy::too_many_arguments": 22,
   "clippy::type_complexity": 1,
 });
 
@@ -51,6 +51,12 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/websocket.rs|pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(",
   // ponytail: keep the Mojo ABI adapter explicit; use an input struct only if another caller appears.
   "clippy::too_many_arguments|crates/prodex-mojo-core/src/runtime/quota_decisions.rs|pub fn precommit_budget_plan(",
+  // ponytail: keep the Mojo quota snapshot ABI scalar layout explicit; group it only if another non-ABI caller appears.
+  "clippy::too_many_arguments|crates/prodex-mojo-core/src/runtime_state_quota.rs|pub fn probe_usage_snapshot_apply_plan(",
+  // ponytail: state merge policy mirrors the fixed Mojo scalar ABI; introduce an input struct only if the policy gains another caller shape.
+  "clippy::too_many_arguments|crates/prodex-mojo-core/src/state_policy.rs|pub fn binding_merge_plan(",
+  // ponytail: selection policy is one fixed scalar bridge into Mojo; preserve the wire-shaped call until the ABI itself changes.
+  "clippy::too_many_arguments|crates/prodex-runtime-proxy/src/selection_policy.rs|fn runtime_quota_selection_policy_code(",
   // ponytail: preserve the runtime call shape; group these inputs if a second caller appears.
   "clippy::too_many_arguments|crates/prodex-runtime-proxy/src/selection_policy/mojo.rs|pub(super) fn allows_direct_current_profile_fallback(",
   // ponytail: immutable live-reload inputs stay explicit; add a watcher context when another consumer appears.

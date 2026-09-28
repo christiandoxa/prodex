@@ -7,6 +7,8 @@ use super::{
 };
 
 const MAX_UPSTREAM_PAYLOAD_LOG_BYTES: usize = 64 * 1024;
+const MAX_UPSTREAM_PAYLOAD_REDACTION_TEXT_BYTES: usize = 1024;
+const UPSTREAM_PAYLOAD_OMISSION_MARKER: &str = "<omitted:large-text>";
 
 pub(crate) fn log_runtime_upstream_payload_snapshot(
     shared: &RuntimeRotationProxyShared,
@@ -42,11 +44,39 @@ pub(crate) fn log_runtime_upstream_payload_snapshot(
 
 fn redacted_upstream_payload(payload: &[u8]) -> Option<Vec<u8>> {
     if let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(payload) {
+        let mut remaining_text_bytes = MAX_UPSTREAM_PAYLOAD_REDACTION_TEXT_BYTES;
+        bound_upstream_payload_json_strings(&mut value, &mut remaining_text_bytes);
         redaction_redact_json(&mut value);
         return serde_json::to_vec(&value).ok();
     }
     let text = std::str::from_utf8(payload).ok()?;
+    if text.len() > MAX_UPSTREAM_PAYLOAD_REDACTION_TEXT_BYTES {
+        return Some(UPSTREAM_PAYLOAD_OMISSION_MARKER.as_bytes().to_vec());
+    }
     Some(redaction_redact_secret_like_text(text).into_bytes())
+}
+
+fn bound_upstream_payload_json_strings(value: &mut serde_json::Value, remaining: &mut usize) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for value in map.values_mut() {
+                bound_upstream_payload_json_strings(value, remaining);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                bound_upstream_payload_json_strings(value, remaining);
+            }
+        }
+        serde_json::Value::String(text) => {
+            if text.len() > *remaining {
+                *text = UPSTREAM_PAYLOAD_OMISSION_MARKER.to_string();
+            } else {
+                *remaining -= text.len();
+            }
+        }
+        _ => {}
+    }
 }
 
 fn truncate_upstream_payload(payload: &[u8]) -> (&[u8], bool) {
@@ -78,6 +108,23 @@ mod tests {
         assert_eq!(value["input"], "run");
         assert_eq!(value["text"], "hello");
         assert_eq!(value["access_token"], "<redacted>");
+    }
+
+    #[test]
+    fn upstream_payload_redaction_omits_large_string_content_before_redaction() {
+        let payload = serde_json::json!({
+            "access_token": "super-secret-token",
+            "output": "safe output ".repeat(20_000),
+            "nested": {"text": "user@example.test"}
+        })
+        .to_string();
+        let redacted = redacted_upstream_payload(payload.as_bytes()).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&redacted).unwrap();
+
+        assert_eq!(value["access_token"], "<redacted>");
+        assert_eq!(value["nested"]["text"], "<redacted>");
+        let output = value["output"].as_str().unwrap();
+        assert_eq!(output, UPSTREAM_PAYLOAD_OMISSION_MARKER);
     }
 
     #[test]

@@ -49,6 +49,46 @@ pub struct RuntimeProxyPathPlan {
     pub long_lived: bool,
 }
 
+fn runtime_proxy_bool_output(value: i64) -> Result<bool, MojoError> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+fn runtime_proxy_query_mark(path_and_query: &str, value: i64) -> Result<Option<usize>, MojoError> {
+    if value < 0 {
+        return Ok(None);
+    }
+    let index = usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?;
+    if index >= path_and_query.len()
+        || path_and_query.as_bytes().get(index) != Some(&b'?')
+        || !path_and_query.is_char_boundary(index)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(Some(index))
+}
+
+fn runtime_proxy_mount_suffix_start(
+    path_and_query: &str,
+    path_end: usize,
+    mounted: bool,
+    value: i64,
+) -> Result<Option<usize>, MojoError> {
+    if !mounted {
+        return (value == -1)
+            .then_some(None)
+            .ok_or(MojoError::InvalidOutput);
+    }
+    let index = usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?;
+    if index > path_end || !path_and_query.is_char_boundary(index) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(Some(index))
+}
+
 pub fn runtime_proxy_path_plan(
     path_and_query: &str,
     websocket: bool,
@@ -71,40 +111,14 @@ pub fn runtime_proxy_path_plan(
             _ => MojoError::InvalidOutput,
         });
     }
-    let bool_output = |value: i64| match value {
-        0 => Ok(false),
-        1 => Ok(true),
-        _ => Err(MojoError::InvalidOutput),
-    };
     let path_end = usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?;
     if path_end > path_and_query.len() || !path_and_query.is_char_boundary(path_end) {
         return Err(MojoError::InvalidOutput);
     }
-    let query_mark = if output[3] < 0 {
-        None
-    } else {
-        let index = usize::try_from(output[3]).map_err(|_| MojoError::InvalidOutput)?;
-        if index >= path_and_query.len()
-            || path_and_query.as_bytes().get(index) != Some(&b'?')
-            || !path_and_query.is_char_boundary(index)
-        {
-            return Err(MojoError::InvalidOutput);
-        }
-        Some(index)
-    };
-    let mounted = bool_output(output[0])?;
-    let mount_suffix_start = if mounted {
-        let index = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
-        if index > path_end || !path_and_query.is_char_boundary(index) {
-            return Err(MojoError::InvalidOutput);
-        }
-        Some(index)
-    } else {
-        if output[1] != -1 {
-            return Err(MojoError::InvalidOutput);
-        }
-        None
-    };
+    let query_mark = runtime_proxy_query_mark(path_and_query, output[3])?;
+    let mounted = runtime_proxy_bool_output(output[0])?;
+    let mount_suffix_start =
+        runtime_proxy_mount_suffix_start(path_and_query, path_end, mounted, output[1])?;
     if !(0..=3).contains(&output[9]) {
         return Err(MojoError::InvalidOutput);
     }
@@ -112,12 +126,12 @@ pub fn runtime_proxy_path_plan(
         mount_suffix_start,
         path_end,
         query_mark,
-        responses: bool_output(output[4])?,
-        chat_completions: bool_output(output[5])?,
-        compact: bool_output(output[6])?,
-        realtime_call: bool_output(output[7])?,
-        realtime_websocket: bool_output(output[8])?,
+        responses: runtime_proxy_bool_output(output[4])?,
+        chat_completions: runtime_proxy_bool_output(output[5])?,
+        compact: runtime_proxy_bool_output(output[6])?,
+        realtime_call: runtime_proxy_bool_output(output[7])?,
+        realtime_websocket: runtime_proxy_bool_output(output[8])?,
         route_kind: output[9],
-        long_lived: bool_output(output[10])?,
+        long_lived: runtime_proxy_bool_output(output[10])?,
     })
 }

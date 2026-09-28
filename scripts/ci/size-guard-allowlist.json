@@ -63,5 +63,15 @@
     "file": "crates/prodex-app/tests/src/runtime_proxy/smart_context/prepare.rs",
     "maxLines": 878,
     "reason": "Smart Context preparation regressions cover budget tiers, deterministic rehydration, static-context fingerprints, aliases, line ranges, and HTTP/WebSocket parity."
+  },
+  {
+    "file": "crates/prodex-mojo-core/src/quota.rs",
+    "maxLines": 895,
+    "reason": "Mojo quota ABI adapters and typed result reconstruction remain colocated in one production boundary after hard-replacement migration; exact cap ratchets the audited 0.433.0 size until the adapter splits by quota policy family."
+  },
+  {
+    "file": "crates/prodex-runtime-state/tests/src/lib.rs",
+    "maxLines": 961,
+    "reason": "Runtime-state fixed parity coverage now includes exhaustive Mojo mutation/quota/background policy matrices and usize boundary regressions; exact test cap ratchets the audited 0.433.0 suite until policy fixtures split into sibling modules."
   }
 ]

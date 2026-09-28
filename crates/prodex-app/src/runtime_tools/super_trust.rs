@@ -7,6 +7,34 @@ use anyhow::{Context, Result};
 const SUPER_TRUST_RECENT_SESSION_WORKSPACES: usize = 4_096;
 const SUPER_TRUST_CONFIG_MAX_BYTES: usize = 128 * 1024;
 
+#[cfg(windows)]
+fn canonical_workspace_alias(path: &Path) -> Option<PathBuf> {
+    let path = path.to_string_lossy();
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return Some(PathBuf::from(format!(r"\\{rest}")));
+    }
+    path.strip_prefix(r"\\?\").map(PathBuf::from)
+}
+
+#[cfg(not(windows))]
+fn canonical_workspace_alias(_path: &Path) -> Option<PathBuf> {
+    None
+}
+
+fn trusted_workspace_candidates(workspace: PathBuf) -> Vec<PathBuf> {
+    let mut candidates = Vec::with_capacity(3);
+    if let Ok(canonical) = workspace.canonicalize() {
+        if let Some(alias) = canonical_workspace_alias(&canonical) {
+            candidates.push(alias);
+        }
+        candidates.push(canonical);
+    }
+    if !candidates.contains(&workspace) {
+        candidates.push(workspace);
+    }
+    candidates
+}
+
 fn trusted_workspaces_codex_args(
     workspaces: impl IntoIterator<Item = PathBuf>,
     codex_args: &[OsString],
@@ -16,14 +44,7 @@ fn trusted_workspaces_codex_args(
     let mut encoded_bytes = "projects={}".len();
 
     'workspaces: for workspace in workspaces {
-        let mut candidates = Vec::with_capacity(2);
-        if let Ok(canonical) = workspace.canonicalize() {
-            candidates.push(canonical);
-        }
-        if candidates.first() != Some(&workspace) {
-            candidates.push(workspace);
-        }
-        for candidate in candidates {
+        for candidate in trusted_workspace_candidates(workspace) {
             let workspace = candidate.to_string_lossy().into_owned();
             if !seen.insert(workspace.clone()) {
                 continue;

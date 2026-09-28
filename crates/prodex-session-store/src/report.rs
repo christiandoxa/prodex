@@ -37,69 +37,82 @@ pub(super) struct SessionValueMetadata {
     pub(super) model_provider: Option<String>,
 }
 
+fn session_json_node_kind_and_text(
+    value: &serde_json::Value,
+) -> (prodex_mojo_core::json::JsonKind, &str) {
+    use prodex_mojo_core::json::JsonKind;
+    match value {
+        serde_json::Value::Null => (JsonKind::Null, ""),
+        serde_json::Value::Bool(false) => (JsonKind::False, ""),
+        serde_json::Value::Bool(true) => (JsonKind::True, ""),
+        serde_json::Value::Number(_) => (JsonKind::Number, ""),
+        serde_json::Value::String(value) => (JsonKind::String, value.as_str()),
+        serde_json::Value::Array(_) => (JsonKind::Array, ""),
+        serde_json::Value::Object(_) => (JsonKind::Object, ""),
+    }
+}
+
+fn session_link_json_child(
+    nodes: &mut [prodex_mojo_core::json::JsonNode<'_>],
+    parent: usize,
+    previous: Option<usize>,
+    child: usize,
+) {
+    if let Some(previous) = previous {
+        nodes[previous].next_sibling = Some(child);
+    } else {
+        nodes[parent].first_child = Some(child);
+    }
+}
+
+fn session_push_json_node<'a>(
+    nodes: &mut Vec<prodex_mojo_core::json::JsonNode<'a>>,
+    value: &'a serde_json::Value,
+    key: &'a str,
+    parent: Option<usize>,
+) -> usize {
+    use prodex_mojo_core::json::JsonNode;
+
+    let (kind, text) = session_json_node_kind_and_text(value);
+    let index = nodes.len();
+    nodes.push(JsonNode {
+        kind,
+        first_child: None,
+        next_sibling: None,
+        parent,
+        key,
+        text,
+        raw_start: 0,
+        raw_length: 0,
+    });
+
+    let mut previous = None;
+    match value {
+        serde_json::Value::Array(values) => {
+            for child in values {
+                let child_index = session_push_json_node(nodes, child, "", Some(index));
+                session_link_json_child(nodes, index, previous, child_index);
+                previous = Some(child_index);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for (child_key, child) in map {
+                let child_index =
+                    session_push_json_node(nodes, child, child_key.as_str(), Some(index));
+                session_link_json_child(nodes, index, previous, child_index);
+                previous = Some(child_index);
+            }
+        }
+        _ => {}
+    }
+    index
+}
+
 fn session_json_nodes<'a>(
     value: &'a serde_json::Value,
 ) -> Vec<prodex_mojo_core::json::JsonNode<'a>> {
-    use prodex_mojo_core::json::{JsonKind, JsonNode};
-
-    fn push<'a>(
-        nodes: &mut Vec<JsonNode<'a>>,
-        value: &'a serde_json::Value,
-        key: &'a str,
-        parent: Option<usize>,
-    ) -> usize {
-        let (kind, text) = match value {
-            serde_json::Value::Null => (JsonKind::Null, ""),
-            serde_json::Value::Bool(false) => (JsonKind::False, ""),
-            serde_json::Value::Bool(true) => (JsonKind::True, ""),
-            serde_json::Value::Number(_) => (JsonKind::Number, ""),
-            serde_json::Value::String(value) => (JsonKind::String, value.as_str()),
-            serde_json::Value::Array(_) => (JsonKind::Array, ""),
-            serde_json::Value::Object(_) => (JsonKind::Object, ""),
-        };
-        let index = nodes.len();
-        nodes.push(JsonNode {
-            kind,
-            first_child: None,
-            next_sibling: None,
-            parent,
-            key,
-            text,
-            raw_start: 0,
-            raw_length: 0,
-        });
-
-        let mut previous: Option<usize> = None;
-        match value {
-            serde_json::Value::Array(values) => {
-                for child in values {
-                    let child_index = push(nodes, child, "", Some(index));
-                    if let Some(previous) = previous {
-                        nodes[previous].next_sibling = Some(child_index);
-                    } else {
-                        nodes[index].first_child = Some(child_index);
-                    }
-                    previous = Some(child_index);
-                }
-            }
-            serde_json::Value::Object(map) => {
-                for (child_key, child) in map {
-                    let child_index = push(nodes, child, child_key.as_str(), Some(index));
-                    if let Some(previous) = previous {
-                        nodes[previous].next_sibling = Some(child_index);
-                    } else {
-                        nodes[index].first_child = Some(child_index);
-                    }
-                    previous = Some(child_index);
-                }
-            }
-            _ => {}
-        }
-        index
-    }
-
     let mut nodes = Vec::new();
-    push(&mut nodes, value, "", None);
+    session_push_json_node(&mut nodes, value, "", None);
     nodes
 }
 
