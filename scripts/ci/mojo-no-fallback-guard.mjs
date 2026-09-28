@@ -8,6 +8,8 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/runtime_route_reason.rs",
+  "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
   "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
   "crates/prodex-mojo-core/src/smart_context_markers.rs",
   "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
@@ -253,6 +255,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
   "crates/prodex-runtime-tuning/src/mojo.rs",
   "crates/prodex-runtime-tuning/src/lib.rs",
   "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
@@ -1450,6 +1453,37 @@ export function findViolations(files) {
     }
     return [];
   });
+  const routeReasonViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs") {
+      const required = [
+        "prodex_mojo_core::runtime_route_reason::lookup(",
+        "prodex_mojo_core::runtime_route_reason::stage(",
+        "prodex_mojo_core::runtime_route_reason::normalize_unknown(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": route-decision reason migration must retain Mojo call " + call);
+      if (
+        contents.includes("VALUES.iter().copied().find(|value| value.as_str() == label)")
+        || contents.includes("Self::AuthFailureBackoff | Self::AuthNotQuotaCompatible")
+        || contents.includes("ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_'")
+      ) {
+        violations.push(filePath + ": contains restored Rust route-reason semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_route_reason.rs") {
+      const required = [
+        "prodex_runtime_route_reason_lookup_v1(",
+        "prodex_runtime_route_reason_stage_v1(",
+        "prodex_runtime_route_reason_unknown_span_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": route-reason ABI adapter must retain " + call);
+    }
+    return [];
+  });
   const runtimeLineageViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-runtime-state/src/lineage.rs") {
       const required = [
@@ -1663,7 +1697,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,

@@ -1,7 +1,8 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use super::{RUNTIME_ROUTE_DECISION_TRACE_MAX_IDENTIFIER_BYTES, RuntimeRouteDecisionStage};
+use super::RuntimeRouteDecisionStage;
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeRouteDecisionReasonKind {
     AuthFailureBackoff,
@@ -81,85 +82,73 @@ impl RuntimeRouteDecisionReasonKind {
     }
 
     pub fn from_label(label: &str) -> Option<Self> {
-        const VALUES: &[RuntimeRouteDecisionReasonKind] = &[
-            RuntimeRouteDecisionReasonKind::AuthFailureBackoff,
-            RuntimeRouteDecisionReasonKind::SelectionBackoff,
-            RuntimeRouteDecisionReasonKind::RouteCircuitOpen,
-            RuntimeRouteDecisionReasonKind::RouteCircuitHalfOpenProbeWait,
-            RuntimeRouteDecisionReasonKind::ProfileHealth,
-            RuntimeRouteDecisionReasonKind::ProfilePerformance,
-            RuntimeRouteDecisionReasonKind::QuotaProbeUnavailable,
-            RuntimeRouteDecisionReasonKind::StalePersistedQuota,
-            RuntimeRouteDecisionReasonKind::QuotaHealthy,
-            RuntimeRouteDecisionReasonKind::QuotaThin,
-            RuntimeRouteDecisionReasonKind::QuotaCritical,
-            RuntimeRouteDecisionReasonKind::QuotaExhausted,
-            RuntimeRouteDecisionReasonKind::QuotaUnknown,
-            RuntimeRouteDecisionReasonKind::QuotaExhaustedBeforeSend,
-            RuntimeRouteDecisionReasonKind::QuotaWindowsUnavailable,
-            RuntimeRouteDecisionReasonKind::ProfileInflightSoftLimit,
-            RuntimeRouteDecisionReasonKind::AuthNotQuotaCompatible,
-            RuntimeRouteDecisionReasonKind::PromptCacheAffinity,
-            RuntimeRouteDecisionReasonKind::NegativeCache,
-            RuntimeRouteDecisionReasonKind::Excluded,
-            RuntimeRouteDecisionReasonKind::AffinityOwnerUnavailable,
-            RuntimeRouteDecisionReasonKind::SelectionFailed,
-            RuntimeRouteDecisionReasonKind::Compatible,
-            RuntimeRouteDecisionReasonKind::EndpointUnsupported,
-            RuntimeRouteDecisionReasonKind::RequiredCapabilityMissing,
-            RuntimeRouteDecisionReasonKind::CatalogEntryUnavailable,
-            RuntimeRouteDecisionReasonKind::ContextWindowUnknown,
-            RuntimeRouteDecisionReasonKind::ContextWindowExceeded,
-            RuntimeRouteDecisionReasonKind::OutputLimitUnknown,
-            RuntimeRouteDecisionReasonKind::RequestedOutputExceedsModelLimit,
-            RuntimeRouteDecisionReasonKind::ReasoningReserveUnsupported,
-            RuntimeRouteDecisionReasonKind::ReasoningReserveExcessive,
-            RuntimeRouteDecisionReasonKind::MalformedRequestLimits,
-            RuntimeRouteDecisionReasonKind::OutputLimitClamped,
-        ];
-        VALUES.iter().copied().find(|value| value.as_str() == label)
+        let lookup = prodex_mojo_core::runtime_route_reason::lookup(label)
+            .expect("Mojo route-decision reason lookup returned invalid output");
+        lookup.kind.and_then(runtime_route_reason_kind_from_tag)
     }
 
-    pub const fn rejection_stage(self) -> RuntimeRouteDecisionStage {
-        match self {
-            Self::AuthFailureBackoff | Self::AuthNotQuotaCompatible => {
-                RuntimeRouteDecisionStage::Authentication
-            }
-            Self::SelectionBackoff
-            | Self::RouteCircuitOpen
-            | Self::RouteCircuitHalfOpenProbeWait => RuntimeRouteDecisionStage::CircuitAndBackoff,
-            Self::QuotaProbeUnavailable
-            | Self::StalePersistedQuota
-            | Self::QuotaHealthy
-            | Self::QuotaThin
-            | Self::QuotaCritical
-            | Self::QuotaExhausted
-            | Self::QuotaUnknown
-            | Self::QuotaExhaustedBeforeSend
-            | Self::QuotaWindowsUnavailable => RuntimeRouteDecisionStage::Quota,
-            Self::ProfileInflightSoftLimit => RuntimeRouteDecisionStage::Admission,
-            Self::ProfileHealth | Self::ProfilePerformance | Self::PromptCacheAffinity => {
-                RuntimeRouteDecisionStage::Ranking
-            }
-            Self::NegativeCache | Self::Excluded | Self::AffinityOwnerUnavailable => {
-                RuntimeRouteDecisionStage::Affinity
-            }
-            Self::SelectionFailed => RuntimeRouteDecisionStage::FinalSelection,
-            Self::Compatible
-            | Self::ContextWindowUnknown
-            | Self::ContextWindowExceeded
-            | Self::OutputLimitUnknown
-            | Self::RequestedOutputExceedsModelLimit
-            | Self::ReasoningReserveUnsupported
-            | Self::ReasoningReserveExcessive
-            | Self::MalformedRequestLimits
-            | Self::OutputLimitClamped => RuntimeRouteDecisionStage::RequestConstraints,
-            Self::EndpointUnsupported | Self::RequiredCapabilityMissing => {
-                RuntimeRouteDecisionStage::EndpointCapability
-            }
-            Self::CatalogEntryUnavailable => RuntimeRouteDecisionStage::ModelResolution,
-        }
+    pub fn rejection_stage(self) -> RuntimeRouteDecisionStage {
+        let tag = prodex_mojo_core::runtime_route_reason::stage(self as u8)
+            .expect("Mojo route-decision rejection-stage mapping returned invalid output");
+        runtime_route_decision_stage_from_tag(tag).expect("validated Mojo route-decision stage tag")
     }
+}
+
+fn runtime_route_reason_kind_from_tag(tag: u8) -> Option<RuntimeRouteDecisionReasonKind> {
+    const VALUES: &[RuntimeRouteDecisionReasonKind] = &[
+        RuntimeRouteDecisionReasonKind::AuthFailureBackoff,
+        RuntimeRouteDecisionReasonKind::SelectionBackoff,
+        RuntimeRouteDecisionReasonKind::RouteCircuitOpen,
+        RuntimeRouteDecisionReasonKind::RouteCircuitHalfOpenProbeWait,
+        RuntimeRouteDecisionReasonKind::ProfileHealth,
+        RuntimeRouteDecisionReasonKind::ProfilePerformance,
+        RuntimeRouteDecisionReasonKind::QuotaProbeUnavailable,
+        RuntimeRouteDecisionReasonKind::StalePersistedQuota,
+        RuntimeRouteDecisionReasonKind::QuotaHealthy,
+        RuntimeRouteDecisionReasonKind::QuotaThin,
+        RuntimeRouteDecisionReasonKind::QuotaCritical,
+        RuntimeRouteDecisionReasonKind::QuotaExhausted,
+        RuntimeRouteDecisionReasonKind::QuotaUnknown,
+        RuntimeRouteDecisionReasonKind::QuotaExhaustedBeforeSend,
+        RuntimeRouteDecisionReasonKind::QuotaWindowsUnavailable,
+        RuntimeRouteDecisionReasonKind::ProfileInflightSoftLimit,
+        RuntimeRouteDecisionReasonKind::AuthNotQuotaCompatible,
+        RuntimeRouteDecisionReasonKind::PromptCacheAffinity,
+        RuntimeRouteDecisionReasonKind::NegativeCache,
+        RuntimeRouteDecisionReasonKind::Excluded,
+        RuntimeRouteDecisionReasonKind::AffinityOwnerUnavailable,
+        RuntimeRouteDecisionReasonKind::SelectionFailed,
+        RuntimeRouteDecisionReasonKind::Compatible,
+        RuntimeRouteDecisionReasonKind::EndpointUnsupported,
+        RuntimeRouteDecisionReasonKind::RequiredCapabilityMissing,
+        RuntimeRouteDecisionReasonKind::CatalogEntryUnavailable,
+        RuntimeRouteDecisionReasonKind::ContextWindowUnknown,
+        RuntimeRouteDecisionReasonKind::ContextWindowExceeded,
+        RuntimeRouteDecisionReasonKind::OutputLimitUnknown,
+        RuntimeRouteDecisionReasonKind::RequestedOutputExceedsModelLimit,
+        RuntimeRouteDecisionReasonKind::ReasoningReserveUnsupported,
+        RuntimeRouteDecisionReasonKind::ReasoningReserveExcessive,
+        RuntimeRouteDecisionReasonKind::MalformedRequestLimits,
+        RuntimeRouteDecisionReasonKind::OutputLimitClamped,
+    ];
+    VALUES.get(usize::from(tag)).copied()
+}
+
+fn runtime_route_decision_stage_from_tag(tag: u8) -> Option<RuntimeRouteDecisionStage> {
+    const VALUES: &[RuntimeRouteDecisionStage] = &[
+        RuntimeRouteDecisionStage::Affinity,
+        RuntimeRouteDecisionStage::ModelResolution,
+        RuntimeRouteDecisionStage::EndpointCapability,
+        RuntimeRouteDecisionStage::RequestConstraints,
+        RuntimeRouteDecisionStage::Governance,
+        RuntimeRouteDecisionStage::Authentication,
+        RuntimeRouteDecisionStage::Quota,
+        RuntimeRouteDecisionStage::CircuitAndBackoff,
+        RuntimeRouteDecisionStage::Admission,
+        RuntimeRouteDecisionStage::Ranking,
+        RuntimeRouteDecisionStage::FinalSelection,
+    ];
+    VALUES.get(usize::from(tag)).copied()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -219,15 +208,8 @@ impl From<RuntimeRouteDecisionReasonKind> for RuntimeRouteDecisionReason {
 }
 
 fn runtime_route_trace_reason_label(value: &str) -> String {
-    let value = value.trim();
-    if value.is_empty()
-        || value.len() > RUNTIME_ROUTE_DECISION_TRACE_MAX_IDENTIFIER_BYTES
-        || value
-            .chars()
-            .any(|ch| !(ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_'))
-    {
-        "unknown".to_string()
-    } else {
-        value.to_string()
-    }
+    prodex_mojo_core::runtime_route_reason::normalize_unknown(value)
+        .expect("Mojo route-decision unknown-label normalization returned invalid output")
+        .unwrap_or("unknown")
+        .to_string()
 }

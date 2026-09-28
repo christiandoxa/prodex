@@ -2740,3 +2740,20 @@ Validation passes 8/8 tests with default features and the same 8/8 tests under
 self-test, ownership, and authority guards. This hardens the existing
 runtime_tuning_capacity_defaults authority, so broad source share remains
 **23.27% Mojo** rather than changing through filler LOC.
+
+## Runtime route-decision reason migration
+
+Known route-decision label lookup, reason-to-rejection-stage mapping, and safe
+unknown-label normalization now use mojo/prodex_core/runtime_route_reason.mojo.
+Rust keeps the stable public enums/Serde contract and validates numeric Mojo tags,
+but the former label scan, stage match table, and lowercase/digit/underscore safety
+policy were removed from production Rust.
+
+Validation passes the direct Mojo ABI smoke test plus a fixed 34-label caller matrix
+covering every known reason/stage pair, exact-known misses, safe unknown trimming,
+and unsafe labels. Library clippy, prodex-app check, no-fallback self-test, ownership,
+and authority guards pass; ownership now reports **77 authoritative operations**.
+The canonical broad source report counts **58,583 reachable Mojo LOC** and
+**192,771 Rust production LOC**, totaling **251,354 LOC**: **23.31% Mojo**. The
+75% project target remains unmet, with **519,730 additional Mojo LOC** required at
+this Rust volume.
