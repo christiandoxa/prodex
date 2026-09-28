@@ -9,6 +9,8 @@ enum Operation {
     ConcurrencyValidate = 1,
     ReasoningEffort = 2,
     ModelNonempty = 3,
+    ProviderUrlPolicy = 4,
+    ChildSpecScalarPolicy = 5,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,6 +43,18 @@ pub enum ReasoningEffortPlan {
     XHigh,
     Max,
     Ultra,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderUrlViolation {
+    LocalRequiresUrl,
+    NonLocalRejectsUrl,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildSpecScalarViolation {
+    InvalidRecursionMarker,
+    InvalidTaskSize,
 }
 
 unsafe extern "C" {
@@ -133,6 +147,34 @@ pub fn model_nonempty(value: &str) -> Result<bool, MojoError> {
     }
 }
 
+pub fn provider_url_violation(
+    provider_is_local: bool,
+    url_present: bool,
+) -> Result<Option<ProviderUrlViolation>, MojoError> {
+    let scalar = i64::from(provider_is_local) | (i64::from(url_present) << 1);
+    let result = call(Operation::ProviderUrlPolicy, "", scalar)?;
+    match result[0] {
+        0 => Ok(None),
+        1 => Ok(Some(ProviderUrlViolation::LocalRequiresUrl)),
+        2 => Ok(Some(ProviderUrlViolation::NonLocalRejectsUrl)),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn child_spec_scalar_violation(
+    recursion_marker: &str,
+    task_max_bytes: usize,
+) -> Result<Option<ChildSpecScalarViolation>, MojoError> {
+    let scalar = i64::try_from(task_max_bytes).map_err(|_| MojoError::InvalidInput)?;
+    let result = call(Operation::ChildSpecScalarPolicy, recursion_marker, scalar)?;
+    match result[0] {
+        0 => Ok(None),
+        1 => Ok(Some(ChildSpecScalarViolation::InvalidRecursionMarker)),
+        2 => Ok(Some(ChildSpecScalarViolation::InvalidTaskSize)),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,5 +224,26 @@ mod tests {
         assert_eq!(reasoning_effort("extreme").unwrap(), None);
         assert!(model_nonempty(" 模型/β-🦀 ").unwrap());
         assert!(!model_nonempty(" \t\u{3000} ").unwrap());
+        assert_eq!(provider_url_violation(true, true).unwrap(), None);
+        assert_eq!(
+            provider_url_violation(true, false).unwrap(),
+            Some(ProviderUrlViolation::LocalRequiresUrl)
+        );
+        assert_eq!(
+            provider_url_violation(false, true).unwrap(),
+            Some(ProviderUrlViolation::NonLocalRejectsUrl)
+        );
+        assert_eq!(
+            child_spec_scalar_violation("PRODEX_SUB_AGENT", 65_536).unwrap(),
+            None
+        );
+        assert_eq!(
+            child_spec_scalar_violation("bad", 65_536).unwrap(),
+            Some(ChildSpecScalarViolation::InvalidRecursionMarker)
+        );
+        assert_eq!(
+            child_spec_scalar_violation("PRODEX_SUB_AGENT", 0).unwrap(),
+            Some(ChildSpecScalarViolation::InvalidTaskSize)
+        );
     }
 }

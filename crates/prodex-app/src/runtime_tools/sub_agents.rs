@@ -4,6 +4,10 @@ use prodex_cli::{
     SubAgentConfig, SubAgentLaunchTarget, SubAgentMaxConcurrency, SubAgentReasoningEffort,
     SuperLaunchTarget,
 };
+use prodex_mojo_core::sub_agent_policy::{
+    ChildSpecScalarViolation, ProviderUrlViolation, child_spec_scalar_violation, model_nonempty,
+    provider_url_violation,
+};
 use prodex_provider_core::{
     ProviderId, ProviderReasoningEffort, provider_catalog_entry, provider_model_spec,
 };
@@ -147,10 +151,8 @@ pub(crate) fn resolve_super_sub_agent_config(
     target: SuperLaunchTarget,
 ) -> Result<ResolvedSuperSubAgent> {
     let provider = config.provider;
-    if config
-        .model
-        .as_deref()
-        .is_some_and(|model| model.trim().is_empty())
+    if let Some(model) = config.model.as_deref()
+        && !model_nonempty(model).expect("Mojo sub-agent model validator returned invalid output")
     {
         bail!("--sub-agent-model must be nonempty");
     }
@@ -194,11 +196,16 @@ pub(crate) fn resolve_super_sub_agent_config(
                 .map_err(anyhow::Error::msg)
         })
         .transpose()?;
-    if provider == ProviderId::Local && url.is_none() {
-        bail!("local sub-agent provider requires --sub-agent-url");
-    }
-    if provider != ProviderId::Local && url.is_some() {
-        bail!("--sub-agent-url is only supported with the local sub-agent provider");
+    match provider_url_violation(provider == ProviderId::Local, url.is_some())
+        .expect("Mojo sub-agent provider/URL policy returned invalid output")
+    {
+        Some(ProviderUrlViolation::LocalRequiresUrl) => {
+            bail!("local sub-agent provider requires --sub-agent-url");
+        }
+        Some(ProviderUrlViolation::NonLocalRejectsUrl) => {
+            bail!("--sub-agent-url is only supported with the local sub-agent provider");
+        }
+        None => {}
     }
 
     Ok(ResolvedSuperSubAgent {
@@ -415,20 +422,30 @@ fn validate_child_launch_spec(spec: &ChildLaunchSpec) -> Result<()> {
     if !spec.executable.is_absolute() {
         bail!("sub-agent executable path must be absolute");
     }
-    if spec.recursion_marker != SUB_AGENT_RECURSION_MARKER {
-        bail!("sub-agent recursion marker is invalid");
+    match child_spec_scalar_violation(&spec.recursion_marker, spec.task_max_bytes)
+        .expect("Mojo sub-agent child-spec scalar policy returned invalid output")
+    {
+        Some(ChildSpecScalarViolation::InvalidRecursionMarker) => {
+            bail!("sub-agent recursion marker is invalid");
+        }
+        Some(ChildSpecScalarViolation::InvalidTaskSize) => {
+            bail!("sub-agent task size policy is invalid");
+        }
+        None => {}
     }
-    if spec.task_max_bytes == 0 || spec.task_max_bytes > SUB_AGENT_TASK_MAX_BYTES {
-        bail!("sub-agent task size policy is invalid");
+    match provider_url_violation(spec.provider == ProviderId::Local, spec.local_url.is_some())
+        .expect("Mojo sub-agent provider/URL policy returned invalid output")
+    {
+        Some(ProviderUrlViolation::LocalRequiresUrl) => {
+            bail!("local child provider requires a URL");
+        }
+        Some(ProviderUrlViolation::NonLocalRejectsUrl) => {
+            bail!("child local URL is valid only for the local provider");
+        }
+        None => {}
     }
-    if spec.provider == ProviderId::Local {
-        let url = spec
-            .local_url
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("local child provider requires a URL"))?;
+    if let Some(url) = spec.local_url.as_deref() {
         prodex_cli::parse_sub_agent_url(url).map_err(anyhow::Error::msg)?;
-    } else if spec.local_url.is_some() {
-        bail!("child local URL is valid only for the local provider");
     }
     for tool in &spec.required_tools {
         tool.parse::<prodex_optional_tools::OptionalToolId>()

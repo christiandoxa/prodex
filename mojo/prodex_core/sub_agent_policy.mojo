@@ -12,6 +12,8 @@ comptime OP_CONCURRENCY_PARSE: Int64 = 0
 comptime OP_CONCURRENCY_VALIDATE: Int64 = 1
 comptime OP_REASONING_EFFORT: Int64 = 2
 comptime OP_MODEL_NONEMPTY: Int64 = 3
+comptime OP_PROVIDER_URL_POLICY: Int64 = 4
+comptime OP_CHILD_SPEC_SCALAR_POLICY: Int64 = 5
 
 def sub_agent_view(address: UInt, length: Int64) -> ProdexRichStringView:
     return ProdexRichStringView(address, UInt(length))
@@ -153,7 +155,7 @@ def prodex_sub_agent_policy_v1(
         return SUB_AGENT_POLICY_ABI
     if (
         operation < OP_CONCURRENCY_PARSE
-        or operation > OP_MODEL_NONEMPTY
+        or operation > OP_CHILD_SPEC_SCALAR_POLICY
         or length < 0
         or (length > 0 and address == 0)
         or result_address == 0
@@ -177,7 +179,21 @@ def prodex_sub_agent_policy_v1(
         result[1] = scalar
     elif operation == OP_REASONING_EFFORT:
         sub_agent_reasoning_effort(view, result)
-    else:
+    elif operation == OP_MODEL_NONEMPTY:
         var bounds = rich_trim_bounds(view)
         result[1] = Int64(bounds[1] > bounds[0])
+    elif operation == OP_PROVIDER_URL_POLICY:
+        var provider_is_local = (scalar & 1) == 1
+        var url_present = (scalar & 2) == 2
+        if provider_is_local and not url_present:
+            result[0] = 1
+        elif not provider_is_local and url_present:
+            result[0] = 2
+    else:
+        if not sub_agent_range_equals["PRODEX_SUB_AGENT"](
+            view, 0, Int64(view.len), False
+        ):
+            result[0] = 1
+        elif scalar < 1 or scalar > 65536:
+            result[0] = 2
     return SUB_AGENT_POLICY_OK
