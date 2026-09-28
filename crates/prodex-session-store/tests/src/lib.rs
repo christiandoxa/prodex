@@ -42,6 +42,89 @@ fn assert_codex_session_meta_line(
 }
 
 #[test]
+fn recent_session_workspaces_skip_invalid_and_relative_cwds() {
+    let root = test_temp_dir("recent-session-workspaces");
+    let sessions = root.join("sessions/2026/09/28");
+    let workspace_a = root.join("workspace-a");
+    let workspace_b = root.join("workspace-b");
+    fs::create_dir_all(&sessions).expect("session dir should be created");
+    fs::create_dir_all(&workspace_a).expect("workspace A should be created");
+    fs::create_dir_all(&workspace_b).expect("workspace B should be created");
+
+    let write_session = |name: &str, id: &str, cwd: &Path| {
+        fs::write(
+            sessions.join(name),
+            serde_json::json!({
+                "timestamp": "2026-09-28T12:00:00Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": id,
+                    "cwd": cwd,
+                    "originator": "codex-tui",
+                    "cli_version": "0.157.0"
+                }
+            })
+            .to_string()
+                + "\n"
+                + &serde_json::json!({
+                    "type": "turn_context",
+                    "payload": {
+                        "cwd": "/should/not/be/scanned",
+                        "model": "gpt-5.6"
+                    }
+                })
+                .to_string()
+                + "\n",
+        )
+        .expect("session should be written");
+    };
+
+    write_session(
+        "rollout-a.jsonl",
+        "01900000-0000-7000-8000-000000000301",
+        &workspace_a,
+    );
+    write_session(
+        "rollout-a-duplicate.jsonl",
+        "01900000-0000-7000-8000-000000000302",
+        &workspace_a,
+    );
+    write_session(
+        "rollout-b.jsonl",
+        "01900000-0000-7000-8000-000000000303",
+        &workspace_b,
+    );
+    fs::write(
+        sessions.join("rollout-relative.jsonl"),
+        serde_json::json!({
+            "timestamp": "2026-09-28T12:00:00Z",
+            "type": "session_meta",
+            "payload": {
+                "id": "01900000-0000-7000-8000-000000000304",
+                "cwd": "relative/workspace"
+            }
+        })
+        .to_string()
+            + "\n",
+    )
+    .expect("relative session should be written");
+    fs::write(sessions.join("broken.jsonl"), "{not-json}\n")
+        .expect("broken session should be written");
+
+    let mut workspaces =
+        collect_recent_session_workspaces(&root, 16).expect("workspace scan should succeed");
+    workspaces.sort();
+    assert_eq!(workspaces, vec![workspace_a, workspace_b]);
+    assert!(
+        collect_recent_session_workspaces(&root, 0)
+            .expect("zero-limit scan should succeed")
+            .is_empty()
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn session_current_filters_by_cwd() {
     let root = test_temp_dir("session-current");
     let sessions = root.join("sessions");

@@ -4,20 +4,43 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 
+const SUPER_TRUST_RECENT_SESSION_WORKSPACES: usize = 4_096;
+const SUPER_TRUST_CONFIG_MAX_BYTES: usize = 128 * 1024;
+
 fn trusted_workspaces_codex_args(
     workspaces: impl IntoIterator<Item = PathBuf>,
     codex_args: &[OsString],
 ) -> Vec<OsString> {
     let mut seen = BTreeSet::new();
     let mut entries = Vec::new();
-    for workspace in workspaces {
-        let workspace = workspace.to_string_lossy().into_owned();
-        if !seen.insert(workspace.clone()) {
-            continue;
+    let mut encoded_bytes = "projects={}".len();
+
+    'workspaces: for workspace in workspaces {
+        let mut candidates = Vec::with_capacity(2);
+        if let Ok(canonical) = workspace.canonicalize() {
+            candidates.push(canonical);
         }
-        let workspace = serde_json::to_string(&workspace)
-            .expect("workspace path should serialize as a TOML-compatible string");
-        entries.push(format!("{workspace}={{trust_level=\"trusted\"}}"));
+        if candidates.first() != Some(&workspace) {
+            candidates.push(workspace);
+        }
+        for candidate in candidates {
+            let workspace = candidate.to_string_lossy().into_owned();
+            if !seen.insert(workspace.clone()) {
+                continue;
+            }
+            let workspace = serde_json::to_string(&workspace)
+                .expect("workspace path should serialize as a TOML-compatible string");
+            let entry = format!("{workspace}={{trust_level=\"trusted\"}}");
+            let separator_bytes = usize::from(!entries.is_empty());
+            let projected = encoded_bytes
+                .saturating_add(separator_bytes)
+                .saturating_add(entry.len());
+            if !entries.is_empty() && projected > SUPER_TRUST_CONFIG_MAX_BYTES {
+                break 'workspaces;
+            }
+            encoded_bytes = projected;
+            entries.push(entry);
+        }
     }
 
     let mut args = Vec::with_capacity(codex_args.len() + 2);
@@ -42,6 +65,7 @@ pub(crate) fn trusted_workspace_codex_args(
 pub(crate) fn trusted_super_resume_codex_args(
     workspace: &Path,
     resume_session_path: Option<&Path>,
+    shared_codex_root: &Path,
     codex_args: &[OsString],
 ) -> Result<Vec<OsString>> {
     let mut workspaces = vec![workspace.to_path_buf()];
@@ -57,6 +81,14 @@ pub(crate) fn trusted_super_resume_codex_args(
     {
         workspaces.push(resume_workspace);
     }
+
+    if let Ok(recent_workspaces) = prodex_session_store::collect_recent_session_workspaces(
+        shared_codex_root,
+        SUPER_TRUST_RECENT_SESSION_WORKSPACES,
+    ) {
+        workspaces.extend(recent_workspaces);
+    }
+
     Ok(trusted_workspaces_codex_args(workspaces, codex_args))
 }
 
@@ -77,7 +109,13 @@ mod tests {
             &session_path,
             format!(
                 "{{\"timestamp\":\"2026-09-25T01:45:58Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"01900000-0000-7000-8000-000000000157\",\"cwd\":{},\"originator\":\"codex-tui\",\"cli_version\":\"0.157.0\"}}}}\n",
-                serde_json::to_string(&resumed_workspace.to_string_lossy()).unwrap()
+                serde_json::to_string(
+                    &resumed_workspace
+                        .join("..")
+                        .join("resumed-workspace")
+                        .to_string_lossy()
+                )
+                .unwrap()
             ),
         )
         .unwrap();
@@ -85,7 +123,8 @@ mod tests {
         let launch_workspace = root.join("launch-workspace");
         std::fs::create_dir_all(&launch_workspace).unwrap();
         let args =
-            trusted_super_resume_codex_args(&launch_workspace, Some(&session_path), &[]).unwrap();
+            trusted_super_resume_codex_args(&launch_workspace, Some(&session_path), &root, &[])
+                .unwrap();
 
         assert_eq!(args.first(), Some(&OsString::from("-c")));
         let config: toml::Value =
@@ -96,6 +135,67 @@ mod tests {
                 Some("trusted")
             );
         }
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn super_tui_pretrusts_recent_session_workspaces_for_slash_resume() {
+        let root = crate::test_temp_root().join(format!(
+            "prodex-super-slash-resume-trust-{}",
+            std::process::id()
+        ));
+        let shared_codex_root = root.join("shared");
+        let sessions = shared_codex_root.join("sessions/2026/09/28");
+        std::fs::create_dir_all(&sessions).unwrap();
+
+        let workspace_a = root.join("workspace-a");
+        let workspace_b = root.join("workspace-b");
+        let launch_workspace = root.join("launch-workspace");
+        for workspace in [&workspace_a, &workspace_b, &launch_workspace] {
+            std::fs::create_dir_all(workspace).unwrap();
+        }
+
+        for (name, id, timestamp, workspace) in [
+            (
+                "rollout-a.jsonl",
+                "01900000-0000-7000-8000-000000000201",
+                "2026-09-28T01:00:00Z",
+                &workspace_a,
+            ),
+            (
+                "rollout-b.jsonl",
+                "01900000-0000-7000-8000-000000000202",
+                "2026-09-28T02:00:00Z",
+                &workspace_b,
+            ),
+        ] {
+            std::fs::write(
+                sessions.join(name),
+                format!(
+                    "{{\"timestamp\":{timestamp},\"type\":\"session_meta\",\"payload\":{{\"id\":{id},\"cwd\":{cwd},\"originator\":\"codex-tui\",\"cli_version\":\"0.157.0\"}}}}\n",
+                    timestamp = serde_json::to_string(timestamp).unwrap(),
+                    id = serde_json::to_string(id).unwrap(),
+                    cwd = serde_json::to_string(&workspace.to_string_lossy()).unwrap(),
+                ),
+            )
+            .unwrap();
+        }
+
+        let args =
+            trusted_super_resume_codex_args(&launch_workspace, None, &shared_codex_root, &[])
+                .unwrap();
+        let config: toml::Value =
+            toml::from_str(args[1].to_str().expect("config override should be UTF-8")).unwrap();
+
+        for workspace in [&launch_workspace, &workspace_a, &workspace_b] {
+            assert_eq!(
+                config["projects"][workspace.to_string_lossy().as_ref()]["trust_level"].as_str(),
+                Some("trusted"),
+                "workspace={}",
+                workspace.display(),
+            );
+        }
+
         std::fs::remove_dir_all(root).unwrap();
     }
 }

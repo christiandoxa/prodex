@@ -72,6 +72,66 @@ enum SessionRepairMatchKind {
     Exact,
 }
 
+pub fn collect_recent_session_workspaces(
+    shared_codex_root: &Path,
+    max_workspaces: usize,
+) -> Result<Vec<PathBuf>> {
+    if max_workspaces == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut session_paths = Vec::new();
+    collect_session_paths(&shared_codex_root.join(SESSIONS_DIR), &mut session_paths)?;
+    collect_session_paths(
+        &shared_codex_root.join(ARCHIVED_SESSIONS_DIR),
+        &mut session_paths,
+    )?;
+    session_paths.sort_by_key(|path| std::cmp::Reverse(file_modified_epoch(path).unwrap_or(0)));
+
+    let mut seen = std::collections::BTreeSet::new();
+    let mut workspaces = Vec::new();
+    for path in session_paths {
+        let Ok(Some(workspace)) = session_initial_cwd_from_path(&path) else {
+            continue;
+        };
+        if !workspace.is_absolute() || !seen.insert(workspace.clone()) {
+            continue;
+        }
+        workspaces.push(workspace);
+        if workspaces.len() >= max_workspaces {
+            break;
+        }
+    }
+    Ok(workspaces)
+}
+
+fn session_initial_cwd_from_path(path: &Path) -> Result<Option<PathBuf>> {
+    let mut report = SessionReport::from_path(path, file_modified_epoch(path).unwrap_or(0));
+    if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
+        if !read_json_session_report(path, &mut report)? {
+            return Ok(None);
+        }
+        return Ok(report.cwd.map(PathBuf::from));
+    }
+
+    let mut saw_resume_metadata = false;
+    visit_session_lines(path, |line| {
+        if line.trim().is_empty() {
+            return true;
+        }
+        if !session_line_starts_resume_metadata(line) {
+            return false;
+        }
+        apply_session_json_line(&mut report, line);
+        saw_resume_metadata = true;
+        false
+    })?;
+    if !saw_resume_metadata {
+        return Ok(None);
+    }
+    Ok(report.cwd.map(PathBuf::from))
+}
+
 pub fn collect_session_reports(
     shared_codex_root: &Path,
     current_dir: Option<&Path>,
