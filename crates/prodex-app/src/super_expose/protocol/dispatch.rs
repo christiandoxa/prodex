@@ -50,14 +50,109 @@ fn parse_dispatch_request(
     if let Some(response) = validate_mcp_request_headers(&object, method, headers) {
         return Err(response);
     }
-    validate_request_id_presence(&object, method, id.as_ref())?;
-    let tool_name = params
-        .as_object()
+
+    let params_object = params.as_object();
+    let tool_name = params_object
         .and_then(|params| params.get("name"))
         .and_then(Value::as_str);
+    let protocol_version_present = params_object
+        .and_then(|params| params.get("protocolVersion"))
+        .and_then(Value::as_str)
+        .is_some();
+    let tool_arguments_kind = match params_object.and_then(|params| params.get("arguments")) {
+        None => 0,
+        Some(arguments) if arguments.is_object() => 1,
+        Some(_) => 2,
+    };
+    let validation = prodex_mojo_core::rich::super_expose_dispatch_validation(
+        method,
+        object.contains_key("id"),
+        id.is_some(),
+        params_object.is_some(),
+        protocol_version_present,
+        tool_name.is_some(),
+        tool_arguments_kind,
+    )
+    .expect("Mojo Super expose dispatch validation returned invalid output");
+
+    use prodex_mojo_core::rich::SuperExposeDispatchDecision;
+    match validation {
+        SuperExposeDispatchDecision::NotificationAccepted => {
+            return Err(json_response(202, Value::Null));
+        }
+        SuperExposeDispatchDecision::NotificationUnsupported => {
+            return Err(error(None, -32601, "notification is unsupported"));
+        }
+        SuperExposeDispatchDecision::InvalidRequestId => {
+            return Err(error(None, -32600, "invalid request id"));
+        }
+        SuperExposeDispatchDecision::Ok
+        | SuperExposeDispatchDecision::InitializeParamsRequired
+        | SuperExposeDispatchDecision::ProtocolVersionRequired
+        | SuperExposeDispatchDecision::ToolParamsRequired
+        | SuperExposeDispatchDecision::ToolNameRequired
+        | SuperExposeDispatchDecision::ToolArgumentsObjectRequired => {}
+    }
+
     let (method_kind, tool_kind) = expose_route(method, tool_name);
     audit_dispatch_request(context, method_kind, tool_kind, body.len());
-    validate_method_params(method_kind, &params, id.clone())?;
+
+    match validation {
+        SuperExposeDispatchDecision::InitializeParamsRequired => {
+            return Err(mcp_error_response(
+                400,
+                id,
+                -32602,
+                "initialize params are required",
+            ));
+        }
+        SuperExposeDispatchDecision::ProtocolVersionRequired => {
+            return Err(mcp_error_response(
+                400,
+                id,
+                -32602,
+                "protocolVersion is required",
+            ));
+        }
+        SuperExposeDispatchDecision::ToolParamsRequired => {
+            return Err(mcp_error_response(
+                400,
+                id,
+                -32602,
+                "tool parameters are required",
+            ));
+        }
+        SuperExposeDispatchDecision::ToolNameRequired => {
+            return Err(mcp_error_response(400, id, -32602, "tool name is required"));
+        }
+        SuperExposeDispatchDecision::ToolArgumentsObjectRequired => {
+            return Err(mcp_error_response(
+                400,
+                id,
+                -32602,
+                "tool arguments must be an object",
+            ));
+        }
+        SuperExposeDispatchDecision::Ok => {}
+        SuperExposeDispatchDecision::NotificationAccepted
+        | SuperExposeDispatchDecision::NotificationUnsupported
+        | SuperExposeDispatchDecision::InvalidRequestId => {
+            unreachable!("handled before dispatch audit")
+        }
+    }
+
+    if method_kind == ExposeMethod::ToolsCall {
+        let empty_arguments = Value::Object(Default::default());
+        let arguments = params_object
+            .and_then(|params| params.get("arguments"))
+            .unwrap_or(&empty_arguments);
+        validate_tool_arguments(
+            tool_name.expect("Mojo validated tools/call name"),
+            arguments,
+        )
+        .map_err(|message| mcp_error_response(400, id.clone(), -32602, &message))?;
+    }
+
     Ok(ParsedDispatchRequest {
         id,
         params,
@@ -107,97 +202,6 @@ fn require_dispatch_object(
             ))
         }
     }
-}
-
-fn validate_request_id_presence(
-    object: &serde_json::Map<String, Value>,
-    method: &str,
-    id: Option<&Value>,
-) -> std::result::Result<(), Response<std::io::Cursor<Vec<u8>>>> {
-    if !object.contains_key("id") {
-        return Err(
-            if matches!(
-                method,
-                "notifications/initialized" | "notifications/cancelled"
-            ) {
-                json_response(202, Value::Null)
-            } else {
-                error(None, -32601, "notification is unsupported")
-            },
-        );
-    }
-    if id.is_none() {
-        return Err(error(None, -32600, "invalid request id"));
-    }
-    Ok(())
-}
-
-fn validate_method_params(
-    method_kind: ExposeMethod,
-    params: &Value,
-    id: Option<Value>,
-) -> std::result::Result<(), Response<std::io::Cursor<Vec<u8>>>> {
-    match method_kind {
-        ExposeMethod::Initialize => validate_initialize_params(params, id),
-        ExposeMethod::ToolsCall => validate_tools_call_params(params, id),
-        _ => Ok(()),
-    }
-}
-
-fn validate_initialize_params(
-    params: &Value,
-    id: Option<Value>,
-) -> std::result::Result<(), Response<std::io::Cursor<Vec<u8>>>> {
-    let Some(params) = params.as_object() else {
-        return Err(mcp_error_response(
-            400,
-            id,
-            -32602,
-            "initialize params are required",
-        ));
-    };
-    if params
-        .get("protocolVersion")
-        .and_then(Value::as_str)
-        .is_none()
-    {
-        return Err(mcp_error_response(
-            400,
-            id,
-            -32602,
-            "protocolVersion is required",
-        ));
-    }
-    Ok(())
-}
-
-fn validate_tools_call_params(
-    params: &Value,
-    id: Option<Value>,
-) -> std::result::Result<(), Response<std::io::Cursor<Vec<u8>>>> {
-    let Some(params) = params.as_object() else {
-        return Err(mcp_error_response(
-            400,
-            id,
-            -32602,
-            "tool parameters are required",
-        ));
-    };
-    let Some(name) = params.get("name").and_then(Value::as_str) else {
-        return Err(mcp_error_response(400, id, -32602, "tool name is required"));
-    };
-    let empty_arguments = Value::Object(Default::default());
-    let arguments = params.get("arguments").unwrap_or(&empty_arguments);
-    if !arguments.is_object() {
-        return Err(mcp_error_response(
-            400,
-            id,
-            -32602,
-            "tool arguments must be an object",
-        ));
-    }
-    validate_tool_arguments(name, arguments)
-        .map_err(|message| mcp_error_response(400, id, -32602, &message))
 }
 
 fn audit_dispatch_request(

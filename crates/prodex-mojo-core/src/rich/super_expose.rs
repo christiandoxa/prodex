@@ -246,7 +246,32 @@ pub enum SuperExposeProtocolDecision {
     NameMismatch,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuperExposeDispatchDecision {
+    Ok,
+    NotificationAccepted,
+    NotificationUnsupported,
+    InvalidRequestId,
+    InitializeParamsRequired,
+    ProtocolVersionRequired,
+    ToolParamsRequired,
+    ToolNameRequired,
+    ToolArgumentsObjectRequired,
+}
+
 unsafe extern "C" {
+    fn prodex_mojo_super_expose_dispatch_validation_v1(
+        abi_version: i64,
+        method_address: u64,
+        method_length: i64,
+        has_id_field: i64,
+        id_valid: i64,
+        params_is_object: i64,
+        protocol_version_present: i64,
+        tool_name_present: i64,
+        tool_arguments_kind: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_mojo_super_expose_protocol_version_supported_v1(
         abi_version: i64,
         address: u64,
@@ -336,6 +361,48 @@ fn bool_output(value: i64) -> Result<bool, MojoError> {
     match value {
         0 => Ok(false),
         1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn super_expose_dispatch_validation(
+    method: &str,
+    has_id_field: bool,
+    id_valid: bool,
+    params_is_object: bool,
+    protocol_version_present: bool,
+    tool_name_present: bool,
+    tool_arguments_kind: i64,
+) -> Result<SuperExposeDispatchDecision, MojoError> {
+    ensure_rich_abi()?;
+    if method.len() > SUPER_EXPOSE_MAX_NAME_BYTES || !(0..=2).contains(&tool_arguments_kind) {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = -1_i64;
+    super_expose_status(unsafe {
+        prodex_mojo_super_expose_dispatch_validation_v1(
+            SUPER_EXPOSE_ABI_VERSION,
+            method.as_ptr() as usize as u64,
+            i64::try_from(method.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(has_id_field),
+            i64::from(id_valid),
+            i64::from(params_is_object),
+            i64::from(protocol_version_present),
+            i64::from(tool_name_present),
+            tool_arguments_kind,
+            mojo_mut_pointer_address(&mut output),
+        )
+    })?;
+    match output {
+        0 => Ok(SuperExposeDispatchDecision::Ok),
+        1 => Ok(SuperExposeDispatchDecision::NotificationAccepted),
+        2 => Ok(SuperExposeDispatchDecision::NotificationUnsupported),
+        3 => Ok(SuperExposeDispatchDecision::InvalidRequestId),
+        4 => Ok(SuperExposeDispatchDecision::InitializeParamsRequired),
+        5 => Ok(SuperExposeDispatchDecision::ProtocolVersionRequired),
+        6 => Ok(SuperExposeDispatchDecision::ToolParamsRequired),
+        7 => Ok(SuperExposeDispatchDecision::ToolNameRequired),
+        8 => Ok(SuperExposeDispatchDecision::ToolArgumentsObjectRequired),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -494,6 +561,68 @@ pub fn super_expose_string_valid(value: &str, max_bytes: usize) -> Result<bool, 
 #[cfg(test)]
 mod protocol_policy_tests {
     use super::*;
+
+    #[test]
+    fn dispatch_validation_preserves_request_id_and_param_precedence() {
+        use SuperExposeDispatchDecision::*;
+
+        assert_eq!(
+            super_expose_dispatch_validation(
+                "notifications/initialized",
+                false,
+                false,
+                false,
+                false,
+                false,
+                0,
+            )
+            .unwrap(),
+            NotificationAccepted
+        );
+        assert_eq!(
+            super_expose_dispatch_validation("ping", false, false, false, false, false, 0).unwrap(),
+            NotificationUnsupported
+        );
+        assert_eq!(
+            super_expose_dispatch_validation("ping", true, false, false, false, false, 0).unwrap(),
+            InvalidRequestId
+        );
+        assert_eq!(
+            super_expose_dispatch_validation("initialize", true, true, false, false, false, 0)
+                .unwrap(),
+            InitializeParamsRequired
+        );
+        assert_eq!(
+            super_expose_dispatch_validation("initialize", true, true, true, false, false, 0)
+                .unwrap(),
+            ProtocolVersionRequired
+        );
+        assert_eq!(
+            super_expose_dispatch_validation("tools/call", true, true, false, false, false, 0)
+                .unwrap(),
+            ToolParamsRequired
+        );
+        assert_eq!(
+            super_expose_dispatch_validation("tools/call", true, true, true, false, false, 0)
+                .unwrap(),
+            ToolNameRequired
+        );
+        assert_eq!(
+            super_expose_dispatch_validation("tools/call", true, true, true, false, true, 2)
+                .unwrap(),
+            ToolArgumentsObjectRequired
+        );
+        assert_eq!(
+            super_expose_dispatch_validation("tools/call", true, true, true, false, true, 0)
+                .unwrap(),
+            Ok
+        );
+        assert_eq!(
+            super_expose_dispatch_validation("unknown/method", true, true, false, false, false, 0)
+                .unwrap(),
+            Ok
+        );
+    }
 
     #[test]
     fn protocol_version_and_metadata_policy_preserve_precedence() {

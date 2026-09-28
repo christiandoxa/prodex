@@ -8,6 +8,7 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
   "crates/prodex-app/src/app_commands/log_transcript.rs",
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
   "crates/prodex-cli/src/sub_agent.rs",
@@ -264,6 +265,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
   "crates/prodex-mojo-core/src/log.rs",
   "crates/prodex-app/src/app_commands/log_transcript.rs",
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
@@ -659,6 +661,7 @@ const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_acco
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
 const SUPER_EXPOSE_FILE = "crates/prodex-cli/src/lib.rs";
 const SUPER_EXPOSE_PROTOCOL_FILE = "crates/prodex-app/src/super_expose/protocol.rs";
+const SUPER_EXPOSE_DISPATCH_FILE = "crates/prodex-app/src/super_expose/protocol/dispatch.rs";
 const SUPER_EXPOSE_VALIDATION_FILE = "crates/prodex-app/src/super_expose/protocol/validation.rs";
 const SUPER_EXPOSE_TOOL_CONTRACT_FILE = "crates/prodex-app/src/super_expose/protocol/tool_contract.rs";
 const SUPER_EXPOSE_RICH_FILE = "crates/prodex-mojo-core/src/rich/super_expose.rs";
@@ -1217,6 +1220,23 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === SUPER_EXPOSE_DISPATCH_FILE) {
+      const required = "prodex_mojo_core::rich::super_expose_dispatch_validation(";
+      const violations = contents.includes(required)
+        ? [] : [filePath + ": Super-expose dispatch validation must retain Mojo call " + required];
+      for (const retired of [
+        "fn validate_request_id_presence(",
+        "fn validate_method_params(",
+        "fn validate_initialize_params(",
+        "fn validate_tools_call_params(",
+      ]) {
+        if (contents.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust Super-expose dispatch validation semantics");
+          break;
+        }
+      }
+      return violations;
+    }
     if (filePath === SUPER_EXPOSE_VALIDATION_FILE) {
       const required = [
         "prodex_mojo_core::rich::super_expose_protocol_metadata(",
@@ -1265,6 +1285,7 @@ export function findViolations(files) {
     }
     if (filePath === SUPER_EXPOSE_RICH_FILE) {
       const required = [
+        "prodex_mojo_super_expose_dispatch_validation_v1(",
         "prodex_mojo_super_expose_protocol_version_supported_v1(",
         "prodex_mojo_super_expose_protocol_metadata_v1(",
         "prodex_mojo_super_expose_media_header_v1(",
