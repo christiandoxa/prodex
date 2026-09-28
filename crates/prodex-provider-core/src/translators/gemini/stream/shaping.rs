@@ -180,7 +180,6 @@ pub fn gemini_provider_core_function_call_arguments_delta_event_with_thought_sig
     mut event: Value,
     thought_signature: Option<&str>,
 ) -> Value {
-    #[cfg(feature = "mojo")]
     if let Some(signature) = thought_signature
         && event.get("type").and_then(Value::as_str)
             == Some("response.function_call_arguments.delta")

@@ -1164,6 +1164,10 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs" &&
+        /#\[cfg\(feature = "mojo"\)\]/u.test(contents)) {
+      return [filePath + ": Gemini stream shaping Mojo kernel must be unconditional"];
+    }
     if (filePath === GEMINI_BRIDGE_ROOT_FILE &&
         /#\[cfg\(feature = "mojo"\)\]\s*pub\(crate\) use self::request::\{/u.test(contents)) {
       return [`${filePath}: Gemini translator bridge export must be unconditional`];
@@ -2113,6 +2117,9 @@ function selfTest() {
   assert(findViolations([[GEMINI_BRIDGE_REQUEST_FILE,
     'pub fn gemini_provider_core_generate_content_body_value() {\n#[cfg(not(feature = "mojo"))]\nold_body();\n}']])
     .some((violation) => violation.includes("gemini_provider_core_generate_content_body_value must use Mojo")));
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+    '#[cfg(feature = "mojo")] fn gated_shape() {}']]).join("\n"),
+    /stream shaping Mojo kernel must be unconditional/u);
   assert.match(findViolations([[GEMINI_GENERATION_CONFIG_FILE,
     "fn gemini_generation_config_from_request() {}"]])[0], /duplicate Gemini generation-config adapter/u);
   assert.match(findViolations([[GEMINI_SYSTEM_INSTRUCTION_FILE,
