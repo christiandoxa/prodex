@@ -941,7 +941,8 @@
           "runtime_external_provider_classification",
           "runtime_model_provider_classification",
           "runtime_boolean_token_classification",
-          "deepseek_web_search_mode_classification"
+          "deepseek_web_search_mode_classification",
+          "runtime_ci_truth_token_classification"
         ]
       },
       {
@@ -3813,6 +3814,31 @@
       "rust_owner_before": "case-insensitive auto, off/disabled/disable, openai_chat/openai-chat/chat, and anthropic mode classification",
       "rust_test_oracle": "deleted; direct Mojo adapter coverage plus DeepSeek web-search environment/profile and invalid-value caller tests preserve the production behavior",
       "rust_adapter_scope": "empty and Unicode-whitespace error precedence plus mapping the Mojo token enum to the stable runtime mode enum"
+    },
+    {
+      "domain": "app/runtime-config",
+      "introduced_in": "0.433.0",
+      "baseline_state": "duplicated Rust case-insensitive 1/true/yes truth tables for CI and strict-TUI environment handling",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/shared.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/shared.rs",
+        "crates/prodex-app/src/app_commands/session.rs",
+        "crates/prodex-app/src/profile_commands/manage.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "runtime_ci_truth_token_classification",
+      "mojo_entry": "prodex_runtime_ci_truth_token_v1",
+      "consumer_marker": "runtime_ci_truth_token",
+      "rust_owner_before": "trimmed case-insensitive 1/true/yes environment truth classification repeated in session TUI, shared inline-TUI gating, and profile scroll gating",
+      "rust_test_oracle": "deleted; direct Mojo adapter coverage fixes 1/true/yes as true while on/off/empty remain false, and app callers compile against the single classifier",
+      "rust_adapter_scope": "environment acquisition, caller-specific defaults, CODEX_CI presence handling, and final TUI action"
     }
   ],
   "rust_semantic_reductions": [

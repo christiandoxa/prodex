@@ -1,5 +1,6 @@
 use crate::audit_log::append_audit_event;
 use anyhow::Result;
+use prodex_mojo_core::super_provider_config::runtime_ci_truth_token;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use std::cell::RefCell;
@@ -139,10 +140,8 @@ fn inline_tui_allowed() -> bool {
     env::var_os("CODEX_CI").is_none()
         && env::var("PRODEX_TUI_STRICT")
             .map(|value| {
-                !matches!(
-                    value.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes"
-                )
+                !runtime_ci_truth_token(value.trim())
+                    .expect("runtime CI truth classifier should accept Rust strings")
             })
             .unwrap_or(true)
 }

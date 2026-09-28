@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal;
+use prodex_mojo_core::super_provider_config::runtime_ci_truth_token;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -562,10 +563,8 @@ fn profile_scroll_tui_allowed() -> bool {
         && env::var_os("CODEX_CI").is_none()
         && env::var("CI")
             .map(|value| {
-                !matches!(
-                    value.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes"
-                )
+                !runtime_ci_truth_token(value.trim())
+                    .expect("runtime CI truth classifier should accept Rust strings")
             })
             .unwrap_or(true)
 }

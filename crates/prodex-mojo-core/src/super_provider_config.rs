@@ -55,6 +55,8 @@ unsafe extern "C" {
 
     fn prodex_runtime_bool_token_v1(abi_version: i64, address: u64, length: i64) -> i64;
 
+    fn prodex_runtime_ci_truth_token_v1(abi_version: i64, address: u64, length: i64) -> i64;
+
     fn prodex_runtime_deepseek_web_search_token_v1(
         abi_version: i64,
         address: u64,
@@ -190,6 +192,22 @@ pub fn runtime_bool_token(value: &str) -> Result<Option<bool>, MojoError> {
         -2 => Err(MojoError::InvalidInput),
         0 => Ok(Some(false)),
         1 => Ok(Some(true)),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn runtime_ci_truth_token(value: &str) -> Result<bool, MojoError> {
+    let result = unsafe {
+        prodex_runtime_ci_truth_token_v1(
+            ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            signed_len(value)?,
+        )
+    };
+    match result {
+        -2 => Err(MojoError::InvalidInput),
+        0 => Ok(false),
+        1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -363,6 +381,11 @@ mod tests {
         assert_eq!(runtime_bool_token("OFF").unwrap(), Some(false));
         assert_eq!(runtime_bool_token(" true ").unwrap(), None);
         assert_eq!(runtime_bool_token("maybe").unwrap(), None);
+        assert!(runtime_ci_truth_token("YeS").unwrap());
+        assert!(runtime_ci_truth_token("TRUE").unwrap());
+        assert!(!runtime_ci_truth_token("on").unwrap());
+        assert!(!runtime_ci_truth_token("off").unwrap());
+        assert!(!runtime_ci_truth_token("").unwrap());
         assert_eq!(
             runtime_deepseek_web_search_token("OPENAI-CHAT").unwrap(),
             Some(RuntimeDeepSeekWebSearchToken::OpenAiChat)
