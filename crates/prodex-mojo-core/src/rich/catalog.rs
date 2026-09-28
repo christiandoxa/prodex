@@ -58,6 +58,16 @@ unsafe extern "C" {
         query: u64,
         output_index: u64,
     ) -> i64;
+    fn prodex_mojo_rich_catalog_resolve_exact_v1(
+        abi_version: i64,
+        model_ids: u64,
+        model_count: i64,
+        aliases: u64,
+        alias_models: u64,
+        alias_count: i64,
+        query: u64,
+        output_index: u64,
+    ) -> i64;
     fn prodex_mojo_rich_catalog_choices_v1(
         abi_version: i64,
         model_ids: u64,
@@ -231,6 +241,40 @@ pub fn resolve_catalog_model(
     let mut output_index = -1_i64;
     status(unsafe {
         prodex_mojo_rich_catalog_resolve_v1(
+            RICH_ABI_VERSION,
+            address(&views.model_ids),
+            i64::try_from(views.model_ids.len()).map_err(|_| MojoError::InvalidInput)?,
+            address(&views.aliases),
+            address(&views.alias_models),
+            i64::try_from(views.aliases.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_pointer_address(&query),
+            count_address(&mut output_index),
+        )
+    })?;
+    match output_index {
+        -1 => Ok(None),
+        index if index >= 0 => usize::try_from(index)
+            .ok()
+            .filter(|index| *index < models.len())
+            .map(Some)
+            .ok_or(MojoError::InvalidOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn resolve_catalog_model_exact(
+    models: &[CatalogModel<'_>],
+    model: &str,
+) -> Result<Option<usize>, MojoError> {
+    ensure_rich_abi()?;
+    if model.len() > CATALOG_MAX_IDENTIFIER_BYTES {
+        return Ok(None);
+    }
+    let views = views(models)?;
+    let query = view(model);
+    let mut output_index = -1_i64;
+    status(unsafe {
+        prodex_mojo_rich_catalog_resolve_exact_v1(
             RICH_ABI_VERSION,
             address(&views.model_ids),
             i64::try_from(views.model_ids.len()).map_err(|_| MojoError::InvalidInput)?,

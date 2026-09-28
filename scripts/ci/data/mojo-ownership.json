@@ -428,7 +428,8 @@
           "provider_catalog_choice_planning",
           "provider_catalog_merge_dedup",
           "model_catalog_choice_planning",
-          "model_catalog_configuration_resolution"
+          "model_catalog_configuration_resolution",
+          "provider_catalog_exact_model_identity"
         ]
       },
       "mojo/prodex_core/log_semantics.mojo": {
@@ -3843,6 +3844,30 @@
       "rust_owner_before": "trimmed case-insensitive 1/true/yes environment truth classification repeated in session TUI, shared inline-TUI gating, and profile scroll gating",
       "rust_test_oracle": "deleted; direct Mojo adapter coverage fixes 1/true/yes as true while on/off/empty remain false, and app callers compile against the single classifier",
       "rust_adapter_scope": "environment acquisition, caller-specific defaults, CODEX_CI presence handling, and final TUI action"
+    },
+    {
+      "name": "provider_catalog_exact_model_identity",
+      "domain": "catalog/identity",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust exact case-insensitive model and alias identity matching without whitespace normalization",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_catalog_resolve_exact_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_catalog.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+      "consumer_marker": "resolve_catalog_model_exact",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/provider_models.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_models.rs",
+      "rust_owner_before": "case-insensitive exact model/alias matching in Super model choices and dynamic provider model lookup",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct rich-catalog exact resolver test plus Super and provider-model caller tests cover mixed case, aliases, empty input, and non-trimming whitespace behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "build bounded catalog views, preserve original JSON/index ownership, and materialize the selected caller value"
     }
   ],
   "rust_semantic_reductions": [

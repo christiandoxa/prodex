@@ -137,6 +137,27 @@ fn rich_catalog_handles_aliases_duplicates_and_capacity() {
 }
 
 #[test]
+fn rich_catalog_exact_resolver_preserves_untrimmed_identity() {
+    let models = [CatalogModel {
+        id: "gpt-main",
+        aliases: &["gpt-alias"],
+    }];
+    assert_eq!(
+        resolve_catalog_model_exact(&models, "GPT-MAIN").unwrap(),
+        Some(0)
+    );
+    assert_eq!(
+        resolve_catalog_model_exact(&models, "GPT-ALIAS").unwrap(),
+        Some(0)
+    );
+    assert_eq!(
+        resolve_catalog_model_exact(&models, " gpt-main ").unwrap(),
+        None
+    );
+    assert_eq!(resolve_catalog_model_exact(&models, "").unwrap(), None);
+}
+
+#[test]
 fn rich_catalog_merge_deduplicates_aliases_against_canonical_ids() {
     let models = [CatalogModel {
         id: "gpt-5.6-sol",

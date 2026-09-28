@@ -3,6 +3,7 @@ use crate::{canonical_sub_agent_efforts, effective_provider_model_catalog, provi
 use prodex_cli::SubAgentReasoningEffort;
 use prodex_mojo_core::rich::{
     CatalogModel, CatalogPlanModel, merge_catalog_ids, plan_dynamic_catalog,
+    resolve_catalog_model_exact,
 };
 
 const CATALOG_MAX_PRIORITY: u64 = i64::MAX as u64;
@@ -155,11 +156,20 @@ pub(super) fn main_model_choice_matches(choice: &MainModelChoice, model: &str) -
     let prodex_provider_core::ProviderModelChoice::Model(candidate) = &choice.choice else {
         return false;
     };
-    candidate.eq_ignore_ascii_case(model)
-        || choice
-            .aliases
-            .iter()
-            .any(|alias| alias.eq_ignore_ascii_case(model))
+    let aliases = choice
+        .aliases
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    resolve_catalog_model_exact(
+        &[CatalogModel {
+            id: candidate,
+            aliases: &aliases,
+        }],
+        model,
+    )
+    .expect("Mojo exact main-model catalog resolution failed")
+    .is_some()
 }
 
 pub(super) fn main_model_choice_is_selectable(choices: &[MainModelChoice], model: &str) -> bool {
@@ -572,6 +582,21 @@ pub(super) fn main_model_efforts(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn main_model_choice_matching_uses_exact_mojo_catalog_identity() {
+        let choice = MainModelChoice {
+            choice: prodex_provider_core::ProviderModelChoice::Model("gpt-main".to_string()),
+            label: "Main".to_string(),
+            efforts: None,
+            aliases: vec!["gpt-alias".to_string()],
+            default_effort: None,
+        };
+        assert!(main_model_choice_matches(&choice, "GPT-MAIN"));
+        assert!(main_model_choice_matches(&choice, "GPT-ALIAS"));
+        assert!(!main_model_choice_matches(&choice, " gpt-main "));
+        assert!(!main_model_choice_matches(&choice, "other"));
+    }
 
     #[test]
     fn bundled_openai_merge_keeps_canonical_case_insensitive_dedup() {
