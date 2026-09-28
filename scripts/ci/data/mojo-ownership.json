@@ -45,7 +45,11 @@
       "rust_adapter_scope": "row preparation and range DTO adapter; Rust oracle deleted"
     },
     "provider_catalog_merge_dedup": {
-      "production_reachability_test": "crates/prodex-app/src/runtime_external_provider_config/catalog_merge_tests.rs"
+      "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+      "expanded_in": "0.433.0",
+      "consumer": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+      "consumer_marker": "merge_catalog_ids",
+      "rust_adapter_scope": "collect canonical IDs, invoke Mojo merge deduplication, materialize accepted bundled provider choices, and preserve insertion position"
     },
     "log_event_classification": {
       "expanded_in": "0.427.0"

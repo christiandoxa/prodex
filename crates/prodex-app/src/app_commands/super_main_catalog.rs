@@ -1,8 +1,9 @@
 use super::super_prompt;
 use crate::{canonical_sub_agent_efforts, effective_provider_model_catalog, provider_display_name};
 use prodex_cli::SubAgentReasoningEffort;
-use prodex_mojo_core::rich::{CatalogPlanModel, plan_dynamic_catalog};
-use std::collections::BTreeSet;
+use prodex_mojo_core::rich::{
+    CatalogModel, CatalogPlanModel, merge_catalog_ids, plan_dynamic_catalog,
+};
 
 const CATALOG_MAX_PRIORITY: u64 = i64::MAX as u64;
 const CATALOG_MAX_IDENTIFIER_BYTES: usize = 4_096;
@@ -208,15 +209,34 @@ pub(super) fn openai_main_model_choices() -> Option<Vec<MainModelChoice>> {
 }
 
 fn merge_bundled_openai_choices(choices: &mut Vec<MainModelChoice>) {
-    let mut seen = choices
+    let existing_ids = choices
         .iter()
         .filter_map(|choice| match &choice.choice {
-            prodex_provider_core::ProviderModelChoice::Model(model) => {
-                Some(model.to_ascii_lowercase())
-            }
+            prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.as_str()),
             _ => None,
         })
-        .collect::<BTreeSet<_>>();
+        .collect::<Vec<_>>();
+    let existing = existing_ids
+        .iter()
+        .map(|id| CatalogModel { id, aliases: &[] })
+        .collect::<Vec<_>>();
+    let bundled_models = prodex_provider_core::resolve_provider_model_choices(
+        prodex_provider_core::ProviderId::OpenAi,
+        &[],
+        None,
+    )
+    .into_iter()
+    .filter_map(|choice| match choice {
+        prodex_provider_core::ProviderModelChoice::Model(model) => Some(model),
+        _ => None,
+    })
+    .collect::<Vec<_>>();
+    let bundled_ids = bundled_models
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let accepted = merge_catalog_ids(&existing, &bundled_ids)
+        .expect("Mojo bundled OpenAI catalog merge failed");
     let insert_at = choices
         .iter()
         .position(|choice| {
@@ -226,24 +246,15 @@ fn merge_bundled_openai_choices(choices: &mut Vec<MainModelChoice>) {
             )
         })
         .map_or(0, |index| index + 1);
-    let bundled = prodex_provider_core::resolve_provider_model_choices(
-        prodex_provider_core::ProviderId::OpenAi,
-        &[],
-        None,
-    )
-    .into_iter()
-    .filter_map(|choice| match choice {
-        prodex_provider_core::ProviderModelChoice::Model(model)
-            if seen.insert(model.to_ascii_lowercase()) =>
-        {
-            Some(main_model_choice_from_provider(
+    let bundled = accepted
+        .into_iter()
+        .map(|index| {
+            main_model_choice_from_provider(
                 prodex_provider_core::ProviderId::OpenAi,
-                prodex_provider_core::ProviderModelChoice::Model(model),
-            ))
-        }
-        _ => None,
-    })
-    .collect::<Vec<_>>();
+                prodex_provider_core::ProviderModelChoice::Model(bundled_models[index].clone()),
+            )
+        })
+        .collect::<Vec<_>>();
     choices.splice(insert_at..insert_at, bundled);
 }
 
@@ -560,7 +571,54 @@ pub(super) fn main_model_efforts(
 
 #[cfg(test)]
 mod tests {
-    use super::main_model_prompt_title;
+    use super::*;
+
+    #[test]
+    fn bundled_openai_merge_keeps_canonical_case_insensitive_dedup() {
+        let mut choices = vec![
+            MainModelChoice {
+                choice: prodex_provider_core::ProviderModelChoice::ProviderDefault,
+                label: "provider default".to_string(),
+                efforts: None,
+                aliases: Vec::new(),
+                default_effort: None,
+            },
+            MainModelChoice {
+                choice: prodex_provider_core::ProviderModelChoice::Model("GPT-5.6-SOL".to_string()),
+                label: "existing".to_string(),
+                efforts: None,
+                aliases: vec!["gpt-5.6-terra".to_string()],
+                default_effort: None,
+            },
+            MainModelChoice {
+                choice: prodex_provider_core::ProviderModelChoice::Custom,
+                label: "custom model...".to_string(),
+                efforts: None,
+                aliases: Vec::new(),
+                default_effort: None,
+            },
+        ];
+        merge_bundled_openai_choices(&mut choices);
+        let models = choices
+            .iter()
+            .filter_map(|choice| match &choice.choice {
+                prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.as_str()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            models
+                .iter()
+                .filter(|model| model.eq_ignore_ascii_case("gpt-5.6-sol"))
+                .count(),
+            1
+        );
+        assert!(
+            models
+                .iter()
+                .any(|model| model.eq_ignore_ascii_case("gpt-5.6-terra"))
+        );
+    }
 
     #[test]
     fn degraded_main_model_title_is_bounded_and_non_secret() {
