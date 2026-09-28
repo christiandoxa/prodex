@@ -50,14 +50,22 @@ pub fn kiro_provider_core_apply_response_runtime_metadata(
 }
 
 pub fn kiro_provider_core_response_has_tool_calls(response: &Value) -> bool {
-    response
+    let output_types = response
         .get("output")
         .and_then(Value::as_array)
-        .is_some_and(|items| {
+        .map(|items| {
             items
                 .iter()
-                .any(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
+                .map(|item| item.get("type").and_then(Value::as_str))
+                .collect::<Vec<_>>()
         })
+        .unwrap_or_default();
+    let output_types =
+        serde_json::to_string(&output_types).expect("Kiro response output types serialize");
+    let mut input = KiroKernelInput::new(KiroKernelOperation::ResponseHasToolCalls);
+    input.output = Some(&output_types);
+    serde_json::from_slice::<bool>(&kiro_mojo_body(input))
+        .expect("Mojo Kiro tool-call presence is a JSON boolean")
 }
 
 pub fn kiro_provider_core_model_list_value(model_catalog: &[Value]) -> Value {

@@ -81,6 +81,7 @@ comptime KIRO_INVALID_REQUEST_ERROR: Int64 = 46
 comptime KIRO_UNSUPPORTED_PATH_ERROR: Int64 = 47
 comptime KIRO_REQUEST_VALIDATION_ERROR: Int64 = 48
 comptime KIRO_ANTHROPIC_REQUEST_REWRITE: Int64 = 49
+comptime KIRO_RESPONSE_HAS_TOOL_CALLS: Int64 = 50
 
 comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
 comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
@@ -399,6 +400,32 @@ def kiro_activity_ascii_lower(value: UInt8) -> UInt8:
     if value >= 65 and value <= 90:
         return value + 32
     return value
+
+
+def kiro_output_types_has_function_call(view: ProdexRichStringView) -> Int64:
+    var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
+    if start >= Int64(view.len) or deepseek_json_byte(view, start) != 91:
+        return -1
+    var end = deepseek_json_value_end(view, start, Int64(view.len), 0)
+    if end < 0 or deepseek_json_skip_ws(view, end, Int64(view.len)) != Int64(view.len):
+        return -1
+    var cursor = deepseek_json_skip_ws(view, start + 1, end - 1)
+    while cursor < end - 1:
+        var item_end = deepseek_json_value_end(view, cursor, end - 1, 0)
+        if item_end < 0:
+            return -1
+        if deepseek_json_byte(view, cursor) == 34 and deepseek_json_raw_equals(
+            view, cursor, item_end, StringSlice("function_call")
+        ):
+            return 1
+        cursor = deepseek_json_skip_ws(view, item_end, end - 1)
+        if cursor < end - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, end - 1)
+            continue
+        if cursor != end - 1:
+            return -1
+        break
+    return 0
 
 
 def kiro_activity_contains(
@@ -1365,6 +1392,13 @@ def kiro_write_operation(
             and kiro_put_json_string(writer, input.content)
             and kiro_put_byte(writer, 125)
         )
+    if operation == KIRO_RESPONSE_HAS_TOOL_CALLS:
+        var result = kiro_output_types_has_function_call(input.output)
+        if result < 0:
+            return False
+        if result == 1:
+            return kiro_put_literal(writer, StringSlice("true"))
+        return kiro_put_literal(writer, StringSlice("false"))
     if operation == KIRO_MODEL_LIST:
         return (
             kiro_put_literal(writer, StringSlice('{"object":"list","data":'))
