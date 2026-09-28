@@ -1,23 +1,5 @@
 //! Tool-output text extraction for Gemini guardrails.
 
-pub(super) fn gemini_provider_core_tool_text_has_version_lines(text: &str) -> bool {
-    text.lines().any(|line| {
-        let lower = line.trim().to_ascii_lowercase();
-        let starts_with_tool = [
-            "rtk ",
-            "sqz ",
-            "sqz-mcp ",
-            "token-savior ",
-            "claw-compactor ",
-            "prodex ",
-            "codex ",
-        ]
-        .iter()
-        .any(|prefix| lower.starts_with(prefix));
-        starts_with_tool && lower.chars().any(|ch| ch.is_ascii_digit())
-    })
-}
-
 pub(super) fn gemini_provider_core_tool_texts_since_latest_user(
     messages: &[serde_json::Value],
 ) -> Vec<String> {
@@ -41,23 +23,6 @@ pub(super) fn gemini_provider_core_tool_texts_since_latest_user(
         })
         .filter(|text| !text.trim().is_empty())
         .collect()
-}
-
-pub(super) fn gemini_provider_core_tool_text_has_failure(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    [
-        "process exited with code 1",
-        "process exited with code 2",
-        "process exited with code 127",
-        "no such file or directory",
-        "command not found",
-        "error:",
-        "failed",
-        "not found",
-        "virtual manifest",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
 }
 
 pub(super) fn gemini_provider_core_collect_payload_text(

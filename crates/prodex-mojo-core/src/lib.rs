@@ -93,6 +93,8 @@ fn compiled_core_self_test_passes() {
 pub mod codex_config;
 #[cfg(feature = "mojo-runtime")]
 pub mod context;
+#[cfg(feature = "mojo-rich")]
+pub mod gemini_guardrails;
 #[cfg(feature = "mojo-routing")]
 #[cfg(feature = "mojo-rich")]
 pub mod log;

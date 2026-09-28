@@ -8,6 +8,7 @@ use self::commands::{
     gemini_provider_core_tool_command_matches_required,
 };
 use super::tool_text::gemini_provider_core_collect_payload_text;
+use prodex_mojo_core::gemini_guardrails::gemini_command_output_only;
 
 pub fn gemini_provider_core_forced_command_output(
     messages: &[serde_json::Value],
@@ -56,10 +57,8 @@ pub fn gemini_provider_core_conversation_requests_command_output_only(
 fn gemini_provider_core_requests_command_output_only(message: &serde_json::Value) -> bool {
     let mut text = String::new();
     gemini_provider_core_collect_payload_text(message.get("content"), &mut text);
-    let lower = text.to_ascii_lowercase();
-    lower.contains("only the command output")
-        || lower.contains("command output only")
-        || lower.contains("only with the command output")
+    gemini_command_output_only(&text)
+        .expect("Mojo Gemini command-output-only guardrail should accept Rust strings")
 }
 
 fn gemini_provider_core_command_output_from_tool_message(

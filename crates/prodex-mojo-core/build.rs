@@ -504,6 +504,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/provider_error.mojo");
         sources.push("../../mojo/prodex_core/rich_plan.mojo");
         sources.push("../../mojo/prodex_core/rich_catalog.mojo");
+        sources.push("../../mojo/prodex_core/gemini_guardrails.mojo");
         sources.push("../../mojo/prodex_core/log_semantics.mojo");
         sources.push("../../mojo/prodex_core/log_throughput_policy.mojo");
         sources.push("../../mojo/prodex_core/log_parser.mojo");

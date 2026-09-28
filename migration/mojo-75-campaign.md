@@ -3167,3 +3167,16 @@ reasoning-effort defaults, remembered selections, and prompt selection. The repe
 Rust eq_ignore_ascii_case decisions in these production paths were deleted; Rust keeps
 iteration, DTO ownership, prompt rendering, and the case-sensitive first-pass source
 lookup needed to preserve duplicate-case ordering.
+
+
+## Gemini assistant guardrail text migration
+
+Gemini assistant wait/poll narration, future tool-intent detection with exact token
+boundaries, success-claim markers, tool failure/version verification, process-exit-zero
+recognition, and command-output-only phrase policy now use the dedicated
+gemini_guardrails.mojo kernel. The Rust ASCII-lowercase phrase tables and token scan
+were deleted. Rust retains conversation JSON extraction, tool-output collection, typed
+label mapping, and orchestration over the latest verification outputs; no Rust semantic
+fallback remains for these text classifications. Direct kernel coverage plus four
+Gemini SSE regressions pass. The canonical broad report counts **61,715 Mojo LOC** and
+**194,504 Rust production LOC**, totaling **256,219 LOC**: **24.09% Mojo**.
