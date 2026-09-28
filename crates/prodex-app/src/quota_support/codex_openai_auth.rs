@@ -1,4 +1,5 @@
 use codex_config::codex_config_value;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::env;
 use std::path::Path;
 use std::process::Command;
@@ -36,9 +37,8 @@ fn codex_openai_auth_residency(
 ) -> codex_config::CodexConfigResult<Option<&'static str>> {
     Ok(codex_config_value(codex_home, "enforce_residency")?
         .is_some_and(|value| {
-            value
-                .trim()
-                .eq_ignore_ascii_case(CODEX_OPENAI_AUTH_RESIDENCY_US)
+            ascii_casefold_equal_exact(value.trim(), CODEX_OPENAI_AUTH_RESIDENCY_US)
+                .expect("Mojo OpenAI residency comparison failed")
         })
         .then_some(CODEX_OPENAI_AUTH_RESIDENCY_US))
 }
@@ -262,7 +262,8 @@ fn detect_terminal_info() -> TerminalInfo {
 
 fn detect_terminal_from_term_program(tmux: bool) -> Option<TerminalInfo> {
     let term_program = terminal_env_var_non_empty("TERM_PROGRAM")?;
-    if term_program.eq_ignore_ascii_case("tmux")
+    if ascii_casefold_equal_exact(&term_program, "tmux")
+        .expect("Mojo terminal-program comparison failed")
         && tmux
         && let Some(terminal) = terminal_from_tmux_client_info(tmux_client_info())
     {

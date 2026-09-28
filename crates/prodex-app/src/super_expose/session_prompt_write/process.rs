@@ -1,6 +1,7 @@
 #[cfg(target_os = "linux")]
 use super::TARGET_ENV_KEYS;
 use super::{PROCESS_ANCESTRY_LIMIT, SessionPromptWriteError};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::collections::{BTreeMap, HashMap};
 #[cfg(target_os = "linux")]
 use std::fs;
@@ -330,8 +331,10 @@ pub(crate) fn is_rollout_file_name(name: &str) -> bool {
 }
 
 pub(crate) fn is_plain_prodex_session(process: &ProcessRecord) -> bool {
-    executable_name(process).is_some_and(|name| name.eq_ignore_ascii_case("prodex"))
-        && process.argv.get(1).is_some_and(|arg| arg == "s")
+    executable_name(process).is_some_and(|name| {
+        ascii_casefold_equal_exact(name, "prodex")
+            .expect("Mojo Prodex executable-name comparison failed")
+    }) && process.argv.get(1).is_some_and(|arg| arg == "s")
         && !process.argv.iter().skip(2).any(|arg| {
             matches!(arg.as_str(), "expose" | "super" | "exec" | "review")
                 || arg.starts_with("prodex_super_")
@@ -342,7 +345,10 @@ pub(crate) fn is_plain_prodex_session(process: &ProcessRecord) -> bool {
 }
 
 pub(crate) fn is_codex_writer(process: &ProcessRecord) -> bool {
-    if !executable_name(process).is_some_and(|name| name.eq_ignore_ascii_case("codex")) {
+    if !executable_name(process).is_some_and(|name| {
+        ascii_casefold_equal_exact(name, "codex")
+            .expect("Mojo Codex executable-name comparison failed")
+    }) {
         return false;
     }
     let command = first_codex_positional_arg(&process.argv);

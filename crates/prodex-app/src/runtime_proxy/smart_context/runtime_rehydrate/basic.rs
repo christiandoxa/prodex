@@ -7,14 +7,19 @@ use super::super::{
     runtime_smart_context_static_prompt_field_key,
     runtime_smart_context_value_is_static_context_item,
 };
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use runtime_proxy_crate::runtime_proxy_request_header_value;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_exact_header(
     request: &RuntimeProxyRequest,
 ) -> bool {
-    runtime_proxy_request_header_value(&request.headers, "x-prodex-smart-context")
-        .is_some_and(|value| value.eq_ignore_ascii_case("exact"))
+    runtime_proxy_request_header_value(&request.headers, "x-prodex-smart-context").is_some_and(
+        |value| {
+            ascii_casefold_equal_exact(value, "exact")
+                .expect("Mojo smart-context mode comparison failed")
+        },
+    )
 }
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_missing_artifact_refs_in_store(

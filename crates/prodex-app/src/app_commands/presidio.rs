@@ -1,5 +1,6 @@
 use crate::{AppPaths, print_launch_status};
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_mojo_core::super_provider_config::runtime_bool_token;
 use prodex_presidio::{
     PresidioBlockingClient, PresidioHealth, ProdexPresidioRuntimeFileConfig,
@@ -32,7 +33,10 @@ pub(crate) fn ensure_required_presidio_services_for_super_launch(paths: &AppPath
 
 fn ensure_presidio_services_for_super_launch_inner(paths: &AppPaths, required: bool) -> Result<()> {
     let config = load_presidio_config(paths)?.unwrap_or_default();
-    if required && !config.fail_mode.eq_ignore_ascii_case("closed") {
+    if required
+        && !ascii_casefold_equal_exact(&config.fail_mode, "closed")
+            .expect("Mojo Presidio fail-mode comparison failed")
+    {
         bail!(
             "--require-tool presidio requires fail_mode = \"closed\" in {}",
             presidio_config_path(paths).display()

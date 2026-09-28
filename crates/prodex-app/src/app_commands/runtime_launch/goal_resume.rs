@@ -17,6 +17,7 @@ use crate::{
     codex_config_file_toml_value, codex_profile_v2_config_path,
 };
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 #[cfg(test)]
 use rusqlite::OptionalExtension;
 use sha2::{Digest, Sha256};
@@ -418,9 +419,8 @@ pub(super) fn write_runtime_goal_session_marker(marker_path: &Path, payload: &Os
 
 pub(super) fn codex_args_include_goal_resume(codex_args: &[OsString]) -> bool {
     codex_args.iter().any(|arg| {
-        arg.to_string_lossy()
-            .trim()
-            .eq_ignore_ascii_case("/goal resume")
+        ascii_casefold_equal_exact(arg.to_string_lossy().trim(), "/goal resume")
+            .expect("Mojo goal-resume command comparison failed")
     })
 }
 
