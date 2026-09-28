@@ -44,10 +44,20 @@ pub(super) fn write_runtime_proxy_backend_http_response(
         chunk_delay,
     } = response;
 
-    let mut headers = format!(
-        "{status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
-        body.len(),
-    );
+    let close_delimited_sse = content_type == "text/event-stream"
+        && matches!(
+            mode,
+            RuntimeProxyBackendMode::HttpOnlyPreviousResponseNotFoundAfterCommit
+        )
+        && matches!(account_id, "second-account");
+    let mut headers = if close_delimited_sse {
+        format!("{status_line}\r\nContent-Type: {content_type}\r\nConnection: close\r\n")
+    } else {
+        format!(
+            "{status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            body.len(),
+        )
+    };
     if let Some(turn_state) = response_turn_state.as_deref() {
         headers.push_str(&format!("x-codex-turn-state: {turn_state}\r\n"));
     }
