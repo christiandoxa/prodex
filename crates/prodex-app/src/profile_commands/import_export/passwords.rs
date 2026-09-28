@@ -3,6 +3,7 @@ use std::io::IsTerminal;
 use crate::{ExportProfileArgs, ProfileExportPayload, print_stderr_line, print_stderr_prompt};
 use anyhow::{Context, Result, bail};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
+use prodex_mojo_core::confirmation_policy::{ConfirmationPolicy, confirmation_value};
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -179,15 +180,18 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
         io::stdin()
             .read_line(&mut input)
             .context("failed to read prompt response")?;
-        match input.trim().to_ascii_lowercase().as_str() {
-            "" => return Ok(default),
-            "y" | "yes" => return Ok(true),
-            "n" | "no" => return Ok(false),
-            _ => {
+        match parse_yes_no_confirmation(&input, default) {
+            Some(value) => return Ok(value),
+            None => {
                 print_stderr_line("Please answer yes or no.")?;
             }
         }
     }
+}
+
+fn parse_yes_no_confirmation(input: &str, default: bool) -> Option<bool> {
+    confirmation_value(ConfirmationPolicy::YesNo, input, default)
+        .expect("Mojo yes/no confirmation policy should accept Rust strings")
 }
 
 type ExportPromptTui = terminal_ui::AlternateScreenTerminal<io::Stderr>;
@@ -279,4 +283,18 @@ pub(super) fn read_profile_export_payload(path: &Path) -> Result<(ProfileExportP
 
 fn print_profile_import_status(message: &str) {
     let _ = print_profile_import_progress(message);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn confirmation_policy_preserves_profile_export_defaults() {
+        assert_eq!(parse_yes_no_confirmation("", true), Some(true));
+        assert_eq!(parse_yes_no_confirmation(" ", false), Some(false));
+        assert_eq!(parse_yes_no_confirmation("YES", false), Some(true));
+        assert_eq!(parse_yes_no_confirmation(" nO ", true), Some(false));
+        assert_eq!(parse_yes_no_confirmation("maybe", true), None);
+    }
 }

@@ -1,3 +1,4 @@
+use prodex_mojo_core::confirmation_policy::{ConfirmationPolicy, confirmation_value};
 use std::io::{self, IsTerminal};
 
 use anyhow::{Context, Result, bail};
@@ -304,11 +305,8 @@ fn prompt_manual_redeem_confirmation_tui(
 }
 
 fn parse_manual_redeem_confirmation(input: &str) -> Option<bool> {
-    match input.trim().to_ascii_lowercase().as_str() {
-        "" | "n" | "no" => Some(false),
-        "y" | "yes" => Some(true),
-        _ => None,
-    }
+    confirmation_value(ConfirmationPolicy::Redeem, input, false)
+        .expect("Mojo redeem confirmation policy should accept Rust strings")
 }
 
 fn manual_redeem_request_id() -> String {
