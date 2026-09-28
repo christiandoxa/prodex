@@ -3091,3 +3091,13 @@ planner for exact ASCII-folded canonical-ID deduplication. The former Rust
 BTreeSet lowercase duplicate filter was deleted. Aliases are intentionally omitted
 from this merge input to preserve the historical canonical-ID-only behavior; Rust
 retains choice DTO materialization and insertion position.
+
+
+## Sub-agent dynamic catalog dedup cleanup
+
+Dynamic sub-agent model catalogs now reuse the authoritative rich-catalog Mojo merge
+planner per source for case-insensitive canonical-ID deduplication. The long-lived Rust
+BTreeSet lowercase index was deleted. Rust still loads profile/catalog files, filters
+selectability, preserves source precedence and model limits, and materializes accepted
+JSON entries. Aliases are intentionally omitted from the merge input to preserve the
+historical canonical-ID-only behavior.

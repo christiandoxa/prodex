@@ -3,13 +3,13 @@ use crate::{
     ProfileProvider, parse_kiro_model_catalog_text, read_provider_model_catalog_text,
 };
 use prodex_cli::SubAgentReasoningEffort;
+use prodex_mojo_core::rich::{CatalogModel, merge_catalog_ids};
 use prodex_provider_core::{
     PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderModelChoice,
     provider_implementation_registry, provider_model_reasoning_resolution,
     resolve_provider_model_choices,
 };
 use serde_json::Value;
-use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 pub(crate) const OPENAI_MODEL_CACHE_FILE: &str = "models_cache.json";
@@ -72,7 +72,6 @@ pub(crate) fn effective_provider_model_catalog_from_paths(
         Err(_) => return degraded_catalog(),
     };
     let mut models = Vec::new();
-    let mut seen = BTreeSet::new();
     let mut degraded = false;
     let mut usable_sources = 0;
     let model_limit = SUPER_CONFIGURED_MODEL_LIMIT
@@ -94,14 +93,8 @@ pub(crate) fn effective_provider_model_catalog_from_paths(
             }
             CatalogSourceLoad::Entries(entries) => entries,
         };
-        let usable = append_catalog_entries(
-            provider,
-            entries,
-            model_limit,
-            &mut seen,
-            &mut models,
-            &mut degraded,
-        );
+        let usable =
+            append_catalog_entries(provider, entries, model_limit, &mut models, &mut degraded);
         if !usable {
             degraded = true;
         } else if source.required {
@@ -140,29 +133,47 @@ fn append_catalog_entries(
     provider: ProviderId,
     entries: Vec<Value>,
     model_limit: usize,
-    seen: &mut BTreeSet<String>,
     models: &mut Vec<Value>,
     degraded: &mut bool,
 ) -> bool {
-    let mut usable = false;
-    for entry in entries {
-        let Some(id) = catalog_entry_model_id(&entry).map(str::to_string) else {
-            continue;
-        };
-        if !catalog_entry_is_selectable(&entry) {
-            continue;
-        }
-        usable = true;
-        if !seen.insert(id.to_ascii_lowercase()) {
-            continue;
-        }
+    let mut candidates = entries
+        .into_iter()
+        .filter_map(|entry| {
+            let id = catalog_entry_model_id(&entry)?.to_string();
+            catalog_entry_is_selectable(&entry).then_some(Some((entry, id)))
+        })
+        .collect::<Vec<_>>();
+    if candidates.is_empty() {
+        return false;
+    }
+
+    let existing_ids = models
+        .iter()
+        .filter_map(catalog_entry_model_id)
+        .collect::<Vec<_>>();
+    let existing = existing_ids
+        .iter()
+        .map(|id| CatalogModel { id, aliases: &[] })
+        .collect::<Vec<_>>();
+    let candidate_ids = candidates
+        .iter()
+        .filter_map(|candidate| candidate.as_ref().map(|(_, id)| id.as_str()))
+        .collect::<Vec<_>>();
+    let accepted =
+        merge_catalog_ids(&existing, &candidate_ids).expect("Mojo sub-agent catalog merge failed");
+
+    for index in accepted {
+        let (entry, id) = candidates
+            .get_mut(index)
+            .and_then(Option::take)
+            .expect("Mojo catalog merge returned a valid candidate index");
         models.push(catalog_entry_with_id(entry, provider, &id));
         if models.len() >= model_limit {
             *degraded = true;
             break;
         }
     }
-    usable
+    true
 }
 
 fn dynamic_catalog_status(models: &[Value], degraded: bool) -> DynamicCatalogStatus {

@@ -49,7 +49,7 @@
       "expanded_in": "0.433.0",
       "consumer": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
       "consumer_marker": "merge_catalog_ids",
-      "rust_adapter_scope": "collect canonical IDs, invoke Mojo merge deduplication, materialize accepted bundled provider choices, and preserve insertion position"
+      "rust_adapter_scope": "collect canonical IDs for Super and sub-agent catalogs, invoke Mojo merge deduplication, materialize accepted provider choices/entries, and preserve source/insertion order"
     },
     "log_event_classification": {
       "expanded_in": "0.427.0"
