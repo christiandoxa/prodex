@@ -3,6 +3,7 @@ use super::{
 };
 use crate::profile_commands::KIRO_MODEL_CATALOG_FILE;
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::rich::{CatalogModel, resolve_catalog_model_exact};
 use prodex_provider_core::{ProviderReasoningEffort, provider_catalog_entry};
 use serde_json::{Value, json};
 use std::path::Path;
@@ -110,9 +111,7 @@ pub(super) fn external_catalog_models(
 ) -> Result<Vec<Value>> {
     let dynamic_models = external_dynamic_catalog_models(codex_home, provider)?;
     let mut models = Vec::with_capacity(provider.models().len() + dynamic_models.len() + 1);
-    let launch_model_context_window = dynamic_models
-        .iter()
-        .find(|model| model.slug.eq_ignore_ascii_case(launch_model))
+    let launch_model_context_window = external_dynamic_catalog_model(&dynamic_models, launch_model)
         .and_then(|model| model.context_window)
         .or_else(|| provider.model_prompt_token_limit(launch_model));
     let default_compact_limit = auto_compact_token_limit;
@@ -143,9 +142,7 @@ pub(super) fn external_catalog_models(
             );
         }
         let priority = models.len() + 1;
-        let dynamic_model = dynamic_models
-            .iter()
-            .find(|model| model.slug.eq_ignore_ascii_case(slug));
+        let dynamic_model = external_dynamic_catalog_model(&dynamic_models, slug);
         let (fallback_display_name, fallback_description) = provider.model_metadata(slug);
         let display_name = dynamic_model
             .and_then(|model| model.display_name.as_deref())
@@ -182,6 +179,22 @@ struct ExternalDynamicCatalogModel {
     display_name: Option<String>,
     description: Option<String>,
     context_window: Option<u64>,
+}
+
+fn external_dynamic_catalog_model<'a>(
+    models: &'a [ExternalDynamicCatalogModel],
+    model: &str,
+) -> Option<&'a ExternalDynamicCatalogModel> {
+    let catalog = models
+        .iter()
+        .map(|entry| CatalogModel {
+            id: &entry.slug,
+            aliases: &[],
+        })
+        .collect::<Vec<_>>();
+    resolve_catalog_model_exact(&catalog, model)
+        .expect("Mojo exact external catalog lookup failed")
+        .map(|index| &models[index])
 }
 
 fn external_dynamic_catalog_models(
@@ -252,4 +265,26 @@ fn copilot_catalog_entry_prompt_token_limit(model: &Value) -> Option<u64> {
         })
         .and_then(Value::as_u64)
         .filter(|tokens| *tokens > 1)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_dynamic_catalog_lookup_uses_exact_mojo_identity() {
+        let models = vec![ExternalDynamicCatalogModel {
+            slug: "Account/Model-X".to_string(),
+            display_name: None,
+            description: None,
+            context_window: Some(123),
+        }];
+        assert_eq!(
+            external_dynamic_catalog_model(&models, "account/model-x")
+                .and_then(|model| model.context_window),
+            Some(123)
+        );
+        assert!(external_dynamic_catalog_model(&models, " account/model-x ").is_none());
+        assert!(external_dynamic_catalog_model(&models, "missing").is_none());
+    }
 }

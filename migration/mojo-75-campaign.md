@@ -3111,3 +3111,11 @@ model lookup use this Mojo operation, deleting their Rust eq_ignore_ascii_case s
 The existing trimmed resolver remains unchanged for callers whose contract intentionally
 normalizes surrounding whitespace. Focused coverage fixes mixed-case canonical and alias
 matching while proving that a space-padded query remains a miss.
+
+
+## External dynamic catalog exact-identity cleanup
+
+Copilot/Kiro external dynamic catalog lookup now reuses the exact non-trimming Mojo
+catalog resolver for launch-model context lookup and per-entry metadata selection. The
+two Rust eq_ignore_ascii_case scans were deleted. Rust retains catalog-file parsing,
+context-window arithmetic, provider metadata fallback, and final JSON materialization.
