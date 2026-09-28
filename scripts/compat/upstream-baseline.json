@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.157.1 release",
+      "baseline_source": "openai/codex rust-v0.158.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -144,7 +144,7 @@
         },
         {
           "path": "codex-rs/models-manager/models.json",
-          "reason": "Owns bundled GPT-5.6 plus Codex 0.157.1 GPT-6 Sol/Luna model metadata and context-window contracts. Prodex preserves these upstream values while keeping its provider catalogs independently governed.",
+          "reason": "Owns bundled GPT-5.6 plus Codex 0.158 GPT-6 Sol/Luna model metadata and context-window contracts. Prodex preserves these upstream values while keeping its provider catalogs independently governed.",
           "required_contains": [
             "\"display_name\": \"GPT-6-Luna\"",
             "\"display_name\": \"GPT-6-Sol\"",
@@ -269,7 +269,7 @@
         },
         {
           "path": "codex-rs/model-provider/src/provider.rs",
-          "reason": "Owns Codex provider capabilities and static Bedrock model-manager wiring, including GPT-6 Sol/Luna direct-launch availability in 0.157.",
+          "reason": "Owns Codex provider capabilities and static Bedrock model-manager wiring; Codex 0.158 retains GPT-6 Sol/Luna and GPT-5.5/5.6 while removing GPT-5.4 from the bundled Bedrock catalog.",
           "required_contains": [
             "RemoteCompactionSupport",
             "ProviderCapabilities",
@@ -278,7 +278,6 @@
             "RemoteCompactionSupport::V2",
             "amazon_bedrock_provider_creates_static_models_manager",
             "openai.gpt-5.5",
-            "openai.gpt-5.4",
             "openai.gpt-5.6-sol",
             "openai.gpt-5.6-terra",
             "openai.gpt-5.6-luna",
@@ -569,11 +568,11 @@
         },
         {
           "path": "codex-rs/tools/src/json_schema/compaction.rs",
-          "reason": "Owns the bounded, ordered large-tool-schema compaction passes after the 0.153.4 module split.",
+          "reason": "Owns ordered large-tool-schema compaction; Codex 0.158 parameterizes the byte budget while retaining a 5000-byte default and the existing depth/pass policy.",
           "required_contains": [
             "compact_large_tool_schema",
             "LARGE_SCHEMA_COMPACTION_PASSES",
-            "MAX_COMPACT_TOOL_SCHEMA_BYTES",
+            "DEFAULT_COMPACT_TOOL_SCHEMA_BYTES",
             "MAX_COMPACT_TOOL_SCHEMA_DEPTH",
             "prune_schema_compositions"
           ]
@@ -768,6 +767,22 @@
             "ThreadPath",
             "RequestSerializationAccess",
             "QueuedInitializedRequest"
+          ]
+        },
+        {
+          "path": "codex-rs/config/src/project_trust.rs",
+          "reason": "Codex 0.158 owns portable project-trust lookup: canonical executor-normalized cwd keys are tried before original spellings, then merged projects entries provide trust_level used by the TUI and policy loader.",
+          "required_contains": [
+            "ProjectTrustPath",
+            "ProjectTrustLookup",
+            "from_native_path",
+            "from_paths",
+            "normalize_for_path_comparison",
+            "canonical != original",
+            "keys.push(canonical)",
+            "keys.push(original)",
+            "get_active_project_for_lookup",
+            "normalize_lookup_key"
           ]
         }
       ],
@@ -1180,11 +1195,11 @@
           "id": "tools.large-schema-compaction",
           "kind": "tool_schema",
           "file": "codex-rs/tools/src/json_schema/compaction.rs",
-          "reason": "Codex 0.153.4 moved bounded large-tool-schema compaction into its focused module without changing the ordered best-effort policy.",
+          "reason": "Codex 0.158 keeps ordered best-effort compaction but makes the byte budget caller-configurable; 5000 bytes remains the default.",
           "file_contains_all": [
             "compact_large_tool_schema",
             "LARGE_SCHEMA_COMPACTION_PASSES",
-            "MAX_COMPACT_TOOL_SCHEMA_BYTES",
+            "DEFAULT_COMPACT_TOOL_SCHEMA_BYTES",
             "MAX_COMPACT_TOOL_SCHEMA_DEPTH",
             "prune_schema_compositions"
           ]
@@ -1193,11 +1208,10 @@
           "id": "model-provider.bedrock-static-manager-models",
           "kind": "provider_catalog",
           "file": "codex-rs/model-provider/src/provider.rs",
-          "reason": "Codex 0.157 static Bedrock model manager exposes GPT-6 Sol/Luna alongside the prior GPT-5.x catalog and defaults to GPT-6 Sol.",
+          "reason": "Codex 0.158 keeps GPT-6 Sol/Luna plus GPT-5.5/5.6 in the static Bedrock manager and intentionally removes GPT-5.4.",
           "file_contains_all": [
             "amazon_bedrock_provider_creates_static_models_manager",
             "openai.gpt-5.5",
-            "openai.gpt-5.4",
             "openai.gpt-5.6-sol",
             "openai.gpt-5.6-terra",
             "openai.gpt-5.6-luna",
@@ -1675,7 +1689,7 @@
           "id": "models-manager.gpt-6-sol-luna",
           "kind": "model_catalog",
           "file": "codex-rs/models-manager/models.json",
-          "reason": "Codex 0.157.1 retains GPT-6 Sol and GPT-6 Luna in the picker with a 272,000 base context window and 872,000 maximum context window; Sol supports Ultra while Luna tops out at Max.",
+          "reason": "Codex 0.158 retains GPT-6 Sol and GPT-6 Luna in the picker with a 272,000 base context window and 872,000 maximum context window; Sol supports Ultra while Luna tops out at Max.",
           "file_contains_all": [
             "\"slug\": \"gpt-6-sol\"",
             "\"display_name\": \"GPT-6-Sol\"",
@@ -1686,9 +1700,23 @@
             "\"effort\": \"ultra\"",
             "\"effort\": \"max\""
           ]
+        },
+        {
+          "id": "config.project-trust-canonical-before-original",
+          "kind": "trust_lookup",
+          "file": "codex-rs/config/src/project_trust.rs",
+          "reason": "Super resume pre-trust projects must remain compatible with Codex 0.158 canonical-before-original lookup order; Prodex projects overrides intentionally include canonical and original workspace spellings.",
+          "file_contains_all": [
+            "ProjectTrustPath",
+            "ProjectTrustLookup",
+            "canonical != original",
+            "keys.push(canonical)",
+            "keys.push(original)",
+            "get_active_project_for_lookup"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.157.1",
+      "tested_codex_release": "rust-v0.158.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1911,6 +1939,23 @@
           ],
           "prodex_action": "Advance the tested upstream baseline to 0.157.1 without changing Linux proxy/session semantics. Preserve the upstream Windows process-lifecycle fixes. Separately fix Prodex direct Super resume so the persisted internal model_provider prodex-openai-governed-http resolves to canonical OpenAI instead of being rejected before Codex can resume the thread.",
           "compatibility_evidence": "Exact 0.157.0 and 0.157.1 source archives, official release/tag metadata, official Linux musl binary checksum/version smoke, all 797 critical-file/semantic markers replayed with zero misses, isolated app-server initialize, focused provider-registry and resume tests, and a dry-run of the originally failing governed-OpenAI Super session are recorded in migration/codex-rust-v0.157.1-audit.md."
+        },
+        {
+          "from": "rust-v0.157.1",
+          "to": "rust-v0.158.0",
+          "upstream_commit": "064c6b8c737f5b41d171fdda80bd9ef10ad06eb3",
+          "upstream_tag_object": "54e1bd264b4122fe9471ee7d54c4d021a76bb8ff",
+          "upstream_release_date": "2026-09-28T05:07:23Z",
+          "tree_comparison": "exact tagged source archives; 1224 changed files, 52257 additions, 13525 deletions",
+          "runtime_changes": [
+            "Project trust lookup is extracted into portable config APIs that try executor-normalized canonical cwd keys before original spellings and only then repository-root keys.",
+            "The static Amazon Bedrock model-manager test/catalog surface removes openai.gpt-5.4 while retaining GPT-5.5, GPT-5.6 Sol/Terra/Luna, and GPT-6 Sol/Luna.",
+            "Large tool-schema compaction now accepts a caller-provided byte budget; DEFAULT_COMPACT_TOOL_SCHEMA_BYTES remains 5000 and the existing ordered compaction passes/depth policy remain.",
+            "Terminal input approval is enabled by default for elevated commands; runtime-only grants no longer cause unnecessary review.",
+            "App-server/exec-server add authenticated WebSocket support, MCP OAuth client secrets, richer image generation/editing controls, and additive command-completion behavior."
+          ],
+          "prodex_action": "Advance the tested Codex baseline to 0.158.0. Preserve upstream project-trust lookup semantics by emitting both canonical and original Super workspace keys, keep Super approval_policy=never and danger-full-access so the new default terminal-input approval does not add prompts, remove only the obsolete GPT-5.4 Bedrock compatibility marker, track the parameterized 5000-byte schema-compaction default without reimplementing Codex compaction, and keep new MCP/WebSocket/image/app-server surfaces upstream-owned and pass-through unless Prodex already owns the corresponding boundary.",
+          "compatibility_evidence": "Exact 0.157.1 and 0.158.0 source archives, tag/release metadata, official Linux musl binary checksum/version smoke, 811 current critical/semantic markers including the new canonical project-trust lookup contract, isolated app-server initialize, and focused Super trust regressions are recorded in migration/codex-rust-v0.158.0-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -1933,32 +1978,33 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.157.1",
-      "name": "0.157.1",
-      "published_at": "2026-09-26T01:02:31Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.157.1",
+      "tag_name": "rust-v0.158.0",
+      "name": "0.158.0",
+      "published_at": "2026-09-28T05:07:23Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.158.0",
       "body_head": [
-        "## Chores",
-        "",
-        "- Release highlights could not be determined: the supplied PR index is empty, and the GitHub tag comparison returned 404.",
-        "",
-        "## Changelog",
-        "",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.157.0...rust-v0.157.1"
+        "## New Features",
+        "- Configure copy-on-select and right-click paste in the fullscreen TUI. Copied transcript selections now preserve Markdown formatting. (#47639, #47896, #48118)",
+        "- Connect to MCP servers that require pre-registered OAuth client secrets, including through `codex mcp add --oauth-client-secret`. (#47891)",
+        "- Secure direct exec-server WebSocket connections with bearer tokens, including connections configured through app-server. (#47601, #47648)",
+        "- Image generation and editing can explicitly request transparent backgrounds, and edits now accept file-backed conversation images. (#47484, #47956)",
+        "- Terminal input approval is enabled by default for commands running with elevated permissions; runtime-only grants no longer cause unnecessary reviews. (#47799, #48073)",
+        "## Bug Fixes",
+        "- Fixed Windows sandbox failures involving ordinary Windows 10 paths, rejected stored credentials, and large permission policies. (#47672, #47695, #47919)"
       ]
     }
   },
   "claude": {
     "latestRelease": {
-      "tag_name": "v2.1.263",
-      "name": "v2.1.263",
-      "published_at": "2026-09-06T02:54:20Z",
-      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.263"
+      "tag_name": "v2.1.283",
+      "name": "v2.1.283",
+      "published_at": "2026-09-25T21:50:12Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.283"
     },
     "docs": [
       {
         "url": "https://docs.anthropic.com/en/docs/claude-code/settings",
-        "title": "Claude Code settings - Claude Code Docs",
+        "title": "Settings files and precedence - Claude Code Docs",
         "description": "Change Claude Code settings, pick the scope a key belongs in, verify the change, and learn which value Claude Code uses when a key is set in several places.",
         "required_contains": [
           "settings.json",
