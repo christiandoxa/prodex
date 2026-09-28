@@ -936,7 +936,8 @@
           "super_external_provider_alias_policy",
           "super_provider_config_serialization",
           "super_toml_string_serialization",
-          "runtime_external_provider_classification"
+          "runtime_external_provider_classification",
+          "runtime_model_provider_classification"
         ]
       },
       {
@@ -3676,6 +3677,35 @@
       "rust_owner_before": "case-insensitive Anthropic/Claude, Copilot aliases, DeepSeek, Gemini/Gemini OAuth, Kiro, Gemini native, and Antigravity classification repeated across runtime consumers",
       "rust_test_oracle": "deleted; direct Mojo classifier coverage plus focused runtime provider-mode, rotation, local-rewrite and native Gemini selection tests preserve the caller behavior",
       "rust_adapter_scope": "Rust maps the classifier enum into auth lookup, profile selection, model-provider ids, and stable unsupported-provider errors"
+    },
+    {
+      "domain": "app/runtime-model-provider",
+      "introduced_in": "0.433.0",
+      "baseline_state": "duplicated Rust case-insensitive classification for the prodex-local/deepseek/gemini/anthropic/copilot/kiro model-provider ids",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/runtime_launch/providers_mode.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/runtime_launch/providers_mode.rs",
+        "crates/prodex-app/src/runtime_gemini_config.rs",
+        "crates/prodex-app/src/runtime_deepseek_config.rs",
+        "crates/prodex-app/src/runtime_local_provider_config.rs",
+        "crates/prodex-app/src/runtime_external_provider_config.rs",
+        "crates/prodex-app/src/quota_support/external_provider.rs",
+        "crates/prodex-app/src/quota_support.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "runtime_model_provider_classification",
+      "mojo_entry": "prodex_runtime_model_provider_class_v1",
+      "consumer_marker": "runtime_model_provider_class",
+      "rust_owner_before": "case-insensitive prodex model-provider id comparisons repeated across launch rewrite enablement, provider-specific catalog enablement, external catalog selection, quota labeling, and quota profile matching",
+      "rust_test_oracle": "deleted; direct Mojo classifier coverage plus focused Gemini, DeepSeek, local, external catalog and provider-mode caller tests preserve the production behavior",
+      "rust_adapter_scope": "Rust acquires effective Codex config strings and maps the classifier enum into launch, catalog, quota label, and filter behavior; custom and Bedrock provider handling remains outside this operation"
     }
   ],
   "rust_semantic_reductions": [

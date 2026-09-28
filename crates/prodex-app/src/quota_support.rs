@@ -1,4 +1,7 @@
 use super::*;
+use prodex_mojo_core::super_provider_config::{
+    RuntimeModelProviderClass, runtime_model_provider_class,
+};
 
 mod adaptive_refresh;
 mod auth;
@@ -151,13 +154,11 @@ impl QuotaProviderFilter {
             Ok(Some(provider)) => provider,
             Ok(None) | Err(_) => return false,
         };
+        let provider_class = runtime_model_provider_class(&model_provider.provider_id)
+            .expect("runtime model-provider classification should accept Rust strings");
         match self {
-            Self::DeepSeek => model_provider
-                .provider_id
-                .eq_ignore_ascii_case(SUPER_DEEPSEEK_PROVIDER_ID),
-            Self::Local => model_provider
-                .provider_id
-                .eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID),
+            Self::DeepSeek => provider_class == Some(RuntimeModelProviderClass::DeepSeek),
+            Self::Local => provider_class == Some(RuntimeModelProviderClass::Local),
             Self::All
             | Self::OpenAi
             | Self::Gemini

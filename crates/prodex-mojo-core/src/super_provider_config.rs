@@ -24,6 +24,16 @@ pub enum RuntimeExternalProviderClass {
     Antigravity,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeModelProviderClass {
+    Local,
+    DeepSeek,
+    Gemini,
+    Anthropic,
+    Copilot,
+    Kiro,
+}
+
 unsafe extern "C" {
     fn prodex_super_external_provider_alias_v1(abi_version: i64, address: u64, length: i64) -> i64;
 
@@ -32,6 +42,8 @@ unsafe extern "C" {
         address: u64,
         length: i64,
     ) -> i64;
+
+    fn prodex_runtime_model_provider_class_v1(abi_version: i64, address: u64, length: i64) -> i64;
 
     fn prodex_super_toml_string_v1(
         abi_version: i64,
@@ -122,6 +134,29 @@ pub fn runtime_external_provider_class(
         5 => Ok(Some(RuntimeExternalProviderClass::Kiro)),
         6 => Ok(Some(RuntimeExternalProviderClass::GeminiNative)),
         7 => Ok(Some(RuntimeExternalProviderClass::Antigravity)),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn runtime_model_provider_class(
+    value: &str,
+) -> Result<Option<RuntimeModelProviderClass>, MojoError> {
+    let result = unsafe {
+        prodex_runtime_model_provider_class_v1(
+            ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            signed_len(value)?,
+        )
+    };
+    match result {
+        -1 => Ok(None),
+        -2 => Err(MojoError::InvalidInput),
+        0 => Ok(Some(RuntimeModelProviderClass::Local)),
+        1 => Ok(Some(RuntimeModelProviderClass::DeepSeek)),
+        2 => Ok(Some(RuntimeModelProviderClass::Gemini)),
+        3 => Ok(Some(RuntimeModelProviderClass::Anthropic)),
+        4 => Ok(Some(RuntimeModelProviderClass::Copilot)),
+        5 => Ok(Some(RuntimeModelProviderClass::Kiro)),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -257,6 +292,19 @@ mod tests {
         );
         assert_eq!(runtime_external_provider_class(" gemini ").unwrap(), None);
         assert_eq!(runtime_external_provider_class("unknown").unwrap(), None);
+        assert_eq!(
+            runtime_model_provider_class("PRODEX-GEMINI").unwrap(),
+            Some(RuntimeModelProviderClass::Gemini)
+        );
+        assert_eq!(
+            runtime_model_provider_class("prodex-copilot").unwrap(),
+            Some(RuntimeModelProviderClass::Copilot)
+        );
+        assert_eq!(
+            runtime_model_provider_class(" prodex-local ").unwrap(),
+            None
+        );
+        assert_eq!(runtime_model_provider_class("custom").unwrap(), None);
         assert_eq!(toml_string_literal("a\\b\"c").unwrap(), "\"a\\\\b\\\"c\"");
 
         let entries = provider_config_entries(ProviderConfigInput {

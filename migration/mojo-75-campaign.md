@@ -2975,3 +2975,22 @@ Gemini profileless-selection tests. The canonical broad report counts **61,086
 reachable Mojo LOC** and **194,091 Rust production LOC**, totaling **255,177 LOC**:
 **23.94% Mojo**. The 75% project target remains unmet, with **521,187 additional Mojo
 LOC** required at the current Rust volume.
+
+
+## Runtime model-provider identifier migration
+
+The internal Codex model-provider identifiers prodex-local, prodex-deepseek,
+prodex-gemini, prodex-anthropic, prodex-copilot, and prodex-kiro now have one
+authoritative exact case-insensitive classifier in super_provider_config.mojo.
+Repeated Rust identifier comparisons were deleted from runtime launch rewrite
+selection, Gemini/DeepSeek/local catalog enablement, external catalog selection,
+custom quota labels, and quota profile matching. Rust retains effective-config
+acquisition and maps the Mojo enum into host-side launch/catalog/quota actions;
+custom provider names and Amazon Bedrock aliases remain outside this operation.
+
+Focused validation passes the direct Mojo classifier test plus Gemini, DeepSeek,
+local, Anthropic/Copilot/Kiro external-catalog, and provider-mode caller tests.
+The canonical broad report counts **61,109 reachable Mojo LOC** and **194,117 Rust
+production LOC**, totaling **255,226 LOC**: **23.94% Mojo**. The 75% project target
+remains unmet, with **521,242 additional Mojo LOC** required at the current Rust
+volume.

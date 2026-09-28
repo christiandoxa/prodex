@@ -6,11 +6,13 @@ use crate::{
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
     SUPER_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_ANTHROPIC_DEFAULT_CONTEXT_WINDOW,
-    SUPER_ANTHROPIC_DEFAULT_MODEL, SUPER_ANTHROPIC_PROVIDER_ID,
-    SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW,
-    SUPER_COPILOT_DEFAULT_MODEL, SUPER_COPILOT_PROVIDER_ID, SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT,
-    SUPER_KIRO_DEFAULT_CONTEXT_WINDOW, SUPER_KIRO_DEFAULT_MODEL, SUPER_KIRO_PROVIDER_ID,
-    super_copilot_prompt_token_limit_for_model,
+    SUPER_ANTHROPIC_DEFAULT_MODEL, SUPER_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT,
+    SUPER_COPILOT_DEFAULT_CONTEXT_WINDOW, SUPER_COPILOT_DEFAULT_MODEL,
+    SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_KIRO_DEFAULT_CONTEXT_WINDOW,
+    SUPER_KIRO_DEFAULT_MODEL, super_copilot_prompt_token_limit_for_model,
+};
+use prodex_mojo_core::super_provider_config::{
+    RuntimeModelProviderClass, runtime_model_provider_class,
 };
 use prodex_provider_core::ProviderId;
 use serde_json::json;
@@ -149,17 +151,14 @@ fn external_catalog_provider(
     else {
         return Ok(None);
     };
-    Ok(
-        if provider.eq_ignore_ascii_case(SUPER_ANTHROPIC_PROVIDER_ID) {
-            Some(ExternalCatalogProvider::Anthropic)
-        } else if provider.eq_ignore_ascii_case(SUPER_COPILOT_PROVIDER_ID) {
-            Some(ExternalCatalogProvider::Copilot)
-        } else if provider.eq_ignore_ascii_case(SUPER_KIRO_PROVIDER_ID) {
-            Some(ExternalCatalogProvider::Kiro)
-        } else {
-            None
-        },
-    )
+    let provider = runtime_model_provider_class(&provider)
+        .expect("runtime model-provider classification should accept Rust strings");
+    Ok(match provider {
+        Some(RuntimeModelProviderClass::Anthropic) => Some(ExternalCatalogProvider::Anthropic),
+        Some(RuntimeModelProviderClass::Copilot) => Some(ExternalCatalogProvider::Copilot),
+        Some(RuntimeModelProviderClass::Kiro) => Some(ExternalCatalogProvider::Kiro),
+        _ => None,
+    })
 }
 
 fn external_catalog_model_for_launch(

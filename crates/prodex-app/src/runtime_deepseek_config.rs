@@ -6,7 +6,10 @@ use crate::{
 use anyhow::{Context, Result, bail};
 use prodex_cli::{
     SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
-    SUPER_DEEPSEEK_DEFAULT_MODEL, SUPER_DEEPSEEK_PROVIDER_ID,
+    SUPER_DEEPSEEK_DEFAULT_MODEL,
+};
+use prodex_mojo_core::super_provider_config::{
+    RuntimeModelProviderClass, runtime_model_provider_class,
 };
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -246,8 +249,13 @@ fn deepseek_provider_codex_args(
 
 fn deepseek_provider_enabled(codex_home: &Path, user_args: &[OsString]) -> Result<bool> {
     Ok(
-        codex_effective_config_value(codex_home, user_args, "model_provider")?
-            .is_some_and(|provider| provider.eq_ignore_ascii_case(SUPER_DEEPSEEK_PROVIDER_ID)),
+        codex_effective_config_value(codex_home, user_args, "model_provider")?.is_some_and(
+            |provider| {
+                runtime_model_provider_class(&provider)
+                    .expect("runtime model-provider classification should accept Rust strings")
+                    == Some(RuntimeModelProviderClass::DeepSeek)
+            },
+        ),
     )
 }
 

@@ -7,31 +7,17 @@ use super::{
 use crate::{
     AppState, CodexModelProviderSetting, SUPER_ANTHROPIC_PROVIDER_ID, SUPER_COPILOT_PROVIDER_ID,
     SUPER_DEEPSEEK_PROVIDER_ID, SUPER_GEMINI_PROVIDER_ID, SUPER_KIRO_PROVIDER_ID,
-    SUPER_LOCAL_PROVIDER_ID,
 };
-use prodex_mojo_core::super_provider_config::RuntimeExternalProviderClass;
+use prodex_mojo_core::super_provider_config::{
+    RuntimeExternalProviderClass, runtime_model_provider_class,
+};
 
 pub(crate) fn runtime_launch_model_provider_uses_local_rewrite(
     provider: &CodexModelProviderSetting,
 ) -> bool {
-    provider
-        .provider_id
-        .eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID)
-        || provider
-            .provider_id
-            .eq_ignore_ascii_case(SUPER_DEEPSEEK_PROVIDER_ID)
-        || provider
-            .provider_id
-            .eq_ignore_ascii_case(SUPER_GEMINI_PROVIDER_ID)
-        || provider
-            .provider_id
-            .eq_ignore_ascii_case(SUPER_KIRO_PROVIDER_ID)
-        || provider
-            .provider_id
-            .eq_ignore_ascii_case(SUPER_ANTHROPIC_PROVIDER_ID)
-        || provider
-            .provider_id
-            .eq_ignore_ascii_case(SUPER_COPILOT_PROVIDER_ID)
+    runtime_model_provider_class(&provider.provider_id)
+        .expect("runtime model-provider classification should accept Rust strings")
+        .is_some()
 }
 
 pub(crate) fn runtime_local_rewrite_model_provider_id<'a>(
