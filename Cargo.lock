@@ -2682,6 +2682,7 @@ dependencies = [
  "anyhow",
  "libc",
  "prodex-core",
+ "prodex-mojo-core",
  "prodex-shared-codex-fs",
  "semver",
  "serde",

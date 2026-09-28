@@ -21,8 +21,24 @@ fn temp_dir(name: &str) -> PathBuf {
 #[test]
 fn optional_tool_ids_parse_to_typed_values() {
     assert_eq!("caveman".parse(), Ok(OptionalToolId::Caveman));
-    assert_eq!("cbm".parse(), Ok(OptionalToolId::CodebaseMemoryMcp));
+    assert_eq!(" CBM ".parse(), Ok(OptionalToolId::CodebaseMemoryMcp));
+    assert_eq!("PLAYWRIGHT".parse(), Ok(OptionalToolId::PlaywrightMcp));
+    assert_eq!("playwright-mcp".parse(), Ok(OptionalToolId::PlaywrightMcp));
     assert!("unknown".parse::<OptionalToolId>().is_err());
+}
+
+#[test]
+fn optional_tool_descriptors_follow_mojo_policy() {
+    let caveman = optional_tool_descriptor(OptionalToolId::Caveman);
+    assert_eq!(caveman.kind, ToolKind::CodexPlugin);
+    assert_eq!(
+        caveman.capabilities,
+        &[ToolCapability::Codex, ToolCapability::Claude]
+    );
+
+    let presidio = optional_tool_descriptor(OptionalToolId::Presidio);
+    assert_eq!(presidio.kind, ToolKind::Service);
+    assert_eq!(presidio.capabilities, &[ToolCapability::Redaction]);
 }
 
 #[test]

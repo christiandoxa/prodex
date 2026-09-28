@@ -103,6 +103,8 @@ pub mod log_throughput_policy;
 #[cfg(feature = "mojo-observability")]
 pub mod observability;
 #[cfg(feature = "mojo-runtime")]
+pub mod optional_tools_policy;
+#[cfg(feature = "mojo-runtime")]
 pub mod policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod profile_export;

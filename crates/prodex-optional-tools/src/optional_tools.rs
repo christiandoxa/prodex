@@ -3,6 +3,12 @@ use crate::discovery::{
     managed_optimizer_command_candidates, managed_optimizer_roots, path_dirs_from_env,
 };
 use anyhow::{Context, Result};
+use prodex_mojo_core::optional_tools_policy::{
+    CAP_BROWSER_AUTOMATION, CAP_CLAUDE, CAP_CODEX, CAP_REDACTION, CAP_SHELL_COMPRESSION,
+    CAP_SIMPLICITY_REVIEW, CAP_STRUCTURAL_NAVIGATION, OptionalToolPolicyId, OptionalToolPolicyKind,
+    optional_tool_class, optional_tool_descriptor_policy, optional_tool_manifest_tree_supported,
+};
+use prodex_mojo_core::rich::ascii_casefold_contains;
 use semver::Version;
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
@@ -30,7 +36,8 @@ pub(crate) fn manifest_tree_sha256_supported(
     vetted: &str,
     legacy_manifest: &str,
 ) -> bool {
-    value == vetted || value == legacy_manifest
+    optional_tool_manifest_tree_supported(value, vetted, legacy_manifest)
+        .expect("Mojo optional-tool manifest-tree policy failed")
 }
 
 fn parsed_probe_semver(value: &str) -> Option<Version> {
@@ -114,15 +121,10 @@ impl FromStr for OptionalToolId {
     type Err = String;
 
     fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "caveman" => Ok(Self::Caveman),
-            "rtk" => Ok(Self::Rtk),
-            "codebase-memory-mcp" | "codebase-memory" | "cbm" => Ok(Self::CodebaseMemoryMcp),
-            "playwright" | "playwright-mcp" => Ok(Self::PlaywrightMcp),
-            "ponytail" => Ok(Self::Ponytail),
-            "presidio" => Ok(Self::Presidio),
-            _ => Err(format!("unknown optional tool {value}")),
-        }
+        optional_tool_class(value)
+            .expect("Mojo optional-tool alias policy failed")
+            .map(optional_tool_id_from_policy)
+            .ok_or_else(|| format!("unknown optional tool {value}"))
     }
 }
 
@@ -152,26 +154,56 @@ pub struct ToolDescriptor {
     pub capabilities: &'static [ToolCapability],
 }
 
-pub const fn optional_tool_descriptor(id: OptionalToolId) -> ToolDescriptor {
-    let (kind, capabilities): (ToolKind, &'static [ToolCapability]) = match id {
-        OptionalToolId::Caveman => (
-            ToolKind::CodexPlugin,
-            &[ToolCapability::Codex, ToolCapability::Claude],
-        ),
-        OptionalToolId::Rtk => (ToolKind::Command, &[ToolCapability::ShellCompression]),
-        OptionalToolId::CodebaseMemoryMcp => {
-            (ToolKind::McpServer, &[ToolCapability::StructuralNavigation])
-        }
-        OptionalToolId::PlaywrightMcp => {
-            (ToolKind::McpServer, &[ToolCapability::BrowserAutomation])
-        }
-        OptionalToolId::Ponytail => (ToolKind::CodexPlugin, &[ToolCapability::SimplicityReview]),
-        OptionalToolId::Presidio => (ToolKind::Service, &[ToolCapability::Redaction]),
-    };
+fn optional_tool_policy_id(id: OptionalToolId) -> OptionalToolPolicyId {
+    match id {
+        OptionalToolId::Caveman => OptionalToolPolicyId::Caveman,
+        OptionalToolId::Rtk => OptionalToolPolicyId::Rtk,
+        OptionalToolId::CodebaseMemoryMcp => OptionalToolPolicyId::CodebaseMemoryMcp,
+        OptionalToolId::PlaywrightMcp => OptionalToolPolicyId::PlaywrightMcp,
+        OptionalToolId::Ponytail => OptionalToolPolicyId::Ponytail,
+        OptionalToolId::Presidio => OptionalToolPolicyId::Presidio,
+    }
+}
+
+fn optional_tool_id_from_policy(id: OptionalToolPolicyId) -> OptionalToolId {
+    match id {
+        OptionalToolPolicyId::Caveman => OptionalToolId::Caveman,
+        OptionalToolPolicyId::Rtk => OptionalToolId::Rtk,
+        OptionalToolPolicyId::CodebaseMemoryMcp => OptionalToolId::CodebaseMemoryMcp,
+        OptionalToolPolicyId::PlaywrightMcp => OptionalToolId::PlaywrightMcp,
+        OptionalToolPolicyId::Ponytail => OptionalToolId::Ponytail,
+        OptionalToolPolicyId::Presidio => OptionalToolId::Presidio,
+    }
+}
+
+fn optional_tool_kind_from_policy(kind: OptionalToolPolicyKind) -> ToolKind {
+    match kind {
+        OptionalToolPolicyKind::Command => ToolKind::Command,
+        OptionalToolPolicyKind::CodexPlugin => ToolKind::CodexPlugin,
+        OptionalToolPolicyKind::McpServer => ToolKind::McpServer,
+        OptionalToolPolicyKind::Service => ToolKind::Service,
+    }
+}
+
+fn optional_tool_capabilities_from_mask(mask: u64) -> &'static [ToolCapability] {
+    match mask {
+        mask if mask == CAP_CODEX | CAP_CLAUDE => &[ToolCapability::Codex, ToolCapability::Claude],
+        CAP_SHELL_COMPRESSION => &[ToolCapability::ShellCompression],
+        CAP_STRUCTURAL_NAVIGATION => &[ToolCapability::StructuralNavigation],
+        CAP_BROWSER_AUTOMATION => &[ToolCapability::BrowserAutomation],
+        CAP_SIMPLICITY_REVIEW => &[ToolCapability::SimplicityReview],
+        CAP_REDACTION => &[ToolCapability::Redaction],
+        _ => panic!("Mojo optional-tool capability policy returned an invalid mask"),
+    }
+}
+
+pub fn optional_tool_descriptor(id: OptionalToolId) -> ToolDescriptor {
+    let policy = optional_tool_descriptor_policy(optional_tool_policy_id(id))
+        .expect("Mojo optional-tool descriptor policy failed");
     ToolDescriptor {
         id,
-        kind,
-        capabilities,
+        kind: optional_tool_kind_from_policy(policy.kind),
+        capabilities: optional_tool_capabilities_from_mask(policy.capability_mask),
     }
 }
 
@@ -245,13 +277,16 @@ pub struct OptionalToolSet(BTreeSet<OptionalToolId>);
 
 impl OptionalToolSet {
     pub fn super_defaults() -> Self {
-        Self(BTreeSet::from([
-            OptionalToolId::Caveman,
-            OptionalToolId::Rtk,
-            OptionalToolId::CodebaseMemoryMcp,
-            OptionalToolId::PlaywrightMcp,
-            OptionalToolId::Ponytail,
-        ]))
+        Self(
+            OptionalToolId::ALL
+                .into_iter()
+                .filter(|id| {
+                    optional_tool_descriptor_policy(optional_tool_policy_id(*id))
+                        .expect("Mojo optional-tool default policy failed")
+                        .super_default
+                })
+                .collect(),
+        )
     }
 
     pub fn insert(&mut self, id: OptionalToolId) -> bool {
@@ -454,7 +489,9 @@ fn playwright_tool_status() -> ToolHealth {
 
 pub(super) fn playwright_probe_failure(error: anyhow::Error) -> ToolHealth {
     let detail = error.to_string();
-    if detail.to_ascii_lowercase().contains(" is too old") {
+    if ascii_casefold_contains(&detail, " is too old")
+        .expect("Mojo Playwright compatibility error comparison failed")
+    {
         return invalid_tool(OptionalToolId::PlaywrightMcp, error);
     }
     ToolHealth::missing(
@@ -677,7 +714,7 @@ mod tests {
         assert!(missing.detail.contains("Playwright MCP is not installed"));
 
         let incompatible =
-            playwright_probe_failure(anyhow::anyhow!("playwright-mcp 0.0.78 is too old"));
+            playwright_probe_failure(anyhow::anyhow!("playwright-mcp 0.0.78 IS TOO OLD"));
         assert_eq!(incompatible.status, ToolHealthStatus::Invalid);
     }
 
