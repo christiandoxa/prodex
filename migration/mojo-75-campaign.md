@@ -3013,3 +3013,14 @@ validation, and fail-closed recursion-marker policy. The canonical broad report
 counts **61,125 reachable Mojo LOC** and **194,166 Rust production LOC**, totaling
 **255,291 LOC**: **23.94% Mojo**. The 75% project target remains unmet, with
 **521,373 additional Mojo LOC** required at the current Rust volume.
+
+
+## Runtime provider-profile alias duplicate cleanup
+
+The remaining runtime OAuth profile matcher now consumes the authoritative
+runtime_external_provider_class Mojo classifier instead of repeating the
+Gemini, Anthropic/Claude, Copilot/GitHub-Copilot, and Kiro alias table in Rust.
+Rust retains profile collection lookup and enum matching only; there is no
+provider-name fallback classifier in this path.
+
+Focused runtime classifier coverage and the Mojo no-fallback/ownership/authority guards pass. The canonical broad report remains **61,125 Mojo LOC** and **194,167 Rust production LOC**, totaling **255,292 LOC**: **23.94% Mojo**.
