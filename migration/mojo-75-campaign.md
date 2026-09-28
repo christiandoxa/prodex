@@ -3245,3 +3245,14 @@ Mojo primitive. Presidio timeout, concurrency, and malformed-response text class
 uses the Mojo contains relation. The Rust lowercase/match tables were deleted while
 caller-owned trim, JSON/error acquisition, numeric parsing, and output-label mapping stay
 in Rust. Mixed-case and whitespace regressions pass with no Rust semantic fallback.
+
+
+## Runtime SSE, rate-limit, and Gemini model-memory cleanup
+
+Gemini/provider SSE content-type detection and buffered rate-limit markers now use the
+authoritative Mojo casefold contains relation. Gemini normalized error response headers
+reuse exact Mojo equality, and the Gemini OAuth selected-model path now calls the
+Mojo-backed provider_model_allows_session_memory policy instead of repeating the
+empty/auto/default lowercase table. Rust retains HTTP/body acquisition, UTF-8 checks,
+prefetch routing, header mutation, and model-memory state ownership. Focused quota,
+header, and model-memory regressions pass with no Rust semantic fallback.

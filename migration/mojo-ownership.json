@@ -3992,16 +3992,18 @@
         "crates/prodex-provider-core/src/fallback/chains.rs",
         "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/body.rs",
         "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
-        "crates/prodex-provider-core/src/translators/gemini/response_media.rs"
+        "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_quota.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-      "rust_owner_before": "exact ASCII case-insensitive equality repeated across runtime/header/catalog identity, provider request roles, session-memory aliases, Gemini quota/rate-limit codes, media extensions, and Code Assist labels/domains",
+      "rust_owner_before": "exact ASCII case-insensitive equality repeated across runtime/header/catalog identity, provider request roles, session-memory aliases, Gemini quota codes/media extensions, normalized response headers, and Code Assist labels/domains",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo equality coverage preserves empty strings, mixed case, and whitespace sensitivity, while Super catalog/prompt caller tests preserve selection behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "caller-owned trimming where historically required, string/path/header/URL/JSON acquisition, iteration, DTO/process ownership, routing/filtering decisions, and result mapping; Mojo owns exact ASCII-folded equality"
+      "rust_adapter_scope": "caller-owned trimming where historically required, string/header/body/URL/JSON acquisition, iteration, model-memory selection, routing/filtering decisions, and result mapping; Mojo owns exact ASCII-folded equality"
     },
     {
       "name": "gemini_guardrail_text_classification",
@@ -4136,16 +4138,19 @@
         "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
         "crates/prodex-app/src/runtime_gemini_auth/code_assist/validation.rs",
         "crates/prodex-app/src/runtime_proxy/smart_context.rs",
-        "crates/prodex-app/src/runtime_proxy/presidio/telemetry.rs"
+        "crates/prodex-app/src/runtime_proxy/presidio/telemetry.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_precommit.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
-      "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching for Gemini URI MIME detection, trusted validation hosts, Smart Context content types, and Presidio timeout/failure text classification",
+      "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching for provider MIME/validation, Smart Context, Presidio telemetry, SSE content types, and buffered rate-limit body markers",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo relation coverage preserves Rust starts_with/ends_with/contains empty-needle semantics and 70k exact equality, with Copilot/Gemini caller regressions preserving case and trim behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "URI/header/error/JSON acquisition, caller-specific split/trim rules, MIME/outcome mapping, and routing/telemetry labels"
+      "rust_adapter_scope": "header/body/error/URI/JSON acquisition, caller-specific UTF-8 and split/trim rules, routing/prefetch decisions, MIME/outcome mapping, and telemetry labels"
     }
   ],
   "rust_semantic_reductions": [
