@@ -201,15 +201,22 @@ impl SuperExternalProvider {
 fn parse_super_external_provider(
     value: &str,
 ) -> std::result::Result<SuperExternalProvider, String> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "anthropic" | "claude" => Ok(SuperExternalProvider::Anthropic),
-        "copilot" | "github-copilot" | "github_copilot" => Ok(SuperExternalProvider::Copilot),
-        "deepseek" => Ok(SuperExternalProvider::DeepSeek),
-        "gemini" => Ok(SuperExternalProvider::Gemini),
-        "kiro" => Ok(SuperExternalProvider::Kiro),
-        other => Err(format!(
-            "invalid --provider: supported values are anthropic, copilot, deepseek, gemini, kiro, got {other:?}"
-        )),
+    use prodex_mojo_core::super_provider_config::ExternalProviderAliasPlan;
+
+    match prodex_mojo_core::super_provider_config::external_provider_alias(value)
+        .expect("Mojo Super external-provider alias policy returned invalid output")
+    {
+        Some(ExternalProviderAliasPlan::Anthropic) => Ok(SuperExternalProvider::Anthropic),
+        Some(ExternalProviderAliasPlan::Copilot) => Ok(SuperExternalProvider::Copilot),
+        Some(ExternalProviderAliasPlan::DeepSeek) => Ok(SuperExternalProvider::DeepSeek),
+        Some(ExternalProviderAliasPlan::Gemini) => Ok(SuperExternalProvider::Gemini),
+        Some(ExternalProviderAliasPlan::Kiro) => Ok(SuperExternalProvider::Kiro),
+        None => {
+            let other = value.trim().to_ascii_lowercase();
+            Err(format!(
+                "invalid --provider: supported values are anthropic, copilot, deepseek, gemini, kiro, got {other:?}"
+            ))
+        }
     }
 }
 
@@ -230,38 +237,18 @@ fn super_local_provider_codex_args(
         .filter(|value| *value > 0)
         .unwrap_or(SUPER_DEFAULT_AUTO_COMPACT_LIMIT)
         .min(context_window.saturating_sub(1));
-    let overrides = [
-        format!(
-            "model_provider={}",
-            toml_string_literal(SUPER_LOCAL_PROVIDER_ID)
-        ),
-        format!("model={}", toml_string_literal(model)),
-        format!(
-            "model_providers.{SUPER_LOCAL_PROVIDER_ID}.name={}",
-            toml_string_literal(prodex_provider_core::PRODEX_LOCAL_PROVIDER_NAME)
-        ),
-        format!(
-            "model_providers.{SUPER_LOCAL_PROVIDER_ID}.base_url={}",
-            toml_string_literal(&base_url)
-        ),
-        format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.wire_api=\"responses\""),
-        format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.requires_openai_auth=true"),
-        format!("model_providers.{SUPER_LOCAL_PROVIDER_ID}.supports_websockets=false"),
-        format!("model_context_window={context_window}"),
-        format!("model_auto_compact_token_limit={auto_compact_token_limit}"),
-        "model_reasoning_summary=\"none\"".to_string(),
-        "web_search=\"disabled\"".to_string(),
-        "features.apps=false".to_string(),
-        "features.js_repl=false".to_string(),
-        "features.image_generation=false".to_string(),
-    ];
-
-    let mut args = Vec::with_capacity(overrides.len() * 2);
-    for override_entry in overrides {
-        args.push(OsString::from("-c"));
-        args.push(OsString::from(override_entry));
-    }
-    args
+    super_provider_config_codex_args(
+        prodex_mojo_core::super_provider_config::ProviderConfigInput {
+            provider_id: SUPER_LOCAL_PROVIDER_ID,
+            provider_name: prodex_provider_core::PRODEX_LOCAL_PROVIDER_NAME,
+            base_url: &base_url,
+            model,
+            web_search: "disabled",
+            context_window,
+            auto_compact_token_limit,
+            image_generation: false,
+        },
+    )
 }
 
 pub fn super_external_provider_codex_args(
@@ -285,36 +272,29 @@ pub fn super_external_provider_codex_args(
             context_window,
             auto_compact_token_limit,
         );
-    let overrides = [
-        format!("model_provider={}", toml_string_literal(provider_id)),
-        format!("model={}", toml_string_literal(model)),
-        format!(
-            "model_providers.{provider_id}.name={}",
-            toml_string_literal(provider.codex_provider_name())
-        ),
-        format!(
-            "model_providers.{provider_id}.base_url={}",
-            toml_string_literal(&base_url)
-        ),
-        format!("model_providers.{provider_id}.wire_api=\"responses\""),
-        format!("model_providers.{provider_id}.requires_openai_auth=true"),
-        format!("model_providers.{provider_id}.supports_websockets=false"),
-        format!("model_context_window={context_window}"),
-        format!("model_auto_compact_token_limit={auto_compact_token_limit}"),
-        "model_reasoning_summary=\"none\"".to_string(),
-        format!("web_search=\"{}\"", provider.web_search_mode()),
-        "features.apps=false".to_string(),
-        "features.js_repl=false".to_string(),
-        format!(
-            "features.image_generation={}",
-            provider.image_generation_enabled()
-        ),
-    ];
+    super_provider_config_codex_args(
+        prodex_mojo_core::super_provider_config::ProviderConfigInput {
+            provider_id,
+            provider_name: provider.codex_provider_name(),
+            base_url: &base_url,
+            model,
+            web_search: provider.web_search_mode(),
+            context_window,
+            auto_compact_token_limit,
+            image_generation: provider.image_generation_enabled(),
+        },
+    )
+}
 
-    let mut args = Vec::with_capacity(overrides.len() * 2);
-    for override_entry in overrides {
+fn super_provider_config_codex_args(
+    input: prodex_mojo_core::super_provider_config::ProviderConfigInput<'_>,
+) -> Vec<OsString> {
+    let entries = prodex_mojo_core::super_provider_config::provider_config_entries(input)
+        .expect("Mojo Super provider config serializer returned invalid output");
+    let mut args = Vec::with_capacity(entries.len() * 2);
+    for entry in entries {
         args.push(OsString::from("-c"));
-        args.push(OsString::from(override_entry));
+        args.push(OsString::from(entry));
     }
     args
 }
@@ -365,7 +345,8 @@ pub(crate) fn parse_credential_free_http_url(
 }
 
 fn toml_string_literal(value: &str) -> String {
-    format!("\"{}\"", value.replace('\\', "\\\\").replace('"', "\\\""))
+    prodex_mojo_core::super_provider_config::toml_string_literal(value)
+        .expect("Mojo Super TOML string literal serializer returned invalid output")
 }
 
 #[derive(Args, Debug)]

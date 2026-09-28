@@ -2881,3 +2881,20 @@ operations**. The canonical broad source report counts **60,178 Mojo LOC** and
 **193,424 Rust production LOC**, totaling **253,602 LOC**: **23.73% Mojo**. The
 75% project target remains unmet, with **520,094 additional Mojo LOC** required
 at the current Rust volume.
+
+## Super provider config serialization migration
+
+Super external-provider alias classification, TOML string literal escaping, and
+the ordered 14-entry local/external Codex provider override table now use
+mojo/prodex_core/super_provider_config.mojo. Rust retains credential-free URL
+validation, provider metadata lookup, Copilot/model token-limit calculation,
+API-key ownership, and OsString argument interleaving. No Rust fallback table or
+escaping implementation remains.
+
+Validation passes the direct Mojo kernel fixture, all 143 prodex-cli unit tests,
+and both Copilot runtime-arg integration tests, plus clippy, full prodex-app
+check, no-fallback self-test, ownership, and authority guards. Ownership now
+reports **103 authoritative operations**. The canonical broad source report
+counts **60,525 Mojo LOC** and **193,580 Rust production LOC**, totaling
+**254,105 LOC**: **23.82% Mojo**. The 75% project target remains unmet, with
+**520,215 additional Mojo LOC** required at the current Rust volume.

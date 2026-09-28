@@ -8,6 +8,8 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/super_provider_config.rs",
+  "crates/prodex-cli/src/runtime_args.rs",
   "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
   "crates/prodex-app/src/app_commands/log_transcript.rs",
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
@@ -265,6 +267,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-mojo-core/src/super_provider_config.rs",
+  "crates/prodex-cli/src/runtime_args.rs",
   "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
   "crates/prodex-mojo-core/src/log.rs",
   "crates/prodex-app/src/app_commands/log_transcript.rs",
@@ -649,6 +653,8 @@ const STATE_PROVIDER_FILE = "crates/prodex-state/src/provider_capabilities.rs";
 const STATE_REMEMBER_FILE = "crates/prodex-app/src/runtime_proxy/lineage/remember.rs";
 const REDACTION_FILE = "crates/prodex-redaction/src/lib.rs";
 const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
+const SUPER_PROVIDER_CONFIG_FILE = "crates/prodex-cli/src/runtime_args.rs";
+const SUPER_PROVIDER_CONFIG_ADAPTER_FILE = "crates/prodex-mojo-core/src/super_provider_config.rs";
 const SUB_AGENT_POLICY_FILE = "crates/prodex-cli/src/sub_agent.rs";
 const SUB_AGENT_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
@@ -1176,6 +1182,41 @@ export function findViolations(files) {
       violations.push(filePath + ": contains a retired Rust profile-identity semantic helper");
     }
     return violations;
+  });
+  const superProviderConfigViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SUPER_PROVIDER_CONFIG_FILE) {
+      const required = [
+        "prodex_mojo_core::super_provider_config::external_provider_alias(",
+        "prodex_mojo_core::super_provider_config::provider_config_entries(",
+        "prodex_mojo_core::super_provider_config::toml_string_literal(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": Super provider config migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      for (const retired of [
+        "match value.trim().to_ascii_lowercase().as_str()",
+        "let overrides = [",
+        "value.replace('\\',",
+      ]) {
+        if (production.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust Super provider config/alias/TOML semantics");
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === SUPER_PROVIDER_CONFIG_ADAPTER_FILE) {
+      const required = [
+        "prodex_super_external_provider_alias_v1(",
+        "prodex_super_toml_string_v1(",
+        "prodex_super_provider_config_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": Super provider config ABI adapter must retain " + call);
+    }
+    return [];
   });
   const subAgentPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === SUB_AGENT_POLICY_FILE) {
@@ -1956,7 +1997,7 @@ export function findViolations(files) {
     ...quotaModelPolicyViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
-    ...anthropicWebSearchViolations, ...subAgentPolicyViolations, ...cliRuntimeFeatureViolations,
+    ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...subAgentPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSystemInstructionViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
