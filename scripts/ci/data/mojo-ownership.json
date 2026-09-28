@@ -939,7 +939,9 @@
           "super_provider_config_serialization",
           "super_toml_string_serialization",
           "runtime_external_provider_classification",
-          "runtime_model_provider_classification"
+          "runtime_model_provider_classification",
+          "runtime_boolean_token_classification",
+          "deepseek_web_search_mode_classification"
         ]
       },
       {
@@ -3762,6 +3764,52 @@
       "rust_owner_before": "exact recursion-marker identity and 1..65536 task-size policy before child launch",
       "rust_test_oracle": "deleted; direct Mojo smoke plus recursion-marker and child-config app tests cover valid marker, invalid marker, valid limit, and invalid task size",
       "rust_adapter_scope": "absolute executable path validation, local URL syntax parsing, optional-tool parsing, filesystem confinement, and stable error text remain Rust"
+    },
+    {
+      "domain": "app/runtime-config",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust ASCII-lowercase boolean token match table for DeepSeek runtime configuration",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
+      "consumer": "crates/prodex-app/src/runtime_deepseek_config.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_deepseek_config.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "runtime_boolean_token_classification",
+      "mojo_entry": "prodex_runtime_bool_token_v1",
+      "consumer_marker": "runtime_bool_token",
+      "rust_owner_before": "case-insensitive 1/true/yes/on and 0/false/no/off runtime boolean token classification",
+      "rust_test_oracle": "deleted; direct Mojo adapter coverage plus DeepSeek strict-tools environment/profile and invalid-value caller tests preserve the production behavior",
+      "rust_adapter_scope": "empty and Unicode-whitespace error precedence plus stable caller-specific error text"
+    },
+    {
+      "domain": "app/deepseek-config",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust ASCII-lowercase DeepSeek web-search mode alias match table",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
+      "consumer": "crates/prodex-app/src/runtime_deepseek_config.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_deepseek_config.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "deepseek_web_search_mode_classification",
+      "mojo_entry": "prodex_runtime_deepseek_web_search_token_v1",
+      "consumer_marker": "runtime_deepseek_web_search_token",
+      "rust_owner_before": "case-insensitive auto, off/disabled/disable, openai_chat/openai-chat/chat, and anthropic mode classification",
+      "rust_test_oracle": "deleted; direct Mojo adapter coverage plus DeepSeek web-search environment/profile and invalid-value caller tests preserve the production behavior",
+      "rust_adapter_scope": "empty and Unicode-whitespace error precedence plus mapping the Mojo token enum to the stable runtime mode enum"
     }
   ],
   "rust_semantic_reductions": [

@@ -10,7 +10,10 @@ use prodex_cli::{
 };
 use prodex_mojo_core::{
     rich::{CatalogModel, merge_catalog_ids, resolve_catalog_model},
-    super_provider_config::{RuntimeModelProviderClass, runtime_model_provider_class},
+    super_provider_config::{
+        RuntimeDeepSeekWebSearchToken, RuntimeModelProviderClass, runtime_bool_token,
+        runtime_deepseek_web_search_token, runtime_model_provider_class,
+    },
 };
 use serde_json::json;
 use std::ffi::{OsStr, OsString};
@@ -154,11 +157,9 @@ fn runtime_deepseek_gateway_bool(name: &str, value: &str) -> Result<bool> {
     if value.chars().any(char::is_whitespace) {
         bail!("{name} must not contain whitespace");
     }
-    match value.to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(true),
-        "0" | "false" | "no" | "off" => Ok(false),
-        _ => bail!("{name} must be true or false"),
-    }
+    runtime_bool_token(value)
+        .expect("runtime boolean token classification should accept Rust strings")
+        .ok_or_else(|| anyhow::anyhow!("{name} must be true or false"))
 }
 
 fn runtime_deepseek_gateway_web_search_value(
@@ -171,12 +172,18 @@ fn runtime_deepseek_gateway_web_search_value(
     if value.chars().any(char::is_whitespace) {
         bail!("{name} must not contain whitespace");
     }
-    match value.to_ascii_lowercase().as_str() {
-        "auto" => Ok(RuntimeDeepSeekWebSearchMode::Auto),
-        "off" | "disabled" | "disable" => Ok(RuntimeDeepSeekWebSearchMode::Off),
-        "openai_chat" | "openai-chat" | "chat" => Ok(RuntimeDeepSeekWebSearchMode::OpenAiChat),
-        "anthropic" => Ok(RuntimeDeepSeekWebSearchMode::Anthropic),
-        _ => bail!("{name} must be auto, off, openai_chat, or anthropic"),
+    match runtime_deepseek_web_search_token(value)
+        .expect("DeepSeek web-search token classification should accept Rust strings")
+    {
+        Some(RuntimeDeepSeekWebSearchToken::Auto) => Ok(RuntimeDeepSeekWebSearchMode::Auto),
+        Some(RuntimeDeepSeekWebSearchToken::Off) => Ok(RuntimeDeepSeekWebSearchMode::Off),
+        Some(RuntimeDeepSeekWebSearchToken::OpenAiChat) => {
+            Ok(RuntimeDeepSeekWebSearchMode::OpenAiChat)
+        }
+        Some(RuntimeDeepSeekWebSearchToken::Anthropic) => {
+            Ok(RuntimeDeepSeekWebSearchMode::Anthropic)
+        }
+        None => bail!("{name} must be auto, off, openai_chat, or anthropic"),
     }
 }
 
