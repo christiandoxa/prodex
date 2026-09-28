@@ -843,6 +843,16 @@
         "operations": [
           "smart_context_artifact_reference_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/smart_context_markers.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "smart_context_semantic_marker_policy"
+        ]
       }
     ],
     "removed": [
@@ -2638,6 +2648,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "text tokenization, JSON traversal, alias-map aggregation, artifact DTO mapping and marker/string materialization remain Rust"
+    },
+    {
+      "name": "smart_context_semantic_marker_policy",
+      "domain": "smart-context/semantic-markers",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_smart_context_markers_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/smart_context_markers.mojo",
+      "consumer": "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
+      "consumer_marker": "prodex_mojo_core::smart_context_markers::parse_file_location_token",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/smart_context_markers.rs",
+      "rust_owner_before": "file-location/path classification, diff path/span parsing, test-failure/symbol classification, error-code extraction and per-line command-kind classification",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct ABI fixtures plus semantic-index artifact tests cover file locations, diff hunks, test failures, bracketed errors, Unicode whitespace codes and command-kind precedence",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "line/token iteration, diff-hunk end scanning, command-kind aggregation precedence, DTO/string materialization and semantic-range storage remain Rust"
     }
   ],
   "rust_semantic_reductions": [

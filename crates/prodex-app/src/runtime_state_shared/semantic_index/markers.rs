@@ -1,8 +1,4 @@
-use super::{
-    RuntimeSmartContextParsedDiffHunk, RuntimeSmartContextParsedFileLocation,
-    runtime_smart_context_bounded_string,
-};
-use crate::runtime_state_shared::RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_FIELD_BYTES;
+use super::{RuntimeSmartContextParsedDiffHunk, RuntimeSmartContextParsedFileLocation};
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_file_location(
     line: &str,
@@ -15,95 +11,28 @@ pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_file_location
 pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_file_location_token(
     token: &str,
 ) -> Option<RuntimeSmartContextParsedFileLocation> {
-    let token = token
-        .trim_matches(|ch: char| {
-            matches!(
-                ch,
-                '"' | '\'' | '`' | '(' | ')' | '[' | ']' | '{' | '}' | ',' | ';'
-            )
-        })
-        .trim_end_matches(':');
-    let last_colon = token.rfind(':')?;
-    let last_number = token[last_colon + 1..].parse::<usize>().ok()?;
-    let prefix = &token[..last_colon];
-    let (path, line, column) = if let Some(second_colon) = prefix.rfind(':') {
-        if let Ok(line) = prefix[second_colon + 1..].parse::<usize>() {
-            (&prefix[..second_colon], line, Some(last_number))
-        } else {
-            (prefix, last_number, None)
-        }
-    } else {
-        (prefix, last_number, None)
-    };
-    let path = path
-        .trim_start_matches("file://")
-        .trim_start_matches("a/")
-        .trim_start_matches("b/");
-    if !runtime_smart_context_path_looks_like_file(path) {
-        return None;
-    }
-    let path = runtime_smart_context_bounded_string(path)?;
-    Some(RuntimeSmartContextParsedFileLocation { path, line, column })
-}
-
-pub(in crate::runtime_state_shared) fn runtime_smart_context_path_looks_like_file(
-    path: &str,
-) -> bool {
-    if path.is_empty() || path.len() > RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_FIELD_BYTES {
-        return false;
-    }
-    path.contains('/')
-        || path.contains('\\')
-        || path.rsplit_once('.').is_some_and(|(_, ext)| {
-            matches!(
-                ext,
-                "rs" | "toml"
-                    | "json"
-                    | "md"
-                    | "ts"
-                    | "tsx"
-                    | "js"
-                    | "jsx"
-                    | "py"
-                    | "go"
-                    | "java"
-                    | "kt"
-                    | "swift"
-                    | "c"
-                    | "cc"
-                    | "cpp"
-                    | "h"
-                    | "hpp"
-                    | "css"
-                    | "scss"
-                    | "html"
-                    | "yml"
-                    | "yaml"
-                    | "sh"
-                    | "bash"
-                    | "zsh"
-                    | "sql"
-                    | "lock"
-            )
-        })
+    let plan = prodex_mojo_core::smart_context_markers::parse_file_location_token(token)
+        .expect("Mojo smart-context file-location parser returned invalid output")?;
+    let path = token.get(plan.path_start..plan.path_end)?.to_string();
+    Some(RuntimeSmartContextParsedFileLocation {
+        path,
+        line: plan.line,
+        column: plan.column,
+    })
 }
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_diff_file_path(
     line: &str,
 ) -> Option<String> {
-    let path = line
+    let token = line
         .strip_prefix("+++ ")
         .or_else(|| line.strip_prefix("--- "))?
         .split_whitespace()
         .next()?;
-    if path == "/dev/null" {
-        return None;
-    }
-    let path = path
-        .trim_start_matches("a/")
-        .trim_start_matches("b/")
-        .trim_matches('"');
-    runtime_smart_context_bounded_string(path)
+    let (start, end) =
+        prodex_mojo_core::smart_context_markers::normalize_diff_file_path_token(token)
+            .expect("Mojo smart-context diff-path parser returned invalid output")?;
+    token.get(start..end).map(str::to_string)
 }
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_diff_hunk(
@@ -127,14 +56,9 @@ pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_diff_span(
     span: &str,
     prefix: char,
 ) -> Option<(usize, usize)> {
-    let span = span.strip_prefix(prefix)?;
-    let mut parts = span.splitn(2, ',');
-    let start = parts.next()?.parse::<usize>().ok()?;
-    let count = parts
-        .next()
-        .map(|count| count.parse::<usize>().ok())
-        .unwrap_or(Some(1))?;
-    Some((start, count))
+    let plan = prodex_mojo_core::smart_context_markers::parse_diff_span(span, prefix)
+        .expect("Mojo smart-context diff-span parser returned invalid output")?;
+    Some((plan.start, plan.count))
 }
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_diff_hunk_end(
@@ -165,59 +89,23 @@ pub(in crate::runtime_state_shared) fn runtime_smart_context_diff_hunk_end(
 pub(in crate::runtime_state_shared) fn runtime_smart_context_is_test_failure_line(
     line: &str,
 ) -> bool {
-    line.contains("test result: FAILED")
-        || line == "failures:"
-        || line.starts_with("failures:")
-        || line.starts_with("FAIL ")
-        || line.starts_with("FAILED ")
-        || line.contains(" panicked at ")
-        || (line.starts_with("---- ") && line.ends_with(" stdout ----"))
+    prodex_mojo_core::smart_context_markers::is_test_failure_line(line)
+        .expect("Mojo smart-context test-failure classifier returned invalid output")
 }
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_test_symbol(
     line: &str,
 ) -> Option<String> {
-    if let Some(symbol) = line
-        .strip_prefix("---- ")
-        .and_then(|line| line.strip_suffix(" stdout ----"))
-    {
-        return runtime_smart_context_bounded_string(symbol);
-    }
-    if let Some(rest) = line.strip_prefix("thread '")
-        && let Some((symbol, _)) = rest.split_once("' panicked at ")
-    {
-        return runtime_smart_context_bounded_string(symbol);
-    }
-    None
+    let (start, end) = prodex_mojo_core::smart_context_markers::test_symbol_span(line)
+        .expect("Mojo smart-context test-symbol parser returned invalid output")?;
+    line.get(start..end).map(str::to_string)
 }
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_error_code(
     line: &str,
 ) -> Option<String> {
-    if let Some(code) = runtime_smart_context_parse_bracketed_error_code(line) {
-        return Some(code);
-    }
-    if line.contains("error:") || line.contains("Error:") || line.contains("ERROR") {
-        return Some("error".to_string());
-    }
-    if let Some((_, rest)) = line.split_once("exit code ") {
-        let code = rest.split_whitespace().next()?;
-        return runtime_smart_context_bounded_string(&format!("exit_code_{code}"));
-    }
-    if let Some((_, rest)) = line.split_once("status code ") {
-        let code = rest.split_whitespace().next()?;
-        return runtime_smart_context_bounded_string(&format!("status_code_{code}"));
-    }
-    None
-}
-
-pub(in crate::runtime_state_shared) fn runtime_smart_context_parse_bracketed_error_code(
-    line: &str,
-) -> Option<String> {
-    let start = line.find("error[")? + "error[".len();
-    let rest = &line[start..];
-    let end = rest.find(']')?;
-    runtime_smart_context_bounded_string(&rest[..end])
+    prodex_mojo_core::smart_context_markers::error_code(line)
+        .expect("Mojo smart-context error-code parser returned invalid output")
 }
 
 pub(in crate::runtime_state_shared) fn runtime_smart_context_infer_command_kind(
@@ -249,17 +137,15 @@ pub(in crate::runtime_state_shared) fn runtime_smart_context_infer_command_kind(
 }
 
 fn runtime_smart_context_command_line_kind(line: &str) -> Option<&'static str> {
-    if line.starts_with("diff --git ") || line.starts_with("@@ ") {
-        return Some("diff");
+    use prodex_mojo_core::smart_context_markers::CommandLineKind;
+    match prodex_mojo_core::smart_context_markers::command_line_kind(line)
+        .expect("Mojo smart-context command-kind classifier returned invalid output")
+    {
+        Some(CommandLineKind::Python) => Some("python"),
+        Some(CommandLineKind::Diff) => Some("diff"),
+        Some(CommandLineKind::CargoTest) => Some("cargo-test"),
+        Some(CommandLineKind::CargoBuild) => Some("cargo-build"),
+        Some(CommandLineKind::NpmTest) => Some("npm-test"),
+        None => None,
     }
-    if line.contains("test result:") || line.starts_with("running ") && line.ends_with(" tests") {
-        return Some("cargo-test");
-    }
-    if line.contains("error: could not compile") {
-        return Some("cargo-build");
-    }
-    if line.starts_with("npm ERR!") || line.starts_with("FAIL ") {
-        return Some("npm-test");
-    }
-    (line == "Traceback (most recent call last):").then_some("python")
 }
