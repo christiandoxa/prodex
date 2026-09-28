@@ -888,6 +888,22 @@
           "provider_usage_cost",
           "provider_usage_merged_total"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/super_expose.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "super_expose_protocol_version_policy",
+          "super_expose_protocol_metadata_policy",
+          "super_expose_media_header_policy",
+          "super_expose_json_nesting_policy",
+          "super_expose_tool_argument_policy",
+          "super_expose_run_id_policy",
+          "super_expose_string_validation_policy"
+        ]
       }
     ],
     "removed": [
@@ -2946,6 +2962,167 @@
       "rust_owner_before": "total-token precedence and saturating input/output total fallback",
       "rust_test_oracle": "deleted; fixed tests cover explicit total, missing input, default missing output and u64 saturation",
       "rust_adapter_scope": "ProviderTokenUsage DTO API and Option<u64> mapping"
+    },
+    {
+      "domain": "super-expose/protocol",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust Super-expose protocol validation",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_expose.mojo",
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/super_expose.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "super_expose_protocol_version_policy",
+      "mojo_entry": "prodex_mojo_super_expose_protocol_version_supported_v1",
+      "consumer": "crates/prodex-app/src/super_expose/protocol.rs",
+      "consumer_marker": "prodex_mojo_core::rich::super_expose_protocol_version_supported",
+      "production_consumers": [
+        "crates/prodex-app/src/super_expose/protocol.rs"
+      ],
+      "rust_owner_before": "supported MCP protocol-version table membership used by initialize",
+      "rust_test_oracle": "deleted; existing preserved-version tests plus direct ABI fixtures cover current, legacy and unsupported versions",
+      "rust_adapter_scope": "stable initialize error text and result JSON construction"
+    },
+    {
+      "domain": "super-expose/protocol",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust Super-expose protocol validation",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_expose.mojo",
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/super_expose.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "super_expose_protocol_metadata_policy",
+      "mojo_entry": "prodex_mojo_super_expose_protocol_metadata_v1",
+      "consumer": "crates/prodex-app/src/super_expose/protocol/validation.rs",
+      "consumer_marker": "prodex_mojo_core::rich::super_expose_protocol_metadata",
+      "production_consumers": [
+        "crates/prodex-app/src/super_expose/protocol/validation.rs"
+      ],
+      "rust_owner_before": "header/body protocol-version precedence, current-version metadata requirements and Mcp-Method/Mcp-Name mismatch decisions",
+      "rust_test_oracle": "deleted; direct ABI fixtures cover unsupported-first precedence, version mismatch, metadata-required, method mismatch and name mismatch",
+      "rust_adapter_scope": "request-body field acquisition and exact HTTP/JSON-RPC error construction"
+    },
+    {
+      "domain": "super-expose/protocol",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust Super-expose protocol validation",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_expose.mojo",
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/super_expose.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "super_expose_media_header_policy",
+      "mojo_entry": "prodex_mojo_super_expose_media_header_v1",
+      "consumer": "crates/prodex-app/src/super_expose/protocol/validation.rs",
+      "consumer_marker": "prodex_mojo_core::rich::super_expose_content_type_allowed",
+      "production_consumers": [
+        "crates/prodex-app/src/super_expose/protocol/validation.rs"
+      ],
+      "rust_owner_before": "Content-Type and Accept media-type splitting, Unicode trim and ASCII case-insensitive application/json matching",
+      "rust_test_oracle": "deleted; direct ABI fixtures cover missing headers, parameters, comma lists, Unicode whitespace and mixed case",
+      "rust_adapter_scope": "HTTP header uniqueness acquisition and stable 415/406 response mapping"
+    },
+    {
+      "domain": "super-expose/protocol",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust Super-expose protocol validation",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_expose.mojo",
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/super_expose.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "super_expose_json_nesting_policy",
+      "mojo_entry": "prodex_mojo_super_expose_json_nesting_v1",
+      "consumer": "crates/prodex-app/src/super_expose/protocol/validation.rs",
+      "consumer_marker": "prodex_mojo_core::rich::super_expose_json_nesting_within_limit",
+      "production_consumers": [
+        "crates/prodex-app/src/super_expose/protocol/validation.rs"
+      ],
+      "rust_owner_before": "quote/escape-aware JSON brace/bracket nesting scan and malformed-close detection",
+      "rust_test_oracle": "deleted; direct ABI fixtures cover delimiters inside strings, exact depth limit, unmatched close and unterminated escape/string",
+      "rust_adapter_scope": "bounded HTTP body acquisition and JSON parser/error response orchestration"
+    },
+    {
+      "domain": "super-expose/protocol",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust Super-expose protocol validation",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_expose.mojo",
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/super_expose.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "super_expose_tool_argument_policy",
+      "mojo_entry": "prodex_mojo_super_expose_tool_argument_allowed_v1",
+      "consumer": "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
+      "consumer_marker": "prodex_mojo_core::rich::super_expose_tool_argument_allowed",
+      "production_consumers": [
+        "crates/prodex-app/src/super_expose/protocol/tool_contract.rs"
+      ],
+      "rust_owner_before": "per-tool allowed argument-key tables for all exposed Super/session tools",
+      "rust_test_oracle": "deleted; tool-contract and full Super-expose suites cover unknown-key fail-closed behavior and exec/full tool surfaces",
+      "rust_adapter_scope": "Serde object key iteration and stable unknown-argument error text"
+    },
+    {
+      "domain": "super-expose/protocol",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust Super-expose protocol validation",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_expose.mojo",
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/super_expose.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "super_expose_run_id_policy",
+      "mojo_entry": "prodex_mojo_super_expose_run_id_valid_v1",
+      "consumer": "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
+      "consumer_marker": "prodex_mojo_core::rich::super_expose_run_id_valid",
+      "production_consumers": [
+        "crates/prodex-app/src/super_expose/protocol/tool_contract.rs"
+      ],
+      "rust_owner_before": "spr_ run-id prefix and ASCII alphanumeric/underscore/hyphen validation",
+      "rust_test_oracle": "deleted; direct ABI and run-manager tests cover valid opaque run ids and invalid punctuation",
+      "rust_adapter_scope": "required-string acquisition and stable run_id error text"
+    },
+    {
+      "domain": "super-expose/protocol",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust Super-expose protocol validation",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_expose.mojo",
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/super_expose.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "super_expose_string_validation_policy",
+      "mojo_entry": "prodex_mojo_super_expose_string_valid_v1",
+      "consumer": "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
+      "consumer_marker": "prodex_mojo_core::rich::super_expose_string_valid",
+      "production_consumers": [
+        "crates/prodex-app/src/super_expose/protocol/tool_contract.rs"
+      ],
+      "rust_owner_before": "optional nonempty/max-byte and Unicode control-character rejection policy",
+      "rust_test_oracle": "deleted; existing optional-string test plus direct ABI fixtures cover Unicode text, C0/C1 controls and over-limit strings",
+      "rust_adapter_scope": "Serde optional/null/string extraction, UUID normalization for thread_id and stable field-specific error text"
     }
   ],
   "rust_semantic_reductions": [

@@ -4,36 +4,13 @@ pub(super) fn validate_tool_arguments(
     tool: &str,
     arguments: &Value,
 ) -> std::result::Result<(), String> {
-    let allowed = match tool {
-        "prodex_super_start" => [
-            "task",
-            "model",
-            "reasoning_effort",
-            "provider",
-            "profile",
-            "sub_agents",
-        ]
-        .as_slice(),
-        "prodex_super_status" | "prodex_super_result" | "prodex_super_cancel" => {
-            ["run_id"].as_slice()
-        }
-        "prodex_super_events" => ["run_id", "after_seq", "limit"].as_slice(),
-        "prodex_super_list" => [].as_slice(),
-        "prodex_session_prompt_write" => ["message", "cwd", "prodex_pid", "thread_id"].as_slice(),
-        "prodex_session_preempt" => ["cwd", "prodex_pid", "thread_id"].as_slice(),
-        "prodex_session_output_read" => {
-            ["cursor", "limit", "wait_ms", "prodex_pid", "thread_id"].as_slice()
-        }
-        "prodex_super_exec" => ["program", "args", "cwd", "env", "stdin", "timeout_ms"].as_slice(),
-        _ => return Ok(()),
-    };
     let Some(object) = arguments.as_object() else {
         return Err("tool arguments must be an object".to_string());
     };
-    if let Some(unknown) = object
-        .keys()
-        .find(|key| !allowed.iter().any(|candidate| candidate == key))
-    {
+    if let Some(unknown) = object.keys().find(|key| {
+        !prodex_mojo_core::rich::super_expose_tool_argument_allowed(tool, key)
+            .expect("Mojo Super expose tool-argument policy returned invalid output")
+    }) {
         return Err(format!("unknown tool argument: {unknown}"));
     }
     Ok(())
@@ -155,10 +132,8 @@ pub(super) fn run_id_schema() -> Value {
 
 pub(super) fn required_run_id(arguments: &Value) -> std::result::Result<String, String> {
     let value = required_string(arguments, "run_id", 128)?;
-    if value.starts_with("spr_")
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    if prodex_mojo_core::rich::super_expose_run_id_valid(&value)
+        .expect("Mojo Super expose run-id policy returned invalid output")
     {
         Ok(value)
     } else {
@@ -219,10 +194,8 @@ pub(super) fn optional_string(
     let Some(value) = value.as_str() else {
         return Err(format!("{name} must be a string"));
     };
-    if value.is_empty()
-        || value.len() > max_bytes
-        || value.as_bytes().contains(&0)
-        || value.chars().any(char::is_control)
+    if !prodex_mojo_core::rich::super_expose_string_valid(value, max_bytes)
+        .expect("Mojo Super expose optional-string policy returned invalid output")
     {
         return Err(format!("{name} is empty or too large"));
     }

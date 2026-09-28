@@ -5,20 +5,56 @@ pub(super) fn validate_mcp_request_headers(
     method: &str,
     headers: &McpRequestHeaders,
 ) -> Option<Response<std::io::Cursor<Vec<u8>>>> {
+    use prodex_mojo_core::rich::SuperExposeProtocolDecision;
+
     let params = message.get("params").and_then(Value::as_object);
     let body_version = request_body_protocol_version(method, params);
-    let header_version = headers.protocol_version.as_deref();
-    if let Some(response) = validate_protocol_version(message, header_version, body_version) {
-        return Some(response);
-    }
-    validate_current_protocol_metadata(
-        message,
+    let body_name = (method == "tools/call")
+        .then(|| {
+            params
+                .and_then(|params| params.get("name"))
+                .and_then(Value::as_str)
+        })
+        .flatten();
+    let decision = prodex_mojo_core::rich::super_expose_protocol_metadata(
         method,
-        headers,
-        params,
-        header_version,
+        headers.protocol_version.as_deref(),
         body_version,
+        headers.mcp_method.as_deref(),
+        headers.mcp_name.as_deref(),
+        body_name,
     )
+    .expect("Mojo Super expose protocol metadata policy returned invalid output");
+
+    match decision {
+        SuperExposeProtocolDecision::Ok => None,
+        SuperExposeProtocolDecision::UnsupportedVersion => Some(mcp_json_error(
+            400,
+            request_id(message),
+            MCP_ERROR_UNSUPPORTED_VERSION,
+            "unsupported protocol version",
+            Some(json!({
+                "supported": MCP_PROTOCOL_VERSIONS,
+                "requested": headers.protocol_version.as_deref().or(body_version),
+            })),
+        )),
+        SuperExposeProtocolDecision::VersionMismatch => Some(mcp_error_response(
+            400,
+            request_id(message),
+            MCP_ERROR_HEADER_MISMATCH,
+            "protocol version header mismatch",
+        )),
+        SuperExposeProtocolDecision::MetadataRequired => Some(header_mismatch(
+            message,
+            "protocol version metadata is required",
+        )),
+        SuperExposeProtocolDecision::MethodMismatch => {
+            Some(header_mismatch(message, "Mcp-Method header mismatch"))
+        }
+        SuperExposeProtocolDecision::NameMismatch => {
+            Some(header_mismatch(message, "Mcp-Name header mismatch"))
+        }
+    }
 }
 
 fn request_body_protocol_version<'a>(
@@ -35,82 +71,6 @@ fn request_body_protocol_version<'a>(
         .and_then(Value::as_object)
         .and_then(|meta| meta.get("io.modelcontextprotocol/protocolVersion"))
         .and_then(Value::as_str)
-}
-
-fn validate_protocol_version(
-    message: &serde_json::Map<String, Value>,
-    header_version: Option<&str>,
-    body_version: Option<&str>,
-) -> Option<Response<std::io::Cursor<Vec<u8>>>> {
-    if let Some(version) = header_version.or(body_version)
-        && !MCP_PROTOCOL_VERSIONS.contains(&version)
-    {
-        return Some(mcp_json_error(
-            400,
-            request_id(message),
-            MCP_ERROR_UNSUPPORTED_VERSION,
-            "unsupported protocol version",
-            Some(json!({
-                "supported": MCP_PROTOCOL_VERSIONS,
-                "requested": header_version.or(body_version),
-            })),
-        ));
-    }
-    if header_version.is_some_and(|header| body_version.is_some_and(|body| body != header)) {
-        return Some(mcp_error_response(
-            400,
-            request_id(message),
-            MCP_ERROR_HEADER_MISMATCH,
-            "protocol version header mismatch",
-        ));
-    }
-    None
-}
-
-fn validate_current_protocol_metadata(
-    message: &serde_json::Map<String, Value>,
-    method: &str,
-    headers: &McpRequestHeaders,
-    params: Option<&serde_json::Map<String, Value>>,
-    header_version: Option<&str>,
-    body_version: Option<&str>,
-) -> Option<Response<std::io::Cursor<Vec<u8>>>> {
-    let current = header_version == Some(MCP_CURRENT_PROTOCOL_VERSION)
-        || body_version == Some(MCP_CURRENT_PROTOCOL_VERSION);
-    if !current {
-        return validate_legacy_method_header(message, method, headers);
-    }
-    if header_version != Some(MCP_CURRENT_PROTOCOL_VERSION)
-        || body_version != Some(MCP_CURRENT_PROTOCOL_VERSION)
-    {
-        return Some(header_mismatch(
-            message,
-            "protocol version metadata is required",
-        ));
-    }
-    if headers.mcp_method.as_deref() != Some(method) {
-        return Some(header_mismatch(message, "Mcp-Method header mismatch"));
-    }
-    if method != "tools/call" {
-        return None;
-    }
-    let body_name = params
-        .and_then(|params| params.get("name"))
-        .and_then(Value::as_str);
-    (headers.mcp_name.as_deref() != body_name)
-        .then(|| header_mismatch(message, "Mcp-Name header mismatch"))
-}
-
-fn validate_legacy_method_header(
-    message: &serde_json::Map<String, Value>,
-    method: &str,
-    headers: &McpRequestHeaders,
-) -> Option<Response<std::io::Cursor<Vec<u8>>>> {
-    headers
-        .mcp_method
-        .as_deref()
-        .is_some_and(|header| header != method)
-        .then(|| header_mismatch(message, "Mcp-Method header mismatch"))
 }
 
 fn header_mismatch(
@@ -149,54 +109,18 @@ pub(crate) fn mcp_origin_allowed(host: &str, origin: Option<&str>) -> bool {
 }
 
 pub(crate) fn mcp_content_type_allowed(value: Option<&str>) -> bool {
-    value
-        .and_then(|value| value.split(';').next())
-        .is_some_and(|value| value.trim().eq_ignore_ascii_case("application/json"))
+    prodex_mojo_core::rich::super_expose_content_type_allowed(value)
+        .expect("Mojo Super expose Content-Type policy returned invalid output")
 }
 
 pub(crate) fn mcp_accept_allowed(value: Option<&str>) -> bool {
-    let Some(value) = value else {
-        return false;
-    };
-    value
-        .split(',')
-        .filter_map(|part| part.split(';').next())
-        .any(|media| media.trim().eq_ignore_ascii_case("application/json"))
+    prodex_mojo_core::rich::super_expose_accept_allowed(value)
+        .expect("Mojo Super expose Accept policy returned invalid output")
 }
 
 pub(super) fn mcp_json_nesting_within_limit(body: &[u8], limit: usize) -> bool {
-    let mut depth = 0usize;
-    let mut escaped = false;
-    let mut in_string = false;
-    for byte in body {
-        if in_string {
-            if escaped {
-                escaped = false;
-            } else if *byte == b'\\' {
-                escaped = true;
-            } else if *byte == b'"' {
-                in_string = false;
-            }
-            continue;
-        }
-        match *byte {
-            b'"' => in_string = true,
-            b'{' | b'[' => {
-                depth += 1;
-                if depth > limit {
-                    return false;
-                }
-            }
-            b'}' | b']' => {
-                let Some(next_depth) = depth.checked_sub(1) else {
-                    return false;
-                };
-                depth = next_depth;
-            }
-            _ => {}
-        }
-    }
-    !in_string && !escaped && depth == 0
+    prodex_mojo_core::rich::super_expose_json_nesting_within_limit(body, limit)
+        .expect("Mojo Super expose JSON nesting policy returned invalid output")
 }
 
 pub(super) fn request_id(message: &serde_json::Map<String, Value>) -> Option<Value> {

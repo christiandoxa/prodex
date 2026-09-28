@@ -8,6 +8,9 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/rich/super_expose.rs",
+  "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
+  "crates/prodex-app/src/super_expose/protocol/validation.rs",
   "crates/prodex-mojo-core/src/provider_usage.rs",
   "crates/prodex-provider-core/src/usage.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace.rs",
@@ -258,6 +261,10 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-mojo-core/src/rich/super_expose.rs",
+  "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
+  "crates/prodex-app/src/super_expose/protocol/validation.rs",
+  "crates/prodex-app/src/super_expose/protocol.rs",
   "crates/prodex-mojo-core/src/provider_usage.rs",
   "crates/prodex-provider-core/src/usage.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace.rs",
@@ -642,6 +649,10 @@ const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
 const SUPER_EXPOSE_FILE = "crates/prodex-cli/src/lib.rs";
+const SUPER_EXPOSE_PROTOCOL_FILE = "crates/prodex-app/src/super_expose/protocol.rs";
+const SUPER_EXPOSE_VALIDATION_FILE = "crates/prodex-app/src/super_expose/protocol/validation.rs";
+const SUPER_EXPOSE_TOOL_CONTRACT_FILE = "crates/prodex-app/src/super_expose/protocol/tool_contract.rs";
+const SUPER_EXPOSE_RICH_FILE = "crates/prodex-mojo-core/src/rich/super_expose.rs";
 const GEMINI_SCHEMA_FILE = "crates/prodex-provider-core/src/translators/gemini/request/schema.rs";
 const GEMINI_TOOLS_FILE = "crates/prodex-provider-core/src/translators/gemini/request/tools.rs";
 const GEMINI_STATUS_FILE = "crates/prodex-provider-core/src/translators/gemini/response/status.rs";
@@ -1156,6 +1167,78 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === CLI_RUNTIME_FEATURE_FILE &&
       /\bfn\s+(?:rust_plan|rollout_budget_reminders|to_codex_config_args_rust|mojo_feature_plan_matches_rust_oracle_for_seeded_inputs)\s*\(/u.test(contents))
     .map(([filePath]) => `${filePath}: contains a Rust runtime-feature planner or oracle`);
+  const superExposeProtocolViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SUPER_EXPOSE_PROTOCOL_FILE) {
+      const required = "prodex_mojo_core::rich::super_expose_protocol_version_supported(";
+      const violations = contents.includes(required)
+        ? [] : [filePath + ": Super-expose initialize version policy must retain Mojo call " + required];
+      if (contents.includes("MCP_PROTOCOL_VERSIONS.contains(&version)")) {
+        violations.push(filePath + ": contains restored Rust MCP protocol-version membership semantics");
+      }
+      return violations;
+    }
+    if (filePath === SUPER_EXPOSE_VALIDATION_FILE) {
+      const required = [
+        "prodex_mojo_core::rich::super_expose_protocol_metadata(",
+        "prodex_mojo_core::rich::super_expose_content_type_allowed(",
+        "prodex_mojo_core::rich::super_expose_accept_allowed(",
+        "prodex_mojo_core::rich::super_expose_json_nesting_within_limit(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": Super-expose validation must retain Mojo call " + call);
+      for (const retired of [
+        "fn validate_protocol_version(",
+        "fn validate_current_protocol_metadata(",
+        "fn validate_legacy_method_header(",
+        ".split(';')",
+        ".split(',')",
+        "let mut depth = 0usize",
+      ]) {
+        if (contents.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust Super-expose protocol/media/nesting semantics");
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === SUPER_EXPOSE_TOOL_CONTRACT_FILE) {
+      const required = [
+        "prodex_mojo_core::rich::super_expose_tool_argument_allowed(",
+        "prodex_mojo_core::rich::super_expose_run_id_valid(",
+        "prodex_mojo_core::rich::super_expose_string_valid(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": Super-expose tool contract must retain Mojo call " + call);
+      for (const retired of [
+        "let allowed = match tool",
+        "value.starts_with(\"spr_\")",
+        "value.chars().any(char::is_control)",
+      ]) {
+        if (contents.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust Super-expose tool/string semantics");
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === SUPER_EXPOSE_RICH_FILE) {
+      const required = [
+        "prodex_mojo_super_expose_protocol_version_supported_v1(",
+        "prodex_mojo_super_expose_protocol_metadata_v1(",
+        "prodex_mojo_super_expose_media_header_v1(",
+        "prodex_mojo_super_expose_json_nesting_v1(",
+        "prodex_mojo_super_expose_tool_argument_allowed_v1(",
+        "prodex_mojo_super_expose_run_id_valid_v1(",
+        "prodex_mojo_super_expose_string_valid_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": Super-expose ABI adapter must retain " + call);
+    }
+    return [];
+  });
   const superExposeViolations = files
     .filter(([filePath, contents]) => filePath === SUPER_EXPOSE_FILE &&
       (!contents.includes("prodex_mojo_core::launch::find_super_expose_alias_index") ||
@@ -1778,7 +1861,7 @@ export function findViolations(files) {
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...cliRuntimeFeatureViolations,
-    ...superExposeViolations,
+    ...superExposeProtocolViolations, ...superExposeViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSystemInstructionViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,

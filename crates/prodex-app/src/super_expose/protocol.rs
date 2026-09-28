@@ -394,7 +394,9 @@ fn initialize_result(
         .get("protocolVersion")
         .and_then(Value::as_str)
         .ok_or_else(|| "protocolVersion is required".to_string())?;
-    if !MCP_PROTOCOL_VERSIONS.contains(&version) {
+    if !prodex_mojo_core::rich::super_expose_protocol_version_supported(version)
+        .expect("Mojo Super expose protocol-version policy returned invalid output")
+    {
         return Err("unsupported protocol version".to_string());
     }
     Ok(json!({
