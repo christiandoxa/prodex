@@ -3,7 +3,7 @@ use crate::{
     ProfileProvider, parse_kiro_model_catalog_text, read_provider_model_catalog_text,
 };
 use prodex_cli::SubAgentReasoningEffort;
-use prodex_mojo_core::rich::{CatalogModel, merge_catalog_ids};
+use prodex_mojo_core::rich::{CatalogModel, ascii_casefold_equal_exact, merge_catalog_ids};
 use prodex_provider_core::{
     PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderModelChoice,
     provider_implementation_registry, provider_model_reasoning_resolution,
@@ -297,7 +297,10 @@ fn catalog_entry_is_selectable(value: &Value) -> bool {
         && value
             .get("visibility")
             .and_then(Value::as_str)
-            .is_none_or(|visibility| visibility.eq_ignore_ascii_case("list"))
+            .is_none_or(|visibility| {
+                ascii_casefold_equal_exact(visibility, "list")
+                    .expect("Mojo sub-agent catalog visibility comparison failed")
+            })
 }
 
 pub(crate) fn canonical_sub_agent_model_choices(

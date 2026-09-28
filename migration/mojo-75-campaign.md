@@ -3214,3 +3214,13 @@ were deleted from resume/provider display, websocket upgrade detection, Content-
 authorization/account headers, generic local-rewrite header lookup, turn-state/cookie
 filtering, Sec-WebSocket-Key lookup, and Smart Context turn-metadata detection. Rust
 retains header parsing/validation, forwarding, provider resolution, and routing actions.
+
+
+## Remaining catalog/header exact-identity cleanup
+
+Copilot runtime-token <redacted> catalog-key detection, sub-agent visibility, DeepSeek
+conversation namespace headers, Gemini compact metadata header replacement, and
+Super-expose trusted-origin host matching now reuse the authoritative exact ASCII-casefold
+Mojo primitive. The remaining Rust eq_ignore_ascii_case/lowercase copies in these paths
+were deleted. Rust retains JSON/catalog acquisition, URL parsing, namespace selection,
+header mutation, and caller-specific routing behavior.
