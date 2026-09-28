@@ -3146,3 +3146,13 @@ Kiro model endpoint lookup now reuses the exact non-trimming rich-catalog Mojo
 resolver. The Rust eq_ignore_ascii_case scan over model IDs was deleted. Mixed-case
 model IDs still resolve, while space-padded IDs remain a miss exactly as before; Rust
 retains response JSON ownership and the existing Mojo model-not-found shape.
+
+
+## Copilot and Kiro profile catalog dedup cleanup
+
+Copilot runtime-token model catalogs and Kiro profile model catalogs now reuse the
+authoritative rich-catalog Mojo merge planner for case-insensitive canonical-ID
+deduplication. The two Rust lowercase BTreeSet filters were deleted. Both callers
+normalize IDs before the Mojo boundary, so first-win ordering, whitespace behavior,
+hard limits, provider-specific normalization, and downstream validation remain
+unchanged.
