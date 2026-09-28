@@ -140,6 +140,30 @@ def catalog_find(
     return -1
 
 
+def catalog_find_exact(
+    model_ids: Pointer[mut=False, ProdexRichStringView, _],
+    model_count: Int64,
+    aliases: Pointer[mut=False, ProdexRichStringView, _],
+    alias_models: Pointer[mut=False, Int64, _],
+    alias_count: Int64,
+    query: ProdexRichStringView,
+) -> Int64:
+    if query.len == 0:
+        return -1
+    for model_index in range(model_count):
+        if catalog_view_equal_full(query, model_ids[unsafe_offset=model_index]):
+            return model_index
+        for alias_index in range(alias_count):
+            if (
+                alias_models[unsafe_offset=alias_index] == model_index
+                and catalog_view_equal_full(query, aliases[unsafe_offset=alias_index])
+            ):
+                return model_index
+    return -1
+
+
+
+
 def catalog_choice_view(
     kind: Int64,
     index: Int64,
@@ -524,6 +548,49 @@ def prodex_mojo_rich_catalog_resolve_v1(
         unsafe_from_address=Int(output_index_address)
     )
     output[] = catalog_find(model_ids, model_count, aliases, alias_models, alias_count, query)
+    return RICH_STATUS_OK
+
+
+@export("prodex_mojo_rich_catalog_resolve_exact_v1")
+def prodex_mojo_rich_catalog_resolve_exact_v1(
+    abi_version: Int64,
+    model_ids_address: UInt,
+    model_count: Int64,
+    aliases_address: UInt,
+    alias_models_address: UInt,
+    alias_count: Int64,
+    query_address: UInt,
+    output_index_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if query_address == 0 or output_index_address == 0 or not catalog_prepare(
+        model_ids_address, model_count, aliases_address, alias_models_address, alias_count
+    ):
+        return RICH_STATUS_INVALID
+    var model_ids = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(model_ids_address)
+    )
+    var aliases = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(aliases_address)
+    )
+    var alias_models = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(alias_models_address)
+    )
+    var query = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(query_address)
+    )[].copy()
+    if (
+        not catalog_valid_views(model_ids, model_count, aliases, alias_models, alias_count)
+        or not rich_view_valid(query, CATALOG_MAX_QUERY_BYTES)
+    ):
+        return RICH_STATUS_UTF8
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_index_address)
+    )
+    output[] = catalog_find_exact(
+        model_ids, model_count, aliases, alias_models, alias_count, query
+    )
     return RICH_STATUS_OK
 
 

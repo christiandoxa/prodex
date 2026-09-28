@@ -3101,3 +3101,13 @@ BTreeSet lowercase index was deleted. Rust still loads profile/catalog files, fi
 selectability, preserves source precedence and model limits, and materializes accepted
 JSON entries. Aliases are intentionally omitted from the merge input to preserve the
 historical canonical-ID-only behavior.
+
+
+## Exact catalog identity migration
+
+The rich catalog now exposes a separate exact case-insensitive resolver that does not
+trim the query. Super main-model canonical/alias matching and runtime provider dynamic
+model lookup use this Mojo operation, deleting their Rust eq_ignore_ascii_case scans.
+The existing trimmed resolver remains unchanged for callers whose contract intentionally
+normalizes surrounding whitespace. Focused coverage fixes mixed-case canonical and alias
+matching while proving that a space-padded query remains a miss.
