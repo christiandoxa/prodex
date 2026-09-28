@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use dirs::{data_local_dir, home_dir};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use serde_json::Value;
 use std::env;
 use std::ffi::OsString;
@@ -102,10 +103,15 @@ fn normalize_kiro_codebase_memory_config(path: &Path) -> Result<bool> {
             .and_then(|command| Path::new(command).file_name())
             .and_then(|name| name.to_str())
             .is_some_and(|name| {
-                name.eq_ignore_ascii_case("codebase-memory-mcp")
-                    || name.eq_ignore_ascii_case("codebase-memory-mcp.exe")
+                ascii_casefold_equal_exact(name, "codebase-memory-mcp")
+                    .expect("Mojo Kiro MCP executable comparison failed")
+                    || ascii_casefold_equal_exact(name, "codebase-memory-mcp.exe")
+                        .expect("Mojo Kiro MCP executable comparison failed")
             });
-        if !name.eq_ignore_ascii_case("codebase-memory-mcp") && !command_is_codebase_memory {
+        if !ascii_casefold_equal_exact(name, "codebase-memory-mcp")
+            .expect("Mojo Kiro MCP server-name comparison failed")
+            && !command_is_codebase_memory
+        {
             continue;
         }
         let disabled = server

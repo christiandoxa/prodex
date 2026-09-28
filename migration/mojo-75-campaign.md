@@ -3193,3 +3193,14 @@ normalizer, token extractor, and command matching implementation were deleted wi
 semantic fallback. The full focused exact-output caller suite passes. The canonical
 broad report counts **62,249 Mojo LOC** and **194,562 Rust production LOC**, totaling
 **256,811 LOC**: **24.24% Mojo**.
+
+
+## Generic exact ASCII identity cleanup
+
+The exact non-trimming ASCII-casefold Mojo primitive now replaces additional Rust
+eq_ignore_ascii_case decisions in Presidio fail-mode enforcement, goal-resume command
+recognition, Kiro Codebase Memory executable/server matching, ChatGPT account labels,
+OpenAI residency and tmux detection, Kiro/provider GET model routing, Smart Context
+exact mode, and Super-expose Prodex/Codex process-role detection. Callers retain any
+historical trim step plus path/header/process acquisition and routing behavior; no
+Rust semantic equality fallback remains in these migrated paths.

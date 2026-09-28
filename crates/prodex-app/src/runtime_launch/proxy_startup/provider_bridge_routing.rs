@@ -3,6 +3,7 @@ use super::super::provider_models::{
 };
 use super::{RuntimeProviderBridgeKind, runtime_provider_label};
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_provider_core::{
     ProviderCapabilityStatus, ProviderEndpoint, provider_adapter, provider_model_fallback_chain,
 };
@@ -41,7 +42,9 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_models_buffered
     method: &str,
     path_and_query: &str,
 ) -> Option<RuntimeHeapTrimmedBufferedResponseParts> {
-    if !method.eq_ignore_ascii_case("GET") {
+    if !ascii_casefold_equal_exact(method, "GET")
+        .expect("Mojo provider models-method comparison failed")
+    {
         return None;
     }
     let path = path_without_query(path_and_query);

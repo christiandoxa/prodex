@@ -56,6 +56,7 @@ use crate::runtime_kiro_acp::{
 };
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest};
 use anyhow::{Context, Result};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 #[cfg(test)]
 use prodex_provider_core::kiro_provider_core_responses_items_from_chat_message as runtime_kiro_responses_items_from_chat_message;
 use prodex_provider_core::{
@@ -108,7 +109,9 @@ pub(super) fn runtime_kiro_models_buffered_response(
     method: &str,
     path_and_query: &str,
 ) -> Option<RuntimeHeapTrimmedBufferedResponseParts> {
-    if !method.eq_ignore_ascii_case("GET") {
+    if !ascii_casefold_equal_exact(method, "GET")
+        .expect("Mojo Kiro models-method comparison failed")
+    {
         return None;
     }
     let path = path_without_query(path_and_query);

@@ -3962,16 +3962,25 @@
       "consumer_marker": "ascii_casefold_equal_exact",
       "production_consumers": [
         "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-        "crates/prodex-app/src/app_commands/super_main_prompt.rs"
+        "crates/prodex-app/src/app_commands/super_main_prompt.rs",
+        "crates/prodex-app/src/app_commands/presidio.rs",
+        "crates/prodex-app/src/app_commands/runtime_launch/goal_resume.rs",
+        "crates/prodex-app/src/profile_commands/kiro_environment.rs",
+        "crates/prodex-app/src/quota_support/auth.rs",
+        "crates/prodex-app/src/quota_support/codex_openai_auth.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs",
+        "crates/prodex-app/src/runtime_proxy/smart_context/runtime_rehydrate/basic.rs",
+        "crates/prodex-app/src/super_expose/session_prompt_write/process.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-      "rust_owner_before": "exact ASCII case-insensitive equality for catalog source IDs, visibility labels, reasoning efforts, canonical model selections, remembered models, and prompt selections",
+      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/prompt identity plus runtime commands, fail modes, account labels, executable names, HTTP methods, smart-context mode, and process-role detection",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo equality coverage preserves empty strings, mixed case, and whitespace sensitivity, while Super catalog/prompt caller tests preserve selection behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "caller-owned iteration, string acquisition, DTO selection, prompt rendering, and exact case-sensitive fast-path where ordering semantics require it"
+      "rust_adapter_scope": "caller-owned trimming where historically required, string/path/header acquisition, iteration, DTO/process ownership, routing decisions, and rendering; Mojo owns exact ASCII-folded equality only"
     },
     {
       "name": "gemini_guardrail_text_classification",

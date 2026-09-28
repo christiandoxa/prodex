@@ -19,6 +19,7 @@ use anyhow::{Context, Result, bail};
 use chrono::Local;
 use codex_config::codex_non_openai_model_provider;
 use prodex_core::AppPaths;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_quota::{AuthSummary, UsageAuth, UsageAuthSyncOutcome, UsageAuthSyncSource};
 use prodex_shared_types::StoredAuth;
 use reqwest::blocking::Client;
@@ -523,7 +524,10 @@ impl ChatgptAccountEntry {
                 self.structure
                     .as_deref()
                     .map(str::trim)
-                    .filter(|structure| structure.eq_ignore_ascii_case("personal"))
+                    .filter(|structure| {
+                        ascii_casefold_equal_exact(structure, "personal")
+                            .expect("Mojo ChatGPT account-structure comparison failed")
+                    })
                     .map(|_| "Personal".to_string())
             })
     }
