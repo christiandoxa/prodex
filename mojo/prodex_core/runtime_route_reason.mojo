@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
+from rich_text import rich_codepoint_width, rich_trim_bounds, rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
 
 comptime ROUTE_REASON_ABI_VERSION: Int64 = 1
@@ -156,3 +156,49 @@ def prodex_runtime_route_reason_unknown_span_v1(
     output[0] = start if valid else -1
     output[1] = end if valid else -1
     return 1 if valid else 0
+
+
+@export("prodex_runtime_route_identifier_span_v1")
+def prodex_runtime_route_identifier_span_v1(
+    abi_version: Int64,
+    address: UInt,
+    length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != ROUTE_REASON_ABI_VERSION
+        or length < 0
+        or (length > 0 and address == 0)
+        or output_address == 0
+    ):
+        return ROUTE_REASON_INVALID
+
+    var view = reason_view(address, length)
+    if not rich_view_valid(view, length):
+        return ROUTE_REASON_INVALID
+
+    var bounds = rich_trim_bounds(view)
+    var start = bounds[0]
+    var full_end = bounds[1]
+    var end = full_end
+    var truncated = False
+
+    if full_end - start > ROUTE_REASON_MAX_IDENTIFIER_BYTES:
+        var source = rich_view_ptr(view)
+        var cursor = start
+        var limit = start + ROUTE_REASON_MAX_IDENTIFIER_BYTES
+        while cursor < full_end:
+            var width = rich_codepoint_width(source[unsafe_offset=cursor])
+            if cursor + width > limit:
+                break
+            cursor += width
+        end = cursor
+        truncated = end < full_end
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[0] = start
+    output[1] = end
+    output[2] = Int64(truncated)
+    return 0

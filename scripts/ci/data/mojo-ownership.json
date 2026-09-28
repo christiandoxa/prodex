@@ -863,7 +863,8 @@
         "operations": [
           "runtime_route_reason_lookup",
           "runtime_route_reason_stage",
-          "runtime_route_reason_unknown_label"
+          "runtime_route_reason_unknown_label",
+          "runtime_route_safe_identifier"
         ]
       }
     ],
@@ -2753,6 +2754,29 @@
       "rust_owner_before": "trim, maximum-length and safe-character normalization for unknown reason labels",
       "rust_test_oracle": "deleted; fixed tests cover trimmed safe unknown labels, unsafe labels, uppercase labels and exact-known misses",
       "rust_adapter_scope": "borrowed UTF-8 slice materialization and unknown-string ownership"
+    },
+    {
+      "name": "runtime_route_safe_identifier",
+      "domain": "runtime-proxy/route-decision",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_route_identifier_span_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_route_reason.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/route_decision_trace.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_route_reason::safe_identifier",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/route_decision_trace.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_route_reason.rs",
+      "rust_owner_before": "route-decision identifier Unicode trim and UTF-8-safe 96-byte truncation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; route-decision trace tests plus direct ABI smoke cover trim, short identifiers, ASCII boundary and multibyte UTF-8 truncation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "owned String materialization and stable trace DTO/Serde API"
     }
   ],
   "rust_semantic_reductions": [

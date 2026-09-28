@@ -8,6 +8,7 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-runtime-proxy/src/route_decision_trace.rs",
   "crates/prodex-mojo-core/src/runtime_route_reason.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
   "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
@@ -255,6 +256,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-runtime-proxy/src/route_decision_trace.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
   "crates/prodex-runtime-tuning/src/mojo.rs",
   "crates/prodex-runtime-tuning/src/lib.rs",
@@ -1454,6 +1456,19 @@ export function findViolations(files) {
     return [];
   });
   const routeReasonViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-proxy/src/route_decision_trace.rs") {
+      const required = "prodex_mojo_core::runtime_route_reason::safe_identifier(";
+      const violations = contents.includes(required)
+        ? [] : [filePath + ": route-decision identifier migration must retain Mojo call " + required];
+      if (
+        contents.includes("while !value.is_char_boundary(end)")
+        || contents.includes("RUNTIME_ROUTE_DECISION_TRACE_MAX_IDENTIFIER_BYTES;")
+           && contents.includes("value[..end].to_string()")
+      ) {
+        violations.push(filePath + ": contains restored Rust route-decision identifier semantics");
+      }
+      return violations;
+    }
     if (filePath === "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs") {
       const required = [
         "prodex_mojo_core::runtime_route_reason::lookup(",
@@ -1477,6 +1492,7 @@ export function findViolations(files) {
         "prodex_runtime_route_reason_lookup_v1(",
         "prodex_runtime_route_reason_stage_v1(",
         "prodex_runtime_route_reason_unknown_span_v1(",
+        "prodex_runtime_route_identifier_span_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))

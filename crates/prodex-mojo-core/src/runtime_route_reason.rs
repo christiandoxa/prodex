@@ -23,6 +23,12 @@ unsafe extern "C" {
         length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_runtime_route_identifier_span_v1(
+        abi_version: i64,
+        address: u64,
+        length: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 fn signed_len(value: &str) -> Result<i64, MojoError> {
@@ -64,6 +70,32 @@ pub fn stage(kind: u8) -> Result<u8, MojoError> {
     let stage = u8::try_from(stage).map_err(|_| MojoError::InvalidOutput)?;
     (stage <= 10)
         .then_some(stage)
+        .ok_or(MojoError::InvalidOutput)
+}
+
+pub fn safe_identifier(value: &str) -> Result<(&str, bool), MojoError> {
+    let mut span = [-1_i64; 3];
+    let status = unsafe {
+        prodex_runtime_route_identifier_span_v1(
+            ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            signed_len(value)?,
+            span.as_mut_ptr() as usize as u64,
+        )
+    };
+    if status != 0 {
+        return Err(MojoError::InvalidInput);
+    }
+    let start = usize::try_from(span[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let end = usize::try_from(span[1]).map_err(|_| MojoError::InvalidOutput)?;
+    let truncated = match span[2] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    value
+        .get(start..end)
+        .map(|value| (value, truncated))
         .ok_or(MojoError::InvalidOutput)
 }
 
@@ -111,5 +143,10 @@ mod tests {
         );
         assert_eq!(normalize_unknown("not safe / secret").unwrap(), None);
         assert_eq!(stage(25).unwrap(), 1);
+        assert_eq!(safe_identifier("  model-x  ").unwrap(), ("model-x", false));
+        let long = format!("{}é", "a".repeat(95));
+        let (safe, truncated) = safe_identifier(&long).unwrap();
+        assert_eq!(safe, "a".repeat(95));
+        assert!(truncated);
     }
 }
