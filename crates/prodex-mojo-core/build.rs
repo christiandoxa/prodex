@@ -488,6 +488,7 @@ fn selected_sources() -> Vec<&'static str> {
     {
         sources.push("../../mojo/prodex_core/smart_context_normalization.mojo");
         sources.push("../../mojo/prodex_core/smart_context_artifact_ref.mojo");
+        sources.push("../../mojo/prodex_core/smart_context_markers.mojo");
         sources.push("../../mojo/prodex_core/rich_abi.mojo");
         sources.push("../../mojo/prodex_core/chat_tools.mojo");
         sources.push("../../mojo/prodex_core/openai_chat_request.mojo");

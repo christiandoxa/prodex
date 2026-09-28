@@ -2693,3 +2693,23 @@ self-test, ownership, and authority guards pass; ownership now reports
 **57,977 reachable Mojo LOC** and **192,640 Rust production LOC**, totaling
 **250,617 LOC**: **23.13% Mojo**. The 75% project target remains unmet, with
 **519,943 additional Mojo LOC** required at this Rust volume.
+
+## Smart-context semantic marker migration
+
+Smart-context semantic marker parsing now uses
+`mojo/prodex_core/smart_context_markers.mojo` for file-location and file-path
+classification, diff path/span parsing, test-failure and test-symbol detection,
+error-code extraction, and per-line command-kind classification. Rust retains
+line/token iteration, diff-hunk end scanning, command-kind aggregation precedence,
+DTO/string materialization, and semantic-range storage; the former branch parser
+implementation in `semantic_index/markers.rs` was deleted without a fallback.
+
+Validation passes the direct ABI smoke test, the semantic-line-index fixture, and
+the bounded semantic-index fixture. Edge coverage includes Unicode whitespace
+around exit/status codes, diff path quoting, file locations, bracketed compiler
+errors, test symbols, and Python/cargo/npm command markers. Clippy, `prodex-app`
+check, no-fallback self-test, ownership, and authority guards pass; ownership now
+reports **74 authoritative operations**. The canonical broad source report counts
+**58,441 reachable Mojo LOC** and **192,706 Rust production LOC**, totaling
+**251,147 LOC**: **23.27% Mojo**. The 75% project target remains unmet, with
+**519,677 additional Mojo LOC** required at this Rust volume.
