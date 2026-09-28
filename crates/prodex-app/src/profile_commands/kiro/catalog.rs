@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::rich::merge_catalog_ids;
 use prodex_provider_core::ProviderId;
 use serde_json::{Map, Value};
-use std::collections::BTreeSet;
 
 pub(crate) fn parse_kiro_model_catalog_text(text: &str) -> Result<Vec<Value>> {
     let value: Value =
@@ -21,16 +21,12 @@ pub(crate) fn normalize_kiro_model_catalog_models(models: &[Value]) -> Result<Ve
             prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT
         );
     }
-    let mut seen = BTreeSet::new();
-    let models = models
+    let candidates = models
         .iter()
         .filter_map(|model| {
             let id = first_nonempty_string(model, &["id", "model_id", "modelId", "slug", "model"])?;
             let name =
                 first_nonempty_string(model, &["name", "model_name", "modelName"]).unwrap_or(id);
-            if !seen.insert(id.to_ascii_lowercase()) {
-                return None;
-            }
             let mut normalized = serde_json::json!({
                 "id": id,
                 "name": name,
@@ -47,6 +43,16 @@ pub(crate) fn normalize_kiro_model_catalog_models(models: &[Value]) -> Result<Ve
             }
             Some(normalized)
         })
+        .collect::<Vec<_>>();
+    let candidate_ids = candidates
+        .iter()
+        .filter_map(|model| model.get("id").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    let accepted =
+        merge_catalog_ids(&[], &candidate_ids).expect("Mojo Kiro model catalog dedup failed");
+    let models = accepted
+        .into_iter()
+        .map(|index| candidates[index].clone())
         .collect::<Vec<_>>();
     if models.is_empty() {
         bail!("Kiro model catalog returned no usable models");

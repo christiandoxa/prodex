@@ -1,6 +1,5 @@
 use anyhow::{Context, Result, bail};
 use reqwest::blocking::Client;
-use std::collections::BTreeSet;
 use std::fmt;
 use std::time::Duration;
 
@@ -10,6 +9,7 @@ use crate::{
     RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, format_response_body,
     read_blocking_response_body_with_limit,
 };
+use prodex_mojo_core::rich::merge_catalog_ids;
 use prodex_profile_export::{copilot_user_api_origin, default_copilot_models_api_url};
 use prodex_provider_core::{PROVIDER_MODEL_CATALOG_HARD_LIMIT, ProviderId};
 
@@ -209,17 +209,19 @@ pub(super) fn copilot_runtime_model_catalog_from_token(
             PROVIDER_MODEL_CATALOG_HARD_LIMIT
         );
     }
-    let mut seen = BTreeSet::new();
-    let models = models
+    let candidates = models
         .into_iter()
         .filter_map(copilot_runtime_model_catalog_entry)
-        .filter(|model| {
-            model
-                .get("id")
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(|id| !id.is_empty() && seen.insert(id.to_ascii_lowercase()))
-        })
-        .map(sanitize_copilot_catalog_entry)
+        .collect::<Vec<_>>();
+    let candidate_ids = candidates
+        .iter()
+        .filter_map(|model| model.get("id").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>();
+    let accepted =
+        merge_catalog_ids(&[], &candidate_ids).expect("Mojo Copilot runtime catalog dedup failed");
+    let models = accepted
+        .into_iter()
+        .map(|index| sanitize_copilot_catalog_entry(candidates[index].clone()))
         .collect::<Vec<_>>();
     prodex_provider_core::merge_provider_model_catalog_json(ProviderId::Copilot, &models)
         .map_err(anyhow::Error::new)?;
