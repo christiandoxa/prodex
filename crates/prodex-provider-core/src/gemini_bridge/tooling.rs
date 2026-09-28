@@ -1,5 +1,6 @@
 //! Gemini tool declaration and tool-output guard helpers.
 
+use prodex_mojo_core::gemini_tooling_policy::gemini_tool_name_policy;
 use std::collections::BTreeSet;
 
 mod gemini3;
@@ -18,68 +19,35 @@ pub use self::guardrails::{
 };
 
 pub fn gemini_provider_core_tool_aliases(name: &str) -> BTreeSet<String> {
+    let policy = gemini_tool_name_policy(name)
+        .expect("Mojo Gemini tool-name policy should accept Rust strings");
     let mut aliases = BTreeSet::new();
-    let normalized = gemini_provider_core_normalize_tool_name(name);
-    aliases.insert(normalized.clone());
-    if let Some(suffix) = normalized.rsplit("__").next() {
-        aliases.insert(suffix.to_string());
-    }
-    match normalized.as_str() {
-        "exec_command" | "run_shell_command" | "shell" | "bash" => {
-            aliases
-                .extend(["exec_command", "run_shell_command", "shell", "bash"].map(str::to_string));
-        }
-        "apply_patch" | "edit" | "replace" => {
-            aliases.extend(["apply_patch", "edit", "replace"].map(str::to_string));
-        }
-        "read_file" | "read" => {
-            aliases.extend(["read_file", "read"].map(str::to_string));
-        }
-        "read_many_files" | "glob" => {
-            aliases.extend(["read_many_files", "glob"].map(str::to_string));
-        }
-        "grep" | "rip_grep" | "rg" | "search" => {
-            aliases.extend(["grep", "rip_grep", "rg", "search"].map(str::to_string));
-        }
-        "write_file" | "write" => {
-            aliases.extend(["write_file", "write"].map(str::to_string));
-        }
-        _ => {}
-    }
+    aliases.insert(policy.normalized);
+    aliases.insert(policy.suffix);
+    aliases.extend(policy.aliases.into_iter().map(str::to_string));
     aliases
 }
 
 pub fn gemini_provider_core_canonical_output_tool_name(name: &str) -> String {
-    match gemini_provider_core_normalize_tool_name(name).as_str() {
-        "run_shell_command" => "exec_command".to_string(),
-        _ => name.to_string(),
+    let policy = gemini_tool_name_policy(name)
+        .expect("Mojo Gemini tool-name policy should accept Rust strings");
+    if policy.canonical_exec {
+        "exec_command".to_string()
+    } else {
+        name.to_string()
     }
 }
 
 pub fn gemini_provider_core_normalize_tool_name(name: &str) -> String {
-    let mut name = name.trim().to_ascii_lowercase().replace('-', "_");
-    if let Some(suffix) = name.rsplit('.').next() {
-        name = suffix.to_string();
-    }
-    name
+    gemini_tool_name_policy(name)
+        .expect("Mojo Gemini tool-name policy should accept Rust strings")
+        .normalized
 }
 
 pub fn gemini_provider_core_tool_is_mutating(name: &str) -> bool {
-    let aliases = gemini_provider_core_tool_aliases(name);
-    aliases.iter().any(|alias| {
-        matches!(
-            alias.as_str(),
-            "apply_patch"
-                | "edit"
-                | "replace"
-                | "write"
-                | "write_file"
-                | "exec_command"
-                | "run_shell_command"
-                | "shell"
-                | "bash"
-        )
-    })
+    gemini_tool_name_policy(name)
+        .expect("Mojo Gemini tool-name policy should accept Rust strings")
+        .mutating
 }
 
 pub fn gemini_provider_core_tool_call_command_text(args: &serde_json::Value) -> String {
@@ -101,5 +69,36 @@ pub fn gemini_provider_core_tool_call_command_text(args: &serde_json::Value) -> 
     match args {
         serde_json::Value::String(text) => text.to_string(),
         _ => serde_json::to_string(args).unwrap_or_default(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_tooling_policy_is_mojo_authoritative() {
+        assert_eq!(
+            gemini_provider_core_normalize_tool_name(" Namespace.RUN-SHELL-COMMAND "),
+            "run_shell_command"
+        );
+        let aliases = gemini_provider_core_tool_aliases("mcp__repo__read-file");
+        assert!(aliases.contains("mcp__repo__read_file"));
+        assert!(aliases.contains("read_file"));
+        assert!(!aliases.contains("read"));
+        assert!(gemini_provider_core_tool_is_mutating(
+            "mcp__repo__exec-command"
+        ));
+        assert!(!gemini_provider_core_tool_is_mutating(
+            "mcp__repo__read-file"
+        ));
+        assert_eq!(
+            gemini_provider_core_canonical_output_tool_name("RUN-SHELL-COMMAND"),
+            "exec_command"
+        );
+        assert_eq!(
+            gemini_provider_core_canonical_output_tool_name("shell"),
+            "shell"
+        );
     }
 }
