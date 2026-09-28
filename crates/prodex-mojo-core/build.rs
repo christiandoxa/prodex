@@ -448,6 +448,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/runtime_auto_redeem.mojo");
         sources.push("../../mojo/prodex_core/profile_schedule.mojo");
         sources.push("../../mojo/prodex_core/candidate_decision.mojo");
+        sources.push("../../mojo/prodex_core/confirmation_policy.mojo");
         sources.push("../../mojo/prodex_core/smart_context_rehydrate.mojo");
         sources.push("../../mojo/prodex_core/runtime_tuning.mojo");
         sources.push("../../mojo/prodex_core/launch_args.mojo");

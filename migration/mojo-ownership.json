@@ -1032,6 +1032,16 @@
           "optional_tool_descriptor_policy",
           "optional_tool_manifest_tree_compatibility"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/confirmation_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "confirmation_token_policy"
+        ]
       }
     ],
     "removed": [
@@ -4241,6 +4251,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "borrow manifest digest strings and map the Mojo boolean into the existing validation flow"
+    },
+    {
+      "name": "confirmation_token_policy",
+      "domain": "app/confirmation-policy",
+      "introduced_in": "0.433.0",
+      "baseline_state": "duplicated Rust trim/lowercase yes/no confirmation token parsers for manual redeem and profile export prompts",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_confirmation_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/confirmation_policy.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/redeem.rs",
+      "consumer_marker": "confirmation_value",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/redeem.rs",
+        "crates/prodex-app/src/profile_commands/import_export/passwords.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/confirmation_policy.rs",
+      "rust_owner_before": "trimmed case-insensitive empty/y/yes/n/no confirmation classification, including redeem default-no and caller-supplied yes/no defaults",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo adapter plus redeem and profile-export caller regressions preserve mixed case, whitespace, default behavior, and unknown-token retry semantics",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "terminal input acquisition, prompt looping, caller-supplied default selection, user-facing retry text, and final action remain Rust-owned"
     }
   ],
   "rust_semantic_reductions": [

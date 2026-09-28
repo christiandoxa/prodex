@@ -3276,3 +3276,12 @@ owner. Mojo owns trim, ASCII lowercase, allowed-character preservation, @ to und
 one-dash-per-Unicode-scalar replacement, leading/trailing separator trimming, and the
 api_key fallback. The Rust sanitizer implementation was deleted; Rust retains URL/host
 acquisition, profile-name availability checks, suffix search, and filesystem state.
+
+
+## Confirmation token policy migration
+
+Manual redeem and profile-export yes/no confirmation parsing now share the dedicated
+confirmation_policy.mojo kernel. Mojo owns Unicode-whitespace trimming, ASCII-casefold
+classification of y/yes/n/no, redeem default-no behavior, caller-supplied empty-input
+defaults, and unknown-token rejection. The two Rust lowercase match tables were deleted;
+Rust retains terminal input, prompt loops, retry text, and the resulting user action.
