@@ -1042,6 +1042,17 @@
         "operations": [
           "confirmation_token_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_tooling_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_tool_name_policy",
+          "gemini3_model_toolset_policy"
+        ]
       }
     ],
     "removed": [
@@ -4275,6 +4286,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "terminal input acquisition, prompt looping, caller-supplied default selection, user-facing retry text, and final action remain Rust-owned"
+    },
+    {
+      "name": "gemini_tool_name_policy",
+      "domain": "provider/gemini/tooling",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust tool-name trim/lowercase/hyphen normalization, dotted namespace stripping, double-underscore suffix extraction, alias-group expansion, mutating detection, and canonical shell-name policy",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_gemini_tool_name_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_tooling_policy.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling.rs",
+      "consumer_marker": "gemini_tool_name_policy",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/tooling.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/gemini_tooling_policy.rs",
+      "rust_owner_before": "Gemini tool normalization, namespace suffix identity, six alias-family tables, mutating-tool classification, and run_shell_command canonical-output rewrite",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo adapter and provider-core regression cover trim/case/hyphen/dot normalization, namespaced suffixes, alias expansion, mutation, canonical output, and empty input",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "decode Mojo alias bitmask/flags, materialize normalized/suffix strings, and reconstruct the public BTreeSet output"
+    },
+    {
+      "name": "gemini3_model_toolset_policy",
+      "domain": "provider/gemini/tooling",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust ASCII-lowercase Gemini-3/auto model classification",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_gemini_tooling_model_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_tooling_policy.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling/gemini3.rs",
+      "consumer_marker": "gemini_model_uses_gemini3_toolset",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/tooling/gemini3.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/gemini_tooling_policy.rs",
+      "rust_owner_before": "case-insensitive gemini-3 substring and auto model detection controlling Gemini 3 tool declaration overrides",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo model-policy coverage preserves mixed-case gemini-3, auto, auto-gemini-3, and Gemini 2 negatives",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrow model string and map the Mojo boolean into existing declaration-override orchestration"
     }
   ],
   "rust_semantic_reductions": [

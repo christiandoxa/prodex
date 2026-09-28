@@ -1,6 +1,7 @@
 //! Gemini 3 tool declaration description overrides.
 
 use super::gemini_provider_core_tool_aliases;
+use prodex_mojo_core::gemini_tooling_policy::gemini_model_uses_gemini3_toolset;
 
 pub fn gemini_provider_core_apply_gemini3_tool_declaration_overrides(
     model: &str,
@@ -30,8 +31,8 @@ pub fn gemini_provider_core_apply_gemini3_tool_declaration_overrides(
 }
 
 pub fn gemini_provider_core_model_uses_gemini3_toolset(model: &str) -> bool {
-    let model = model.to_ascii_lowercase();
-    model.contains("gemini-3") || model == "auto" || model.contains("auto-gemini-3")
+    gemini_model_uses_gemini3_toolset(model)
+        .expect("Mojo Gemini-3 model policy should accept Rust strings")
 }
 
 pub fn gemini_provider_core_gemini3_tool_description(name: &str) -> Option<&'static str> {

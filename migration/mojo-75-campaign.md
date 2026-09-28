@@ -3285,3 +3285,13 @@ confirmation_policy.mojo kernel. Mojo owns Unicode-whitespace trimming, ASCII-ca
 classification of y/yes/n/no, redeem default-no behavior, caller-supplied empty-input
 defaults, and unknown-token rejection. The two Rust lowercase match tables were deleted;
 Rust retains terminal input, prompt loops, retry text, and the resulting user action.
+
+
+## Gemini tooling normalization and alias policy migration
+
+Gemini tool-name normalization, dotted-prefix stripping, double-underscore namespace
+suffix extraction, alias-family expansion, mutating-tool classification, canonical
+run_shell_command output naming, and Gemini-3 model/toolset detection now live in the
+dedicated gemini_tooling_policy.mojo owner. The Rust normalization, alias match tables,
+mutation table, and model lowercase classifier were deleted. Rust retains BTreeSet/string
+materialization plus JSON declaration mutation driven by the Mojo policy outputs.

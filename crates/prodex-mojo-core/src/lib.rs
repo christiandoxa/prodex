@@ -97,6 +97,8 @@ pub mod confirmation_policy;
 pub mod context;
 #[cfg(feature = "mojo-rich")]
 pub mod gemini_guardrails;
+#[cfg(feature = "mojo-rich")]
+pub mod gemini_tooling_policy;
 #[cfg(feature = "mojo-routing")]
 #[cfg(feature = "mojo-rich")]
 pub mod log;
