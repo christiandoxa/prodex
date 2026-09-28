@@ -3,11 +3,8 @@ use std::env;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-#[cfg(feature = "mojo")]
 mod capacity;
-#[cfg(feature = "mojo")]
 mod mojo;
-#[cfg(feature = "mojo")]
 pub use capacity::{
     RuntimeProxyLaneLimitOverrides, runtime_probe_refresh_worker_count_default,
     runtime_proxy_active_request_limit_default, runtime_proxy_async_worker_count_default,
@@ -119,7 +116,6 @@ pub fn runtime_tuning_snapshot_from_input(
     input.into_snapshot()
 }
 
-#[cfg(feature = "mojo")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeTuningDefaults {
     pub worker_count: usize,
@@ -131,7 +127,6 @@ pub struct RuntimeTuningDefaults {
     pub websocket_dns_worker_count: usize,
 }
 
-#[cfg(feature = "mojo")]
 pub fn runtime_tuning_defaults(parallelism: usize) -> RuntimeTuningDefaults {
     mojo::runtime_tuning_defaults(parallelism)
 }

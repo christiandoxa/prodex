@@ -11,11 +11,11 @@ name = "prodex_runtime_tuning"
 path = "src/lib.rs"
 
 [features]
-default = ["mojo"]
-mojo = ["dep:prodex_mojo_core", "prodex_mojo_core/mojo-runtime"]
+default = []
+mojo = []
 
 [dependencies]
-prodex_mojo_core = { workspace = true, optional = true }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
 
 [lints]
 workspace = true

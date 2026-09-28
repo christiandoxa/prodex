@@ -253,6 +253,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-runtime-tuning/src/mojo.rs",
+  "crates/prodex-runtime-tuning/src/lib.rs",
   "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
   "crates/prodex-mojo-core/src/smart_context_markers.rs",
   "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
@@ -625,6 +627,7 @@ const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
 const DOCTOR_CARGO_FILE = "crates/prodex-runtime-doctor/Cargo.toml";
 const RUNTIME_PROXY_CARGO_FILE = "crates/prodex-runtime-proxy/Cargo.toml";
+const RUNTIME_TUNING_CARGO_FILE = "crates/prodex-runtime-tuning/Cargo.toml";
 const QUOTA_MODELS_FILE = "crates/prodex-quota/src/models.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
@@ -1628,6 +1631,27 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === RUNTIME_PROXY_CARGO_FILE &&
       !/^prodex_mojo_core\s*=\s*\{[^\n]*features\s*=\s*\[[^\]]*"mojo-rich"[^\]]*\][^\n]*\}/mu.test(contents))
     .map(([filePath]) => `${filePath}: Retry-After parsing requires Mojo rich without a feature gate`);
+  const runtimeTuningViolations = files.flatMap(([filePath, contents]) => {
+    if ([
+      "crates/prodex-runtime-tuning/src/lib.rs",
+      "crates/prodex-runtime-tuning/src/capacity.rs",
+      "crates/prodex-runtime-tuning/src/mojo.rs",
+    ].includes(filePath)) {
+      return /#\[cfg\(feature\s*=\s*"mojo"\)\]/u.test(contents)
+        ? [filePath + ": runtime tuning Mojo ownership must be unconditional"]
+        : [];
+    }
+    if (filePath !== RUNTIME_TUNING_CARGO_FILE) return [];
+    const dependency = contents.match(/^prodex_mojo_core\s*=.*$/mu)?.[0] ?? "";
+    const violations = [];
+    if (!dependency.includes('features = ["mojo-runtime"]')) {
+      violations.push(filePath + ": runtime tuning requires unconditional Mojo runtime dependency");
+    }
+    if (dependency.includes("optional = true")) {
+      violations.push(filePath + ": runtime tuning Mojo dependency must not be optional");
+    }
+    return violations;
+  });
   const defaultFeatureViolations = files.flatMap(([filePath, contents]) => {
     const required = REQUIRED_DEFAULT_FEATURES.get(filePath);
     if (!required) return [];
@@ -1661,7 +1685,7 @@ export function findViolations(files) {
     ...deepseekStreamFallbackViolations,
     ...quotaWindowViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
-    ...doctorDependencyViolations, ...proxyDependencyViolations,
+    ...doctorDependencyViolations, ...proxyDependencyViolations, ...runtimeTuningViolations,
     ...defaultFeatureViolations];
 }
 
@@ -1687,6 +1711,7 @@ async function promotedFiles() {
   ));
   files.push(["crates/prodex-cli/Cargo.toml", await fs.readFile(path.join(repoRoot, "crates/prodex-cli/Cargo.toml"), "utf8")]);
   files.push([RUNTIME_PROXY_CARGO_FILE, await fs.readFile(path.join(repoRoot, RUNTIME_PROXY_CARGO_FILE), "utf8")]);
+  files.push([RUNTIME_TUNING_CARGO_FILE, await fs.readFile(path.join(repoRoot, RUNTIME_TUNING_CARGO_FILE), "utf8")]);
   return files;
 }
 
@@ -2041,6 +2066,10 @@ function selfTest() {
     'pub fn provider_error_rejects_request_member() {\n  prodex_mojo_core::json::provider_error_rejects_member(nodes, raw, member);\n}']]), []);
   assert.match(findViolations([["crates/prodex-runtime-tuning/src/capacity.rs",
     "fn runtime_proxy_worker_count_default_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+  assert.match(findViolations([["crates/prodex-runtime-tuning/src/lib.rs",
+    '#[cfg(feature = "mojo")] mod mojo;']]).join("\n"), /must be unconditional/u);
+  assert.match(findViolations([[RUNTIME_TUNING_CARGO_FILE,
+    'prodex_mojo_core = { workspace = true, optional = true }']]).join("\n"), /unconditional Mojo runtime dependency|must not be optional/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/rollout.rs",
     "fn smart_context_rollout_decision_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/normalization.rs",
