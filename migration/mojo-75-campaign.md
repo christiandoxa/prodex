@@ -3024,3 +3024,17 @@ Rust retains profile collection lookup and enum matching only; there is no
 provider-name fallback classifier in this path.
 
 Focused runtime classifier coverage and the Mojo no-fallback/ownership/authority guards pass. The canonical broad report remains **61,125 Mojo LOC** and **194,167 Rust production LOC**, totaling **255,292 LOC**: **23.94% Mojo**.
+
+
+## Gemini and DeepSeek runtime catalog identity cleanup
+
+Runtime Gemini and DeepSeek model-catalog generation now reuses the authoritative
+rich_catalog Mojo merge planner for trim/blank filtering and exact ASCII-folded
+deduplication. Built-in metadata lookup now uses the authoritative catalog resolver
+instead of Rust eq_ignore_ascii_case scans. Rust retains candidate collection, accepted
+index materialization, catalog JSON construction, and file writes; no Rust duplicate
+identity/dedup policy remains in these two generators.
+
+Focused catalog-write tests pass for DeepSeek, Gemini, and a custom Gemini launch model.
+The canonical broad report counts **61,125 Mojo LOC** and **194,186 Rust production LOC**,
+totaling **255,311 LOC**: **23.94% Mojo**.

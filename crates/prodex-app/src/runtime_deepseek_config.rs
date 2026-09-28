@@ -8,11 +8,11 @@ use prodex_cli::{
     SUPER_DEEPSEEK_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_DEEPSEEK_DEFAULT_CONTEXT_WINDOW,
     SUPER_DEEPSEEK_DEFAULT_MODEL,
 };
-use prodex_mojo_core::super_provider_config::{
-    RuntimeModelProviderClass, runtime_model_provider_class,
+use prodex_mojo_core::{
+    rich::{CatalogModel, merge_catalog_ids, resolve_catalog_model},
+    super_provider_config::{RuntimeModelProviderClass, runtime_model_provider_class},
 };
 use serde_json::json;
-use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 #[cfg(test)]
 use std::fs;
@@ -305,16 +305,15 @@ fn deepseek_catalog_models(
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Vec<serde_json::Value> {
-    let mut models = Vec::with_capacity(DEEPSEEK_CATALOG_MODELS.len() + 1);
-    let mut seen = BTreeSet::new();
-
-    for slug in std::iter::once(launch_model)
+    let candidates = std::iter::once(launch_model)
         .chain(DEEPSEEK_CATALOG_MODELS.iter().map(|(slug, _, _)| *slug))
-    {
-        let slug = slug.trim();
-        if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
-            continue;
-        }
+        .collect::<Vec<_>>();
+    let accepted = merge_catalog_ids(&[], &candidates)
+        .expect("Mojo DeepSeek catalog dedup returned an invalid structured result");
+    let mut models = Vec::with_capacity(accepted.len());
+
+    for candidate_index in accepted {
+        let slug = candidates[candidate_index].trim();
         let priority = models.len() + 1;
         let (display_name, description) = deepseek_catalog_model_metadata(slug);
         models.push(deepseek_catalog_model(
@@ -331,10 +330,19 @@ fn deepseek_catalog_models(
 }
 
 fn deepseek_catalog_model_metadata(model: &str) -> (&str, &'static str) {
-    DEEPSEEK_CATALOG_MODELS
+    let catalog = DEEPSEEK_CATALOG_MODELS
         .iter()
-        .find(|(slug, _, _)| model.eq_ignore_ascii_case(slug))
-        .map(|(_, display_name, description)| (*display_name, *description))
+        .map(|(slug, _, _)| CatalogModel {
+            id: slug,
+            aliases: &[],
+        })
+        .collect::<Vec<_>>();
+    resolve_catalog_model(&catalog, model)
+        .expect("Mojo DeepSeek catalog lookup returned an invalid structured result")
+        .map(|index| {
+            let (_, display_name, description) = DEEPSEEK_CATALOG_MODELS[index];
+            (display_name, description)
+        })
         .unwrap_or((
             model,
             "DeepSeek model routed through the Prodex Responses adapter.",

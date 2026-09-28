@@ -4,8 +4,9 @@ use crate::{
     codex_effective_config_value,
 };
 use anyhow::{Context, Result, bail};
-use prodex_mojo_core::super_provider_config::{
-    RuntimeModelProviderClass, runtime_model_provider_class,
+use prodex_mojo_core::{
+    rich::{CatalogModel, merge_catalog_ids, resolve_catalog_model},
+    super_provider_config::{RuntimeModelProviderClass, runtime_model_provider_class},
 };
 use prodex_provider_core::{
     PRODEX_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT as GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
@@ -14,7 +15,6 @@ use prodex_provider_core::{
     ProviderId, provider_model_catalog,
 };
 use serde_json::json;
-use std::collections::BTreeSet;
 use std::ffi::OsString;
 #[cfg(test)]
 use std::fs;
@@ -170,18 +170,19 @@ fn gemini_catalog_models(
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Result<Vec<serde_json::Value>> {
-    let mut models = Vec::with_capacity(provider_model_catalog(ProviderId::Gemini).len() + 1);
-    let mut seen = BTreeSet::new();
+    let candidates = std::iter::once(launch_model)
+        .chain(
+            provider_model_catalog(ProviderId::Gemini)
+                .iter()
+                .map(|spec| spec.id),
+        )
+        .collect::<Vec<_>>();
+    let accepted = merge_catalog_ids(&[], &candidates)
+        .expect("Mojo Gemini catalog dedup returned an invalid structured result");
+    let mut models = Vec::with_capacity(accepted.len());
 
-    for slug in std::iter::once(launch_model).chain(
-        provider_model_catalog(ProviderId::Gemini)
-            .iter()
-            .map(|spec| spec.id),
-    ) {
-        let slug = slug.trim();
-        if slug.is_empty() || !seen.insert(slug.to_ascii_lowercase()) {
-            continue;
-        }
+    for candidate_index in accepted {
+        let slug = candidates[candidate_index].trim();
         if models.len() >= PROVIDER_MODEL_CATALOG_HARD_LIMIT {
             bail!(
                 "Gemini model catalog exceeds the hard limit of {} entries",
@@ -204,10 +205,20 @@ fn gemini_catalog_models(
 }
 
 fn gemini_catalog_model_metadata(model: &str) -> (String, String) {
-    provider_model_catalog(ProviderId::Gemini)
+    let specs = provider_model_catalog(ProviderId::Gemini);
+    let catalog = specs
         .iter()
-        .find(|spec| model.eq_ignore_ascii_case(spec.id))
-        .map(|spec| (spec.display_name.to_string(), spec.description.to_string()))
+        .map(|spec| CatalogModel {
+            id: spec.id,
+            aliases: &[],
+        })
+        .collect::<Vec<_>>();
+    resolve_catalog_model(&catalog, model)
+        .expect("Mojo Gemini catalog lookup returned an invalid structured result")
+        .map(|index| {
+            let spec = specs[index];
+            (spec.display_name.to_string(), spec.description.to_string())
+        })
         .unwrap_or((
             model.to_string(),
             "Gemini model routed through the Prodex Responses adapter.".to_string(),
