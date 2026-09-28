@@ -4,6 +4,7 @@ use crate::{
     ProviderId, provider_canonical_model, provider_model_from_request_body,
     provider_request_body_with_model,
 };
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use serde_json::Value;
 
 pub fn copilot_provider_core_request_body_with_canonical_model(body: &[u8]) -> Vec<u8> {
@@ -42,7 +43,10 @@ pub fn copilot_provider_core_request_has_agent_input(body: &[u8]) -> bool {
                     .get("role")
                     .and_then(Value::as_str)
                     .is_some_and(|role| {
-                        role.eq_ignore_ascii_case("assistant") || role.eq_ignore_ascii_case("tool")
+                        ascii_casefold_equal_exact(role, "assistant")
+                            .expect("Mojo Copilot assistant-role comparison failed")
+                            || ascii_casefold_equal_exact(role, "tool")
+                                .expect("Mojo Copilot tool-role comparison failed")
                     })
             })
         })
@@ -61,7 +65,10 @@ pub fn copilot_provider_core_request_has_agent_input(body: &[u8]) -> bool {
                         .and_then(Value::as_str)
                         .map(str::trim)
                         .filter(|role| !role.is_empty())
-                        .is_none_or(|role| role.eq_ignore_ascii_case("assistant"))
+                        .is_none_or(|role| {
+                            ascii_casefold_equal_exact(role, "assistant")
+                                .expect("Mojo Copilot input-role comparison failed")
+                        })
                 })
             })
         })

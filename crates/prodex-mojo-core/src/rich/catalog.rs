@@ -10,7 +10,6 @@ pub use catalog_planner::{
 const CATALOG_MAX_MODELS: usize = 1_024;
 const CATALOG_MAX_INPUT_MODELS: usize = 65_536;
 const CATALOG_MAX_IDENTIFIER_BYTES: usize = 4_096;
-const CATALOG_MAX_QUERY_BYTES: usize = 65_536;
 const CATALOG_CHOICE_PROVIDER_DEFAULT: i64 = 0;
 const CATALOG_CHOICE_CATALOG: i64 = 1;
 const CATALOG_CHOICE_CONFIGURED: i64 = 2;
@@ -55,6 +54,15 @@ unsafe extern "C" {
         left_length: i64,
         right_address: u64,
         right_length: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_mojo_rich_ascii_casefold_relation_v1(
+        abi_version: i64,
+        operation: i64,
+        value_address: u64,
+        value_length: i64,
+        needle_address: u64,
+        needle_length: i64,
         output_address: u64,
     ) -> i64;
     fn prodex_mojo_rich_catalog_resolve_v1(
@@ -239,9 +247,6 @@ fn reasoning_views(models: &[CatalogReasoningModel<'_>]) -> Result<ReasoningView
 
 pub fn ascii_casefold_equal_exact(left: &str, right: &str) -> Result<bool, MojoError> {
     ensure_rich_abi()?;
-    if left.len() > CATALOG_MAX_QUERY_BYTES || right.len() > CATALOG_MAX_QUERY_BYTES {
-        return Err(MojoError::InvalidInput);
-    }
     let mut output = -1_i64;
     status(unsafe {
         prodex_mojo_rich_ascii_casefold_equal_v1(
@@ -258,6 +263,51 @@ pub fn ascii_casefold_equal_exact(left: &str, right: &str) -> Result<bool, MojoE
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AsciiCasefoldRelation {
+    StartsWith = 0,
+    EndsWith = 1,
+    Contains = 2,
+}
+
+fn ascii_casefold_relation(
+    operation: AsciiCasefoldRelation,
+    value: &str,
+    needle: &str,
+) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = -1_i64;
+    status(unsafe {
+        prodex_mojo_rich_ascii_casefold_relation_v1(
+            RICH_ABI_VERSION,
+            operation as i64,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            needle.as_ptr() as usize as u64,
+            i64::try_from(needle.len()).map_err(|_| MojoError::InvalidInput)?,
+            count_address(&mut output),
+        )
+    })?;
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn ascii_casefold_starts_with(value: &str, prefix: &str) -> Result<bool, MojoError> {
+    ascii_casefold_relation(AsciiCasefoldRelation::StartsWith, value, prefix)
+}
+
+pub fn ascii_casefold_ends_with(value: &str, suffix: &str) -> Result<bool, MojoError> {
+    ascii_casefold_relation(AsciiCasefoldRelation::EndsWith, value, suffix)
+}
+
+pub fn ascii_casefold_contains(value: &str, needle: &str) -> Result<bool, MojoError> {
+    ascii_casefold_relation(AsciiCasefoldRelation::Contains, value, needle)
 }
 
 pub fn resolve_catalog_model(
