@@ -1,4 +1,5 @@
 use super::*;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use redaction::redaction_redact_secret_like_text;
 mod connect;
 mod response_tracking;
@@ -354,10 +355,15 @@ fn append_runtime_proxy_websocket_forwarded_headers(
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_str())),
     ) {
-        if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
+        if turn_state_override.is_some()
+            && ascii_casefold_equal_exact(name, "x-codex-turn-state")
+                .expect("Mojo websocket turn-state header comparison failed")
+        {
             continue;
         }
-        if name.eq_ignore_ascii_case("cookie") {
+        if ascii_casefold_equal_exact(name, "cookie")
+            .expect("Mojo websocket cookie header comparison failed")
+        {
             continue;
         }
         let Ok(header_name) = WsHeaderName::from_bytes(name.as_bytes()) else {

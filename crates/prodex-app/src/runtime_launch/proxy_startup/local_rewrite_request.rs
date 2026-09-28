@@ -1,3 +1,4 @@
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::{
     io::{self, Read},
     time::Instant,
@@ -45,7 +46,10 @@ impl RuntimeLocalRewriteRequest {
 
     pub(super) fn is_websocket_upgrade(&self) -> bool {
         self.headers.iter().any(|(name, value)| {
-            name.eq_ignore_ascii_case("upgrade") && value.eq_ignore_ascii_case("websocket")
+            ascii_casefold_equal_exact(name, "upgrade")
+                .expect("Mojo upgrade header-name comparison failed")
+                && ascii_casefold_equal_exact(value, "websocket")
+                    .expect("Mojo websocket upgrade-value comparison failed")
         })
     }
 
@@ -103,7 +107,8 @@ impl RuntimeLocalRewriteRequest {
 
     fn content_length(&self) -> Option<u64> {
         self.headers.iter().find_map(|(name, value)| {
-            name.eq_ignore_ascii_case("content-length")
+            ascii_casefold_equal_exact(name, "content-length")
+                .expect("Mojo content-length header-name comparison failed")
                 .then(|| value.trim().parse().ok())
                 .flatten()
         })

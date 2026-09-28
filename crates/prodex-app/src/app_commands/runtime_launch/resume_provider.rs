@@ -2,6 +2,7 @@ use crate::app_state::AppStateIoExt;
 use anyhow::{Result, bail};
 use prodex_cli::SuperExternalProvider;
 use prodex_core::AppPaths;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_provider_core::ProviderId;
 use prodex_state::AppState;
 use std::ffi::OsString;
@@ -122,8 +123,10 @@ fn resolve_bound_provider_identity(value: Option<&str>) -> Result<Option<Provide
     let Some(value) = value else {
         return Ok(None);
     };
-    if value.eq_ignore_ascii_case("amazon-bedrock")
-        || value.eq_ignore_ascii_case("amazon-bedrock-runtime")
+    if ascii_casefold_equal_exact(value, "amazon-bedrock")
+        .expect("Mojo Bedrock provider comparison failed")
+        || ascii_casefold_equal_exact(value, "amazon-bedrock-runtime")
+            .expect("Mojo Bedrock provider comparison failed")
     {
         return Ok(None);
     }
