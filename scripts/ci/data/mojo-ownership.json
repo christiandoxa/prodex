@@ -947,7 +947,8 @@
           "runtime_model_provider_classification",
           "runtime_boolean_token_classification",
           "deepseek_web_search_mode_classification",
-          "runtime_ci_truth_token_classification"
+          "runtime_ci_truth_token_classification",
+          "profile_import_source_classification"
         ]
       },
       {
@@ -3869,6 +3870,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "build bounded catalog views, preserve original JSON/index ownership, materialize selected caller values, and retain provider-specific context/metadata mapping"
+    },
+    {
+      "name": "profile_import_source_classification",
+      "domain": "app/profile-import",
+      "introduced_in": "0.433.0",
+      "baseline_state": "duplicated Rust exact case-insensitive built-in import-source matching for claude, copilot, and kiro",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_import_source_class_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
+      "consumer": "crates/prodex-app/src/profile_commands/anthropic.rs",
+      "consumer_marker": "profile_import_source_class",
+      "production_consumers": [
+        "crates/prodex-app/src/profile_commands/anthropic.rs",
+        "crates/prodex-app/src/profile_commands/copilot.rs",
+        "crates/prodex-app/src/profile_commands/kiro.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
+      "rust_owner_before": "exact case-insensitive claude/copilot/kiro import-source name checks repeated across three profile import modules",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo adapter coverage preserves mixed-case matches, rejects whitespace-padded names and rejects unsupported aliases",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "single-component Path and path-existence checks remain Rust-owned before dispatching the Mojo source class"
     }
   ],
   "rust_semantic_reductions": [

@@ -118,6 +118,26 @@ def prodex_runtime_deepseek_web_search_token_v1(
     return -1
 
 
+@export("prodex_profile_import_source_class_v1")
+def prodex_profile_import_source_class_v1(
+    abi_version: Int64,
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if abi_version != SUPER_PROVIDER_CONFIG_ABI_VERSION:
+        return -2
+    if not config_valid_view(address, length):
+        return -2
+    var view = config_view(address, length)
+    if config_range_equals["claude"](view, 0, length):
+        return 0
+    if config_range_equals["copilot"](view, 0, length):
+        return 1
+    if config_range_equals["kiro"](view, 0, length):
+        return 2
+    return -1
+
+
 @export("prodex_runtime_model_provider_class_v1")
 def prodex_runtime_model_provider_class_v1(
     abi_version: Int64,
