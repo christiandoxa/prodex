@@ -142,6 +142,8 @@ pub mod smart_context_artifact_ref;
 pub mod smart_context_markers;
 #[cfg(feature = "mojo-runtime")]
 pub mod state_policy;
+#[cfg(feature = "mojo-runtime")]
+pub mod sub_agent_policy;
 
 #[cfg(feature = "mojo-runtime")]
 pub mod launch;

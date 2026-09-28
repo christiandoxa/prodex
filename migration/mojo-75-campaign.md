@@ -2827,3 +2827,20 @@ operations**. The canonical broad source report counts **59,651 Mojo LOC** and
 **193,104 Rust production LOC**, totaling **252,755 LOC**: **23.60% Mojo**. The
 75% project target remains unmet, with **519,661 additional Mojo LOC** required
 at the current Rust volume.
+
+## Sub-agent CLI policy migration
+
+Sub-agent maximum concurrency parsing/validation, preset-vs-custom classification,
+reasoning-effort keyword parsing, and Unicode-trimmed nonempty model validation now
+use mojo/prodex_core/sub_agent_policy.mojo. Provider parsing and credential-free
+URL validation remain Rust-owned. Rust now retains only public DTO construction,
+stable CLI error strings, and enum/result mapping; no Rust semantic fallback is
+retained.
+
+Validation passes 27/27 focused prodex-cli sub-agent tests and 1/1 direct Mojo
+policy smoke test, plus clippy, full prodex-app check, no-fallback self-test,
+ownership, and authority guards. Ownership now reports **95 authoritative
+operations**. The canonical broad source report counts **59,815 Mojo LOC** and
+**193,229 Rust production LOC**, totaling **253,044 LOC**: **23.64% Mojo**. The
+75% project target remains unmet, with **519,872 additional Mojo LOC** required
+at the current Rust volume.

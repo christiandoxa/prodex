@@ -904,6 +904,19 @@
           "super_expose_run_id_policy",
           "super_expose_string_validation_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/sub_agent_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "sub_agent_concurrency_parse_policy",
+          "sub_agent_concurrency_validate_policy",
+          "sub_agent_reasoning_effort_policy",
+          "sub_agent_model_nonempty_policy"
+        ]
       }
     ],
     "removed": [
@@ -3123,6 +3136,110 @@
       "rust_owner_before": "optional nonempty/max-byte and Unicode control-character rejection policy",
       "rust_test_oracle": "deleted; existing optional-string test plus direct ABI fixtures cover Unicode text, C0/C1 controls and over-limit strings",
       "rust_adapter_scope": "Serde optional/null/string extraction, UUID normalization for thread_id and stable field-specific error text"
+    },
+    {
+      "domain": "cli/sub-agent",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust sub-agent CLI policy",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_sub_agent_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
+      "consumer": "crates/prodex-cli/src/sub_agent.rs",
+      "production_consumers": [
+        "crates/prodex-cli/src/sub_agent.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "sub_agent_concurrency_parse_policy",
+      "mojo_operation_ids": {
+        "concurrency_parse": 0
+      },
+      "consumer_marker": "prodex_mojo_core::sub_agent_policy::parse_concurrency",
+      "rust_owner_before": "sub-agent concurrency trim/default/integer syntax/u16 overflow/range classification and preset-vs-custom source selection",
+      "rust_test_oracle": "deleted; direct Mojo smoke and prodex-cli sub-agent tests cover default/preset/custom, invalid syntax, overflow and 1..64 range errors",
+      "rust_adapter_scope": "public error strings, NonZeroU16 construction and SubAgentConcurrencySource enum mapping"
+    },
+    {
+      "domain": "cli/sub-agent",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust sub-agent CLI policy",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_sub_agent_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
+      "consumer": "crates/prodex-cli/src/sub_agent.rs",
+      "production_consumers": [
+        "crates/prodex-cli/src/sub_agent.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "sub_agent_concurrency_validate_policy",
+      "mojo_operation_ids": {
+        "concurrency_validate": 1
+      },
+      "consumer_marker": "prodex_mojo_core::sub_agent_policy::concurrency_valid",
+      "rust_owner_before": "SubAgentMaxConcurrency constructor 1..64 bound validation",
+      "rust_test_oracle": "deleted; constructor/default/Serde callers are covered by prodex-cli sub-agent tests and direct Mojo smoke",
+      "rust_adapter_scope": "NonZeroU16 materialization and stable public bound error string"
+    },
+    {
+      "domain": "cli/sub-agent",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust sub-agent CLI policy",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_sub_agent_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
+      "consumer": "crates/prodex-cli/src/sub_agent.rs",
+      "production_consumers": [
+        "crates/prodex-cli/src/sub_agent.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "sub_agent_reasoning_effort_policy",
+      "mojo_operation_ids": {
+        "reasoning_effort": 2
+      },
+      "consumer_marker": "prodex_mojo_core::sub_agent_policy::reasoning_effort",
+      "rust_owner_before": "trimmed ASCII-case-insensitive reasoning-effort keyword classification",
+      "rust_test_oracle": "deleted; prodex-cli tests cover all eight accepted values, uppercase aliases and invalid effort handling",
+      "rust_adapter_scope": "SubAgentReasoningEffort enum mapping and normalized invalid-value text rendering"
+    },
+    {
+      "domain": "cli/sub-agent",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust sub-agent CLI policy",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_sub_agent_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
+      "consumer": "crates/prodex-cli/src/sub_agent.rs",
+      "production_consumers": [
+        "crates/prodex-cli/src/sub_agent.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "sub_agent_model_nonempty_policy",
+      "mojo_operation_ids": {
+        "model_nonempty": 3
+      },
+      "consumer_marker": "prodex_mojo_core::sub_agent_policy::model_nonempty",
+      "rust_owner_before": "Unicode-trimmed nonempty validation for arbitrary sub-agent model identifiers",
+      "rust_test_oracle": "deleted; prodex-cli tests cover ASCII, vendor IDs, Unicode model IDs and whitespace-only rejection",
+      "rust_adapter_scope": "returning the original untrimmed model string and stable error text"
     }
   ],
   "rust_semantic_reductions": [
