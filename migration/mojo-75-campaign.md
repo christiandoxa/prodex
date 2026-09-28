@@ -2713,3 +2713,17 @@ reports **74 authoritative operations**. The canonical broad source report count
 **58,441 reachable Mojo LOC** and **192,706 Rust production LOC**, totaling
 **251,147 LOC**: **23.27% Mojo**. The 75% project target remains unmet, with
 **519,677 additional Mojo LOC** required at this Rust volume.
+
+## Runtime hard-binding remember policy consolidation
+
+Runtime hard-binding remember conflict, identity-addition, refresh, and max-bound-time
+decisions now reuse the existing Mojo state_core_policy binding merge planner.
+Rust still owns BTreeMap mutation, persistence scheduling, logging, and binding
+identity cloning; the previous nested Rust decision table was removed without adding
+a fallback path.
+
+Validation passes 8 affinity-persistence tests and 24 continuation-cleanup tests,
+plus clippy, no-fallback self-test, ownership, and authority guards. This extends
+the existing state-policy authority rather than creating a duplicate operation.
+The current broad source report remains **58,441 Mojo LOC** and **192,708 Rust
+production LOC**: **23.27% Mojo**.

@@ -2265,16 +2265,17 @@
       "consumer_marker": "prodex_mojo_core::state_policy::binding_merge_plan",
       "production_consumers": [
         "crates/prodex-state/src/lib.rs",
-        "crates/prodex-state/src/provider_capabilities.rs"
+        "crates/prodex-state/src/provider_capabilities.rs",
+        "crates/prodex-app/src/runtime_proxy/lineage/remember.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/state_policy.rs",
-      "rust_owner_before": "provider capability table and pool priority, hard-binding merge/retention, active-profile merge precedence, and last-run retention decisions",
+      "rust_owner_before": "provider capability table and pool priority, hard-binding merge/retention, active-profile merge precedence, last-run retention decisions, and runtime hard-binding remember conflict/identity-add/refresh decisions",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "deleted; prodex-state caller suite plus direct ABI smoke cover provider classes, binding conflicts, compaction, concurrent state merge and timestamp precedence",
+      "rust_test_oracle": "deleted; prodex-state caller suite, affinity-persistence and continuation-cleanup tests, plus direct ABI smoke cover provider classes, binding conflicts, identity addition, compaction, concurrent state merge and timestamp precedence",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "provider/identity/profile existence mapping, BTreeMap traversal, cloning and validated enum/result reconstruction"
+      "rust_adapter_scope": "provider/identity/profile existence mapping, BTreeMap traversal and mutation, cloning, persistence scheduling, logging and validated enum/result reconstruction"
     },
     {
       "domain": "runtime-broker/continuity",
