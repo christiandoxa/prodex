@@ -1,5 +1,9 @@
 use super::*;
 
+use prodex_mojo_core::rich::{CatalogModel, resolve_catalog_model};
+use prodex_mojo_core::super_provider_config::{
+    RuntimeOpenAiScalarPolicy, runtime_openai_scalar_policy,
+};
 pub(crate) use prodex_runtime_launch::runtime_launch_cli_model;
 
 mod copilot_instructions;
@@ -156,7 +160,10 @@ pub(super) fn runtime_launch_config_model_cache_context_window_tokens_with_profi
 ) -> Result<Option<u64>> {
     let provider =
         codex_config_value_with_profile_v2(codex_home, "model_provider", profile_v2_name)?;
-    if provider.is_some_and(|provider| !provider.trim().eq_ignore_ascii_case("openai")) {
+    if provider.is_some_and(|provider| {
+        !runtime_openai_scalar_policy(RuntimeOpenAiScalarPolicy::ProviderName, &provider)
+            .expect("runtime OpenAI provider policy should accept Rust strings")
+    }) {
         return Ok(None);
     }
     let Some(model) = codex_config_value_with_profile_v2(codex_home, "model", profile_v2_name)?
@@ -266,7 +273,10 @@ fn runtime_launch_openai_provider_for_args(codex_home: &Path, args: &[OsString])
         Some(provider) => Some(provider),
         None => codex_config_value_for_args(codex_home, args, "model_provider")?,
     };
-    Ok(provider.is_none_or(|provider| provider.trim().eq_ignore_ascii_case("openai")))
+    Ok(provider.is_none_or(|provider| {
+        runtime_openai_scalar_policy(RuntimeOpenAiScalarPolicy::ProviderName, &provider)
+            .expect("runtime OpenAI provider policy should accept Rust strings")
+    }))
 }
 
 fn runtime_launch_openai_model(codex_home: &Path, args: &[OsString]) -> Result<Option<String>> {
@@ -279,52 +289,112 @@ fn runtime_launch_openai_model(codex_home: &Path, args: &[OsString]) -> Result<O
 }
 
 fn runtime_launch_openai_model_uses_large_context(model: &str) -> bool {
-    let model = model.trim().to_ascii_lowercase();
-    model.starts_with("gpt-5")
-        || matches!(model.as_str(), "gpt-6-sol" | "gpt-6-luna")
-        || model == "codex-auto-review"
+    runtime_openai_scalar_policy(RuntimeOpenAiScalarPolicy::LargeContextModel, model)
+        .expect("runtime OpenAI model policy should accept Rust strings")
 }
 
 fn runtime_launch_openai_model_context_from_models_cache(
     codex_home: &Path,
     model: &str,
 ) -> Option<u64> {
-    let raw = match fs::read_to_string(codex_home.join("models_cache.json")) {
-        Ok(raw) => raw,
-        Err(_) => return None,
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        return None;
-    };
-    let expected = model.trim().to_ascii_lowercase();
-    value
-        .get("models")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|models| {
-            models.iter().find_map(|entry| {
-                let matches_slug = entry
-                    .get("slug")
-                    .and_then(serde_json::Value::as_str)
-                    .or_else(|| entry.get("id").and_then(serde_json::Value::as_str))
-                    .is_some_and(|slug| slug.trim().eq_ignore_ascii_case(&expected));
-                if !matches_slug {
-                    return None;
-                }
-                let context_window = entry.get("context_window");
-                let max_context_window = entry
-                    .get("max_context_window")
-                    .or_else(|| entry.get("max_context_window_tokens"));
-                let context_window = if matches!(
-                    expected.as_str(),
-                    "gpt-5.6-sol" | "gpt-5.6-terra" | "gpt-5.6-luna" | "gpt-6-sol" | "gpt-6-luna"
-                ) {
-                    max_context_window.or(context_window)
-                } else {
-                    context_window.or(max_context_window)
-                };
-                context_window
-                    .and_then(serde_json::Value::as_u64)
-                    .filter(|context_window| *context_window > 1)
-            })
+    let raw = fs::read_to_string(codex_home.join("models_cache.json")).ok()?;
+    let value = serde_json::from_str::<serde_json::Value>(&raw).ok()?;
+    let entries = value.get("models").and_then(serde_json::Value::as_array)?;
+    let indexed = entries
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            entry
+                .get("slug")
+                .and_then(serde_json::Value::as_str)
+                .or_else(|| entry.get("id").and_then(serde_json::Value::as_str))
+                .map(str::trim)
+                .filter(|slug| !slug.is_empty())
+                .map(|slug| (index, slug))
         })
+        .collect::<Vec<_>>();
+    let catalog = indexed
+        .iter()
+        .map(|(_, slug)| CatalogModel {
+            id: slug,
+            aliases: &[],
+        })
+        .collect::<Vec<_>>();
+    let index = resolve_catalog_model(&catalog, model)
+        .expect("Mojo OpenAI models-cache identity lookup failed")?;
+    let entry = &entries[indexed[index].0];
+    let context_window = entry.get("context_window");
+    let max_context_window = entry
+        .get("max_context_window")
+        .or_else(|| entry.get("max_context_window_tokens"));
+    let prefer_max =
+        runtime_openai_scalar_policy(RuntimeOpenAiScalarPolicy::PreferMaxContextModel, model)
+            .expect("runtime OpenAI context policy should accept Rust strings");
+    let context_window = if prefer_max {
+        max_context_window.or(context_window)
+    } else {
+        context_window.or(max_context_window)
+    };
+    context_window
+        .and_then(serde_json::Value::as_u64)
+        .filter(|context_window| *context_window > 1)
+}
+
+#[cfg(test)]
+mod openai_model_policy_tests {
+    use super::*;
+
+    #[test]
+    fn openai_runtime_scalar_policy_preserves_trim_and_family_rules() {
+        assert!(runtime_launch_openai_model_uses_large_context(
+            " GPT-5.6-SOL "
+        ));
+        assert!(runtime_launch_openai_model_uses_large_context("gpt-5-mini"));
+        assert!(runtime_launch_openai_model_uses_large_context("gpt-6-luna"));
+        assert!(runtime_launch_openai_model_uses_large_context(
+            "codex-auto-review"
+        ));
+        assert!(!runtime_launch_openai_model_uses_large_context("gpt-4o"));
+    }
+
+    #[test]
+    fn openai_models_cache_uses_mojo_identity_and_context_precedence() {
+        let root = crate::test_support::test_temp_root().join(format!(
+            "prodex-openai-model-cache-policy-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(
+            root.join("models_cache.json"),
+            serde_json::json!({
+                "models": [
+                    {
+                        "slug": " GPT-5.6-SOL ",
+                        "context_window": 200000,
+                        "max_context_window": 1000000
+                    },
+                    {
+                        "id": "gpt-5.5",
+                        "context_window": 300000,
+                        "max_context_window_tokens": 900000
+                    }
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        assert_eq!(
+            runtime_launch_openai_model_context_from_models_cache(&root, " gpt-5.6-sol "),
+            Some(1000000)
+        );
+        assert_eq!(
+            runtime_launch_openai_model_context_from_models_cache(&root, "GPT-5.5"),
+            Some(300000)
+        );
+        assert_eq!(
+            runtime_launch_openai_model_context_from_models_cache(&root, "missing"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
 }

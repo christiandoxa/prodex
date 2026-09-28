@@ -62,6 +62,13 @@
       "consumer": "crates/prodex-app/src/app_commands/doctor.rs",
       "consumer_marker": "prodex_mojo_core::log::self_test",
       "production_reachability_test": "crates/prodex-app/src/app_commands/doctor.rs"
+    },
+    "provider_catalog_model_identity": {
+      "expanded_in": "0.433.0",
+      "consumer": "crates/prodex-app/src/runtime_launch.rs",
+      "consumer_marker": "resolve_catalog_model",
+      "production_reachability_test": "crates/prodex-app/src/runtime_launch.rs",
+      "rust_adapter_scope": "models-cache JSON acquisition, slug/id projection, selected entry materialization, and context-window extraction"
     }
   },
   "classification_legend": {
@@ -948,7 +955,8 @@
           "runtime_boolean_token_classification",
           "deepseek_web_search_mode_classification",
           "runtime_ci_truth_token_classification",
-          "profile_import_source_classification"
+          "profile_import_source_classification",
+          "runtime_openai_scalar_policy"
         ]
       },
       {
@@ -3895,6 +3903,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "single-component Path and path-existence checks remain Rust-owned before dispatching the Mojo source class"
+    },
+    {
+      "name": "runtime_openai_scalar_policy",
+      "domain": "app/runtime-openai",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust trim/lowercase policy for OpenAI provider identity, large-context model families, and max-context preference",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_openai_scalar_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
+      "consumer": "crates/prodex-app/src/runtime_launch.rs",
+      "consumer_marker": "runtime_openai_scalar_policy",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_launch.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
+      "rust_owner_before": "trimmed case-insensitive OpenAI provider-name matching, gpt-5/gpt-6/codex-auto-review large-context classification, and max-context preference table",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo adapter coverage and runtime-launch tests preserve trim, mixed-case, prefix, exact-family, and context precedence behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "config acquisition, models-cache JSON parsing, context-window extraction, and Codex argument materialization"
     }
   ],
   "rust_semantic_reductions": [
