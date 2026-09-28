@@ -3774,7 +3774,9 @@
       "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
       "consumer": "crates/prodex-app/src/runtime_deepseek_config.rs",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_deepseek_config.rs"
+        "crates/prodex-app/src/runtime_deepseek_config.rs",
+        "crates/prodex-app/src/runtime_config/environment.rs",
+        "crates/prodex-app/src/app_commands/presidio.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
       "rust_state_after": "adapter-only",
@@ -3784,9 +3786,9 @@
       "name": "runtime_boolean_token_classification",
       "mojo_entry": "prodex_runtime_bool_token_v1",
       "consumer_marker": "runtime_bool_token",
-      "rust_owner_before": "case-insensitive 1/true/yes/on and 0/false/no/off runtime boolean token classification",
+      "rust_owner_before": "case-insensitive 1/true/yes/on and 0/false/no/off runtime boolean token classification duplicated across DeepSeek config, runtime config flags, and Presidio auto-start handling",
       "rust_test_oracle": "deleted; direct Mojo adapter coverage plus DeepSeek strict-tools environment/profile and invalid-value caller tests preserve the production behavior",
-      "rust_adapter_scope": "empty and Unicode-whitespace error precedence plus stable caller-specific error text"
+      "rust_adapter_scope": "caller-specific trim/empty/Unicode-whitespace policy, stable error/default behavior, and boolean result mapping"
     },
     {
       "domain": "app/deepseek-config",

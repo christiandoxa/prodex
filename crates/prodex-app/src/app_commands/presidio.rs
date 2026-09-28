@@ -1,5 +1,6 @@
 use crate::{AppPaths, print_launch_status};
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::super_provider_config::runtime_bool_token;
 use prodex_presidio::{
     PresidioBlockingClient, PresidioHealth, ProdexPresidioRuntimeFileConfig,
     validate_presidio_file_config,
@@ -108,13 +109,13 @@ fn required_presidio_services_error(
 fn presidio_auto_start_disabled() -> bool {
     env::var(PRESIDIO_AUTO_START_ENV)
         .ok()
-        .map(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "0" | "false" | "no" | "off"
-            )
-        })
-        .unwrap_or(false)
+        .is_some_and(|value| presidio_auto_start_disabled_value(&value))
+}
+
+fn presidio_auto_start_disabled_value(value: &str) -> bool {
+    runtime_bool_token(value.trim())
+        .expect("runtime boolean token classification should accept Rust strings")
+        == Some(false)
 }
 
 fn presidio_health_label(health: &PresidioHealth) -> String {
@@ -140,4 +141,19 @@ fn load_presidio_config(paths: &AppPaths) -> Result<Option<ProdexPresidioConfig>
 
 fn presidio_config_path(paths: &AppPaths) -> PathBuf {
     paths.root.join(PRODEX_PRESIDIO_FILE_NAME)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::presidio_auto_start_disabled_value;
+
+    #[test]
+    fn presidio_auto_start_disabled_value_uses_mojo_boolean_tokens() {
+        for value in ["0", "FALSE", " no ", "\u{2003}OFF\u{2003}"] {
+            assert!(presidio_auto_start_disabled_value(value));
+        }
+        for value in ["1", "true", "YES", "on", "", "unknown"] {
+            assert!(!presidio_auto_start_disabled_value(value));
+        }
+    }
 }
