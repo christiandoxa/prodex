@@ -3038,3 +3038,17 @@ identity/dedup policy remains in these two generators.
 Focused catalog-write tests pass for DeepSeek, Gemini, and a custom Gemini launch model.
 The canonical broad report counts **61,125 Mojo LOC** and **194,186 Rust production LOC**,
 totaling **255,311 LOC**: **23.94% Mojo**.
+
+
+## DeepSeek runtime scalar token policy migration
+
+DeepSeek runtime strict-tools boolean token aliases and web-search mode aliases now
+use dedicated scalar classifiers in the existing super_provider_config Mojo owner.
+Rust preserves empty/Unicode-whitespace rejection and the stable caller-specific error
+messages, then maps the Mojo result into the public runtime enums; the former lowercase
+match tables were deleted and there is no Rust fallback classification.
+
+Direct Mojo adapter coverage passes together with five strict-tools caller tests and one
+web-search-mode caller test. The canonical broad report counts **61,177 Mojo LOC** and
+**194,238 Rust production LOC**, totaling **255,415 LOC**: **23.95% Mojo**. The 75%
+project target remains unmet.
