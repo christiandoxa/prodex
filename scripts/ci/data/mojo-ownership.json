@@ -922,6 +922,18 @@
           "sub_agent_reasoning_effort_policy",
           "sub_agent_model_nonempty_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/super_provider_config.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "super_external_provider_alias_policy",
+          "super_provider_config_serialization",
+          "super_toml_string_serialization"
+        ]
       }
     ],
     "removed": [
@@ -3360,6 +3372,78 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "JSON parsing, request-id materialization, header validation ordering, audit timing, tool argument allowlist and exact HTTP/JSON-RPC response construction"
+    },
+    {
+      "domain": "cli/super-provider-config",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust Super provider config policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
+      "consumer": "crates/prodex-cli/src/runtime_args.rs",
+      "production_consumers": [
+        "crates/prodex-cli/src/runtime_args.rs",
+        "crates/prodex-cli/src/runtime_args/optional_tools.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "super_external_provider_alias_policy",
+      "mojo_entry": "prodex_super_external_provider_alias_v1",
+      "consumer_marker": "prodex_mojo_core::super_provider_config::external_provider_alias",
+      "rust_owner_before": "case-insensitive anthropic/claude, copilot/github aliases, deepseek, gemini and kiro provider parsing",
+      "rust_test_oracle": "deleted; direct kernel and full CLI suite cover canonical names, aliases, mixed case/whitespace and unknown-provider errors",
+      "rust_adapter_scope": "SuperExternalProvider enum mapping and stable invalid-provider error text"
+    },
+    {
+      "domain": "cli/super-provider-config",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust Super provider config policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
+      "consumer": "crates/prodex-cli/src/runtime_args.rs",
+      "production_consumers": [
+        "crates/prodex-cli/src/runtime_args.rs",
+        "crates/prodex-cli/src/runtime_args/optional_tools.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "super_provider_config_serialization",
+      "mojo_entry": "prodex_super_provider_config_v1",
+      "consumer_marker": "prodex_mojo_core::super_provider_config::provider_config_entries",
+      "rust_owner_before": "ordered 14-entry local/external Codex provider override table and scalar/string serialization",
+      "rust_test_oracle": "deleted; direct kernel plus full CLI/Copilot tests cover provider id/name/base URL/model, responses wire API, auth/websocket flags, context/compact limits, web search and image generation",
+      "rust_adapter_scope": "security-sensitive URL validation, provider metadata lookup, token-limit calculation, OsString interleaving and API-key ownership remain Rust"
+    },
+    {
+      "domain": "cli/super-provider-config",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust Super provider config policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/super_provider_config.mojo",
+      "consumer": "crates/prodex-cli/src/runtime_args.rs",
+      "production_consumers": [
+        "crates/prodex-cli/src/runtime_args.rs",
+        "crates/prodex-cli/src/runtime_args/optional_tools.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/super_provider_config.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "super_toml_string_serialization",
+      "mojo_entry": "prodex_super_toml_string_v1",
+      "consumer_marker": "prodex_mojo_core::super_provider_config::toml_string_literal",
+      "rust_owner_before": "double-quoted TOML literal backslash and quote escaping used by Super model/provider overrides",
+      "rust_test_oracle": "deleted; direct kernel fixture covers backslash/quote escaping and CLI tests exercise Unicode model identifiers",
+      "rust_adapter_scope": "owned String materialization only"
     }
   ],
   "rust_semantic_reductions": [
