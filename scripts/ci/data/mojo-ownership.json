@@ -997,6 +997,16 @@
         "operations": [
           "gemini_stream_metadata_merge"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_guardrails.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_guardrail_text_classification"
+        ]
       }
     ],
     "removed": [
@@ -3958,6 +3968,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "caller-owned iteration, string acquisition, DTO selection, prompt rendering, and exact case-sensitive fast-path where ordering semantics require it"
+    },
+    {
+      "name": "gemini_guardrail_text_classification",
+      "domain": "provider/gemini-guardrails",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust ASCII-lowercase phrase tables and tool-token boundary scans for Gemini assistant guardrails",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_guardrail_text_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_guardrails.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs",
+      "consumer_marker": "prodex_mojo_core::gemini_guardrails",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/intent.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails.rs",
+      "rust_owner_before": "wait/poll narration classification, future tool-intent phrase and token-boundary detection, success-claim markers, tool failure/version verification, process-exit-zero recognition, and command-output-only phrase policy",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo policy-table coverage plus Gemini SSE caller regressions preserve tool-intent, wait/poll, failed verification, and explicit-version verification behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "conversation JSON extraction, tool-text collection, typed enum-to-static-label mapping, and orchestration across recent tool outputs"
     }
   ],
   "rust_semantic_reductions": [
