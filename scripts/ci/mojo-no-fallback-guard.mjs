@@ -8,6 +8,8 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/provider_usage.rs",
+  "crates/prodex-provider-core/src/usage.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace.rs",
   "crates/prodex-mojo-core/src/runtime_route_reason.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
@@ -256,6 +258,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-mojo-core/src/provider_usage.rs",
+  "crates/prodex-provider-core/src/usage.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
   "crates/prodex-runtime-tuning/src/mojo.rs",
@@ -768,6 +772,38 @@ export function findViolations(files) {
     .filter(([filePath, contents]) => filePath === ADAPTIVE_BUDGET_FILE &&
       !contents.includes("prodex_mojo_core::runtime::smart_context_adaptive_budget_plan("))
     .map(([filePath]) => `${filePath}: adaptive budget must use the Mojo plan`);
+  const providerUsageViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/usage.rs") {
+      const required = [
+        "prodex_mojo_core::provider_usage::extract_json(",
+        "prodex_mojo_core::provider_usage::calculate_cost(",
+        "prodex_mojo_core::provider_usage::merged_total(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": provider usage migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /\bfn\s+first_u64\s*\(/u.test(production)
+        || /saturating_mul\(rate\)\s*\/\s*1_000_000/u.test(production)
+        || /self\.total_tokens\.or_else/u.test(production)
+      ) {
+        violations.push(filePath + ": contains restored Rust provider-usage semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/provider_usage.rs") {
+      const required = [
+        "prodex_provider_usage_extract_v1(",
+        "prodex_provider_usage_cost_v1(",
+        "prodex_provider_usage_merged_total_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": provider usage ABI adapter must retain " + call);
+    }
+    return [];
+  });
   const deepseekSimpleRequestViolations = files
     .filter(([filePath, contents]) => filePath === DEEPSEEK_SIMPLE_REQUEST_FILE &&
       (!contents.includes("DeepSeekRequestPolicyOperation::SimpleRequest") ||
@@ -1731,6 +1767,7 @@ export function findViolations(files) {
   });
   return [...markerViolations, ...featureOffViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
+    ...providerUsageViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
     ...kiroChatResponseViolations,

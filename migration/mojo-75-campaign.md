@@ -2793,3 +2793,19 @@ ownership now reports **81 authoritative operations**. The canonical broad sourc
 report counts **58,835 Mojo LOC** and **192,900 Rust production LOC**, totaling
 **251,735 LOC**: **23.37% Mojo**. The 75% project target remains unmet, with
 **519,865 additional Mojo LOC** required at the current Rust volume.
+
+## Provider usage extraction and cost migration
+
+Provider token-usage precedence and usage-cost arithmetic now use
+mojo/prodex_core/provider_usage.mojo. Rust continues to validate complete JSON
+documents with serde and owns SSE framing, but OpenAI/Anthropic/Gemini usage
+field alias selection, explicit-total versus input/output fallback, and
+saturating microusd cost arithmetic no longer have Rust semantic copies.
+
+Validation passes 6/6 focused usage tests, the direct Mojo usage smoke test,
+337/337 prodex-provider-core unit tests plus 7 integration tests, clippy, and
+prodex-app check. No-fallback self-test, ownership, and authority guards pass;
+ownership now reports **84 authoritative operations**. The canonical broad
+source report counts **59,114 Mojo LOC** and **192,965 Rust production LOC**,
+totaling **252,079 LOC**: **23.45% Mojo**. The 75% project target remains unmet,
+with **519,781 additional Mojo LOC** required at the current Rust volume.
