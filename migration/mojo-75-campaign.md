@@ -3138,3 +3138,11 @@ super_provider_config.mojo. Models-cache slug/id lookup now reuses the authorita
 trimmed rich-catalog resolver. The previous Rust lowercase/prefix tables and manual
 case-insensitive cache scan were deleted. Rust retains config/file acquisition, JSON
 projection, numeric context-window extraction, and Codex override materialization.
+
+
+## Kiro model endpoint exact-identity cleanup
+
+Kiro model endpoint lookup now reuses the exact non-trimming rich-catalog Mojo
+resolver. The Rust eq_ignore_ascii_case scan over model IDs was deleted. Mixed-case
+model IDs still resolve, while space-padded IDs remain a miss exactly as before; Rust
+retains response JSON ownership and the existing Mojo model-not-found shape.
