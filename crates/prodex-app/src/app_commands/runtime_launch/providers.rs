@@ -1,7 +1,7 @@
 use super::{
     RuntimeLaunchRequest, RuntimeLaunchSelection, active_profile_selection_order,
-    resolve_runtime_launch_profile_name, runtime_launch_effective_gemini_thinking_budget_tokens,
-    runtime_launch_profile_home,
+    resolve_runtime_launch_profile_name, runtime_external_provider_class,
+    runtime_launch_effective_gemini_thinking_budget_tokens, runtime_launch_profile_home,
 };
 #[path = "providers_env.rs"]
 mod providers_env;
@@ -32,6 +32,7 @@ use crate::{
     RuntimeLocalRewriteProviderOptions, SuperExternalProvider, remove_provider_secret_env,
 };
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::super_provider_config::RuntimeExternalProviderClass;
 use std::path::PathBuf;
 
 pub(super) fn isolate_auto_external_provider_child_env(
@@ -85,16 +86,16 @@ pub(super) fn runtime_launch_profile_home_for_external_provider(
     profile_name: &str,
     external_provider: Option<&str>,
 ) -> Result<PathBuf> {
-    if external_provider.is_some_and(|provider| {
-        provider.eq_ignore_ascii_case("gemini")
-            || provider.eq_ignore_ascii_case("gemini-oauth")
-            || provider.eq_ignore_ascii_case("copilot")
-            || provider.eq_ignore_ascii_case("github-copilot")
-            || provider.eq_ignore_ascii_case("github_copilot")
-            || provider.eq_ignore_ascii_case("anthropic")
-            || provider.eq_ignore_ascii_case("claude")
-            || provider.eq_ignore_ascii_case("kiro")
-    }) {
+    if matches!(
+        external_provider.and_then(runtime_external_provider_class),
+        Some(
+            RuntimeExternalProviderClass::Gemini
+                | RuntimeExternalProviderClass::GeminiOauth
+                | RuntimeExternalProviderClass::Copilot
+                | RuntimeExternalProviderClass::Anthropic
+                | RuntimeExternalProviderClass::Kiro
+        )
+    ) {
         let profile = state
             .profiles
             .get(profile_name)
@@ -121,28 +122,38 @@ pub(super) fn runtime_local_rewrite_provider_options(
 ) -> Result<RuntimeLocalRewriteProviderOptions> {
     match request.external_provider {
         Some(provider)
-            if provider.eq_ignore_ascii_case("anthropic")
-                || provider.eq_ignore_ascii_case("claude") =>
+            if runtime_external_provider_class(provider)
+                == Some(RuntimeExternalProviderClass::Anthropic) =>
         {
             runtime_local_rewrite_anthropic_options(state, selection, request)
         }
         Some(provider)
-            if provider.eq_ignore_ascii_case("copilot")
-                || provider.eq_ignore_ascii_case("github-copilot")
-                || provider.eq_ignore_ascii_case("github_copilot") =>
+            if runtime_external_provider_class(provider)
+                == Some(RuntimeExternalProviderClass::Copilot) =>
         {
             runtime_local_rewrite_copilot_options(state, selection, request)
         }
-        Some(provider) if provider.eq_ignore_ascii_case("deepseek") => {
+        Some(provider)
+            if runtime_external_provider_class(provider)
+                == Some(RuntimeExternalProviderClass::DeepSeek) =>
+        {
             runtime_local_rewrite_deepseek_options(selection, request)
         }
         Some(provider)
-            if provider.eq_ignore_ascii_case("gemini")
-                || provider.eq_ignore_ascii_case("gemini-oauth") =>
+            if matches!(
+                runtime_external_provider_class(provider),
+                Some(
+                    RuntimeExternalProviderClass::Gemini
+                        | RuntimeExternalProviderClass::GeminiOauth
+                )
+            ) =>
         {
             runtime_local_rewrite_gemini_options(state, selection, request, provider)
         }
-        Some(provider) if provider.eq_ignore_ascii_case("kiro") => {
+        Some(provider)
+            if runtime_external_provider_class(provider)
+                == Some(RuntimeExternalProviderClass::Kiro) =>
+        {
             let auth = runtime_kiro_profile_for_provider(state, selection)?;
             Ok(RuntimeLocalRewriteProviderOptions::Kiro { auth })
         }
@@ -224,7 +235,7 @@ fn runtime_local_rewrite_gemini_options(
     let thinking_budget_tokens =
         runtime_launch_effective_gemini_thinking_budget_tokens(request, selection);
     let model_resolution = RuntimeGeminiModelResolution::from_current_settings()?;
-    if !provider.eq_ignore_ascii_case("gemini-oauth")
+    if runtime_external_provider_class(provider) != Some(RuntimeExternalProviderClass::GeminiOauth)
         && let Some(api_keys) =
             runtime_gemini_api_keys_from_request_or_env(request.external_provider_api_key)?
     {

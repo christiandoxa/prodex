@@ -1,4 +1,5 @@
 use super::*;
+use prodex_mojo_core::super_provider_config::RuntimeExternalProviderClass;
 
 #[derive(Debug, Clone)]
 pub(super) struct RuntimeLaunchSelection {
@@ -25,23 +26,24 @@ impl RuntimeLaunchSelection {
             model_provider_override,
             profile_v2_name,
         )?;
-        let gemini_external_provider = external_provider.is_some_and(|provider| {
-            provider.eq_ignore_ascii_case("gemini") || provider.eq_ignore_ascii_case("gemini-oauth")
-        });
-        let copilot_external_provider = external_provider.is_some_and(|provider| {
-            provider.eq_ignore_ascii_case("copilot")
-                || provider.eq_ignore_ascii_case("github-copilot")
-                || provider.eq_ignore_ascii_case("github_copilot")
-        });
-        let anthropic_external_provider = external_provider.is_some_and(|provider| {
-            provider.eq_ignore_ascii_case("anthropic") || provider.eq_ignore_ascii_case("claude")
-        });
+        let external_provider_class = external_provider.and_then(runtime_external_provider_class);
+        let gemini_external_provider = matches!(
+            external_provider_class,
+            Some(RuntimeExternalProviderClass::Gemini | RuntimeExternalProviderClass::GeminiOauth)
+        );
+        let copilot_external_provider =
+            external_provider_class == Some(RuntimeExternalProviderClass::Copilot);
+        let anthropic_external_provider =
+            external_provider_class == Some(RuntimeExternalProviderClass::Anthropic);
         let kiro_external_provider =
-            external_provider.is_some_and(|provider| provider.eq_ignore_ascii_case("kiro"));
-        let native_profileless_provider = external_provider.is_some_and(|provider| {
-            provider.eq_ignore_ascii_case("gemini-native")
-                || provider.eq_ignore_ascii_case("antigravity")
-        });
+            external_provider_class == Some(RuntimeExternalProviderClass::Kiro);
+        let native_profileless_provider = matches!(
+            external_provider_class,
+            Some(
+                RuntimeExternalProviderClass::GeminiNative
+                    | RuntimeExternalProviderClass::Antigravity
+            )
+        );
         if requested.is_none() && native_profileless_provider {
             return Ok(Self {
                 initial_profile_name: "local".to_string(),
