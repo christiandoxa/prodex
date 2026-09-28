@@ -1,4 +1,5 @@
 use super::{GeminiCodeAssistValidation, GeminiLoadCodeAssistResponse};
+use prodex_mojo_core::rich::{ascii_casefold_ends_with, ascii_casefold_equal_exact};
 use serde_json::Value;
 
 pub(super) fn gemini_validation_from_load_response(
@@ -92,8 +93,8 @@ pub(in crate::runtime_gemini_auth) fn gemini_validation_from_body(
         .and_then(|links| {
             links.iter().find_map(|link| {
                 let description = link.get("description").and_then(Value::as_str)?;
-                description
-                    .eq_ignore_ascii_case("learn more")
+                ascii_casefold_equal_exact(description, "learn more")
+                    .expect("Mojo Gemini help-link description comparison failed")
                     .then(|| {
                         link.get("url")
                             .and_then(Value::as_str)
@@ -110,18 +111,21 @@ pub(in crate::runtime_gemini_auth) fn gemini_validation_from_body(
 }
 
 fn gemini_code_assist_domain_matches(domain: &str) -> bool {
-    domain
-        .trim()
-        .eq_ignore_ascii_case("cloudcode-pa.googleapis.com")
+    ascii_casefold_equal_exact(domain.trim(), "cloudcode-pa.googleapis.com")
+        .expect("Mojo Gemini Code Assist domain comparison failed")
 }
 
 fn trusted_gemini_validation_url(value: &str) -> Option<String> {
     let url = reqwest::Url::parse(value.trim()).ok()?;
-    let host = url.host_str()?.to_ascii_lowercase();
-    let google_host = host == "google.com"
-        || host.ends_with(".google.com")
-        || host == "googleapis.com"
-        || host.ends_with(".googleapis.com");
+    let host = url.host_str()?;
+    let google_host = ascii_casefold_equal_exact(host, "google.com")
+        .expect("Mojo Gemini validation-host comparison failed")
+        || ascii_casefold_ends_with(host, ".google.com")
+            .expect("Mojo Gemini validation-host suffix comparison failed")
+        || ascii_casefold_equal_exact(host, "googleapis.com")
+            .expect("Mojo Gemini validation-host comparison failed")
+        || ascii_casefold_ends_with(host, ".googleapis.com")
+            .expect("Mojo Gemini validation-host suffix comparison failed");
     if url.scheme() != "https"
         || !google_host
         || !url.username().is_empty()

@@ -146,6 +146,23 @@ fn rich_ascii_casefold_exact_equality_preserves_empty_and_whitespace() {
 }
 
 #[test]
+fn rich_ascii_casefold_relations_match_rust_string_contracts() {
+    assert!(
+        ascii_casefold_starts_with("Application/JSON; Charset=UTF-8", "application/json").unwrap()
+    );
+    assert!(ascii_casefold_ends_with("https://EXAMPLE.test/IMAGE.PNG", ".png").unwrap());
+    assert!(ascii_casefold_contains("Timeout while CONNECTING", "timeout").unwrap());
+    assert!(ascii_casefold_starts_with("x", "").unwrap());
+    assert!(ascii_casefold_ends_with("x", "").unwrap());
+    assert!(ascii_casefold_contains("x", "").unwrap());
+    assert!(!ascii_casefold_starts_with("json", "application/json").unwrap());
+    assert!(!ascii_casefold_ends_with("file.pngx", ".png").unwrap());
+    assert!(!ascii_casefold_contains("healthy", "timeout").unwrap());
+    let large = "A".repeat(70_000);
+    assert!(ascii_casefold_equal_exact(&large, &large.to_ascii_lowercase()).unwrap());
+}
+
+#[test]
 fn rich_catalog_exact_resolver_preserves_untrimmed_identity() {
     let models = [CatalogModel {
         id: "gpt-main",

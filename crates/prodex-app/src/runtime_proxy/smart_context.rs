@@ -1,4 +1,5 @@
 use super::*;
+use prodex_mojo_core::rich::ascii_casefold_starts_with;
 mod artifact_manifest;
 mod artifact_refs;
 mod body;
@@ -323,7 +324,10 @@ fn runtime_smart_context_admission_fallback_reason(
         return Some("unsupported_route");
     }
     runtime_proxy_crate::runtime_proxy_request_header_value(&request.headers, "content-type")
-        .is_some_and(|value| !value.to_ascii_lowercase().starts_with("application/json"))
+        .is_some_and(|value| {
+            !ascii_casefold_starts_with(value, "application/json")
+                .expect("Mojo Smart Context content-type prefix comparison failed")
+        })
         .then_some("unsupported_content_type")
 }
 

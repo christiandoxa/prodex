@@ -79,6 +79,22 @@ fn copilot_provider_core_detects_agent_and_vision_input() {
         "messages": [{"role": "user", "content": "hello"}]
     }))
     .unwrap();
+    let agent_upper = serde_json::to_vec(&json!({
+        "messages": [{"role": "ASSISTANT", "content": "hello"}]
+    }))
+    .unwrap();
+    let tool_upper = serde_json::to_vec(&json!({
+        "messages": [{"role": "TOOL", "content": "hello"}]
+    }))
+    .unwrap();
+    let spaced_message_role = serde_json::to_vec(&json!({
+        "messages": [{"role": " ASSISTANT ", "content": "hello"}]
+    }))
+    .unwrap();
+    let spaced_input_role = serde_json::to_vec(&json!({
+        "input": [{"type": "message", "role": " ASSISTANT ", "content": []}]
+    }))
+    .unwrap();
     let vision = serde_json::to_vec(&json!({
         "input": [{
             "type": "message",
@@ -137,6 +153,14 @@ fn copilot_provider_core_detects_agent_and_vision_input() {
     .unwrap();
 
     assert!(copilot_provider_core_request_has_agent_input(&agent));
+    assert!(copilot_provider_core_request_has_agent_input(&agent_upper));
+    assert!(copilot_provider_core_request_has_agent_input(&tool_upper));
+    assert!(!copilot_provider_core_request_has_agent_input(
+        &spaced_message_role
+    ));
+    assert!(copilot_provider_core_request_has_agent_input(
+        &spaced_input_role
+    ));
     assert!(!copilot_provider_core_request_has_agent_input(&user));
     assert!(copilot_provider_core_request_has_vision_input(&vision));
     assert!(copilot_provider_core_request_has_vision_input(

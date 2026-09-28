@@ -3224,3 +3224,14 @@ Super-expose trusted-origin host matching now reuse the authoritative exact ASCI
 Mojo primitive. The remaining Rust eq_ignore_ascii_case/lowercase copies in these paths
 were deleted. Rust retains JSON/catalog acquisition, URL parsing, namespace selection,
 header mutation, and caller-specific routing behavior.
+
+
+## Generic ASCII casefold relation migration
+
+The rich catalog kernel now exposes bounded ASCII-casefold starts-with, ends-with,
+and contains relations, and exact equality now accepts large Rust strings without the
+previous 64 KiB adapter ceiling. Copilot request-role classification, Gemini data-URL
+base64 detection, URI MIME suffixes, Code Assist help/domain/trusted-host matching, and
+Smart Context application/json content-type recognition now delegate to Mojo. Rust
+retains JSON/URL/header acquisition, historical trim/split behavior, and result mapping;
+no lowercase semantic fallback remains in these migrated paths.
