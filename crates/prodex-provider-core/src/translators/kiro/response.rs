@@ -2,7 +2,7 @@
 
 use super::stream::kiro_provider_core_stream_content_text;
 use prodex_mojo_core::MojoError;
-use prodex_mojo_core::rich::KIRO_RESPONSE_MAX_BYTES;
+use prodex_mojo_core::rich::{CatalogModel, KIRO_RESPONSE_MAX_BYTES, resolve_catalog_model_exact};
 use serde_json::{Value, json};
 
 use super::stream::{kiro_mojo_body, kiro_mojo_value};
@@ -79,13 +79,24 @@ pub fn kiro_provider_core_model_value_or_not_found(
     model_catalog: &[Value],
     model_id: &str,
 ) -> (u16, Value) {
-    if let Some(model) = model_catalog.iter().find(|model| {
-        model
-            .get("id")
-            .and_then(Value::as_str)
-            .is_some_and(|id| id.eq_ignore_ascii_case(model_id))
-    }) {
-        return (200, model.clone());
+    let indexed = model_catalog
+        .iter()
+        .enumerate()
+        .filter_map(|(index, model)| {
+            model
+                .get("id")
+                .and_then(Value::as_str)
+                .map(|id| (index, id))
+        })
+        .collect::<Vec<_>>();
+    let catalog = indexed
+        .iter()
+        .map(|(_, id)| CatalogModel { id, aliases: &[] })
+        .collect::<Vec<_>>();
+    if let Some(index) = resolve_catalog_model_exact(&catalog, model_id)
+        .expect("Mojo exact Kiro model lookup failed")
+    {
+        return (200, model_catalog[indexed[index].0].clone());
     }
     let mut input = KiroKernelInput::new(KiroKernelOperation::ModelNotFound);
     input.model = Some(model_id);

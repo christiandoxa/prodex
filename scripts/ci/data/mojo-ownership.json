@@ -3868,16 +3868,17 @@
       "production_consumers": [
         "crates/prodex-app/src/app_commands/super_main_catalog.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/provider_models.rs",
-        "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs"
+        "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
+        "crates/prodex-provider-core/src/translators/kiro/response.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_models.rs",
-      "rust_owner_before": "case-insensitive exact model/alias matching in Super model choices and dynamic provider model lookup, including external dynamic catalog slug lookup.",
+      "rust_owner_before": "case-insensitive exact model/alias matching in Super model choices and dynamic provider model lookup, including external dynamic catalog slug lookup, including Kiro model endpoint lookup.",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct rich-catalog exact resolver test plus Super and provider-model caller tests cover mixed case, aliases, empty input, and non-trimming whitespace behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "build bounded catalog views, preserve original JSON/index ownership, materialize selected caller values, and retain provider-specific context/metadata mapping"
+      "rust_adapter_scope": "build bounded catalog views, preserve original JSON/index ownership, materialize selected caller values, and retain provider-specific response/context metadata mapping"
     },
     {
       "name": "profile_import_source_classification",

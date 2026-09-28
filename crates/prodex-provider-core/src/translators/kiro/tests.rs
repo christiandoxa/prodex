@@ -135,6 +135,8 @@ fn kiro_provider_core_shapes_model_endpoint_values() {
     let (status, body) = kiro_provider_core_model_value_or_not_found(&catalog, "CLAUDE-SONNET-4");
     assert_eq!(status, 200);
     assert_eq!(body["id"], "claude-sonnet-4");
+    let (status, _) = kiro_provider_core_model_value_or_not_found(&catalog, " CLAUDE-SONNET-4 ");
+    assert_eq!(status, 404);
 
     let (status, body) = kiro_provider_core_model_value_or_not_found(&catalog, "missing");
     assert_eq!(status, 404);
