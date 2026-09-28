@@ -3979,16 +3979,21 @@
         "crates/prodex-app/src/runtime_proxy/dispatch/websocket.rs",
         "crates/prodex-app/src/runtime_proxy/smart_context/rollout.rs",
         "crates/prodex-app/src/runtime_proxy/upstream.rs",
-        "crates/prodex-app/src/runtime_proxy/websocket.rs"
+        "crates/prodex-app/src/runtime_proxy/websocket.rs",
+        "crates/prodex-app/src/profile_commands/copilot/runtime_auth.rs",
+        "crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
+        "crates/prodex-app/src/super_expose/protocol/validation.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/prompt identity, runtime commands/fail modes/process names, Amazon Bedrock aliases, HTTP/header names and values, websocket routing, and Smart Context metadata",
+      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/prompt identity, runtime commands/fail modes/process names, provider/header identity, Copilot catalog keys, sub-agent visibility, compact metadata headers, conversation namespace, and Super-expose trusted-origin hosts",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo equality coverage preserves empty strings, mixed case, and whitespace sensitivity, while Super catalog/prompt caller tests preserve selection behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "caller-owned trimming where historically required, string/path/header acquisition, iteration, DTO/process ownership, routing and forwarding decisions; Mojo owns bounded exact ASCII-folded equality only"
+      "rust_adapter_scope": "caller-owned trimming where historically required, string/path/header/URL acquisition, iteration, DTO/process ownership, routing/filtering decisions, and rendering; Mojo owns bounded exact ASCII-folded equality only"
     },
     {
       "name": "gemini_guardrail_text_classification",

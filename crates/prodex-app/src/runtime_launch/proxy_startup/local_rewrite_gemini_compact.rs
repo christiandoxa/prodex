@@ -11,6 +11,7 @@ use crate::{
     read_blocking_response_body_with_limit,
 };
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 #[cfg(test)]
 use prodex_provider_core::GEMINI_PROVIDER_CORE_LOCAL_COMPACT_SUMMARY_PREFIX;
 use prodex_provider_core::{
@@ -313,10 +314,14 @@ fn mark_runtime_compact_parts(
     reason: Option<&'static str>,
 ) {
     parts.headers.retain(|(name, _)| {
-        !name.eq_ignore_ascii_case("x-prodex-compact-mode")
-            && !name.eq_ignore_ascii_case("x-prodex-compact-provider")
-            && !name.eq_ignore_ascii_case("x-prodex-compact-degraded")
-            && !name.eq_ignore_ascii_case("x-prodex-compact-reason")
+        !ascii_casefold_equal_exact(name, "x-prodex-compact-mode")
+            .expect("Mojo compact header comparison failed")
+            && !ascii_casefold_equal_exact(name, "x-prodex-compact-provider")
+                .expect("Mojo compact header comparison failed")
+            && !ascii_casefold_equal_exact(name, "x-prodex-compact-degraded")
+                .expect("Mojo compact header comparison failed")
+            && !ascii_casefold_equal_exact(name, "x-prodex-compact-reason")
+                .expect("Mojo compact header comparison failed")
     });
     parts.headers.push((
         "x-prodex-compact-mode".to_string(),

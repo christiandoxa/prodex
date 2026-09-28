@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use reqwest::blocking::Client;
 use std::fmt;
 use std::time::Duration;
@@ -301,7 +302,10 @@ fn is_copilot_runtime_model_list(key: &str) -> bool {
         "data",
     ]
     .iter()
-    .any(|candidate| key.eq_ignore_ascii_case(candidate))
+    .any(|candidate| {
+        ascii_casefold_equal_exact(key, candidate)
+            .expect("Mojo Copilot catalog-key comparison failed")
+    })
 }
 
 fn copilot_runtime_model_catalog_entry(value: &serde_json::Value) -> Option<serde_json::Value> {

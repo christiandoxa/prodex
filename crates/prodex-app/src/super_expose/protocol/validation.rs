@@ -1,4 +1,5 @@
 use super::*;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 
 pub(super) fn validate_mcp_request_headers(
     message: &serde_json::Map<String, Value>,
@@ -93,11 +94,12 @@ pub(crate) fn mcp_origin_allowed(host: &str, origin: Option<&str>) -> bool {
     let local_http = host.starts_with("127.0.0.1:") && origin == format!("http://{host}");
     let trusted_https = parsed.scheme() == "https"
         && parsed.host_str().is_some_and(|origin_host| {
-            origin_host.eq_ignore_ascii_case(host)
-                || matches!(
-                    origin_host.to_ascii_lowercase().as_str(),
-                    "chatgpt.com" | "chat.openai.com"
-                )
+            ascii_casefold_equal_exact(origin_host, host)
+                .expect("Mojo MCP origin host comparison failed")
+                || ascii_casefold_equal_exact(origin_host, "chatgpt.com")
+                    .expect("Mojo MCP trusted-origin comparison failed")
+                || ascii_casefold_equal_exact(origin_host, "chat.openai.com")
+                    .expect("Mojo MCP trusted-origin comparison failed")
         })
         && parsed.port().is_none();
     (local_http || trusted_https)
@@ -150,4 +152,37 @@ fn mcp_json_error(
         rpc_error["data"] = data;
     }
     json_response(status, json!({"jsonrpc":"2.0","id":id,"error":rpc_error}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn origin_policy_uses_exact_mojo_casefold() {
+        assert!(mcp_origin_allowed(
+            "example.com",
+            Some("https://EXAMPLE.COM/")
+        ));
+        assert!(mcp_origin_allowed(
+            "127.0.0.1:9876",
+            Some("http://127.0.0.1:9876")
+        ));
+        assert!(mcp_origin_allowed(
+            "localhost",
+            Some("https://CHATGPT.COM/")
+        ));
+        assert!(mcp_origin_allowed(
+            "localhost",
+            Some("https://chat.openai.com/")
+        ));
+        assert!(!mcp_origin_allowed(
+            "example.com",
+            Some(" https://example.com/")
+        ));
+        assert!(!mcp_origin_allowed(
+            "example.com",
+            Some("https://example.com/path")
+        ));
+    }
 }

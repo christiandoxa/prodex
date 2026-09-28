@@ -51,6 +51,7 @@ use crate::runtime_state_shared::{
 };
 use crate::{RuntimeRotationProxy, runtime_proxy_request_sequence_seed};
 use anyhow::{Context, Result};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_provider_core::provider_adapter;
 use prodex_runtime_state::{RuntimeProxyLaneAdmission, RuntimeProxyLaneLimits};
 use runtime_proxy_crate::RuntimeProxyRequest;
@@ -154,7 +155,11 @@ impl RuntimeLocalRewriteRequestContext {
                     .headers
                     .iter()
                     .find(|(name, _)| {
-                        name.eq_ignore_ascii_case(RUNTIME_GATEWAY_CONVERSATION_NAMESPACE_HEADER)
+                        ascii_casefold_equal_exact(
+                            name,
+                            RUNTIME_GATEWAY_CONVERSATION_NAMESPACE_HEADER,
+                        )
+                        .expect("Mojo conversation-namespace header comparison failed")
                     })
                     .map(|(_, value)| value.clone())
             })
