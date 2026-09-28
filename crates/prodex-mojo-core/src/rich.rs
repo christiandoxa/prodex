@@ -56,9 +56,9 @@ mod catalog;
 pub use catalog::{
     CatalogChoice, CatalogChoicesPlan, CatalogConfigurationInput, CatalogConfigurationPlan,
     CatalogModel, CatalogPlanModel, CatalogPlanRole, CatalogPlannedModel, CatalogReasoningModel,
-    CatalogReasoningPlan, merge_catalog_ids, plan_catalog_choices, plan_catalog_configuration,
-    plan_dynamic_catalog, resolve_catalog_model, resolve_catalog_model_exact,
-    resolve_catalog_reasoning,
+    CatalogReasoningPlan, ascii_casefold_equal_exact, merge_catalog_ids, plan_catalog_choices,
+    plan_catalog_configuration, plan_dynamic_catalog, resolve_catalog_model,
+    resolve_catalog_model_exact, resolve_catalog_reasoning,
 };
 #[path = "rich/gemini_sse_state.rs"]
 mod gemini_sse_state;

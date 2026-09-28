@@ -2,8 +2,8 @@ use super::super_prompt;
 use crate::{canonical_sub_agent_efforts, effective_provider_model_catalog, provider_display_name};
 use prodex_cli::SubAgentReasoningEffort;
 use prodex_mojo_core::rich::{
-    CatalogModel, CatalogPlanModel, merge_catalog_ids, plan_dynamic_catalog,
-    resolve_catalog_model_exact,
+    CatalogModel, CatalogPlanModel, ascii_casefold_equal_exact, merge_catalog_ids,
+    plan_dynamic_catalog, resolve_catalog_model_exact,
 };
 
 const CATALOG_MAX_PRIORITY: u64 = i64::MAX as u64;
@@ -316,7 +316,10 @@ fn dynamic_catalog_model(entry: serde_json::Value) -> DynamicCatalogModel {
         listed: entry
             .get("visibility")
             .and_then(serde_json::Value::as_str)
-            .is_none_or(|visibility| visibility.eq_ignore_ascii_case("list")),
+            .is_none_or(|visibility| {
+                ascii_casefold_equal_exact(visibility, "list")
+                    .expect("Mojo catalog visibility comparison failed")
+            }),
         efforts,
         aliases: catalog_entry_aliases(&entry),
         default_effort: catalog_entry_default_effort(&entry),
@@ -439,9 +442,10 @@ fn main_model_choices_from_catalog_mojo(
             .iter()
             .find(|entry| entry.id.trim() == model.id)
             .or_else(|| {
-                owned
-                    .iter()
-                    .find(|entry| entry.id.trim().eq_ignore_ascii_case(&model.id))
+                owned.iter().find(|entry| {
+                    ascii_casefold_equal_exact(entry.id.trim(), &model.id)
+                        .expect("Mojo catalog source identity comparison failed")
+                })
             })?;
         choices.push(MainModelChoice {
             choice: prodex_provider_core::ProviderModelChoice::Model(model.id),
@@ -504,9 +508,10 @@ fn valid_default_effort(default_effort: Option<&str>, efforts: &[String]) -> Opt
         .map(str::trim)
         .filter(|default| !default.is_empty())
         .filter(|default| {
-            efforts
-                .iter()
-                .any(|effort| effort.eq_ignore_ascii_case(default))
+            efforts.iter().any(|effort| {
+                ascii_casefold_equal_exact(effort, default)
+                    .expect("Mojo catalog effort comparison failed")
+            })
         })
         .map(str::to_string)
 }
@@ -540,7 +545,12 @@ pub(super) fn prompt_main_model(
     let selected = current_model
         .and_then(|model| {
             models.iter().position(|choice| {
-                matches!(&choice.choice, prodex_provider_core::ProviderModelChoice::Model(candidate) if candidate.eq_ignore_ascii_case(model))
+                matches!(
+                    &choice.choice,
+                    prodex_provider_core::ProviderModelChoice::Model(candidate)
+                        if ascii_casefold_equal_exact(candidate, model)
+                            .expect("Mojo main-model selection comparison failed")
+                )
             })
         })
         .unwrap_or(0);
@@ -567,7 +577,10 @@ pub(super) fn main_model_efforts(
                 return None;
             };
             model
-                .is_some_and(|model| candidate.eq_ignore_ascii_case(model))
+                .is_some_and(|model| {
+                    ascii_casefold_equal_exact(candidate, model)
+                        .expect("Mojo main-model effort lookup comparison failed")
+                })
                 .then_some(choice.efforts.as_deref().unwrap_or_default())
         })
     {

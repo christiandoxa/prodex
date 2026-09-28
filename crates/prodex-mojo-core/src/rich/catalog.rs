@@ -10,6 +10,7 @@ pub use catalog_planner::{
 const CATALOG_MAX_MODELS: usize = 1_024;
 const CATALOG_MAX_INPUT_MODELS: usize = 65_536;
 const CATALOG_MAX_IDENTIFIER_BYTES: usize = 4_096;
+const CATALOG_MAX_QUERY_BYTES: usize = 65_536;
 const CATALOG_CHOICE_PROVIDER_DEFAULT: i64 = 0;
 const CATALOG_CHOICE_CATALOG: i64 = 1;
 const CATALOG_CHOICE_CONFIGURED: i64 = 2;
@@ -48,6 +49,14 @@ pub enum CatalogChoice {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_rich_ascii_casefold_equal_v1(
+        abi_version: i64,
+        left_address: u64,
+        left_length: i64,
+        right_address: u64,
+        right_length: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_mojo_rich_catalog_resolve_v1(
         abi_version: i64,
         model_ids: u64,
@@ -226,6 +235,29 @@ fn reasoning_views(models: &[CatalogReasoningModel<'_>]) -> Result<ReasoningView
         }
     }
     Ok((catalog, efforts, effort_models, defaults))
+}
+
+pub fn ascii_casefold_equal_exact(left: &str, right: &str) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    if left.len() > CATALOG_MAX_QUERY_BYTES || right.len() > CATALOG_MAX_QUERY_BYTES {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = -1_i64;
+    status(unsafe {
+        prodex_mojo_rich_ascii_casefold_equal_v1(
+            RICH_ABI_VERSION,
+            left.as_ptr() as usize as u64,
+            i64::try_from(left.len()).map_err(|_| MojoError::InvalidInput)?,
+            right.as_ptr() as usize as u64,
+            i64::try_from(right.len()).map_err(|_| MojoError::InvalidInput)?,
+            count_address(&mut output),
+        )
+    })?;
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn resolve_catalog_model(

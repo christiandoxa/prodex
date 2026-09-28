@@ -12,7 +12,8 @@ use catalog::openai_main_model_choices;
 use catalog::{main_model_choices, main_model_efforts, prompt_main_model};
 use prodex_cli::{SubAgentReasoningEffort, SuperArgs, SuperExternalProvider};
 use prodex_mojo_core::rich::{
-    CatalogConfigurationInput, CatalogPlanModel, CatalogPlanRole, plan_catalog_configuration,
+    CatalogConfigurationInput, CatalogPlanModel, CatalogPlanRole, ascii_casefold_equal_exact,
+    plan_catalog_configuration,
 };
 
 pub(super) fn resolve_main_model_and_effort(
@@ -154,7 +155,10 @@ fn resolve_main_model_and_effort_mojo(
             |effort| {
                 main_model_efforts(provider, model.as_deref())
                     .iter()
-                    .any(|candidate| candidate.eq_ignore_ascii_case(effort))
+                    .any(|candidate| {
+                        ascii_casefold_equal_exact(candidate, effort)
+                            .expect("Mojo remembered-effort comparison failed")
+                    })
             },
         );
     let effort = prompt_main_reasoning_effort(
@@ -241,7 +245,10 @@ fn remembered_effort_for_model(
     model: Option<&str>,
 ) -> Option<String> {
     let (remembered_model, effort) = selection?;
-    model.filter(|selected_model| selected_model.eq_ignore_ascii_case(remembered_model))?;
+    model.filter(|selected_model| {
+        ascii_casefold_equal_exact(selected_model, remembered_model)
+            .expect("Mojo remembered-model comparison failed")
+    })?;
     effort.clone()
 }
 
@@ -275,7 +282,12 @@ pub(super) fn prompt_super_model(
     let selected = current_model
         .and_then(|model| {
             models.iter().position(|choice| {
-                matches!(choice, prodex_provider_core::ProviderModelChoice::Model(candidate) if candidate.eq_ignore_ascii_case(model))
+                matches!(
+                    choice,
+                    prodex_provider_core::ProviderModelChoice::Model(candidate)
+                        if ascii_casefold_equal_exact(candidate, model)
+                            .expect("Mojo sub-agent model selection comparison failed")
+                )
             })
         })
         .unwrap_or(0);
@@ -337,7 +349,10 @@ fn prompt_main_reasoning_effort(
             effort
                 .as_deref()
                 .zip(current)
-                .is_some_and(|(candidate, current)| candidate.eq_ignore_ascii_case(current))
+                .is_some_and(|(candidate, current)| {
+                    ascii_casefold_equal_exact(candidate, current)
+                        .expect("Mojo reasoning-effort selection comparison failed")
+                })
         })
         .unwrap_or(0);
     Ok(

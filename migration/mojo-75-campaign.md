@@ -3156,3 +3156,14 @@ deduplication. The two Rust lowercase BTreeSet filters were deleted. Both caller
 normalize IDs before the Mojo boundary, so first-win ordering, whitespace behavior,
 hard limits, provider-specific normalization, and downstream validation remain
 unchanged.
+
+
+## Super exact casefold equality migration
+
+A bounded exact ASCII-casefold equality primitive now lives in rich_catalog.mojo and
+preserves empty strings plus non-trimming whitespace semantics. Super catalog and
+prompt flows use it for source-ID fallback matching, visibility, model/alias identity,
+reasoning-effort defaults, remembered selections, and prompt selection. The repeated
+Rust eq_ignore_ascii_case decisions in these production paths were deleted; Rust keeps
+iteration, DTO ownership, prompt rendering, and the case-sensitive first-pass source
+lookup needed to preserve duplicate-case ordering.
