@@ -181,6 +181,16 @@ Full Changelog: [0.432.2...0.433.0](https://github.com/christiandoxa/prodex/comp
 ### Runtime
 
 - Support Codex 0.157.1 resume (`4dec9c0`)
+- Shorten overlays for Codex daemon sockets (`4ddf7d7`)
+- Own continuation binding retention (`b496617`)
+- Own continuation status policy (`04f03f7`)
+- Own runtime log tokenization (`26ebebe`)
+
+### CLI
+
+- Aggregate OpenAI pools in Mojo (`8fc4c10`)
+- Own quota status classification (`f70166a`)
+- Own OpenAI model quota planning (`b78bd72`)
 
 ### Claude
 
@@ -196,29 +206,6 @@ Full Changelog: [0.432.2...0.433.0](https://github.com/christiandoxa/prodex/comp
 - Route Gemini text parts through Mojo (`1e38aac`)
 - Move Kiro chat responses into Mojo (`430336a`)
 - Move Gemini system instructions into Mojo (`c02469a`)
-
-## 0.432.1 - 2026-09-25
-
-### Runtime
-
-- Shorten overlays for Codex daemon sockets (`4ddf7d7`)
-
-## 0.432.0 - 2026-09-25
-
-### Runtime
-
-- Own continuation binding retention (`b496617`)
-- Own continuation status policy (`04f03f7`)
-- Own runtime log tokenization (`26ebebe`)
-
-### CLI
-
-- Aggregate OpenAI pools in Mojo (`8fc4c10`)
-- Own quota status classification (`f70166a`)
-- Own OpenAI model quota planning (`b78bd72`)
-
-### Misc
-
 - Isolate MSVC weak aliases (`bf06276`)
 - Support Codex 0.157.0 (`a96f995`)
 - Merge pull request #95 from christiandoxa/mojo-75-chat-response-20260925 (`37f9f12`)
