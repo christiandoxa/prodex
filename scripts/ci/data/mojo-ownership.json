@@ -876,6 +876,18 @@
           "runtime_route_reason_unknown_label",
           "runtime_route_safe_identifier"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/provider_usage.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "provider_usage_extraction",
+          "provider_usage_cost",
+          "provider_usage_merged_total"
+        ]
       }
     ],
     "removed": [
@@ -2865,6 +2877,75 @@
       "rust_owner_before": "system/user role scan plus ASCII case-insensitive JSON guidance detection",
       "rust_test_oracle": "deleted; focused tests cover user/system guidance, assistant non-guidance, case-insensitivity and decoded escaped content",
       "rust_adapter_scope": "Serde serialization of decoded messages and insertion of the stable fallback system prompt"
+    },
+    {
+      "domain": "provider/usage",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust usage policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/provider_usage.mojo",
+      "consumer": "crates/prodex-provider-core/src/usage.rs",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/usage.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/provider_usage.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "provider_usage_extraction",
+      "mojo_entry": "prodex_provider_usage_extract_v1",
+      "consumer_marker": "prodex_mojo_core::provider_usage::extract_json",
+      "rust_owner_before": "OpenAI/Anthropic/Gemini usage object precedence and token-field alias selection",
+      "rust_test_oracle": "deleted; provider usage tests cover OpenAI/Gemini shapes, SSE final usage, invalid first aliases, scalar usage blocking nested fallback and u64 overflow",
+      "rust_adapter_scope": "serde_json full-document validation/normalization, SSE framing and typed DTO materialization"
+    },
+    {
+      "domain": "provider/usage",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust usage policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/provider_usage.mojo",
+      "consumer": "crates/prodex-provider-core/src/usage.rs",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/usage.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/provider_usage.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "provider_usage_cost",
+      "mojo_entry": "prodex_provider_usage_cost_v1",
+      "consumer_marker": "prodex_mojo_core::provider_usage::calculate_cost",
+      "rust_owner_before": "saturating input/output microusd cost arithmetic and known-cost presence policy",
+      "rust_test_oracle": "deleted; fixed tests cover nominal rates, missing rates/tokens and u64 saturation",
+      "rust_adapter_scope": "ProviderModelCost field projection and Option<u64> result mapping"
+    },
+    {
+      "domain": "provider/usage",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust usage policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/provider_usage.mojo",
+      "consumer": "crates/prodex-provider-core/src/usage.rs",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/usage.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/provider_usage.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "provider_usage_merged_total",
+      "mojo_entry": "prodex_provider_usage_merged_total_v1",
+      "consumer_marker": "prodex_mojo_core::provider_usage::merged_total",
+      "rust_owner_before": "total-token precedence and saturating input/output total fallback",
+      "rust_test_oracle": "deleted; fixed tests cover explicit total, missing input, default missing output and u64 saturation",
+      "rust_adapter_scope": "ProviderTokenUsage DTO API and Option<u64> mapping"
     }
   ],
   "rust_semantic_reductions": [

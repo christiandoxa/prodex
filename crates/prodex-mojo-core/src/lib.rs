@@ -108,6 +108,8 @@ pub mod profile_identity;
 pub mod provider_constraints;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_registry;
+#[cfg(feature = "mojo-provider-constraints")]
+pub mod provider_usage;
 #[cfg(feature = "mojo-quota")]
 pub mod quota;
 #[cfg(feature = "mojo-quota")]

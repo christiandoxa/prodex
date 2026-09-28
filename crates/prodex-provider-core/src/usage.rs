@@ -15,12 +15,12 @@ pub struct ProviderTokenUsage {
 
 impl ProviderTokenUsage {
     pub fn merged_total(self) -> Option<u64> {
-        self.total_tokens.or_else(|| {
-            Some(
-                self.input_tokens?
-                    .saturating_add(self.output_tokens.unwrap_or_default()),
-            )
-        })
+        prodex_mojo_core::provider_usage::merged_total(
+            self.total_tokens,
+            self.input_tokens,
+            self.output_tokens,
+        )
+        .expect("Mojo provider usage merged-total policy returned invalid output")
     }
 }
 
@@ -32,57 +32,13 @@ pub fn extract_usage_tokens(body: &[u8]) -> ProviderTokenUsage {
 }
 
 fn extract_usage_from_value(value: &serde_json::Value) -> ProviderTokenUsage {
-    let usage = value
-        .get("usage")
-        .or_else(|| {
-            value
-                .get("response")
-                .and_then(|response| response.get("usage"))
-        })
-        .or_else(|| {
-            value
-                .get("message")
-                .and_then(|message| message.get("usage"))
-        })
-        .unwrap_or(value);
-    let input_tokens = first_u64(
-        usage,
-        &[
-            "input_tokens",
-            "prompt_tokens",
-            "promptTokens",
-            "inputTokens",
-            "cache_creation_input_tokens",
-        ],
-    )
-    .or_else(|| {
-        value
-            .get("usageMetadata")
-            .and_then(|usage| first_u64(usage, &["promptTokenCount"]))
-    });
-    let output_tokens = first_u64(
-        usage,
-        &[
-            "output_tokens",
-            "completion_tokens",
-            "completionTokens",
-            "outputTokens",
-        ],
-    )
-    .or_else(|| {
-        value
-            .get("usageMetadata")
-            .and_then(|usage| first_u64(usage, &["candidatesTokenCount"]))
-    });
-    let total_tokens = first_u64(usage, &["total_tokens", "totalTokens"]).or_else(|| {
-        value
-            .get("usageMetadata")
-            .and_then(|usage| first_u64(usage, &["totalTokenCount"]))
-    });
+    let source = serde_json::to_string(value).expect("validated provider usage JSON serializes");
+    let plan = prodex_mojo_core::provider_usage::extract_json(&source)
+        .expect("Mojo provider usage parser returned invalid output");
     ProviderTokenUsage {
-        input_tokens,
-        output_tokens,
-        total_tokens,
+        input_tokens: plan.input_tokens,
+        output_tokens: plan.output_tokens,
+        total_tokens: plan.total_tokens,
     }
 }
 
@@ -133,27 +89,18 @@ fn merge_sse_usage_data(data_lines: &mut Vec<&str>, merged: &mut ProviderTokenUs
     }
 }
 
-fn first_u64(value: &serde_json::Value, keys: &[&str]) -> Option<u64> {
-    keys.iter()
-        .find_map(|key| value.get(*key).and_then(serde_json::Value::as_u64))
-}
-
 pub fn calculate_cost_microusd(
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
     cost: ProviderModelCost,
 ) -> Option<u64> {
-    let mut total = 0_u64;
-    let mut known = false;
-    if let (Some(tokens), Some(rate)) = (input_tokens, cost.input_cost_per_million_microusd) {
-        total = total.saturating_add(tokens.saturating_mul(rate) / 1_000_000);
-        known = true;
-    }
-    if let (Some(tokens), Some(rate)) = (output_tokens, cost.output_cost_per_million_microusd) {
-        total = total.saturating_add(tokens.saturating_mul(rate) / 1_000_000);
-        known = true;
-    }
-    known.then_some(total)
+    prodex_mojo_core::provider_usage::calculate_cost(
+        input_tokens,
+        output_tokens,
+        cost.input_cost_per_million_microusd,
+        cost.output_cost_per_million_microusd,
+    )
+    .expect("Mojo provider usage cost policy returned invalid output")
 }
 
 pub fn microusd_to_usd(value: u64) -> f64 {
@@ -188,6 +135,67 @@ mod tests {
         assert_eq!(gemini.input_tokens, Some(11));
         assert_eq!(gemini.output_tokens, Some(22));
         assert_eq!(gemini.total_tokens, Some(33));
+    }
+
+    #[test]
+    fn usage_parser_mojo_preserves_precedence_and_numeric_shape() {
+        let usage = extract_usage_tokens(
+            br#"{"usage":{"input_tokens":"bad","prompt_tokens":9,"output_tokens":4},"usageMetadata":{"promptTokenCount":99,"candidatesTokenCount":88}}"#,
+        );
+        assert_eq!(usage.input_tokens, Some(9));
+        assert_eq!(usage.output_tokens, Some(4));
+
+        let usage = extract_usage_tokens(
+            br#"{"usage":"not-an-object","response":{"usage":{"input_tokens":77}},"usageMetadata":{"promptTokenCount":11}}"#,
+        );
+        assert_eq!(usage.input_tokens, Some(11));
+
+        let overflow = extract_usage_tokens(
+            br#"{"usage":{"input_tokens":18446744073709551616,"prompt_tokens":7}}"#,
+        );
+        assert_eq!(overflow.input_tokens, Some(7));
+    }
+
+    #[test]
+    fn usage_mojo_arithmetic_preserves_saturation_and_presence() {
+        assert_eq!(
+            ProviderTokenUsage {
+                input_tokens: Some(u64::MAX),
+                output_tokens: Some(1),
+                total_tokens: None,
+            }
+            .merged_total(),
+            Some(u64::MAX)
+        );
+        assert_eq!(
+            ProviderTokenUsage {
+                input_tokens: None,
+                output_tokens: Some(10),
+                total_tokens: None,
+            }
+            .merged_total(),
+            None
+        );
+
+        let cost = ProviderModelCost {
+            input_cost_per_million_microusd: Some(u64::MAX),
+            output_cost_per_million_microusd: None,
+        };
+        assert_eq!(
+            calculate_cost_microusd(Some(u64::MAX), None, cost),
+            Some(u64::MAX / 1_000_000)
+        );
+        assert_eq!(
+            calculate_cost_microusd(
+                None,
+                None,
+                ProviderModelCost {
+                    input_cost_per_million_microusd: Some(1),
+                    output_cost_per_million_microusd: Some(1),
+                },
+            ),
+            None
+        );
     }
 
     #[test]
