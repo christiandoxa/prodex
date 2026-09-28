@@ -916,8 +916,9 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.432.2"
+version = "0.433.0"
 dependencies = [
+ "prodex-mojo-core",
  "serde",
  "uuid",
  "zeroize",
@@ -933,8 +934,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "prodex-mojo-core"
+version = "0.433.0"
+
+[[package]]
 name = "prodex-profile-export"
-version = "0.432.2"
+version = "0.433.0"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -942,6 +947,7 @@ dependencies = [
  "base64",
  "getrandom",
  "pbkdf2",
+ "prodex-mojo-core",
  "prodex-secret-store",
  "serde",
  "serde_json",
@@ -951,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.432.2"
+version = "0.433.0"
 dependencies = [
  "aes-gcm-siv",
  "getrandom",
