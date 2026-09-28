@@ -2,7 +2,14 @@ from std.collections import Array
 
 from std.memory import Pointer
 
-from rich_text import rich_view_matches_literal, rich_view_ptr, rich_view_valid
+from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_trim_bounds,
+    rich_view_matches_literal,
+    rich_view_ptr,
+    rich_view_valid,
+)
 from rich_types import ProdexRichStringView
 
 comptime SUPER_EXPOSE_ABI_VERSION: Int64 = 1
@@ -176,7 +183,7 @@ def prodex_mojo_super_expose_tunnel_id_valid_v1(
     ):
         return 1
     var value = ProdexRichStringView(value_address, UInt(value_length))
-    if not rich_view_valid(value, SUPER_EXPOSE_MAX_NAME_BYTES):
+    if not rich_view_valid(value, value_length):
         return 2
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
@@ -319,7 +326,7 @@ def prodex_mojo_super_expose_tunnel_client_version_valid_v1(
     ):
         return 1
     var value = ProdexRichStringView(value_address, UInt(value_length))
-    if not rich_view_valid(value, 16_384):
+    if not rich_view_valid(value, value_length):
         return 2
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
@@ -327,4 +334,583 @@ def prodex_mojo_super_expose_tunnel_client_version_valid_v1(
     output[] = (
         1 if super_expose_tunnel_client_version_output_valid(value) else 0
     )
+    return 0
+
+
+comptime SUPER_EXPOSE_PROTOCOL_OK: Int64 = 0
+comptime SUPER_EXPOSE_PROTOCOL_UNSUPPORTED: Int64 = 1
+comptime SUPER_EXPOSE_PROTOCOL_VERSION_MISMATCH: Int64 = 2
+comptime SUPER_EXPOSE_PROTOCOL_METADATA_REQUIRED: Int64 = 3
+comptime SUPER_EXPOSE_PROTOCOL_METHOD_MISMATCH: Int64 = 4
+comptime SUPER_EXPOSE_PROTOCOL_NAME_MISMATCH: Int64 = 5
+comptime SUPER_EXPOSE_CURRENT_PROTOCOL = "2026-07-28"
+
+
+def super_expose_protocol_supported(view: ProdexRichStringView) -> Bool:
+    return (
+        rich_view_matches_literal["2026-07-28"](view, False)
+        or rich_view_matches_literal["2025-11-25"](view, False)
+        or rich_view_matches_literal["2025-06-18"](view, False)
+        or rich_view_matches_literal["2025-03-26"](view, False)
+        or rich_view_matches_literal["2024-11-05"](view, False)
+    )
+
+
+def super_expose_optional_view(
+    present: Int64, address: UInt, length: Int64
+) -> ProdexRichStringView:
+    if present == 0:
+        return ProdexRichStringView(UInt(0), UInt(0))
+    return ProdexRichStringView(address, UInt(length))
+
+
+def super_expose_optional_equal(
+    left_present: Int64,
+    left: ProdexRichStringView,
+    right_present: Int64,
+    right: ProdexRichStringView,
+) -> Bool:
+    if left_present != right_present:
+        return False
+    if left_present == 0:
+        return True
+    if left.len != right.len:
+        return False
+    var left_ptr = rich_view_ptr(left)
+    var right_ptr = rich_view_ptr(right)
+    for index in range(Int64(left.len)):
+        if left_ptr[unsafe_offset=index] != right_ptr[unsafe_offset=index]:
+            return False
+    return True
+
+
+@export("prodex_mojo_super_expose_protocol_version_supported_v1")
+def prodex_mojo_super_expose_protocol_version_supported_v1(
+    abi_version: Int64,
+    address: UInt,
+    length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        length < 0
+        or output_address == 0
+        or (length > 0 and address == 0)
+    ):
+        return 1
+    var value = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(value, length):
+        return 2
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(super_expose_protocol_supported(value))
+    return 0
+
+
+@export("prodex_mojo_super_expose_protocol_metadata_v1")
+def prodex_mojo_super_expose_protocol_metadata_v1(
+    abi_version: Int64,
+    method_address: UInt,
+    method_length: Int64,
+    header_present: Int64,
+    header_address: UInt,
+    header_length: Int64,
+    body_present: Int64,
+    body_address: UInt,
+    body_length: Int64,
+    method_header_present: Int64,
+    method_header_address: UInt,
+    method_header_length: Int64,
+    name_header_present: Int64,
+    name_header_address: UInt,
+    name_header_length: Int64,
+    body_name_present: Int64,
+    body_name_address: UInt,
+    body_name_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        method_length < 0
+        or method_address == 0
+        or output_address == 0
+        or (header_present != 0 and header_present != 1)
+        or (body_present != 0 and body_present != 1)
+        or (method_header_present != 0 and method_header_present != 1)
+        or (name_header_present != 0 and name_header_present != 1)
+        or (body_name_present != 0 and body_name_present != 1)
+        or header_length < 0
+        or body_length < 0
+        or method_header_length < 0
+        or name_header_length < 0
+        or body_name_length < 0
+        or (header_present == 1 and header_length > 0 and header_address == 0)
+        or (body_present == 1 and body_length > 0 and body_address == 0)
+        or (
+            method_header_present == 1
+            and method_header_length > 0
+            and method_header_address == 0
+        )
+        or (
+            name_header_present == 1
+            and name_header_length > 0
+            and name_header_address == 0
+        )
+        or (
+            body_name_present == 1
+            and body_name_length > 0
+            and body_name_address == 0
+        )
+    ):
+        return 1
+
+    var method = ProdexRichStringView(method_address, UInt(method_length))
+    var header = super_expose_optional_view(
+        header_present, header_address, header_length
+    )
+    var body = super_expose_optional_view(body_present, body_address, body_length)
+    var method_header = super_expose_optional_view(
+        method_header_present, method_header_address, method_header_length
+    )
+    var name_header = super_expose_optional_view(
+        name_header_present, name_header_address, name_header_length
+    )
+    var body_name = super_expose_optional_view(
+        body_name_present, body_name_address, body_name_length
+    )
+
+    if not rich_view_valid(method, method_length):
+        return 2
+    if header_present == 1 and not rich_view_valid(header, header_length):
+        return 2
+    if body_present == 1 and not rich_view_valid(body, body_length):
+        return 2
+    if method_header_present == 1 and not rich_view_valid(
+        method_header, method_header_length
+    ):
+        return 2
+    if name_header_present == 1 and not rich_view_valid(
+        name_header, name_header_length
+    ):
+        return 2
+    if body_name_present == 1 and not rich_view_valid(
+        body_name, body_name_length
+    ):
+        return 2
+
+    var decision = SUPER_EXPOSE_PROTOCOL_OK
+    if header_present == 1:
+        if not super_expose_protocol_supported(header):
+            decision = SUPER_EXPOSE_PROTOCOL_UNSUPPORTED
+    elif body_present == 1:
+        if not super_expose_protocol_supported(body):
+            decision = SUPER_EXPOSE_PROTOCOL_UNSUPPORTED
+
+    if decision == SUPER_EXPOSE_PROTOCOL_OK and (
+        header_present == 1
+        and body_present == 1
+        and not super_expose_optional_equal(1, header, 1, body)
+    ):
+        decision = SUPER_EXPOSE_PROTOCOL_VERSION_MISMATCH
+
+    var current = (
+        header_present == 1
+        and rich_view_matches_literal["2026-07-28"](header, False)
+    ) or (
+        body_present == 1
+        and rich_view_matches_literal["2026-07-28"](body, False)
+    )
+
+    if decision == SUPER_EXPOSE_PROTOCOL_OK:
+        if current:
+            if not (
+                header_present == 1
+                and body_present == 1
+                and rich_view_matches_literal["2026-07-28"](
+                    header, False
+                )
+                and rich_view_matches_literal["2026-07-28"](
+                    body, False
+                )
+            ):
+                decision = SUPER_EXPOSE_PROTOCOL_METADATA_REQUIRED
+            elif not (
+                method_header_present == 1
+                and super_expose_optional_equal(
+                    1, method_header, 1, method
+                )
+            ):
+                decision = SUPER_EXPOSE_PROTOCOL_METHOD_MISMATCH
+            elif rich_view_matches_literal["tools/call"](method, False) and not (
+                super_expose_optional_equal(
+                    name_header_present,
+                    name_header,
+                    body_name_present,
+                    body_name,
+                )
+            ):
+                decision = SUPER_EXPOSE_PROTOCOL_NAME_MISMATCH
+        elif method_header_present == 1 and not super_expose_optional_equal(
+            1, method_header, 1, method
+        ):
+            decision = SUPER_EXPOSE_PROTOCOL_METHOD_MISMATCH
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = decision
+    return 0
+
+
+def super_expose_ascii_lower(byte: UInt8) -> UInt8:
+    if byte >= 65 and byte <= 90:
+        return byte + 32
+    return byte
+
+
+def super_expose_range_equals_ascii_ignore_case(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var n = Int64(literal.byte_length())
+    if start < 0 or end < start or end - start != n:
+        return False
+    var ptr = rich_view_ptr(view)
+    var wanted = literal.unsafe_ptr()
+    for index in range(n):
+        if super_expose_ascii_lower(ptr[unsafe_offset=start + index]) != (
+            super_expose_ascii_lower(wanted[unsafe_offset=index])
+        ):
+            return False
+    return True
+
+
+def super_expose_unicode_trim_range(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=0)
+    if start < 0 or end < start or end > Int64(view.len):
+        result[0] = start
+        result[1] = start
+        return result^
+    var subview = ProdexRichStringView(
+        UInt(Int(view.ptr) + Int(start)), UInt(end - start)
+    )
+    var bounds = rich_trim_bounds(subview)
+    result[0] = start + bounds[0]
+    result[1] = start + bounds[1]
+    return result^
+
+
+def super_expose_media_part_is_json(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    var semicolon = end
+    var ptr = rich_view_ptr(view)
+    for index in range(start, end):
+        if ptr[unsafe_offset=index] == 59:
+            semicolon = index
+            break
+    var bounds = super_expose_unicode_trim_range(view, start, semicolon)
+    return super_expose_range_equals_ascii_ignore_case(
+        view, bounds[0], bounds[1], StringSlice("application/json")
+    )
+
+
+@export("prodex_mojo_super_expose_media_header_v1")
+def prodex_mojo_super_expose_media_header_v1(
+    abi_version: Int64,
+    kind: Int64,
+    present: Int64,
+    address: UInt,
+    length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        kind < 0
+        or kind > 1
+        or (present != 0 and present != 1)
+        or length < 0
+        or output_address == 0
+        or (present == 1 and length > 0 and address == 0)
+    ):
+        return 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if present == 0:
+        output[] = 0
+        return 0
+    var value = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(value, length):
+        return 2
+
+    if kind == 0:
+        output[] = Int64(
+            super_expose_media_part_is_json(value, 0, length)
+        )
+        return 0
+
+    var ptr = rich_view_ptr(value)
+    var start: Int64 = 0
+    while start <= length:
+        var end = start
+        while end < length and ptr[unsafe_offset=end] != 44:
+            end += 1
+        if super_expose_media_part_is_json(value, start, end):
+            output[] = 1
+            return 0
+        if end >= length:
+            break
+        start = end + 1
+    output[] = 0
+    return 0
+
+
+@export("prodex_mojo_super_expose_json_nesting_v1")
+def prodex_mojo_super_expose_json_nesting_v1(
+    abi_version: Int64,
+    address: UInt,
+    length: Int64,
+    limit: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        length < 0
+        or length > 16 * 1024 * 1024
+        or limit < 0
+        or output_address == 0
+        or (length > 0 and address == 0)
+    ):
+        return 1
+    var ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    var depth: Int64 = 0
+    var escaped = False
+    var in_string = False
+    var valid = True
+    for index in range(length):
+        var byte = ptr[unsafe_offset=index]
+        if in_string:
+            if escaped:
+                escaped = False
+            elif byte == 92:
+                escaped = True
+            elif byte == 34:
+                in_string = False
+            continue
+        if byte == 34:
+            in_string = True
+        elif byte == 123 or byte == 91:
+            depth += 1
+            if depth > limit:
+                valid = False
+                break
+        elif byte == 125 or byte == 93:
+            if depth <= 0:
+                valid = False
+                break
+            depth -= 1
+    if in_string or escaped or depth != 0:
+        valid = False
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(valid)
+    return 0
+
+
+def super_expose_tool_argument_allowed(
+    tool_kind: Int64,
+    key: ProdexRichStringView,
+) -> Bool:
+    if tool_kind == SUPER_EXPOSE_TOOL_UNKNOWN:
+        return True
+    if tool_kind == SUPER_EXPOSE_TOOL_START:
+        return (
+            rich_view_matches_literal["task"](key, False)
+            or rich_view_matches_literal["model"](key, False)
+            or rich_view_matches_literal["reasoning_effort"](key, False)
+            or rich_view_matches_literal["provider"](key, False)
+            or rich_view_matches_literal["profile"](key, False)
+            or rich_view_matches_literal["sub_agents"](key, False)
+        )
+    if (
+        tool_kind == SUPER_EXPOSE_TOOL_STATUS
+        or tool_kind == SUPER_EXPOSE_TOOL_RESULT
+        or tool_kind == SUPER_EXPOSE_TOOL_CANCEL
+    ):
+        return rich_view_matches_literal["run_id"](key, False)
+    if tool_kind == SUPER_EXPOSE_TOOL_EVENTS:
+        return (
+            rich_view_matches_literal["run_id"](key, False)
+            or rich_view_matches_literal["after_seq"](key, False)
+            or rich_view_matches_literal["limit"](key, False)
+        )
+    if tool_kind == SUPER_EXPOSE_TOOL_LIST:
+        return False
+    if tool_kind == SUPER_EXPOSE_TOOL_EXEC:
+        return (
+            rich_view_matches_literal["program"](key, False)
+            or rich_view_matches_literal["args"](key, False)
+            or rich_view_matches_literal["cwd"](key, False)
+            or rich_view_matches_literal["env"](key, False)
+            or rich_view_matches_literal["stdin"](key, False)
+            or rich_view_matches_literal["timeout_ms"](key, False)
+        )
+    if tool_kind == SUPER_EXPOSE_TOOL_SESSION_PROMPT_WRITE:
+        return (
+            rich_view_matches_literal["message"](key, False)
+            or rich_view_matches_literal["cwd"](key, False)
+            or rich_view_matches_literal["prodex_pid"](key, False)
+            or rich_view_matches_literal["thread_id"](key, False)
+        )
+    if tool_kind == SUPER_EXPOSE_TOOL_SESSION_PREEMPT:
+        return (
+            rich_view_matches_literal["cwd"](key, False)
+            or rich_view_matches_literal["prodex_pid"](key, False)
+            or rich_view_matches_literal["thread_id"](key, False)
+        )
+    if tool_kind == SUPER_EXPOSE_TOOL_SESSION_OUTPUT_READ:
+        return (
+            rich_view_matches_literal["cursor"](key, False)
+            or rich_view_matches_literal["limit"](key, False)
+            or rich_view_matches_literal["wait_ms"](key, False)
+            or rich_view_matches_literal["prodex_pid"](key, False)
+            or rich_view_matches_literal["thread_id"](key, False)
+        )
+    return False
+
+
+@export("prodex_mojo_super_expose_tool_argument_allowed_v1")
+def prodex_mojo_super_expose_tool_argument_allowed_v1(
+    abi_version: Int64,
+    tool_address: UInt,
+    tool_length: Int64,
+    key_address: UInt,
+    key_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        tool_length < 0
+        or tool_length > SUPER_EXPOSE_MAX_NAME_BYTES
+        or key_length < 0
+        or output_address == 0
+        or (tool_length > 0 and tool_address == 0)
+        or (key_length > 0 and key_address == 0)
+    ):
+        return 1
+    var tool = ProdexRichStringView(tool_address, UInt(tool_length))
+    var key = ProdexRichStringView(key_address, UInt(key_length))
+    if (
+        not rich_view_valid(tool, SUPER_EXPOSE_MAX_NAME_BYTES)
+        or not rich_view_valid(key, key_length)
+    ):
+        return 2
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(
+        super_expose_tool_argument_allowed(super_expose_tool(tool), key)
+    )
+    return 0
+
+
+@export("prodex_mojo_super_expose_run_id_valid_v1")
+def prodex_mojo_super_expose_run_id_valid_v1(
+    abi_version: Int64,
+    address: UInt,
+    length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        length < 0
+        or length > SUPER_EXPOSE_MAX_NAME_BYTES
+        or output_address == 0
+        or (length > 0 and address == 0)
+    ):
+        return 1
+    var value = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(value, SUPER_EXPOSE_MAX_NAME_BYTES):
+        return 2
+    var valid = length >= 4 and rich_view_matches_literal["spr_"](
+        ProdexRichStringView(address, UInt(4)), False
+    )
+    if valid:
+        var ptr = rich_view_ptr(value)
+        for index in range(length):
+            var byte = ptr[unsafe_offset=index]
+            if not (
+                (byte >= 48 and byte <= 57)
+                or (byte >= 65 and byte <= 90)
+                or (byte >= 97 and byte <= 122)
+                or byte == 95
+                or byte == 45
+            ):
+                valid = False
+                break
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(valid)
+    return 0
+
+
+@export("prodex_mojo_super_expose_string_valid_v1")
+def prodex_mojo_super_expose_string_valid_v1(
+    abi_version: Int64,
+    address: UInt,
+    length: Int64,
+    max_bytes: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        length < 0
+        or max_bytes < 0
+        or output_address == 0
+        or (length > 0 and address == 0)
+    ):
+        return 1
+    var value = ProdexRichStringView(address, UInt(length))
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if length == 0 or length > max_bytes:
+        output[] = 0
+        return 0
+    if not rich_view_valid(value, length):
+        return 2
+    var valid = True
+    if valid:
+        var ptr = rich_view_ptr(value)
+        var index: Int64 = 0
+        while index < length:
+            var width = rich_codepoint_width(ptr[unsafe_offset=index])
+            var codepoint = rich_codepoint(ptr, index, width)
+            if codepoint <= 31 or (codepoint >= 127 and codepoint <= 159):
+                valid = False
+                break
+            index += width
+    output[] = Int64(valid)
     return 0

@@ -2809,3 +2809,21 @@ ownership now reports **84 authoritative operations**. The canonical broad
 source report counts **59,114 Mojo LOC** and **192,965 Rust production LOC**,
 totaling **252,079 LOC**: **23.45% Mojo**. The 75% project target remains unmet,
 with **519,781 additional Mojo LOC** required at the current Rust volume.
+
+## Super-expose protocol and tool-contract migration
+
+Super-expose MCP protocol-version/header decisions, Content-Type/Accept media
+matching, quote-aware JSON nesting limits, per-tool allowed argument keys, run-id
+shape validation, and bounded optional-string Unicode control rejection now use
+the existing mojo/prodex_core/super_expose.mojo owner. Rust retains URL origin
+parsing, request-body field acquisition, HTTP/JSON-RPC response construction,
+Serde iteration, UUID parsing, and stable field-specific error text. No Rust
+semantic fallback is retained.
+
+Validation passes 78/78 focused prodex-app Super-expose tests and 3/3 direct Mojo
+protocol-policy fixtures, plus clippy, full prodex-app check, no-fallback self-test,
+ownership, and authority guards. Ownership now reports **91 authoritative
+operations**. The canonical broad source report counts **59,651 Mojo LOC** and
+**193,104 Rust production LOC**, totaling **252,755 LOC**: **23.60% Mojo**. The
+75% project target remains unmet, with **519,661 additional Mojo LOC** required
+at the current Rust volume.
