@@ -1,6 +1,4 @@
-#[cfg(feature = "mojo")]
 use crate::runtime_tuning_defaults;
-#[cfg(feature = "mojo")]
 use crate::{
     RuntimeProxyLaneLimitOverrides, RuntimeTuningDefaults,
     runtime_probe_refresh_worker_count_default, runtime_proxy_active_request_limit_default,
@@ -20,7 +18,6 @@ use crate::{
 };
 use std::time::Duration;
 
-#[cfg(feature = "mojo")]
 #[test]
 fn websocket_tcp_connect_defaults_are_bounded() {
     assert_eq!(runtime_websocket_tcp_connect_worker_count_default(1), 4);
@@ -44,7 +41,6 @@ fn websocket_tcp_connect_defaults_are_bounded() {
     );
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn websocket_dns_defaults_are_bounded() {
     assert_eq!(runtime_websocket_dns_resolve_worker_count_default(1), 2);
@@ -65,7 +61,6 @@ fn websocket_dns_defaults_are_bounded() {
     );
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn runtime_tuning_defaults_cover_zero_and_saturated_parallelism() {
     assert_eq!(
@@ -152,7 +147,6 @@ fn runtime_tuning_snapshot_from_input_converts_duration_budgets() {
     assert_eq!(snapshot.profile_inflight_hard_limit, 36);
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn runtime_proxy_worker_defaults_are_bounded() {
     assert_eq!(runtime_proxy_worker_count_default(1), 4);
@@ -172,7 +166,6 @@ fn runtime_proxy_worker_defaults_are_bounded() {
     assert_eq!(runtime_proxy_async_worker_count_default(64), 4);
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn runtime_proxy_capacity_defaults_are_bounded() {
     assert_eq!(runtime_proxy_long_lived_queue_capacity_default(1), 128);
@@ -197,7 +190,6 @@ fn runtime_proxy_capacity_defaults_are_bounded() {
     assert_eq!(runtime_proxy_log_queue_capacity_default(usize::MAX), 8192);
 }
 
-#[cfg(feature = "mojo")]
 #[test]
 fn runtime_proxy_lane_limits_keep_defaults_and_clamp_overrides() {
     assert_eq!(

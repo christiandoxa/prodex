@@ -2727,3 +2727,16 @@ plus clippy, no-fallback self-test, ownership, and authority guards. This extend
 the existing state-policy authority rather than creating a duplicate operation.
 The current broad source report remains **58,441 Mojo LOC** and **192,708 Rust
 production LOC**: **23.27% Mojo**.
+
+## Runtime tuning feature-gate hard replacement
+
+prodex-runtime-tuning now requires the Mojo runtime in every feature mode. The
+previous optional prodex_mojo_core dependency and cfg(feature = mojo) API gating
+were removed; the legacy mojo feature remains a no-op compatibility feature only.
+No Rust arithmetic fallback was introduced.
+
+Validation passes 8/8 tests with default features and the same 8/8 tests under
+--no-default-features, plus no-default clippy, prodex-app check, no-fallback
+self-test, ownership, and authority guards. This hardens the existing
+runtime_tuning_capacity_defaults authority, so broad source share remains
+**23.27% Mojo** rather than changing through filler LOC.
