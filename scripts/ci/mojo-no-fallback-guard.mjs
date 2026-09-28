@@ -8,6 +8,8 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/sub_agent_policy.rs",
+  "crates/prodex-cli/src/sub_agent.rs",
   "crates/prodex-mojo-core/src/rich/super_expose.rs",
   "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
   "crates/prodex-app/src/super_expose/protocol/validation.rs",
@@ -261,6 +263,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-mojo-core/src/sub_agent_policy.rs",
+  "crates/prodex-cli/src/sub_agent.rs",
   "crates/prodex-mojo-core/src/rich/super_expose.rs",
   "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
   "crates/prodex-app/src/super_expose/protocol/validation.rs",
@@ -640,6 +644,8 @@ const STATE_PROVIDER_FILE = "crates/prodex-state/src/provider_capabilities.rs";
 const STATE_REMEMBER_FILE = "crates/prodex-app/src/runtime_proxy/lineage/remember.rs";
 const REDACTION_FILE = "crates/prodex-redaction/src/lib.rs";
 const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
+const SUB_AGENT_POLICY_FILE = "crates/prodex-cli/src/sub_agent.rs";
+const SUB_AGENT_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
 const DOCTOR_CARGO_FILE = "crates/prodex-runtime-doctor/Cargo.toml";
 const RUNTIME_PROXY_CARGO_FILE = "crates/prodex-runtime-proxy/Cargo.toml";
@@ -1162,6 +1168,35 @@ export function findViolations(files) {
       violations.push(filePath + ": contains a retired Rust profile-identity semantic helper");
     }
     return violations;
+  });
+  const subAgentPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SUB_AGENT_POLICY_FILE) {
+      const required = [
+        "prodex_mojo_core::sub_agent_policy::parse_concurrency(",
+        "prodex_mojo_core::sub_agent_policy::concurrency_valid(",
+        "prodex_mojo_core::sub_agent_policy::reasoning_effort(",
+        "prodex_mojo_core::sub_agent_policy::model_nonempty(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": sub-agent CLI policy must retain Mojo call " + call);
+      const retired = [
+        "if value == 0 || value > HARD_MAX_SUB_AGENT_CONCURRENCY",
+        "value.bytes().all(|byte| byte.is_ascii_digit())",
+        "SUB_AGENT_MAX_CONCURRENCY_PRESETS.contains(&parsed)",
+        "match value.trim().to_ascii_lowercase().as_str()",
+        "(!value.trim().is_empty())",
+      ];
+      if (retired.some((pattern) => contents.includes(pattern))) {
+        violations.push(filePath + ": contains restored Rust sub-agent parsing/validation semantics");
+      }
+      return violations;
+    }
+    if (filePath === SUB_AGENT_POLICY_ADAPTER_FILE) {
+      return contents.includes("prodex_sub_agent_policy_v1(")
+        ? [] : [filePath + ": sub-agent policy adapter must retain Mojo ABI call"];
+    }
+    return [];
   });
   const cliRuntimeFeatureViolations = files
     .filter(([filePath, contents]) => filePath === CLI_RUNTIME_FEATURE_FILE &&
@@ -1860,7 +1895,7 @@ export function findViolations(files) {
     ...quotaModelPolicyViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
-    ...anthropicWebSearchViolations, ...cliRuntimeFeatureViolations,
+    ...anthropicWebSearchViolations, ...subAgentPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSystemInstructionViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,

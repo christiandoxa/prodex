@@ -46,7 +46,9 @@ struct SubAgentMaxConcurrencyWire {
 
 impl SubAgentMaxConcurrency {
     pub fn new(value: u16, source: SubAgentConcurrencySource) -> Result<Self, String> {
-        if value == 0 || value > HARD_MAX_SUB_AGENT_CONCURRENCY {
+        if !prodex_mojo_core::sub_agent_policy::concurrency_valid(value)
+            .expect("Mojo sub-agent concurrency validator returned invalid output")
+        {
             return Err(format!(
                 "maximum active sub-agents must be between 1 and {HARD_MAX_SUB_AGENT_CONCURRENCY}"
             ));
@@ -80,26 +82,31 @@ impl FromStr for SubAgentMaxConcurrency {
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let value = value.trim();
-        if value == "default" {
-            return Ok(Self::default());
-        }
-        if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(format!(
-                "invalid maximum active sub-agents: expected default or an integer from 1 to {HARD_MAX_SUB_AGENT_CONCURRENCY}"
-            ));
-        }
-        let parsed = value.parse::<u16>().map_err(|_| {
-            format!(
-                "invalid maximum active sub-agents: expected an integer from 1 to {HARD_MAX_SUB_AGENT_CONCURRENCY}"
-            )
-        })?;
-        let source = if SUB_AGENT_MAX_CONCURRENCY_PRESETS.contains(&parsed) {
-            SubAgentConcurrencySource::Preset
-        } else {
-            SubAgentConcurrencySource::Custom
+        use prodex_mojo_core::sub_agent_policy::{
+            ConcurrencyParseViolation, ConcurrencySourcePlan,
         };
-        Self::new(parsed, source)
+
+        match prodex_mojo_core::sub_agent_policy::parse_concurrency(value)
+            .expect("Mojo sub-agent concurrency parser returned invalid output")
+        {
+            Ok(parsed) => {
+                let source = match parsed.source {
+                    ConcurrencySourcePlan::Default => SubAgentConcurrencySource::Default,
+                    ConcurrencySourcePlan::Preset => SubAgentConcurrencySource::Preset,
+                    ConcurrencySourcePlan::Custom => SubAgentConcurrencySource::Custom,
+                };
+                Self::new(parsed.value, source)
+            }
+            Err(ConcurrencyParseViolation::Syntax) => Err(format!(
+                "invalid maximum active sub-agents: expected default or an integer from 1 to {HARD_MAX_SUB_AGENT_CONCURRENCY}"
+            )),
+            Err(ConcurrencyParseViolation::Overflow) => Err(format!(
+                "invalid maximum active sub-agents: expected an integer from 1 to {HARD_MAX_SUB_AGENT_CONCURRENCY}"
+            )),
+            Err(ConcurrencyParseViolation::OutOfRange) => Err(format!(
+                "maximum active sub-agents must be between 1 and {HARD_MAX_SUB_AGENT_CONCURRENCY}"
+            )),
+        }
     }
 }
 
@@ -164,18 +171,25 @@ impl FromStr for SubAgentReasoningEffort {
     type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "none" => Ok(Self::None),
-            "minimal" => Ok(Self::Minimal),
-            "low" => Ok(Self::Low),
-            "medium" => Ok(Self::Medium),
-            "high" => Ok(Self::High),
-            "xhigh" => Ok(Self::XHigh),
-            "max" => Ok(Self::Max),
-            "ultra" => Ok(Self::Ultra),
-            other => Err(format!(
-                "invalid sub-agent reasoning effort: expected none, minimal, low, medium, high, xhigh, max, or ultra, got {other:?}"
-            )),
+        use prodex_mojo_core::sub_agent_policy::ReasoningEffortPlan;
+
+        match prodex_mojo_core::sub_agent_policy::reasoning_effort(value)
+            .expect("Mojo sub-agent reasoning-effort parser returned invalid output")
+        {
+            Some(ReasoningEffortPlan::None) => Ok(Self::None),
+            Some(ReasoningEffortPlan::Minimal) => Ok(Self::Minimal),
+            Some(ReasoningEffortPlan::Low) => Ok(Self::Low),
+            Some(ReasoningEffortPlan::Medium) => Ok(Self::Medium),
+            Some(ReasoningEffortPlan::High) => Ok(Self::High),
+            Some(ReasoningEffortPlan::XHigh) => Ok(Self::XHigh),
+            Some(ReasoningEffortPlan::Max) => Ok(Self::Max),
+            Some(ReasoningEffortPlan::Ultra) => Ok(Self::Ultra),
+            None => {
+                let other = value.trim().to_ascii_lowercase();
+                Err(format!(
+                    "invalid sub-agent reasoning effort: expected none, minimal, low, medium, high, xhigh, max, or ultra, got {other:?}"
+                ))
+            }
         }
     }
 }
@@ -270,7 +284,8 @@ pub fn parse_sub_agent_provider(value: &str) -> Result<ProviderId, String> {
 }
 
 pub fn parse_sub_agent_model(value: &str) -> Result<String, String> {
-    (!value.trim().is_empty())
+    prodex_mojo_core::sub_agent_policy::model_nonempty(value)
+        .expect("Mojo sub-agent model validator returned invalid output")
         .then(|| value.to_owned())
         .ok_or_else(|| "--sub-agent-model must be nonempty".to_string())
 }
@@ -297,6 +312,32 @@ impl fmt::Display for SubAgentReasoningEffort {
 #[cfg(test)]
 mod concurrency_tests {
     use super::*;
+
+    #[test]
+    fn mojo_concurrency_errors_preserve_public_messages() {
+        assert_eq!(
+            "1e2".parse::<SubAgentMaxConcurrency>().unwrap_err(),
+            "invalid maximum active sub-agents: expected default or an integer from 1 to 64"
+        );
+        assert_eq!(
+            "999999999999999999999"
+                .parse::<SubAgentMaxConcurrency>()
+                .unwrap_err(),
+            "invalid maximum active sub-agents: expected an integer from 1 to 64"
+        );
+        assert_eq!(
+            "65".parse::<SubAgentMaxConcurrency>().unwrap_err(),
+            "maximum active sub-agents must be between 1 and 64"
+        );
+        assert_eq!(
+            " XHIGH ".parse::<SubAgentReasoningEffort>().unwrap(),
+            SubAgentReasoningEffort::XHigh
+        );
+        assert_eq!(
+            " EXTREME ".parse::<SubAgentReasoningEffort>().unwrap_err(),
+            r#"invalid sub-agent reasoning effort: expected none, minimal, low, medium, high, xhigh, max, or ultra, got "extreme""#
+        );
+    }
 
     #[test]
     fn maximum_active_sub_agents_are_typed_and_bounded() {
