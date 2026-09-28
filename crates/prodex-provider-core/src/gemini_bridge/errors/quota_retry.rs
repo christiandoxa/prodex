@@ -96,3 +96,31 @@ pub(super) fn gemini_provider_core_value_has_rate_limit(value: &serde_json::Valu
     }
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_quota_code_casefold_preserves_trimmed_contract() {
+        let terminal = br#"{"error":{"status":" RESOURCE_EXHAUSTED "}}"#;
+        assert!(gemini_provider_core_body_has_terminal_quota(terminal));
+        assert_eq!(
+            gemini_provider_core_google_quota_message(
+                br#"{"error":{"status":" QUOTA_EXCEEDED ","message":"limit reached"}}"#
+            )
+            .as_deref(),
+            Some("limit reached")
+        );
+        assert!(gemini_provider_core_value_has_rate_limit(
+            &serde_json::json!({
+                "error": {"code": " RATE_LIMIT_EXCEEDED_ERROR "}
+            })
+        ));
+        assert!(!gemini_provider_core_value_has_rate_limit(
+            &serde_json::json!({
+                "error": {"code": "rate limit exceeded"}
+            })
+        ));
+    }
+}

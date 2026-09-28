@@ -1,5 +1,7 @@
 //! Gemini quota retry response-body parsing helpers.
 
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+
 pub(super) fn gemini_provider_core_google_quota_message_from_value(
     value: &serde_json::Value,
 ) -> Option<String> {
@@ -35,14 +37,19 @@ pub(super) fn gemini_provider_core_google_quota_message_from_value(
 }
 
 fn gemini_provider_core_google_quota_code(code: &str) -> bool {
-    matches!(
-        code.trim().to_ascii_lowercase().as_str(),
-        "resource_exhausted"
-            | "quota_exhausted"
-            | "quota_exceeded"
-            | "rate_limit_exceeded"
-            | "rate_limit_exceeded_error"
-    )
+    let code = code.trim();
+    [
+        "resource_exhausted",
+        "quota_exhausted",
+        "quota_exceeded",
+        "rate_limit_exceeded",
+        "rate_limit_exceeded_error",
+    ]
+    .into_iter()
+    .any(|candidate| {
+        ascii_casefold_equal_exact(code, candidate)
+            .expect("Mojo Gemini quota-code comparison failed")
+    })
 }
 
 pub(super) fn gemini_provider_core_values_from_body(body: &[u8]) -> Vec<serde_json::Value> {

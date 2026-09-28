@@ -3988,16 +3988,20 @@
         "crates/prodex-app/src/super_expose/protocol/validation.rs",
         "crates/prodex-provider-core/src/translators/copilot/request.rs",
         "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
-        "crates/prodex-app/src/runtime_gemini_auth/code_assist/validation.rs"
+        "crates/prodex-app/src/runtime_gemini_auth/code_assist/validation.rs",
+        "crates/prodex-provider-core/src/fallback/chains.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/body.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
+        "crates/prodex-provider-core/src/translators/gemini/response_media.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/prompt identity, runtime commands/fail modes/process/header identity, provider catalogs, Copilot request roles, Gemini media encoding markers, and Gemini Code Assist labels/domains",
+      "rust_owner_before": "exact ASCII case-insensitive equality repeated across runtime/header/catalog identity, provider request roles, session-memory aliases, Gemini quota/rate-limit codes, media extensions, and Code Assist labels/domains",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo equality coverage preserves empty strings, mixed case, and whitespace sensitivity, while Super catalog/prompt caller tests preserve selection behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "caller-owned trimming where historically required, string/path/header/URL/JSON acquisition, iteration, DTO/process ownership, routing/filtering decisions, and rendering; Mojo owns exact ASCII-folded equality"
+      "rust_adapter_scope": "caller-owned trimming where historically required, string/path/header/URL/JSON acquisition, iteration, DTO/process ownership, routing/filtering decisions, and result mapping; Mojo owns exact ASCII-folded equality"
     },
     {
       "name": "gemini_guardrail_text_classification",
@@ -4131,16 +4135,17 @@
       "production_consumers": [
         "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
         "crates/prodex-app/src/runtime_gemini_auth/code_assist/validation.rs",
-        "crates/prodex-app/src/runtime_proxy/smart_context.rs"
+        "crates/prodex-app/src/runtime_proxy/smart_context.rs",
+        "crates/prodex-app/src/runtime_proxy/presidio/telemetry.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
-      "rust_owner_before": "ASCII case-insensitive prefix/suffix matching for Gemini URI MIME detection, trusted Google validation hosts, and Smart Context application/json content-type recognition",
+      "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching for Gemini URI MIME detection, trusted validation hosts, Smart Context content types, and Presidio timeout/failure text classification",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo relation coverage preserves Rust starts_with/ends_with/contains empty-needle semantics and 70k exact equality, with Copilot/Gemini caller regressions preserving case and trim behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "URI/header/JSON acquisition, caller-specific split/trim rules, MIME/result mapping, and skip-reason routing"
+      "rust_adapter_scope": "URI/header/error/JSON acquisition, caller-specific split/trim rules, MIME/outcome mapping, and routing/telemetry labels"
     }
   ],
   "rust_semantic_reductions": [
