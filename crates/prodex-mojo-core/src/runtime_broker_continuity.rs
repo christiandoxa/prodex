@@ -40,6 +40,35 @@ pub enum HealthKeyKind {
     Profile,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct BrokerBinaryIdentityView<'a> {
+    pub version: Option<&'a str>,
+    pub sha256: Option<&'a str>,
+    pub path_present: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrokerReplacementReason {
+    Sha256Mismatch,
+    VersionMismatch,
+    IdentityMismatch,
+    IdentityUnresolved,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrokerVersionGuardOutcome {
+    Compatible,
+    DeferredActiveRequests,
+    Replaced,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrokerVersionGuardPlan {
+    pub outcome: BrokerVersionGuardOutcome,
+    pub use_version_identity: bool,
+    pub replacement_reason: Option<BrokerReplacementReason>,
+}
+
 unsafe extern "C" {
     fn prodex_runtime_broker_continuity_line_v1(
         abi_version: i64,
@@ -88,6 +117,51 @@ unsafe extern "C" {
         abi_version: i64,
         key_address: u64,
         key_length: i64,
+    ) -> i64;
+
+    fn prodex_runtime_broker_identity_policy_v1(
+        abi_version: i64,
+        mode: i64,
+        left_flags: i64,
+        left_version_address: u64,
+        left_version_length: i64,
+        left_sha_address: u64,
+        left_sha_length: i64,
+        right_flags: i64,
+        right_version_address: u64,
+        right_version_length: i64,
+        right_sha_address: u64,
+        right_sha_length: i64,
+    ) -> i64;
+
+    fn prodex_runtime_broker_guard_plan_v1(
+        abi_version: i64,
+        process_alive: i64,
+        binary_flags: i64,
+        binary_version_address: u64,
+        binary_version_length: i64,
+        binary_sha_address: u64,
+        binary_sha_length: i64,
+        version_flags: i64,
+        version_version_address: u64,
+        version_version_length: i64,
+        version_sha_address: u64,
+        version_sha_length: i64,
+        observed_flags: i64,
+        observed_version_address: u64,
+        observed_version_length: i64,
+        observed_sha_address: u64,
+        observed_sha_length: i64,
+        active_requests: u64,
+        live_leases: u64,
+        output_address: u64,
+    ) -> i64;
+
+    fn prodex_runtime_broker_parse_version_v1(
+        abi_version: i64,
+        address: u64,
+        length: i64,
+        output_address: u64,
     ) -> i64;
 }
 
@@ -226,6 +300,229 @@ pub fn route_kind(route: &str) -> Result<ContinuityRouteKind, MojoError> {
     }
 }
 
+fn identity_parts(
+    identity: BrokerBinaryIdentityView<'_>,
+) -> Result<(i64, u64, i64, u64, i64), MojoError> {
+    let mut flags = 0_i64;
+    let (version_address, version_length) = match identity.version {
+        Some(value) => {
+            flags |= 1;
+            (ptr(value), length(value)?)
+        }
+        None => (0, 0),
+    };
+    if identity.path_present {
+        flags |= 2;
+    }
+    let (sha_address, sha_length) = match identity.sha256 {
+        Some(value) => {
+            flags |= 4;
+            (ptr(value), length(value)?)
+        }
+        None => (0, 0),
+    };
+    Ok((
+        flags,
+        version_address,
+        version_length,
+        sha_address,
+        sha_length,
+    ))
+}
+
+fn identity_policy(
+    mode: i64,
+    left: BrokerBinaryIdentityView<'_>,
+    right: BrokerBinaryIdentityView<'_>,
+) -> Result<i64, MojoError> {
+    let (left_flags, left_version_address, left_version_length, left_sha_address, left_sha_length) =
+        identity_parts(left)?;
+    let (
+        right_flags,
+        right_version_address,
+        right_version_length,
+        right_sha_address,
+        right_sha_length,
+    ) = identity_parts(right)?;
+    let value = unsafe {
+        prodex_runtime_broker_identity_policy_v1(
+            ABI_VERSION,
+            mode,
+            left_flags,
+            left_version_address,
+            left_version_length,
+            left_sha_address,
+            left_sha_length,
+            right_flags,
+            right_version_address,
+            right_version_length,
+            right_sha_address,
+            right_sha_length,
+        )
+    };
+    (value >= 0)
+        .then_some(value)
+        .ok_or(MojoError::InvalidOutput)
+}
+
+fn replacement_reason_from_code(value: i64) -> Result<BrokerReplacementReason, MojoError> {
+    match value {
+        1 => Ok(BrokerReplacementReason::Sha256Mismatch),
+        2 => Ok(BrokerReplacementReason::VersionMismatch),
+        3 => Ok(BrokerReplacementReason::IdentityMismatch),
+        4 => Ok(BrokerReplacementReason::IdentityUnresolved),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn binary_identity_present(identity: BrokerBinaryIdentityView<'_>) -> Result<bool, MojoError> {
+    match identity_policy(
+        0,
+        identity,
+        BrokerBinaryIdentityView {
+            version: None,
+            sha256: None,
+            path_present: false,
+        },
+    )? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn binary_identity_matches(
+    current: BrokerBinaryIdentityView<'_>,
+    other: BrokerBinaryIdentityView<'_>,
+) -> Result<bool, MojoError> {
+    match identity_policy(1, current, other)? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn binary_identity_replacement_reason(
+    current: BrokerBinaryIdentityView<'_>,
+    observed: BrokerBinaryIdentityView<'_>,
+) -> Result<BrokerReplacementReason, MojoError> {
+    replacement_reason_from_code(identity_policy(2, current, observed)?)
+}
+
+pub fn binary_identity_version_mismatch(
+    current: BrokerBinaryIdentityView<'_>,
+    observed: BrokerBinaryIdentityView<'_>,
+) -> Result<bool, MojoError> {
+    match identity_policy(3, current, observed)? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn version_guard_plan(
+    process_alive: bool,
+    current_binary: BrokerBinaryIdentityView<'_>,
+    current_version: BrokerBinaryIdentityView<'_>,
+    observed: BrokerBinaryIdentityView<'_>,
+    active_requests: usize,
+    live_leases: usize,
+) -> Result<BrokerVersionGuardPlan, MojoError> {
+    let (
+        binary_flags,
+        binary_version_address,
+        binary_version_length,
+        binary_sha_address,
+        binary_sha_length,
+    ) = identity_parts(current_binary)?;
+    let (
+        version_flags,
+        version_version_address,
+        version_version_length,
+        version_sha_address,
+        version_sha_length,
+    ) = identity_parts(current_version)?;
+    let (
+        observed_flags,
+        observed_version_address,
+        observed_version_length,
+        observed_sha_address,
+        observed_sha_length,
+    ) = identity_parts(observed)?;
+    let mut output = [-1_i64; 3];
+    let status = unsafe {
+        prodex_runtime_broker_guard_plan_v1(
+            ABI_VERSION,
+            i64::from(process_alive),
+            binary_flags,
+            binary_version_address,
+            binary_version_length,
+            binary_sha_address,
+            binary_sha_length,
+            version_flags,
+            version_version_address,
+            version_version_length,
+            version_sha_address,
+            version_sha_length,
+            observed_flags,
+            observed_version_address,
+            observed_version_length,
+            observed_sha_address,
+            observed_sha_length,
+            u64::try_from(active_requests).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(live_leases).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    if status != 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    let outcome = match output[0] {
+        0 => BrokerVersionGuardOutcome::Compatible,
+        1 => BrokerVersionGuardOutcome::DeferredActiveRequests,
+        2 => BrokerVersionGuardOutcome::Replaced,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let use_version_identity = match output[1] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let replacement_reason = match output[2] {
+        0 => None,
+        value => Some(replacement_reason_from_code(value)?),
+    };
+    Ok(BrokerVersionGuardPlan {
+        outcome,
+        use_version_identity,
+        replacement_reason,
+    })
+}
+
+pub fn parse_prodex_version(output: &str) -> Result<Option<&str>, MojoError> {
+    let mut span = [-1_i64; 2];
+    let status = unsafe {
+        prodex_runtime_broker_parse_version_v1(
+            ABI_VERSION,
+            ptr(output),
+            length(output)?,
+            span.as_mut_ptr() as usize as u64,
+        )
+    };
+    match status {
+        0 => Ok(None),
+        1 => {
+            let start = usize::try_from(span[0]).map_err(|_| MojoError::InvalidOutput)?;
+            let end = usize::try_from(span[1]).map_err(|_| MojoError::InvalidOutput)?;
+            output
+                .get(start..end)
+                .map(Some)
+                .ok_or(MojoError::InvalidOutput)
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 pub fn health_key_kind(key: &str) -> Result<HealthKeyKind, MojoError> {
     let output =
         unsafe { prodex_runtime_broker_health_key_kind_v1(ABI_VERSION, ptr(key), length(key)?) };
@@ -263,5 +560,56 @@ mod tests {
             health_key_kind("__route_health__:responses:main").unwrap(),
             HealthKeyKind::Route
         );
+        let current = BrokerBinaryIdentityView {
+            version: Some("0.7.0"),
+            sha256: Some("abc123"),
+            path_present: true,
+        };
+        let same_sha = BrokerBinaryIdentityView {
+            version: Some("0.8.0"),
+            sha256: Some("abc123"),
+            path_present: false,
+        };
+        let different = BrokerBinaryIdentityView {
+            version: Some("0.8.0"),
+            sha256: Some("def456"),
+            path_present: false,
+        };
+        assert!(binary_identity_present(current).unwrap());
+        assert!(binary_identity_matches(current, same_sha).unwrap());
+        assert_eq!(
+            binary_identity_replacement_reason(current, different).unwrap(),
+            BrokerReplacementReason::Sha256Mismatch
+        );
+        assert!(binary_identity_version_mismatch(current, different).unwrap());
+        assert_eq!(
+            version_guard_plan(
+                true,
+                current,
+                BrokerBinaryIdentityView {
+                    version: Some("0.7.0"),
+                    sha256: None,
+                    path_present: false,
+                },
+                different,
+                0,
+                0
+            )
+            .unwrap(),
+            BrokerVersionGuardPlan {
+                outcome: BrokerVersionGuardOutcome::Replaced,
+                use_version_identity: true,
+                replacement_reason: Some(BrokerReplacementReason::VersionMismatch),
+            }
+        );
+        assert_eq!(
+            parse_prodex_version(
+                "  prodex 0.7.0
+"
+            )
+            .unwrap(),
+            Some("0.7.0")
+        );
+        assert_eq!(parse_prodex_version("codex 0.7.0").unwrap(), None);
     }
 }

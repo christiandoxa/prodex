@@ -8,6 +8,9 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/app_commands/log_throughput_state.rs",
+  "crates/prodex-mojo-core/src/log_throughput_policy.rs",
+  "crates/prodex-runtime-broker/src/version_guard.rs",
   "crates/prodex-mojo-core/src/super_provider_config.rs",
   "crates/prodex-cli/src/runtime_args.rs",
   "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
@@ -267,6 +270,9 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-app/src/app_commands/log_throughput_state.rs",
+  "crates/prodex-mojo-core/src/log_throughput_policy.rs",
+  "crates/prodex-runtime-broker/src/version_guard.rs",
   "crates/prodex-mojo-core/src/super_provider_config.rs",
   "crates/prodex-cli/src/runtime_args.rs",
   "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
@@ -647,6 +653,7 @@ const RUNTIME_STATE_BACKGROUND_FILE = "crates/prodex-runtime-state/src/backgroun
 const RUNTIME_STATE_QUOTA_FILE = "crates/prodex-runtime-state/src/quota.rs";
 const RUNTIME_PROXY_ROOT_FILE = "crates/prodex-runtime-proxy/src/lib.rs";
 const BROKER_CONTINUITY_FILE = "crates/prodex-runtime-broker/src/continuity.rs";
+const BROKER_VERSION_GUARD_FILE = "crates/prodex-runtime-broker/src/version_guard.rs";
 const CODEX_CONFIG_FILE = "crates/prodex-codex-config/src/lib.rs";
 const STATE_FILE = "crates/prodex-state/src/lib.rs";
 const STATE_PROVIDER_FILE = "crates/prodex-state/src/provider_capabilities.rs";
@@ -1053,6 +1060,73 @@ export function findViolations(files) {
       violations.push(filePath + ": contains restored Rust previous-response request-shape semantics");
     }
     return violations;
+  });
+  const logThroughputViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/app_commands/log_throughput_state.rs") {
+      const required = [
+        "prodex_mojo_core::log_throughput_policy::sample_plan(",
+        "prodex_mojo_core::log_throughput_policy::completed_rate(",
+        "prodex_mojo_core::log_throughput_policy::stream_rate(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": log-throughput migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        production.includes("OUTPUT_THROUGHPUT_MIN_SAMPLE")
+        || /output_tokens as f64 \* 1_000\.0 \/ duration as f64/u.test(production)
+        || /checked_sub\(\*first_generation_ms\)/u.test(production)
+      ) {
+        violations.push(filePath + ": contains restored Rust log-throughput counter/rate semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/log_throughput_policy.rs") {
+      const required = [
+        "prodex_log_throughput_sample_plan_v1(",
+        "prodex_log_throughput_completed_rate_v1(",
+        "prodex_log_throughput_stream_rate_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": log-throughput ABI adapter must retain " + call);
+    }
+    return [];
+  });
+  const brokerVersionGuardViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === BROKER_VERSION_GUARD_FILE) {
+      const required = [
+        "prodex_mojo_core::runtime_broker_continuity::binary_identity_present(",
+        "prodex_mojo_core::runtime_broker_continuity::binary_identity_matches(",
+        "prodex_mojo_core::runtime_broker_continuity::binary_identity_replacement_reason(",
+        "prodex_mojo_core::runtime_broker_continuity::binary_identity_version_mismatch(",
+        "prodex_mojo_core::runtime_broker_continuity::version_guard_plan(",
+        "prodex_mojo_core::runtime_broker_continuity::parse_prodex_version(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": broker version-guard migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /if let \(Some\(current_sha256\), Some\(other_sha256\)\)/u.test(production)
+        || /split_whitespace\(\)/u.test(production)
+        || /active_requests > 0 \|\| live_leases > 0/u.test(production)
+      ) {
+        violations.push(filePath + ": contains restored Rust broker version-guard semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_broker_continuity.rs") {
+      const required = [
+        "prodex_runtime_broker_identity_policy_v1(",
+        "prodex_runtime_broker_guard_plan_v1(",
+        "prodex_runtime_broker_parse_version_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": broker version-guard ABI adapter must retain " + call);
+    }
+    return [];
   });
   const brokerContinuityViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== BROKER_CONTINUITY_FILE) return [];
@@ -1985,7 +2059,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...logThroughputViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...deepseekSimpleRequestViolations,

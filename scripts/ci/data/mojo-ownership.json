@@ -781,7 +781,10 @@
           "broker_continuity_health_decay",
           "broker_continuity_stale_verification",
           "broker_continuity_route_classification",
-          "broker_health_key_classification"
+          "broker_health_key_classification",
+          "broker_binary_identity_policy",
+          "broker_version_guard_planning",
+          "broker_version_output_parsing"
         ]
       },
       {
@@ -933,6 +936,18 @@
           "super_external_provider_alias_policy",
           "super_provider_config_serialization",
           "super_toml_string_serialization"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/log_throughput_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "log_throughput_sample_planning",
+          "log_throughput_completed_rate",
+          "log_throughput_stream_rate"
         ]
       }
     ],
@@ -3444,6 +3459,150 @@
       "rust_owner_before": "double-quoted TOML literal backslash and quote escaping used by Super model/provider overrides",
       "rust_test_oracle": "deleted; direct kernel fixture covers backslash/quote escaping and CLI tests exercise Unicode model identifiers",
       "rust_adapter_scope": "owned String materialization only"
+    },
+    {
+      "domain": "runtime-broker/version-guard",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust binary identity/version guard policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/version_guard.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/version_guard.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_binary_identity_policy",
+      "mojo_entry": "prodex_runtime_broker_identity_policy_v1",
+      "mojo_operation_ids": {
+        "identity_present": 0,
+        "identity_match": 1,
+        "replacement_reason": 2,
+        "version_mismatch": 3
+      },
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::binary_identity_matches",
+      "rust_owner_before": "binary identity presence, SHA-first/version-fallback equality, replacement reason precedence and observed-version mismatch",
+      "rust_test_oracle": "deleted; runtime-broker version-guard tests plus direct continuity kernel fixture cover SHA/version precedence, unresolved identities and path-only presence",
+      "rust_adapter_scope": "PathBuf ownership, registry/health DTO projection and static reason-string mapping"
+    },
+    {
+      "domain": "runtime-broker/version-guard",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust binary identity/version guard policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/version_guard.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/version_guard.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_version_guard_planning",
+      "mojo_entry": "prodex_runtime_broker_guard_plan_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::version_guard_plan",
+      "rust_owner_before": "current identity source selection plus compatible/deferred/replaced version-guard outcome and replacement reason",
+      "rust_test_oracle": "deleted; version-guard tests cover active-request deferral, version mismatch source selection and replacement behavior",
+      "rust_adapter_scope": "identity DTO cloning and public outcome enum reconstruction"
+    },
+    {
+      "domain": "runtime-broker/version-guard",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust binary identity/version guard policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/version_guard.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/version_guard.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_version_output_parsing",
+      "mojo_entry": "prodex_runtime_broker_parse_version_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::parse_prodex_version",
+      "rust_owner_before": "prodex --version whitespace token parsing and binary-name validation",
+      "rust_test_oracle": "deleted; version-guard tests and direct adapter fixture cover leading/trailing whitespace, valid prodex output and wrong/missing binary tokens",
+      "rust_adapter_scope": "borrowed span to owned String materialization"
+    },
+    {
+      "domain": "app/log-throughput",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust throughput counter/rate policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_throughput_state.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "log_throughput_sample_planning",
+      "mojo_entry": "prodex_log_throughput_sample_plan_v1",
+      "consumer_marker": "prodex_mojo_core::log_throughput_policy::sample_plan",
+      "rust_owner_before": "counter-reset detection and append-sample decision from token/generation monotonicity",
+      "rust_test_oracle": "deleted; direct kernel and throughput tests cover equal counters, token resets, generation resets and first samples",
+      "rust_adapter_scope": "stream map mutation, timestamps, pruning and last-known-rate storage"
+    },
+    {
+      "domain": "app/log-throughput",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust throughput counter/rate policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_throughput_state.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "log_throughput_completed_rate",
+      "mojo_entry": "prodex_log_throughput_completed_rate_v1",
+      "consumer_marker": "prodex_mojo_core::log_throughput_policy::completed_rate",
+      "rust_owner_before": "completed generation output-token rate validity and tokens-per-second calculation",
+      "rust_test_oracle": "deleted; direct kernel and throughput tests cover zero tokens/duration and valid final averages",
+      "rust_adapter_scope": "InfoTokenUsageEvent projection and sticky display-rate state"
+    },
+    {
+      "domain": "app/log-throughput",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust throughput counter/rate policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_throughput_state.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "log_throughput_stream_rate",
+      "mojo_entry": "prodex_log_throughput_stream_rate_v1",
+      "consumer_marker": "prodex_mojo_core::log_throughput_policy::stream_rate",
+      "rust_owner_before": "250ms minimum live-sample window, monotonic delta validation and live token-rate calculation",
+      "rust_test_oracle": "deleted; throughput suite covers counter resets, zero/short elapsed samples, live-vs-final precedence and p95 display latency",
+      "rust_adapter_scope": "VecDeque sample storage, Instant-based pruning, profile/stream identity maps and display state"
     }
   ],
   "rust_semantic_reductions": [

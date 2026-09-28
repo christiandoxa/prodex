@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const OUTPUT_THROUGHPUT_WINDOW: Duration = Duration::from_secs(2);
-const OUTPUT_THROUGHPUT_MIN_SAMPLE: Duration = Duration::from_millis(250);
 const OUTPUT_THROUGHPUT_MAX_STREAMS: usize = 64;
 const OUTPUT_THROUGHPUT_MAX_OBSERVATIONS: usize = 256;
 
@@ -82,13 +81,18 @@ impl OutputThroughput {
         if event.output_tokens == 0 {
             return;
         }
-        let counter_reset = self
-            .streams
-            .get(&key)
-            .and_then(|stream| stream.samples.back())
-            .is_some_and(|(_, previous_tokens, previous_generation_ms)| {
-                event.output_tokens < *previous_tokens || generation_ms < *previous_generation_ms
-            });
+        let sample_plan = prodex_mojo_core::log_throughput_policy::sample_plan(
+            self.streams
+                .get(&key)
+                .and_then(|stream| stream.samples.back())
+                .map(|(_, previous_tokens, previous_generation_ms)| {
+                    (*previous_tokens, *previous_generation_ms)
+                }),
+            event.output_tokens,
+            generation_ms,
+        )
+        .expect("Mojo log-throughput sample policy returned invalid output");
+        let counter_reset = sample_plan.counter_reset;
         if counter_reset {
             self.last_known_rates.remove(&key);
         }
@@ -111,11 +115,7 @@ impl OutputThroughput {
                 stream.active = false;
                 stream.last_known_rate = None;
             }
-            if stream
-                .samples
-                .back()
-                .is_none_or(|(_, previous_tokens, _)| event.output_tokens > *previous_tokens)
-            {
+            if sample_plan.append_sample {
                 stream
                     .samples
                     .push_back((observed_at, event.output_tokens, generation_ms));
@@ -400,12 +400,11 @@ fn is_live_log_path(path: &Path) -> bool {
 }
 
 fn valid_output_rate(event: &InfoTokenUsageEvent) -> Option<f64> {
-    let duration = event.generation_ms.filter(|duration| *duration > 0)?;
-    if event.output_tokens == 0 {
-        return None;
-    }
-    let rate = event.output_tokens as f64 * 1_000.0 / duration as f64;
-    rate.is_finite().then_some(rate)
+    prodex_mojo_core::log_throughput_policy::completed_rate(
+        event.output_tokens,
+        event.generation_ms.unwrap_or_default(),
+    )
+    .expect("Mojo log-throughput completed-rate policy returned invalid output")
 }
 
 fn prune_output_throughput_samples(stream: &mut OutputThroughputStream, now: Instant) {
@@ -419,17 +418,13 @@ fn prune_output_throughput_samples(stream: &mut OutputThroughputStream, now: Ins
 fn output_throughput_stream_rate(stream: &OutputThroughputStream) -> Option<f64> {
     let (_, first_tokens, first_generation_ms) = stream.samples.front()?;
     let (_, last_tokens, last_generation_ms) = stream.samples.back()?;
-    let elapsed_ms = last_generation_ms.checked_sub(*first_generation_ms)?;
-    let elapsed = Duration::from_millis(elapsed_ms);
-    if elapsed < OUTPUT_THROUGHPUT_MIN_SAMPLE || elapsed.is_zero() {
-        return None;
-    }
-    let tokens = last_tokens.checked_sub(*first_tokens)?;
-    if tokens == 0 {
-        return None;
-    }
-    let rate = tokens as f64 / elapsed.as_secs_f64();
-    rate.is_finite().then_some(rate)
+    prodex_mojo_core::log_throughput_policy::stream_rate(
+        *first_tokens,
+        *first_generation_ms,
+        *last_tokens,
+        *last_generation_ms,
+    )
+    .expect("Mojo log-throughput stream-rate policy returned invalid output")
 }
 
 #[cfg(test)]

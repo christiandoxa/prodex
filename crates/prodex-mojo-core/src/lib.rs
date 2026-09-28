@@ -96,6 +96,8 @@ pub mod context;
 #[cfg(feature = "mojo-routing")]
 #[cfg(feature = "mojo-rich")]
 pub mod log;
+#[cfg(feature = "mojo-runtime")]
+pub mod log_throughput_policy;
 #[cfg(feature = "mojo-observability")]
 pub mod observability;
 #[cfg(feature = "mojo-runtime")]
