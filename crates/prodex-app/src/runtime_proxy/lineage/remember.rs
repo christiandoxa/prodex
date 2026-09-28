@@ -471,46 +471,51 @@ fn remember_hard_binding(
     {
         return (false, false);
     }
-    match bindings.get_mut(key) {
-        Some(binding) if binding.profile_name == profile_name => {
-            let identity_added = binding.binding_identity.is_none() && binding_identity.is_some();
-            if binding
-                .binding_identity
-                .as_ref()
-                .zip(binding_identity)
-                .is_some_and(|(previous, current)| previous != current)
-            {
-                binding.profile_name = prodex_state::HARD_BINDING_CONFLICT_PROFILE.to_string();
-                binding.binding_identity = None;
-                binding.bound_at = binding.bound_at.max(bound_at);
-                return (true, true);
-            }
-            if binding.binding_identity.is_none()
-                && let Some(binding_identity) = binding_identity
-            {
-                binding.binding_identity = Some(binding_identity.clone());
-            }
-            if binding.bound_at < bound_at {
-                binding.bound_at = bound_at;
-            }
-            (identity_added, identity_added)
-        }
-        Some(binding) => {
+
+    let Some(binding) = bindings.get_mut(key) else {
+        bindings.insert(
+            key.to_string(),
+            ResponseProfileBinding {
+                profile_name: profile_name.to_string(),
+                bound_at,
+                binding_identity: binding_identity.cloned(),
+            },
+        );
+        return (true, true);
+    };
+
+    let identity_added = binding.binding_identity.is_none() && binding_identity.is_some();
+    let identities_conflict = binding
+        .binding_identity
+        .as_ref()
+        .zip(binding_identity)
+        .is_some_and(|(previous, current)| previous != current);
+    let plan = prodex_mojo_core::state_policy::binding_merge_plan(
+        binding.profile_name == prodex_state::HARD_BINDING_CONFLICT_PROFILE,
+        false,
+        binding.profile_name == profile_name,
+        binding.binding_identity.is_some(),
+        binding_identity.is_some(),
+        identities_conflict,
+        binding.bound_at,
+        bound_at,
+    )
+    .expect("Mojo hard-binding remember policy returned invalid output");
+
+    match plan.choice {
+        prodex_mojo_core::state_policy::BindingMergeChoice::Conflict => {
             binding.profile_name = prodex_state::HARD_BINDING_CONFLICT_PROFILE.to_string();
             binding.binding_identity = None;
-            binding.bound_at = binding.bound_at.max(bound_at);
+            binding.bound_at = plan.bound_at;
             (true, true)
         }
-        None => {
-            bindings.insert(
-                key.to_string(),
-                ResponseProfileBinding {
-                    profile_name: profile_name.to_string(),
-                    bound_at,
-                    binding_identity: binding_identity.cloned(),
-                },
-            );
-            (true, true)
+        prodex_mojo_core::state_policy::BindingMergeChoice::Left
+        | prodex_mojo_core::state_policy::BindingMergeChoice::Right => {
+            if identity_added {
+                binding.binding_identity = binding_identity.cloned();
+            }
+            binding.bound_at = plan.bound_at;
+            (identity_added, identity_added)
         }
     }
 }

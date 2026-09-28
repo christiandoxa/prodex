@@ -8,6 +8,7 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
   "crates/prodex-mojo-core/src/smart_context_markers.rs",
   "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
   "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
@@ -252,6 +253,7 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
   "crates/prodex-mojo-core/src/smart_context_markers.rs",
   "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
   "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
@@ -617,6 +619,7 @@ const BROKER_CONTINUITY_FILE = "crates/prodex-runtime-broker/src/continuity.rs";
 const CODEX_CONFIG_FILE = "crates/prodex-codex-config/src/lib.rs";
 const STATE_FILE = "crates/prodex-state/src/lib.rs";
 const STATE_PROVIDER_FILE = "crates/prodex-state/src/provider_capabilities.rs";
+const STATE_REMEMBER_FILE = "crates/prodex-app/src/runtime_proxy/lineage/remember.rs";
 const REDACTION_FILE = "crates/prodex-redaction/src/lib.rs";
 const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
@@ -995,6 +998,20 @@ export function findViolations(files) {
     return violations;
   });
   const statePolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === STATE_REMEMBER_FILE) {
+      const required = "prodex_mojo_core::state_policy::binding_merge_plan(";
+      const violations = contents.includes(required)
+        ? [] : [`${filePath}: hard-binding remember must retain Mojo state policy`];
+      const rememberBody = contents.match(/fn remember_hard_binding\([^]*?^\}/mu)?.[0] ?? "";
+      if (
+        rememberBody.includes("binding.profile_name == profile_name =>")
+        || rememberBody.includes("binding.binding_identity.as_ref().zip(binding_identity)")
+           && !rememberBody.includes(required)
+      ) {
+        violations.push(`${filePath}: contains restored Rust hard-binding remember semantics`);
+      }
+      return violations;
+    }
     if (filePath === STATE_PROVIDER_FILE) {
       const required = "prodex_mojo_core::state_policy::provider_capabilities(";
       const violations = contents.includes(required)
