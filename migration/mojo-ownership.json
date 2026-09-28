@@ -923,7 +923,9 @@
           "sub_agent_concurrency_parse_policy",
           "sub_agent_concurrency_validate_policy",
           "sub_agent_reasoning_effort_policy",
-          "sub_agent_model_nonempty_policy"
+          "sub_agent_model_nonempty_policy",
+          "sub_agent_provider_url_policy",
+          "sub_agent_child_spec_scalar_policy"
         ]
       },
       {
@@ -3280,7 +3282,8 @@
       "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
       "consumer": "crates/prodex-cli/src/sub_agent.rs",
       "production_consumers": [
-        "crates/prodex-cli/src/sub_agent.rs"
+        "crates/prodex-cli/src/sub_agent.rs",
+        "crates/prodex-app/src/runtime_tools/sub_agents.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
       "rust_state_after": "adapter-only",
@@ -3292,8 +3295,8 @@
         "model_nonempty": 3
       },
       "consumer_marker": "prodex_mojo_core::sub_agent_policy::model_nonempty",
-      "rust_owner_before": "Unicode-trimmed nonempty validation for arbitrary sub-agent model identifiers",
-      "rust_test_oracle": "deleted; prodex-cli tests cover ASCII, vendor IDs, Unicode model IDs and whitespace-only rejection",
+      "rust_owner_before": "Unicode-trimmed nonempty validation for arbitrary sub-agent model identifiers in CLI parsing and duplicated app launch resolution",
+      "rust_test_oracle": "deleted; prodex-cli plus app resolver tests and direct Mojo smoke cover Unicode model IDs and whitespace-only rejection",
       "rust_adapter_scope": "returning the original untrimmed model string and stable error text"
     },
     {
@@ -3706,6 +3709,58 @@
       "rust_owner_before": "case-insensitive prodex model-provider id comparisons repeated across launch rewrite enablement, provider-specific catalog enablement, external catalog selection, quota labeling, and quota profile matching",
       "rust_test_oracle": "deleted; direct Mojo classifier coverage plus focused Gemini, DeepSeek, local, external catalog and provider-mode caller tests preserve the production behavior",
       "rust_adapter_scope": "Rust acquires effective Codex config strings and maps the classifier enum into launch, catalog, quota label, and filter behavior; custom and Bedrock provider handling remains outside this operation"
+    },
+    {
+      "domain": "app/sub-agent",
+      "introduced_in": "0.433.0",
+      "baseline_state": "duplicated Rust Local-provider versus URL-presence policy in sub-agent resolution and child-spec validation",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
+      "consumer": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_tools/sub_agents.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "sub_agent_provider_url_policy",
+      "mojo_entry": "prodex_sub_agent_policy_v1",
+      "mojo_operation_ids": {
+        "provider_url_policy": 4
+      },
+      "consumer_marker": "provider_url_violation",
+      "rust_owner_before": "Local sub-agent providers require a URL while non-Local providers reject a URL, duplicated in launch resolution and child launcher validation",
+      "rust_test_oracle": "deleted; direct Mojo policy plus local-provider resolver and child-config tests cover both violation directions and valid combinations",
+      "rust_adapter_scope": "ProviderId::Local and Option URL presence acquisition plus stable caller-specific error text and URL syntax validation"
+    },
+    {
+      "domain": "app/sub-agent",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust sub-agent child-spec recursion-marker and task-byte-limit validation",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
+      "consumer": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_tools/sub_agents.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "sub_agent_child_spec_scalar_policy",
+      "mojo_entry": "prodex_sub_agent_policy_v1",
+      "mojo_operation_ids": {
+        "child_spec_scalar_policy": 5
+      },
+      "consumer_marker": "child_spec_scalar_violation",
+      "rust_owner_before": "exact recursion-marker identity and 1..65536 task-size policy before child launch",
+      "rust_test_oracle": "deleted; direct Mojo smoke plus recursion-marker and child-config app tests cover valid marker, invalid marker, valid limit, and invalid task size",
+      "rust_adapter_scope": "absolute executable path validation, local URL syntax parsing, optional-tool parsing, filesystem confinement, and stable error text remain Rust"
     }
   ],
   "rust_semantic_reductions": [

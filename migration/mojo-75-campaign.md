@@ -2994,3 +2994,22 @@ The canonical broad report counts **61,109 reachable Mojo LOC** and **194,117 Ru
 production LOC**, totaling **255,226 LOC**: **23.94% Mojo**. The 75% project target
 remains unmet, with **521,242 additional Mojo LOC** required at the current Rust
 volume.
+
+
+## Sub-agent launch validation hard replacement
+
+Sub-agent model nonempty validation at the app boundary now reuses the existing
+Mojo model policy instead of repeating Unicode-trim semantics in Rust. The Local
+provider versus URL-presence rule is now operation 4 of sub_agent_policy.mojo and
+is consumed both while resolving a Super sub-agent and while validating the child
+launcher spec. Operation 5 now owns the exact recursion-marker identity and the
+1..65536 task-byte limit. The corresponding Rust conditionals were deleted.
+
+Rust still acquires ProviderId/Option values, validates URL syntax, absolute paths,
+required optional-tool identifiers, filesystem confinement, locks, and process
+execution. Focused validation passes the direct sub-agent Mojo contract plus app
+tests for empty model rejection, Local endpoint requirements, child config/tool
+validation, and fail-closed recursion-marker policy. The canonical broad report
+counts **61,125 reachable Mojo LOC** and **194,166 Rust production LOC**, totaling
+**255,291 LOC**: **23.94% Mojo**. The 75% project target remains unmet, with
+**521,373 additional Mojo LOC** required at the current Rust volume.
