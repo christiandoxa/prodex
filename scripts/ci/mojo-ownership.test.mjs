@@ -127,6 +127,9 @@ test("baseline Mojo ownership cannot regress", () => {
       classification: "SYSTEM_BOUNDARY",
     };
   }
+  for (const entry of manifest.release_inventory.additions.filter((candidate) => candidate.language === "mojo")) {
+    entry.classification = "SYSTEM_BOUNDARY";
+  }
   assert.throws(
     () => calculateOwnership(manifest, BASE_SHA, "WORKTREE"),
     /Mojo semantic ownership regressed/,
@@ -135,7 +138,11 @@ test("baseline Mojo ownership cannot regress", () => {
 
 test("baseline authoritative operations remain continuous", () => {
   const manifest = releaseManifest();
-  manifest.authoritative_operations.shift();
+  const baselineIndex = manifest.authoritative_operations.findIndex(
+    (operation) => operation.baseline_state === "authoritative",
+  );
+  assert.notEqual(baselineIndex, -1, "expected at least one baseline-authoritative operation");
+  manifest.authoritative_operations.splice(baselineIndex, 1);
   assert.throws(
     () => validateManifest(manifest, BASE_SHA, "WORKTREE"),
     /baseline authoritative operation .* is missing/,

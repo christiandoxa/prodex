@@ -12,7 +12,7 @@ const DOMAIN_SRC_DIR = "crates/prodex-domain/src";
 const DOMAIN_HEALTH = "crates/prodex-domain/src/health.rs";
 const DOMAIN_SECRETS = "crates/prodex-domain/src/secrets.rs";
 const DOMAIN_LIB = "crates/prodex-domain/src/lib.rs";
-const ALLOWED_DEPENDENCIES = new Set(["serde", "sha2", "uuid", "zeroize"]);
+const ALLOWED_DEPENDENCIES = new Set(["prodex_mojo_core", "serde", "sha2", "uuid", "zeroize"]);
 const ALLOWED_DEV_DEPENDENCIES = new Set(["serde_json"]);
 const FORBIDDEN_DEPENDENCIES = new Set([
   "anyhow",
@@ -176,10 +176,13 @@ serde_json = { workspace = true }
     "forbidden runtime dependency accepted",
   );
 
-  const invalidMojoBridge = `${valid}\nprodex_mojo_core = { workspace = true, optional = true }\n`;
+  const validMojoBridge = valid.replace(
+    "[dev-dependencies]",
+    'prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }\n\n[dev-dependencies]',
+  );
   assertSelfTest(
-    validateDomainManifest(invalidMojoBridge, "invalid-mojo/Cargo.toml").some((error) => error.includes("prodex_mojo_core")),
-    "Mojo bridge dependency accepted in pure domain",
+    validateDomainManifest(validMojoBridge, "valid-mojo/Cargo.toml").length === 0,
+    "deterministic Mojo semantic dependency rejected",
   );
 
   const invalidTarget = `${valid}\n[target.'cfg(unix)'.dependencies]\ntokio = "1"\n`;
