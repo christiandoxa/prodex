@@ -64,6 +64,9 @@ pub enum DeepSeekRequestPolicyOperation {
     WebSearchContext = 10,
     ToolsShape = 11,
     ResponsesRequestParams = 12,
+    ResponseFormatShape = 13,
+    MetadataShape = 14,
+    JsonGuidance = 15,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

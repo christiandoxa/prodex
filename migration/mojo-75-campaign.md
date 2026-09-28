@@ -2774,3 +2774,22 @@ canonical broad source report counts **58,622 Mojo LOC** and **192,796 Rust
 production LOC**, totaling **251,418 LOC**: **23.32% Mojo**. The 75% project
 target remains unmet, with **519,766 additional Mojo LOC** required at the
 current Rust volume.
+
+## DeepSeek metadata-shape policy migration
+
+DeepSeek response-format classification, fixed request-metadata type gates,
+degraded JSON-schema detection, and JSON-guidance detection now run through
+request-policy Mojo operations 13/14/15. Rust retains dynamic
+metadata.<provider_key> validation, stable provider error strings, Serde object
+materialization, and the existing RequestMetadata/ResponseFormat serializer
+kernels; the previous response-format match table and
+to_ascii_lowercase().contains("json") scan were deleted.
+
+Validation passes 6/6 focused metadata tests and 115/115 DeepSeek-focused tests,
+including error precedence, nested text.format, supported/unsupported response
+formats, decoded escaped JSON guidance, and thinking metadata behavior. Clippy,
+prodex-app check, no-fallback self-test, ownership, and authority guards pass;
+ownership now reports **81 authoritative operations**. The canonical broad source
+report counts **58,835 Mojo LOC** and **192,900 Rust production LOC**, totaling
+**251,735 LOC**: **23.37% Mojo**. The 75% project target remains unmet, with
+**519,865 additional Mojo LOC** required at the current Rust volume.

@@ -624,7 +624,10 @@
           "kiro_chat_response_mapping",
           "kiro_response_shape_fallbacks",
           "kiro_acp_shape_fallbacks",
-          "deepseek_stream_shape_fallbacks"
+          "deepseek_stream_shape_fallbacks",
+          "deepseek_response_format_shape_policy",
+          "deepseek_request_metadata_shape_policy",
+          "deepseek_json_guidance_policy"
         ]
       },
       {
@@ -645,13 +648,20 @@
           {
             "start": 3893,
             "end": 4008
+          },
+          {
+            "start": 1874,
+            "end": 2095
           }
         ],
         "operations": [
           "deepseek_simple_request_eligibility",
           "deepseek_request_metadata_composition",
           "deepseek_strict_schema_normalization",
-          "deepseek_stream_shape_fallbacks"
+          "deepseek_stream_shape_fallbacks",
+          "deepseek_response_format_shape_policy",
+          "deepseek_request_metadata_shape_policy",
+          "deepseek_json_guidance_policy"
         ]
       },
       {
@@ -2777,6 +2787,84 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "owned String materialization and stable trace DTO/Serde API"
+    },
+    {
+      "domain": "provider/deepseek",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust request-shape classification",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_deepseek_request_policy_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "deepseek_response_format_shape_policy",
+      "mojo_operation_ids": {
+        "response_format_shape": 13
+      },
+      "consumer_marker": "DeepSeekRequestPolicyOperation::ResponseFormatShape",
+      "rust_owner_before": "response_format location/type classification and supported-format dispatch",
+      "rust_test_oracle": "deleted; focused metadata tests and the full DeepSeek suite cover text, json/json_object/json_schema/structured_output, missing type, unsupported type and nested text.format",
+      "rust_adapter_scope": "stable provider error strings plus typed response-format Mojo serializer invocation"
+    },
+    {
+      "domain": "provider/deepseek",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust request-shape classification",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_deepseek_request_policy_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "deepseek_request_metadata_shape_policy",
+      "mojo_operation_ids": {
+        "metadata_shape": 14
+      },
+      "consumer_marker": "DeepSeekRequestPolicyOperation::MetadataShape",
+      "rust_owner_before": "fixed metadata/client_metadata/prompt-cache type gates and degraded response-format detection",
+      "rust_test_oracle": "deleted; metadata precedence tests retain dynamic provider-key validation and verify fixed-field error ordering",
+      "rust_adapter_scope": "dynamic metadata.<provider_key> validation, Serde object extraction, stable error strings and RequestMetadata serializer invocation"
+    },
+    {
+      "domain": "provider/deepseek",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust request-shape classification",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_deepseek_request_policy_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "consumer": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "deepseek_json_guidance_policy",
+      "mojo_operation_ids": {
+        "json_guidance": 15
+      },
+      "consumer_marker": "DeepSeekRequestPolicyOperation::JsonGuidance",
+      "rust_owner_before": "system/user role scan plus ASCII case-insensitive JSON guidance detection",
+      "rust_test_oracle": "deleted; focused tests cover user/system guidance, assistant non-guidance, case-insensitivity and decoded escaped content",
+      "rust_adapter_scope": "Serde serialization of decoded messages and insertion of the stable fallback system prompt"
     }
   ],
   "rust_semantic_reductions": [
