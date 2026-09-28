@@ -2920,3 +2920,23 @@ Ownership now reports **109 authoritative operations**. The canonical broad sour
 report counts **60,972 Mojo LOC** and **193,959 Rust production LOC**, totaling
 **254,931 LOC**: **23.92% Mojo**. The 75% project target remains unmet, with
 **520,905 additional Mojo LOC** required at the current Rust volume.
+
+
+## Gemini SSE identifier and metadata merge migration
+
+Gemini SSE output-text/media/citation item IDs now use the existing Gemini response
+kernel identifiers directly from the provider-core production boundary. The runtime
+copy of the UUID-derived identifier formatter was deleted. Repeated Gemini response
+metadata now delegates to the parsed-JSON Mojo merge operation: top-level incoming
+fields replace existing fields, nested objects merge one level, an incoming object
+replaces an existing scalar, and a non-object incoming value preserves an existing
+object exactly as the previous runtime behavior did. Rust retains Serde acquisition,
+JSON materialization, and the streaming state container; no Rust semantic fallback
+remains.
+
+Focused validation passes the provider-core merge fixture plus the Gemini SSE
+later-chunk metadata and missing-response-id caller tests. cargo fmt --all -- --check
+passes. The canonical broad report on this checkpoint counts **61,023 reachable Mojo
+LOC** and **194,026 Rust production LOC**, totaling **255,049 LOC**: **23.93% Mojo**.
+The 75% project target remains unmet, with **521,055 additional Mojo LOC** required at
+the current Rust volume.

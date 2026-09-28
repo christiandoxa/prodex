@@ -21,7 +21,7 @@ use prodex_provider_core::{
     gemini_provider_core_forced_command_output as runtime_gemini_forced_command_output,
     gemini_provider_core_image_generation_call_item_from_part,
     gemini_provider_core_internal_instruction_corpus,
-    gemini_provider_core_media_content_item_from_part,
+    gemini_provider_core_media_content_item_from_part, gemini_provider_core_merge_stream_metadata,
     gemini_provider_core_non_actionable_wait_or_poll_text as runtime_gemini_non_actionable_wait_or_poll_text,
     gemini_provider_core_output_item_done_event, gemini_provider_core_output_text_delta_event,
     gemini_provider_core_prompt_feedback_failure,
@@ -31,9 +31,11 @@ use prodex_provider_core::{
     gemini_provider_core_response_incomplete_event, gemini_provider_core_response_metadata_event,
     gemini_provider_core_response_part_plan, gemini_provider_core_stream_candidate_parts,
     gemini_provider_core_stream_chat_assistant_message, gemini_provider_core_stream_chunk_metadata,
+    gemini_provider_core_stream_citation_item_id,
     gemini_provider_core_stream_error as runtime_gemini_stream_error,
-    gemini_provider_core_stream_message_item, gemini_provider_core_stream_output_items,
-    gemini_provider_core_stream_output_text_content,
+    gemini_provider_core_stream_media_item_id, gemini_provider_core_stream_message_item,
+    gemini_provider_core_stream_output_items, gemini_provider_core_stream_output_text_content,
+    gemini_provider_core_stream_output_text_item_id,
     gemini_provider_core_stream_part_function_call,
     gemini_provider_core_stream_part_has_video_metadata, gemini_provider_core_stream_part_text,
     gemini_provider_core_stream_reasoning_delta_source, gemini_provider_core_stream_response_value,
@@ -207,7 +209,7 @@ impl RuntimeGeminiSseState {
             self.usage = Some(usage);
         }
         if let Some(metadata) = metadata.response_metadata {
-            self.metadata = Some(runtime_gemini_merge_metadata(
+            self.metadata = Some(gemini_provider_core_merge_stream_metadata(
                 self.metadata.take(),
                 metadata,
             ));
@@ -432,66 +434,4 @@ impl RuntimeGeminiSseState {
         self.sequence_number = self.sequence_number.saturating_add(1);
         next
     }
-}
-
-fn runtime_gemini_stream_uuid(request_id: u64, salt: u64) -> String {
-    let low = (request_id.rotate_left(23) ^ salt) & 0x3fff_ffff_ffff_ffff | 0x8000_0000_0000_0000;
-    format!(
-        "{:08x}-{:04x}-{:04x}-{:04x}-{:012x}",
-        request_id >> 32,
-        (request_id >> 16) & 0xffff,
-        request_id & 0xffff,
-        low >> 48,
-        low & 0xffff_ffff_ffff,
-    )
-}
-
-fn gemini_provider_core_stream_output_text_item_id(request_id: u64) -> String {
-    format!("msg_gemini_{}", runtime_gemini_stream_uuid(request_id, 1))
-}
-
-fn gemini_provider_core_stream_media_item_id(request_id: u64) -> String {
-    format!(
-        "msg_gemini_media_{}",
-        runtime_gemini_stream_uuid(request_id, 2)
-    )
-}
-
-fn gemini_provider_core_stream_citation_item_id(request_id: u64) -> String {
-    format!(
-        "msg_gemini_citations_{}",
-        runtime_gemini_stream_uuid(request_id, 3)
-    )
-}
-
-fn runtime_gemini_merge_metadata(
-    existing: Option<serde_json::Value>,
-    incoming: serde_json::Value,
-) -> serde_json::Value {
-    let Some(mut existing) = existing else {
-        return incoming;
-    };
-    let Some(existing_object) = existing.as_object_mut() else {
-        return incoming;
-    };
-    let Some(incoming_object) = incoming.as_object() else {
-        return existing;
-    };
-    for (key, value) in incoming_object {
-        match (existing_object.get_mut(key), value) {
-            (Some(existing_value), serde_json::Value::Object(incoming_nested)) => {
-                if let Some(existing_nested) = existing_value.as_object_mut() {
-                    for (nested_key, nested_value) in incoming_nested {
-                        existing_nested.insert(nested_key.clone(), nested_value.clone());
-                    }
-                    continue;
-                }
-                existing_object.insert(key.clone(), value.clone());
-            }
-            _ => {
-                existing_object.insert(key.clone(), value.clone());
-            }
-        }
-    }
-    existing
 }

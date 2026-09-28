@@ -11,6 +11,7 @@ pub enum DeepSeekMessageOperation {
     AssistantContent,
     RepairAdjacency,
     MergeMetadata,
+    MergeValueObjects,
 }
 
 unsafe extern "C" {
