@@ -8,6 +8,9 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
+  "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs",
+  "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
   "crates/prodex-mojo-core/src/json.rs",
   "crates/prodex-session-store/src/session_selector.rs",
   "crates/prodex-session-store/src/report.rs",
@@ -247,6 +250,9 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
+  "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs",
+  "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
   "crates/prodex-session-store/src/session_selector.rs",
   "crates/prodex-session-store/src/report.rs",
   "crates/prodex-mojo-core/src/runtime_lineage.rs",
@@ -1452,6 +1458,51 @@ export function findViolations(files) {
     }
     return [];
   });
+  const smartContextArtifactRefViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs") {
+      const required = [
+        "prodex_mojo_core::smart_context_artifact_ref::parse_alias_declaration(",
+        "prodex_mojo_core::smart_context_artifact_ref::parse_alias_reference(",
+        "prodex_mojo_core::smart_context_artifact_ref::parse_reference(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": artifact-ref migration must retain Mojo call " + call);
+      for (const restored of [
+        "fn runtime_smart_context_split_artifact_alias_ref",
+        "fn runtime_smart_context_trim_artifact_ref_token",
+        "fn runtime_smart_context_normalize_artifact_ref",
+        "fn runtime_smart_context_artifact_prefix_len",
+        "fn runtime_smart_context_artifact_id_end",
+        "fn runtime_smart_context_parse_line_ranges",
+        "fn runtime_smart_context_parse_line_range_segment",
+        "fn runtime_smart_context_parse_line_number",
+      ]) {
+        if (contents.includes(restored)) {
+          violations.push(filePath + ": contains restored Rust smart-context artifact-ref semantics");
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs") {
+      return contents.includes("prodex_mojo_core::smart_context_artifact_ref::artifact_id_valid(")
+        ? [] : [filePath + ": artifact ID validation must remain Mojo-authoritative"];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs") {
+      const required = [
+        "prodex_smart_context_artifact_ref_v1(",
+        "pub fn artifact_id_valid(",
+        "pub fn parse_alias_declaration(",
+        "pub fn parse_alias_reference(",
+        "pub fn parse_reference(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": smart-context artifact-ref ABI adapter must retain " + call);
+    }
+    return [];
+  });
   const runtimeRepoMapViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-app/src/runtime_state_shared/line_index.rs") return [];
     const required = [
@@ -1536,7 +1587,7 @@ export function findViolations(files) {
     ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...doctorMarkerViolations, ...statusSummaryViolations,
-    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...runtimeRepoMapViolations,
+    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,

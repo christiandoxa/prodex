@@ -2673,3 +2673,23 @@ pass; ownership now reports **72 authoritative operations**. The canonical broad
 source report counts **57,680 reachable Mojo LOC** and **192,548 Rust production
 LOC**, totaling **250,228 LOC**: **23.05% Mojo**. The 75% project target remains
 unmet, with **519,964 additional Mojo LOC** required at this Rust volume.
+
+## Smart-context artifact-reference parser migration
+
+Smart-context artifact reference validation, psc/psc2/prodex-artifact
+normalization, alias validation/declaration/reference parsing, punctuation trimming,
+and #/:/? line-range parsing now use
+mojo/prodex_core/smart_context_artifact_ref.mojo through the safe
+prodex_mojo_core adapter. Rust retains text tokenization, JSON traversal, alias-map
+aggregation, DTO mapping, and marker/string materialization; the former Rust parser
+helpers were deleted without a fallback branch.
+
+Validation passes the direct ABI smoke test plus 7/7 smart-context rehydrate/dedupe
+fixtures and explicit line-range preparation coverage. Extra ABI fixtures cover
+short/long canonical IDs, quoted alias declarations, punctuation trimming, multiple
+line ranges, invalid IDs, and alias references. Clippy, prodex-app check, no-fallback
+self-test, ownership, and authority guards pass; ownership now reports
+**73 authoritative operations**. The canonical broad source report counts
+**57,977 reachable Mojo LOC** and **192,640 Rust production LOC**, totaling
+**250,617 LOC**: **23.13% Mojo**. The 75% project target remains unmet, with
+**519,943 additional Mojo LOC** required at this Rust volume.

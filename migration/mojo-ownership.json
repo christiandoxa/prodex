@@ -833,6 +833,16 @@
         "operations": [
           "session_report_metadata_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/smart_context_artifact_ref.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "smart_context_artifact_reference_policy"
+        ]
       }
     ],
     "removed": [
@@ -2604,6 +2614,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "serde_json decoding and borrowed JsonNode tree construction, numeric timestamp fallback, chrono formatting, PathBuf/canonicalization, file discovery and report DTO mutation remain Rust"
+    },
+    {
+      "name": "smart_context_artifact_reference_policy",
+      "domain": "smart-context/artifact-reference",
+      "introduced_in": "0.432.3",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_smart_context_artifact_ref_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/smart_context_artifact_ref.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
+      "consumer_marker": "prodex_mojo_core::smart_context_artifact_ref::parse_reference",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
+        "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
+      "rust_owner_before": "artifact ID validation; psc/psc2/prodex-artifact normalization; alias validation/declaration/reference parsing; punctuation trimming; and #/:/? line-range parsing",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct ABI smoke plus smart-context rehydrate tests cover short/long IDs, quoted aliases, punctuation trimming, alias references, single/multiple ranges, invalid IDs and legacy verbose markers",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "text tokenization, JSON traversal, alias-map aggregation, artifact DTO mapping and marker/string materialization remain Rust"
     }
   ],
   "rust_semantic_reductions": [
