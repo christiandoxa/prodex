@@ -3082,3 +3082,12 @@ profile scrolling all call the same Mojo classifier. The previous Rust lowercase
 match tables were deleted. This intentionally remains distinct from the broader
 runtime boolean classifier: on is still false for the CI/strict-TUI contract.
 Rust retains environment acquisition, defaults, terminal detection, and rendering.
+
+
+## Super bundled model dedup cleanup
+
+Bundled OpenAI model merge now reuses the authoritative rich-catalog Mojo merge
+planner for exact ASCII-folded canonical-ID deduplication. The former Rust
+BTreeSet lowercase duplicate filter was deleted. Aliases are intentionally omitted
+from this merge input to preserve the historical canonical-ID-only behavior; Rust
+retains choice DTO materialization and insertion position.
