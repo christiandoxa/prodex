@@ -21,6 +21,7 @@ use crate::{
     print_stdout_line, print_stdout_text,
 };
 use prodex_cli::CodexRuntimeFeatureArgs;
+use prodex_mojo_core::super_provider_config::runtime_ci_truth_token;
 pub(crate) use prodex_session_store::SessionReport;
 
 pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
@@ -159,7 +160,10 @@ fn render_session_reports_tui(reports: &[SessionReport], empty_message: &str) ->
     let needs_scroll = total_lines.saturating_add(6) > term_h
         && env::var_os("CODEX_CI").is_none()
         && !env::var("CI")
-            .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+            .map(|value| {
+                runtime_ci_truth_token(value.trim())
+                    .expect("runtime CI truth classifier should accept Rust strings")
+            })
             .unwrap_or(false);
 
     if needs_scroll {

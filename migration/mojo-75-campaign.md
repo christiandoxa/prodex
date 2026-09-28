@@ -3072,3 +3072,13 @@ PRODEX_GEMINI_STICKY_FRESH_OAUTH now reuses the authoritative runtime boolean
 Mojo classifier after preserving its historical trim/default behavior. The Rust
 lowercase false-token table was deleted; unknown and empty compatibility values
 still preserve the previous enabled default.
+
+
+## CI and strict-TUI truth-token migration
+
+The exact case-insensitive 1|true|yes environment truth contract now lives in
+super_provider_config.mojo. Session scrolling, shared inline-TUI gating, and
+profile scrolling all call the same Mojo classifier. The previous Rust lowercase
+match tables were deleted. This intentionally remains distinct from the broader
+runtime boolean classifier: on is still false for the CI/strict-TUI contract.
+Rust retains environment acquisition, defaults, terminal detection, and rendering.
