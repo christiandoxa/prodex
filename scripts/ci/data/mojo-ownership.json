@@ -442,7 +442,8 @@
           "provider_catalog_merge_dedup",
           "model_catalog_choice_planning",
           "model_catalog_configuration_resolution",
-          "provider_catalog_exact_model_identity"
+          "provider_catalog_exact_model_identity",
+          "catalog_exact_ascii_casefold_equality"
         ]
       },
       "mojo/prodex_core/log_semantics.mojo": {
@@ -3933,6 +3934,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "config acquisition, models-cache JSON parsing, context-window extraction, and Codex argument materialization"
+    },
+    {
+      "name": "catalog_exact_ascii_casefold_equality",
+      "domain": "catalog/identity",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust eq_ignore_ascii_case decisions repeated across Super model, alias, effort, visibility, and remembered-selection paths",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_ascii_casefold_equal_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_catalog.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+      "consumer_marker": "ascii_casefold_equal_exact",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+        "crates/prodex-app/src/app_commands/super_main_prompt.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
+      "rust_owner_before": "exact ASCII case-insensitive equality for catalog source IDs, visibility labels, reasoning efforts, canonical model selections, remembered models, and prompt selections",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo equality coverage preserves empty strings, mixed case, and whitespace sensitivity, while Super catalog/prompt caller tests preserve selection behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "caller-owned iteration, string acquisition, DTO selection, prompt rendering, and exact case-sensitive fast-path where ordering semantics require it"
     }
   ],
   "rust_semantic_reductions": [

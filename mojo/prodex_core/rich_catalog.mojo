@@ -513,6 +513,41 @@ def prodex_mojo_rich_catalog_reasoning_v1(
     return RICH_STATUS_OK
 
 
+@export("prodex_mojo_rich_ascii_casefold_equal_v1")
+def prodex_mojo_rich_ascii_casefold_equal_v1(
+    abi_version: Int64,
+    left_address: UInt,
+    left_length: Int64,
+    right_address: UInt,
+    right_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if (
+        left_length < 0
+        or right_length < 0
+        or left_length > CATALOG_MAX_QUERY_BYTES
+        or right_length > CATALOG_MAX_QUERY_BYTES
+        or output_address == 0
+        or (left_length > 0 and left_address == 0)
+        or (right_length > 0 and right_address == 0)
+    ):
+        return RICH_STATUS_INVALID
+    var left = ProdexRichStringView(left_address, UInt(left_length))
+    var right = ProdexRichStringView(right_address, UInt(right_length))
+    if (
+        not rich_view_valid(left, CATALOG_MAX_QUERY_BYTES)
+        or not rich_view_valid(right, CATALOG_MAX_QUERY_BYTES)
+    ):
+        return RICH_STATUS_UTF8
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(catalog_view_equal_full(left, right))
+    return RICH_STATUS_OK
+
+
 @export("prodex_mojo_rich_catalog_resolve_v1")
 def prodex_mojo_rich_catalog_resolve_v1(
     abi_version: Int64,

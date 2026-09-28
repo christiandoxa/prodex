@@ -137,6 +137,15 @@ fn rich_catalog_handles_aliases_duplicates_and_capacity() {
 }
 
 #[test]
+fn rich_ascii_casefold_exact_equality_preserves_empty_and_whitespace() {
+    assert!(ascii_casefold_equal_exact("", "").unwrap());
+    assert!(ascii_casefold_equal_exact("GPT-5.6-SOL", "gpt-5.6-sol").unwrap());
+    assert!(ascii_casefold_equal_exact("xhigh", "XHIGH").unwrap());
+    assert!(!ascii_casefold_equal_exact(" gpt-5.6-sol ", "gpt-5.6-sol").unwrap());
+    assert!(!ascii_casefold_equal_exact("", "x").unwrap());
+}
+
+#[test]
 fn rich_catalog_exact_resolver_preserves_untrimmed_identity() {
     let models = [CatalogModel {
         id: "gpt-main",
