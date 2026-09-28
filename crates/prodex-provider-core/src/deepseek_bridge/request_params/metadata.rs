@@ -1,5 +1,9 @@
 //! DeepSeek response-format metadata and degraded JSON-mode notes.
 
+use prodex_mojo_core::rich::{DeepSeekRequestPolicyOperation, deepseek_request_policy};
+
+use super::super::request_policy::{detail, plan_value};
+
 struct MojoMetadataRequest<'a> {
     existing: serde_json::Map<String, serde_json::Value>,
     provider_label: &'a str,
@@ -80,33 +84,37 @@ pub fn deepseek_provider_core_response_format_from_responses_request(
     value: &serde_json::Value,
     provider_label: &str,
 ) -> Result<Option<serde_json::Value>, String> {
-    let response_format = value
-        .get("response_format")
-        .or_else(|| value.get("text").and_then(|text| text.get("format")));
-    let Some(response_format) = response_format else {
-        return Ok(None);
-    };
-    let format_type = response_format
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    match format_type {
-        "json_object" | "json_schema" | "json" | "structured_output" => {
+    let (source, plan) = plan_value(
+        value,
+        DeepSeekRequestPolicyOperation::ResponseFormatShape,
+        false,
+    );
+    match plan.tag {
+        0 | 2 => Ok(None),
+        1 => {
+            let format_type = detail(&source, plan).ok_or_else(|| {
+                format!("{provider_label} response_format could not be classified")
+            })?;
             let mut input =
                 super::DeepSeekKernelInput::new(super::DeepSeekKernelOperation::ResponseFormat);
-            input.role = Some(format_type);
+            input.role = Some(&format_type);
             super::deepseek_provider_core_mojo_value(input)
                 .map(Some)
                 .map_err(|error| {
                     format!("{provider_label} response_format could not be normalized: {error}")
                 })
         }
-        "text" => Ok(None),
-        "" => Err(format!(
+        3 => Err(format!(
             "{provider_label} response_format must include a type"
         )),
-        other => Err(format!(
-            "{provider_label} response_format type \x60{other}\x60 is not supported"
+        4 => {
+            let format_type = detail(&source, plan).unwrap_or_default();
+            Err(format!(
+                "{provider_label} response_format type \x60{format_type}\x60 is not supported"
+            ))
+        }
+        _ => Err(format!(
+            "{provider_label} response_format classification returned invalid output"
         )),
     }
 }
@@ -116,6 +124,13 @@ pub fn deepseek_provider_core_response_metadata_from_responses_request(
     provider_label: &str,
     provider_key: &str,
 ) -> Result<Option<serde_json::Value>, String> {
+    let (source, plan) = plan_value(value, DeepSeekRequestPolicyOperation::MetadataShape, false);
+    if plan.tag == 1 {
+        return Err(format!(
+            "{provider_label} request metadata must be an object"
+        ));
+    }
+
     let metadata = match value.get("metadata") {
         Some(metadata) => metadata
             .as_object()
@@ -131,35 +146,40 @@ pub fn deepseek_provider_core_response_metadata_from_responses_request(
             "{provider_label} request metadata.{provider_key} must be an object"
         ));
     }
-    let client_metadata = value.get("client_metadata");
-    if client_metadata.is_some_and(|value| !value.is_object()) {
-        return Err(format!(
-            "{provider_label} client_metadata must be an object"
-        ));
+
+    match plan.tag {
+        0 | 256 => {}
+        2 => {
+            return Err(format!(
+                "{provider_label} client_metadata must be an object"
+            ));
+        }
+        3 => {
+            return Err(format!(
+                "{provider_label} prompt_cache_key must be a string"
+            ));
+        }
+        4 => {
+            return Err(format!(
+                "{provider_label} prompt_cache_retention must be a string"
+            ));
+        }
+        _ => {
+            return Err(format!(
+                "{provider_label} request metadata classification returned invalid output"
+            ));
+        }
     }
-    let prompt_cache_key = match value.get("prompt_cache_key") {
-        Some(value) => Some(
-            value
-                .as_str()
-                .ok_or_else(|| format!("{provider_label} prompt_cache_key must be a string"))?,
-        ),
-        None => None,
-    };
-    let prompt_cache_key = prompt_cache_key.filter(|value| !value.trim().is_empty());
-    let prompt_cache_retention =
-        match value.get("prompt_cache_retention") {
-            Some(value) => Some(value.as_str().ok_or_else(|| {
-                format!("{provider_label} prompt_cache_retention must be a string")
-            })?),
-            None => None,
-        };
-    let response_format = value
-        .get("response_format")
-        .or_else(|| value.get("text").and_then(|text| text.get("format")));
-    let degraded_from = response_format
-        .and_then(|response_format| response_format.get("type"))
+
+    let client_metadata = value.get("client_metadata");
+    let prompt_cache_key = value
+        .get("prompt_cache_key")
         .and_then(serde_json::Value::as_str)
-        .filter(|format_type| matches!(*format_type, "json_schema" | "structured_output"));
+        .filter(|value| !value.trim().is_empty());
+    let prompt_cache_retention = value
+        .get("prompt_cache_retention")
+        .and_then(serde_json::Value::as_str);
+    let degraded_from = (plan.tag == 256).then(|| detail(&source, plan)).flatten();
 
     mojo_metadata_value(MojoMetadataRequest {
         existing: metadata,
@@ -168,7 +188,7 @@ pub fn deepseek_provider_core_response_metadata_from_responses_request(
         client_metadata,
         prompt_cache_key,
         prompt_cache_retention,
-        degraded_from,
+        degraded_from: degraded_from.as_deref(),
         tool_choice: None,
         thinking_enabled: false,
     })
@@ -212,12 +232,20 @@ pub fn deepseek_provider_core_note_thinking_tool_choice_omission(
 pub fn deepseek_provider_core_ensure_json_prompt_instruction(
     messages: &mut Vec<serde_json::Value>,
 ) {
-    if messages
-        .iter()
-        .any(deepseek_provider_core_message_has_json_guidance)
-    {
-        return;
+    let source = serde_json::to_string(messages).expect("DeepSeek JSON guidance input serializes");
+    let plan = deepseek_request_policy(
+        DeepSeekRequestPolicyOperation::JsonGuidance,
+        &source,
+        false,
+        0,
+    )
+    .expect("Mojo DeepSeek JSON guidance policy returned invalid output");
+    match plan.tag {
+        1 => return,
+        0 => {}
+        _ => panic!("Mojo DeepSeek JSON guidance policy returned invalid tag"),
     }
+
     messages.insert(
         0,
         serde_json::json!({
@@ -227,23 +255,12 @@ pub fn deepseek_provider_core_ensure_json_prompt_instruction(
     );
 }
 
-fn deepseek_provider_core_message_has_json_guidance(message: &serde_json::Value) -> bool {
-    if !matches!(
-        message.get("role").and_then(serde_json::Value::as_str),
-        Some("system" | "user")
-    ) {
-        return false;
-    }
-    message
-        .get("content")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|content| content.to_ascii_lowercase().contains("json"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
+        deepseek_provider_core_ensure_json_prompt_instruction,
         deepseek_provider_core_note_thinking_tool_choice_omission,
+        deepseek_provider_core_response_format_from_responses_request,
         deepseek_provider_core_response_metadata_from_responses_request,
     };
     use serde_json::json;
@@ -272,6 +289,89 @@ mod tests {
             metadata["deepseek"]["degraded_response_format"]["from"],
             "json_schema"
         );
+    }
+
+    #[test]
+    fn mojo_response_format_shape_preserves_supported_and_error_classes() {
+        assert_eq!(
+            deepseek_provider_core_response_format_from_responses_request(
+                &json!({"response_format": {"type": "text"}}),
+                "DeepSeek",
+            )
+            .unwrap(),
+            None
+        );
+        assert_eq!(
+            deepseek_provider_core_response_format_from_responses_request(
+                &json!({"text": {"format": {"type": "json"}}}),
+                "DeepSeek",
+            )
+            .unwrap(),
+            Some(json!({"type": "json_object"}))
+        );
+        assert_eq!(
+            deepseek_provider_core_response_format_from_responses_request(
+                &json!({"response_format": {}}),
+                "DeepSeek",
+            )
+            .unwrap_err(),
+            "DeepSeek response_format must include a type"
+        );
+        assert_eq!(
+            deepseek_provider_core_response_format_from_responses_request(
+                &json!({"response_format": {"type": "xml"}}),
+                "DeepSeek",
+            )
+            .unwrap_err(),
+            "DeepSeek response_format type `xml` is not supported"
+        );
+    }
+
+    #[test]
+    fn mojo_metadata_shape_keeps_provider_specific_error_precedence() {
+        let request = json!({
+            "metadata": {"deepseek": "bad"},
+            "client_metadata": [],
+            "prompt_cache_key": 42,
+        });
+        assert_eq!(
+            deepseek_provider_core_response_metadata_from_responses_request(
+                &request, "DeepSeek", "deepseek",
+            )
+            .unwrap_err(),
+            "DeepSeek request metadata.deepseek must be an object"
+        );
+
+        let request = json!({
+            "metadata": {},
+            "client_metadata": [],
+            "prompt_cache_key": 42,
+        });
+        assert_eq!(
+            deepseek_provider_core_response_metadata_from_responses_request(
+                &request, "DeepSeek", "deepseek",
+            )
+            .unwrap_err(),
+            "DeepSeek client_metadata must be an object"
+        );
+    }
+
+    #[test]
+    fn mojo_json_guidance_handles_case_and_decoded_escape_content() {
+        let mut messages = vec![json!({
+            "role": "user",
+            "content": "Return J\u{53}ON please"
+        })];
+        deepseek_provider_core_ensure_json_prompt_instruction(&mut messages);
+        assert_eq!(messages.len(), 1);
+
+        let mut messages = vec![json!({
+            "role": "assistant",
+            "content": "JSON"
+        })];
+        deepseek_provider_core_ensure_json_prompt_instruction(&mut messages);
+        assert_eq!(messages[0]["role"], "system");
+        assert_eq!(messages[0]["content"], "Respond with valid JSON only.");
     }
 
     #[test]

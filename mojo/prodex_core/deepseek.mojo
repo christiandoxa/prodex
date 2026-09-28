@@ -1173,6 +1173,9 @@ comptime DEEPSEEK_POLICY_WEB_SEARCH_OPTIONS: Int64 = 9
 comptime DEEPSEEK_POLICY_WEB_SEARCH_CONTEXT: Int64 = 10
 comptime DEEPSEEK_POLICY_TOOLS_SHAPE: Int64 = 11
 comptime DEEPSEEK_POLICY_RESPONSES_REQUEST_PARAMS: Int64 = 12
+comptime DEEPSEEK_POLICY_RESPONSE_FORMAT_SHAPE: Int64 = 13
+comptime DEEPSEEK_POLICY_METADATA_SHAPE: Int64 = 14
+comptime DEEPSEEK_POLICY_JSON_GUIDANCE: Int64 = 15
 
 
 def deepseek_policy_set(
@@ -1866,6 +1869,230 @@ def deepseek_stop_plan(
         deepseek_policy_set(output, 3)
     return True
 
+
+
+def deepseek_policy_root_bounds(view: ProdexRichStringView) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
+    var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
+    var end = deepseek_json_value_end(view, start, Int64(view.len), 0)
+    if end < 0 or deepseek_json_skip_ws(view, end, Int64(view.len)) != Int64(view.len):
+        return result.copy()
+    result[0] = start
+    result[1] = end
+    return result.copy()
+
+
+def deepseek_policy_response_format_bounds(
+    view: ProdexRichStringView, root: Array[Int64, 2]
+) -> Array[Int64, 2]:
+    var format = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("response_format")
+    )
+    if format[0] >= 0:
+        return format.copy()
+    var text = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("text")
+    )
+    if deepseek_json_bounds_is_kind(view, text, 123):
+        return deepseek_json_object_member(
+            view, text[0], text[1], StringSlice("format")
+        )
+    return format.copy()
+
+
+def deepseek_response_format_shape_plan(
+    view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    var root = deepseek_input_object_bounds(view)
+    if root[0] < 0:
+        return False
+    var format = deepseek_policy_response_format_bounds(view, root)
+    if format[0] < 0:
+        deepseek_policy_set(output, 0)
+        return True
+    var format_type = deepseek_json_object_member(
+        view, format[0], format[1], StringSlice("type")
+    )
+    if not deepseek_json_string_nonempty(view, format_type):
+        deepseek_policy_set(output, 3)
+        return True
+    if (
+        deepseek_json_raw_equals(
+            view, format_type[0], format_type[1], StringSlice("json_object")
+        )
+        or deepseek_json_raw_equals(
+            view, format_type[0], format_type[1], StringSlice("json_schema")
+        )
+        or deepseek_json_raw_equals(
+            view, format_type[0], format_type[1], StringSlice("json")
+        )
+        or deepseek_json_raw_equals(
+            view, format_type[0], format_type[1], StringSlice("structured_output")
+        )
+    ):
+        deepseek_policy_set(output, 1, format_type[0], format_type[1])
+        return True
+    if deepseek_json_raw_equals(
+        view, format_type[0], format_type[1], StringSlice("text")
+    ):
+        deepseek_policy_set(output, 2, format_type[0], format_type[1])
+        return True
+    deepseek_policy_set(output, 4, format_type[0], format_type[1])
+    return True
+
+
+def deepseek_metadata_shape_plan(
+    view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    var root = deepseek_input_object_bounds(view)
+    if root[0] < 0:
+        return False
+
+    var metadata = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("metadata")
+    )
+    if metadata[0] >= 0 and not deepseek_json_bounds_is_kind(view, metadata, 123):
+        deepseek_policy_set(output, 1)
+        return True
+
+    var client_metadata = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("client_metadata")
+    )
+    if (
+        client_metadata[0] >= 0
+        and not deepseek_json_bounds_is_kind(view, client_metadata, 123)
+    ):
+        deepseek_policy_set(output, 2)
+        return True
+
+    var prompt_cache_key = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("prompt_cache_key")
+    )
+    if (
+        prompt_cache_key[0] >= 0
+        and not deepseek_json_bounds_is_kind(view, prompt_cache_key, 34)
+    ):
+        deepseek_policy_set(output, 3)
+        return True
+
+    var prompt_cache_retention = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("prompt_cache_retention")
+    )
+    if (
+        prompt_cache_retention[0] >= 0
+        and not deepseek_json_bounds_is_kind(view, prompt_cache_retention, 34)
+    ):
+        deepseek_policy_set(output, 4)
+        return True
+
+    var format = deepseek_policy_response_format_bounds(view, root)
+    if format[0] >= 0:
+        var format_type = deepseek_json_object_member(
+            view, format[0], format[1], StringSlice("type")
+        )
+        if (
+            deepseek_json_raw_equals(
+                view, format_type[0], format_type[1], StringSlice("json_schema")
+            )
+            or deepseek_json_raw_equals(
+                view,
+                format_type[0],
+                format_type[1],
+                StringSlice("structured_output"),
+            )
+        ):
+            deepseek_policy_set(output, 256, format_type[0], format_type[1])
+            return True
+
+    deepseek_policy_set(output, 0)
+    return True
+
+
+def deepseek_policy_string_contains_json(
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
+) -> Bool:
+    if not deepseek_json_bounds_is_kind(view, bounds, 34):
+        return False
+    var source = rich_view_ptr(view)
+    var start = bounds[0] + 1
+    var end = bounds[1] - 1
+    var index = start
+    while index + 3 < end:
+        var j = source[unsafe_offset=index]
+        var s = source[unsafe_offset=index + 1]
+        var o = source[unsafe_offset=index + 2]
+        var n = source[unsafe_offset=index + 3]
+        if (
+            (j == 106 or j == 74)
+            and (s == 115 or s == 83)
+            and (o == 111 or o == 79)
+            and (n == 110 or n == 78)
+        ):
+            return True
+        index += 1
+    return False
+
+
+def deepseek_messages_have_json_guidance(
+    view: ProdexRichStringView, messages: Array[Int64, 2]
+) -> Bool:
+    if not deepseek_json_bounds_is_kind(view, messages, 91):
+        return False
+    var index = deepseek_json_skip_ws(view, messages[0] + 1, messages[1] - 1)
+    while index < messages[1] - 1:
+        var item_end = deepseek_json_value_end(
+            view, index, messages[1] - 1, 0
+        )
+        if item_end < 0:
+            return False
+        if deepseek_json_byte(view, index) == 123:
+            var role = deepseek_json_object_member(
+                view, index, item_end, StringSlice("role")
+            )
+            var allowed_role = (
+                deepseek_json_raw_equals(
+                    view, role[0], role[1], StringSlice("system")
+                )
+                or deepseek_json_raw_equals(
+                    view, role[0], role[1], StringSlice("user")
+                )
+            )
+            if allowed_role:
+                var content = deepseek_json_object_member(
+                    view, index, item_end, StringSlice("content")
+                )
+                if deepseek_policy_string_contains_json(view, content):
+                    return True
+        index = deepseek_json_skip_ws(view, item_end, messages[1] - 1)
+        if (
+            index < messages[1] - 1
+            and deepseek_json_byte(view, index) == 44
+        ):
+            index = deepseek_json_skip_ws(
+                view, index + 1, messages[1] - 1
+            )
+            continue
+        if index != messages[1] - 1:
+            return False
+        break
+    return False
+
+
+def deepseek_json_guidance_plan(
+    view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    var root = deepseek_policy_root_bounds(view)
+    if root[0] < 0:
+        return False
+    var messages = root.copy()
+    if deepseek_json_byte(view, root[0]) == 123:
+        messages = deepseek_json_object_member(
+            view, root[0], root[1], StringSlice("messages")
+        )
+    deepseek_policy_set(
+        output, Int64(deepseek_messages_have_json_guidance(view, messages))
+    )
+    return True
 
 def deepseek_responses_request_params_plan(
     view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
@@ -2583,6 +2810,12 @@ def deepseek_request_policy_v1(
         ok = deepseek_tools_shape_plan(view, flag == 1, output)
     elif operation == DEEPSEEK_POLICY_RESPONSES_REQUEST_PARAMS:
         ok = deepseek_responses_request_params_plan(view, output)
+    elif operation == DEEPSEEK_POLICY_RESPONSE_FORMAT_SHAPE:
+        ok = deepseek_response_format_shape_plan(view, output)
+    elif operation == DEEPSEEK_POLICY_METADATA_SHAPE:
+        ok = deepseek_metadata_shape_plan(view, output)
+    elif operation == DEEPSEEK_POLICY_JSON_GUIDANCE:
+        ok = deepseek_json_guidance_plan(view, output)
     else:
         return DEEPSEEK_KERNEL_STATUS_INVALID
     return DEEPSEEK_KERNEL_STATUS_OK if ok else DEEPSEEK_KERNEL_STATUS_INVALID

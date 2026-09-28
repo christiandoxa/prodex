@@ -773,11 +773,27 @@ export function findViolations(files) {
       (!contents.includes("DeepSeekRequestPolicyOperation::SimpleRequest") ||
         !contents.includes("prodex_mojo_core::rich::deepseek_request_policy(")))
     .map(([filePath]) => `${filePath}: DeepSeek simple-request eligibility must use Mojo`);
-  const deepseekMetadataViolations = files
-    .filter(([filePath, contents]) => filePath === DEEPSEEK_METADATA_FILE &&
-      (!contents.includes("DeepSeekKernelOperation::RequestMetadata") ||
-        !contents.includes("DeepSeekKernelOperation::ResponseFormat")))
-    .map(([filePath]) => `${filePath}: DeepSeek metadata and response format must use Mojo`);
+  const deepseekMetadataViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== DEEPSEEK_METADATA_FILE) return [];
+    const required = [
+      "DeepSeekKernelOperation::RequestMetadata",
+      "DeepSeekKernelOperation::ResponseFormat",
+      "DeepSeekRequestPolicyOperation::ResponseFormatShape",
+      "DeepSeekRequestPolicyOperation::MetadataShape",
+      "DeepSeekRequestPolicyOperation::JsonGuidance",
+    ];
+    const violations = required
+      .filter((marker) => !contents.includes(marker))
+      .map((marker) => filePath + ": DeepSeek metadata/format migration must retain " + marker);
+    if (
+      /\bfn\s+deepseek_provider_core_message_has_json_guidance\s*\(/u.test(contents)
+      || /\bmatch\s+format_type\s*\{/u.test(contents)
+      || /to_ascii_lowercase\(\)\.contains\(["']json["']\)/u.test(contents)
+    ) {
+      violations.push(filePath + ": contains restored Rust DeepSeek metadata/format semantics");
+    }
+    return violations;
+  });
   const kiroChatResponseViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== KIRO_CHAT_RESPONSE_FILE) return [];
     const start = contents.indexOf("pub fn kiro_provider_core_chat_completion_value_from_response");
@@ -1834,9 +1850,11 @@ function selfTest() {
   assert.deepEqual(findViolations([[DEEPSEEK_SIMPLE_REQUEST_FILE,
     "DeepSeekRequestPolicyOperation::SimpleRequest; prodex_mojo_core::rich::deepseek_request_policy()"]]), []);
   assert.match(findViolations([[DEEPSEEK_METADATA_FILE, "fn metadata() {}"]]).join("\n"),
-    /DeepSeek metadata and response format must use Mojo/u);
-  assert.deepEqual(findViolations([[DEEPSEEK_METADATA_FILE,
-    "DeepSeekKernelOperation::RequestMetadata; DeepSeekKernelOperation::ResponseFormat"]]), []);
+    /DeepSeek metadata\/format migration must retain/u);
+  const deepseekMetadataMojoMarkers = "DeepSeekKernelOperation::RequestMetadata; DeepSeekKernelOperation::ResponseFormat; DeepSeekRequestPolicyOperation::ResponseFormatShape; DeepSeekRequestPolicyOperation::MetadataShape; DeepSeekRequestPolicyOperation::JsonGuidance";
+  assert.deepEqual(findViolations([[DEEPSEEK_METADATA_FILE, deepseekMetadataMojoMarkers]]), []);
+  assert.match(findViolations([[DEEPSEEK_METADATA_FILE, deepseekMetadataMojoMarkers + "; fn deepseek_provider_core_message_has_json_guidance() {}"]]).join("\n"),
+    /restored Rust DeepSeek metadata\/format semantics/u);
   const kiroChatResponseViolations = (contents) => findViolations([[KIRO_CHAT_RESPONSE_FILE, contents]]);
   assert.deepEqual(kiroChatResponseViolations(`
     pub fn kiro_provider_core_chat_completion_value_from_response(value: &Value, id: u64) -> Value {
