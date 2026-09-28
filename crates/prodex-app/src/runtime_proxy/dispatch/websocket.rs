@@ -1,10 +1,13 @@
 //! HTTP upgrade handling for runtime websocket proxy requests.
 
 use super::super::*;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 
 pub(crate) fn is_tiny_http_websocket_upgrade(request: &tiny_http::Request) -> bool {
     request.headers().iter().any(|header| {
-        header.field.equiv("Upgrade") && header.value.as_str().eq_ignore_ascii_case("websocket")
+        header.field.equiv("Upgrade")
+            && ascii_casefold_equal_exact(header.value.as_str(), "websocket")
+                .expect("Mojo websocket upgrade-value comparison failed")
     })
 }
 
@@ -169,7 +172,8 @@ pub(crate) fn proxy_runtime_responses_websocket_request(
 
 fn runtime_proxy_websocket_key(request: &RuntimeProxyRequest) -> Option<String> {
     request.headers.iter().find_map(|(name, value)| {
-        name.eq_ignore_ascii_case("Sec-WebSocket-Key")
+        ascii_casefold_equal_exact(name, "Sec-WebSocket-Key")
+            .expect("Mojo websocket key header-name comparison failed")
             .then(|| value.trim().to_string())
             .filter(|value| !value.is_empty())
     })

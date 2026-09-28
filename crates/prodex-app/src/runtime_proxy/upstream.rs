@@ -1,4 +1,5 @@
 use super::*;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 
 struct RuntimeProxyUpstreamRequestEvents {
     route_kind: RuntimeRouteKind,
@@ -189,10 +190,14 @@ fn build_runtime_proxy_upstream_request(
             .iter()
             .map(|(name, value)| (name.as_str(), value.as_str())),
     ) {
-        if turn_state_override.is_some() && name.eq_ignore_ascii_case("x-codex-turn-state") {
+        if turn_state_override.is_some()
+            && ascii_casefold_equal_exact(name, "x-codex-turn-state")
+                .expect("Mojo turn-state header comparison failed")
+        {
             continue;
         }
-        if name.eq_ignore_ascii_case("cookie") {
+        if ascii_casefold_equal_exact(name, "cookie").expect("Mojo cookie header comparison failed")
+        {
             continue;
         }
         upstream_request = upstream_request.header(name, value);

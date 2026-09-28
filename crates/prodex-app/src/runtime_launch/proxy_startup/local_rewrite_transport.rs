@@ -10,6 +10,7 @@ use super::provider_bridge::{
 };
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_provider_core::{ProviderWireFormat, provider_adapter};
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
@@ -463,8 +464,10 @@ fn runtime_local_rewrite_copy_openai_headers(
             continue;
         }
         if replacing_openai_auth
-            && (name.eq_ignore_ascii_case("authorization")
-                || name.eq_ignore_ascii_case("chatgpt-account-id"))
+            && (ascii_casefold_equal_exact(name, "authorization")
+                .expect("Mojo authorization header comparison failed")
+                || ascii_casefold_equal_exact(name, "chatgpt-account-id")
+                    .expect("Mojo ChatGPT account header comparison failed"))
         {
             continue;
         }
@@ -553,7 +556,10 @@ fn runtime_local_rewrite_header<'a>(
     request
         .headers
         .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case(expected_name))
+        .find(|(name, _)| {
+            ascii_casefold_equal_exact(name, expected_name)
+                .expect("Mojo runtime header-name comparison failed")
+        })
         .map(|(_, value)| value.as_str())
 }
 

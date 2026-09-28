@@ -10,6 +10,7 @@ use crate::{
 use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit};
 use anyhow::{Context, Result, bail};
 use codex_config::codex_non_openai_model_provider;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_mojo_core::super_provider_config::{
     RuntimeModelProviderClass, runtime_model_provider_class,
 };
@@ -244,9 +245,12 @@ fn custom_model_provider_display_name(provider_id: &str) -> String {
         Some(RuntimeModelProviderClass::Local) => "Local OpenAI-compatible".to_string(),
         Some(RuntimeModelProviderClass::DeepSeek) => "DeepSeek".to_string(),
         Some(RuntimeModelProviderClass::Anthropic) => "Anthropic Claude".to_string(),
-        _ if provider_id.eq_ignore_ascii_case("amazon-bedrock")
-            || provider_id.eq_ignore_ascii_case("amazon-bedrock-runtime")
-            || provider_id.eq_ignore_ascii_case("bedrock") =>
+        _ if ascii_casefold_equal_exact(provider_id, "amazon-bedrock")
+            .expect("Mojo Bedrock provider comparison failed")
+            || ascii_casefold_equal_exact(provider_id, "amazon-bedrock-runtime")
+                .expect("Mojo Bedrock provider comparison failed")
+            || ascii_casefold_equal_exact(provider_id, "bedrock")
+                .expect("Mojo Bedrock provider comparison failed") =>
         {
             "Amazon Bedrock".to_string()
         }

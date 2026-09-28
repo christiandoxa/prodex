@@ -1,6 +1,7 @@
 //! Smart-context rollout and environment flag helpers.
 
 use super::*;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 pub(super) fn runtime_smart_context_rollout_decision(
     _request_id: u64,
     request: &RuntimeProxyRequest,
@@ -27,7 +28,10 @@ pub(super) fn runtime_smart_context_rollout_stable_key(
     let turn_metadata = request
         .headers
         .iter()
-        .find(|(name, _)| name.eq_ignore_ascii_case("x-codex-turn-metadata"))
+        .find(|(name, _)| {
+            ascii_casefold_equal_exact(name, "x-codex-turn-metadata")
+                .expect("Mojo turn-metadata header comparison failed")
+        })
         .and_then(|(_, value)| serde_json::from_str::<serde_json::Value>(value).ok());
     let session_id = runtime_proxy_crate::runtime_request_explicit_session_id(request)
         .map(runtime_proxy_crate::RuntimeExplicitSessionId::into_string)

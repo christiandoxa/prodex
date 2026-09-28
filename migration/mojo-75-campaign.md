@@ -3204,3 +3204,13 @@ OpenAI residency and tmux detection, Kiro/provider GET model routing, Smart Cont
 exact mode, and Super-expose Prodex/Codex process-role detection. Callers retain any
 historical trim step plus path/header/process acquisition and routing behavior; no
 Rust semantic equality fallback remains in these migrated paths.
+
+
+## Bedrock and runtime header identity cleanup
+
+Amazon Bedrock provider aliases plus runtime HTTP/websocket header identity now reuse
+the authoritative exact ASCII-casefold Mojo primitive. Rust eq_ignore_ascii_case copies
+were deleted from resume/provider display, websocket upgrade detection, Content-Length,
+authorization/account headers, generic local-rewrite header lookup, turn-state/cookie
+filtering, Sec-WebSocket-Key lookup, and Smart Context turn-metadata detection. Rust
+retains header parsing/validation, forwarding, provider resolution, and routing actions.
