@@ -1,4 +1,5 @@
 use super::ConfigError;
+use prodex_mojo_core::super_provider_config::runtime_bool_token;
 use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
@@ -197,10 +198,11 @@ impl RuntimeConfigParser {
         let Some(value) = self.strict_text(key) else {
             return default;
         };
-        match value.to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => true,
-            "0" | "false" | "no" | "off" => false,
-            _ => {
+        match runtime_bool_token(&value)
+            .expect("runtime boolean token classification should accept Rust strings")
+        {
+            Some(value) => value,
+            None => {
                 self.errors.push(ConfigError {
                     key,
                     message: "must be one of true,false,1,0,yes,no,on,off".to_string(),
@@ -299,10 +301,9 @@ impl RuntimeConfigParser {
             .get(key)
             .and_then(|value| value.to_str())
             .is_some_and(|value| {
-                matches!(
-                    value.trim().to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes" | "on"
-                )
+                runtime_bool_token(value.trim())
+                    .expect("runtime boolean token classification should accept Rust strings")
+                    == Some(true)
             })
     }
 
@@ -330,5 +331,40 @@ impl RuntimeConfigParser {
             self.compatibility_defaults.push(key);
         }
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parser_with(key: &'static str, value: &str) -> RuntimeConfigParser {
+        RuntimeConfigParser::new(RuntimeConfigEnvironment::read_with(|candidate| {
+            (candidate == key).then(|| OsString::from(value))
+        }))
+    }
+
+    #[test]
+    fn strict_bool_and_compatibility_flag_use_mojo_boolean_tokens() {
+        let mut parser = parser_with("PRODEX_RUNTIME_RESPONSE_CHAIN_TRACE", "YeS");
+        assert!(parser.strict_bool("PRODEX_RUNTIME_RESPONSE_CHAIN_TRACE", false));
+        assert!(parser.errors.is_empty());
+
+        let mut parser = parser_with("PRODEX_RUNTIME_RESPONSE_CHAIN_TRACE", "OFF");
+        assert!(!parser.strict_bool("PRODEX_RUNTIME_RESPONSE_CHAIN_TRACE", true));
+        assert!(parser.errors.is_empty());
+
+        let mut parser = parser_with("PRODEX_RUNTIME_RESPONSE_CHAIN_TRACE", "maybe");
+        assert!(parser.strict_bool("PRODEX_RUNTIME_RESPONSE_CHAIN_TRACE", true));
+        assert_eq!(
+            parser.errors[0].message,
+            "must be one of true,false,1,0,yes,no,on,off"
+        );
+
+        let parser = parser_with("PRODEX_SMART_CONTEXT_SHADOW", "\u{2003}YES\u{2003}");
+        assert!(parser.compatibility_flag("PRODEX_SMART_CONTEXT_SHADOW"));
+
+        let parser = parser_with("PRODEX_SMART_CONTEXT_SHADOW", "unknown");
+        assert!(!parser.compatibility_flag("PRODEX_SMART_CONTEXT_SHADOW"));
     }
 }

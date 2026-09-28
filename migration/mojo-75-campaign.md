@@ -3052,3 +3052,15 @@ Direct Mojo adapter coverage passes together with five strict-tools caller tests
 web-search-mode caller test. The canonical broad report counts **61,177 Mojo LOC** and
 **194,238 Rust production LOC**, totaling **255,415 LOC**: **23.95% Mojo**. The 75%
 project target remains unmet.
+
+
+## Runtime boolean duplicate cleanup
+
+The runtime-config strict boolean parser, compatibility shadow flag, and Presidio
+auto-start switch now reuse the authoritative runtime boolean Mojo classifier. Each
+Rust caller preserves its existing trim, empty/whitespace, default, and error behavior;
+the repeated lowercase alias tables were deleted without fallback recomputation.
+
+Two focused caller-boundary tests pass for strict/compat runtime flags and Presidio
+auto-start values. The canonical broad report counts **61,177 Mojo LOC** and **194,237
+Rust production LOC**, totaling **255,414 LOC**: **23.95% Mojo**.
