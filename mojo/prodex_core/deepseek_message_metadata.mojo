@@ -42,6 +42,59 @@ def ds_merge_objects(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson, lef
     js_byte(sink, 125)
 
 
+
+def ds_merge_objects_replace_scalar(
+    sink: Pointer[mut=True, JsonSink, _],
+    tree: ParsedJson,
+    left: Int64,
+    right: Int64,
+    merge_nested: Bool,
+):
+    js_byte(sink, 123)
+    var count: Int64 = 0
+    var child = pj_child(tree, left)
+    while child >= 0:
+        ds_field_prefix(sink, tree, child, Pointer(to=count))
+        var replacement = ds_key_member(tree, right, tree.nodes[unsafe_offset=child].key)
+        if replacement < 0:
+            js_raw(sink, tree, child)
+        elif merge_nested and pj_kind(tree, replacement) == JSON_OBJECT:
+            if pj_kind(tree, child) == JSON_OBJECT:
+                ds_merge_objects_replace_scalar(
+                    sink, tree, child, replacement, False
+                )
+            else:
+                js_raw(sink, tree, replacement)
+        else:
+            js_raw(sink, tree, replacement)
+        child = pj_next(tree, child)
+    child = pj_child(tree, right)
+    while child >= 0:
+        if ds_key_member(tree, left, tree.nodes[unsafe_offset=child].key) < 0:
+            ds_field_prefix(sink, tree, child, Pointer(to=count))
+            js_raw(sink, tree, child)
+        child = pj_next(tree, child)
+    js_byte(sink, 125)
+
+
+def ds_merge_value_objects(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson
+) -> Bool:
+    if pj_kind(tree, 0) != JSON_ARRAY:
+        return False
+    var left = pj_child(tree, 0)
+    var right = pj_next(tree, left)
+    if left < 0 or right < 0:
+        return False
+    if pj_kind(tree, left) != JSON_OBJECT:
+        js_raw(sink, tree, right)
+        return True
+    if pj_kind(tree, right) != JSON_OBJECT:
+        js_raw(sink, tree, left)
+        return True
+    ds_merge_objects_replace_scalar(sink, tree, left, right, True)
+    return True
+
 def ds_merge_metadata(sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson) -> Bool:
     if pj_kind(tree, 0) != JSON_ARRAY:
         return False

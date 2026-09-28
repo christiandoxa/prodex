@@ -4,7 +4,7 @@ from parsed_json import ParsedJson, ParsedJsonNode, pj_valid
 from json_sink import JsonSink
 from deepseek_message_common import ds_message, ds_normalize_thinking, DS_MESSAGE_ASSISTANT
 from deepseek_message_adjacency import ds_repair_adjacency
-from deepseek_message_metadata import ds_merge_metadata
+from deepseek_message_metadata import ds_merge_metadata, ds_merge_value_objects
 
 
 @export("prodex_mojo_deepseek_messages_v1")
@@ -18,7 +18,7 @@ def prodex_mojo_deepseek_messages_v1(
 ) abi("C") -> Int64:
     if abi != 1:
         return 4
-    if operation < 0 or operation > 3 or flag != 0 or measuring < 0 or measuring > 1 or raw_length < 0:
+    if operation < 0 or operation > 4 or flag != 0 or measuring < 0 or measuring > 1 or raw_length < 0:
         return 1
     if capacity < 0 or metadata_address == 0 or nodes_address == 0 or scratch_address == 0 or scratch_count < nodes_count:
         return 1
@@ -44,8 +44,10 @@ def prodex_mojo_deepseek_messages_v1(
         ds_message(Pointer(to=sink), tree, 0, DS_MESSAGE_ASSISTANT, scratch, 0)
     elif operation == 2:
         present = ds_repair_adjacency(Pointer(to=sink), tree, scratch)
-    else:
+    elif operation == 3:
         present = ds_merge_metadata(Pointer(to=sink), tree)
+    else:
+        present = ds_merge_value_objects(Pointer(to=sink), tree)
     if sink.failed:
         return 3
     var meta = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(metadata_address))

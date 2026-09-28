@@ -6,7 +6,11 @@ use super::{
 };
 use serde_json::{Value, json};
 
-use prodex_mojo_core::rich::{GeminiResponseKernelInput, GeminiResponseKernelOperation};
+use crate::mojo_json::Document;
+use prodex_mojo_core::{
+    deepseek_messages::{DeepSeekMessageOperation, transform_deepseek_messages},
+    rich::{GeminiResponseKernelInput, GeminiResponseKernelOperation},
+};
 
 fn gemini_stream_identifier(
     operation: GeminiResponseKernelOperation,
@@ -20,6 +24,26 @@ fn gemini_stream_identifier(
         .as_str()
         .unwrap_or_else(|| panic!("Mojo Gemini stream identifier kernel returned a non-string"))
         .to_string()
+}
+
+pub fn gemini_provider_core_merge_stream_metadata(
+    existing: Option<Value>,
+    incoming: Value,
+) -> Value {
+    let Some(existing) = existing else {
+        return incoming;
+    };
+    let mut document = Document::default();
+    document.array([&existing, &incoming]);
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let bytes = transform_deepseek_messages(
+        &document.nodes,
+        raw,
+        DeepSeekMessageOperation::MergeValueObjects,
+    )
+    .expect("Mojo Gemini stream metadata merge returned invalid output")
+    .expect("Mojo Gemini stream metadata merge must return a result");
+    serde_json::from_slice(&bytes).expect("Mojo Gemini stream metadata merge must return JSON")
 }
 
 pub fn gemini_provider_core_stream_output_text_item_id(request_id: u64) -> String {
@@ -360,4 +384,44 @@ pub fn gemini_provider_core_stream_part_has_video_metadata(part: &Value) -> bool
 
 pub fn gemini_provider_core_stream_part_function_call(part: &Value) -> Option<&Value> {
     part.get("functionCall")
+}
+
+#[cfg(test)]
+mod metadata_merge_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn stream_metadata_merge_matches_previous_app_semantics() {
+        assert_eq!(
+            gemini_provider_core_merge_stream_metadata(None, json!({"a": 1})),
+            json!({"a": 1})
+        );
+        assert_eq!(
+            gemini_provider_core_merge_stream_metadata(Some(json!("old")), json!({"a": 1})),
+            json!({"a": 1})
+        );
+        assert_eq!(
+            gemini_provider_core_merge_stream_metadata(Some(json!({"a": 1})), json!("new")),
+            json!({"a": 1})
+        );
+        assert_eq!(
+            gemini_provider_core_merge_stream_metadata(
+                Some(json!({"a": 1, "nested": {"keep": 1, "replace": 1}})),
+                json!({"a": 2, "nested": {"replace": 2, "new": 3}, "b": 4}),
+            ),
+            json!({
+                "a": 2,
+                "nested": {"keep": 1, "replace": 2, "new": 3},
+                "b": 4
+            })
+        );
+        assert_eq!(
+            gemini_provider_core_merge_stream_metadata(
+                Some(json!({"nested": 7})),
+                json!({"nested": {"value": 9}}),
+            ),
+            json!({"nested": {"value": 9}})
+        );
+    }
 }

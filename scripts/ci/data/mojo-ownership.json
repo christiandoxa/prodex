@@ -949,6 +949,26 @@
           "log_throughput_completed_rate",
           "log_throughput_stream_rate"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/deepseek_messages.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "gemini_stream_metadata_merge"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/deepseek_message_metadata.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_stream_metadata_merge"
+        ]
       }
     ],
     "removed": [
@@ -3603,6 +3623,31 @@
       "rust_owner_before": "250ms minimum live-sample window, monotonic delta validation and live token-rate calculation",
       "rust_test_oracle": "deleted; throughput suite covers counter resets, zero/short elapsed samples, live-vs-final precedence and p95 display latency",
       "rust_adapter_scope": "VecDeque sample storage, Instant-based pruning, profile/stream identity maps and display state"
+    },
+    {
+      "domain": "provider/gemini",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust nested response-metadata merge in runtime Gemini SSE state",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/deepseek_messages.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/gemini_sse_state.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "gemini_stream_metadata_merge",
+      "mojo_entry": "prodex_mojo_deepseek_messages_v1",
+      "consumer_marker": "DeepSeekMessageOperation::MergeValueObjects",
+      "rust_owner_before": "top-level response metadata merge with one-level nested object merge and scalar replacement semantics",
+      "rust_test_oracle": "deleted; provider-core merge fixtures and Gemini SSE later-chunk metadata test cover the production behavior",
+      "rust_adapter_scope": "Serde JSON arena acquisition, UTF-8/JSON materialization, and Option ownership around the Mojo merge result",
+      "mojo_semantic_source": "mojo/prodex_core/deepseek_message_metadata.mojo"
     }
   ],
   "rust_semantic_reductions": [
