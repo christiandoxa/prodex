@@ -8,6 +8,7 @@ import { repoRoot } from "../npm/common.mjs";
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/app_commands/log_transcript.rs",
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
   "crates/prodex-cli/src/sub_agent.rs",
   "crates/prodex-mojo-core/src/rich/super_expose.rs",
@@ -263,6 +264,8 @@ const PROMOTED_FILES = [
 ];
 
 const UNCONDITIONAL_MOJO_FILES = new Set([
+  "crates/prodex-mojo-core/src/log.rs",
+  "crates/prodex-app/src/app_commands/log_transcript.rs",
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
   "crates/prodex-cli/src/sub_agent.rs",
   "crates/prodex-mojo-core/src/rich/super_expose.rs",
@@ -659,6 +662,8 @@ const SUPER_EXPOSE_PROTOCOL_FILE = "crates/prodex-app/src/super_expose/protocol.
 const SUPER_EXPOSE_VALIDATION_FILE = "crates/prodex-app/src/super_expose/protocol/validation.rs";
 const SUPER_EXPOSE_TOOL_CONTRACT_FILE = "crates/prodex-app/src/super_expose/protocol/tool_contract.rs";
 const SUPER_EXPOSE_RICH_FILE = "crates/prodex-mojo-core/src/rich/super_expose.rs";
+const LOG_TRANSCRIPT_FILE = "crates/prodex-app/src/app_commands/log_transcript.rs";
+const LOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/log.rs";
 const GEMINI_SCHEMA_FILE = "crates/prodex-provider-core/src/translators/gemini/request/schema.rs";
 const GEMINI_TOOLS_FILE = "crates/prodex-provider-core/src/translators/gemini/request/tools.rs";
 const GEMINI_STATUS_FILE = "crates/prodex-provider-core/src/translators/gemini/response/status.rs";
@@ -1812,6 +1817,41 @@ export function findViolations(files) {
     }
     return violations;
   });
+  const transcriptPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === LOG_TRANSCRIPT_FILE) {
+      const required = [
+        "prodex_mojo_core::log::classify_transcript_event(",
+        "prodex_mojo_core::log::classify_transcript_item(",
+        "prodex_mojo_core::log::transcript_operation_span(",
+        "prodex_mojo_core::log::sanitize_transcript_tool_name(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": transcript migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /\bfn\s+event_msg_is_status\s*\(/u.test(production)
+        || /\bmatch\s+payload\.get\("type"\).*function_call/su.test(production)
+        || /\.chars\(\)\.take\(96\)/u.test(production)
+        || /\.chars\(\)\.take\(192\)/u.test(production)
+      ) {
+        violations.push(filePath + ": contains restored Rust transcript classification/bounding semantics");
+      }
+      return violations;
+    }
+    if (filePath === LOG_ADAPTER_FILE) {
+      const required = [
+        "prodex_mojo_transcript_event_classify_v1(",
+        "prodex_mojo_transcript_item_classify_v1(",
+        "prodex_mojo_transcript_operation_span_v1(",
+        "prodex_mojo_transcript_tool_name_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": transcript ABI adapter must retain " + call);
+    }
+    return [];
+  });
   const replacedClassifierViolations = files.flatMap(([filePath, contents]) => {
     const forbidden = new Map([
       ["crates/prodex-domain/src/governance/inspection.rs", /\bfn\s+minimum_classification_rust\s*\(|\.any\(\|finding\|\s*classification\s*<\s*finding\.kind\.minimum_classification\(\)\)/u],
@@ -1883,7 +1923,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...deepseekSimpleRequestViolations,
