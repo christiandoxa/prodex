@@ -3180,3 +3180,16 @@ label mapping, and orchestration over the latest verification outputs; no Rust s
 fallback remains for these text classifications. Direct kernel coverage plus four
 Gemini SSE regressions pass. The canonical broad report counts **61,715 Mojo LOC** and
 **194,504 Rust production LOC**, totaling **256,219 LOC**: **24.09% Mojo**.
+
+
+## Gemini exact-output guardrail migration
+
+Gemini exact-output required-command extraction, latest tool-output slicing, diff-tail
+trimming, PRODEX marker matching, Unicode-whitespace command normalization, and
+normalized exact/substring command matching now run in gemini_guardrails.mojo. Rust
+retains only conversation/tool-call JSON acquisition, command-string collection, scratch
+buffer ownership, and returned-string materialization. The former Rust marker parser,
+normalizer, token extractor, and command matching implementation were deleted with no
+semantic fallback. The full focused exact-output caller suite passes. The canonical
+broad report counts **62,249 Mojo LOC** and **194,562 Rust production LOC**, totaling
+**256,811 LOC**: **24.24% Mojo**.

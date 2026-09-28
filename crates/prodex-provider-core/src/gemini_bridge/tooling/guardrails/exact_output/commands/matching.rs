@@ -1,13 +1,16 @@
 //! Exact-output command matching against assistant tool calls.
 
-use super::gemini_provider_core_exact_output_markers;
+use prodex_mojo_core::gemini_guardrails::{
+    gemini_command_matches_required, gemini_normalized_command_is_empty,
+};
 
 pub(in crate::gemini_bridge::tooling::guardrails::exact_output) fn gemini_provider_core_tool_command_matches_required(
     messages_before_tool: &[serde_json::Value],
     required_command: &str,
 ) -> bool {
-    let required = gemini_provider_core_normalize_command_for_match(required_command);
-    if required.is_empty() {
+    if gemini_normalized_command_is_empty(required_command)
+        .expect("Mojo Gemini command normalization should accept Rust strings")
+    {
         return true;
     }
     messages_before_tool
@@ -18,18 +21,9 @@ pub(in crate::gemini_bridge::tooling::guardrails::exact_output) fn gemini_provid
         })
         .flat_map(gemini_provider_core_assistant_tool_commands)
         .any(|command| {
-            let command = gemini_provider_core_normalize_command_for_match(&command);
-            command == required
-                || command.contains(&required)
-                || required.contains(&command)
-                || gemini_provider_core_commands_share_exact_output_marker(&required, &command)
+            gemini_command_matches_required(required_command, &command)
+                .expect("Mojo Gemini command matching should accept Rust strings")
         })
-}
-
-fn gemini_provider_core_commands_share_exact_output_marker(required: &str, command: &str) -> bool {
-    gemini_provider_core_exact_output_markers(required)
-        .into_iter()
-        .any(|marker| command.contains(&marker))
 }
 
 fn gemini_provider_core_assistant_tool_commands(message: &serde_json::Value) -> Vec<String> {
@@ -82,13 +76,4 @@ fn gemini_provider_core_collect_command_strings(
             commands.push(command.trim().to_string());
         }
     }
-}
-
-fn gemini_provider_core_normalize_command_for_match(command: &str) -> String {
-    command
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .trim_matches(['"', '\''])
-        .to_string()
 }

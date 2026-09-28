@@ -1005,7 +1005,11 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_guardrail_text_classification"
+          "gemini_guardrail_text_classification",
+          "gemini_exact_output_slice_policy",
+          "gemini_exact_output_marker_policy",
+          "gemini_command_normalized_empty_policy",
+          "gemini_command_match_policy"
         ]
       }
     ],
@@ -3993,6 +3997,99 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "conversation JSON extraction, tool-text collection, typed enum-to-static-label mapping, and orchestration across recent tool outputs"
+    },
+    {
+      "name": "gemini_exact_output_slice_policy",
+      "domain": "provider/gemini-guardrails",
+      "introduced_in": "0.433.0",
+      "baseline_state": "case-insensitive required-command marker extraction and command-output slice trimming/diff-suffix rejection",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_guardrail_slice_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_guardrails.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs",
+      "consumer_marker": "gemini_extract_command_output",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output.rs",
+      "rust_owner_before": "case-insensitive required-command marker extraction and command-output slice trimming/diff-suffix rejection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo exact-output fixtures plus the Gemini SSE exact-output regression suite preserve production behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "conversation/tool payload text acquisition and borrowed-slice-to-owned-string materialization"
+    },
+    {
+      "name": "gemini_exact_output_marker_policy",
+      "domain": "provider/gemini-guardrails",
+      "introduced_in": "0.433.0",
+      "baseline_state": "PRODEX_ exact-output token extraction and case-sensitive marker containment matching",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_guardrail_marker_match_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_guardrails.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs",
+      "consumer_marker": "gemini_exact_output_marker_match",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands.rs",
+      "rust_owner_before": "PRODEX_ exact-output token extraction and case-sensitive marker containment matching",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo exact-output fixtures plus the Gemini SSE exact-output regression suite preserve production behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "required-command and tool-output string ownership only"
+    },
+    {
+      "name": "gemini_command_normalized_empty_policy",
+      "domain": "provider/gemini-guardrails",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Unicode-whitespace command normalization and quote/apostrophe edge trimming used for required-command emptiness",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_guardrail_command_empty_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_guardrails.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs",
+      "consumer_marker": "gemini_normalized_command_is_empty",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs",
+      "rust_owner_before": "Unicode-whitespace command normalization and quote/apostrophe edge trimming used for required-command emptiness",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo exact-output fixtures plus the Gemini SSE exact-output regression suite preserve production behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "temporary scratch allocation and boolean mapping"
+    },
+    {
+      "name": "gemini_command_match_policy",
+      "domain": "provider/gemini-guardrails",
+      "introduced_in": "0.433.0",
+      "baseline_state": "normalized exact/substring command matching and shared PRODEX marker matching",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_guardrail_command_match_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_guardrails.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs",
+      "consumer_marker": "gemini_command_matches_required",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/tooling/guardrails/exact_output/commands/matching.rs",
+      "rust_owner_before": "normalized exact/substring command matching and shared PRODEX marker matching",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo exact-output fixtures plus the Gemini SSE exact-output regression suite preserve production behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "assistant tool-call JSON extraction, command-string collection, scratch allocation, and result mapping"
     }
   ],
   "rust_semantic_reductions": [
