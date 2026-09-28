@@ -429,7 +429,11 @@
       },
       "mojo/prodex_core/log_semantics.mojo": {
         "operations": [
-          "runtime_log_level_classification"
+          "runtime_log_level_classification",
+          "transcript_event_classification",
+          "transcript_item_classification",
+          "transcript_operation_value_policy",
+          "transcript_tool_name_policy"
         ]
       },
       "mojo/prodex_core/profile_schedule.mojo": {
@@ -3240,6 +3244,98 @@
       "rust_owner_before": "Unicode-trimmed nonempty validation for arbitrary sub-agent model identifiers",
       "rust_test_oracle": "deleted; prodex-cli tests cover ASCII, vendor IDs, Unicode model IDs and whitespace-only rejection",
       "rust_adapter_scope": "returning the original untrimmed model string and stable error text"
+    },
+    {
+      "domain": "app/log-transcript",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust transcript semantic classification",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_semantics.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_transcript.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_transcript.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "transcript_event_classification",
+      "mojo_entry": "prodex_mojo_transcript_event_classify_v1",
+      "consumer_marker": "prodex_mojo_core::log::classify_transcript_event",
+      "rust_owner_before": "event_msg protocol/status/user/assistant/reasoning classification and status error/terminal source decision",
+      "rust_test_oracle": "deleted; direct ABI tests plus app log tests cover protocol precedence, command status, fail/error status and message kinds",
+      "rust_adapter_scope": "Serde field extraction, transcript DTO construction, redaction and stable source labels"
+    },
+    {
+      "domain": "app/log-transcript",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust transcript semantic classification",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_semantics.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_transcript.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_transcript.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "transcript_item_classification",
+      "mojo_entry": "prodex_mojo_transcript_item_classify_v1",
+      "consumer_marker": "prodex_mojo_core::log::classify_transcript_item",
+      "rust_owner_before": "response_item kind classification across message/function/custom/shell/reasoning/MCP/sub-agent/tool categories",
+      "rust_test_oracle": "deleted; direct ABI and app log tests cover exact item kinds, protocol source labels and unknown vendor tool-call behavior",
+      "rust_adapter_scope": "Serde payload extraction plus per-kind text/output DTO construction"
+    },
+    {
+      "domain": "app/log-transcript",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust transcript semantic classification",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_semantics.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_transcript.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_transcript.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "transcript_operation_value_policy",
+      "mojo_entry": "prodex_mojo_transcript_operation_span_v1",
+      "consumer_marker": "prodex_mojo_core::log::transcript_operation_span",
+      "rust_owner_before": "nonblank/control validation and UTF-8-safe 192-character operation-value truncation",
+      "rust_test_oracle": "deleted; direct ABI tests cover Unicode whitespace, C1 controls, preserved outer whitespace and multibyte truncation",
+      "rust_adapter_scope": "secret redaction, borrowed slice materialization and ellipsis rendering"
+    },
+    {
+      "domain": "app/log-transcript",
+      "introduced_in": "0.432.2",
+      "baseline_state": "Rust transcript semantic classification",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_semantics.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_transcript.rs",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_transcript.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "transcript_tool_name_policy",
+      "mojo_entry": "prodex_mojo_transcript_tool_name_v1",
+      "consumer_marker": "prodex_mojo_core::log::sanitize_transcript_tool_name",
+      "rust_owner_before": "96-character tool-name bounding and ASCII-safe character replacement with tool fallback",
+      "rust_test_oracle": "deleted; direct ABI and log tests cover empty names, Unicode replacement, punctuation allowlist and overlong names",
+      "rust_adapter_scope": "secret redaction and owned String materialization"
     }
   ],
   "rust_semantic_reductions": [

@@ -211,78 +211,54 @@ fn event_msg_transcript_event(
     timestamp: String,
     payload: &serde_json::Value,
 ) -> Option<TranscriptEvent> {
-    let event_type = payload.get("type").and_then(serde_json::Value::as_str)?;
-    if event_type.contains("mcp")
-        || event_type.contains("subagent")
-        || event_type.contains("sub_agent")
-        || event_type.contains("tool_call")
-    {
-        return protocol_operation_transcript_event(timestamp, payload, event_type);
-    }
-    if event_msg_is_status(event_type) {
-        return status_transcript_event(timestamp, payload, event_type);
-    }
-    let text_field = match event_type {
-        "agent_reasoning" => "text",
-        _ => "message",
-    };
-    let text = payload
-        .get(text_field)
-        .and_then(serde_json::Value::as_str)
-        .and_then(transcript_visible_message_text)?;
-    let source = match event_type {
-        "user_message" => "user",
-        "agent_message" => "assistant",
-        "agent_reasoning" => "reasoning",
-        _ => return None,
-    };
-    Some(TranscriptEvent {
-        timestamp,
-        source: source.to_string(),
-        text: text.to_string(),
-    })
-}
+    use prodex_mojo_core::log::TranscriptEventKind;
 
-fn event_msg_is_status(event_type: &str) -> bool {
-    matches!(
-        event_type,
-        "task_started"
-            | "task_complete"
-            | "task_completed"
-            | "turn_started"
-            | "turn_complete"
-            | "turn_completed"
-            | "turn_aborted"
-            | "turn_cancelled"
-            | "turn_interrupted"
-            | "turn_failed"
-            | "command_execution_started"
-            | "command_execution_completed"
-            | "command_execution_finished"
-            | "command_execution_output"
-            | "exec_command_begin"
-            | "exec_command_end"
-            | "error"
-    ) || (event_type.contains("command") && event_type.contains("status"))
+    let event_type = payload.get("type").and_then(serde_json::Value::as_str)?;
+    let status = payload.get("status").and_then(serde_json::Value::as_str);
+    let plan = prodex_mojo_core::log::classify_transcript_event(event_type, status)
+        .expect("Mojo transcript event classifier returned invalid output");
+    match plan.kind {
+        TranscriptEventKind::Protocol => protocol_operation_transcript_event(
+            timestamp,
+            payload,
+            event_type,
+            plan.protocol_source,
+        ),
+        TranscriptEventKind::StatusTerminal => {
+            status_transcript_event(timestamp, payload, event_type, "terminal")
+        }
+        TranscriptEventKind::StatusError => {
+            status_transcript_event(timestamp, payload, event_type, "error")
+        }
+        TranscriptEventKind::User
+        | TranscriptEventKind::Assistant
+        | TranscriptEventKind::Reasoning => {
+            let (text_field, source) = match plan.kind {
+                TranscriptEventKind::User => ("message", "user"),
+                TranscriptEventKind::Assistant => ("message", "assistant"),
+                TranscriptEventKind::Reasoning => ("text", "reasoning"),
+                _ => unreachable!("matched transcript message event"),
+            };
+            let text = payload
+                .get(text_field)
+                .and_then(serde_json::Value::as_str)
+                .and_then(transcript_visible_message_text)?;
+            Some(TranscriptEvent {
+                timestamp,
+                source: source.to_string(),
+                text: text.to_string(),
+            })
+        }
+        TranscriptEventKind::Unknown => None,
+    }
 }
 
 fn status_transcript_event(
     timestamp: String,
     payload: &serde_json::Value,
     event_type: &str,
+    source: &'static str,
 ) -> Option<TranscriptEvent> {
-    let source = if event_type.contains("fail")
-        || event_type.contains("abort")
-        || event_type == "error"
-        || payload
-            .get("status")
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(|status| status.contains("fail") || status.contains("error"))
-    {
-        "error"
-    } else {
-        "terminal"
-    };
     let mut details = Vec::new();
     for key in [
         "status",
@@ -372,8 +348,13 @@ fn response_item_transcript_event(
     timestamp: String,
     payload: &serde_json::Value,
 ) -> Option<TranscriptEvent> {
-    match payload.get("type").and_then(serde_json::Value::as_str)? {
-        "message" => {
+    use prodex_mojo_core::log::TranscriptItemKind;
+
+    let item_type = payload.get("type").and_then(serde_json::Value::as_str)?;
+    let plan = prodex_mojo_core::log::classify_transcript_item(item_type)
+        .expect("Mojo transcript response-item classifier returned invalid output");
+    match plan.kind {
+        TranscriptItemKind::Message => {
             let source = payload
                 .get("role")
                 .and_then(serde_json::Value::as_str)
@@ -389,7 +370,7 @@ fn response_item_transcript_event(
                 text,
             })
         }
-        "function_call" => {
+        TranscriptItemKind::FunctionCall => {
             let name = payload
                 .get("name")
                 .and_then(serde_json::Value::as_str)
@@ -405,7 +386,7 @@ fn response_item_transcript_event(
                 text: arguments.to_string(),
             })
         }
-        "function_call_output" => {
+        TranscriptItemKind::FunctionOutput | TranscriptItemKind::CustomOutput => {
             let output = transcript_visible_tool_output(
                 payload.get("output").and_then(serde_json::Value::as_str)?,
             )?;
@@ -415,7 +396,7 @@ fn response_item_transcript_event(
                 text: output,
             })
         }
-        "custom_tool_call" => {
+        TranscriptItemKind::CustomCall => {
             let name = payload
                 .get("name")
                 .and_then(serde_json::Value::as_str)
@@ -431,41 +412,19 @@ fn response_item_transcript_event(
                 text: input.to_string(),
             })
         }
-        "custom_tool_call_output" => {
-            let output = transcript_visible_tool_output(
-                payload.get("output").and_then(serde_json::Value::as_str)?,
-            )?;
-            Some(TranscriptEvent {
+        TranscriptItemKind::ShellCall => shell_call_transcript_event(timestamp, payload),
+        TranscriptItemKind::ShellOutput => shell_output_transcript_event(timestamp, payload),
+        TranscriptItemKind::Reasoning => {
+            transcript_text_from_reasoning(payload).map(|text| TranscriptEvent {
                 timestamp,
-                source: "tool-output".to_string(),
-                text: output,
+                source: "reasoning".to_string(),
+                text,
             })
         }
-        "local_shell_call" | "shell_call" => shell_call_transcript_event(timestamp, payload),
-        "local_shell_call_output" | "shell_call_output" => {
-            shell_output_transcript_event(timestamp, payload)
+        TranscriptItemKind::Protocol => {
+            protocol_operation_transcript_event(timestamp, payload, item_type, plan.protocol_source)
         }
-        "reasoning" => transcript_text_from_reasoning(payload).map(|text| TranscriptEvent {
-            timestamp,
-            source: "reasoning".to_string(),
-            text,
-        }),
-        item_type
-            if item_type.contains("mcp")
-                || item_type.contains("subagent")
-                || item_type.contains("sub_agent")
-                || matches!(
-                    item_type,
-                    "computer_call"
-                        | "computer_call_output"
-                        | "web_search_call"
-                        | "file_search_call"
-                        | "code_interpreter_call"
-                ) =>
-        {
-            protocol_operation_transcript_event(timestamp, payload, item_type)
-        }
-        _ => None,
+        TranscriptItemKind::Unknown => None,
     }
     .filter(|event| !event.text.trim().is_empty())
 }
@@ -494,21 +453,8 @@ fn shell_call_transcript_event(
 
 fn transcript_tool_name(value: &str) -> String {
     let value = redaction::redaction_redact_secret_like_text(value);
-    let mut name = value
-        .chars()
-        .take(96)
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.' | ':') {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    if name.is_empty() {
-        name.push_str("tool");
-    }
-    name
+    prodex_mojo_core::log::sanitize_transcript_tool_name(&value)
+        .expect("Mojo transcript tool-name sanitizer returned invalid output")
 }
 
 fn shell_output_transcript_event(
@@ -543,13 +489,12 @@ fn protocol_operation_transcript_event(
     timestamp: String,
     payload: &serde_json::Value,
     event_type: &str,
+    source_kind: prodex_mojo_core::log::TranscriptProtocolSource,
 ) -> Option<TranscriptEvent> {
-    let source = if event_type.contains("mcp") {
-        "mcp"
-    } else if event_type.contains("subagent") || event_type.contains("sub_agent") {
-        "agent"
-    } else {
-        "tool"
+    let source = match source_kind {
+        prodex_mojo_core::log::TranscriptProtocolSource::Mcp => "mcp",
+        prodex_mojo_core::log::TranscriptProtocolSource::Agent => "agent",
+        prodex_mojo_core::log::TranscriptProtocolSource::Tool => "tool",
     };
     let mut details = Vec::new();
     for (keys, label) in [
@@ -589,14 +534,13 @@ fn protocol_operation_transcript_event(
 
 fn transcript_safe_operation_value(value: &str) -> Option<String> {
     let value = redaction::redaction_redact_secret_like_text(value);
-    if value.trim().is_empty() || value.chars().any(char::is_control) {
-        return None;
+    let (bounded, truncated) = prodex_mojo_core::log::transcript_operation_span(&value)
+        .expect("Mojo transcript operation-value policy returned invalid output")?;
+    let mut result = bounded.to_string();
+    if truncated {
+        result.push('…');
     }
-    let mut bounded = value.chars().take(192).collect::<String>();
-    if value.chars().nth(192).is_some() {
-        bounded.push('…');
-    }
-    Some(bounded)
+    Some(result)
 }
 
 fn transcript_text_from_reasoning(payload: &serde_json::Value) -> Option<String> {

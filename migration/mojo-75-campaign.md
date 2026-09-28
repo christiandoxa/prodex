@@ -2844,3 +2844,21 @@ operations**. The canonical broad source report counts **59,815 Mojo LOC** and
 **193,229 Rust production LOC**, totaling **253,044 LOC**: **23.64% Mojo**. The
 75% project target remains unmet, with **519,872 additional Mojo LOC** required
 at the current Rust volume.
+
+## Runtime transcript semantic migration
+
+Transcript event classification, response-item kind classification, bounded
+operation-value validation/truncation, and tool-name sanitization now use
+mojo/prodex_core/log_semantics.mojo through the safe prodex_mojo_core::log
+adapter. Rust retains JSON extraction, secret redaction, transcript DTO
+construction, tool output filtering, and stable source/error rendering. The
+former Rust event/status tables and char-bound sanitization loops were removed.
+
+Validation passes 3/3 direct Mojo transcript policy fixtures and 25/25 app log
+tests, including MCP/sub-agent/tool events, response items, status/error
+classification, ANSI/binary filtering, dedupe, and streaming transcript follow.
+Clippy, prodex-app check, no-fallback self-test, ownership, and authority guards
+pass; ownership now reports **99 authoritative operations**. The canonical broad
+source report counts **60,107 Mojo LOC** and **193,359 Rust production LOC**,
+totaling **253,466 LOC**: **23.71% Mojo**. The 75% project target remains unmet,
+with **519,970 additional Mojo LOC** required at the current Rust volume.
