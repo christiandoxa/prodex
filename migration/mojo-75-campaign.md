@@ -2940,3 +2940,19 @@ passes. The canonical broad report on this checkpoint counts **61,023 reachable 
 LOC** and **194,026 Rust production LOC**, totaling **255,049 LOC**: **23.93% Mojo**.
 The 75% project target remains unmet, with **521,055 additional Mojo LOC** required at
 the current Rust volume.
+
+
+## Kiro response tool-call presence migration
+
+Kiro response tool-call presence now uses operation 50 of the existing Kiro Mojo
+response kernel. Rust acquires only the optional output-item type strings and
+serializes that bounded projection; Mojo parses the projection and decides whether
+any function_call item is present. The previous Rust any/type comparison was deleted,
+and finish-reason derivation continues to consume the Mojo-owned result without a Rust
+semantic fallback.
+
+Focused validation passes the tracked Kiro response integration fixture covering
+tool-call, non-tool, empty-response, and length finish-reason behavior. The canonical
+broad report counts **61,055 reachable Mojo LOC** and **194,036 Rust production LOC**,
+totaling **255,091 LOC**: **23.93% Mojo**. The 75% project target remains unmet, with
+**521,053 additional Mojo LOC** required at the current Rust volume.

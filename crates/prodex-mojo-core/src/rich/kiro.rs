@@ -56,6 +56,7 @@ pub enum KiroKernelOperation {
     UnsupportedPathError = 47,
     RequestValidationError = 48,
     AnthropicRequestRewrite = 49,
+    ResponseHasToolCalls = 50,
 }
 
 /// Inputs for one bounded Kiro JSON or text transformation.
@@ -371,6 +372,7 @@ fn operation_code(operation: KiroKernelOperation) -> i64 {
         KiroKernelOperation::UnsupportedPathError => 47,
         KiroKernelOperation::RequestValidationError => 48,
         KiroKernelOperation::AnthropicRequestRewrite => 49,
+        KiroKernelOperation::ResponseHasToolCalls => 50,
     }
 }
 

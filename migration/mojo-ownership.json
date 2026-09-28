@@ -1993,7 +1993,8 @@
         "model_list": 44,
         "model_not_found": 45,
         "invalid_request_error": 46,
-        "unsupported_path_error": 47
+        "unsupported_path_error": 47,
+        "response_has_tool_calls": 50
       },
       "mojo_source": "mojo/prodex_core/rich_abi.mojo",
       "mojo_semantic_source": "mojo/prodex_core/kiro.mojo",
@@ -2004,13 +2005,13 @@
         "crates/prodex-provider-core/src/translators/kiro.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/tests/kiro_response.rs",
-      "rust_owner_before": "feature-off Kiro model/error JSON shapes, finish-reason classification, Anthropic tool-use blocks, stop-reason mapping, and message assembly",
+      "rust_owner_before": "feature-off Kiro model/error JSON shapes, finish-reason classification, response tool-call presence scanning, Anthropic tool-use blocks, stop-reason mapping, and message assembly",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "Deleted; fixed provider caller expectations cover model and error shapes, finish reasons, Anthropic content/tool ordering, defaults, and usage mapping",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "catalog lookup, JSON serialization and decoding, raw malformed-field preservation where the string ABI cannot represent the original JSON type, and runtime metadata attachment"
+      "rust_adapter_scope": "catalog lookup, output-type acquisition, JSON serialization/decoding, raw malformed-field preservation where the string ABI cannot represent the original JSON type, and runtime metadata attachment"
     },
     {
       "name": "kiro_acp_shape_fallbacks",
