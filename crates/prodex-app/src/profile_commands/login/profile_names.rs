@@ -28,18 +28,22 @@ pub(super) fn unique_profile_name_for_slug(
 }
 
 pub(super) fn sanitize_profile_slug(value: &str) -> String {
-    let mut slug = String::new();
-    for ch in value.trim().to_ascii_lowercase().chars() {
-        match ch {
-            'a'..='z' | '0'..='9' | '.' | '_' | '-' => slug.push(ch),
-            '@' => slug.push('_'),
-            _ => slug.push('-'),
-        }
-    }
-    let slug = slug.trim_matches(|ch| matches!(ch, '.' | '_' | '-'));
-    if slug.is_empty() || slug == "." || slug == ".." {
-        "api_key".to_string()
-    } else {
-        slug.to_string()
+    prodex_mojo_core::profile_identity::sanitize_profile_slug(value)
+        .expect("Mojo profile slug sanitizer should accept Rust strings")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn profile_slug_sanitizer_uses_mojo_kernel() {
+        assert_eq!(
+            sanitize_profile_slug("  API_KEY_User@EXAMPLE.com  "),
+            "api_key_user_example.com"
+        );
+        assert_eq!(sanitize_profile_slug("雪@EXAMPLE.com"), "example.com");
+        assert_eq!(sanitize_profile_slug("---"), "api_key");
+        assert_eq!(sanitize_profile_slug(" A/B "), "a-b");
     }
 }

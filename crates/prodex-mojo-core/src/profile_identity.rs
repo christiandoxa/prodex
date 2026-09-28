@@ -20,6 +20,7 @@ enum ProfileIdentityOperation {
     FindMatch = 8,
     RemoveTargets = 9,
     DeleteHome = 10,
+    SanitizeSlug = 11,
 }
 
 #[repr(C)]
@@ -218,6 +219,14 @@ pub fn profile_name_from_email(value: &str) -> Result<String, MojoError> {
         ProfileIdentityOperation::ProfileName,
         value,
         "profile".len(),
+    )
+}
+
+pub fn sanitize_profile_slug(value: &str) -> Result<String, MojoError> {
+    string_result(
+        ProfileIdentityOperation::SanitizeSlug,
+        value,
+        "api_key".len(),
     )
 }
 
@@ -452,6 +461,16 @@ mod tests {
             profile_name_from_email(" User+Work@example.com ").unwrap(),
             "user-work_example.com"
         );
+        assert_eq!(
+            sanitize_profile_slug("  API_KEY_User@EXAMPLE.com  ").unwrap(),
+            "api_key_user_example.com"
+        );
+        assert_eq!(
+            sanitize_profile_slug("雪@EXAMPLE.com").unwrap(),
+            "example.com"
+        );
+        assert_eq!(sanitize_profile_slug("...").unwrap(), "api_key");
+        assert_eq!(sanitize_profile_slug(" A/B ").unwrap(), "a-b");
         assert_eq!(
             canonical_profile_identity_key(Some(" acct "), Some(" User@Example.COM ")).unwrap(),
             Some("account:acct|email:user@example.com".to_string())

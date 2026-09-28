@@ -3267,3 +3267,12 @@ the authoritative Mojo casefold-contains relation. The Rust alias/descriptor/def
 manifest tables and lowercase error classifier were deleted. Rust retains filesystem/PATH
 discovery, process probes, semver parsing/comparison, hashing, health DTOs, and strict
 FFI-to-enum/capability decoding; there is no Rust semantic fallback.
+
+
+## Login profile slug sanitizer migration
+
+Login/API-key profile slug sanitization now runs in the existing profile_identity.mojo
+owner. Mojo owns trim, ASCII lowercase, allowed-character preservation, @ to underscore,
+one-dash-per-Unicode-scalar replacement, leading/trailing separator trimming, and the
+api_key fallback. The Rust sanitizer implementation was deleted; Rust retains URL/host
+acquisition, profile-name availability checks, suffix search, and filesystem state.
