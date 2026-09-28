@@ -1,4 +1,7 @@
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::super_provider_config::{
+    ProfileImportSourceClass, profile_import_source_class,
+};
 use std::path::Path;
 
 use super::import_export::{
@@ -18,9 +21,11 @@ use crate::{
 
 pub(super) fn is_claude_import_source(path: &Path) -> bool {
     path.components().count() == 1
-        && path
-            .to_str()
-            .is_some_and(|value| value.eq_ignore_ascii_case("claude"))
+        && path.to_str().is_some_and(|value| {
+            profile_import_source_class(value)
+                .expect("profile import source classifier should accept Rust strings")
+                == Some(ProfileImportSourceClass::Claude)
+        })
         && !path.exists()
 }
 

@@ -3119,3 +3119,12 @@ Copilot/Kiro external dynamic catalog lookup now reuses the exact non-trimming M
 catalog resolver for launch-model context lookup and per-entry metadata selection. The
 two Rust eq_ignore_ascii_case scans were deleted. Rust retains catalog-file parsing,
 context-window arithmetic, provider metadata fallback, and final JSON materialization.
+
+
+## Built-in profile import source migration
+
+Exact case-insensitive classification for the built-in claude, copilot, and kiro
+profile import source names now lives in super_provider_config.mojo. The three Rust
+eq_ignore_ascii_case copies were deleted. The classifier deliberately does not trim
+input, preserving the previous path-component contract; Rust retains one-component
+path validation, path existence checks, and provider-specific import execution.

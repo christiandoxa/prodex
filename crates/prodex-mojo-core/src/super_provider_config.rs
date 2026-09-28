@@ -25,6 +25,13 @@ pub enum RuntimeExternalProviderClass {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileImportSourceClass {
+    Claude,
+    Copilot,
+    Kiro,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeModelProviderClass {
     Local,
     DeepSeek,
@@ -50,6 +57,8 @@ unsafe extern "C" {
         address: u64,
         length: i64,
     ) -> i64;
+
+    fn prodex_profile_import_source_class_v1(abi_version: i64, address: u64, length: i64) -> i64;
 
     fn prodex_runtime_model_provider_class_v1(abi_version: i64, address: u64, length: i64) -> i64;
 
@@ -152,6 +161,26 @@ pub fn runtime_external_provider_class(
         5 => Ok(Some(RuntimeExternalProviderClass::Kiro)),
         6 => Ok(Some(RuntimeExternalProviderClass::GeminiNative)),
         7 => Ok(Some(RuntimeExternalProviderClass::Antigravity)),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn profile_import_source_class(
+    value: &str,
+) -> Result<Option<ProfileImportSourceClass>, MojoError> {
+    let result = unsafe {
+        prodex_profile_import_source_class_v1(
+            ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            signed_len(value)?,
+        )
+    };
+    match result {
+        -1 => Ok(None),
+        -2 => Err(MojoError::InvalidInput),
+        0 => Ok(Some(ProfileImportSourceClass::Claude)),
+        1 => Ok(Some(ProfileImportSourceClass::Copilot)),
+        2 => Ok(Some(ProfileImportSourceClass::Kiro)),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -364,6 +393,20 @@ mod tests {
         );
         assert_eq!(runtime_external_provider_class(" gemini ").unwrap(), None);
         assert_eq!(runtime_external_provider_class("unknown").unwrap(), None);
+        assert_eq!(
+            profile_import_source_class("CLAUDE").unwrap(),
+            Some(ProfileImportSourceClass::Claude)
+        );
+        assert_eq!(
+            profile_import_source_class("copilot").unwrap(),
+            Some(ProfileImportSourceClass::Copilot)
+        );
+        assert_eq!(
+            profile_import_source_class("Kiro").unwrap(),
+            Some(ProfileImportSourceClass::Kiro)
+        );
+        assert_eq!(profile_import_source_class(" claude ").unwrap(), None);
+        assert_eq!(profile_import_source_class("github-copilot").unwrap(), None);
         assert_eq!(
             runtime_model_provider_class("PRODEX-GEMINI").unwrap(),
             Some(RuntimeModelProviderClass::Gemini)

@@ -1,5 +1,8 @@
 use anyhow::{Context, Result, bail};
 use dirs::home_dir;
+use prodex_mojo_core::super_provider_config::{
+    ProfileImportSourceClass, profile_import_source_class,
+};
 use reqwest::blocking::Client;
 use std::env;
 use std::fmt;
@@ -57,9 +60,11 @@ impl fmt::Debug for CopilotImportContext {
 
 pub(super) fn is_copilot_import_source(path: &Path) -> bool {
     path.components().count() == 1
-        && path
-            .to_str()
-            .is_some_and(|value| value.eq_ignore_ascii_case("copilot"))
+        && path.to_str().is_some_and(|value| {
+            profile_import_source_class(value)
+                .expect("profile import source classifier should accept Rust strings")
+                == Some(ProfileImportSourceClass::Copilot)
+        })
         && !path.exists()
 }
 
