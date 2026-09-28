@@ -1,6 +1,6 @@
 use super::{
     RuntimeLaunchRequest, RuntimeLaunchSelection, active_profile_selection_order,
-    resolve_runtime_launch_profile_name,
+    resolve_runtime_launch_profile_name, runtime_external_provider_class,
 };
 use crate::{
     AppState, KIRO_MODEL_CATALOG_FILE, ProfileProvider, RuntimeAnthropicOAuthProfileAuth,
@@ -10,6 +10,7 @@ use crate::{
     resolve_copilot_runtime_api_auth, resolve_profile_name, write_copilot_runtime_model_catalog,
 };
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::super_provider_config::RuntimeExternalProviderClass;
 use redaction::redaction_redact_secret_like_text;
 
 pub(crate) fn resolve_gemini_runtime_launch_profile_name(
@@ -244,24 +245,25 @@ fn runtime_external_provider_matches_profile(
     external_provider: &str,
     profile_provider: &ProfileProvider,
 ) -> bool {
-    if external_provider.eq_ignore_ascii_case("gemini") {
-        return matches!(profile_provider, ProfileProvider::Gemini { .. });
-    }
-    if external_provider.eq_ignore_ascii_case("anthropic")
-        || external_provider.eq_ignore_ascii_case("claude")
-    {
-        return matches!(profile_provider, ProfileProvider::Anthropic { .. });
-    }
-    if external_provider.eq_ignore_ascii_case("copilot")
-        || external_provider.eq_ignore_ascii_case("github-copilot")
-        || external_provider.eq_ignore_ascii_case("github_copilot")
-    {
-        return matches!(profile_provider, ProfileProvider::Copilot { .. });
-    }
-    if external_provider.eq_ignore_ascii_case("kiro") {
-        return matches!(profile_provider, ProfileProvider::Kiro { .. });
-    }
-    false
+    matches!(
+        (
+            runtime_external_provider_class(external_provider),
+            profile_provider
+        ),
+        (
+            Some(RuntimeExternalProviderClass::Gemini),
+            ProfileProvider::Gemini { .. }
+        ) | (
+            Some(RuntimeExternalProviderClass::Anthropic),
+            ProfileProvider::Anthropic { .. }
+        ) | (
+            Some(RuntimeExternalProviderClass::Copilot),
+            ProfileProvider::Copilot { .. }
+        ) | (
+            Some(RuntimeExternalProviderClass::Kiro),
+            ProfileProvider::Kiro { .. }
+        )
+    )
 }
 
 fn runtime_copilot_combined_model_catalog(
