@@ -1,3 +1,4 @@
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use serde_json::{Value, json};
 
 pub(crate) fn gemini_media_content_item_from_part(part: &Value) -> Option<Value> {
@@ -129,22 +130,46 @@ fn gemini_data_url_parts(text: &str) -> Option<(&str, &str)> {
 }
 
 fn gemini_mime_type_for_uri(uri: &str) -> &str {
-    match uri
-        .rsplit('.')
-        .next()
-        .unwrap_or_default()
-        .to_ascii_lowercase()
-        .as_str()
-    {
-        "png" => "image/png",
-        "jpg" | "jpeg" => "image/jpeg",
-        "gif" => "image/gif",
-        "webp" => "image/webp",
-        "mp3" => "audio/mpeg",
-        "wav" => "audio/wav",
-        "mp4" => "video/mp4",
-        "mov" => "video/quicktime",
-        "pdf" => "application/pdf",
-        _ => "application/octet-stream",
+    let extension = uri.rsplit('.').next().unwrap_or_default();
+    let is = |candidate| {
+        ascii_casefold_equal_exact(extension, candidate)
+            .expect("Mojo Gemini response-media extension comparison failed")
+    };
+    if is("png") {
+        "image/png"
+    } else if is("jpg") || is("jpeg") {
+        "image/jpeg"
+    } else if is("gif") {
+        "image/gif"
+    } else if is("webp") {
+        "image/webp"
+    } else if is("mp3") {
+        "audio/mpeg"
+    } else if is("wav") {
+        "audio/wav"
+    } else if is("mp4") {
+        "video/mp4"
+    } else if is("mov") {
+        "video/quicktime"
+    } else if is("pdf") {
+        "application/pdf"
+    } else {
+        "application/octet-stream"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_response_media_mime_casefold_uses_mojo_identity() {
+        assert_eq!(gemini_mime_type_for_uri("IMAGE.PNG"), "image/png");
+        assert_eq!(gemini_mime_type_for_uri("photo.JpEg"), "image/jpeg");
+        assert_eq!(gemini_mime_type_for_uri("movie.MOV"), "video/quicktime");
+        assert_eq!(
+            gemini_mime_type_for_uri("archive.unknown"),
+            "application/octet-stream"
+        );
     }
 }

@@ -3235,3 +3235,13 @@ base64 detection, URI MIME suffixes, Code Assist help/domain/trusted-host matchi
 Smart Context application/json content-type recognition now delegate to Mojo. Rust
 retains JSON/URL/header acquisition, historical trim/split behavior, and result mapping;
 no lowercase semantic fallback remains in these migrated paths.
+
+
+## Provider quota, media, and Presidio casefold cleanup
+
+Session-memory auto/default aliases, Gemini quota/rate-limit/terminal-quota codes, and
+Gemini response-media extension mapping now use the authoritative exact ASCII-casefold
+Mojo primitive. Presidio timeout, concurrency, and malformed-response text classification
+uses the Mojo contains relation. The Rust lowercase/match tables were deleted while
+caller-owned trim, JSON/error acquisition, numeric parsing, and output-label mapping stay
+in Rust. Mixed-case and whitespace regressions pass with no Rust semantic fallback.

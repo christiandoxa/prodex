@@ -6,6 +6,7 @@ use crate::runtime_proxy_log;
 use crate::runtime_state_shared::RuntimeRotationProxyShared;
 use anyhow::{Result, anyhow};
 use prodex_domain::{FindingKind, InspectionCoverage, InspectionFinding};
+use prodex_mojo_core::rich::ascii_casefold_contains;
 use prodex_observability::{
     InspectionCoverageClass, InspectionFindingCategory, InspectionMaskingAction,
     InspectionMetricPlan, InspectionOutcome, InspectionStage, plan_inspection_metric,
@@ -61,7 +62,8 @@ pub(super) fn runtime_inspection_error_outcome(error: &anyhow::Error) -> Inspect
         cause
             .downcast_ref::<reqwest::Error>()
             .is_some_and(reqwest::Error::is_timeout)
-    }) || error.to_string().to_ascii_lowercase().contains("timeout")
+    }) || ascii_casefold_contains(&error.to_string(), "timeout")
+        .expect("Mojo Presidio timeout-text comparison failed")
     {
         InspectionOutcome::Timeout
     } else {
@@ -76,13 +78,18 @@ pub(super) fn runtime_inspection_failure_type(error: &anyhow::Error) -> &'static
     ) {
         return "timeout";
     }
-    let message = error.to_string().to_ascii_lowercase();
-    if message.contains("concurrency_limit_reached") {
+    let message = error.to_string();
+    if ascii_casefold_contains(&message, "concurrency_limit_reached")
+        .expect("Mojo Presidio concurrency-error comparison failed")
+    {
         return "concurrency_exhaustion";
     }
-    if message.contains("failed to parse presidio")
-        || message.contains("separator count")
-        || message.contains("finding count exceeded")
+    if ascii_casefold_contains(&message, "failed to parse presidio")
+        .expect("Mojo Presidio parse-error comparison failed")
+        || ascii_casefold_contains(&message, "separator count")
+            .expect("Mojo Presidio separator-error comparison failed")
+        || ascii_casefold_contains(&message, "finding count exceeded")
+            .expect("Mojo Presidio finding-count comparison failed")
     {
         return "malformed_response";
     }

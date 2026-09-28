@@ -1,5 +1,7 @@
 //! Gemini retry-delay parsing.
 
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+
 #[path = "retry_delay/duration.rs"]
 mod duration;
 
@@ -129,19 +131,27 @@ pub(super) fn gemini_provider_core_object_mentions_quota_limit(
 }
 
 pub(super) fn gemini_provider_core_google_rate_limit_code(code: &str) -> bool {
-    matches!(
-        code.trim().to_ascii_lowercase().as_str(),
-        "rate_limit_exceeded" | "rate_limit_exceeded_error"
-    )
+    let code = code.trim();
+    ["rate_limit_exceeded", "rate_limit_exceeded_error"]
+        .into_iter()
+        .any(|candidate| {
+            ascii_casefold_equal_exact(code, candidate)
+                .expect("Mojo Gemini rate-limit code comparison failed")
+        })
 }
 
 pub(super) fn gemini_provider_core_google_terminal_quota_code(code: &str) -> bool {
-    matches!(
-        code.trim().to_ascii_lowercase().as_str(),
-        "quota_exhausted"
-            | "quota_exceeded"
-            | "resource_exhausted"
-            | "insufficient_g1_credits_balance"
-            | "insufficient_quota"
-    )
+    let code = code.trim();
+    [
+        "quota_exhausted",
+        "quota_exceeded",
+        "resource_exhausted",
+        "insufficient_g1_credits_balance",
+        "insufficient_quota",
+    ]
+    .into_iter()
+    .any(|candidate| {
+        ascii_casefold_equal_exact(code, candidate)
+            .expect("Mojo Gemini terminal-quota code comparison failed")
+    })
 }
