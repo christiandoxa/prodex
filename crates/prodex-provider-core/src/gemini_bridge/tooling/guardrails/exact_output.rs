@@ -8,7 +8,9 @@ use self::commands::{
     gemini_provider_core_tool_command_matches_required,
 };
 use super::tool_text::gemini_provider_core_collect_payload_text;
-use prodex_mojo_core::gemini_guardrails::gemini_command_output_only;
+use prodex_mojo_core::gemini_guardrails::{
+    gemini_command_output_only, gemini_extract_command_output,
+};
 
 pub fn gemini_provider_core_forced_command_output(
     messages: &[serde_json::Value],
@@ -73,22 +75,7 @@ fn gemini_provider_core_command_output_from_tool_message(
 }
 
 fn gemini_provider_core_extract_command_output(text: &str) -> Option<String> {
-    let marker = "Output:\n";
-    let mut output = text
-        .rfind(marker)
-        .map(|index| &text[index + marker.len()..])
-        .unwrap_or(text)
-        .trim();
-    for delimiter in ["\n\ndiff --git ", "\ndiff --git "] {
-        if let Some(diff_index) = output.find(delimiter) {
-            output = output[..diff_index].trim_end();
-            break;
-        }
-    }
-    if output.starts_with("Success. Updated the following files:")
-        || output.starts_with("Success. No files changed.")
-    {
-        return None;
-    }
-    (!output.is_empty()).then(|| output.to_string())
+    gemini_extract_command_output(text)
+        .expect("Mojo Gemini command-output extraction should accept Rust strings")
+        .map(str::to_string)
 }
