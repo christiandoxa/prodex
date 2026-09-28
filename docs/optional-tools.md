@@ -137,8 +137,13 @@ explicit Presidio redaction through its local provider bridge.
 Tool selection remains independent of provider and permissions for the
 individual typed Super tool flags. The
 `prodex s` / `prodex super` shortcut is intentionally different: it is the YOLO
-entrypoint, applies Codex approval/sandbox overrides, marks the current workspace trusted only for that invocation, and pre-trusts discovered hooks by their exact Codex hook hash. It does not use the global dangerous hook-bypass flag and does not persist the workspace trust override. Interactive launches ask about Presidio unless `--presidio` or
-`--no-presidio` supplies the choice.
+entrypoint, applies Codex approval/sandbox overrides, marks the launch workspace
+trusted only for that invocation, and also pre-trusts canonical persisted session
+workspaces needed by direct UUID resume and Codex `/resume`. It pre-trusts
+discovered hooks by their exact Codex hook hash. It does not use the global
+dangerous hook-bypass flag and does not persist workspace trust. Interactive
+launches ask about Presidio unless `--presidio` or `--no-presidio` supplies the
+choice.
 
 The aliases `prodex caveman`, `prodex rtk`, `prodex playwright`, and `prodex
 ponytail` are retired. Select tools through `prodex super --tool <tool>` or

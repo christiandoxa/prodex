@@ -399,7 +399,11 @@ fn prepare_overlay_launch(
     crate::runtime_launch::emit_runtime_timing("startup.overlay_prepare_ms", stage_started);
     let cleanup = RuntimeOverlayCleanup::new(overlay_home.clone());
     let stage_started = Instant::now();
-    let mut runtime_args = strategy.prepare_runtime_codex_args(&overlay_home, runtime_proxy)?;
+    let mut runtime_args = strategy.prepare_runtime_codex_args(
+        &overlay_home,
+        &prepared.paths.shared_codex_root,
+        runtime_proxy,
+    )?;
     strategy.recovery_model =
         crate::codex_effective_config_value(&overlay_home, &runtime_args, "model")?;
     if let Some(monitor) = strategy.goal_usage_limit_monitor.as_ref() {
