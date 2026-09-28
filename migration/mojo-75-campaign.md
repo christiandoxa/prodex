@@ -2862,3 +2862,22 @@ pass; ownership now reports **99 authoritative operations**. The canonical broad
 source report counts **60,107 Mojo LOC** and **193,359 Rust production LOC**,
 totaling **253,466 LOC**: **23.71% Mojo**. The 75% project target remains unmet,
 with **519,970 additional Mojo LOC** required at the current Rust volume.
+
+## Super-expose dispatch validation migration
+
+Post-header Super-expose dispatch validation now uses the
+prodex_mojo_super_expose_dispatch_validation_v1 entry in the existing
+super_expose.mojo owner. Notification/no-id handling, invalid request-id
+classification, initialize params/protocolVersion requirements, and tools/call
+params/name/arguments shape decisions no longer have Rust semantic copies. Rust
+retains JSON parsing, request-id materialization, MCP header validation ordering,
+audit timing, tool argument allowlist, and exact HTTP/JSON-RPC response
+construction.
+
+Validation passes the direct dispatch decision matrix and 78/78 focused
+Super-expose app tests, plus clippy, full prodex-app check, no-fallback self-test,
+ownership, and authority guards. Ownership now reports **100 authoritative
+operations**. The canonical broad source report counts **60,178 Mojo LOC** and
+**193,424 Rust production LOC**, totaling **253,602 LOC**: **23.73% Mojo**. The
+75% project target remains unmet, with **520,094 additional Mojo LOC** required
+at the current Rust volume.

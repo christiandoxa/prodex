@@ -384,6 +384,86 @@ def super_expose_optional_equal(
     return True
 
 
+
+comptime SUPER_EXPOSE_DISPATCH_OK: Int64 = 0
+comptime SUPER_EXPOSE_DISPATCH_NOTIFICATION_ACCEPTED: Int64 = 1
+comptime SUPER_EXPOSE_DISPATCH_NOTIFICATION_UNSUPPORTED: Int64 = 2
+comptime SUPER_EXPOSE_DISPATCH_INVALID_REQUEST_ID: Int64 = 3
+comptime SUPER_EXPOSE_DISPATCH_INITIALIZE_PARAMS_REQUIRED: Int64 = 4
+comptime SUPER_EXPOSE_DISPATCH_PROTOCOL_VERSION_REQUIRED: Int64 = 5
+comptime SUPER_EXPOSE_DISPATCH_TOOL_PARAMS_REQUIRED: Int64 = 6
+comptime SUPER_EXPOSE_DISPATCH_TOOL_NAME_REQUIRED: Int64 = 7
+comptime SUPER_EXPOSE_DISPATCH_TOOL_ARGUMENTS_OBJECT_REQUIRED: Int64 = 8
+
+
+@export("prodex_mojo_super_expose_dispatch_validation_v1")
+def prodex_mojo_super_expose_dispatch_validation_v1(
+    abi_version: Int64,
+    method_address: UInt,
+    method_length: Int64,
+    has_id_field: Int64,
+    id_valid: Int64,
+    params_is_object: Int64,
+    protocol_version_present: Int64,
+    tool_name_present: Int64,
+    tool_arguments_kind: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        method_length < 0
+        or method_length > SUPER_EXPOSE_MAX_NAME_BYTES
+        or (method_length > 0 and method_address == 0)
+        or (has_id_field != 0 and has_id_field != 1)
+        or (id_valid != 0 and id_valid != 1)
+        or (params_is_object != 0 and params_is_object != 1)
+        or (protocol_version_present != 0 and protocol_version_present != 1)
+        or (tool_name_present != 0 and tool_name_present != 1)
+        or tool_arguments_kind < 0
+        or tool_arguments_kind > 2
+        or output_address == 0
+    ):
+        return 1
+
+    var method = ProdexRichStringView(method_address, UInt(method_length))
+    if not rich_view_valid(method, SUPER_EXPOSE_MAX_NAME_BYTES):
+        return 2
+
+    var decision = SUPER_EXPOSE_DISPATCH_OK
+    if has_id_field == 0:
+        decision = (
+            SUPER_EXPOSE_DISPATCH_NOTIFICATION_ACCEPTED
+            if (
+                rich_view_matches_literal["notifications/initialized"](method, False)
+                or rich_view_matches_literal["notifications/cancelled"](method, False)
+            )
+            else SUPER_EXPOSE_DISPATCH_NOTIFICATION_UNSUPPORTED
+        )
+    elif id_valid == 0:
+        decision = SUPER_EXPOSE_DISPATCH_INVALID_REQUEST_ID
+    else:
+        var method_kind = super_expose_method(method)
+        if method_kind == SUPER_EXPOSE_METHOD_INITIALIZE:
+            if params_is_object == 0:
+                decision = SUPER_EXPOSE_DISPATCH_INITIALIZE_PARAMS_REQUIRED
+            elif protocol_version_present == 0:
+                decision = SUPER_EXPOSE_DISPATCH_PROTOCOL_VERSION_REQUIRED
+        elif method_kind == SUPER_EXPOSE_METHOD_TOOLS_CALL:
+            if params_is_object == 0:
+                decision = SUPER_EXPOSE_DISPATCH_TOOL_PARAMS_REQUIRED
+            elif tool_name_present == 0:
+                decision = SUPER_EXPOSE_DISPATCH_TOOL_NAME_REQUIRED
+            elif tool_arguments_kind == 2:
+                decision = SUPER_EXPOSE_DISPATCH_TOOL_ARGUMENTS_OBJECT_REQUIRED
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = decision
+    return 0
+
+
 @export("prodex_mojo_super_expose_protocol_version_supported_v1")
 def prodex_mojo_super_expose_protocol_version_supported_v1(
     abi_version: Int64,
