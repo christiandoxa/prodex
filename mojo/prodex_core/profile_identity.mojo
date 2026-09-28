@@ -20,6 +20,7 @@ comptime PROFILE_IDENTITY_OTHER_EMAIL_NAME: Int64 = 7
 comptime PROFILE_IDENTITY_FIND_MATCH: Int64 = 8
 comptime PROFILE_IDENTITY_REMOVE_TARGETS: Int64 = 9
 comptime PROFILE_IDENTITY_DELETE_HOME: Int64 = 10
+comptime PROFILE_IDENTITY_SANITIZE_SLUG: Int64 = 11
 
 comptime PROFILE_PRIMARY_PRESENT: Int64 = 1
 comptime PROFILE_SECONDARY_PRESENT: Int64 = 2
@@ -147,11 +148,12 @@ def profile_normalized_equal(
     return True
 
 
-def profile_name_from_email(
+def profile_sanitize_slug(
     view: ProdexRichStringView,
     output: Pointer[mut=True, UInt8, _],
     capacity: Int64,
     written: Pointer[mut=True, Int64, _],
+    fallback: StringSlice,
 ) -> Bool:
     var bounds = rich_trim_bounds(view)
     var source = rich_view_ptr(view)
@@ -192,15 +194,28 @@ def profile_name_from_email(
 
     if lower == upper:
         written[] = output_start
-        return profile_write_literal(
-            output, capacity, written, StringSlice("profile")
-        )
+        return profile_write_literal(output, capacity, written, fallback)
 
     var length = upper - lower
     for offset in range(length):
         output[unsafe_offset=output_start + offset] = output[unsafe_offset=lower + offset]
     written[] = output_start + length
     return True
+
+
+def profile_name_from_email(
+    view: ProdexRichStringView,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    return profile_sanitize_slug(
+        view,
+        output,
+        capacity,
+        written,
+        StringSlice("profile"),
+    )
 
 
 def profile_name_base_email_derived(
@@ -510,7 +525,7 @@ def prodex_mojo_profile_identity_v1(
         return PROFILE_IDENTITY_ABI
     if (
         operation < 0
-        or operation > PROFILE_IDENTITY_DELETE_HOME
+        or operation > PROFILE_IDENTITY_SANITIZE_SLUG
         or primary_length < 0
         or secondary_length < 0
         or record_count < 0
@@ -680,6 +695,17 @@ def prodex_mojo_profile_identity_v1(
             result[] = 1
         else:
             result[] = 2
+        return PROFILE_IDENTITY_OK
+
+    if operation == PROFILE_IDENTITY_SANITIZE_SLUG:
+        if not profile_sanitize_slug(
+            primary,
+            output,
+            output_capacity,
+            written,
+            StringSlice("api_key"),
+        ):
+            return PROFILE_IDENTITY_CAPACITY
         return PROFILE_IDENTITY_OK
 
     return PROFILE_IDENTITY_INVALID
