@@ -4,7 +4,9 @@ use crate::{
     codex_effective_config_value,
 };
 use anyhow::{Context, Result, bail};
-use prodex_cli::SUPER_GEMINI_PROVIDER_ID;
+use prodex_mojo_core::super_provider_config::{
+    RuntimeModelProviderClass, runtime_model_provider_class,
+};
 use prodex_provider_core::{
     PRODEX_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT as GEMINI_DEFAULT_AUTO_COMPACT_LIMIT,
     PRODEX_GEMINI_DEFAULT_CONTEXT_WINDOW as GEMINI_DEFAULT_CONTEXT_WINDOW,
@@ -105,8 +107,13 @@ fn gemini_provider_codex_args(
 
 fn gemini_provider_enabled(codex_home: &Path, user_args: &[OsString]) -> Result<bool> {
     Ok(
-        codex_effective_config_value(codex_home, user_args, "model_provider")?
-            .is_some_and(|provider| provider.eq_ignore_ascii_case(SUPER_GEMINI_PROVIDER_ID)),
+        codex_effective_config_value(codex_home, user_args, "model_provider")?.is_some_and(
+            |provider| {
+                runtime_model_provider_class(&provider)
+                    .expect("runtime model-provider classification should accept Rust strings")
+                    == Some(RuntimeModelProviderClass::Gemini)
+            },
+        ),
     )
 }
 

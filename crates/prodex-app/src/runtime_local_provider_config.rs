@@ -6,7 +6,9 @@ use crate::{
 use anyhow::{Context, Result};
 use prodex_cli::{
     SUPER_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_DEFAULT_CONTEXT_WINDOW, SUPER_DEFAULT_LOCAL_MODEL,
-    SUPER_LOCAL_PROVIDER_ID,
+};
+use prodex_mojo_core::super_provider_config::{
+    RuntimeModelProviderClass, runtime_model_provider_class,
 };
 use serde_json::json;
 use std::ffi::OsString;
@@ -88,8 +90,13 @@ fn local_provider_catalog_codex_args(
 
 fn local_provider_enabled(codex_home: &Path, user_args: &[OsString]) -> Result<bool> {
     Ok(
-        codex_effective_config_value(codex_home, user_args, "model_provider")?
-            .is_some_and(|provider| provider.eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID)),
+        codex_effective_config_value(codex_home, user_args, "model_provider")?.is_some_and(
+            |provider| {
+                runtime_model_provider_class(&provider)
+                    .expect("runtime model-provider classification should accept Rust strings")
+                    == Some(RuntimeModelProviderClass::Local)
+            },
+        ),
     )
 }
 

@@ -1,6 +1,5 @@
 use super::{
-    ExternalQuotaDetail, ExternalQuotaInfo, ProfileProvider, SUPER_ANTHROPIC_PROVIDER_ID,
-    SUPER_DEEPSEEK_PROVIDER_ID, SUPER_LOCAL_PROVIDER_ID, build_upstream_blocking_http_client,
+    ExternalQuotaDetail, ExternalQuotaInfo, ProfileProvider, build_upstream_blocking_http_client,
     first_line_of_error, format_response_body, quota_error_message,
     refresh_claude_oauth_secret_if_needed,
 };
@@ -11,6 +10,9 @@ use crate::{
 use crate::{RUNTIME_PROXY_BUFFERED_RESPONSE_MAX_BYTES, read_blocking_response_body_with_limit};
 use anyhow::{Context, Result, bail};
 use codex_config::codex_non_openai_model_provider;
+use prodex_mojo_core::super_provider_config::{
+    RuntimeModelProviderClass, runtime_model_provider_class,
+};
 use std::env;
 use std::path::Path;
 use std::process::Command;
@@ -236,19 +238,19 @@ pub(super) fn custom_model_provider_quota_info(
 }
 
 fn custom_model_provider_display_name(provider_id: &str) -> String {
-    if provider_id.eq_ignore_ascii_case(SUPER_LOCAL_PROVIDER_ID) {
-        "Local OpenAI-compatible".to_string()
-    } else if provider_id.eq_ignore_ascii_case(SUPER_DEEPSEEK_PROVIDER_ID) {
-        "DeepSeek".to_string()
-    } else if provider_id.eq_ignore_ascii_case(SUPER_ANTHROPIC_PROVIDER_ID) {
-        "Anthropic Claude".to_string()
-    } else if provider_id.eq_ignore_ascii_case("amazon-bedrock")
-        || provider_id.eq_ignore_ascii_case("amazon-bedrock-runtime")
-        || provider_id.eq_ignore_ascii_case("bedrock")
+    match runtime_model_provider_class(provider_id)
+        .expect("runtime model-provider classification should accept Rust strings")
     {
-        "Amazon Bedrock".to_string()
-    } else {
-        format!("Custom provider ({provider_id})")
+        Some(RuntimeModelProviderClass::Local) => "Local OpenAI-compatible".to_string(),
+        Some(RuntimeModelProviderClass::DeepSeek) => "DeepSeek".to_string(),
+        Some(RuntimeModelProviderClass::Anthropic) => "Anthropic Claude".to_string(),
+        _ if provider_id.eq_ignore_ascii_case("amazon-bedrock")
+            || provider_id.eq_ignore_ascii_case("amazon-bedrock-runtime")
+            || provider_id.eq_ignore_ascii_case("bedrock") =>
+        {
+            "Amazon Bedrock".to_string()
+        }
+        _ => format!("Custom provider ({provider_id})"),
     }
 }
 
