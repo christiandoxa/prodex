@@ -146,11 +146,11 @@ def parse_uint(address: UInt, start: Int64, end: Int64) -> Int64:
         if not ascii_digit(byte):
             return -1
         var digit = Int64(byte) - 48
-        if value > 0x7FFFFFFFFFFFFFFF // 10:
+        if value > 0x7FFFFFFFFFFFFFFF // 10 or (
+            value == 0x7FFFFFFFFFFFFFFF // 10 and digit > 7
+        ):
             return -1
         value = value * 10 + digit
-        if value < 0:
-            return -1
     return value
 
 def parse_ranges(
