@@ -3128,3 +3128,13 @@ profile import source names now lives in super_provider_config.mojo. The three R
 eq_ignore_ascii_case copies were deleted. The classifier deliberately does not trim
 input, preserving the previous path-component contract; Rust retains one-component
 path validation, path existence checks, and provider-specific import execution.
+
+
+## Runtime OpenAI model policy migration
+
+OpenAI runtime provider-name recognition, large-context model-family classification,
+and max-context-window preference now use one scalar-policy entry in
+super_provider_config.mojo. Models-cache slug/id lookup now reuses the authoritative
+trimmed rich-catalog resolver. The previous Rust lowercase/prefix tables and manual
+case-insensitive cache scan were deleted. Rust retains config/file acquisition, JSON
+projection, numeric context-window extraction, and Codex override materialization.

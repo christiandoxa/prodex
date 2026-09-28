@@ -138,6 +138,40 @@ def prodex_profile_import_source_class_v1(
     return -1
 
 
+@export("prodex_runtime_openai_scalar_policy_v1")
+def prodex_runtime_openai_scalar_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if abi_version != SUPER_PROVIDER_CONFIG_ABI_VERSION:
+        return -2
+    if operation < 0 or operation > 2 or not config_valid_view(address, length):
+        return -2
+    var view = config_view(address, length)
+    var bounds = rich_trim_bounds(view)
+    if operation == 0:
+        return Int64(config_range_equals["openai"](view, bounds[0], bounds[1]))
+    if operation == 1:
+        if bounds[1] - bounds[0] >= 5 and config_range_equals["gpt-5"](
+            view, bounds[0], bounds[0] + 5
+        ):
+            return 1
+        return Int64(
+            config_range_equals["gpt-6-sol"](view, bounds[0], bounds[1])
+            or config_range_equals["gpt-6-luna"](view, bounds[0], bounds[1])
+            or config_range_equals["codex-auto-review"](view, bounds[0], bounds[1])
+        )
+    return Int64(
+        config_range_equals["gpt-5.6-sol"](view, bounds[0], bounds[1])
+        or config_range_equals["gpt-5.6-terra"](view, bounds[0], bounds[1])
+        or config_range_equals["gpt-5.6-luna"](view, bounds[0], bounds[1])
+        or config_range_equals["gpt-6-sol"](view, bounds[0], bounds[1])
+        or config_range_equals["gpt-6-luna"](view, bounds[0], bounds[1])
+    )
+
+
 @export("prodex_runtime_model_provider_class_v1")
 def prodex_runtime_model_provider_class_v1(
     abi_version: Int64,
