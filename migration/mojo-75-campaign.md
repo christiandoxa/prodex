@@ -3256,3 +3256,14 @@ Mojo-backed provider_model_allows_session_memory policy instead of repeating the
 empty/auto/default lowercase table. Rust retains HTTP/body acquisition, UTF-8 checks,
 prefetch routing, header mutation, and model-memory state ownership. Focused quota,
 header, and model-memory regressions pass with no Rust semantic fallback.
+
+
+## Optional-tools policy hard replacement
+
+Optional-tool name/alias classification, descriptor kind/capability policy, Super default
+membership, and current/legacy manifest-tree compatibility now live in the dedicated
+optional_tools_policy.mojo owner. Playwright incompatible-version error recognition reuses
+the authoritative Mojo casefold-contains relation. The Rust alias/descriptor/default/
+manifest tables and lowercase error classifier were deleted. Rust retains filesystem/PATH
+discovery, process probes, semver parsing/comparison, hashing, health DTOs, and strict
+FFI-to-enum/capability decoding; there is no Rust semantic fallback.

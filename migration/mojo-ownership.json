@@ -1012,6 +1012,18 @@
           "gemini_command_normalized_empty_policy",
           "gemini_command_match_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/optional_tools_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "optional_tool_alias_classification",
+          "optional_tool_descriptor_policy",
+          "optional_tool_manifest_tree_compatibility"
+        ]
       }
     ],
     "removed": [
@@ -4141,16 +4153,86 @@
         "crates/prodex-app/src/runtime_proxy/presidio/telemetry.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_precommit.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs"
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+        "crates/prodex-optional-tools/src/optional_tools.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
-      "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching for provider MIME/validation, Smart Context, Presidio telemetry, SSE content types, and buffered rate-limit body markers",
+      "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching across provider/runtime text classification plus optional-tool probe compatibility diagnostics",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo relation coverage preserves Rust starts_with/ends_with/contains empty-needle semantics and 70k exact equality, with Copilot/Gemini caller regressions preserving case and trim behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "header/body/error/URI/JSON acquisition, caller-specific UTF-8 and split/trim rules, routing/prefetch decisions, MIME/outcome mapping, and telemetry labels"
+      "rust_adapter_scope": "caller-owned text acquisition and domain-specific result mapping; Mojo owns ASCII-casefold relation semantics"
+    },
+    {
+      "name": "optional_tool_alias_classification",
+      "domain": "optional-tools/identity",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust trim/lowercase alias parser for optional-tool names and shorthand aliases",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_optional_tool_class_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/optional_tools_policy.mojo",
+      "consumer": "crates/prodex-optional-tools/src/optional_tools.rs",
+      "consumer_marker": "optional_tool_class",
+      "production_consumers": [
+        "crates/prodex-optional-tools/src/optional_tools.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/optional_tools_policy.rs",
+      "rust_owner_before": "case-insensitive caveman/rtk/codebase-memory/playwright/ponytail/presidio alias classification including cbm and playwright shorthand",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo adapter plus optional-tools parsing tests cover canonical names, mixed case, whitespace, shorthand aliases, and unknown values",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "map Mojo policy IDs into the public OptionalToolId enum and preserve stable unknown-tool error text"
+    },
+    {
+      "name": "optional_tool_descriptor_policy",
+      "domain": "optional-tools/descriptor-policy",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust match tables for optional-tool kind, capability sets, and Super default membership",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_optional_tool_descriptor_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/optional_tools_policy.mojo",
+      "consumer": "crates/prodex-optional-tools/src/optional_tools.rs",
+      "consumer_marker": "optional_tool_descriptor_policy",
+      "production_consumers": [
+        "crates/prodex-optional-tools/src/optional_tools.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/optional_tools_policy.rs",
+      "rust_owner_before": "tool-kind/capability descriptor selection and the five-tool Super default set",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo adapter plus descriptor/default-set tests cover every policy shape and Presidio opt-in behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "decode the Mojo kind/capability bitfield into Rust enums and static capability slices; discovery/probing stays host-owned"
+    },
+    {
+      "name": "optional_tool_manifest_tree_compatibility",
+      "domain": "optional-tools/integrity-policy",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust exact comparison against vetted and legacy optional-tool manifest tree digests",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_optional_tool_manifest_tree_supported_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/optional_tools_policy.mojo",
+      "consumer": "crates/prodex-optional-tools/src/optional_tools.rs",
+      "consumer_marker": "optional_tool_manifest_tree_supported",
+      "production_consumers": [
+        "crates/prodex-optional-tools/src/optional_tools.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/optional_tools_policy.rs",
+      "rust_owner_before": "exact current-or-legacy manifest tree compatibility decision",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo adapter and manifest compatibility regression preserve exact case-sensitive current/legacy matching",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrow manifest digest strings and map the Mojo boolean into the existing validation flow"
     }
   ],
   "rust_semantic_reductions": [
