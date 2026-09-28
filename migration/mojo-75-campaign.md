@@ -2898,3 +2898,25 @@ reports **103 authoritative operations**. The canonical broad source report
 counts **60,525 Mojo LOC** and **193,580 Rust production LOC**, totaling
 **254,105 LOC**: **23.82% Mojo**. The 75% project target remains unmet, with
 **520,215 additional Mojo LOC** required at the current Rust volume.
+
+## Runtime broker version guard and log-throughput policy migration
+
+Runtime broker binary identity presence/matching, SHA-first/version-fallback replacement
+reasoning, version mismatch detection, current-identity selection, compatible/deferred/
+replaced guard planning, and prodex --version token parsing now use the existing
+mojo/prodex_core/runtime_broker_continuity.mojo owner. Rust retains DefaultHasher
+broker-key hashing, PathBuf ownership, registry/health/process DTO projection, identity
+cloning, and stable public reason/outcome enums. No Rust fallback semantic copy is retained.
+
+Log throughput counter-reset/append decisions, completed generation output rate, and
+250ms minimum live-stream delta rate now use
+mojo/prodex_core/log_throughput_policy.mojo. Rust retains Instant timestamps, VecDeque
+sample storage/pruning, stream/profile maps, sticky display state, and TUI rendering.
+
+Validation passes the full prodex-runtime-broker suite (32/32), version-guard direct
+adapter fixtures, 26/26 throughput/app tests, the throughput direct kernel fixture,
+clippy, prodex-app check, no-fallback self-test, ownership, and authority guards.
+Ownership now reports **109 authoritative operations**. The canonical broad source
+report counts **60,972 Mojo LOC** and **193,959 Rust production LOC**, totaling
+**254,931 LOC**: **23.92% Mojo**. The 75% project target remains unmet, with
+**520,905 additional Mojo LOC** required at the current Rust volume.

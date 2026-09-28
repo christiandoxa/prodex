@@ -357,3 +357,361 @@ def prodex_runtime_broker_health_key_kind_v1(
     if key_length >= 2 and ptr[0] == 95 and ptr[1] == 95:
         return 0
     return 2
+
+comptime BROKER_ID_VERSION: Int64 = 1
+comptime BROKER_ID_PATH: Int64 = 2
+comptime BROKER_ID_SHA: Int64 = 4
+
+def broker_identity_valid(
+    flags: Int64,
+    version_address: UInt,
+    version_length: Int64,
+    sha_address: UInt,
+    sha_length: Int64,
+) -> Bool:
+    if flags < 0 or flags > 7 or version_length < 0 or sha_length < 0:
+        return False
+    if (flags & BROKER_ID_VERSION) != 0:
+        if not rich_view_valid(broker_view(version_address, version_length), version_length):
+            return False
+    elif version_length != 0:
+        return False
+    if (flags & BROKER_ID_SHA) != 0:
+        if not rich_view_valid(broker_view(sha_address, sha_length), sha_length):
+            return False
+    elif sha_length != 0:
+        return False
+    return True
+
+def broker_equal_bytes(
+    left_address: UInt,
+    left_length: Int64,
+    right_address: UInt,
+    right_length: Int64,
+) -> Bool:
+    if left_length != right_length:
+        return False
+    var left = rich_view_ptr(broker_view(left_address, left_length))
+    var right = rich_view_ptr(broker_view(right_address, right_length))
+    for index in range(left_length):
+        if left[unsafe_offset=index] != right[unsafe_offset=index]:
+            return False
+    return True
+
+def broker_identity_matches(
+    current_flags: Int64,
+    current_version_address: UInt,
+    current_version_length: Int64,
+    current_sha_address: UInt,
+    current_sha_length: Int64,
+    other_flags: Int64,
+    other_version_address: UInt,
+    other_version_length: Int64,
+    other_sha_address: UInt,
+    other_sha_length: Int64,
+) -> Bool:
+    if (current_flags & BROKER_ID_SHA) != 0 and (other_flags & BROKER_ID_SHA) != 0:
+        return broker_equal_bytes(
+            current_sha_address,
+            current_sha_length,
+            other_sha_address,
+            other_sha_length,
+        )
+    if (
+        (current_flags & BROKER_ID_VERSION) != 0
+        and (other_flags & BROKER_ID_VERSION) != 0
+    ):
+        return broker_equal_bytes(
+            current_version_address,
+            current_version_length,
+            other_version_address,
+            other_version_length,
+        )
+    return False
+
+def broker_identity_version_mismatch(
+    current_flags: Int64,
+    current_version_address: UInt,
+    current_version_length: Int64,
+    observed_flags: Int64,
+    observed_version_address: UInt,
+    observed_version_length: Int64,
+) -> Bool:
+    if (
+        (current_flags & BROKER_ID_VERSION) == 0
+        or (observed_flags & BROKER_ID_VERSION) == 0
+    ):
+        return False
+    return not broker_equal_bytes(
+        current_version_address,
+        current_version_length,
+        observed_version_address,
+        observed_version_length,
+    )
+
+def broker_identity_replacement_reason(
+    current_flags: Int64,
+    current_version_address: UInt,
+    current_version_length: Int64,
+    current_sha_address: UInt,
+    current_sha_length: Int64,
+    observed_flags: Int64,
+    observed_version_address: UInt,
+    observed_version_length: Int64,
+    observed_sha_address: UInt,
+    observed_sha_length: Int64,
+) -> Int64:
+    if (
+        (current_flags & BROKER_ID_SHA) != 0
+        and (observed_flags & BROKER_ID_SHA) != 0
+        and not broker_equal_bytes(
+            current_sha_address,
+            current_sha_length,
+            observed_sha_address,
+            observed_sha_length,
+        )
+    ):
+        return 1
+    if (
+        (current_flags & BROKER_ID_VERSION) != 0
+        and (observed_flags & BROKER_ID_VERSION) != 0
+        and not broker_equal_bytes(
+            current_version_address,
+            current_version_length,
+            observed_version_address,
+            observed_version_length,
+        )
+    ):
+        return 2
+    return 3 if observed_flags != 0 else 4
+
+@export("prodex_runtime_broker_identity_policy_v1")
+def prodex_runtime_broker_identity_policy_v1(
+    abi_version: Int64,
+    mode: Int64,
+    left_flags: Int64,
+    left_version_address: UInt,
+    left_version_length: Int64,
+    left_sha_address: UInt,
+    left_sha_length: Int64,
+    right_flags: Int64,
+    right_version_address: UInt,
+    right_version_length: Int64,
+    right_sha_address: UInt,
+    right_sha_length: Int64,
+) abi("C") -> Int64:
+    if abi_version != BROKER_CONTINUITY_ABI_VERSION or mode < 0 or mode > 3:
+        return BROKER_CONTINUITY_INVALID
+    if not broker_identity_valid(
+        left_flags,
+        left_version_address,
+        left_version_length,
+        left_sha_address,
+        left_sha_length,
+    ):
+        return BROKER_CONTINUITY_INVALID
+    if mode != 0 and not broker_identity_valid(
+        right_flags,
+        right_version_address,
+        right_version_length,
+        right_sha_address,
+        right_sha_length,
+    ):
+        return BROKER_CONTINUITY_INVALID
+    if mode == 0:
+        return Int64(left_flags != 0)
+    if mode == 1:
+        return Int64(
+            broker_identity_matches(
+                left_flags,
+                left_version_address,
+                left_version_length,
+                left_sha_address,
+                left_sha_length,
+                right_flags,
+                right_version_address,
+                right_version_length,
+                right_sha_address,
+                right_sha_length,
+            )
+        )
+    if mode == 2:
+        return broker_identity_replacement_reason(
+            left_flags,
+            left_version_address,
+            left_version_length,
+            left_sha_address,
+            left_sha_length,
+            right_flags,
+            right_version_address,
+            right_version_length,
+            right_sha_address,
+            right_sha_length,
+        )
+    return Int64(
+        broker_identity_version_mismatch(
+            left_flags,
+            left_version_address,
+            left_version_length,
+            right_flags,
+            right_version_address,
+            right_version_length,
+        )
+    )
+
+@export("prodex_runtime_broker_guard_plan_v1")
+def prodex_runtime_broker_guard_plan_v1(
+    abi_version: Int64,
+    process_alive: Int64,
+    binary_flags: Int64,
+    binary_version_address: UInt,
+    binary_version_length: Int64,
+    binary_sha_address: UInt,
+    binary_sha_length: Int64,
+    version_flags: Int64,
+    version_version_address: UInt,
+    version_version_length: Int64,
+    version_sha_address: UInt,
+    version_sha_length: Int64,
+    observed_flags: Int64,
+    observed_version_address: UInt,
+    observed_version_length: Int64,
+    observed_sha_address: UInt,
+    observed_sha_length: Int64,
+    active_requests: UInt64,
+    live_leases: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or (process_alive != 0 and process_alive != 1)
+        or output_address == 0
+        or not broker_identity_valid(
+            binary_flags,
+            binary_version_address,
+            binary_version_length,
+            binary_sha_address,
+            binary_sha_length,
+        )
+        or not broker_identity_valid(
+            version_flags,
+            version_version_address,
+            version_version_length,
+            version_sha_address,
+            version_sha_length,
+        )
+        or not broker_identity_valid(
+            observed_flags,
+            observed_version_address,
+            observed_version_length,
+            observed_sha_address,
+            observed_sha_length,
+        )
+    ):
+        return BROKER_CONTINUITY_INVALID
+
+    var use_version = broker_identity_version_mismatch(
+        version_flags,
+        version_version_address,
+        version_version_length,
+        observed_flags,
+        observed_version_address,
+        observed_version_length,
+    )
+
+    var current_flags = binary_flags
+    var current_version_address = binary_version_address
+    var current_version_length = binary_version_length
+    var current_sha_address = binary_sha_address
+    var current_sha_length = binary_sha_length
+    if use_version:
+        current_flags = version_flags
+        current_version_address = version_version_address
+        current_version_length = version_version_length
+        current_sha_address = version_sha_address
+        current_sha_length = version_sha_length
+
+    var outcome: Int64 = 2
+    var reason: Int64 = 0
+    if process_alive == 0 or (
+        observed_flags != 0
+        and broker_identity_matches(
+            current_flags,
+            current_version_address,
+            current_version_length,
+            current_sha_address,
+            current_sha_length,
+            observed_flags,
+            observed_version_address,
+            observed_version_length,
+            observed_sha_address,
+            observed_sha_length,
+        )
+    ):
+        outcome = 0
+    elif active_requests > 0 or live_leases > 0:
+        outcome = 1
+    else:
+        reason = broker_identity_replacement_reason(
+            current_flags,
+            current_version_address,
+            current_version_length,
+            current_sha_address,
+            current_sha_length,
+            observed_flags,
+            observed_version_address,
+            observed_version_length,
+            observed_sha_address,
+            observed_sha_length,
+        )
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = outcome
+    output[unsafe_offset=1] = Int64(use_version)
+    output[unsafe_offset=2] = reason
+    return 0
+
+@export("prodex_runtime_broker_parse_version_v1")
+def prodex_runtime_broker_parse_version_v1(
+    abi_version: Int64,
+    address: UInt,
+    length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or length < 0
+        or (length > 0 and address == 0)
+        or output_address == 0
+    ):
+        return BROKER_CONTINUITY_INVALID
+    var view = broker_view(address, length)
+    if not rich_view_valid(view, length):
+        return BROKER_CONTINUITY_INVALID
+    var ptr = rich_view_ptr(view)
+    var cursor: Int64 = 0
+    while cursor < length and broker_ascii_whitespace(ptr[unsafe_offset=cursor]):
+        cursor += 1
+    var name_start = cursor
+    while cursor < length and not broker_ascii_whitespace(ptr[unsafe_offset=cursor]):
+        cursor += 1
+    var name_end = cursor
+    if not broker_literal_equal(ptr, name_start, name_end, StringSlice("prodex")):
+        return 0
+    while cursor < length and broker_ascii_whitespace(ptr[unsafe_offset=cursor]):
+        cursor += 1
+    var version_start = cursor
+    while cursor < length and not broker_ascii_whitespace(ptr[unsafe_offset=cursor]):
+        cursor += 1
+    var version_end = cursor
+    if version_end <= version_start:
+        return 0
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = version_start
+    output[unsafe_offset=1] = version_end
+    return 1
