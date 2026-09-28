@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use anyhow::{Context, Result};
 
@@ -21,16 +21,45 @@ fn canonical_workspace_alias(_path: &Path) -> Option<PathBuf> {
     None
 }
 
+fn lexical_workspace_alias(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    let mut rooted = false;
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => {
+                normalized.push(prefix.as_os_str());
+                rooted = true;
+            }
+            Component::RootDir => {
+                normalized.push(component.as_os_str());
+                rooted = true;
+            }
+            Component::CurDir => {}
+            Component::Normal(part) => normalized.push(part),
+            Component::ParentDir => match normalized.components().next_back() {
+                Some(Component::Normal(_)) => {
+                    normalized.pop();
+                }
+                Some(Component::ParentDir) | None if !rooted => normalized.push(".."),
+                _ => {}
+            },
+        }
+    }
+    normalized
+}
+
 fn trusted_workspace_candidates(workspace: PathBuf) -> Vec<PathBuf> {
-    let mut candidates = Vec::with_capacity(3);
+    let mut candidates = Vec::with_capacity(4);
+    candidates.push(workspace.clone());
+    let lexical = lexical_workspace_alias(&workspace);
+    if lexical != workspace {
+        candidates.push(lexical);
+    }
     if let Ok(canonical) = workspace.canonicalize() {
         if let Some(alias) = canonical_workspace_alias(&canonical) {
             candidates.push(alias);
         }
         candidates.push(canonical);
-    }
-    if !candidates.contains(&workspace) {
-        candidates.push(workspace);
     }
     candidates
 }
