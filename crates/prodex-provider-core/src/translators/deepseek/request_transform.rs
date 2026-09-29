@@ -8,12 +8,13 @@ use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
 use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
 use serde_json::Value;
 
-type DeepSeekRequestBody = (Vec<u8>, Option<BTreeMap<String, Value>>);
+type DeepSeekRequestPlan = (Vec<u8>, bool, Option<Value>);
 
-fn deepseek_request_body_from_responses(
-    obj: &serde_json::Map<String, Value>,
+fn deepseek_request_plan_from_responses(
     value: &Value,
-) -> Result<DeepSeekRequestBody, String> {
+    turn_state: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<DeepSeekRequestPlan, String> {
     let canonical = serde_json::to_string(value)
         .map_err(|error| format!("DeepSeek request serialization failed: {error}"))?;
     crate::deepseek_bridge::deepseek_provider_core_validate_responses_request_params(
@@ -22,46 +23,62 @@ fn deepseek_request_body_from_responses(
     let user_id = crate::deepseek_bridge::deepseek_provider_core_user_id_from_responses_request(
         value, "DeepSeek",
     )?;
-
-    let mut degraded = None;
-    let response_format_mode = if let Some(response_format) = obj.get("response_format") {
-        match response_format
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("text")
-        {
-            "text" => 0_u64,
-            "json_object" => 1_u64,
-            "json_schema" | "json" | "structured_output" => {
-                degraded = Some({
-                    let mut map = BTreeMap::new();
-                    map.insert("from".to_string(), Value::String("json_schema".to_string()));
-                    map.insert("to".to_string(), Value::String("json_object".to_string()));
-                    map
-                });
-                1_u64
-            }
-            other => {
-                return Err(format!(
-                    "DeepSeek response_format type `{other}` is not supported"
-                ));
-            }
-        }
-    } else {
-        0_u64
-    };
     let instructions = value
         .get("instructions")
         .and_then(Value::as_str)
         .filter(|text| !text.trim().is_empty());
-    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::RawCommonRequest);
+
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::RawCommonRequestPlan);
     input.input = Some(&canonical);
     input.content = user_id.as_deref();
     input.reasoning_content = instructions;
-    input.sequence_number = response_format_mode;
-    let body = prodex_mojo_core::rich::deepseek_kernel(input)
+    input.error_code = turn_state;
+    input.error_message = session_id;
+    let bytes = prodex_mojo_core::rich::deepseek_kernel(input)
         .map_err(|error| format!("DeepSeek request kernel failed: {error:?}"))?;
-    Ok((body, degraded))
+    let plan: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("DeepSeek request plan returned invalid JSON: {error}"))?;
+    let issue = plan
+        .get("issue")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| "DeepSeek request plan omitted issue code".to_string())?;
+    match issue {
+        0 => {}
+        1 => {
+            return Err(
+                "DeepSeek does not expose a compatible parallel_tool_calls=false control"
+                    .to_string(),
+            );
+        }
+        2 => {
+            let detail = plan
+                .get("detail")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            return Err(format!(
+                "DeepSeek response_format type `{detail}` is not supported"
+            ));
+        }
+        other => {
+            return Err(format!(
+                "DeepSeek request plan returned unknown issue code {other}"
+            ));
+        }
+    }
+    let body = plan
+        .get("body")
+        .ok_or_else(|| "DeepSeek request plan omitted body".to_string())?;
+    let body = serde_json::to_vec(body)
+        .map_err(|error| format!("DeepSeek request plan body serialization failed: {error}"))?;
+    let degraded = plan
+        .get("degraded")
+        .and_then(Value::as_bool)
+        .ok_or_else(|| "DeepSeek request plan omitted degradation state".to_string())?;
+    let continuation = plan
+        .get("continuation")
+        .filter(|value| !value.is_null())
+        .cloned();
+    Ok((body, degraded, continuation))
 }
 
 pub(super) fn deepseek_transform_request(
@@ -104,7 +121,7 @@ pub(super) fn deepseek_transform_request(
             );
         }
     };
-    let Some(obj) = value.as_object() else {
+    if !value.is_object() {
         return ProviderTransformResult::rejected(
             provider,
             input.endpoint,
@@ -113,31 +130,22 @@ pub(super) fn deepseek_transform_request(
             "DeepSeek request body must be a JSON object",
         );
     };
-    if matches!(
-        obj.get("parallel_tool_calls").and_then(Value::as_bool),
-        Some(false)
-    ) {
-        return ProviderTransformResult::rejected(
-            provider,
-            input.endpoint,
-            ProviderWireFormat::OpenAiResponses,
-            ProviderWireFormat::OpenAiChatCompletions,
-            "DeepSeek does not expose a compatible parallel_tool_calls=false control",
-        );
-    }
-    let (body, degraded) = match deepseek_request_body_from_responses(obj, &value) {
-        Ok(result) => result,
-        Err(reason) => {
-            return ProviderTransformResult::rejected(
-                provider,
-                input.endpoint,
-                ProviderWireFormat::OpenAiResponses,
-                ProviderWireFormat::OpenAiChatCompletions,
-                reason,
-            );
-        }
-    };
-    let result = if let Some(details) = degraded {
+    let turn_state = input.headers.get("x-codex-turn-state").map(String::as_str);
+    let session_id = input.headers.get("session_id").map(String::as_str);
+    let (body, degraded, continuation) =
+        match deepseek_request_plan_from_responses(&value, turn_state, session_id) {
+            Ok(result) => result,
+            Err(reason) => {
+                return ProviderTransformResult::rejected(
+                    provider,
+                    input.endpoint,
+                    ProviderWireFormat::OpenAiResponses,
+                    ProviderWireFormat::OpenAiChatCompletions,
+                    reason,
+                );
+            }
+        };
+    let result = if degraded {
         ProviderTransformResult::degraded(
             provider,
             input.endpoint,
@@ -145,7 +153,10 @@ pub(super) fn deepseek_transform_request(
             ProviderWireFormat::OpenAiChatCompletions,
             body,
             "DeepSeek degrades JSON schema output to json_object",
-            details,
+            BTreeMap::from([
+                ("from".to_string(), Value::String("json_schema".to_string())),
+                ("to".to_string(), Value::String("json_object".to_string())),
+            ]),
         )
     } else {
         ProviderTransformResult::lossless(
@@ -156,22 +167,10 @@ pub(super) fn deepseek_transform_request(
             body,
         )
     };
-    let mut metadata = serde_json::Map::new();
-    for header in ["x-codex-turn-state", "session_id"] {
-        if let Some(value) = input.headers.get(header) {
-            metadata.insert(header.to_string(), Value::String(value.clone()));
-        }
-    }
-    if let Some(previous) = obj.get("previous_response_id").and_then(Value::as_str) {
-        metadata.insert(
-            "previous_response_id".to_string(),
-            Value::String(previous.to_string()),
-        );
-    }
-    if metadata.is_empty() {
-        result
+    if let Some(continuation) = continuation {
+        result.with_metadata("continuation", continuation)
     } else {
-        result.with_metadata("continuation", Value::Object(metadata))
+        result
     }
 }
 
