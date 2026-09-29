@@ -230,3 +230,117 @@ fn targeted_reconciliation_kills_a_hanging_app_server() {
     assert!(started.elapsed() < std::time::Duration::from_secs(5));
     let _ = fs::remove_dir_all(root);
 }
+
+#[test]
+fn thread_state_lookup_recovers_workspace_without_rollout_file() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-thread-state-workspace-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let workspace = root.join("workspace");
+    fs::create_dir_all(&workspace).unwrap();
+    let session_id = "01900000-0000-7000-8000-000000000071";
+    let database = root.join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute("CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT)", [])
+        .unwrap();
+    connection
+        .execute(
+            "INSERT INTO threads (id, cwd) VALUES (?1, ?2)",
+            rusqlite::params![session_id, workspace.display().to_string()],
+        )
+        .unwrap();
+    drop(connection);
+
+    assert_eq!(
+        super::runtime_thread_workspace_for_session(&root, session_id).as_deref(),
+        Some(workspace.as_path())
+    );
+    assert_eq!(
+        super::runtime_thread_workspace_for_session(&root, "01900000-0000-7000-8000-000000000072"),
+        None
+    );
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn thread_state_lookup_remembers_latest_model_per_provider() {
+    let root = std::env::temp_dir().join(format!(
+        "prodex-thread-state-model-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let database = root.join("state_5.sqlite");
+    let connection = rusqlite::Connection::open(&database).unwrap();
+    connection
+        .execute(
+            "CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                model_provider TEXT,
+                model TEXT,
+                reasoning_effort TEXT,
+                updated_at_ms INTEGER
+            )",
+            [],
+        )
+        .unwrap();
+    for row in [
+        (
+            "openai-old",
+            "prodex-openai-governed-http",
+            "gpt-5.6-sol",
+            Some("high"),
+            10_i64,
+        ),
+        (
+            "gemini-new",
+            "prodex-gemini",
+            "gemini-2.5-pro",
+            Some("medium"),
+            30_i64,
+        ),
+        (
+            "openai-new",
+            "prodex-openai-governed-http",
+            "gpt-6-luna",
+            Some("max"),
+            20_i64,
+        ),
+    ] {
+        connection
+            .execute(
+                "INSERT INTO threads
+                 (id, model_provider, model, reasoning_effort, updated_at_ms)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                rusqlite::params![row.0, row.1, row.2, row.3, row.4],
+            )
+            .unwrap();
+    }
+    drop(connection);
+
+    assert_eq!(
+        super::latest_runtime_thread_model_selection(
+            &root,
+            prodex_provider_core::ProviderId::OpenAi
+        ),
+        Some(("gpt-6-luna".to_string(), Some("max".to_string())))
+    );
+    assert_eq!(
+        super::latest_runtime_thread_model_selection(
+            &root,
+            prodex_provider_core::ProviderId::Gemini
+        ),
+        Some(("gemini-2.5-pro".to_string(), Some("medium".to_string())))
+    );
+    let _ = fs::remove_dir_all(root);
+}

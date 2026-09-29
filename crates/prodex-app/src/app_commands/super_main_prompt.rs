@@ -201,6 +201,11 @@ fn current_main_selection(
 ) -> Option<(String, Option<String>)> {
     let paths = AppPaths::discover().ok()?;
     let codex_home = prodex_core::default_codex_home(&paths).ok()?;
+    if let Some(selection) =
+        crate::runtime_thread_index::latest_runtime_thread_model_selection(&codex_home, provider)
+    {
+        return Some(selection);
+    }
     let mut preference_args = args.clone();
     preference_args.local_model = None;
     match provider {
@@ -519,6 +524,79 @@ mod tests {
                 "future-depth".to_string(),
             ])
         );
+    }
+
+    #[test]
+    fn current_main_selection_remembers_latest_model_per_provider_from_thread_state() {
+        let _env_lock = crate::TestEnvVarGuard::lock();
+        let root = crate::test_temp_root().join(format!(
+            "prodex-super-main-model-memory-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let shared = root.join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        let _home = crate::TestEnvVarGuard::set("PRODEX_HOME", root.to_str().unwrap());
+        let _shared =
+            crate::TestEnvVarGuard::set("PRODEX_SHARED_CODEX_HOME", shared.to_str().unwrap());
+
+        let connection = rusqlite::Connection::open(shared.join("state_5.sqlite")).unwrap();
+        connection
+            .execute(
+                "CREATE TABLE threads (
+                    id TEXT PRIMARY KEY,
+                    model_provider TEXT,
+                    model TEXT,
+                    reasoning_effort TEXT,
+                    updated_at_ms INTEGER
+                )",
+                [],
+            )
+            .unwrap();
+        for row in [
+            (
+                "openai",
+                "prodex-openai-governed-http",
+                "gpt-6-luna",
+                Some("max"),
+                20_i64,
+            ),
+            (
+                "gemini",
+                "prodex-gemini",
+                "gemini-2.5-pro",
+                Some("medium"),
+                30_i64,
+            ),
+        ] {
+            connection
+                .execute(
+                    "INSERT INTO threads
+                     (id, model_provider, model, reasoning_effort, updated_at_ms)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    rusqlite::params![row.0, row.1, row.2, row.3, row.4],
+                )
+                .unwrap();
+        }
+        drop(connection);
+
+        let crate::Commands::Super(args) =
+            crate::parse_cli_command_from(["prodex", "s"]).expect("Super command should parse")
+        else {
+            panic!("expected Super command");
+        };
+        assert_eq!(
+            current_main_selection(&args, prodex_provider_core::ProviderId::OpenAi),
+            Some(("gpt-6-luna".to_string(), Some("max".to_string())))
+        );
+        assert_eq!(
+            current_main_selection(&args, prodex_provider_core::ProviderId::Gemini),
+            Some(("gemini-2.5-pro".to_string(), Some("medium".to_string())))
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

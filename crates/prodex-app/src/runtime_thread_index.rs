@@ -1,6 +1,6 @@
 use crate::{AppPaths, ChildProcessPlan};
 use anyhow::{Context, Result, bail};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::ffi::OsStr;
@@ -296,6 +296,138 @@ pub(crate) fn latest_thread_index_state(
     } else {
         LatestThreadIndexState::Unavailable
     }
+}
+
+const THREAD_PREFERENCE_SCAN_LIMIT: usize = 4_096;
+
+fn runtime_thread_state_database_paths(sqlite_home: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = fs::read_dir(sqlite_home) else {
+        return Vec::new();
+    };
+    let mut paths = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let name = path.file_name()?.to_str()?;
+            if !name.starts_with("state_") || !name.ends_with(".sqlite") {
+                return None;
+            }
+            let file_type = entry.file_type().ok()?;
+            (file_type.is_file() && !file_type.is_symlink()).then_some(path)
+        })
+        .collect::<Vec<_>>();
+    paths.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+    paths
+}
+
+fn open_runtime_thread_state_database(path: &Path) -> Option<Connection> {
+    Connection::open_with_flags(
+        path,
+        OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )
+    .ok()
+}
+
+pub(crate) fn runtime_thread_workspace_for_session(
+    sqlite_home: &Path,
+    session_id: &str,
+) -> Option<PathBuf> {
+    let session_id = session_id.trim();
+    if session_id.is_empty() {
+        return None;
+    }
+    let thread_id = format!("thread_{session_id}");
+    for path in runtime_thread_state_database_paths(sqlite_home) {
+        let Some(connection) = open_runtime_thread_state_database(&path) else {
+            continue;
+        };
+        let workspace = connection
+            .query_row(
+                "SELECT cwd FROM threads WHERE id = ?1 OR id = ?2 LIMIT 1",
+                rusqlite::params![session_id, thread_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .flatten()
+            .map(|value| PathBuf::from(value.trim()))
+            .filter(|workspace| workspace.is_absolute());
+        if workspace.is_some() {
+            return workspace;
+        }
+    }
+    None
+}
+
+pub(crate) fn latest_runtime_thread_model_selection(
+    sqlite_home: &Path,
+    provider: prodex_provider_core::ProviderId,
+) -> Option<(String, Option<String>)> {
+    let mut best: Option<(i64, String, Option<String>)> = None;
+    for path in runtime_thread_state_database_paths(sqlite_home) {
+        let Some(connection) = open_runtime_thread_state_database(&path) else {
+            continue;
+        };
+        let mut statement = match connection.prepare(
+            "SELECT model_provider, model, reasoning_effort, updated_at_ms \
+             FROM threads WHERE model IS NOT NULL \
+             ORDER BY updated_at_ms DESC LIMIT ?1",
+        ) {
+            Ok(statement) => statement,
+            Err(_) => match connection.prepare(
+                "SELECT model_provider, model, reasoning_effort, updated_at * 1000 \
+                 FROM threads WHERE model IS NOT NULL \
+                 ORDER BY updated_at DESC LIMIT ?1",
+            ) {
+                Ok(statement) => statement,
+                Err(_) => continue,
+            },
+        };
+        let Ok(rows) = statement.query_map([THREAD_PREFERENCE_SCAN_LIMIT as i64], |row| {
+            Ok((
+                row.get::<_, Option<String>>(0)?,
+                row.get::<_, Option<String>>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, i64>(3).unwrap_or_default(),
+            ))
+        }) else {
+            continue;
+        };
+        for row in rows.flatten() {
+            let (model_provider, model, reasoning_effort, updated_at_ms) = row;
+            let Some(model_provider) = model_provider.as_deref() else {
+                continue;
+            };
+            if prodex_provider_core::provider_implementation_registry()
+                .resolve_model_provider_id(model_provider)
+                != Some(provider)
+            {
+                continue;
+            }
+            let Some(model) = model
+                .as_deref()
+                .map(str::trim)
+                .filter(|model| !model.is_empty())
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            let reasoning_effort = reasoning_effort
+                .as_deref()
+                .map(str::trim)
+                .filter(|effort| !effort.is_empty())
+                .map(str::to_string);
+            if best
+                .as_ref()
+                .is_none_or(|(best_updated, _, _)| updated_at_ms > *best_updated)
+            {
+                best = Some((updated_at_ms, model, reasoning_effort));
+            }
+            break;
+        }
+    }
+    best.map(|(_, model, reasoning_effort)| (model, reasoning_effort))
 }
 
 fn inspect_thread_index_database(
