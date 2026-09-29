@@ -145,15 +145,15 @@ fn gemini_provider_core_shapes_response_stream_events() {
 fn gemini_provider_core_shapes_stream_delta_sources() {
     assert_eq!(
         gemini_provider_core_stream_output_text_item_id(9),
-        "msg_gemini_9"
+        "msg_gemini_00000000-0000-0009-8000-000004800001"
     );
     assert_eq!(
         gemini_provider_core_stream_media_item_id(9),
-        "msg_gemini_media_9"
+        "msg_gemini_media_00000000-0000-0009-8000-000004800002"
     );
     assert_eq!(
         gemini_provider_core_stream_citation_item_id(9),
-        "msg_gemini_citations_9"
+        "msg_gemini_citations_00000000-0000-0009-8000-000004800003"
     );
     assert_eq!(
         gemini_provider_core_stream_fallback_response_id(9),

@@ -964,6 +964,7 @@ dependencies = [
  "keyring",
  "libc",
  "prodex-domain",
+ "prodex-mojo-core",
  "sha2",
  "windows-sys",
  "zeroize",
