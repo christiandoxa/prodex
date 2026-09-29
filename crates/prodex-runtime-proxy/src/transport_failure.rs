@@ -1,3 +1,4 @@
+use prodex_mojo_core::rich::ascii_casefold_contains;
 use std::io;
 
 pub const RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY: u32 = 4;
@@ -106,10 +107,14 @@ const RUNTIME_TRANSPORT_FAILURE_MESSAGE_RULES: &[RuntimeTransportFailureMessageR
 pub fn runtime_transport_failure_kind_from_message(
     message: &str,
 ) -> Option<RuntimeTransportFailureKind> {
-    let message = message.to_ascii_lowercase();
     RUNTIME_TRANSPORT_FAILURE_MESSAGE_RULES
         .iter()
-        .find(|rule| rule.needles.iter().any(|needle| message.contains(needle)))
+        .find(|rule| {
+            rule.needles.iter().any(|needle| {
+                ascii_casefold_contains(message, needle)
+                    .expect("Mojo transport-failure text comparison failed")
+            })
+        })
         .map(|rule| rule.kind)
 }
 

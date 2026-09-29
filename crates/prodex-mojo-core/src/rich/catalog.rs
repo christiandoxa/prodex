@@ -65,6 +65,14 @@ unsafe extern "C" {
         needle_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_mojo_rich_ascii_casefold_find_v1(
+        abi_version: i64,
+        value_address: u64,
+        value_length: i64,
+        needle_address: u64,
+        needle_length: i64,
+        output_offset_address: u64,
+    ) -> i64;
     fn prodex_mojo_rich_catalog_resolve_v1(
         abi_version: i64,
         model_ids: u64,
@@ -308,6 +316,28 @@ pub fn ascii_casefold_ends_with(value: &str, suffix: &str) -> Result<bool, MojoE
 
 pub fn ascii_casefold_contains(value: &str, needle: &str) -> Result<bool, MojoError> {
     ascii_casefold_relation(AsciiCasefoldRelation::Contains, value, needle)
+}
+
+pub fn ascii_casefold_find(value: &str, needle: &str) -> Result<Option<usize>, MojoError> {
+    ensure_rich_abi()?;
+    let mut output_offset = -1_i64;
+    status(unsafe {
+        prodex_mojo_rich_ascii_casefold_find_v1(
+            RICH_ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            needle.as_ptr() as usize as u64,
+            i64::try_from(needle.len()).map_err(|_| MojoError::InvalidInput)?,
+            count_address(&mut output_offset),
+        )
+    })?;
+    match output_offset {
+        -1 => Ok(None),
+        offset if offset >= 0 => usize::try_from(offset)
+            .map(Some)
+            .map_err(|_| MojoError::InvalidOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn resolve_catalog_model(

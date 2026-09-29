@@ -163,6 +163,20 @@ fn rich_ascii_casefold_relations_match_rust_string_contracts() {
 }
 
 #[test]
+fn rich_ascii_casefold_find_returns_rust_compatible_byte_offsets() {
+    let value = "Ω Please TRY Again In 1S.";
+    let expected = value.to_ascii_lowercase().find("try again in");
+    assert_eq!(
+        ascii_casefold_find(value, "try again in").unwrap(),
+        expected
+    );
+    assert_eq!(ascii_casefold_find("abc", "").unwrap(), Some(0));
+    assert_eq!(ascii_casefold_find("abc", "D").unwrap(), None);
+    let large = format!("{}Needle", "x".repeat(70_000));
+    assert_eq!(ascii_casefold_find(&large, "NEEDLE").unwrap(), Some(70_000));
+}
+
+#[test]
 fn rich_catalog_exact_resolver_preserves_untrimmed_identity() {
     let models = [CatalogModel {
         id: "gpt-main",

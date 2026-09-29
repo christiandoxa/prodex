@@ -122,6 +122,27 @@ def catalog_view_contains_folded(
         ):
             return True
     return False
+
+
+def catalog_view_find_folded(
+    value: ProdexRichStringView, needle: ProdexRichStringView
+) -> Int64:
+    if needle.len == 0:
+        return 0
+    if needle.len > value.len:
+        return -1
+    var last = Int64(value.len - needle.len)
+    for start in range(last + 1):
+        if catalog_view_equal_range(
+            value,
+            start,
+            start + Int64(needle.len),
+            needle,
+            0,
+            Int64(needle.len),
+        ):
+            return start
+    return -1
 def catalog_valid_views(
     model_ids: Pointer[mut=False, ProdexRichStringView, _],
     model_count: Int64,
@@ -632,6 +653,41 @@ def prodex_mojo_rich_ascii_casefold_relation_v1(
         unsafe_from_address=Int(output_address)
     )
     output[] = Int64(matched)
+    return RICH_STATUS_OK
+
+
+@export("prodex_mojo_rich_ascii_casefold_find_v1")
+def prodex_mojo_rich_ascii_casefold_find_v1(
+    abi_version: Int64,
+    value_address: UInt,
+    value_length: Int64,
+    needle_address: UInt,
+    needle_length: Int64,
+    output_offset_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if (
+        value_length < 0
+        or needle_length < 0
+        or value_length > CATALOG_MAX_MERGE_QUERY_BYTES
+        or needle_length > CATALOG_MAX_MERGE_QUERY_BYTES
+        or output_offset_address == 0
+        or (value_length > 0 and value_address == 0)
+        or (needle_length > 0 and needle_address == 0)
+    ):
+        return RICH_STATUS_INVALID
+    var value = ProdexRichStringView(value_address, UInt(value_length))
+    var needle = ProdexRichStringView(needle_address, UInt(needle_length))
+    if (
+        not rich_view_valid(value, CATALOG_MAX_MERGE_QUERY_BYTES)
+        or not rich_view_valid(needle, CATALOG_MAX_MERGE_QUERY_BYTES)
+    ):
+        return RICH_STATUS_UTF8
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_offset_address)
+    )
+    output[] = catalog_view_find_folded(value, needle)
     return RICH_STATUS_OK
 
 
