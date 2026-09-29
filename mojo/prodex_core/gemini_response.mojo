@@ -728,6 +728,41 @@ def gemini_put_stream_identifier(
     return gemini_put_byte(writer, 34)
 
 
+def gemini_put_stream_uuid_identifier(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    prefix: StringSlice,
+    request_id: UInt64,
+    salt: UInt64,
+) -> Bool:
+    if not gemini_put_byte(writer, 34) or not gemini_put_literal(writer, prefix):
+        return False
+    var rotated = (request_id << 23) | (request_id >> 41)
+    var low = ((rotated ^ salt) & UInt64(0x3fffffffffffffff)) | UInt64(0x8000000000000000)
+    return (
+        gemini_put_hex_byte(writer, UInt8((request_id >> 56) & 255))
+        and gemini_put_hex_byte(writer, UInt8((request_id >> 48) & 255))
+        and gemini_put_hex_byte(writer, UInt8((request_id >> 40) & 255))
+        and gemini_put_hex_byte(writer, UInt8((request_id >> 32) & 255))
+        and gemini_put_byte(writer, 45)
+        and gemini_put_hex_byte(writer, UInt8((request_id >> 24) & 255))
+        and gemini_put_hex_byte(writer, UInt8((request_id >> 16) & 255))
+        and gemini_put_byte(writer, 45)
+        and gemini_put_hex_byte(writer, UInt8((request_id >> 8) & 255))
+        and gemini_put_hex_byte(writer, UInt8(request_id & 255))
+        and gemini_put_byte(writer, 45)
+        and gemini_put_hex_byte(writer, UInt8((low >> 56) & 255))
+        and gemini_put_hex_byte(writer, UInt8((low >> 48) & 255))
+        and gemini_put_byte(writer, 45)
+        and gemini_put_hex_byte(writer, UInt8((low >> 40) & 255))
+        and gemini_put_hex_byte(writer, UInt8((low >> 32) & 255))
+        and gemini_put_hex_byte(writer, UInt8((low >> 24) & 255))
+        and gemini_put_hex_byte(writer, UInt8((low >> 16) & 255))
+        and gemini_put_hex_byte(writer, UInt8((low >> 8) & 255))
+        and gemini_put_hex_byte(writer, UInt8(low & 255))
+        and gemini_put_byte(writer, 34)
+    )
+
+
 def gemini_put_stream_name(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     name: ProdexRichStringView,
@@ -1495,11 +1530,11 @@ def gemini_write_operation(
     if operation == GEMINI_STREAM_TOOL_CALL:
         return gemini_put_stream_tool_call(writer, input)
     if operation == GEMINI_STREAM_OUTPUT_TEXT_ITEM_ID:
-        return gemini_put_stream_identifier(writer, StringSlice("msg_gemini_"), input.sequence_number, 0, False)
+        return gemini_put_stream_uuid_identifier(writer, StringSlice("msg_gemini_"), input.sequence_number, 1)
     if operation == GEMINI_STREAM_MEDIA_ITEM_ID:
-        return gemini_put_stream_identifier(writer, StringSlice("msg_gemini_media_"), input.sequence_number, 0, False)
+        return gemini_put_stream_uuid_identifier(writer, StringSlice("msg_gemini_media_"), input.sequence_number, 2)
     if operation == GEMINI_STREAM_CITATION_ITEM_ID:
-        return gemini_put_stream_identifier(writer, StringSlice("msg_gemini_citations_"), input.sequence_number, 0, False)
+        return gemini_put_stream_uuid_identifier(writer, StringSlice("msg_gemini_citations_"), input.sequence_number, 3)
     if operation == GEMINI_STREAM_FALLBACK_RESPONSE_ID:
         return gemini_put_stream_identifier(writer, StringSlice("resp_gemini_"), input.sequence_number, 0, False)
     if operation == GEMINI_STREAM_FALLBACK_TOOL_CALL_ID:
