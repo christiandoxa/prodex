@@ -3487,3 +3487,21 @@ production LOC**, totaling **259,948 LOC**: **24.85343222490652% Mojo**. The 75%
 target remains unmet, with **521,420 additional Mojo LOC** required at the current Rust
 volume. The eligible semantic ownership report is **92.92% Mojo (32,756 / 35,250)**;
 that narrower metric does not substitute for the broad 75% project target.
+
+## DeepSeek common request-plan hard replacement
+
+DeepSeek Responses-to-Chat request planning now uses one Mojo-owned common request
+plan for parameter rejection, response-format degradation, final body shaping, and
+continuation metadata projection. Mojo owns the `parallel_tool_calls=false` rejection,
+response-format type classification and JSON-schema-to-json_object degradation flag,
+`previous_response_id` extraction, turn/session metadata inclusion, and the final
+continuation object. Rust retains request JSON acquisition, stable public error text,
+ProviderTransformResult construction, and Serde materialization only; the former Rust
+policy branches and metadata assembly were deleted with no fallback recomputation.
+
+Validation passes direct Mojo object compilation, `cargo fmt`, `git diff --check`,
+focused provider-core Mojo compilation, 8 focused request-transform tests, focused
+Clippy with warnings denied, and the Mojo authority, no-fallback, ownership, and
+production-share guards. The canonical broad report counts **64,744 Mojo LOC** and
+**195,343 Rust production LOC**, totaling **260,087 LOC**: **24.893208810897892% Mojo**.
+The 75% broad project target remains in progress.

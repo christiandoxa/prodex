@@ -47,6 +47,7 @@ pub enum DeepSeekKernelOperation {
     RequestMetadata = 38,
     RawBridgeInputItem = 39,
     ResponseToolCallItem = 40,
+    RawCommonRequestPlan = 41,
 }
 
 #[repr(i64)]
@@ -273,6 +274,7 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::RequestMetadata => 38,
         DeepSeekKernelOperation::RawBridgeInputItem => 39,
         DeepSeekKernelOperation::ResponseToolCallItem => 40,
+        DeepSeekKernelOperation::RawCommonRequestPlan => 41,
     }
 }
 

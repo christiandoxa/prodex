@@ -73,6 +73,7 @@ comptime DEEPSEEK_RAW_COMMON_REQUEST: Int64 = 37
 comptime DEEPSEEK_REQUEST_METADATA: Int64 = 38
 comptime DEEPSEEK_RAW_BRIDGE_INPUT_ITEM: Int64 = 39
 comptime DEEPSEEK_RESPONSE_TOOL_CALL_ITEM: Int64 = 40
+comptime DEEPSEEK_RAW_COMMON_REQUEST_PLAN: Int64 = 41
 comptime DEEPSEEK_JSON_MAX_DEPTH: Int64 = 256
 
 
@@ -2828,6 +2829,8 @@ def deepseek_write_operation(
     var operation = input.operation
     if operation == DEEPSEEK_RAW_COMMON_REQUEST:
         return deepseek_raw_common_request(writer, input)
+    if operation == DEEPSEEK_RAW_COMMON_REQUEST_PLAN:
+        return deepseek_raw_common_request_plan(writer, input)
     if operation == DEEPSEEK_RAW_BRIDGE_INPUT_ITEM:
         return deepseek_raw_bridge_input_item(writer, input)
     if operation == DEEPSEEK_REQUEST_METADATA:
@@ -3098,7 +3101,7 @@ def deepseek_flag_valid(value: Int64) -> Bool:
 def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
     return (
         input.operation >= DEEPSEEK_REQUEST_BODY
-        and input.operation <= DEEPSEEK_RESPONSE_TOOL_CALL_ITEM
+        and input.operation <= DEEPSEEK_RAW_COMMON_REQUEST_PLAN
         and
         deepseek_flag_valid(input.stream)
         and deepseek_flag_valid(input.response_id_present)
@@ -3720,6 +3723,152 @@ def deepseek_raw_common_request(
             writer, StringSlice(',"response_format":{"type":"json_object"}')
         ):
             return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_raw_response_format_plan(
+    view: ProdexRichStringView, root: Array[Int64, 2]
+) -> Array[Int64, 4]:
+    # mode, degraded, unsupported detail start, unsupported detail end
+    var result = Array[Int64, 4](fill=-1)
+    result[0] = DEEPSEEK_RAW_REQUEST_RESPONSE_FORMAT_NONE
+    result[1] = 0
+    var response_format = deepseek_raw_member(
+        view, root, StringSlice("response_format")
+    )
+    if not deepseek_raw_present(response_format) or deepseek_json_byte(
+        view, response_format[0]
+    ) != 123:
+        return result.copy()
+    var kind = deepseek_json_object_member(
+        view, response_format[0], response_format[1], StringSlice("type")
+    )
+    # Historical translator behavior treats absent and wrong-type `type` as text.
+    if not deepseek_json_bounds_is_kind(view, kind, 34):
+        return result.copy()
+    if deepseek_json_raw_equals(
+        view, kind[0], kind[1], StringSlice("text")
+    ):
+        return result.copy()
+    if deepseek_json_raw_equals(
+        view, kind[0], kind[1], StringSlice("json_object")
+    ):
+        result[0] = DEEPSEEK_RAW_REQUEST_RESPONSE_FORMAT_JSON_OBJECT
+        return result.copy()
+    if (
+        deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("json_schema"))
+        or deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("json"))
+        or deepseek_json_raw_equals(
+            view, kind[0], kind[1], StringSlice("structured_output")
+        )
+    ):
+        result[0] = DEEPSEEK_RAW_REQUEST_RESPONSE_FORMAT_JSON_OBJECT
+        result[1] = 1
+        return result.copy()
+    result[0] = 2
+    result[2] = kind[0]
+    result[3] = kind[1]
+    return result.copy()
+
+
+def deepseek_raw_request_plan_continuation(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+    view: ProdexRichStringView,
+    root: Array[Int64, 2],
+) -> Bool:
+    var previous = deepseek_raw_member(
+        view, root, StringSlice("previous_response_id")
+    )
+    var previous_string = deepseek_raw_present(previous) and deepseek_json_byte(
+        view, previous[0]
+    ) == 34
+    if (
+        input.error_code_present == 0
+        and input.error_message_present == 0
+        and not previous_string
+    ):
+        return deepseek_put_literal(writer, StringSlice("null"))
+    if not deepseek_put_byte(writer, 123):
+        return False
+    var first = True
+    if input.error_code_present == 1:
+        if (
+            not deepseek_put_literal(
+                writer, StringSlice('"x-codex-turn-state":')
+            )
+            or not deepseek_put_json_string(writer, input.error_code)
+        ):
+            return False
+        first = False
+    if input.error_message_present == 1:
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        if (
+            not deepseek_put_literal(writer, StringSlice('"session_id":'))
+            or not deepseek_put_json_string(writer, input.error_message)
+        ):
+            return False
+        first = False
+    if previous_string:
+        if not first and not deepseek_put_byte(writer, 44):
+            return False
+        if (
+            not deepseek_put_literal(
+                writer, StringSlice('"previous_response_id":')
+            )
+            or not deepseek_put_view_range(
+                writer, view, previous[0], previous[1]
+            )
+        ):
+            return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_raw_common_request_plan(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.input_present != 1:
+        return False
+    var source = input.input.copy()
+    var root = deepseek_raw_root(source)
+    if root[0] < 0:
+        return False
+
+    var parallel = deepseek_raw_member(
+        source, root, StringSlice("parallel_tool_calls")
+    )
+    if deepseek_raw_present(parallel) and deepseek_json_is_false(source, parallel):
+        return deepseek_put_literal(writer, StringSlice('{"issue":1}'))
+
+    var format = deepseek_raw_response_format_plan(source, root)
+    if format[0] == 2:
+        return (
+            deepseek_put_literal(writer, StringSlice('{"issue":2,"detail":'))
+            and deepseek_put_view_range(writer, source, format[2], format[3])
+            and deepseek_put_byte(writer, 125)
+        )
+
+    var planned = input.copy()
+    planned.sequence_number = UInt64(format[0])
+    if not deepseek_put_literal(writer, StringSlice('{"issue":0,"degraded":')):
+        return False
+    if format[1] == 1:
+        if not deepseek_put_literal(writer, StringSlice("true")):
+            return False
+    elif not deepseek_put_literal(writer, StringSlice("false")):
+        return False
+    if not deepseek_put_literal(writer, StringSlice(',"body":')):
+        return False
+    if not deepseek_raw_common_request(writer, planned):
+        return False
+    if not deepseek_put_literal(writer, StringSlice(',"continuation":')):
+        return False
+    if not deepseek_raw_request_plan_continuation(
+        writer, input, source, root
+    ):
+        return False
     return deepseek_put_byte(writer, 125)
 
 def deepseek_raw_first_member3(
