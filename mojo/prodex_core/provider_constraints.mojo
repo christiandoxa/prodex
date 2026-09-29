@@ -2,6 +2,9 @@ from std.collections import Array
 
 from std.memory import Pointer
 
+from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
+from rich_types import ProdexRichStringView
+
 comptime DECISION_COMPATIBLE: Int64 = 0
 comptime DECISION_ENDPOINT_UNSUPPORTED: Int64 = 1
 comptime DECISION_REQUIRED_CAPABILITY_MISSING: Int64 = 2
@@ -55,6 +58,126 @@ comptime COMBO_OUTPUT_U64_TOTAL: Int64 = 2
 comptime PROVIDER_REASONING_EFFORT_NONE: Int64 = 0
 comptime PROVIDER_REASONING_EFFORT_MINIMAL: Int64 = 1
 comptime PROVIDER_REASONING_EFFORT_UNKNOWN: Int64 = 8
+
+comptime PROVIDER_SCALAR_POLICY_ABI_VERSION: Int64 = 1
+comptime PROVIDER_SCALAR_POLICY_REASONING_EFFORT: Int64 = 0
+comptime PROVIDER_SCALAR_POLICY_COPILOT_PROMPT_LIMIT: Int64 = 1
+comptime PROVIDER_SCALAR_POLICY_BOOLEAN_TOKEN: Int64 = 2
+comptime PROVIDER_SCALAR_POLICY_MAX_BYTES: Int64 = 9_223_372_036_854_775_807
+
+
+def provider_scalar_ascii_lower(value: UInt8) -> UInt8:
+    if value >= 65 and value <= 90:
+        return value + 32
+    return value
+
+
+def provider_scalar_range_equals[literal: StaticString](
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> Bool:
+    if end - start != Int64(literal.byte_length()):
+        return False
+    var source = rich_view_ptr(view)
+    var wanted = literal.unsafe_ptr()
+    for index in range(end - start):
+        if (
+            provider_scalar_ascii_lower(source[unsafe_offset=start + index])
+            != wanted[unsafe_offset=index]
+        ):
+            return False
+    return True
+
+
+@export("prodex_provider_scalar_policy_v1")
+def prodex_provider_scalar_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_SCALAR_POLICY_ABI_VERSION:
+        return -3
+    if (
+        operation < PROVIDER_SCALAR_POLICY_REASONING_EFFORT
+        or operation > PROVIDER_SCALAR_POLICY_BOOLEAN_TOKEN
+        or length < 0
+        or length > PROVIDER_SCALAR_POLICY_MAX_BYTES
+        or (length > 0 and address == 0)
+    ):
+        return -2
+    var view = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(view, PROVIDER_SCALAR_POLICY_MAX_BYTES):
+        return -2
+    var bounds = rich_trim_bounds(view)
+
+    if operation == PROVIDER_SCALAR_POLICY_REASONING_EFFORT:
+        if provider_scalar_range_equals["none"](view, bounds[0], bounds[1]):
+            return 0
+        if provider_scalar_range_equals["minimal"](view, bounds[0], bounds[1]):
+            return 1
+        if provider_scalar_range_equals["low"](view, bounds[0], bounds[1]):
+            return 2
+        if provider_scalar_range_equals["medium"](view, bounds[0], bounds[1]):
+            return 3
+        if provider_scalar_range_equals["high"](view, bounds[0], bounds[1]):
+            return 4
+        if provider_scalar_range_equals["xhigh"](view, bounds[0], bounds[1]):
+            return 5
+        if provider_scalar_range_equals["max"](view, bounds[0], bounds[1]):
+            return 6
+        if provider_scalar_range_equals["ultra"](view, bounds[0], bounds[1]):
+            return 7
+        return 8
+
+    if operation == PROVIDER_SCALAR_POLICY_BOOLEAN_TOKEN:
+        if (
+            provider_scalar_range_equals["1"](view, bounds[0], bounds[1])
+            or provider_scalar_range_equals["true"](view, bounds[0], bounds[1])
+            or provider_scalar_range_equals["yes"](view, bounds[0], bounds[1])
+            or provider_scalar_range_equals["on"](view, bounds[0], bounds[1])
+        ):
+            return 1
+        if (
+            provider_scalar_range_equals["0"](view, bounds[0], bounds[1])
+            or provider_scalar_range_equals["false"](view, bounds[0], bounds[1])
+            or provider_scalar_range_equals["no"](view, bounds[0], bounds[1])
+            or provider_scalar_range_equals["off"](view, bounds[0], bounds[1])
+        ):
+            return 0
+        return -1
+
+    if (
+        provider_scalar_range_equals["auto"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["codex"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["gpt-5.3-codex"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["gpt-5.1-codex"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["gpt-5.1-codex-max"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["gpt-5.1-codex-mini"](view, bounds[0], bounds[1])
+    ):
+        return 272_000
+    if (
+        provider_scalar_range_equals["gpt-5.5"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["gpt-5.4"](view, bounds[0], bounds[1])
+    ):
+        return 922_000
+    if (
+        provider_scalar_range_equals["claude-sonnet-4.6"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["claude-opus-4.8"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["claude-opus-4.7"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["claude-opus-4.6"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["gemini-3.1-pro-preview"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["gemini-3.5-flash"](view, bounds[0], bounds[1])
+    ):
+        return 936_000
+    if (
+        provider_scalar_range_equals["gpt-5-mini"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["gpt-5.4-mini"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["gpt-5.4-nano"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["raptor-mini"](view, bounds[0], bounds[1])
+    ):
+        return 128_000
+    return -1
+
 
 def provider_constraint_endpoint_mask_has(mask: UInt64, endpoint: Int64) -> Bool:
     return mask & (UInt64(1) << UInt64(endpoint)) != 0
