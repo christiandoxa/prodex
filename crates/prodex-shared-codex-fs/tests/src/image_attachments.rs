@@ -707,6 +707,21 @@ fn persist_codex_session_attachment_image_rewrites_to_existing_stable_copy_when_
 }
 
 #[test]
+fn attachment_scanner_accepts_mixed_separator_boundaries() {
+    for path in [
+        r"C:\Users\runner\deleted-overlay/attachments\34d42e43-d282-44e7-8786-74f086b8e151\pasted-text-1.txt",
+        r"C:\Users\runner\deleted-overlay\attachments/34d42e43-d282-44e7-8786-74f086b8e151/image-1.png",
+        r"/tmp/deleted-overlay/attachments\34d42e43-d282-44e7-8786-74f086b8e151\pasted-text-1.txt",
+        r"/tmp/deleted-overlay\attachments/34d42e43-d282-44e7-8786-74f086b8e151/image-1.png",
+    ] {
+        let contents = format!("attachment: {path}\n");
+        let (start, end) = next_codex_session_attachment_path(&contents, 0)
+            .expect("mixed-separator attachment path should be detected");
+        assert_eq!(&contents[start..end], path);
+    }
+}
+
+#[test]
 fn persist_codex_session_attachment_paths_stop_at_escaped_json_newline() {
     let temp_dir = ImageAttachmentTestDir::new("attachment-json-newline");
     let codex_home = temp_dir.path.join("codex-home");

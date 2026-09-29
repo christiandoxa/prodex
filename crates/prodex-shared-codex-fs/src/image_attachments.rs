@@ -6,7 +6,12 @@ const CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 const SESSION_IMAGE_ATTACHMENT_DIR: &str = "image_attachments";
 const SESSION_ATTACHMENT_DIR: &str = "attachments";
-const CODEX_ATTACHMENT_PATH_MARKERS: [&str; 2] = ["/attachments/", "\\attachments\\"];
+const CODEX_ATTACHMENT_PATH_MARKERS: [&str; 4] = [
+    "/attachments/",
+    "/attachments\\",
+    "\\attachments/",
+    "\\attachments\\",
+];
 const CODEX_PASTED_TEXT_PREFIX: &str = "pasted-text-";
 const CODEX_ATTACHMENT_IMAGE_PREFIX: &str = "image-";
 const CODEX_GOAL_OBJECTIVE_FILE: &str = "goal-objective.md";
