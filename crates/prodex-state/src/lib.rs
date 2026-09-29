@@ -1,3 +1,7 @@
+use prodex_mojo_core::profile_identity::{
+    optional_nonempty_trimmed_casefold_equal, optional_trimmed_casefold_equal,
+    optional_trimmed_casefold_wildcard, trimmed_casefold_equal, trimmed_equal,
+};
 use prodex_provider_core::RuntimeProviderBindingIdentity;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -121,7 +125,12 @@ impl ProfileProvider {
                 host: stored_host,
                 login: stored_login,
                 ..
-            } => stored_host.trim() == host.trim() && stored_login.trim() == login.trim(),
+            } => {
+                trimmed_equal(stored_host, host)
+                    .expect("Mojo Copilot host identity comparison failed")
+                    && trimmed_equal(stored_login, login)
+                        .expect("Mojo Copilot login identity comparison failed")
+            }
             Self::Openai
             | Self::Gemini { .. }
             | Self::Anthropic { .. }
@@ -143,9 +152,18 @@ impl ProfileProvider {
                 profile_name: stored_profile_name,
                 ..
             } => {
-                stored_auth_key.trim() == auth_key.trim()
-                    && optional_trimmed_eq(stored_profile_arn.as_deref(), profile_arn)
-                    && optional_trimmed_eq(stored_profile_name.as_deref(), profile_name)
+                trimmed_equal(stored_auth_key, auth_key)
+                    .expect("Mojo Kiro auth-key identity comparison failed")
+                    && optional_nonempty_trimmed_casefold_equal(
+                        stored_profile_arn.as_deref(),
+                        profile_arn,
+                    )
+                    .expect("Mojo Kiro profile-ARN identity comparison failed")
+                    && optional_nonempty_trimmed_casefold_equal(
+                        stored_profile_name.as_deref(),
+                        profile_name,
+                    )
+                    .expect("Mojo Kiro profile-name identity comparison failed")
             }
             Self::Openai
             | Self::Gemini { .. }
@@ -160,7 +178,8 @@ impl ProfileProvider {
             Self::Gemini {
                 email: stored_email,
                 ..
-            } => stored_email.trim().eq_ignore_ascii_case(email.trim()),
+            } => trimmed_casefold_equal(stored_email, email)
+                .expect("Mojo Gemini email identity comparison failed"),
             Self::Openai
             | Self::Anthropic { .. }
             | Self::Copilot { .. }
@@ -175,17 +194,13 @@ impl ProfileProvider {
                 account: stored_account,
                 auth_method: stored_auth_method,
             } => {
-                let account_matches = match (stored_account.as_deref(), account) {
-                    (Some(left), Some(right)) => left.trim().eq_ignore_ascii_case(right.trim()),
-                    (None, None) => true,
-                    _ => false,
-                };
-                let auth_method_matches = match (stored_auth_method.as_deref(), auth_method) {
-                    (Some(left), Some(right)) => left.trim().eq_ignore_ascii_case(right.trim()),
-                    (None, _) => true,
-                    (_, None) => true,
-                };
-                account_matches && auth_method_matches
+                optional_trimmed_casefold_equal(stored_account.as_deref(), account)
+                    .expect("Mojo Anthropic account identity comparison failed")
+                    && optional_trimmed_casefold_wildcard(
+                        stored_auth_method.as_deref(),
+                        auth_method,
+                    )
+                    .expect("Mojo Anthropic auth-method identity comparison failed")
             }
             Self::Openai
             | Self::Gemini { .. }
@@ -193,17 +208,6 @@ impl ProfileProvider {
             | Self::Kiro { .. }
             | Self::Agy { .. } => false,
         }
-    }
-}
-
-fn optional_trimmed_eq(left: Option<&str>, right: Option<&str>) -> bool {
-    match (
-        left.map(str::trim).filter(|value| !value.is_empty()),
-        right.map(str::trim).filter(|value| !value.is_empty()),
-    ) {
-        (Some(left), Some(right)) => left.eq_ignore_ascii_case(right),
-        (None, None) => true,
-        _ => false,
     }
 }
 

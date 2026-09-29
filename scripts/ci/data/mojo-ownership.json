@@ -81,8 +81,12 @@
       "consumer": "crates/prodex-app/src/profile_commands/login/profile_names.rs",
       "consumer_marker": "prodex_mojo_core::profile_identity::sanitize_profile_slug",
       "production_reachability_test": "crates/prodex-app/src/profile_commands/login/profile_names.rs",
-      "rust_owner_before": "profile identity planning plus login-profile slug sanitization: trim, ASCII lowercase, allowed-character mapping, Unicode replacement, separator trimming, and api_key fallback",
-      "rust_adapter_scope": "caller callbacks for unique-name availability and filesystem state remain Rust-owned; profile slug normalization itself is Mojo-authoritative"
+      "rust_owner_before": "profile identity normalization/planning plus Copilot, Kiro, Gemini, and Anthropic stored-profile identity matching with provider-specific trim, casefold, optional-presence, empty-as-absent, and wildcard semantics",
+      "rust_adapter_scope": "JWT and access-token ownership, zeroized secret ownership, caller callbacks for unique-name availability, collection reconstruction, provider enum dispatch, and human-readable error mapping; migrated profile metadata and match relations are Mojo-authoritative",
+      "production_consumers": [
+        "crates/prodex-profile-identity/src/lib.rs",
+        "crates/prodex-state/src/lib.rs"
+      ]
     }
   },
   "classification_legend": {
