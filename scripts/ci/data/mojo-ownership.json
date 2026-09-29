@@ -4058,16 +4058,17 @@
         "crates/prodex-session-store/src/lib.rs",
         "crates/prodex-session-store/src/session_selector.rs",
         "crates/prodex-runtime-launch/src/child.rs",
-        "crates/prodex-runtime-launch/src/profile.rs"
+        "crates/prodex-runtime-launch/src/profile.rs",
+        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/runtime identity, proxy/quota policy, session ID resolution, local-provider identity, and proxy-bypass deduplication",
+      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/runtime identity, proxy/quota policy, session identity, and usage-limit status/type/code classification",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo equality coverage preserves empty strings, mixed case, and whitespace sensitivity, while Super catalog/prompt caller tests preserve selection behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "caller-owned trimming where historically required, Unicode prefix matching where distinct, string/header/session/environment acquisition, iteration, routing and state ownership; Mojo owns exact ASCII-folded equality"
+      "rust_adapter_scope": "caller-owned trimming where historically required, Unicode prefix matching where distinct, string/header/session/environment acquisition, JSON traversal, recovery state, iteration, routing and state ownership; Mojo owns exact ASCII-folded equality"
     },
     {
       "name": "gemini_guardrail_text_classification",
@@ -4209,16 +4210,19 @@
         "crates/prodex-optional-tools/src/optional_tools.rs",
         "crates/prodex-runtime-proxy/src/transport_failure.rs",
         "crates/prodex-app/src/codex_binary.rs",
-        "crates/prodex-runtime-proxy/src/websocket_proxy.rs"
+        "crates/prodex-runtime-proxy/src/websocket_proxy.rs",
+        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
+        "crates/prodex-app/src/runtime_proxy/payload_detection.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
-      "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching across provider/runtime text classification, optional-tool diagnostics, transport failures, Codex binary/shim detection, and no-proxy hostname policy",
+      "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching across provider/runtime text classification, optional-tool diagnostics, transport failures, binary detection, usage-limit messaging, compact error mapping, and token invalidation",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo relation coverage preserves Rust starts_with/ends_with/contains empty-needle semantics and 70k exact equality, with Copilot/Gemini caller regressions preserving case and trim behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "caller-owned text acquisition and domain-specific result mapping; Mojo owns ASCII-casefold relation semantics"
+      "rust_adapter_scope": "caller-owned text acquisition, trim/JSON traversal, recovery state, and domain-specific result mapping; Mojo owns ASCII-casefold relation semantics"
     },
     {
       "name": "optional_tool_alias_classification",

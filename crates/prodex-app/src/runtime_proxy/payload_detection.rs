@@ -4,6 +4,7 @@ use super::{
     runtime_smart_context_normalized_model_name,
 };
 use crate::{RuntimeRotationProxyShared, runtime_proxy_log};
+use prodex_mojo_core::rich::ascii_casefold_contains;
 use prodex_runtime_state::RuntimeRouteKind;
 use redaction::{redaction_redact_json, redaction_redact_secret_like_text};
 use runtime_proxy_crate::{
@@ -32,9 +33,8 @@ pub(crate) fn extract_runtime_proxy_quota_message_from_response_reply(
 }
 
 pub(crate) fn runtime_proxy_body_indicates_token_invalidated(body: &[u8]) -> bool {
-    String::from_utf8_lossy(body)
-        .to_ascii_lowercase()
-        .contains("token invalidated")
+    ascii_casefold_contains(String::from_utf8_lossy(body).as_ref(), "token invalidated")
+        .expect("Mojo token-invalidation comparison failed")
 }
 
 fn runtime_prompt_cache_key_log_label(prompt_cache_key: Option<&str>) -> &'static str {

@@ -11,7 +11,7 @@ use crate::{
     read_blocking_response_body_with_limit,
 };
 use anyhow::{Context, Result, bail};
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+use prodex_mojo_core::rich::{ascii_casefold_contains, ascii_casefold_equal_exact};
 #[cfg(test)]
 use prodex_provider_core::GEMINI_PROVIDER_CORE_LOCAL_COMPACT_SUMMARY_PREFIX;
 use prodex_provider_core::{
@@ -42,22 +42,26 @@ pub(super) fn runtime_compact_reason(err: &anyhow::Error) -> &'static str {
     {
         "unavailable"
     } else {
-        let message = err.to_string().to_ascii_lowercase();
-        if message.contains("timed out") || message.contains("timeout") {
+        let message = err.to_string();
+        let contains = |needle| {
+            ascii_casefold_contains(&message, needle)
+                .expect("Mojo compact error-text comparison failed")
+        };
+        if contains("timed out") || contains("timeout") {
             "timeout"
-        } else if message.contains("unavailable")
-            || message.contains("connection refused")
-            || message.contains("could not connect")
-            || message.contains("failed to spawn")
+        } else if contains("unavailable")
+            || contains("connection refused")
+            || contains("could not connect")
+            || contains("failed to spawn")
         {
             "unavailable"
-        } else if message.contains("unsupported") {
+        } else if contains("unsupported") {
             "unsupported"
-        } else if message.contains("parse")
-            || message.contains("missing")
-            || message.contains("no summary")
-            || message.contains("invalid")
-            || message.contains("unexpectedly returned")
+        } else if contains("parse")
+            || contains("missing")
+            || contains("no summary")
+            || contains("invalid")
+            || contains("unexpectedly returned")
         {
             "invalid-response"
         } else {

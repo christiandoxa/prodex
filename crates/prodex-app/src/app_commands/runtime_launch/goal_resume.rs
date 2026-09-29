@@ -477,8 +477,10 @@ pub(super) fn shared_goal_needs_resume(shared_codex_root: &Path, thread_id: &str
         )
         .optional()?;
     Ok(status.is_some_and(|status| {
-        let normalized = status.trim().to_ascii_lowercase();
-        !matches!(normalized.as_str(), "complete" | "completed")
+        let status = status.trim();
+        !ascii_casefold_equal_exact(status, "complete").expect("Mojo goal-status comparison failed")
+            && !ascii_casefold_equal_exact(status, "completed")
+                .expect("Mojo goal-status comparison failed")
     }))
 }
 
