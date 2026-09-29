@@ -3383,3 +3383,12 @@ invalidation detection now reuse the authoritative rich-catalog ASCII-casefold M
 primitives. The Rust lowercase shadow strings and eq_ignore_ascii_case tables were
 deleted from these production paths. Rust retains JSON traversal, historical trimming,
 recovery state transitions, HTTP/error acquisition, and final domain-specific labels.
+
+
+## Quota render casefold policy cleanup
+
+Quota reset-message marker search, case-insensitive Codex reset-header lookup, and
+unauthorized error classification now reuse the authoritative rich-catalog Mojo
+find/equality/contains primitives. The Rust lowercase shadow string and header
+eq_ignore_ascii_case scan were deleted. Rust retains JSON/time parsing, reset-window
+selection, numeric conversion, and final quota status/detail rendering.

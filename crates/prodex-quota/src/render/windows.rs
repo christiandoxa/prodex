@@ -1,4 +1,7 @@
 use super::*;
+use prodex_mojo_core::rich::{
+    ascii_casefold_contains, ascii_casefold_equal_exact, ascii_casefold_find,
+};
 
 pub fn required_main_window_snapshot(
     usage: &UsageResponse,
@@ -128,7 +131,8 @@ pub fn quota_reset_at_from_message(message: &str) -> Option<i64> {
         return Some(reset_at);
     }
 
-    let marker = message.to_ascii_lowercase().find("try again at ")?;
+    let marker =
+        ascii_casefold_find(message, "try again at ").expect("Mojo retry marker search failed")?;
     let candidate = message
         .get(marker + "try again at ".len()..)?
         .trim()
@@ -231,7 +235,10 @@ fn quota_json_object_i64(value: &serde_json::Value, key: &str) -> Option<i64> {
     let object = value.as_object()?;
     object
         .iter()
-        .find(|(candidate, _)| candidate.eq_ignore_ascii_case(key))
+        .find(|(candidate, _)| {
+            ascii_casefold_equal_exact(candidate, key)
+                .expect("Mojo quota JSON header-name comparison failed")
+        })
         .and_then(|(_, value)| quota_json_i64(value))
 }
 
@@ -508,8 +515,11 @@ pub fn format_blocked_quota_status(blocked: &[BlockedLimit]) -> String {
 }
 
 pub fn format_quota_error_status(error: &str) -> String {
-    let lower = error.to_ascii_lowercase();
-    if lower.contains("401") || lower.contains("unauthorized") {
+    let unauthorized = ascii_casefold_contains(error, "401")
+        .expect("Mojo quota error comparison failed")
+        || ascii_casefold_contains(error, "unauthorized")
+            .expect("Mojo quota error comparison failed");
+    if unauthorized {
         "Blocked unauthorized".to_string()
     } else {
         format!("Error {}", quota_error_summary(error))
@@ -517,8 +527,11 @@ pub fn format_quota_error_status(error: &str) -> String {
 }
 
 pub fn format_quota_error_detail(error: &str) -> String {
-    let lower = error.to_ascii_lowercase();
-    let summary = if lower.contains("401") || lower.contains("unauthorized") {
+    let unauthorized = ascii_casefold_contains(error, "401")
+        .expect("Mojo quota error comparison failed")
+        || ascii_casefold_contains(error, "unauthorized")
+            .expect("Mojo quota error comparison failed");
+    let summary = if unauthorized {
         "unauthorized".to_string()
     } else {
         quota_error_summary(error)
