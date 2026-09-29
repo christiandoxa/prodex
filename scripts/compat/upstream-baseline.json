@@ -2,13 +2,13 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.158.0 release",
+      "baseline_source": "openai/codex rust-v0.159.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
         {
           "path": "codex-rs/core/src/client.rs",
-          "reason": "Owns Responses request metadata/header construction, websocket client metadata, auth-owner cache invalidation, and Codex 0.157 first-party-only internal metadata gating used across Prodex affinity and local-proxy launches.",
+          "reason": "Owns Responses request metadata/header construction, websocket client metadata, auth-owner cache invalidation, request-shape reuse, and internal metadata stripping used across Prodex affinity and local-proxy launches.",
           "required_contains": [
             "build_responses_headers",
             "build_responses_compatibility_headers",
@@ -55,11 +55,11 @@
             "responses_session_id",
             "session_source.is_non_root_agent()",
             "prompt_cache_key(metadata)",
-            "is_internal_metadata_destination",
             "clear_tool_result_metadata",
-            "url.scheme() == \"https\"",
-            "host == \"api.openai.com\"",
-            "codex_http_client::is_allowed_chatgpt_host(host)"
+            "include_internal",
+            ".include_internal_metadata(&client_setup.api_provider)",
+            "if !include_internal",
+            "responses_metadata.client_metadata(include_internal)"
           ]
         },
         {
@@ -269,7 +269,7 @@
         },
         {
           "path": "codex-rs/model-provider/src/provider.rs",
-          "reason": "Owns Codex provider capabilities and static Bedrock model-manager wiring; Codex 0.158 retains GPT-6 Sol/Luna and GPT-5.5/5.6 while removing GPT-5.4 from the bundled Bedrock catalog.",
+          "reason": "Owns provider capability wiring plus the first-party-only internal metadata destination gate. Codex 0.159 relocates that security boundary from core/client.rs while retaining HTTPS OpenAI/allowed-ChatGPT semantics.",
           "required_contains": [
             "RemoteCompactionSupport",
             "ProviderCapabilities",
@@ -282,7 +282,13 @@
             "openai.gpt-5.6-terra",
             "openai.gpt-5.6-luna",
             "openai.gpt-6-sol",
-            "openai.gpt-6-luna"
+            "openai.gpt-6-luna",
+            "fn include_internal_metadata",
+            "self.info().include_internal_metadata",
+            "url.scheme() == \"https\"",
+            "host == \"api.openai.com\"",
+            "codex_http_client::is_allowed_chatgpt_host(host)",
+            "include_internal_metadata"
           ]
         },
         {
@@ -328,7 +334,7 @@
         },
         {
           "path": "codex-rs/codex-api/src/sse/responses.rs",
-          "reason": "Owns Responses SSE lifecycle and failed-event classification. Codex 0.157 preserves invalid_prompt as a distinct InvalidPrompt error while retaining explicit quota/rate/overload classes.",
+          "reason": "Owns Responses SSE lifecycle, event decoding, metadata headers, safety buffering, and stream dispatch. Codex 0.159 extracts failed-event error classification into responses_error.rs.",
           "required_contains": [
             "spawn_response_stream",
             "process_sse",
@@ -341,20 +347,33 @@
             "x-reasoning-included",
             "X-Models-Etag",
             "bio_policy",
-            "insufficient_quota",
-            "rate_limit_exceeded",
             "SafetyBuffering",
             "safety_buffering",
             "ResponseEvent::SafetyBuffering",
             "treatment_from_headers",
             "SafetyBufferingTreatment",
             "with_treatment",
+            "invalid_prompt",
+            "ApiError::InvalidPrompt",
+            "parse_failed_response"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/sse/responses_error.rs",
+          "reason": "Owns Codex 0.159 response.failed classification after extraction from responses.rs, including explicit quota, rate-limit, overload, invalid-prompt, policy, and retry-delay semantics.",
+          "required_contains": [
+            "parse_failed_response",
+            "insufficient_quota",
             "credit_balance_exhausted",
             "organization_spend_limit_exceeded",
             "project_spend_limit_exceeded",
+            "rate_limit_exceeded",
             "slow_down",
             "server_is_overloaded",
             "invalid_prompt",
+            "ApiError::QuotaExceeded",
+            "ApiError::RateLimitExceeded",
+            "ApiError::ServerOverloaded",
             "ApiError::InvalidPrompt"
           ]
         },
@@ -441,7 +460,11 @@
             "CompactionImageBudget",
             "compaction_image_budget",
             "key: \"compaction_image_budget\"",
-            "default_enabled: true"
+            "default_enabled: true",
+            "Feature::InstantInterrupt",
+            "key: \"instant_interrupt\"",
+            "Stage::UnderDevelopment",
+            "default_enabled: false"
           ]
         },
         {
@@ -675,7 +698,7 @@
         },
         {
           "path": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
-          "reason": "Owns additive v2 thread protocol fields, including free-form thread_source and Codex 0.157 optional item lifecycle timestamps.",
+          "reason": "Owns additive v2 thread protocol fields, including thread_source, lifecycle timestamps, and Codex 0.159 thread/items/list item-anchor pagination.",
           "required_contains": [
             "ThreadStartParams",
             "ThreadForkParams",
@@ -683,7 +706,13 @@
             "Optional client-supplied analytics source classification",
             "ThreadItemEntry",
             "pub started_at_ms: Option<i64>",
-            "pub completed_at_ms: Option<i64>"
+            "pub completed_at_ms: Option<i64>",
+            "ThreadItemsListParams",
+            "pub cursor: Option<ThreadItemsListCursor>",
+            "ThreadItemsListCursor",
+            "Anchor(ThreadItemsListAnchor)",
+            "ThreadItemsListAnchor",
+            "item_id: String"
           ]
         },
         {
@@ -888,14 +917,13 @@
         {
           "id": "responses.internal-metadata-destination-gate",
           "kind": "security_boundary",
-          "file": "codex-rs/core/src/client.rs",
-          "reason": "Codex 0.157 sends internal tool-result and MCP attribution metadata only to HTTPS OpenAI/allowed ChatGPT destinations; custom provider destinations such as Prodex loopback remain intentionally filtered.",
+          "file": "codex-rs/model-provider/src/provider.rs",
+          "reason": "Codex 0.159 keeps internal tool-result and MCP attribution metadata limited to explicitly opted-in providers or HTTPS OpenAI/allowed ChatGPT destinations; custom Prodex loopback providers remain filtered before request construction.",
           "file_contains_all": [
-            "is_internal_metadata_destination",
+            "include_internal_metadata",
             "url.scheme() == \"https\"",
             "host == \"api.openai.com\"",
-            "codex_http_client::is_allowed_chatgpt_host(host)",
-            "clear_tool_result_metadata"
+            "codex_http_client::is_allowed_chatgpt_host(host)"
           ]
         },
         {
@@ -1248,8 +1276,8 @@
         {
           "id": "sse.quota-codes",
           "kind": "co_occurrence",
-          "file": "codex-rs/codex-api/src/sse/responses.rs",
-          "reason": "Codex 0.156 classifies explicit balance/spend-limit codes as quota, slow_down as rate-limit, and server_is_overloaded separately.",
+          "file": "codex-rs/codex-api/src/sse/responses_error.rs",
+          "reason": "Codex 0.159 moves failed Responses classification into responses_error.rs while retaining explicit balance/spend-limit quota codes, slow_down/rate_limit_exceeded, and server overload as distinct classes.",
           "file_contains_all": [
             "insufficient_quota",
             "credit_balance_exhausted",
@@ -1714,9 +1742,48 @@
             "keys.push(original)",
             "get_active_project_for_lookup"
           ]
+        },
+        {
+          "id": "responses.internal-metadata-stripping",
+          "kind": "security_boundary",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "After the provider-owned destination gate resolves false, Codex 0.159 still clears tool-result metadata before request serialization; Prodex custom/loopback providers must not regain stripped internal metadata.",
+          "file_contains_all": [
+            "include_internal",
+            ".include_internal_metadata(&client_setup.api_provider)",
+            "if !include_internal",
+            "clear_tool_result_metadata",
+            "responses_metadata.client_metadata(include_internal)"
+          ]
+        },
+        {
+          "id": "features.instant-interrupt-opt-in",
+          "kind": "feature_gate",
+          "file": "codex-rs/features/src/lib.rs",
+          "reason": "Codex 0.159 instant_interrupt remains opt-in and disabled by default; Prodex must preserve rather than silently force this steering behavior.",
+          "file_contains_all": [
+            "Feature::InstantInterrupt",
+            "key: \"instant_interrupt\"",
+            "Stage::UnderDevelopment",
+            "default_enabled: false"
+          ]
+        },
+        {
+          "id": "app-server.thread-items-anchor-pagination",
+          "kind": "jsonrpc_schema",
+          "file": "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+          "reason": "Codex 0.159 thread/items/list accepts either an opaque cursor or an exclusive item anchor scoped to a turn. Prodex app-server forwarding must preserve this additive cursor shape opaquely.",
+          "file_contains_all": [
+            "ThreadItemsListParams",
+            "pub cursor: Option<ThreadItemsListCursor>",
+            "ThreadItemsListCursor",
+            "Anchor(ThreadItemsListAnchor)",
+            "ThreadItemsListAnchor",
+            "item_id: String"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.158.0",
+      "tested_codex_release": "rust-v0.159.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -1956,6 +2023,23 @@
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.158.0. Preserve upstream project-trust lookup semantics by emitting both canonical and original Super workspace keys, keep Super approval_policy=never and danger-full-access so the new default terminal-input approval does not add prompts, remove only the obsolete GPT-5.4 Bedrock compatibility marker, track the parameterized 5000-byte schema-compaction default without reimplementing Codex compaction, and keep new MCP/WebSocket/image/app-server surfaces upstream-owned and pass-through unless Prodex already owns the corresponding boundary.",
           "compatibility_evidence": "Exact 0.157.1 and 0.158.0 source archives, tag/release metadata, official Linux musl binary checksum/version smoke, 811 current critical/semantic markers including the new canonical project-trust lookup contract, isolated app-server initialize, and focused Super trust regressions are recorded in migration/codex-rust-v0.158.0-audit.md."
+        },
+        {
+          "from": "rust-v0.158.0",
+          "to": "rust-v0.159.0",
+          "upstream_commit": "687a119f0fcaace47e1f1abcc77cec6c813fd6da",
+          "upstream_tag_object": "377f7f557a6bdea0f3a2d26d4d899c66db4789d0",
+          "upstream_release_date": "2026-09-29T08:05:42Z",
+          "tree_comparison": "exact tagged source archives; 605 changed files, 18710 additions, 5820 deletions",
+          "runtime_changes": [
+            "instant_interrupt is added as an opt-in under-development feature and remains disabled by default.",
+            "thread/items/list gains additive item-anchor pagination through ThreadItemsListCursor and ThreadItemsListAnchor.",
+            "Internal tool-result metadata destination gating moves from core client helpers into ModelProvider::include_internal_metadata while client-side stripping remains intact.",
+            "Responses response.failed classification moves into sse/responses_error.rs while explicit quota, rate-limit, overload, invalid-prompt, and policy error classes are preserved.",
+            "Blank-session draft persistence, refreshed TUI onboarding, and Windows console/process-launch fixes are upstream-owned behavior changes."
+          ],
+          "prodex_action": "Advance the tested Codex baseline to 0.159.0; preserve instant_interrupt as upstream opt-in, pass through additive app-server item-anchor cursors, move compatibility guards to the new provider/error owner files without weakening security or quota semantics, and repair stale Super attachment paths before resume so pasted text/media remain durable across overlay cleanup.",
+          "compatibility_evidence": "Exact 0.158.0 and 0.159.0 tagged source archives, tag/release metadata, official Linux musl binary checksum/version smoke, relocated security/quota semantic markers, focused attachment resume regressions, and baseline replay are recorded in migration/codex-rust-v0.159.0-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -1978,28 +2062,28 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.158.0",
-      "name": "0.158.0",
-      "published_at": "2026-09-28T05:07:23Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.158.0",
+      "tag_name": "rust-v0.159.0",
+      "name": "0.159.0",
+      "published_at": "2026-09-29T08:05:42Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.159.0",
       "body_head": [
         "## New Features",
-        "- Configure copy-on-select and right-click paste in the fullscreen TUI. Copied transcript selections now preserve Markdown formatting. (#47639, #47896, #48118)",
-        "- Connect to MCP servers that require pre-registered OAuth client secrets, including through `codex mcp add --oauth-client-secret`. (#47891)",
-        "- Secure direct exec-server WebSocket connections with bearer tokens, including connections configured through app-server. (#47601, #47648)",
-        "- Image generation and editing can explicitly request transparent backgrounds, and edits now accept file-backed conversation images. (#47484, #47956)",
-        "- Terminal input approval is enabled by default for commands running with elevated permissions; runtime-only grants no longer cause unnecessary reviews. (#47799, #48073)",
-        "## Bug Fixes",
-        "- Fixed Windows sandbox failures involving ordinary Windows 10 paths, rejected stored credentials, and large permission policies. (#47672, #47695, #47919)"
+        "- Opt-in `instant_interrupt` lets new input steer Codex during model responses or long-running code-mode calls. (#48135, #48141)",
+        "- New sessions get a compact welcome screen and consistent headers, with occasional tips during and after turns. (#48513, #48562, #48352)",
+        "- The warnings viewer dismisses reviewed warnings when closed; press `k` to keep one for later. (#48205, #48206)",
+        "- You can scroll the transcript while deciding whether to implement a plan. (#48805)",
+        "- Native Mermaid rendering supports more flowchart edges, labels, and node groups. (#48814, #48895)",
+        "- App-server clients can paginate thread history from a specific item. (#48151)",
+        "## Bug Fixes"
       ]
     }
   },
   "claude": {
     "latestRelease": {
-      "tag_name": "v2.1.283",
-      "name": "v2.1.283",
-      "published_at": "2026-09-25T21:50:12Z",
-      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.283"
+      "tag_name": "v2.1.284",
+      "name": "v2.1.284",
+      "published_at": "2026-09-28T18:02:03Z",
+      "html_url": "https://github.com/anthropics/claude-code/releases/tag/v2.1.284"
     },
     "docs": [
       {
