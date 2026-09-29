@@ -78,6 +78,33 @@ fn cookie_jar_rejects_secure_cookie_from_insecure_origin() {
 }
 
 #[test]
+fn cookie_policy_is_case_insensitive_through_mojo() {
+    let jar = RuntimeProxyCookieJar::new();
+    jar.capture_set_cookie_headers(
+        "",
+        "alpha",
+        "chatgpt.com",
+        "/backend-api/responses",
+        true,
+        [
+            "case_cookie=live; pAtH=/backend-api; sEcUrE; eXpIrEs=Tue, 01 Jan 2030 00:00:00 GMT",
+            "deleted=gone; mAx-aGe=0; pAtH=/backend-api",
+        ],
+    );
+
+    assert_eq!(
+        merged(
+            &jar,
+            "alpha",
+            "https://chatgpt.com/backend-api/responses",
+            &[("cOoKiE".to_string(), "caller=one".to_string())],
+        )
+        .as_deref(),
+        Some("caller=one; case_cookie=live")
+    );
+}
+
+#[test]
 fn cookie_jar_gives_max_age_precedence_over_expires_in_any_order() {
     let jar = RuntimeProxyCookieJar::new();
     capture(

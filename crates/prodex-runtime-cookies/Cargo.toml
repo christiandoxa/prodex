@@ -11,6 +11,7 @@ name = "prodex_runtime_cookies"
 path = "src/lib.rs"
 
 [dependencies]
+prodex_mojo_core = { workspace = true, features = ["mojo-rich"] }
 chrono = { workspace = true }
 reqwest = { workspace = true }
 tungstenite = { workspace = true }

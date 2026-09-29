@@ -4,6 +4,7 @@
 //! profile-scoped cookie jar used to replay upstream `Set-Cookie` values on
 //! later requests without mixing profiles or runtime instances.
 
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::sync::{Mutex, OnceLock};
@@ -271,10 +272,9 @@ fn runtime_proxy_cookie_caller_segments(
 ) -> (Vec<String>, BTreeSet<String>) {
     let mut segments = Vec::new();
     let mut names = BTreeSet::new();
-    for (_, value) in request_headers
-        .iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("cookie"))
-    {
+    for (_, value) in request_headers.iter().filter(|(name, _)| {
+        ascii_casefold_equal_exact(name, "cookie").expect("Mojo Cookie header comparison failed")
+    }) {
         for segment in value
             .split(';')
             .map(str::trim)
@@ -361,7 +361,9 @@ fn runtime_proxy_cookie_apply_attribute(
     max_age_seen: &mut bool,
     now: SystemTime,
 ) {
-    if attr.eq_ignore_ascii_case("secure") {
+    if ascii_casefold_equal_exact(attr, "secure")
+        .expect("Mojo cookie Secure attribute comparison failed")
+    {
         *secure = true;
         return;
     }
@@ -369,7 +371,9 @@ fn runtime_proxy_cookie_apply_attribute(
         return;
     };
     let value = value.trim();
-    if name.trim().eq_ignore_ascii_case("path") {
+    if ascii_casefold_equal_exact(name.trim(), "path")
+        .expect("Mojo cookie Path attribute comparison failed")
+    {
         if value.starts_with('/')
             && !value.contains(['\r', '\n'])
             && value.len() <= RUNTIME_PROXY_COOKIE_MAX_PATH_BYTES
@@ -378,12 +382,15 @@ fn runtime_proxy_cookie_apply_attribute(
         }
         return;
     }
-    if name.trim().eq_ignore_ascii_case("max-age") {
+    if ascii_casefold_equal_exact(name.trim(), "max-age")
+        .expect("Mojo cookie Max-Age attribute comparison failed")
+    {
         runtime_proxy_cookie_apply_max_age(value, expires_at, delete, max_age_seen, now);
         return;
     }
     if !*max_age_seen
-        && name.trim().eq_ignore_ascii_case("expires")
+        && ascii_casefold_equal_exact(name.trim(), "expires")
+            .expect("Mojo cookie Expires attribute comparison failed")
         && let Some(expires) = runtime_proxy_cookie_parse_expires(value)
     {
         *delete = expires <= now;

@@ -2799,6 +2799,7 @@ name = "prodex-runtime-cookies"
 version = "0.433.0"
 dependencies = [
  "chrono",
+ "prodex-mojo-core",
  "reqwest",
  "tungstenite",
 ]

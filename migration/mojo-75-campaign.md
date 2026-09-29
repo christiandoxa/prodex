@@ -3392,3 +3392,12 @@ unauthorized error classification now reuse the authoritative rich-catalog Mojo
 find/equality/contains primitives. The Rust lowercase shadow string and header
 eq_ignore_ascii_case scan were deleted. Rust retains JSON/time parsing, reset-window
 selection, numeric conversion, and final quota status/detail rendering.
+
+
+## Runtime cookie identity cleanup
+
+Runtime cookie relay now reuses the authoritative exact ASCII-casefold Mojo primitive
+for Cookie header detection and Secure, Path, Max-Age, and Expires attribute names. The
+Rust eq_ignore_ascii_case copies were deleted. Host lowercase canonicalization remains
+Rust-owned because it materializes a normalized map key rather than deciding equality.
+Mixed-case boundary coverage preserves the previous HTTP cookie behavior.
