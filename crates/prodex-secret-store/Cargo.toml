@@ -11,6 +11,7 @@ name = "secret_store"
 path = "src/lib.rs"
 
 [dependencies]
+prodex_mojo_core = { workspace = true, features = ["mojo-rich"] }
 aes-gcm-siv = { workspace = true }
 getrandom = { workspace = true }
 keyring = { workspace = true }

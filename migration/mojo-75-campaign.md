@@ -3418,3 +3418,11 @@ Profile export/import Copilot model-endpoint selection now reuses the authoritat
 ASCII-casefold Mojo primitive for github.com, http://github.com, and https://github.com
 identity. The three Rust eq_ignore_ascii_case copies were deleted. URL trimming and
 enterprise GHE suffix rewriting remain Rust-owned because they transform the endpoint.
+
+
+## Secret backend identity cleanup
+
+SecretBackendKind parsing now reuses the authoritative exact ASCII-casefold Mojo
+primitive for file/keyring classification. The Rust to_ascii_lowercase match table was
+deleted while the existing padded-value rejection and exact error branch remain intact.
+Mixed-case parser coverage preserves the previous public FromStr contract.
