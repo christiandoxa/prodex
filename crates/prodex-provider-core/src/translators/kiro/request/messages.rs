@@ -1,9 +1,5 @@
 //! Chat message and legacy function-tool shaping for Kiro request compatibility.
 
-#[path = "messages/text.rs"]
-mod text;
-
-use self::text::kiro_provider_core_chat_message_text;
 use serde_json::{Value, json};
 
 pub fn kiro_provider_core_prompt_from_chat_messages(messages: &[Value]) -> String {
@@ -55,92 +51,17 @@ fn kiro_provider_core_prompt_section(message: &Value) -> Option<String> {
 }
 
 pub fn kiro_provider_core_responses_items_from_chat_message(message: &Value) -> Vec<Value> {
-    let Some(object) = message.as_object() else {
-        return Vec::new();
-    };
-    let role = object.get("role").and_then(Value::as_str).unwrap_or("user");
-    let mut items = Vec::new();
-    if !matches!(role, "tool" | "function")
-        && let Some(text) = object
-            .get("content")
-            .and_then(kiro_provider_core_chat_message_text)
-    {
-        items.push(json!({
-            "type": "message",
-            "role": role,
-            "content": [{
-                "type": "input_text",
-                "text": text,
-            }],
-        }));
-    }
-    if role == "assistant"
-        && let Some(tool_calls) = object.get("tool_calls").and_then(Value::as_array)
-    {
-        for tool_call in tool_calls {
-            let Some(function) = tool_call.get("function").and_then(Value::as_object) else {
-                continue;
-            };
-            let name = function
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("tool_call");
-            let arguments = function
-                .get("arguments")
-                .and_then(Value::as_str)
-                .unwrap_or("{}");
-            items.push(json!({
-                "type": "function_call",
-                "call_id": tool_call
-                    .get("id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("call_kiro"),
-                "name": name,
-                "arguments": arguments,
-            }));
-        }
-    }
-    if role == "assistant"
-        && !object.contains_key("tool_calls")
-        && let Some(function_call) = object.get("function_call").and_then(Value::as_object)
-    {
-        let name = function_call
-            .get("name")
-            .and_then(Value::as_str)
-            .unwrap_or("tool_call");
-        let arguments = function_call
-            .get("arguments")
-            .and_then(Value::as_str)
-            .unwrap_or("{}");
-        let call_id = function_call
-            .get("call_id")
-            .or_else(|| function_call.get("id"))
-            .and_then(Value::as_str)
-            .unwrap_or(name);
-        items.push(json!({
-            "type": "function_call",
-            "call_id": call_id,
-            "name": name,
-            "arguments": arguments,
-        }));
-    }
-    if matches!(role, "tool" | "function") {
-        let output = object
-            .get("content")
-            .and_then(kiro_provider_core_chat_message_text)
-            .unwrap_or_default();
-        items.push(json!({
-            "type": "function_call_output",
-            "call_id": object
-                .get("tool_call_id")
-                .or_else(|| object.get("call_id"))
-                .or_else(|| object.get("name"))
-                .and_then(Value::as_str)
-                .unwrap_or("call_kiro"),
-            "output": output,
-        }));
-    }
-    items
+    let message =
+        serde_json::to_string(message).expect("Kiro chat message serializes for Mojo rewrite");
+    let mut input = prodex_mojo_core::rich::KiroKernelInput::new(
+        prodex_mojo_core::rich::KiroKernelOperation::RawResponsesItemsFromChatMessage,
+    );
+    input.input = Some(&message);
+    let body = prodex_mojo_core::rich::kiro_kernel(input)
+        .unwrap_or_else(|error| panic!("Mojo Kiro chat-message rewrite failed: {error:?}"));
+    serde_json::from_slice(&body).unwrap_or_else(|error| {
+        panic!("Mojo Kiro chat-message rewrite returned invalid JSON: {error}")
+    })
 }
 
 pub fn kiro_provider_core_tool_from_legacy_chat_function(function: &Value) -> Option<Value> {

@@ -3523,3 +3523,21 @@ tests, 2 direct ABI adapter tests, focused provider-core Clippy with warnings de
 production-share guards. The canonical broad report counts **65,212 Mojo LOC** and
 **195,275 Rust production LOC**, totaling **260,487 LOC**: **25.03464664263476% Mojo**.
 The 75% broad project target remains in progress.
+
+## Kiro chat-message item hard replacement
+
+Kiro Chat-to-Responses single-message expansion now reuses the raw JSON message/tool
+helpers in `kiro.mojo` through a dedicated kernel operation. Mojo owns role defaults,
+message text extraction, assistant tool-call and legacy function-call projection,
+tool/function output shaping, call-id/name/arguments defaults, and missing-content
+behavior. The Rust item traversal and JSON assembly were deleted, together with the
+now-unreachable Rust chat-message text helper; no Rust parity implementation remains.
+The shared raw helper was also aligned so assistant messages without content emit no
+message item and tool outputs without content produce the historical empty string.
+
+Validation passes a fresh direct Kiro Mojo object build, all 14 focused Kiro request
+tests, focused provider-core Clippy with warnings denied, `cargo fmt`, `git diff --check`,
+and the Mojo authority, no-fallback, ownership, and production-share guards. The
+canonical broad report counts **65,244 Mojo LOC** and **195,169 Rust production LOC**,
+totaling **260,413 LOC**: **25.054048761006555% Mojo**. The 75% broad project target
+remains in progress.
