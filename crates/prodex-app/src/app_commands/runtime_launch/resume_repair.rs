@@ -224,16 +224,33 @@ mod tests {
             .join("sessions/2026/09/29")
             .join(format!("rollout-2026-09-29T15-00-00-{session_id}.jsonl"));
         fs::create_dir_all(session_file.parent().unwrap()).unwrap();
-        fs::write(
-            &session_file,
-            format!(
-                "{{\"timestamp\":\"2026-09-29T08:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"/tmp/workspace\",\"originator\":\"codex-cli\",\"cli_version\":\"0.159.0\"}}}}\n\
-                 {{\"timestamp\":\"2026-09-29T08:00:01Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",\"text\":\"pasted text file: {}\\nimage file: {}\"}}]}}}}\n",
-                stale_text.display(),
-                stale_image.display(),
-            ),
-        )
-        .unwrap();
+        let session_meta = serde_json::json!({
+            "timestamp": "2026-09-29T08:00:00Z",
+            "type": "session_meta",
+            "payload": {
+                "id": session_id,
+                "cwd": "/tmp/workspace",
+                "originator": "codex-cli",
+                "cli_version": "0.159.0",
+            }
+        });
+        let response_item = serde_json::json!({
+            "timestamp": "2026-09-29T08:00:01Z",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": format!(
+                        "pasted text file: {}\nimage file: {}",
+                        stale_text.display(),
+                        stale_image.display(),
+                    ),
+                }],
+            }
+        });
+        fs::write(&session_file, format!("{session_meta}\n{response_item}\n")).unwrap();
 
         assert!(
             !stale_overlay.exists(),
