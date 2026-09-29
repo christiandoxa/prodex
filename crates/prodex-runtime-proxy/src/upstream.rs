@@ -1,4 +1,5 @@
 use crate::runtime_proxy_normalize_openai_path;
+use prodex_mojo_core::rich::{ascii_casefold_equal_exact, ascii_casefold_starts_with};
 use std::borrow::Cow;
 
 pub fn runtime_proxy_upstream_url(base_url: &str, path_and_query: &str) -> String {
@@ -89,15 +90,17 @@ const RUNTIME_TRANSPORT_LOCAL_REQUEST_HEADERS: &[&str] = &[
 ];
 
 fn runtime_header_name_starts_with_ignore_ascii_case(name: &str, prefix: &str) -> bool {
-    name.get(..prefix.len())
-        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
+    ascii_casefold_starts_with(name, prefix).expect("Mojo runtime header-prefix comparison failed")
 }
 
 pub fn is_runtime_transport_local_request_header(name: &str) -> bool {
     let name = name.trim();
     RUNTIME_TRANSPORT_LOCAL_REQUEST_HEADERS
         .iter()
-        .any(|transport_name| name.eq_ignore_ascii_case(transport_name))
+        .any(|transport_name| {
+            ascii_casefold_equal_exact(name, transport_name)
+                .expect("Mojo transport header-name comparison failed")
+        })
         || runtime_header_name_starts_with_ignore_ascii_case(name, "sec-websocket-")
 }
 
@@ -108,8 +111,10 @@ pub fn is_prodex_internal_request_header(name: &str) -> bool {
 pub fn should_skip_runtime_request_header(name: &str) -> bool {
     is_runtime_transport_local_request_header(name)
         || is_prodex_internal_request_header(name)
-        || name.trim().eq_ignore_ascii_case("authorization")
-        || name.trim().eq_ignore_ascii_case("chatgpt-account-id")
+        || ascii_casefold_equal_exact(name.trim(), "authorization")
+            .expect("Mojo authorization header comparison failed")
+        || ascii_casefold_equal_exact(name.trim(), "chatgpt-account-id")
+            .expect("Mojo ChatGPT account header comparison failed")
 }
 
 pub fn runtime_forward_request_headers<'a>(
@@ -131,7 +136,10 @@ pub fn runtime_connection_header_tokens<'a>(
 ) -> Vec<String> {
     headers
         .into_iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("connection"))
+        .filter(|(name, _)| {
+            ascii_casefold_equal_exact(name, "connection")
+                .expect("Mojo connection header-name comparison failed")
+        })
         .flat_map(|(_, value)| value.split(','))
         .map(str::trim)
         .filter(|token| {
@@ -163,13 +171,16 @@ pub fn runtime_connection_header_tokens<'a>(
 
 pub fn runtime_header_name_matches_connection_token(name: &str, tokens: &[String]) -> bool {
     let name = name.trim();
-    tokens.iter().any(|token| token.eq_ignore_ascii_case(name))
+    tokens.iter().any(|token| {
+        ascii_casefold_equal_exact(token, name).expect("Mojo connection-token comparison failed")
+    })
 }
 
 #[cfg(test)]
 pub(crate) fn runtime_proxy_effective_user_agent(headers: &[(String, String)]) -> Option<&str> {
     headers.iter().find_map(|(name, value)| {
-        name.eq_ignore_ascii_case("user-agent")
+        ascii_casefold_equal_exact(name, "user-agent")
+            .expect("Mojo user-agent header-name comparison failed")
             .then_some(value.as_str())
             .filter(|value| !value.is_empty())
     })

@@ -2,6 +2,7 @@ use super::{
     RuntimeHttpErrorAction, RuntimeHttpErrorClass, RuntimeHttpErrorPhase, RuntimeHttpErrorPolicy,
     runtime_error_policy_match, runtime_http_error_policy,
 };
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 
 /// Applies the official Codex rate-limit reached header after body classification.
 pub fn runtime_http_error_policy_with_headers<'a>(
@@ -16,7 +17,10 @@ pub fn runtime_http_error_policy_with_headers<'a>(
     }
     let reached_type = headers
         .into_iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("x-codex-rate-limit-reached-type"))
+        .filter(|(name, _)| {
+            ascii_casefold_equal_exact(name, "x-codex-rate-limit-reached-type")
+                .expect("Mojo rate-limit header-name comparison failed")
+        })
         .filter_map(|(_, value)| std::str::from_utf8(value).ok())
         .map(str::trim)
         .find(|value| !value.is_empty());
