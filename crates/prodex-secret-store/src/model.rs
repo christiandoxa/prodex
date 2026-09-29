@@ -1,3 +1,4 @@
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::error::Error as StdError;
 use std::fmt;
 use std::fs;
@@ -249,9 +250,17 @@ impl std::str::FromStr for SecretBackendKind {
                 "unknown secret backend '{value}'"
             )));
         }
-        match value.to_ascii_lowercase().as_str() {
-            "file" => Ok(Self::File),
-            "keyring" => Ok(Self::Keyring),
+        match () {
+            _ if ascii_casefold_equal_exact(value, "file")
+                .expect("Mojo secret-backend comparison failed") =>
+            {
+                Ok(Self::File)
+            }
+            _ if ascii_casefold_equal_exact(value, "keyring")
+                .expect("Mojo secret-backend comparison failed") =>
+            {
+                Ok(Self::Keyring)
+            }
             _ => Err(SecretError::invalid_location(format!(
                 "unknown secret backend '{value}'"
             ))),

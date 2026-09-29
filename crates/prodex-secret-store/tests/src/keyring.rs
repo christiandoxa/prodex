@@ -65,6 +65,18 @@ fn selectable_backend_from_kind_requires_keyring_service() {
 }
 
 #[test]
+fn secret_backend_kind_accepts_mixed_case_via_mojo() {
+    assert_eq!(
+        "FiLe".parse::<SecretBackendKind>().unwrap(),
+        SecretBackendKind::File
+    );
+    assert_eq!(
+        "KeYrInG".parse::<SecretBackendKind>().unwrap(),
+        SecretBackendKind::Keyring
+    );
+}
+
+#[test]
 fn secret_backend_kind_rejects_padded_values() {
     let err = " keyring ".parse::<SecretBackendKind>().unwrap_err();
     assert!(matches!(err, SecretError::InvalidLocation { .. }));
