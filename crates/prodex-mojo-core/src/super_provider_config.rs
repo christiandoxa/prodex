@@ -453,6 +453,7 @@ mod tests {
         for model in [
             "GPT-5.6-SOL",
             " gpt-5-mini ",
+            "gpt-6.1-sol",
             "gpt-6-sol",
             "CODEX-AUTO-REVIEW",
         ] {
@@ -466,7 +467,12 @@ mod tests {
             !runtime_openai_scalar_policy(RuntimeOpenAiScalarPolicy::LargeContextModel, "gpt-4o")
                 .unwrap()
         );
-        for model in ["gpt-5.6-sol", " GPT-5.6-TERRA ", "gpt-6-luna"] {
+        for model in [
+            "gpt-5.6-sol",
+            " GPT-5.6-TERRA ",
+            "gpt-6.1-sol",
+            "gpt-6-luna",
+        ] {
             assert!(
                 runtime_openai_scalar_policy(
                     RuntimeOpenAiScalarPolicy::PreferMaxContextModel,

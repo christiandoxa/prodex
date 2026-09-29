@@ -87,13 +87,14 @@ fn runtime_launch_uses_cached_gpt6_max_context_metadata() {
     fs::write(
         root.join("models_cache.json"),
         r#"{"models":[
+            {"slug":"gpt-6.1-sol","context_window":272000,"max_context_window":872000},
             {"slug":"gpt-6-sol","context_window":272000,"max_context_window":872000},
             {"slug":"gpt-6-luna","context_window":272000,"max_context_window":872000}
         ]}"#,
     )
     .unwrap();
 
-    for model in ["gpt-6-sol", "gpt-6-luna"] {
+    for model in ["gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"] {
         let args = runtime_launch_openai_model_context_codex_args(
             &root,
             &[OsString::from("--model"), OsString::from(model)],
