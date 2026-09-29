@@ -24,7 +24,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 prodex_profile_identity = { workspace = true }
 prodex_runtime_state = { workspace = true }
-prodex_mojo_core = { workspace = true, features = ["mojo-quota"] }
+prodex_mojo_core = { workspace = true, features = ["mojo-quota", "mojo-rich"] }
 terminal_ui = { workspace = true }
 zeroize = { workspace = true }
 
