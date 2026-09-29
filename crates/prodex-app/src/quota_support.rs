@@ -1,4 +1,5 @@
 use super::*;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_mojo_core::super_provider_config::{
     RuntimeModelProviderClass, runtime_model_provider_class,
 };
@@ -117,13 +118,13 @@ impl QuotaProviderFilter {
             return true;
         }
         match self {
-            Self::OpenAi => report.auth.label.eq_ignore_ascii_case("chatgpt"),
-            Self::Gemini => report.auth.label.eq_ignore_ascii_case("gemini"),
-            Self::Anthropic => report.auth.label.eq_ignore_ascii_case("anthropic"),
-            Self::Copilot => report.auth.label.eq_ignore_ascii_case("copilot"),
-            Self::Kiro => report.auth.label.eq_ignore_ascii_case("kiro"),
-            Self::DeepSeek => report.auth.label.eq_ignore_ascii_case("deepseek-key"),
-            Self::Local => report.auth.label.eq_ignore_ascii_case("local"),
+            Self::OpenAi => quota_label_matches(&report.auth.label, "chatgpt"),
+            Self::Gemini => quota_label_matches(&report.auth.label, "gemini"),
+            Self::Anthropic => quota_label_matches(&report.auth.label, "anthropic"),
+            Self::Copilot => quota_label_matches(&report.auth.label, "copilot"),
+            Self::Kiro => quota_label_matches(&report.auth.label, "kiro"),
+            Self::DeepSeek => quota_label_matches(&report.auth.label, "deepseek-key"),
+            Self::Local => quota_label_matches(&report.auth.label, "local"),
             _ => false,
         }
     }
@@ -137,11 +138,11 @@ impl QuotaProviderFilter {
             | (Self::Gemini, ProviderQuotaSnapshot::Gemini(_))
             | (Self::Copilot, ProviderQuotaSnapshot::Copilot(_)) => true,
             (Self::DeepSeek, ProviderQuotaSnapshot::External(info)) => {
-                info.provider.eq_ignore_ascii_case("DeepSeek")
+                quota_label_matches(&info.provider, "DeepSeek")
             }
-            (Self::Local, ProviderQuotaSnapshot::External(info)) => info
-                .provider
-                .eq_ignore_ascii_case("Local OpenAI-compatible"),
+            (Self::Local, ProviderQuotaSnapshot::External(info)) => {
+                quota_label_matches(&info.provider, "Local OpenAI-compatible")
+            }
             _ => false,
         }
     }
@@ -168,6 +169,11 @@ impl QuotaProviderFilter {
             | Self::Agy => false,
         }
     }
+}
+
+fn quota_label_matches(value: &str, expected: &str) -> bool {
+    ascii_casefold_equal_exact(value, expected)
+        .expect("Mojo quota label comparison should accept Rust strings")
 }
 
 #[derive(Debug)]

@@ -11,6 +11,7 @@ use prodex_cli::{
     SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_KIRO_DEFAULT_CONTEXT_WINDOW,
     SUPER_KIRO_DEFAULT_MODEL, super_copilot_prompt_token_limit_for_model,
 };
+use prodex_mojo_core::rich::{CatalogModel, resolve_catalog_model_exact};
 use prodex_mojo_core::super_provider_config::{
     RuntimeModelProviderClass, runtime_model_provider_class,
 };
@@ -441,10 +442,20 @@ impl ExternalCatalogProvider {
     }
 
     fn model_metadata(self, model: &str) -> (&str, &'static str) {
-        self.models()
+        let models = self.models();
+        let catalog = models
             .iter()
-            .find(|(slug, _, _)| model.eq_ignore_ascii_case(slug))
-            .map(|(_, display_name, description)| (*display_name, *description))
+            .map(|(slug, _, _)| CatalogModel {
+                id: slug,
+                aliases: &[],
+            })
+            .collect::<Vec<_>>();
+        resolve_catalog_model_exact(&catalog, model)
+            .expect("Mojo external-provider metadata lookup failed")
+            .map(|index| {
+                let (_, display_name, description) = models[index];
+                (display_name, description)
+            })
             .unwrap_or((
                 model,
                 "External provider model routed through the Prodex Responses adapter.",
@@ -464,6 +475,28 @@ mod tests {
             .unwrap()
             .as_nanos();
         test_temp_root().join(format!("prodex-external-provider-config-{name}-{stamp}"))
+    }
+
+    #[test]
+    fn external_provider_model_metadata_uses_exact_mojo_identity() {
+        assert_eq!(
+            ExternalCatalogProvider::Copilot
+                .model_metadata("GPT-5.1-CODEX")
+                .0,
+            "GPT-5.1 Codex"
+        );
+        assert_eq!(
+            ExternalCatalogProvider::Copilot
+                .model_metadata(" GPT-5.1-CODEX ")
+                .0,
+            " GPT-5.1-CODEX "
+        );
+        assert_eq!(
+            ExternalCatalogProvider::Kiro
+                .model_metadata("GPT-5.6-LUNA")
+                .0,
+            "GPT-5.6 Luna"
+        );
     }
 
     #[test]
