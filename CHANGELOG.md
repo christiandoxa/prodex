@@ -2,6 +2,65 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.433.1 - 2026-09-29
+
+### Runtime
+
+- Migrate runtime cookie identity (`9b6755b`)
+- Migrate runtime scalar config (`4376b2b`)
+- Remove runtime proxy identity duplicates (`b36c6c3`)
+- Migrate runtime proxy casefold checks (`d69220f`)
+- Remove runtime header identity duplicates (`c9df55c`)
+- Migrate OpenAI runtime model policy (`bdbaefe`)
+- Remove runtime boolean duplicates (`7f1bf29`)
+- Centralize runtime catalog identity (`905fc58`)
+- Centralize runtime provider classification (`9109253`)
+
+### CLI
+
+- Migrate quota render casefold policy (`97a9e27`)
+- Remember thread model and trust workspace (`688e364`)
+- Pretrust managed-profile resume workspace (`6589315`)
+- Remove quota identity duplicates (`3fbd892`)
+- Migrate stored profile identity matching (`9a5585b`)
+- Migrate login profile slug sanitizer (`8a5445d`)
+- Dedupe provider profile catalogs (`5b1b825`)
+- Classify profile import sources (`3549448`)
+- Remove provider profile alias duplicate (`d53ef80`)
+
+### Misc
+
+- Migrate secret backend identity (`44d43df`)
+- Migrate Copilot export host identity (`bfe7cdb`)
+- Migrate Presidio identity policy (`3bf0f7d`)
+- Migrate usage-limit text policy (`590098b`)
+- Migrate session launch identity (`8837918`)
+- Remove binary host casefold duplicates (`af224ba`)
+- Add casefold substring search (`5e1b2ab`)
+- Migrate provider scalar policy (`7d1313a`)
+- Migrate Gemini tooling policy (`a32c1fe`)
+- Migrate confirmation token policy (`faa7f85`)
+- Migrate optional-tools policy (`821145c`)
+- Migrate provider casefold policy (`b7901eb`)
+- Add casefold text relations (`39efe4a`)
+- Finish exact identity cleanup (`29cc6cf`)
+- Remove exact identity duplicates (`2ec7f4d`)
+- Migrate Gemini exact-output guardrails (`65d5d0c`)
+- Migrate Gemini guardrail text policy (`62e44c1`)
+- Centralize exact casefold equality (`9e0983b`)
+- Resolve Kiro model identity (`8ef9a1c`)
+- Resolve external catalog identity (`4a4385f`)
+- Add exact catalog identity resolver (`5d8d37d`)
+- Dedupe sub-agent catalogs (`b8bef27`)
+- Dedupe bundled models in catalog (`4c1a5cd`)
+- Centralize CI truth policy (`4047999`)
+- Remove Gemini boolean duplicate (`b4640f6`)
+- Migrate DeepSeek config token policy (`dea1626`)
+- Hard-replace sub-agent launch policy (`dcd5741`)
+- Centralize model provider classification (`1717673`)
+- Migrate Kiro response tool-call policy (`b2d6a32`)
+- Migrate Gemini stream metadata merge (`bb24169`)
+
 ## 0.433.0 - 2026-09-28
 
 ### Runtime
@@ -60,121 +119,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Hard replace DeepSeek stream shapes (`208df26`)
 - Hard replace Kiro ACP shapes (`f5e0d64`)
 - Hard replace Kiro response helpers (`9d612ba`)
-# Prodex 0.433.0
-
-## New Features
-
-- Target the official Codex `rust-v0.158.0` release with an audited compatibility
-  baseline, official binary verification, and isolated app-server initialize smoke.
-- Advance the Rust-to-Mojo hard-replacement campaign across provider translation,
-  runtime state/quota/continuity, profile identity/export, redaction, Codex config,
-  Super Expose, Smart Context, transcript/log semantics, sub-agent CLI policy,
-  provider usage, and runtime broker policy.
-- Keep the migrated surfaces single-owner: replaced Rust semantic fallbacks and
-  feature-off branches are removed rather than retained behind compatibility paths.
-- Raise the broad production Mojo share to **23.92%** with **109 authoritative
-  operations** while preserving the existing 75% migration target.
-
-## Codex 0.158.0 Compatibility
-
-- Advance the tested Codex reference from `rust-v0.157.1` to
-  `rust-v0.158.0`.
-- Add the upstream 0.158 portable project-trust contract to the compatibility
-  baseline. Codex now tries an executor-normalized canonical cwd before its
-  original spelling; Prodex Super intentionally projects both spellings.
-- Preserve zero-prompt Super resume behavior:
-  - `prodex s <session-uuid>` trusts the canonical persisted session cwd.
-  - interactive Super launches pre-trust recent persisted session workspaces so
-    Codex `/resume` does not show the Folder access / Trust and continue screen.
-  - trust remains scoped to the temporary Super invocation and does not rewrite
-    the user's persisted Codex config.
-- Track Codex's intentional removal of GPT-5.4 from the **bundled Amazon Bedrock
-  catalog** without removing GPT-5.4 from Prodex's independent OpenAI, Copilot,
-  or provider catalogs.
-- Track parameterized large-tool-schema compaction: Codex now accepts a caller
-  byte budget while retaining a 5,000-byte default and its existing ordered
-  compaction/depth policy.
-- Keep Codex 0.158's new MCP OAuth client-secret support, authenticated
-  exec-server WebSocket transport, image-generation/editing controls, and
-  command-completion additions upstream-owned unless Prodex already owns the
-  corresponding proxy boundary.
-- Preserve Super's explicit `approval_policy="never"` and
-  `sandbox_mode="danger-full-access"`; Codex 0.158's new default terminal-input
-  approval therefore does not add prompts to Super mode.
-
-## Bug Fixes
-
-- Restore canonical workspace trust for direct Super UUID resume when the rollout
-  persisted a non-canonical cwd spelling.
-- Keep Codex `/resume` zero-prompt in Super by pre-trusting persisted session
-  workspaces before the TUI starts.
-- Harden Smart Context artifact line-range parsing against integer overflow.
-- Continue fail-closed compatibility behavior for unknown provider identities,
-  malformed protocol inputs, and unsupported request shapes.
-
-## Mojo Migration
-
-This release folds the post-0.432.2 migration train into the release line,
-including:
-
-- provider request/response/stream hard replacement for Gemini, DeepSeek, Kiro,
-  Anthropic, OpenAI compatibility, and provider usage;
-- unconditional Mojo ownership for runtime tuning, CLI launch/runtime features,
-  and migrated provider/app paths;
-- runtime state background/quota/lineage, quota model/selection, broker
-  continuity, route-decision, and broker guard policy;
-- profile identity/export planning, governance/quota oracle retirement,
-  redaction, session metadata, Codex config, and state core policy;
-- Smart Context repo-map, artifact-reference, semantic-marker, and related
-  normalization surfaces;
-- Super Expose protocol, dispatch, tool-contract, and provider-config policy;
-- transcript/log throughput semantics and sub-agent CLI policy.
-
-The canonical broad production-source report at release preparation is:
-
-- Rust: **193,959 LOC**
-- Mojo: **60,972 LOC**
-- Total: **254,931 LOC**
-- Mojo share: **23.92%**
-- Authoritative Mojo operations: **109**
-
-The 75% project target remains in progress.
-
-## Dependency Maintenance
-
-- Merge the Dependabot Cargo group update for `hyper-util 0.1.21` and
-  `tiktoken-rs 0.12.1`.
-- Update `astral-sh/setup-uv` to `10.2.0` across GitHub Actions.
-
-## Verification
-
-- Compared exact Codex 0.157.1 and 0.158.0 tagged source archives:
-  **1,224 changed files, 52,257 additions, 13,525 deletions, and 2 binary
-  entries**.
-- Verified the Codex 0.158.0 source archive SHA-256:
-  `e0c6f2492a1afad6ace9101b01a85deb58f81c52ee25af351d3b7478425a3558`.
-- Verified the official Linux musl asset SHA-256:
-  `af9f5aa6e6662accf9d707cef0d9ca083880a173a9c2b6c22947edb7830e5778`.
-- Verified the extracted Codex binary SHA-256:
-  `167c0148a849d2444f1b5a7fb5f8bb2de1de5ae13a2a504b833fc765980f5cd9`;
-  it reports `codex-cli 0.158.0`.
-- Replayed the compatibility baseline with **811** critical/semantic markers,
-  including the new canonical project-trust lookup contract: zero compatibility
-  diffs.
-- Ran an isolated official 0.158.0 app-server `initialize` handshake with
-  `experimentalApi=true` under a synthetic `HOME`/`CODEX_HOME`; it returned
-  a valid Unix/Linux result without credentials or a model turn.
-- The upstream compatibility watchdog is `in_sync`; the offline baseline guard
-  and self-test pass.
-
-## Changelog
-
-- Accommodate Codex `rust-v0.158.0` at the audited compatibility boundary.
-- Promote the post-0.432.2 Mojo hard-replacement train to Prodex 0.433.0.
-- Preserve zero-prompt Super direct resume and `/resume` trust on Codex 0.158.
-- Integrate the current Dependabot Cargo and GitHub Actions updates.
-
-Full Changelog: [0.432.2...0.433.0](https://github.com/christiandoxa/prodex/compare/0.432.2...0.433.0)
 
 ## 0.432.2 - 2026-09-27
 
