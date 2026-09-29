@@ -3363,3 +3363,13 @@ WebSocket NO_PROXY exact/suffix host matching now reuse the authoritative Mojo e
 starts-with, ends-with, and contains relations. Rust lowercase shadow strings were
 deleted. Rust retains filesystem/executable probing, version parsing, host normalization,
 port parsing, wildcard policy, and wrapper process resolution.
+
+
+## Session-store and runtime-launch identity migration
+
+prodex-session-store and prodex-runtime-launch now enable mojo-rich and use the
+authoritative exact ASCII-casefold primitive for exact session-ID resolution, exact
+resume-store matching, local-provider identity, and NO_PROXY bypass deduplication. The
+corresponding Rust eq_ignore_ascii_case copies were deleted. Session prefix matching
+remains Rust Unicode-lowercase intentionally because its semantics are broader than the
+ASCII exact-identity contract.

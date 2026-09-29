@@ -1,4 +1,5 @@
 use anyhow::bail;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::path::{Path, PathBuf};
 
 pub fn allow_profileless_local_home(
@@ -7,8 +8,10 @@ pub fn allow_profileless_local_home(
     local_provider_id: &str,
 ) -> bool {
     requested_profile.is_none()
-        && model_provider_override
-            .is_some_and(|provider| provider.eq_ignore_ascii_case(local_provider_id))
+        && model_provider_override.is_some_and(|provider| {
+            ascii_casefold_equal_exact(provider, local_provider_id)
+                .expect("Mojo local-provider identity comparison failed")
+        })
 }
 
 pub fn fixed_runtime_proxy_state(
