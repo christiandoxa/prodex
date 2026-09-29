@@ -3373,3 +3373,13 @@ resume-store matching, local-provider identity, and NO_PROXY bypass deduplicatio
 corresponding Rust eq_ignore_ascii_case copies were deleted. Session prefix matching
 remains Rust Unicode-lowercase intentionally because its semantics are broader than the
 ASCII exact-identity contract.
+
+
+## Usage-limit and runtime error casefold cleanup
+
+Goal/usage-limit status, error-type/code identity, canonical usage-limit messages,
+usage-limit prefixes, Gemini compact error-text classification, and runtime token
+invalidation detection now reuse the authoritative rich-catalog ASCII-casefold Mojo
+primitives. The Rust lowercase shadow strings and eq_ignore_ascii_case tables were
+deleted from these production paths. Rust retains JSON traversal, historical trimming,
+recovery state transitions, HTTP/error acquisition, and final domain-specific labels.

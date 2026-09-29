@@ -1,6 +1,7 @@
 use crate::app_state::{AppStateIoExt, ProfileProviderExt};
 use crate::{AppPaths, AppState};
 use anyhow::{Context, Result};
+use prodex_mojo_core::rich::{ascii_casefold_equal_exact, ascii_casefold_starts_with};
 use rusqlite::OptionalExtension;
 use std::fs::{self};
 use std::path::{Path, PathBuf};
@@ -117,19 +118,21 @@ impl GoalUsageLimitMonitor {
         } else {
             None
         };
-        let normalized = status
-            .as_ref()
-            .map(|(status, _)| status.trim().to_ascii_lowercase());
+        let normalized = status.as_ref().map(|(status, _)| status.trim());
         self.session_goal_present = status.is_some();
         if let Some(class) = workflow_recovery
             && self.workflow_evidence.safe_to_resume()
-            && normalized.as_deref().is_none_or(goal_status_is_resumable)
+            && normalized.is_none_or(goal_status_is_resumable)
         {
             self.workflow_recovery_class = Some(class);
             self.usage_limit_pending = true;
             self.next_retry_at = Instant::now();
         }
-        if normalized.as_deref() == Some("active") && !self.usage_limit_pending {
+        if normalized.is_some_and(|status| {
+            ascii_casefold_equal_exact(status, "active")
+                .expect("Mojo goal-status comparison failed")
+        }) && !self.usage_limit_pending
+        {
             self.armed = true;
             return Ok(None);
         }
@@ -137,7 +140,10 @@ impl GoalUsageLimitMonitor {
             .as_ref()
             .is_some_and(|(_, updated_at_ms)| *updated_at_ms >= self.started_at_ms);
         if !self.usage_limit_pending
-            && normalized.as_deref() == Some("usage_limited")
+            && normalized.is_some_and(|status| {
+                ascii_casefold_equal_exact(status, "usage_limited")
+                    .expect("Mojo goal-status comparison failed")
+            })
             && (self.armed || current_attempt_hit_limit)
         {
             self.armed = false;
@@ -422,7 +428,9 @@ pub(crate) fn runtime_goal_session_offset_path(marker_path: &Path) -> PathBuf {
 
 fn goal_resume_line_has_usage_limit(line: &str) -> bool {
     let trimmed = line.trim();
-    if trimmed.eq_ignore_ascii_case(OBSERVED_USAGE_LIMIT_MESSAGE) {
+    if ascii_casefold_equal_exact(trimmed, OBSERVED_USAGE_LIMIT_MESSAGE)
+        .expect("Mojo usage-limit message comparison failed")
+    {
         return true;
     }
     let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
@@ -446,16 +454,17 @@ fn goal_resume_event_payload_usage_limit(value: &serde_json::Value) -> bool {
         return false;
     };
     let explicit_type = object.get("type").and_then(serde_json::Value::as_str);
-    if explicit_type.is_some_and(|kind| !kind.eq_ignore_ascii_case("error")) {
+    if explicit_type.is_some_and(|kind| {
+        !ascii_casefold_equal_exact(kind, "error").expect("Mojo usage-limit type comparison failed")
+    }) {
         return false;
     }
     if object
         .get("message")
         .and_then(serde_json::Value::as_str)
         .is_some_and(|message| {
-            message
-                .trim()
-                .eq_ignore_ascii_case(OBSERVED_USAGE_LIMIT_MESSAGE)
+            ascii_casefold_equal_exact(message.trim(), OBSERVED_USAGE_LIMIT_MESSAGE)
+                .expect("Mojo usage-limit message comparison failed")
         })
     {
         return true;
@@ -463,7 +472,10 @@ fn goal_resume_event_payload_usage_limit(value: &serde_json::Value) -> bool {
     let is_error = object
         .get("type")
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|kind| kind.eq_ignore_ascii_case("error"))
+        .is_some_and(|kind| {
+            ascii_casefold_equal_exact(kind, "error")
+                .expect("Mojo usage-limit type comparison failed")
+        })
         || object.contains_key("error")
         || ["code", "status", "reason", "codex_error_info"]
             .into_iter()
@@ -588,21 +600,27 @@ fn usage_limit_recovery_is_ready(
 
 fn goal_resume_quota_code(code: &str) -> bool {
     runtime_proxy_crate::runtime_quota_payload_code(code)
-        || code.trim().eq_ignore_ascii_case("usage_limit_exceeded")
+        || ascii_casefold_equal_exact(code.trim(), "usage_limit_exceeded")
+            .expect("Mojo usage-limit code comparison failed")
 }
 
 fn goal_resume_usage_limit_text(message: &str) -> bool {
     let message = message.trim();
-    if message.eq_ignore_ascii_case(OBSERVED_USAGE_LIMIT_MESSAGE) {
-        return true;
-    }
-    let lower = message.to_ascii_lowercase();
-    lower.starts_with("you've hit your usage limit")
-        || lower.starts_with("you have hit your usage limit")
-        || lower == "the usage limit has been reached"
-        || lower == "usage limit has been reached"
-        || lower.starts_with("your workspace is out of credits")
-        || lower.starts_with("you hit your spend cap")
+    let exact = |expected| {
+        ascii_casefold_equal_exact(message, expected)
+            .expect("Mojo usage-limit message comparison failed")
+    };
+    let starts_with = |prefix| {
+        ascii_casefold_starts_with(message, prefix)
+            .expect("Mojo usage-limit message prefix comparison failed")
+    };
+    exact(OBSERVED_USAGE_LIMIT_MESSAGE)
+        || starts_with("you've hit your usage limit")
+        || starts_with("you have hit your usage limit")
+        || exact("the usage limit has been reached")
+        || exact("usage limit has been reached")
+        || starts_with("your workspace is out of credits")
+        || starts_with("you hit your spend cap")
 }
 
 pub(crate) fn goal_database_is_file(path: &Path) -> Result<bool> {
@@ -670,10 +688,13 @@ fn goal_status_for_thread(
 }
 
 fn goal_status_is_resumable(status: &str) -> bool {
-    matches!(
-        status.trim().to_ascii_lowercase().as_str(),
-        "active" | "paused" | "blocked" | "usage_limited"
-    )
+    let status = status.trim();
+    ["active", "paused", "blocked", "usage_limited"]
+        .into_iter()
+        .any(|expected| {
+            ascii_casefold_equal_exact(status, expected)
+                .expect("Mojo resumable goal-status comparison failed")
+        })
 }
 
 #[cfg(test)]
