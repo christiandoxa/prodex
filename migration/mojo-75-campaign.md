@@ -3354,3 +3354,12 @@ that offset directly instead of allocating lowercase shadow strings; uppercase S
 suffixes are classified by the existing Mojo starts-with relation. Runtime transport
 failure message rules also use Mojo contains. Rust retains numeric duration parsing,
 retry policy mapping, IO-error kind mapping, and ordered rule precedence.
+
+
+## Codex binary and WebSocket no-proxy casefold cleanup
+
+Codex version-label validation, recursive Prodex wrapper filename/text detection, and
+WebSocket NO_PROXY exact/suffix host matching now reuse the authoritative Mojo exact,
+starts-with, ends-with, and contains relations. Rust lowercase shadow strings were
+deleted. Rust retains filesystem/executable probing, version parsing, host normalization,
+port parsing, wildcard policy, and wrapper process resolution.
