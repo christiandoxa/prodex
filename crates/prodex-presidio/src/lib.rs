@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 pub use prodex_cli::PresidioLanguageMode;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use redaction::redaction_redact_secret_like_text;
 use serde::{Deserialize, Deserializer};
 use std::fmt;
@@ -214,10 +215,10 @@ fn runtime_presidio_redaction_config_from_file(
     if !(1..=MAX_PRESIDIO_CONCURRENCY).contains(&file_config.max_concurrency) {
         anyhow::bail!("invalid max_concurrency: expected 1..={MAX_PRESIDIO_CONCURRENCY}");
     }
-    if !matches!(
-        file_config.fail_mode.to_ascii_lowercase().as_str(),
-        "open" | "closed"
-    ) {
+    if !["open", "closed"].into_iter().any(|expected| {
+        ascii_casefold_equal_exact(&file_config.fail_mode, expected)
+            .expect("Mojo Presidio fail-mode comparison failed")
+    }) {
         anyhow::bail!("invalid fail_mode: expected 'open' or 'closed'");
     }
 
@@ -258,7 +259,8 @@ fn runtime_presidio_redaction_config_from_file(
         anonymizer_url: file_config.anonymizer_url,
         languages,
         language_mode,
-        fail_closed: file_config.fail_mode.eq_ignore_ascii_case("closed"),
+        fail_closed: ascii_casefold_equal_exact(&file_config.fail_mode, "closed")
+            .expect("Mojo Presidio fail-closed comparison failed"),
         trusted_hosts: file_config
             .trusted_hosts
             .into_iter()
@@ -302,10 +304,10 @@ pub fn validate_enterprise_presidio_endpoints(
             .host_str()
             .ok_or_else(|| anyhow::anyhow!("untrusted {field}: endpoint host is required"))?;
         if !presidio_host_is_private(host)
-            && !config
-                .trusted_hosts
-                .iter()
-                .any(|trusted| trusted.eq_ignore_ascii_case(host))
+            && !config.trusted_hosts.iter().any(|trusted| {
+                ascii_casefold_equal_exact(trusted, host)
+                    .expect("Mojo Presidio trusted-host comparison failed")
+            })
         {
             anyhow::bail!(
                 "untrusted {field}: enterprise governance requires a private/on-prem endpoint or an exact trusted_hosts entry"
@@ -316,7 +318,9 @@ pub fn validate_enterprise_presidio_endpoints(
 }
 
 fn presidio_host_is_private(host: &str) -> bool {
-    if host.eq_ignore_ascii_case("localhost") {
+    if ascii_casefold_equal_exact(host, "localhost")
+        .expect("Mojo Presidio localhost comparison failed")
+    {
         return true;
     }
     let Ok(address) = host.parse::<IpAddr>() else {
@@ -503,6 +507,26 @@ mod tests {
             assert!(error.contains(field), "{error}");
             let _ = fs::remove_dir_all(root);
         }
+    }
+
+    #[test]
+    fn presidio_casefold_policy_uses_mojo_identity() {
+        let config = ProdexPresidioRuntimeFileConfig {
+            fail_mode: "ClOsEd".to_string(),
+            trusted_hosts: vec!["PRESIDIO.EXAMPLE.COM".to_string()],
+            analyzer_url: "https://presidio.example.com".to_string(),
+            anonymizer_url: "http://10.20.30.40:5001".to_string(),
+            ..Default::default()
+        };
+        let runtime = runtime_presidio_redaction_config_from_file(config)
+            .expect("mixed-case Presidio policy should remain valid");
+        assert!(runtime.fail_closed);
+        validate_enterprise_presidio_endpoints(&RuntimePresidioRedactionConfig {
+            trusted_hosts: vec!["PRESIDIO.EXAMPLE.COM".to_string()],
+            ..runtime
+        })
+        .expect("trusted host comparison should stay case-insensitive");
+        assert!(presidio_host_is_private("LOCALHOST"));
     }
 
     #[test]
