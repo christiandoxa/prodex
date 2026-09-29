@@ -66,8 +66,12 @@ pub(crate) fn gemini_code_assist_endpoint() -> String {
     env::var("PRODEX_GEMINI_CODE_ASSIST_ENDPOINT")
         .or_else(|_| env::var("GEMINI_CODE_ASSIST_ENDPOINT"))
         .ok()
-        .map(|value| value.trim().trim_end_matches('/').to_string())
-        .filter(|value| !value.is_empty())
+        .and_then(|value| {
+            prodex_mojo_core::gemini_code_assist_policy::normalize_gemini_code_assist_endpoint(
+                &value,
+            )
+            .expect("Gemini Code Assist endpoint policy Mojo kernel must accept Rust strings")
+        })
         .unwrap_or_else(|| GEMINI_CODE_ASSIST_ENDPOINT.to_string())
 }
 
@@ -344,42 +348,11 @@ fn gemini_code_assist_plan_label(response: &GeminiLoadCodeAssistResponse) -> Opt
 }
 
 fn gemini_code_assist_tier_label(tier: &GeminiCodeAssistTier) -> Option<String> {
-    if let Some(id) = tier
-        .id
-        .as_deref()
-        .map(str::trim)
-        .filter(|id| !id.is_empty())
-    {
-        return Some(match id {
-            "free-tier" => "free".to_string(),
-            "legacy-tier" => "legacy".to_string(),
-            "standard-tier" => "standard".to_string(),
-            "g1-pro-tier" => "pro".to_string(),
-            "g1-ultra-tier" => "ultra".to_string(),
-            other => other
-                .strip_suffix("-tier")
-                .unwrap_or(other)
-                .to_ascii_lowercase(),
-        });
-    }
-    tier.name
-        .as_deref()
-        .map(str::trim)
-        .filter(|name| !name.is_empty())
-        .map(|name| {
-            let lower = name.to_ascii_lowercase();
-            if lower.contains("google one ai ultra") {
-                "ultra".to_string()
-            } else if lower.contains("google one ai pro") {
-                "pro".to_string()
-            } else if lower.contains("standard") {
-                "standard".to_string()
-            } else if lower.contains("free") {
-                "free".to_string()
-            } else {
-                name.to_string()
-            }
-        })
+    prodex_mojo_core::gemini_code_assist_policy::gemini_code_assist_tier_label(
+        tier.id.as_deref(),
+        tier.name.as_deref(),
+    )
+    .expect("Gemini Code Assist tier policy Mojo kernel must accept Rust strings")
 }
 
 fn gemini_code_assist_ineligible_message(

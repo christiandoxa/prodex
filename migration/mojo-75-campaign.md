@@ -3426,3 +3426,18 @@ SecretBackendKind parsing now reuses the authoritative exact ASCII-casefold Mojo
 primitive for file/keyring classification. The Rust to_ascii_lowercase match table was
 deleted while the existing padded-value rejection and exact error branch remain intact.
 Mixed-case parser coverage preserves the previous public FromStr contract.
+
+## Gemini Code Assist policy hard replacement
+
+Gemini Code Assist endpoint normalization and plan-tier labeling now run in the
+dedicated `gemini_code_assist_policy.mojo` owner. Mojo owns Unicode-whitespace
+trimming, trailing-slash removal, exact tier-ID aliases, `-tier` stripping,
+ASCII lowercase normalization, and case-insensitive plan-name classification.
+Rust retains environment/JSON acquisition, DTO ownership, HTTP orchestration,
+and string materialization only. The previous Rust normalization and tier-label
+tables were deleted; Mojo errors are not recomputed in Rust.
+
+Focused validation passes cargo fmt, the Mojo core build check, the prodex-app
+Mojo-core check, git diff --check, the Mojo authority guard, and the no-fallback
+guard. The canonical broad report counts 63,304 Mojo LOC and 195,676 Rust
+production LOC, totaling 258,980 LOC: 24.443586377326433% Mojo.
