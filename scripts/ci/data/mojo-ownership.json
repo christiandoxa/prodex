@@ -474,7 +474,8 @@
         "operations": [
           "runtime_tuning_defaults_kernel",
           "runtime_tuning_capacity_defaults",
-          "runtime_policy_proxy_preset_defaults"
+          "runtime_policy_proxy_preset_defaults",
+          "runtime_scalar_config_policy"
         ]
       },
       "mojo/prodex_core/smart_context.mojo": {
@@ -4371,6 +4372,38 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "typed Mojo enum/numeric/Option decoding, provider-local enum mapping, and caller-owned JSON value acquisition"
+    },
+    {
+      "name": "runtime_scalar_config_policy",
+      "domain": "runtime/config-scalar-policy",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust lowercase match tables for runtime log format, runtime-proxy preset aliases, CLI web-search and clock-source values, and Codex OpenAI provider identity",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_scalar_config_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "log_format": 0,
+        "proxy_preset": 1,
+        "web_search_mode": 2,
+        "clock_source": 3,
+        "openai_provider": 4
+      },
+      "mojo_source": "mojo/prodex_core/runtime_tuning.mojo",
+      "consumer": "crates/prodex-runtime-policy/src/types.rs",
+      "consumer_marker": "runtime_log_format_class",
+      "production_consumers": [
+        "crates/prodex-runtime-policy/src/types.rs",
+        "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
+        "crates/prodex-codex-config/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_decisions/tuning.rs",
+      "rust_owner_before": "case-insensitive runtime config token parsing with caller-specific trim/no-trim semantics for log format, proxy presets, web-search mode, current-time clock source, and OpenAI provider identity",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo scalar-config coverage plus runtime-policy, CLI override, and codex-config caller tests preserve mixed-case, Unicode-trim, no-trim, alias, unknown-token, and provider identity behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed enum/bool decoding, CLI error text, policy DTO mapping, and Codex config source ownership"
     }
   ],
   "rust_semantic_reductions": [
