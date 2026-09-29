@@ -1,3 +1,4 @@
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 
@@ -104,7 +105,8 @@ pub fn runtime_response_content_type_from_binary_headers<'a>(
     headers: impl IntoIterator<Item = (&'a str, &'a [u8])>,
 ) -> Option<&'a str> {
     headers.into_iter().find_map(|(name, value)| {
-        name.eq_ignore_ascii_case("content-type")
+        ascii_casefold_equal_exact(name, "content-type")
+            .expect("Mojo response Content-Type comparison failed")
             .then(|| std::str::from_utf8(value).ok())
             .flatten()
             .map(str::trim)
@@ -132,7 +134,10 @@ pub fn runtime_response_header_value<'a>(
 ) -> Option<String> {
     headers
         .into_iter()
-        .find(|(candidate_name, _)| candidate_name.eq_ignore_ascii_case(name))
+        .find(|(candidate_name, _)| {
+            ascii_casefold_equal_exact(candidate_name, name)
+                .expect("Mojo response header-name comparison failed")
+        })
         .map(|(_, value)| value.trim())
         .filter(|value| !value.is_empty())
         .map(str::to_string)
@@ -142,7 +147,8 @@ pub fn runtime_stream_response_should_flush_each_chunk<'a>(
     headers: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> bool {
     headers.into_iter().any(|(name, value)| {
-        name.eq_ignore_ascii_case("content-type")
+        ascii_casefold_equal_exact(name, "content-type")
+            .expect("Mojo response Content-Type comparison failed")
             && runtime_response_content_type_is_sse(Some(value))
     })
 }

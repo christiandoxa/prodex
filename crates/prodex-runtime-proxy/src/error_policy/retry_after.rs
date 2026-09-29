@@ -1,3 +1,4 @@
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::time::Duration;
 
 const RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS: i64 = 0;
@@ -30,7 +31,10 @@ pub fn runtime_retry_after_from_headers<'a>(
 ) -> Option<Duration> {
     headers
         .into_iter()
-        .filter(|(name, _)| name.eq_ignore_ascii_case("retry-after"))
+        .filter(|(name, _)| {
+            ascii_casefold_equal_exact(name, "retry-after")
+                .expect("Mojo Retry-After header-name comparison failed")
+        })
         .filter_map(|(_, value)| std::str::from_utf8(value).ok())
         .filter_map(runtime_retry_after_header_value)
         .max()

@@ -4035,16 +4035,24 @@
         "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay.rs",
         "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_quota.rs",
-        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send.rs"
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_send.rs",
+        "crates/prodex-runtime-proxy/src/lib.rs",
+        "crates/prodex-runtime-proxy/src/upstream.rs",
+        "crates/prodex-runtime-proxy/src/response_forwarding.rs",
+        "crates/prodex-runtime-proxy/src/payload_detection/response_metadata.rs",
+        "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
+        "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
+        "crates/prodex-runtime-proxy/src/log_event.rs",
+        "crates/prodex-runtime-proxy/src/websocket_message.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-      "rust_owner_before": "exact ASCII case-insensitive equality repeated across runtime/header/catalog identity, provider request roles, session-memory aliases, Gemini quota codes/media extensions, normalized response headers, and Code Assist labels/domains",
+      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/prompt identity, app runtime headers/processes, and runtime-proxy request/response/header/log/websocket policy",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo equality coverage preserves empty strings, mixed case, and whitespace sensitivity, while Super catalog/prompt caller tests preserve selection behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "caller-owned trimming where historically required, string/header/body/URL/JSON acquisition, iteration, model-memory selection, routing/filtering decisions, and result mapping; Mojo owns exact ASCII-folded equality"
+      "rust_adapter_scope": "caller-owned trimming where historically required, string/header/JSON acquisition, iteration, routing/forwarding/logging decisions, and byte-level URL syntax; Mojo owns exact ASCII-folded string equality"
     },
     {
       "name": "gemini_guardrail_text_classification",

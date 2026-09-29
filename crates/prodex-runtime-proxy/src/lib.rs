@@ -2,6 +2,7 @@
 //! Most modules are side-effect-free; the bounded WebSocket TCP/DNS executor
 //! keeps binary wiring thin while owning runtime state and persistence.
 
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::{borrow::Cow, fmt};
 
 pub use prodex_runtime_state::{
@@ -311,7 +312,8 @@ pub fn runtime_proxy_request_is_long_lived(path: &str, websocket: bool) -> bool 
 }
 
 pub fn runtime_proxy_request_prefers_inflight_wait(request: &RuntimeProxyRequest) -> bool {
-    request.method.eq_ignore_ascii_case("GET")
+    ascii_casefold_equal_exact(&request.method, "GET")
+        .expect("Mojo request-method comparison failed")
         || prodex_mojo_core::rich::runtime_proxy_path_plan(&request.path_and_query, false)
             .expect("Mojo runtime proxy path planning returned invalid output")
             .long_lived
@@ -352,8 +354,8 @@ pub fn runtime_proxy_request_header_value<'a>(
     headers
         .iter()
         .find_map(|(header_name, value)| {
-            header_name
-                .eq_ignore_ascii_case(name)
+            ascii_casefold_equal_exact(header_name, name)
+                .expect("Mojo request header-name comparison failed")
                 .then_some(value.as_str())
         })
         .map(str::trim)
@@ -470,7 +472,8 @@ pub fn runtime_request_session_id_from_turn_metadata(
         .headers
         .iter()
         .find_map(|(name, value)| {
-            name.eq_ignore_ascii_case("x-codex-turn-metadata")
+            ascii_casefold_equal_exact(name, "x-codex-turn-metadata")
+                .expect("Mojo turn-metadata header comparison failed")
                 .then_some(value.as_str())
         })
         .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
@@ -532,7 +535,8 @@ pub fn runtime_request_turn_id(request: &RuntimeProxyRequest) -> Option<String> 
         .headers
         .iter()
         .find_map(|(name, value)| {
-            name.eq_ignore_ascii_case("x-codex-turn-metadata")
+            ascii_casefold_equal_exact(name, "x-codex-turn-metadata")
+                .expect("Mojo turn-metadata header comparison failed")
                 .then_some(value.as_str())
         })
         .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
@@ -552,7 +556,8 @@ pub fn runtime_request_thread_id(request: &RuntimeProxyRequest) -> Option<String
                 .headers
                 .iter()
                 .find_map(|(name, value)| {
-                    name.eq_ignore_ascii_case("x-codex-turn-metadata")
+                    ascii_casefold_equal_exact(name, "x-codex-turn-metadata")
+                        .expect("Mojo turn-metadata header comparison failed")
                         .then_some(value.as_str())
                 })
                 .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())
@@ -565,7 +570,8 @@ pub fn runtime_request_compaction_generation(request: &RuntimeProxyRequest) -> O
         .headers
         .iter()
         .find_map(|(name, value)| {
-            name.eq_ignore_ascii_case("x-codex-turn-metadata")
+            ascii_casefold_equal_exact(name, "x-codex-turn-metadata")
+                .expect("Mojo turn-metadata header comparison failed")
                 .then_some(value.as_str())
         })
         .and_then(|value| serde_json::from_str::<serde_json::Value>(value).ok())

@@ -6,6 +6,7 @@ use crate::{
     extract_runtime_turn_state_from_value, runtime_proxy_stale_continuation_message,
     runtime_response_event_type_from_value, runtime_stream_error_policy_from_value,
 };
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeBufferedWebsocketTextFrame {
@@ -259,11 +260,17 @@ fn runtime_websocket_connection_limit_reached(value: &serde_json::Value) -> bool
         .get("error")
         .and_then(|error| error.get("code"))
         .and_then(serde_json::Value::as_str)
-        .is_some_and(|code| code.eq_ignore_ascii_case(CODE))
+        .is_some_and(|code| {
+            ascii_casefold_equal_exact(code, CODE)
+                .expect("Mojo websocket error-code comparison failed")
+        })
         || value
             .get("code")
             .and_then(serde_json::Value::as_str)
-            .is_some_and(|code| code.eq_ignore_ascii_case(CODE))
+            .is_some_and(|code| {
+                ascii_casefold_equal_exact(code, CODE)
+                    .expect("Mojo websocket error-code comparison failed")
+            })
 }
 
 fn runtime_websocket_wrapped_error_is_terminal(value: &serde_json::Value) -> bool {

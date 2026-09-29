@@ -1,4 +1,5 @@
 use super::json_utils::{runtime_json_find, runtime_json_string, runtime_json_u64_at};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RuntimeTokenUsage {
@@ -149,7 +150,9 @@ fn runtime_token_usage_from_usage_value(value: &serde_json::Value) -> Option<Run
 pub fn extract_runtime_turn_state_from_headers_value(value: &serde_json::Value) -> Option<String> {
     match value {
         serde_json::Value::Object(headers) => headers.iter().find_map(|(name, value)| {
-            if name.eq_ignore_ascii_case("x-codex-turn-state") {
+            if ascii_casefold_equal_exact(name, "x-codex-turn-state")
+                .expect("Mojo turn-state header comparison failed")
+            {
                 extract_runtime_turn_state_header_value(value)
             } else {
                 None
@@ -166,7 +169,9 @@ fn extract_runtime_turn_state_from_header_entry(value: &serde_json::Value) -> Op
     match value {
         serde_json::Value::Array(items) => {
             let name = items.first()?.as_str()?;
-            if !name.eq_ignore_ascii_case("x-codex-turn-state") {
+            if !ascii_casefold_equal_exact(name, "x-codex-turn-state")
+                .expect("Mojo turn-state header comparison failed")
+            {
                 return None;
             }
             items
@@ -178,7 +183,9 @@ fn extract_runtime_turn_state_from_header_entry(value: &serde_json::Value) -> Op
                 .get("name")
                 .or_else(|| entry.get("key"))
                 .and_then(serde_json::Value::as_str)?;
-            if !name.eq_ignore_ascii_case("x-codex-turn-state") {
+            if !ascii_casefold_equal_exact(name, "x-codex-turn-state")
+                .expect("Mojo turn-state header comparison failed")
+            {
                 return None;
             }
             entry

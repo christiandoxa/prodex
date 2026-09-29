@@ -3295,3 +3295,13 @@ run_shell_command output naming, and Gemini-3 model/toolset detection now live i
 dedicated gemini_tooling_policy.mojo owner. The Rust normalization, alias match tables,
 mutation table, and model lowercase classifier were deleted. Rust retains BTreeSet/string
 materialization plus JSON declaration mutation driven by the Mojo policy outputs.
+
+
+## Runtime-proxy exact identity cleanup
+
+Runtime-proxy GET/method checks, generic request/session/turn-metadata headers, transport
+and connection-token filtering, response Content-Type/header lookup, turn-state metadata
+extraction, Retry-After and rate-limit header lookup, stable/free-form log-key classes,
+and websocket error-code identity now reuse the authoritative exact ASCII-casefold Mojo
+primitive. The Rust eq_ignore_ascii_case copies were deleted; the byte-level percent-dot
+URL parser remains Rust-owned because it is syntax parsing rather than string policy.

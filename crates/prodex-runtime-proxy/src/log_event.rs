@@ -1,3 +1,4 @@
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
@@ -272,7 +273,9 @@ fn runtime_proxy_log_key_is_free_form(key: &str) -> bool {
         "error", "message", "detail", "body", "response", "stderr", "panic",
     ]
     .iter()
-    .any(|candidate| key.eq_ignore_ascii_case(candidate))
+    .any(|candidate| {
+        ascii_casefold_equal_exact(key, candidate).expect("Mojo runtime log-key comparison failed")
+    })
 }
 
 fn runtime_proxy_log_value_is_stable_code(value: &str) -> bool {
@@ -288,11 +291,14 @@ fn runtime_proxy_log_value_is_stable_code(value: &str) -> bool {
 }
 
 fn runtime_proxy_log_key_is_location(key: &str) -> bool {
-    key.eq_ignore_ascii_case("path")
+    ascii_casefold_equal_exact(key, "path")
+        .expect("Mojo runtime log location-key comparison failed")
         || key.ends_with("_path")
-        || key.eq_ignore_ascii_case("url")
+        || ascii_casefold_equal_exact(key, "url")
+            .expect("Mojo runtime log location-key comparison failed")
         || key.ends_with("_url")
-        || key.eq_ignore_ascii_case("endpoint")
+        || ascii_casefold_equal_exact(key, "endpoint")
+            .expect("Mojo runtime log location-key comparison failed")
         || key.ends_with("_endpoint")
 }
 
