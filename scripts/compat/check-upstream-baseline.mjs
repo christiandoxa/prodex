@@ -195,6 +195,8 @@ const REQUIRED_FILE_CONTAINS = {
     "has_stable_account",
   ],
   "codex-rs/models-manager/models.json": [
+    "\"slug\": \"gpt-6.1-sol\"",
+    "\"display_name\": \"GPT-6.1-Sol\"",
     "\"slug\": \"gpt-6-sol\"",
     "\"display_name\": \"GPT-6-Sol\"",
     "\"slug\": \"gpt-6-luna\"",
@@ -243,6 +245,8 @@ const REQUIRED_FILE_CONTAINS = {
     "openai.gpt-5.6-terra",
     "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
     "openai.gpt-5.6-luna",
+    "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID",
+    "openai.gpt-6.1-sol",
     "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
     "openai.gpt-6-sol",
     "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
@@ -255,6 +259,7 @@ const REQUIRED_FILE_CONTAINS = {
     "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
     "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
     "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+    "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID",
     "ReasoningEffort::Ultra",
     ".retain(|level| level.effort != ReasoningEffort::Ultra)",
     "model.additional_speed_tiers.clear()",
@@ -277,6 +282,7 @@ const REQUIRED_FILE_CONTAINS = {
     "openai.gpt-5.6-sol",
     "openai.gpt-5.6-terra",
     "openai.gpt-5.6-luna",
+    "openai.gpt-6.1-sol",
     "openai.gpt-6-sol",
     "openai.gpt-6-luna",
     "include_internal_metadata",
@@ -1018,6 +1024,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
       "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
       "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+      "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID",
       "ReasoningEffort::Ultra",
       ".retain(|level| level.effort != ReasoningEffort::Ultra)",
       "model.additional_speed_tiers.clear()",
@@ -1052,6 +1059,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "openai.gpt-5.6-sol",
       "openai.gpt-5.6-terra",
       "openai.gpt-5.6-luna",
+      "openai.gpt-6.1-sol",
       "openai.gpt-6-sol",
       "openai.gpt-6-luna",
     ],
@@ -2018,15 +2026,15 @@ function runSelfTest() {
   });
 
   assertSelfTestError({
-    name: "missing Bedrock GPT-6 catalog token",
+    name: "missing Bedrock GPT-6.1 catalog token",
     mutate: (compat) => {
       const check = semanticCheck(compat, "model-provider.bedrock-gpt-6-catalog");
       check.file_contains_all = check.file_contains_all.filter(
-        (token) => token !== "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
+        (token) => token !== "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID",
       );
     },
     expectedMessage:
-      'codex.compatibility.semantic_checks.model-provider.bedrock-gpt-6-catalog.file_contains_all missing "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID"',
+      'codex.compatibility.semantic_checks.model-provider.bedrock-gpt-6-catalog.file_contains_all missing "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID"',
   });
 
   assertSelfTestError({

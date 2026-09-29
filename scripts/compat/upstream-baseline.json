@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.159.0 release",
+      "baseline_source": "openai/codex rust-v0.159.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -144,11 +144,13 @@
         },
         {
           "path": "codex-rs/models-manager/models.json",
-          "reason": "Owns bundled GPT-5.6 plus Codex 0.158 GPT-6 Sol/Luna model metadata and context-window contracts. Prodex preserves these upstream values while keeping its provider catalogs independently governed.",
+          "reason": "Owns bundled GPT-5.6 plus GPT-6/GPT-6.1 model metadata and context-window contracts. Codex 0.159.1 adds GPT-6.1 Sol as the default bundled model; Prodex preserves these upstream values while keeping its provider catalogs independently governed.",
           "required_contains": [
             "\"display_name\": \"GPT-6-Luna\"",
+            "\"display_name\": \"GPT-6.1-Sol\"",
             "\"display_name\": \"GPT-6-Sol\"",
             "\"slug\": \"gpt-6-luna\"",
+            "\"slug\": \"gpt-6.1-sol\"",
             "\"slug\": \"gpt-6-sol\"",
             "\"slug\": \"gpt-5.6-sol\"",
             "\"slug\": \"gpt-5.6-terra\"",
@@ -227,7 +229,7 @@
         },
         {
           "path": "codex-rs/model-provider-info/src/lib.rs",
-          "reason": "Owns provider metadata and Bedrock model ID constants, including Codex 0.157 GPT-6 Sol/Luna Bedrock IDs used by direct Bedrock launches.",
+          "reason": "Owns provider metadata and Bedrock model ID constants, including Codex 0.159.1 GPT-6.1 Sol plus retained GPT-6 Sol/Luna IDs used by direct Bedrock launches.",
           "required_contains": [
             "ModelProviderInfo",
             "supports_standalone_web_search",
@@ -239,6 +241,8 @@
             "openai.gpt-5.6-terra",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
             "openai.gpt-5.6-luna",
+            "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID",
+            "openai.gpt-6.1-sol",
             "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
             "openai.gpt-6-sol",
             "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
@@ -247,7 +251,7 @@
         },
         {
           "path": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
-          "reason": "Owns the Codex static Amazon Bedrock model catalog. Codex 0.157 adds GPT-6 Sol/Luna, makes GPT-6 Sol the default, and retains inherited reasoning metadata, default-only service tiers, text-only web search, and disabled Responses Lite/tool mode.",
+          "reason": "Owns the Codex static Amazon Bedrock model catalog. Codex 0.159.1 adds GPT-6.1 Sol as the default while retaining GPT-6 Sol/Luna and GPT-5.6 compatibility entries plus Bedrock-specific reasoning/service-tier normalization.",
           "required_contains": [
             "static_model_catalog",
             "normalize_bedrock_catalog",
@@ -255,6 +259,7 @@
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID",
             "ReasoningEffort::Ultra",
             ".retain(|level| level.effort != ReasoningEffort::Ultra)",
             "model.additional_speed_tiers.clear()",
@@ -281,6 +286,7 @@
             "openai.gpt-5.6-sol",
             "openai.gpt-5.6-terra",
             "openai.gpt-5.6-luna",
+            "openai.gpt-6.1-sol",
             "openai.gpt-6-sol",
             "openai.gpt-6-luna",
             "fn include_internal_metadata",
@@ -1199,7 +1205,7 @@
           "id": "model-provider.bedrock-gpt-6-catalog",
           "kind": "provider_catalog",
           "file": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
-          "reason": "Codex 0.157 adds GPT-6 Sol/Luna to the static Bedrock catalog, promotes GPT-6 Sol to default priority, retains GPT-5.6 compatibility entries, removes Ultra where required, disables Responses Lite/tool mode, and keeps Bedrock service tiers default-only.",
+          "reason": "Codex 0.159.1 adds GPT-6.1 Sol to the static Bedrock catalog and makes it the default while retaining GPT-6 Sol/Luna, GPT-5.6 compatibility entries, Bedrock reasoning normalization, disabled Responses Lite/tool mode, and default-only service tiers.",
           "file_contains_all": [
             "static_model_catalog",
             "normalize_bedrock_catalog",
@@ -1207,6 +1213,7 @@
             "AMAZON_BEDROCK_GPT_5_6_SOL_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
+            "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID",
             "ReasoningEffort::Ultra",
             ".retain(|level| level.effort != ReasoningEffort::Ultra)",
             "model.additional_speed_tiers.clear()",
@@ -1236,13 +1243,14 @@
           "id": "model-provider.bedrock-static-manager-models",
           "kind": "provider_catalog",
           "file": "codex-rs/model-provider/src/provider.rs",
-          "reason": "Codex 0.158 keeps GPT-6 Sol/Luna plus GPT-5.5/5.6 in the static Bedrock manager and intentionally removes GPT-5.4.",
+          "reason": "Codex 0.159.1 keeps GPT-5.5/5.6 and GPT-6 Sol/Luna while adding GPT-6.1 Sol to the static Bedrock manager.",
           "file_contains_all": [
             "amazon_bedrock_provider_creates_static_models_manager",
             "openai.gpt-5.5",
             "openai.gpt-5.6-sol",
             "openai.gpt-5.6-terra",
             "openai.gpt-5.6-luna",
+            "openai.gpt-6.1-sol",
             "openai.gpt-6-sol",
             "openai.gpt-6-luna"
           ]
@@ -1717,12 +1725,14 @@
           "id": "models-manager.gpt-6-sol-luna",
           "kind": "model_catalog",
           "file": "codex-rs/models-manager/models.json",
-          "reason": "Codex 0.158 retains GPT-6 Sol and GPT-6 Luna in the picker with a 272,000 base context window and 872,000 maximum context window; Sol supports Ultra while Luna tops out at Max.",
+          "reason": "Codex 0.159.1 adds GPT-6.1 Sol as the default bundled model with the same 272,000 base and 872,000 maximum context contract, while retaining GPT-6 Sol/Luna; Sol-family models expose Ultra reasoning and Luna tops out at Max.",
           "file_contains_all": [
             "\"slug\": \"gpt-6-sol\"",
             "\"display_name\": \"GPT-6-Sol\"",
             "\"slug\": \"gpt-6-luna\"",
             "\"display_name\": \"GPT-6-Luna\"",
+            "\"slug\": \"gpt-6.1-sol\"",
+            "\"display_name\": \"GPT-6.1-Sol\"",
             "\"context_window\": 272000",
             "\"max_context_window\": 872000",
             "\"effort\": \"ultra\"",
@@ -1783,7 +1793,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.159.0",
+      "tested_codex_release": "rust-v0.159.1",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -2040,6 +2050,21 @@
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.159.0; preserve instant_interrupt as upstream opt-in, pass through additive app-server item-anchor cursors, move compatibility guards to the new provider/error owner files without weakening security or quota semantics, and repair stale Super attachment paths before resume so pasted text/media remain durable across overlay cleanup.",
           "compatibility_evidence": "Exact 0.158.0 and 0.159.0 tagged source archives, tag/release metadata, official Linux musl binary checksum/version smoke, relocated security/quota semantic markers, focused attachment resume regressions, and baseline replay are recorded in migration/codex-rust-v0.159.0-audit.md."
+        },
+        {
+          "from": "rust-v0.159.0",
+          "to": "rust-v0.159.1",
+          "upstream_commit": "8e68a98ef03cdde76d2e6800791ebdf1b3b95b24",
+          "upstream_tag_object": "dd48cd3d094a133f2781ab10343dc665a37e5bc0",
+          "upstream_release_date": "2026-09-29T20:32:34Z",
+          "tree_comparison": "exact tagged source archives; 29 changed files, 338 additions, 108 deletions",
+          "runtime_changes": [
+            "Bundled model metadata adds gpt-6.1-sol as the default model with a 272,000 base context window, 872,000 maximum context window, Low default reasoning, and Low/Medium/High/XHigh/Max/Ultra options.",
+            "Amazon Bedrock Mantle/static and Runtime catalogs add openai.gpt-6.1-sol and make GPT-6.1 Sol the default while retaining GPT-6 Sol/Luna and GPT-5.6 compatibility entries.",
+            "Responses transport, provider authentication, quota/error classification, session persistence, workspace routing, compaction, and app-server protocol files tracked by Prodex retain every existing compatibility marker."
+          ],
+          "prodex_action": "Advance the tested Codex baseline to 0.159.1, recognize GPT-6.1 Sol as an 872,000-token large/max-context OpenAI model for runtime launch and Smart Context budgeting, track the new Bedrock default without duplicating the upstream catalog, and preserve existing transport/auth/quota/session semantics.",
+          "compatibility_evidence": "Exact 0.159.0 and 0.159.1 tagged source archives, release/tag metadata, official Linux musl binary checksum/version smoke, 858 current critical-file/semantic markers replayed with zero misses, isolated app-server initialize, focused GPT-6.1 context-policy tests, and baseline guards are recorded in migration/codex-rust-v0.159.1-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -2062,19 +2087,17 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.159.0",
-      "name": "0.159.0",
-      "published_at": "2026-09-29T08:05:42Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.159.0",
+      "tag_name": "rust-v0.159.1",
+      "name": "0.159.1",
+      "published_at": "2026-09-29T20:32:34Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.159.1",
       "body_head": [
         "## New Features",
-        "- Opt-in `instant_interrupt` lets new input steer Codex during model responses or long-running code-mode calls. (#48135, #48141)",
-        "- New sessions get a compact welcome screen and consistent headers, with occasional tips during and after turns. (#48513, #48562, #48352)",
-        "- The warnings viewer dismisses reviewed warnings when closed; press `k` to keep one for later. (#48205, #48206)",
-        "- You can scroll the transcript while deciding whether to implement a plan. (#48805)",
-        "- Native Mermaid rendering supports more flowchart edges, labels, and node groups. (#48814, #48895)",
-        "- App-server clients can paginate thread history from a specific item. (#48151)",
-        "## Bug Fixes"
+        "- Added GPT-6.1 Sol as the default model in the bundled catalog and Amazon Bedrock Mantle and Runtime catalogs. (#49323, #49342)",
+        "## Changelog",
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.159.0...rust-v0.159.1",
+        "- #49323 [0.159] Prepare 0.159.1 release backports @andrewgu-oai",
+        "- #49342 [0.159] Backport GPT-6.1 Sol Bedrock catalogs @celia-oai"
       ]
     }
   },
