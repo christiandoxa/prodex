@@ -2020,31 +2020,32 @@
     },
     {
       "name": "gemini_system_instruction_from_request",
+      "shared_mojo_entry_group": "gemini_text_contents_v1",
       "domain": "provider/gemini",
       "introduced_in": "0.432.1",
       "baseline_state": "feature-off Rust instruction extraction and JSON construction",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_gemini_request_content_kernel_v1",
+      "mojo_entry": "prodex_gemini_bridge_request_kernel_v1",
       "mojo_abi_version": 1,
       "mojo_operation_ids": {
-        "system_instruction_from_request": 11
+        "text_contents": 9
       },
       "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
-      "consumer": "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
-      "consumer_marker": "GeminiRequestContentOperation::SystemInstructionFromRequest",
+      "consumer": "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
+      "consumer_marker": "GeminiBridgeRequestOperation::TextContents",
       "production_consumers": [
-        "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
+        "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
         "crates/prodex-provider-core/src/translators/gemini/request_transform.rs"
       ],
-      "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
       "rust_owner_before": "Responses JSON system and contextual-user text extraction, joining, and feature-off JSON shaping",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "Deleted; provider and Mojo-core tests assert fixed output, empty input, and malformed-input results",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Serde request serialization, bounded Mojo invocation, error mapping, and JSON result decoding",
-      "reuse_constraint": "The existing Gemini bridge text operation rejects contextual-user instructions and handles only its text-only subset; this kernel preserves the broader feature-off Responses fallback semantics."
+      "rust_adapter_scope": "Serde request serialization, one bounded TextContents Mojo invocation, error mapping, and final JSON result materialization",
+      "reuse_constraint": "System instruction extraction is now integrated into the full TextContents Mojo transform together with content, tool-history, media, and contextual-user planning."
     },
     {
       "name": "kiro_chat_response_mapping",
@@ -2206,6 +2207,7 @@
     },
     {
       "name": "gemini_translator_request_planning",
+      "shared_mojo_entry_group": "gemini_text_contents_v1",
       "domain": "provider/gemini",
       "introduced_in": "0.432.3",
       "baseline_state": "feature-off Rust request validation/body assembly alongside Mojo translator validation and raw-request kernels",
@@ -2236,36 +2238,36 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "JSON parsing, issue mapping, one whole-request chat-tools Mojo transform for custom/namespace/MCP shapes, tool-config serialization, and result materialization around the Mojo bridge kernel"
+      "rust_adapter_scope": "JSON parsing, public issue mapping, whole-request chat-tools acquisition, tool-config serialization, and result materialization around Mojo TextContents/RawTranslatorRequest/ValidateTranslatorRequest operations"
     },
     {
       "name": "gemini_request_content_shape_fallbacks",
+      "shared_mojo_entry_group": "gemini_text_contents_v1",
       "domain": "provider/gemini",
       "introduced_in": "0.432.3",
-      "baseline_state": "feature-off Rust JSON builders for Gemini content, function-call and function-response parts alongside the Mojo content kernel",
+      "baseline_state": "Rust item/content traversal, tool-history mapping, media shaping, malformed-value defaults, and function call/response JSON assembly alongside a text-only Mojo fast path",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_gemini_request_content_kernel_v1",
+      "mojo_entry": "prodex_gemini_bridge_request_kernel_v1",
       "mojo_abi_version": 1,
       "mojo_operation_ids": {
-        "content": 3,
-        "function_call_part": 6,
-        "function_response_part": 7
+        "text_contents": 9
       },
       "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
-      "consumer": "crates/prodex-provider-core/src/translators/gemini/request_contents/items.rs",
-      "consumer_marker": "GeminiRequestContentOperation::FunctionCallPart",
+      "consumer": "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
+      "consumer_marker": "GeminiBridgeRequestOperation::TextContents",
       "production_consumers": [
-        "crates/prodex-provider-core/src/translators/gemini/request_contents/items.rs",
-        "crates/prodex-provider-core/src/translators/gemini/request_contents.rs"
+        "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
+        "crates/prodex-provider-core/src/translators/gemini/request_transform.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/request.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
-      "rust_owner_before": "feature-off JSON assembly for role/parts values, functionCall values and functionResponse values",
+      "rust_owner_before": "Responses input role traversal, assistant tool-call shaping, contiguous tool-response grouping, call-id to tool-name matching, user media/text part shaping, malformed-value defaults, and JSON response parsing fallback",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "Deleted; fixed Gemini request-content and translator tests cover text, function calls, tool responses, unicode, malformed arguments and preserved history",
+      "rust_test_oracle": "Deleted; focused provider tests cover Unicode tool history, reversed tool responses, interleaved media/text, malformed and wrong-type fields, contextual-user suppression, system text, and >4 MiB rejection, with the full provider suite exercising production callers",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "message/tool parsing, argument decoding, call-id extraction and collection ordering before invoking the content kernel"
+      "rust_adapter_scope": "Serde request serialization, one bounded TextContents Mojo invocation, compatibility error mapping, and final JSON result materialization"
     },
     {
       "name": "gemini_bridge_request_fallbacks",
@@ -5132,24 +5134,22 @@
       "symbol": "gemini_system_instruction_from_request",
       "operation": "gemini_system_instruction_from_request",
       "previous_responsibility": "Responses JSON system and contextual-user text extraction, joining, and feature-off systemInstruction construction",
-      "final_state": "adapter-only",
+      "final_state": "deleted",
       "rust_before": "Rust extracted and joined instruction text, then shaped the Gemini JSON value",
-      "rust_after": "Rust serializes the request, invokes the typed Mojo operation, maps failures, and decodes its JSON result",
+      "rust_after": "The dedicated Rust adapter is deleted; request_contents.rs serializes once and materializes the integrated TextContents Mojo result",
       "mojo_owner": "mojo/prodex_core/provider_constraints.mojo::gemini_request_content_write_system_instruction_from_request",
       "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
-      "mojo_entry": "prodex_gemini_request_content_kernel_v1 operation 11",
-      "production_consumer": "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
+      "mojo_entry": "prodex_gemini_bridge_request_kernel_v1 operation 9",
+      "production_consumer": "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
       "parity_test": "crates/prodex-mojo-core/tests/gemini_request_content.rs",
       "performance": "one bounded Mojo request-content operation",
       "cleanup_loc": 22,
       "cleanup_source": {
-        "kind": "collapsed-adapter",
+        "kind": "deleted",
         "baseline_range": {
           "start": 7,
           "end": 28
-        },
-        "release_symbol": "gemini_system_instruction_from_request",
-        "release_marker": "GeminiRequestContentOperation::SystemInstructionFromRequest"
+        }
       }
     }
   ],

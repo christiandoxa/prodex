@@ -1,5 +1,18 @@
 [
   {
+    "id": "audited-mojo-gemini-request-contents-hard-replacement-20260929",
+    "requiredSubjects": [
+      "feat(mojo): migrate Gemini request contents"
+    ],
+    "caps": {
+      "maxFiles": 16,
+      "maxBehaviorFiles": 10,
+      "maxLines": 2300,
+      "maxFileLines": 1850
+    },
+    "reason": "Reviewed atomic Gemini request-contents hard replacement: the full Responses content planner, system/contextual instruction extraction, tool history, JSON argument/response normalization, media/data-URL shaping and malformed-input behavior move to one production-reachable Mojo TextContents transform while three superseded Rust semantic modules are deleted. The provider suite, focused edge regressions, strict Clippy, direct Mojo object build, ownership, authority and no-fallback guards remain enforced; global churn thresholds are unchanged."
+  },
+  {
     "id": "audited-mojo-runtime-error-policy-hard-replacement-20260926",
     "requiredSubjects": [
       "refactor(runtime): replace error-policy fallbacks with Mojo"

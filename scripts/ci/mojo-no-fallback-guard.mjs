@@ -227,12 +227,10 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/gemini.rs",
   "crates/prodex-provider-core/src/translators/gemini/request.rs",
   "crates/prodex-provider-core/src/gemini_bridge.rs",
-  "crates/prodex-provider-core/src/translators/gemini/request_contents/items.rs",
   "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
   "crates/prodex-provider-core/src/translators/gemini/request_transform.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs",
   "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs",
-  "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs",
   "crates/prodex-provider-core/src/translators/deepseek.rs",
@@ -325,7 +323,6 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/gemini_bridge/request/tools.rs",
   "crates/prodex-provider-core/src/gemini_bridge/request/simple.rs",
   "crates/prodex-provider-core/src/gemini_bridge/request/native_project.rs",
-  "crates/prodex-provider-core/src/translators/gemini/request_contents/items.rs",
   "crates/prodex-provider-core/src/translators/gemini/request_contents.rs",
   "crates/prodex-provider-core/src/translators/gemini/request_transform.rs",
   "crates/prodex-provider-core/src/translators/deepseek/response/metadata.rs",
@@ -763,7 +760,6 @@ const GEMINI_BRIDGE_ROOT_FILE = "crates/prodex-provider-core/src/gemini_bridge.r
 const GEMINI_BRIDGE_REQUEST_CONTENTS_FILE = "crates/prodex-provider-core/src/gemini_bridge/request_contents.rs";
 const GEMINI_REQUEST_TRANSFORM_FILE = "crates/prodex-provider-core/src/translators/gemini/request_transform.rs";
 const GEMINI_REQUEST_CONTENTS_FILE = "crates/prodex-provider-core/src/translators/gemini/request_contents.rs";
-const GEMINI_REQUEST_ITEMS_FILE = "crates/prodex-provider-core/src/translators/gemini/request_contents/items.rs";
 const GEMINI_BRIDGE_SIMPLE_FILE = "crates/prodex-provider-core/src/gemini_bridge/request/simple.rs";
 const GEMINI_BRIDGE_NATIVE_PROJECT_FILE = "crates/prodex-provider-core/src/gemini_bridge/request/native_project.rs";
 const GEMINI_BRIDGE_TOOLS_FILE = "crates/prodex-provider-core/src/gemini_bridge/request/tools.rs";
@@ -771,7 +767,6 @@ const GEMINI_TRANSLATOR_REQUEST_FILE = "crates/prodex-provider-core/src/translat
 const GEMINI_TRANSLATOR_GENERATION_CONFIG_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs";
 const GEMINI_GENERATION_CONFIG_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config.rs";
 const GEMINI_THINKING_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs";
-const GEMINI_SYSTEM_INSTRUCTION_FILE = "crates/prodex-provider-core/src/translators/gemini/request_contents/system_instruction.rs";
 const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
   [/\bfn\s+anthropic_response_block_input\s*\(/u, "Rust response block classifier"],
   [/\bfn\s+plan_with_rust\s*\(/u, "Rust response planner"],
@@ -1458,7 +1453,7 @@ export function findViolations(files) {
       const required = [
         "gemini_bridge_validate_translator(",
         "gemini_bridge_raw_translator_request(",
-        "gemini_text_contents_from_request_mojo(",
+        "gemini_request_contents_from_request_mojo(",
         "provider_core_chat_tools_from_responses_request(",
       ];
       const violations = required
@@ -1472,20 +1467,6 @@ export function findViolations(files) {
     if (filePath === GEMINI_REQUEST_CONTENTS_FILE &&
         !contents.includes("GeminiBridgeRequestOperation::TextContents")) {
       return [`${filePath}: Gemini text contents must use Mojo`];
-    }
-    if (filePath === GEMINI_REQUEST_ITEMS_FILE) {
-      const required = [
-        "GeminiRequestContentOperation::Content",
-        "GeminiRequestContentOperation::FunctionCallPart",
-        "GeminiRequestContentOperation::FunctionResponsePart",
-      ];
-      const violations = required
-        .filter((marker) => !contents.includes(marker))
-        .map((marker) => `${filePath}: Gemini content hard replacement must retain ${marker}`);
-      if (/fn\s+gemini_contains_local_media_path\s*\(/u.test(contents)) {
-        violations.push(`${filePath}: contains restored Rust local-media translator scan`);
-      }
-      return violations;
     }
     if (filePath === "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs" &&
         /#\[cfg\(feature = "mojo"\)\]/u.test(contents)) {
@@ -1529,16 +1510,6 @@ export function findViolations(files) {
       return [`${filePath}: contains a deleted Gemini feature-off fallback adapter`];
     }
     return [];
-  });
-  const geminiSystemInstructionViolations = files.flatMap(([filePath, contents]) => {
-    if (filePath !== GEMINI_SYSTEM_INSTRUCTION_FILE) return [];
-    const production = contents.split("#[cfg(test)]", 1)[0];
-    const body = production.match(/\bpub\(crate\)\s+fn gemini_system_instruction_from_request\([^]*?^\}/mu)?.[0];
-    const hasMojoOperation = body?.includes("GeminiRequestContentOperation::SystemInstructionFromRequest") &&
-      body.includes("gemini_request_content_kernel(");
-    const hasRustSemantics = /gemini_contextual_user_instruction_text|gemini_message_text|json!\s*\(/u.test(body ?? "");
-    return hasMojoOperation && !hasRustSemantics && !FEATURE_OFF_RUST_PATH.test(body)
-      ? [] : [filePath + ": Gemini system-instruction extraction must use Mojo in every feature mode"];
   });
   const hardReplacementViolations = files
     .filter(([filePath, contents]) => HARD_REPLACED_RUST_FILES.has(filePath) &&
@@ -2080,7 +2051,7 @@ export function findViolations(files) {
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...subAgentPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeViolations,
-    ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations, ...geminiSystemInstructionViolations,
+    ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
     ...deepseekReasoningViolations,
@@ -2529,11 +2500,6 @@ function selfTest() {
     /stream shaping Mojo kernel must be unconditional/u);
   assert.match(findViolations([[GEMINI_GENERATION_CONFIG_FILE,
     "fn gemini_generation_config_from_request() {}"]])[0], /duplicate Gemini generation-config adapter/u);
-  assert.match(findViolations([[GEMINI_SYSTEM_INSTRUCTION_FILE,
-    "pub(crate) fn gemini_system_instruction_from_request() { gemini_contextual_user_instruction_text(); }"]])[0],
-  /Gemini system-instruction extraction must use Mojo in every feature mode/u);
-  assert.deepEqual(findViolations([[GEMINI_SYSTEM_INSTRUCTION_FILE,
-    "pub(crate) fn gemini_system_instruction_from_request() {\n  GeminiRequestContentOperation::SystemInstructionFromRequest;\n  gemini_request_content_kernel();\n}"]]), []);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/optional_fields.rs",
     "fn gemini_apply_optional_request_fields() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([[ANTHROPIC_MESSAGES_FILE,

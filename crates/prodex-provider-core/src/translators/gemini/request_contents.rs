@@ -1,9 +1,6 @@
-#[path = "request_contents/items.rs"]
-mod items;
-#[path = "request_contents/system_instruction.rs"]
-mod system_instruction;
-#[path = "request_contents/text.rs"]
-mod text;
+#[cfg(test)]
+#[path = "request_contents/items_tests.rs"]
+mod items_tests;
 
 use serde_json::Value;
 
@@ -43,29 +40,9 @@ pub(crate) fn gemini_request_content_mojo_value_or_panic(
         .unwrap_or_else(|error| panic!("{error}"))
 }
 
-fn gemini_request_function_part(
-    operation: prodex_mojo_core::provider_constraints::GeminiRequestContentOperation,
-    name: &str,
+pub(crate) fn gemini_request_contents_from_request_mojo(
     value: &Value,
-    call_id: Option<&str>,
-) -> Result<Value, String> {
-    let name = serde_json::to_vec(name).expect("Gemini function name serializes");
-    let value = serde_json::to_vec(value).expect("Gemini function value serializes");
-    let call_id = call_id
-        .map(|call_id| serde_json::to_vec(call_id).expect("Gemini function call ID serializes"));
-    gemini_request_content_mojo_value(
-        operation,
-        Some(&name),
-        Some(&value),
-        call_id.as_deref(),
-        None,
-        0,
-    )
-}
-
-pub(crate) fn gemini_text_contents_from_request_mojo(
-    value: &Value,
-) -> Result<Option<GeminiRequestContents>, String> {
+) -> Result<GeminiRequestContents, String> {
     let input = serde_json::to_vec(value)
         .map_err(|error| format!("failed to serialize Gemini text request: {error}"))?;
     let mut kernel = prodex_mojo_core::provider_constraints::GeminiBridgeRequestKernelInput::new(
@@ -73,13 +50,10 @@ pub(crate) fn gemini_text_contents_from_request_mojo(
     );
     kernel.primary = Some(&input);
     let body = prodex_mojo_core::provider_constraints::gemini_bridge_request_kernel(kernel)
-        .map_err(|error| format!("Mojo Gemini text-contents kernel failed: {error:?}"))?;
+        .map_err(|error| format!("Mojo Gemini request-content kernel failed: {error:?}"))?;
     let mapped: Value = serde_json::from_slice(&body).map_err(|error| {
         format!("Mojo Gemini text-contents kernel returned invalid JSON: {error}")
     })?;
-    if mapped.is_null() {
-        return Ok(None);
-    }
     let object = mapped
         .as_object()
         .ok_or_else(|| "Mojo Gemini text-contents result is not an object".to_string())?;
@@ -92,8 +66,9 @@ pub(crate) fn gemini_text_contents_from_request_mojo(
         .and_then(Value::as_array)
         .cloned()
         .ok_or_else(|| "Mojo Gemini text-contents result has no contents array".to_string())?;
-    Ok(Some((system_instruction, contents)))
+    Ok((system_instruction, contents))
 }
 
-pub(crate) use self::items::gemini_contents_from_request;
-pub(super) use self::system_instruction::gemini_system_instruction_from_request;
+pub(crate) fn gemini_contents_from_request(value: &Value) -> Result<Vec<Value>, String> {
+    gemini_request_contents_from_request_mojo(value).map(|(_, contents)| contents)
+}

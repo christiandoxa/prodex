@@ -7,10 +7,6 @@ use serde_json::Value;
 use super::request::{
     gemini_continuation_metadata, gemini_tool_config_from_request, gemini_validate_openai_tools,
 };
-use super::request_contents::gemini_text_contents_from_request_mojo;
-use super::request_contents::{
-    gemini_contents_from_request, gemini_system_instruction_from_request,
-};
 
 fn gemini_translator_validation_error(
     plan: &crate::gemini_bridge::GeminiTranslatorValidationPlan,
@@ -185,14 +181,8 @@ fn gemini_validate_request_mojo(
 fn gemini_request_contents(
     value: &Value,
 ) -> Result<(Option<Value>, Vec<Value>), GeminiTransformIssue> {
-    match gemini_text_contents_from_request_mojo(value).map_err(GeminiTransformIssue::Rejected)? {
-        Some(contents) => Ok(contents),
-        None => Ok((
-            gemini_system_instruction_from_request(value)
-                .map_err(GeminiTransformIssue::Rejected)?,
-            gemini_contents_from_request(value).map_err(GeminiTransformIssue::Rejected)?,
-        )),
-    }
+    super::request_contents::gemini_request_contents_from_request_mojo(value)
+        .map_err(GeminiTransformIssue::Rejected)
 }
 
 fn gemini_build_body_mojo(
@@ -268,12 +258,6 @@ mod tests {
                 {"role": "tool", "tool_call_id": "call-2", "content": "plain result"}
             ]
         });
-
-        assert!(
-            super::super::request_contents::gemini_text_contents_from_request_mojo(&request)
-                .expect("valid Gemini text contents")
-                .is_none()
-        );
 
         let (_, contents) =
             gemini_request_contents(&request).expect("valid Gemini request contents");

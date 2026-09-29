@@ -3463,3 +3463,27 @@ authority, and no-fallback guards. Ownership reports 137 authoritative operation
 92.73% Mojo in the eligible semantic inventory. The canonical broad report counts
 63,642 Mojo LOC and 195,667 Rust production LOC, totaling 259,309 LOC:
 24.54291983695128% Mojo.
+
+## Gemini full request-contents hard replacement
+
+Gemini Responses request-content shaping now uses one authoritative TextContents
+Mojo transform for the full production path. Mojo owns role dispatch, system and
+contextual-user instruction extraction, assistant/tool/user grouping, prior tool-name
+lookup by call ID, JSON argument and tool-response decoding/validation, media/data-URL
+projection, MIME inference, Unicode text handling, malformed-field fallbacks, and final
+Gemini content ordering. Rust now retains request serialization, one bounded Mojo call,
+error mapping, and final Serde materialization only.
+
+The former Rust `items.rs`, `system_instruction.rs`, and `text.rs` production modules
+were deleted rather than retained as fallback/oracle paths. Focused Unicode, reversed
+tool-response, media-interleaving, malformed-input and contextual-instruction regressions
+pass; the complete `prodex-provider-core` Mojo suite passes 357 library tests plus 7
+integration tests. Focused all-target Clippy passes with warnings denied. A fresh direct
+Mojo object build of `provider_constraints.mojo` passes, as do the no-fallback self-test,
+authority guard, ownership guard and canonical production-share guard.
+
+The canonical broad report now counts **64,606 reachable Mojo LOC** and **195,342 Rust
+production LOC**, totaling **259,948 LOC**: **24.85343222490652% Mojo**. The 75% project
+target remains unmet, with **521,420 additional Mojo LOC** required at the current Rust
+volume. The eligible semantic ownership report is **92.92% Mojo (32,756 / 35,250)**;
+that narrower metric does not substitute for the broad 75% project target.
