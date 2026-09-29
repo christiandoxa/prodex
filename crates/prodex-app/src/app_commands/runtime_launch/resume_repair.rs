@@ -263,17 +263,27 @@ mod tests {
         assert_eq!(repaired.as_deref(), Some(session_file.as_path()));
 
         let contents = fs::read_to_string(&session_file).unwrap();
+        let response_text = contents
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find(|value| value["type"].as_str() == Some("response_item"))
+            .and_then(|value| {
+                value["payload"]["content"][0]["text"]
+                    .as_str()
+                    .map(str::to_string)
+            })
+            .expect("response item text should remain valid JSON");
         assert!(
-            contents.contains(&stable_text.display().to_string()),
-            "{contents}"
+            response_text.contains(stable_text.to_string_lossy().as_ref()),
+            "{response_text}"
         );
         assert!(
-            contents.contains(&stable_image.display().to_string()),
-            "{contents}"
+            response_text.contains(stable_image.to_string_lossy().as_ref()),
+            "{response_text}"
         );
         assert!(
-            !contents.contains(&stale_overlay.display().to_string()),
-            "{contents}"
+            !response_text.contains(stale_overlay.to_string_lossy().as_ref()),
+            "{response_text}"
         );
         assert_eq!(fs::read(&stable_text).unwrap(), b"durable pasted text");
         assert_eq!(fs::read(&stable_image).unwrap(), b"durable image");
