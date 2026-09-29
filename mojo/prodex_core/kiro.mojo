@@ -40,8 +40,6 @@ comptime KIRO_RESPONSE_FUNCTION_CALL_OUTPUT_ITEM: Int64 = 5
 comptime KIRO_LEGACY_FUNCTION_TOOL: Int64 = 6
 comptime KIRO_LEGACY_TOOL_CHOICE: Int64 = 7
 comptime KIRO_CHAT_COMPLETION_RESPONSE: Int64 = 8
-comptime KIRO_ANTHROPIC_TOOL_USE_BLOCK: Int64 = 9
-comptime KIRO_ANTHROPIC_RESPONSE: Int64 = 10
 comptime KIRO_CHAT_COMPLETION_CHUNK: Int64 = 11
 comptime KIRO_CHAT_ROLE_DELTA: Int64 = 12
 comptime KIRO_CHAT_EMPTY_DELTA: Int64 = 13
@@ -1095,23 +1093,6 @@ def kiro_put_chat_finish_reason(
     return kiro_put_literal(writer, StringSlice("stop"))
 
 
-def kiro_put_anthropic_stop_reason(
-    writer: Pointer[mut=True, KiroResponseWriter, _],
-    input: ProdexKiroKernelInput,
-) -> Bool:
-    if input.has_tool_calls == 1:
-        return kiro_put_literal(writer, StringSlice('"tool_use"'))
-    if input.reason_present == 1:
-        if rich_view_matches_literal["max_output_tokens"](input.reason, False) or rich_view_matches_literal[
-            "max_tokens"
-        ](input.reason, False):
-            return kiro_put_literal(writer, StringSlice('"max_tokens"'))
-        if rich_view_matches_literal["tool_use"](input.reason, False):
-            return kiro_put_literal(writer, StringSlice('"tool_use"'))
-    return kiro_put_literal(writer, StringSlice('"end_turn"'))
-
-
-
 def kiro_write_request_validation_error(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     input: ProdexKiroKernelInput,
@@ -1579,56 +1560,6 @@ def kiro_write_operation(
             if not kiro_put_literal(writer, StringSlice(',"metadata":')) or not kiro_put_view(writer, input.metadata):
                 return False
         return kiro_put_byte(writer, 125)
-    if operation == KIRO_ANTHROPIC_TOOL_USE_BLOCK:
-        if not kiro_put_literal(writer, StringSlice('{"type":"tool_use","id":')):
-            return False
-        if not kiro_put_json_string(writer, input.call_id) or not kiro_put_literal(writer, StringSlice(',"name":')):
-            return False
-        if not kiro_put_json_string(writer, input.name) or not kiro_put_literal(writer, StringSlice(',"input":')):
-            return False
-        if input.input_present == 1:
-            if not kiro_put_view(writer, input.input):
-                return False
-        else:
-            if not kiro_put_literal(writer, StringSlice("{}")):
-                return False
-        return kiro_put_byte(writer, 125)
-    if operation == KIRO_ANTHROPIC_RESPONSE:
-        if not kiro_put_literal(writer, StringSlice('{"id":')):
-            return False
-        if input.response_id_present == 1:
-            if not kiro_put_json_string(writer, input.response_id):
-                return False
-        elif not kiro_put_literal(writer, StringSlice('"msg_kiro"')):
-            return False
-        if not kiro_put_literal(writer, StringSlice(',"type":"message","role":"assistant","model":')):
-            return False
-        if input.requested_model_present == 1:
-            if not kiro_put_json_string(writer, input.requested_model):
-                return False
-        elif not kiro_put_literal(writer, StringSlice('"kiro-cli"')):
-            return False
-        if not kiro_put_literal(writer, StringSlice(',"content":[')):
-            return False
-        var content_written = False
-        if input.tool_calls_present == 1 and input.tool_calls.len > 2:
-            if not kiro_put_view_range(writer, input.tool_calls, 1, Int64(input.tool_calls.len) - 1):
-                return False
-            content_written = True
-        if input.content_present == 1 and input.content.len > 0:
-            if content_written and not kiro_put_byte(writer, 44):
-                return False
-            if not kiro_put_literal(writer, StringSlice('{"type":"text","text":')) or not kiro_put_json_string(writer, input.content) or not kiro_put_byte(writer, 125):
-                return False
-        if not kiro_put_literal(writer, StringSlice('],"stop_reason":')) or not kiro_put_anthropic_stop_reason(writer, input):
-            return False
-        return (
-            kiro_put_literal(writer, StringSlice(',"stop_sequence":null,"usage":{"input_tokens":'))
-            and kiro_put_u64(writer, input.used)
-            and kiro_put_literal(writer, StringSlice(',"output_tokens":'))
-            and kiro_put_u64(writer, input.size)
-            and kiro_put_literal(writer, StringSlice("}}"))
-        )
     if operation == KIRO_CHAT_COMPLETION_CHUNK:
         if not kiro_put_literal(writer, StringSlice('data: {"id":')):
             return False
@@ -3084,12 +3015,13 @@ def kiro_raw_first_output_message_text(
                             if kiro_raw_present(text) and deepseek_json_byte(view, text[0]) == 34:
                                 return text^
                 return missing^
-            cursor = deepseek_json_skip_ws(view, item_end, output[1] - 1)
-            if cursor < output[1] - 1 and deepseek_json_byte(view, cursor) == 44:
-                cursor = deepseek_json_skip_ws(view, cursor + 1, output[1] - 1)
-                continue
-            break
-        return missing^
+        cursor = deepseek_json_skip_ws(view, item_end, output[1] - 1)
+        if cursor < output[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, output[1] - 1)
+            continue
+        if cursor != output[1] - 1:
+            return missing^
+        break
     return missing^
 
 def kiro_raw_function_call_count(
@@ -3192,9 +3124,20 @@ def kiro_raw_chat_response(
     view: ProdexRichStringView,
     request_id: UInt64,
 ) -> Bool:
-    var root = kiro_raw_root(view)
-    if root[0] < 0:
+    var root = Array[Int64, 2](fill=-1)
+    var root_start = deepseek_json_skip_ws(view, 0, Int64(view.len))
+    if root_start >= Int64(view.len):
         return False
+    var root_end = deepseek_json_value_end(
+        view, root_start, Int64(view.len), 0
+    )
+    if root_end < 0 or deepseek_json_skip_ws(
+        view, root_end, Int64(view.len)
+    ) != Int64(view.len):
+        return False
+    if deepseek_json_byte(view, root_start) == 123:
+        root[0] = root_start
+        root[1] = root_end
     var response_id = kiro_raw_member(view, root, StringSlice("id"))
     var created = kiro_raw_member(view, root, StringSlice("created_at"))
     var model = kiro_raw_member(view, root, StringSlice("model"))
@@ -3327,6 +3270,396 @@ def kiro_raw_chat_response(
         ):
             return False
     return kiro_put_byte(writer, 125)
+
+
+def kiro_raw_first_output_message_content(
+    view: ProdexRichStringView,
+    output: Array[Int64, 2],
+) -> Array[Int64, 2]:
+    var missing = Array[Int64, 2](fill=-1)
+    if not kiro_raw_present(output) or deepseek_json_byte(view, output[0]) != 91:
+        return missing^
+    var cursor = deepseek_json_skip_ws(view, output[0] + 1, output[1] - 1)
+    while cursor < output[1] - 1:
+        var item_end = deepseek_json_value_end(view, cursor, output[1] - 1, 0)
+        if item_end < 0:
+            return missing^
+        if deepseek_json_byte(view, cursor) == 123:
+            var item = Array[Int64, 2](fill=-1)
+            item[0] = cursor
+            item[1] = item_end
+            var kind = kiro_raw_member(view, item, StringSlice("type"))
+            if kiro_raw_present(kind) and deepseek_json_raw_equals(
+                view, kind[0], kind[1], StringSlice("message")
+            ):
+                return kiro_raw_member(view, item, StringSlice("content"))^
+        cursor = deepseek_json_skip_ws(view, item_end, output[1] - 1)
+        if cursor < output[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, output[1] - 1)
+            continue
+        if cursor != output[1] - 1:
+            return missing^
+        break
+    return missing^
+
+
+def kiro_raw_write_content_text_inner(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    bounds: Array[Int64, 2],
+    depth: Int64,
+) -> Int64:
+    if depth > 128 or not kiro_raw_present(bounds):
+        return -1
+    var opening = deepseek_json_byte(view, bounds[0])
+    if opening == 34:
+        if bounds[1] - bounds[0] <= 2:
+            return 0
+        return 1 if kiro_put_view_range(
+            writer, view, bounds[0] + 1, bounds[1] - 1
+        ) else -1
+    if opening == 91:
+        var found = False
+        var cursor = deepseek_json_skip_ws(view, bounds[0] + 1, bounds[1] - 1)
+        while cursor < bounds[1] - 1:
+            var item_end = deepseek_json_value_end(
+                view, cursor, bounds[1] - 1, depth + 1
+            )
+            if item_end < 0:
+                return -1
+            var item = Array[Int64, 2](fill=-1)
+            item[0] = cursor
+            item[1] = item_end
+            var result = kiro_raw_write_content_text_inner(
+                writer, view, item, depth + 1
+            )
+            if result < 0:
+                return -1
+            if result == 1:
+                found = True
+            cursor = deepseek_json_skip_ws(view, item_end, bounds[1] - 1)
+            if cursor < bounds[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+                cursor = deepseek_json_skip_ws(view, cursor + 1, bounds[1] - 1)
+                continue
+            if cursor != bounds[1] - 1:
+                return -1
+            break
+        return 1 if found else 0
+    if opening == 123:
+        var text = kiro_raw_member(view, bounds, StringSlice("text"))
+        if kiro_raw_present(text) and deepseek_json_byte(view, text[0]) == 34:
+            return kiro_raw_write_content_text_inner(writer, view, text, depth + 1)
+        var content = kiro_raw_member(view, bounds, StringSlice("content"))
+        if kiro_raw_present(content):
+            return kiro_raw_write_content_text_inner(writer, view, content, depth + 1)
+        return 0
+    return 0
+
+
+def kiro_raw_put_anthropic_argument_value(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    arguments: Array[Int64, 2],
+    output_address: UInt,
+) -> Bool:
+    if not kiro_raw_present(arguments) or deepseek_json_byte(view, arguments[0]) != 34:
+        return kiro_put_literal(writer, StringSlice("{}"))
+    var saved = writer[].written
+    var decoded = kiro_json_put_string(
+        writer, view, arguments[0], arguments[1]
+    )
+    if decoded < 0:
+        return False
+    var decoded_length = writer[].written - saved
+    if decoded_length > 0:
+        var decoded_view = ProdexRichStringView(
+            output_address + UInt(saved), UInt(decoded_length)
+        )
+        var start = deepseek_json_skip_ws(decoded_view, 0, decoded_length)
+        if start < decoded_length:
+            var value_end = deepseek_json_value_end(
+                decoded_view, start, decoded_length, 0
+            )
+            if value_end >= 0 and deepseek_json_skip_ws(
+                decoded_view, value_end, decoded_length
+            ) == decoded_length:
+                return True
+    writer[].written = saved
+    return kiro_put_literal(writer, StringSlice("{}"))
+
+
+def kiro_raw_put_anthropic_tool_uses(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    output: Array[Int64, 2],
+    first: Pointer[mut=True, Int64, _],
+    output_address: UInt,
+) -> Bool:
+    if not kiro_raw_present(output) or deepseek_json_byte(view, output[0]) != 91:
+        return True
+    var cursor = deepseek_json_skip_ws(view, output[0] + 1, output[1] - 1)
+    while cursor < output[1] - 1:
+        var item_end = deepseek_json_value_end(view, cursor, output[1] - 1, 0)
+        if item_end < 0:
+            return False
+        if deepseek_json_byte(view, cursor) == 123:
+            var item = Array[Int64, 2](fill=-1)
+            item[0] = cursor
+            item[1] = item_end
+            var kind = kiro_raw_member(view, item, StringSlice("type"))
+            if kiro_raw_present(kind) and deepseek_json_raw_equals(
+                view, kind[0], kind[1], StringSlice("function_call")
+            ):
+                if not kiro_raw_item_prefix(writer, first):
+                    return False
+                var call_id = kiro_raw_member(view, item, StringSlice("call_id"))
+                var name = kiro_raw_member(view, item, StringSlice("name"))
+                var arguments = kiro_raw_member(view, item, StringSlice("arguments"))
+                if not kiro_put_literal(writer, StringSlice('{"type":"tool_use","id":')):
+                    return False
+                if kiro_raw_present(call_id):
+                    if not kiro_put_view_range(writer, view, call_id[0], call_id[1]):
+                        return False
+                elif not kiro_put_literal(writer, StringSlice('"call_kiro"')):
+                    return False
+                if not kiro_put_literal(writer, StringSlice(',"name":')):
+                    return False
+                if kiro_raw_present(name):
+                    if not kiro_put_view_range(writer, view, name[0], name[1]):
+                        return False
+                elif not kiro_put_literal(writer, StringSlice('"tool_call"')):
+                    return False
+                if (
+                    not kiro_put_literal(writer, StringSlice(',"input":'))
+                    or not kiro_raw_put_anthropic_argument_value(
+                        writer, view, arguments, output_address
+                    )
+                    or not kiro_put_byte(writer, 125)
+                ):
+                    return False
+        cursor = deepseek_json_skip_ws(view, item_end, output[1] - 1)
+        if cursor < output[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, output[1] - 1)
+            continue
+        if cursor != output[1] - 1:
+            return False
+        break
+    return True
+
+
+def kiro_raw_put_anthropic_text_block(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    output: Array[Int64, 2],
+    first: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var content = kiro_raw_first_output_message_content(view, output)
+    if not kiro_raw_present(content):
+        return True
+    var saved = writer[].written
+    var first_saved = first[]
+    if (
+        not kiro_raw_item_prefix(writer, first)
+        or not kiro_put_literal(writer, StringSlice('{"type":"text","text":"'))
+    ):
+        return False
+    var result = kiro_raw_write_content_text_inner(writer, view, content, 0)
+    if result < 0:
+        return False
+    if result == 0:
+        writer[].written = saved
+        first[] = first_saved
+        return True
+    return kiro_put_literal(writer, StringSlice('"}'))
+
+
+def kiro_raw_anthropic_stop_reason(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    reason: Array[Int64, 2],
+    has_tool_calls: Bool,
+) -> Bool:
+    if has_tool_calls:
+        return kiro_put_literal(writer, StringSlice('"tool_use"'))
+    if kiro_raw_present(reason) and deepseek_json_byte(view, reason[0]) == 34:
+        if deepseek_json_raw_equals(
+            view, reason[0], reason[1], StringSlice("max_output_tokens")
+        ) or deepseek_json_raw_equals(
+            view, reason[0], reason[1], StringSlice("max_tokens")
+        ):
+            return kiro_put_literal(writer, StringSlice('"max_tokens"'))
+        if deepseek_json_raw_equals(
+            view, reason[0], reason[1], StringSlice("tool_use")
+        ):
+            return kiro_put_literal(writer, StringSlice('"tool_use"'))
+    return kiro_put_literal(writer, StringSlice('"end_turn"'))
+
+
+def kiro_raw_anthropic_response(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    requested_model: ProdexRichStringView,
+    output_address: UInt,
+) -> Bool:
+    var missing = Array[Int64, 2](fill=-1)
+    var root = missing.copy()
+    var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
+    if start >= Int64(view.len):
+        return False
+    var value_end = deepseek_json_value_end(view, start, Int64(view.len), 0)
+    if value_end < 0 or deepseek_json_skip_ws(
+        view, value_end, Int64(view.len)
+    ) != Int64(view.len):
+        return False
+    if deepseek_json_byte(view, start) == 123:
+        root[0] = start
+        root[1] = value_end
+
+    var response_id = missing.copy()
+    var output = missing.copy()
+    var usage = missing.copy()
+    var input_tokens = missing.copy()
+    var output_tokens = missing.copy()
+    var reason = missing.copy()
+    if kiro_raw_present(root):
+        response_id = kiro_raw_member(view, root, StringSlice("id"))
+        output = kiro_raw_member(view, root, StringSlice("output"))
+        if not kiro_raw_present(output) or deepseek_json_byte(view, output[0]) != 91:
+            output = missing.copy()
+        usage = kiro_raw_member(view, root, StringSlice("usage"))
+        if kiro_raw_present(usage) and deepseek_json_byte(view, usage[0]) == 123:
+            input_tokens = kiro_raw_member(
+                view, usage, StringSlice("input_tokens")
+            )
+            output_tokens = kiro_raw_member(
+                view, usage, StringSlice("output_tokens")
+            )
+        var incomplete = kiro_raw_member(
+            view, root, StringSlice("incomplete_details")
+        )
+        var incomplete_reason = missing.copy()
+        if kiro_raw_present(incomplete) and deepseek_json_byte(view, incomplete[0]) == 123:
+            incomplete_reason = kiro_raw_member(
+                view, incomplete, StringSlice("reason")
+            )
+        if kiro_raw_present(incomplete_reason):
+            reason = incomplete_reason.copy()
+        else:
+            var metadata = kiro_raw_member(view, root, StringSlice("metadata"))
+            if kiro_raw_present(metadata) and deepseek_json_byte(view, metadata[0]) == 123:
+                var kiro_metadata = kiro_raw_member(
+                    view, metadata, StringSlice("kiro")
+                )
+                if kiro_raw_present(kiro_metadata) and deepseek_json_byte(
+                    view, kiro_metadata[0]
+                ) == 123:
+                    reason = kiro_raw_member(
+                        view, kiro_metadata, StringSlice("stop_reason")
+                    )
+
+    var function_call_count = kiro_raw_function_call_count(view, output)
+    if function_call_count < 0:
+        return False
+    var has_tool_calls = function_call_count > 0
+    if not kiro_put_literal(writer, StringSlice('{"id":')):
+        return False
+    if kiro_raw_present(response_id):
+        if not kiro_put_view_range(writer, view, response_id[0], response_id[1]):
+            return False
+    elif not kiro_put_literal(writer, StringSlice('"msg_kiro"')):
+        return False
+    if (
+        not kiro_put_literal(
+            writer,
+            StringSlice(',"type":"message","role":"assistant","model":')
+        )
+        or not kiro_put_json_string(writer, requested_model)
+        or not kiro_put_literal(writer, StringSlice(',"content":['))
+    ):
+        return False
+    var first: Int64 = 1
+    var first_ptr = Pointer(to=first)
+    if not kiro_raw_put_anthropic_tool_uses(
+        writer, view, output, first_ptr, output_address
+    ) or not kiro_raw_put_anthropic_text_block(
+        writer, view, output, first_ptr
+    ):
+        return False
+    if (
+        not kiro_put_literal(writer, StringSlice('],"stop_reason":'))
+        or not kiro_raw_anthropic_stop_reason(
+            writer, view, reason, has_tool_calls
+        )
+        or not kiro_put_literal(
+            writer, StringSlice(',"stop_sequence":null,"usage":{"input_tokens":')
+        )
+    ):
+        return False
+    if kiro_raw_present(input_tokens):
+        if not kiro_put_view_range(writer, view, input_tokens[0], input_tokens[1]):
+            return False
+    elif not kiro_put_byte(writer, 48):
+        return False
+    if not kiro_put_literal(writer, StringSlice(',"output_tokens":')):
+        return False
+    if kiro_raw_present(output_tokens):
+        if not kiro_put_view_range(writer, view, output_tokens[0], output_tokens[1]):
+            return False
+    elif not kiro_put_byte(writer, 48):
+        return False
+    return kiro_put_literal(writer, StringSlice("}}"))
+
+
+def kiro_anthropic_response_rewrite_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    model_address: UInt,
+    model_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return KIRO_KERNEL_STATUS_ABI
+    if (
+        input_length < 0
+        or input_length > KIRO_RESPONSE_MAX_BYTES
+        or model_length < 0
+        or model_length > KIRO_KERNEL_MAX_BYTES
+        or output_capacity <= 0
+        or output_capacity > KIRO_RESPONSE_MAX_OUTPUT_BYTES
+        or input_address == 0
+        or (model_length > 0 and model_address == 0)
+        or output_address == 0
+        or written_address == 0
+    ):
+        return KIRO_KERNEL_STATUS_INVALID
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    var model = ProdexRichStringView(model_address, UInt(model_length))
+    if not rich_view_valid(view, KIRO_RESPONSE_MAX_BYTES) or not rich_view_valid(
+        model, KIRO_KERNEL_MAX_BYTES
+    ):
+        return KIRO_KERNEL_STATUS_UTF8
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var writer = KiroResponseWriter(output, output_capacity, 0)
+    var writer_ptr = Pointer(to=writer)
+    if not kiro_raw_anthropic_response(
+        writer_ptr, view, model, output_address
+    ):
+        if writer.written >= output_capacity:
+            written[] = writer.written
+            return KIRO_KERNEL_STATUS_CAPACITY
+        return KIRO_KERNEL_STATUS_INVALID
+    written[] = writer.written
+    return KIRO_KERNEL_STATUS_OK
+
 
 def kiro_chat_response_rewrite_v1(
     abi_version: Int64,

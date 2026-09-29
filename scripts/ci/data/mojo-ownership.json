@@ -661,6 +661,7 @@
           "deepseek_strict_schema_normalization",
           "anthropic_web_search_result_shaping",
           "kiro_chat_response_mapping",
+          "kiro_anthropic_response_mapping",
           "kiro_response_shape_fallbacks",
           "kiro_acp_shape_fallbacks",
           "deepseek_stream_shape_fallbacks",
@@ -732,11 +733,12 @@
         "semantic_ranges": [
           {
             "start": 3014,
-            "end": 3295
+            "end": 3663
           }
         ],
         "operations": [
           "kiro_chat_response_mapping",
+          "kiro_anthropic_response_mapping",
           "kiro_response_shape_fallbacks",
           "kiro_acp_shape_fallbacks"
         ]
@@ -2078,8 +2080,6 @@
       "mojo_entry": "prodex_mojo_kiro_kernel_v1",
       "mojo_abi_version": 6,
       "mojo_operation_ids": {
-        "anthropic_tool_use_block": 9,
-        "anthropic_response": 10,
         "finish_reason": 27,
         "model_list": 44,
         "model_not_found": 45,
@@ -2090,19 +2090,44 @@
       "mojo_source": "mojo/prodex_core/rich_abi.mojo",
       "mojo_semantic_source": "mojo/prodex_core/kiro.mojo",
       "consumer": "crates/prodex-provider-core/src/translators/kiro/response.rs",
-      "consumer_marker": "KiroKernelOperation::AnthropicResponse",
+      "consumer_marker": "KiroKernelOperation::FinishReason",
       "production_consumers": [
         "crates/prodex-provider-core/src/translators/kiro/response.rs",
         "crates/prodex-provider-core/src/translators/kiro.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/tests/kiro_response.rs",
-      "rust_owner_before": "feature-off Kiro model/error JSON shapes, finish-reason classification, response tool-call presence scanning, Anthropic tool-use blocks, stop-reason mapping, and message assembly",
+      "rust_owner_before": "feature-off Kiro model/error JSON shapes, finish-reason classification, and response tool-call presence scanning",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "Deleted; fixed provider caller expectations cover model and error shapes, finish reasons, Anthropic content/tool ordering, defaults, and usage mapping",
+      "rust_test_oracle": "Deleted; fixed provider caller expectations cover model and error shapes, finish reasons, and response tool-call presence",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "catalog lookup, output-type acquisition, JSON serialization/decoding, raw malformed-field preservation where the string ABI cannot represent the original JSON type, and runtime metadata attachment"
+      "rust_adapter_scope": "catalog lookup, output-type acquisition, JSON serialization/decoding, and runtime metadata attachment"
+    },
+    {
+      "name": "kiro_anthropic_response_mapping",
+      "domain": "provider/kiro",
+      "introduced_in": "0.434.0",
+      "baseline_state": "Rust walked Kiro Responses JSON, reconstructed Anthropic tool/text blocks, parsed tool arguments, classified stop reasons, and copied usage fields",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_kiro_anthropic_response_rewrite_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/kiro.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/kiro/response.rs",
+      "consumer_marker": "kiro_rewrite_anthropic_response_json",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/kiro/response.rs",
+        "crates/prodex-provider-core/src/translators/kiro.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/kiro/response_tests.rs",
+      "rust_owner_before": "Kiro Responses-to-Anthropic message mapping including output traversal, tool argument parsing/defaults, text extraction, stop-reason precedence, raw ID/name/usage preservation, and final message assembly",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; focused provider caller coverage asserts Unicode, malformed and wrong-type fields, tool/text ordering, invalid argument fallback, stop-reason precedence, raw usage types, and 8 MiB text",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "canonical Serde serialization, bounded Mojo invocation, returned JSON decoding, and panic-on-contract-violation compatibility wrapper"
     },
     {
       "name": "kiro_acp_shape_fallbacks",

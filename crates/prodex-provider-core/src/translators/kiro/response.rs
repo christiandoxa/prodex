@@ -1,9 +1,8 @@
 //! Kiro provider response compatibility helpers.
 
-use super::stream::kiro_provider_core_stream_content_text;
 use prodex_mojo_core::MojoError;
 use prodex_mojo_core::rich::{CatalogModel, KIRO_RESPONSE_MAX_BYTES, resolve_catalog_model_exact};
-use serde_json::{Value, json};
+use serde_json::Value;
 
 use super::stream::{kiro_mojo_body, kiro_mojo_value};
 use prodex_mojo_core::rich::{KiroKernelInput, KiroKernelOperation};
@@ -148,91 +147,13 @@ pub fn kiro_provider_core_anthropic_message_value_from_response(
     response: &Value,
     requested_model: &str,
 ) -> Value {
-    let output = response
-        .get("output")
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-        .unwrap_or_default();
-
-    let text = output
-        .iter()
-        .find(|item| item.get("type").and_then(Value::as_str) == Some("message"))
-        .and_then(|item| item.get("content"))
-        .and_then(kiro_provider_core_stream_content_text)
-        .unwrap_or_default();
-    let tool_use_blocks = output
-        .iter()
-        .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
-        .map(|item| {
-            let arguments = item
-                .get("arguments")
-                .and_then(Value::as_str)
-                .and_then(|arguments| serde_json::from_str::<Value>(arguments).ok())
-                .unwrap_or_else(|| json!({}));
-            let arguments =
-                serde_json::to_string(&arguments).expect("Kiro Anthropic tool input serializes");
-            let mut input = KiroKernelInput::new(KiroKernelOperation::AnthropicToolUseBlock);
-            input.call_id = Some(
-                item.get("call_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or("call_kiro"),
-            );
-            input.name = Some(
-                item.get("name")
-                    .and_then(Value::as_str)
-                    .unwrap_or("tool_call"),
-            );
-            input.input = Some(&arguments);
-            let mut block = kiro_mojo_value(input);
-            // Preserve raw JSON fields that the string-only ABI cannot represent.
-            if let Some(call_id) = item.get("call_id") {
-                block["id"] = call_id.clone();
-            }
-            if let Some(name) = item.get("name") {
-                block["name"] = name.clone();
-            }
-            block
-        })
-        .collect::<Vec<_>>();
-    let has_tool_calls = !tool_use_blocks.is_empty();
-    let tool_calls = has_tool_calls.then(|| {
-        serde_json::to_string(&tool_use_blocks).expect("Kiro Anthropic tool blocks serialize")
-    });
-    let response_id = response
-        .get("id")
-        .and_then(Value::as_str)
-        .unwrap_or("msg_kiro");
-    let usage = response.get("usage");
-    let used = usage
-        .and_then(|usage| usage.get("input_tokens"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let size = usage
-        .and_then(|usage| usage.get("output_tokens"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let reason = response
-        .pointer("/incomplete_details/reason")
-        .or_else(|| response.pointer("/metadata/kiro/stop_reason"))
-        .and_then(Value::as_str);
-    let mut input = KiroKernelInput::new(KiroKernelOperation::AnthropicResponse);
-    input.response_id = Some(response_id);
-    input.requested_model = Some(requested_model);
-    input.content = (!text.is_empty()).then_some(text.as_str());
-    input.tool_calls = tool_calls.as_deref();
-    input.has_tool_calls = has_tool_calls;
-    input.reason = reason;
-    input.used = used;
-    input.size = size;
-    let mut message = kiro_mojo_value(input);
-    // Copy through raw values without normalizing their JSON types at the ABI.
-    if let Some(id) = response.get("id") {
-        message["id"] = id.clone();
-    }
-    for field in ["input_tokens", "output_tokens"] {
-        if let Some(value) = usage.and_then(|usage| usage.get(field)) {
-            message["usage"][field] = value.clone();
-        }
-    }
-    message
+    let canonical = serde_json::to_string(response).expect("Kiro Anthropic response serializes");
+    let body =
+        prodex_mojo_core::rich::kiro_rewrite_anthropic_response_json(&canonical, requested_model)
+            .unwrap_or_else(|error| {
+                panic!("Mojo Kiro Anthropic response rewrite failed: {error:?}")
+            });
+    serde_json::from_slice(&body).unwrap_or_else(|error| {
+        panic!("Mojo Kiro Anthropic response rewrite returned invalid JSON: {error}")
+    })
 }

@@ -33,6 +33,7 @@ from anthropic_request import anthropic_request_kernel_v1
 from openai_compat import openai_compat_kernel_v1
 # Kiro shares the rich ABI while keeping ACP transport and session behavior in Rust.
 from kiro import (
+    kiro_anthropic_response_rewrite_v1,
     kiro_chat_request_rewrite_v1,
     kiro_chat_response_rewrite_v1,
     kiro_kernel_v1,
@@ -530,6 +531,29 @@ def prodex_mojo_kiro_chat_request_rewrite_v1(
         output_capacity,
         written_address,
         issue_address,
+    )
+
+
+@export("prodex_mojo_kiro_anthropic_response_rewrite_v1")
+def prodex_mojo_kiro_anthropic_response_rewrite_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    model_address: UInt,
+    model_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    return kiro_anthropic_response_rewrite_v1(
+        abi_version,
+        input_address,
+        input_length,
+        model_address,
+        model_length,
+        output_address,
+        output_capacity,
+        written_address,
     )
 
 
