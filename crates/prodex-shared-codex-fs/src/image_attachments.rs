@@ -465,11 +465,18 @@ fn next_codex_session_attachment_path(contents: &str, cursor: usize) -> Option<(
 fn codex_session_path_continues(contents: &str, index: usize) -> bool {
     let bytes = contents.as_bytes();
     if bytes[index] == b'\\' {
+        if index > 0 && bytes[index - 1] == b'\\' {
+            return true;
+        }
         let mut end = index;
         while bytes.get(end) == Some(&b'\\') {
             end += 1;
         }
-        if bytes.get(end) == Some(&b'"') {
+        let slash_count = end - index;
+        let json_escape = bytes
+            .get(end)
+            .is_some_and(|byte| matches!(byte, b'"' | b'b' | b'f' | b'n' | b'r' | b't' | b'u'));
+        if slash_count % 2 == 1 && json_escape {
             return false;
         }
     }

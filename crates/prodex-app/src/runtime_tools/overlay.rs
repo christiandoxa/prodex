@@ -385,8 +385,8 @@ fn prepare_overlay_launch(
     let stage_started = Instant::now();
     if !strategy.args.dry_run {
         strategy.resume_session_path =
-            crate::app_commands::runtime_launch::resume_repair::repair_resume_session_in_shared_home(
-                &prepared.paths.shared_codex_root,
+            crate::app_commands::runtime_launch::resume_repair::repair_resume_session_for_launch(
+                &prepared.paths,
                 &strategy.codex_args,
             )?;
     }
