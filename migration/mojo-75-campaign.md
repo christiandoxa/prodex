@@ -3410,3 +3410,11 @@ primitive for open/closed fail-mode validation, fail-closed selection, exact tru
 matching, and localhost recognition. The Rust eq_ignore_ascii_case/lowercase decision
 copies were deleted. Trusted-host lowercase canonicalization remains Rust-owned because
 it materializes normalized persisted/runtime values rather than deciding equality.
+
+
+## Copilot profile-export host identity cleanup
+
+Profile export/import Copilot model-endpoint selection now reuses the authoritative exact
+ASCII-casefold Mojo primitive for github.com, http://github.com, and https://github.com
+identity. The three Rust eq_ignore_ascii_case copies were deleted. URL trimming and
+enterprise GHE suffix rewriting remain Rust-owned because they transform the endpoint.

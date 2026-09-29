@@ -540,6 +540,10 @@ fn copilot_url_helpers_match_import_expectations() {
         "https://api.githubcopilot.com"
     );
     assert_eq!(
+        default_copilot_models_api_url("HTTPS://GITHUB.COM/"),
+        "https://api.githubcopilot.com"
+    );
+    assert_eq!(
         default_copilot_models_api_url("https://enterprise.ghe.com"),
         "https://copilot-api.enterprise.ghe.com"
     );

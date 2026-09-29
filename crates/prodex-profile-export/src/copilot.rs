@@ -1,6 +1,7 @@
 use std::{collections::BTreeMap, fmt};
 
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -339,9 +340,12 @@ pub fn copilot_user_api_origin(host: &str) -> Result<String> {
 
 pub fn default_copilot_models_api_url(host: &str) -> String {
     let normalized = host.trim().trim_end_matches('/');
-    if normalized.eq_ignore_ascii_case("https://github.com")
-        || normalized.eq_ignore_ascii_case("http://github.com")
-        || normalized.eq_ignore_ascii_case("github.com")
+    if ascii_casefold_equal_exact(normalized, "https://github.com")
+        .expect("Mojo Copilot GitHub host comparison failed")
+        || ascii_casefold_equal_exact(normalized, "http://github.com")
+            .expect("Mojo Copilot GitHub host comparison failed")
+        || ascii_casefold_equal_exact(normalized, "github.com")
+            .expect("Mojo Copilot GitHub host comparison failed")
     {
         return "https://api.githubcopilot.com".to_string();
     }
