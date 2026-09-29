@@ -114,11 +114,8 @@ pub(crate) fn trusted_workspace_codex_args(
     trusted_workspaces_codex_args([workspace.to_path_buf()], codex_args)
 }
 
-fn exact_resume_session_path_from_profile_homes(
-    paths: &AppPaths,
-    session_id: &str,
-) -> Option<PathBuf> {
-    let mut homes = Vec::new();
+fn super_trust_codex_homes(paths: &AppPaths) -> Vec<PathBuf> {
+    let mut homes = vec![paths.shared_codex_root.clone()];
     if let Ok(state) = AppState::load(paths) {
         homes.extend(
             state
@@ -146,13 +143,17 @@ fn exact_resume_session_path_from_profile_homes(
             homes.push(path);
         }
     }
-
     let mut seen = BTreeSet::new();
-    for home in homes {
-        let key = lexical_workspace_alias(&home)
-            .to_string_lossy()
-            .into_owned();
-        if !seen.insert(key) || prodex_core::same_path(&home, &paths.shared_codex_root) {
+    homes.retain(|home| seen.insert(lexical_workspace_alias(home).to_string_lossy().into_owned()));
+    homes
+}
+
+fn exact_resume_session_path_from_profile_homes(
+    paths: &AppPaths,
+    session_id: &str,
+) -> Option<PathBuf> {
+    for home in super_trust_codex_homes(paths) {
+        if prodex_core::same_path(&home, &paths.shared_codex_root) {
             continue;
         }
         if let Ok(Some(path)) = prodex_session_store::find_resume_session_path(&home, session_id) {
@@ -160,6 +161,12 @@ fn exact_resume_session_path_from_profile_homes(
         }
     }
     None
+}
+
+fn resume_workspace_from_thread_state(paths: &AppPaths, session_id: &str) -> Option<PathBuf> {
+    super_trust_codex_homes(paths).into_iter().find_map(|home| {
+        crate::runtime_thread_index::runtime_thread_workspace_for_session(&home, session_id)
+    })
 }
 
 pub(crate) fn trusted_super_resume_codex_args(
@@ -187,6 +194,11 @@ pub(crate) fn trusted_super_resume_codex_args(
                 )
             })?
         && resume_workspace.is_absolute()
+    {
+        workspaces.push(resume_workspace);
+    }
+    if let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(codex_args)
+        && let Some(resume_workspace) = resume_workspace_from_thread_state(paths, session_id)
     {
         workspaces.push(resume_workspace);
     }
@@ -310,6 +322,61 @@ mod tests {
             );
         }
 
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn direct_super_resume_trusts_managed_profile_state_db_workspace_without_rollout_file() {
+        let root = crate::test_temp_root().join(format!(
+            "prodex-super-resume-state-db-trust-{}",
+            std::process::id()
+        ));
+        let launch_workspace = root.join("launch-workspace");
+        let resumed_workspace = root.join("resumed-workspace");
+        let managed_profiles_root = root.join("profiles");
+        let profile_home = managed_profiles_root.join("profile-a");
+        let shared_codex_root = root.join("shared");
+        std::fs::create_dir_all(&launch_workspace).unwrap();
+        std::fs::create_dir_all(&resumed_workspace).unwrap();
+        std::fs::create_dir_all(&profile_home).unwrap();
+        std::fs::create_dir_all(&shared_codex_root).unwrap();
+
+        let session_id = "01900000-0000-7000-8000-000000000271";
+        let database = profile_home.join("state_5.sqlite");
+        let connection = rusqlite::Connection::open(&database).unwrap();
+        connection
+            .execute("CREATE TABLE threads (id TEXT PRIMARY KEY, cwd TEXT)", [])
+            .unwrap();
+        connection
+            .execute(
+                "INSERT INTO threads (id, cwd) VALUES (?1, ?2)",
+                rusqlite::params![session_id, resumed_workspace.display().to_string()],
+            )
+            .unwrap();
+        drop(connection);
+
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root,
+            shared_codex_root,
+            legacy_shared_codex_root: root.join("legacy"),
+        };
+        let normalized =
+            prodex_runtime_launch::normalize_run_codex_args(&[OsString::from(session_id)]);
+        let args =
+            trusted_super_resume_codex_args(&launch_workspace, None, &paths, &normalized).unwrap();
+        let config: toml::Value =
+            toml::from_str(args[1].to_str().expect("config override should be UTF-8")).unwrap();
+
+        for workspace in [&launch_workspace, &resumed_workspace] {
+            assert_eq!(
+                config["projects"][workspace.to_string_lossy().as_ref()]["trust_level"].as_str(),
+                Some("trusted"),
+                "workspace={}",
+                workspace.display(),
+            );
+        }
         std::fs::remove_dir_all(root).unwrap();
     }
 
