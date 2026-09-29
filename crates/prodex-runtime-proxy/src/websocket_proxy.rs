@@ -1,4 +1,5 @@
 use base64::Engine;
+use prodex_mojo_core::rich::{ascii_casefold_ends_with, ascii_casefold_equal_exact};
 use std::collections::VecDeque;
 use std::io::{self, Read};
 use std::net::SocketAddr;
@@ -191,9 +192,10 @@ pub fn runtime_websocket_no_proxy_pattern_matches(pattern: &str, host: &str, por
     }
     let pattern_host = runtime_websocket_normalize_host(pattern_host);
     let host = runtime_websocket_normalize_host(host);
-    let pattern_host = pattern_host.trim_start_matches('.').to_ascii_lowercase();
-    let host = host.to_ascii_lowercase();
-    host == pattern_host || host.ends_with(&format!(".{pattern_host}"))
+    let pattern_host = pattern_host.trim_start_matches('.');
+    ascii_casefold_equal_exact(&host, pattern_host).expect("Mojo no-proxy host comparison failed")
+        || ascii_casefold_ends_with(&host, &format!(".{pattern_host}"))
+            .expect("Mojo no-proxy suffix comparison failed")
 }
 
 pub fn runtime_websocket_no_proxy_pattern_host_port(pattern: &str) -> (&str, Option<u16>) {

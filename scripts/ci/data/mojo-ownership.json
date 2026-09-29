@@ -4052,10 +4052,12 @@
         "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
         "crates/prodex-runtime-proxy/src/log_event.rs",
         "crates/prodex-runtime-proxy/src/websocket_message.rs",
-        "crates/prodex-app/src/quota_support.rs"
+        "crates/prodex-app/src/quota_support.rs",
+        "crates/prodex-app/src/codex_binary.rs",
+        "crates/prodex-runtime-proxy/src/websocket_proxy.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/prompt identity, app/runtime-proxy headers and routing, quota report labels, provider/media policy, and related runtime string classification",
+      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/runtime identity, proxy/header policy, quota/report labels, binary wrapper detection, and no-proxy host matching",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo equality coverage preserves empty strings, mixed case, and whitespace sensitivity, while Super catalog/prompt caller tests preserve selection behavior",
       "production_fallback": false,
@@ -4201,10 +4203,12 @@
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
         "crates/prodex-optional-tools/src/optional_tools.rs",
-        "crates/prodex-runtime-proxy/src/transport_failure.rs"
+        "crates/prodex-runtime-proxy/src/transport_failure.rs",
+        "crates/prodex-app/src/codex_binary.rs",
+        "crates/prodex-runtime-proxy/src/websocket_proxy.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
-      "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching across provider/runtime text classification, optional-tool diagnostics, and transport-failure message classification",
+      "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching across provider/runtime text classification, optional-tool diagnostics, transport failures, Codex binary/shim detection, and no-proxy hostname policy",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo relation coverage preserves Rust starts_with/ends_with/contains empty-needle semantics and 70k exact equality, with Copilot/Gemini caller regressions preserving case and trim behavior",
       "production_fallback": false,

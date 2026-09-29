@@ -1,4 +1,7 @@
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::rich::{
+    ascii_casefold_contains, ascii_casefold_equal_exact, ascii_casefold_starts_with,
+};
 use sha2::{Digest as _, Sha256};
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -144,7 +147,9 @@ fn probe_codex(path: &Path, args: &[&str], label: &str) -> Result<std::process::
 }
 
 fn parse_codex_version(output: &str) -> Option<(u64, u64, u64)> {
-    if !output.to_ascii_lowercase().contains("codex") {
+    if !ascii_casefold_contains(output, "codex")
+        .expect("Mojo Codex version-label comparison failed")
+    {
         return None;
     }
     let token = crate::quota_support::parse_codex_cli_version_output(output)?;
@@ -225,7 +230,10 @@ fn is_recursive_prodex_wrapper(candidate: &Path, current_exe: Option<&Path>) -> 
         .file_name()
         .and_then(OsStr::to_str)
         .is_some_and(|name| {
-            name.eq_ignore_ascii_case("prodex") || name.eq_ignore_ascii_case("prodex.exe")
+            ascii_casefold_equal_exact(name, "prodex")
+                .expect("Mojo Prodex wrapper filename comparison failed")
+                || ascii_casefold_equal_exact(name, "prodex.exe")
+                    .expect("Mojo Prodex wrapper filename comparison failed")
         })
     {
         return true;
@@ -240,12 +248,17 @@ fn is_recursive_prodex_wrapper(candidate: &Path, current_exe: Option<&Path>) -> 
     let Ok(text) = String::from_utf8(bytes) else {
         return false;
     };
-    let lower = text.to_ascii_lowercase();
-    lower.contains("codex-shim")
-        || lower.contains("@christiandoxa/prodex")
-        || lower.lines().any(|line| {
+    ascii_casefold_contains(&text, "codex-shim").expect("Mojo Codex shim marker comparison failed")
+        || ascii_casefold_contains(&text, "@christiandoxa/prodex")
+            .expect("Mojo Prodex package marker comparison failed")
+        || text.lines().any(|line| {
             let line = line.trim();
-            (line.starts_with("exec ") || line.contains("spawn")) && line.contains("prodex")
+            (ascii_casefold_starts_with(line, "exec ")
+                .expect("Mojo wrapper exec-prefix comparison failed")
+                || ascii_casefold_contains(line, "spawn")
+                    .expect("Mojo wrapper spawn comparison failed"))
+                && ascii_casefold_contains(line, "prodex")
+                    .expect("Mojo wrapper Prodex comparison failed")
         })
 }
 
