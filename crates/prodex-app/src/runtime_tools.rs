@@ -197,10 +197,10 @@ impl RuntimeToolLaunchStrategy {
     fn prepare_runtime_codex_args(
         &self,
         overlay_home: &std::path::Path,
-        shared_codex_root: &std::path::Path,
+        paths: &AppPaths,
         runtime_proxy: Option<&RuntimeProxyEndpoint>,
     ) -> Result<Vec<OsString>> {
-        let codex_args = self.base_runtime_codex_args(overlay_home, shared_codex_root)?;
+        let codex_args = self.base_runtime_codex_args(overlay_home, paths)?;
         let codex_args = runtime_launch_openai_model_context_codex_args(overlay_home, &codex_args)?;
         let codex_args = profile_openai_compatible_codex_args(overlay_home, &codex_args)?;
         let codex_args = prepare_local_provider_catalog_codex_args(overlay_home, &codex_args)?;
@@ -216,13 +216,13 @@ impl RuntimeToolLaunchStrategy {
     fn base_runtime_codex_args(
         &self,
         overlay_home: &std::path::Path,
-        shared_codex_root: &std::path::Path,
+        paths: &AppPaths,
     ) -> Result<Vec<OsString>> {
         let codex_args = if self.args.super_mode {
             trusted_super_resume_codex_args(
                 &env::current_dir()?,
                 self.resume_session_path.as_deref(),
-                shared_codex_root,
+                paths,
                 &self.codex_args,
             )?
         } else {
