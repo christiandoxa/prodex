@@ -3505,3 +3505,21 @@ Clippy with warnings denied, and the Mojo authority, no-fallback, ownership, and
 production-share guards. The canonical broad report counts **64,744 Mojo LOC** and
 **195,343 Rust production LOC**, totaling **260,087 LOC**: **24.893208810897892% Mojo**.
 The 75% broad project target remains in progress.
+
+## Copilot raw request-policy hard replacement
+
+Copilot request sanitization and capability-shape detection now run in the existing
+`provider_constraints.mojo` raw JSON owner through a dedicated versioned ABI. Mojo owns
+recursive `encrypted_content` removal with compaction preservation, escaped JSON-key
+matching, Chat/Responses agent-role classification with the historical trim/casefold
+contracts, and exact vision-payload detection for Responses and Chat request shapes.
+Rust retains raw byte ownership, canonical-model rewriting, ABI status mapping, and the
+public invalid-JSON default behavior only; the previous recursive Serde traversal and
+agent/vision Rust helpers were deleted with no semantic fallback implementation.
+
+Validation passes a fresh direct Mojo object build, 5 Copilot provider characterization
+tests, 2 direct ABI adapter tests, focused provider-core Clippy with warnings denied,
+`cargo fmt`, `git diff --check`, and the Mojo authority, no-fallback, ownership, and
+production-share guards. The canonical broad report counts **65,212 Mojo LOC** and
+**195,275 Rust production LOC**, totaling **260,487 LOC**: **25.03464664263476% Mojo**.
+The 75% broad project target remains in progress.

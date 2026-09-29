@@ -6737,3 +6737,508 @@ def prodex_gemini_bridge_request_kernel_v1(
         return GEMINI_BRIDGE_REQUEST_STATUS_INVALID
     written[] = writer.written
     return 0
+
+
+# Copilot raw request policy. Rust retains only byte ownership and public error/default mapping.
+comptime COPILOT_REQUEST_POLICY_ABI_VERSION: Int64 = 1
+comptime COPILOT_REQUEST_POLICY_STRIP_ENCRYPTED: Int64 = 1
+comptime COPILOT_REQUEST_POLICY_AGENT_INPUT: Int64 = 2
+comptime COPILOT_REQUEST_POLICY_VISION_INPUT: Int64 = 3
+comptime COPILOT_REQUEST_POLICY_STATUS_INVALID: Int64 = 1
+comptime COPILOT_REQUEST_POLICY_STATUS_CAPACITY: Int64 = 3
+comptime COPILOT_REQUEST_POLICY_STATUS_ABI: Int64 = 4
+
+
+def copilot_request_string_token_equals(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+    fold_ascii: Bool,
+) -> Bool:
+    if start < 0 or end <= start + 1 or gemini_request_content_byte(source, start) != 34 or gemini_request_content_byte(source, end - 1) != 34:
+        return False
+    var expected = literal.unsafe_ptr()
+    var index = start + 1
+    var inner_end = end - 1
+    for offset in range(Int64(literal.byte_length())):
+        if index >= inner_end:
+            return False
+        var decoded = gemini_request_content_next_string_codepoint(
+            source, index, inner_end
+        )
+        if decoded[0] < 0 or decoded[0] > 127:
+            return False
+        var actual = UInt8(decoded[0])
+        var wanted = expected[unsafe_offset=offset]
+        if fold_ascii:
+            if actual >= 65 and actual <= 90:
+                actual += 32
+            if wanted >= 65 and wanted <= 90:
+                wanted += 32
+        if actual != wanted:
+            return False
+        index = decoded[1]
+    return index == inner_end
+
+
+def copilot_request_object_member(
+    source: GeminiRequestContentStringView,
+    object_start: Int64,
+    object_end: Int64,
+    key: StringSlice,
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
+    if object_start < 0 or object_end <= object_start + 1 or object_end > Int64(source.len):
+        return result^
+    if gemini_request_content_byte(source, object_start) != 123 or gemini_request_content_byte(source, object_end - 1) != 125:
+        return result^
+    var index = gemini_request_content_skip_ws(source, object_start + 1, object_end - 1)
+    while index < object_end - 1:
+        var key_start = index
+        var key_end = gemini_request_content_string_end(source, key_start, object_end - 1)
+        if key_end < 0:
+            return Array[Int64, 2](fill=-1)^
+        index = gemini_request_content_skip_ws(source, key_end, object_end - 1)
+        if index >= object_end - 1 or gemini_request_content_byte(source, index) != 58:
+            return Array[Int64, 2](fill=-1)^
+        var value_start = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+        var value_end = gemini_request_content_value_end(source, value_start, object_end - 1, 0)
+        if value_end < 0:
+            return Array[Int64, 2](fill=-1)^
+        if copilot_request_string_token_equals(
+            source, key_start, key_end, key, False
+        ):
+            result[0] = value_start
+            result[1] = value_end
+        index = gemini_request_content_skip_ws(source, value_end, object_end - 1)
+        if index < object_end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, object_end - 1)
+            continue
+        if index != object_end - 1:
+            return Array[Int64, 2](fill=-1)^
+        break
+    return result^
+
+
+def copilot_request_root(
+    source: GeminiRequestContentStringView
+) -> Array[Int64, 2]:
+    var missing = Array[Int64, 2](fill=-1)
+    if source.len == 0:
+        return missing^
+    var start = gemini_request_content_skip_ws(source, 0, Int64(source.len))
+    var end = gemini_request_content_value_end(source, start, Int64(source.len), 0)
+    if end < 0 or gemini_request_content_skip_ws(
+        source, end, Int64(source.len)
+    ) != Int64(source.len):
+        return missing^
+    var result = Array[Int64, 2](fill=-1)
+    result[0] = start
+    result[1] = end
+    return result^
+
+
+def copilot_request_nonblank_string(
+    source: GeminiRequestContentStringView,
+    token: Array[Int64, 2],
+) -> Bool:
+    if not gemini_bridge_text_raw_string(source, token):
+        return False
+    return gemini_bridge_full_trimmed_inner(source, token)[0] >= 0
+
+
+def copilot_request_write_stripped_value(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    changed: Pointer[mut=True, Int64, _],
+    depth: Int64,
+) -> Bool:
+    if depth > GEMINI_REQUEST_CONTENT_MAX_DEPTH or start < 0 or end <= start:
+        return False
+    var opening = gemini_request_content_byte(source, start)
+    if opening == 91:
+        if not gemini_request_content_put_byte(writer, 91):
+            return False
+        var first = True
+        var index = gemini_request_content_skip_ws(source, start + 1, end - 1)
+        while index < end - 1:
+            var value_end = gemini_request_content_value_end(source, index, end - 1, depth + 1)
+            if value_end < 0:
+                return False
+            if not first and not gemini_request_content_put_byte(writer, 44):
+                return False
+            first = False
+            if not copilot_request_write_stripped_value(
+                source, index, value_end, writer, changed, depth + 1
+            ):
+                return False
+            index = gemini_request_content_skip_ws(source, value_end, end - 1)
+            if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+                index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+                continue
+            if index != end - 1:
+                return False
+            break
+        return gemini_request_content_put_byte(writer, 93)
+    if opening != 123:
+        return gemini_request_content_put_range(writer, source, start, end)
+
+    var type_token = copilot_request_object_member(
+        source, start, end, StringSlice("type")
+    )
+    var preserve_encrypted = copilot_request_string_token_equals(
+        source, type_token[0], type_token[1], StringSlice("compaction"), False
+    )
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    var first = True
+    var index = gemini_request_content_skip_ws(source, start + 1, end - 1)
+    while index < end - 1:
+        var key_start = index
+        var key_end = gemini_request_content_string_end(source, key_start, end - 1)
+        if key_end < 0:
+            return False
+        index = gemini_request_content_skip_ws(source, key_end, end - 1)
+        if index >= end - 1 or gemini_request_content_byte(source, index) != 58:
+            return False
+        var value_start = gemini_request_content_skip_ws(source, index + 1, end - 1)
+        var value_end = gemini_request_content_value_end(source, value_start, end - 1, depth + 1)
+        if value_end < 0:
+            return False
+        var drop = not preserve_encrypted and copilot_request_string_token_equals(
+            source,
+            key_start,
+            key_end,
+            StringSlice("encrypted_content"),
+            False,
+        )
+        if drop:
+            changed[] = 1
+        else:
+            if not first and not gemini_request_content_put_byte(writer, 44):
+                return False
+            first = False
+            if (
+                not gemini_request_content_put_range(writer, source, key_start, key_end)
+                or not gemini_request_content_put_byte(writer, 58)
+                or not copilot_request_write_stripped_value(
+                    source, value_start, value_end, writer, changed, depth + 1
+                )
+            ):
+                return False
+        index = gemini_request_content_skip_ws(source, value_end, end - 1)
+        if index < end - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, end - 1)
+            continue
+        if index != end - 1:
+            return False
+        break
+    return gemini_request_content_put_byte(writer, 125)
+
+
+def copilot_request_array_has_message_agent(
+    source: GeminiRequestContentStringView,
+    array: Array[Int64, 2],
+) -> Bool:
+    if array[0] < 0 or gemini_request_content_byte(source, array[0]) != 91:
+        return False
+    var index = gemini_request_content_skip_ws(source, array[0] + 1, array[1] - 1)
+    while index < array[1] - 1:
+        var item_end = gemini_request_content_value_end(source, index, array[1] - 1, 0)
+        if item_end < 0:
+            return False
+        if gemini_request_content_byte(source, index) == 123:
+            var role = copilot_request_object_member(
+                source, index, item_end, StringSlice("role")
+            )
+            if copilot_request_string_token_equals(
+                source, role[0], role[1], StringSlice("assistant"), True
+            ) or copilot_request_string_token_equals(
+                source, role[0], role[1], StringSlice("tool"), True
+            ):
+                return True
+        index = gemini_request_content_skip_ws(source, item_end, array[1] - 1)
+        if index < array[1] - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, array[1] - 1)
+        else:
+            break
+    return False
+
+
+def copilot_request_array_has_responses_agent(
+    source: GeminiRequestContentStringView,
+    array: Array[Int64, 2],
+) -> Bool:
+    if array[0] < 0 or gemini_request_content_byte(source, array[0]) != 91:
+        return False
+    var index = gemini_request_content_skip_ws(source, array[0] + 1, array[1] - 1)
+    while index < array[1] - 1:
+        var item_end = gemini_request_content_value_end(source, index, array[1] - 1, 0)
+        if item_end < 0:
+            return False
+        if gemini_request_content_byte(source, index) == 123:
+            var role = copilot_request_object_member(
+                source, index, item_end, StringSlice("role")
+            )
+            if not gemini_bridge_text_raw_string(source, role):
+                return True
+            var trimmed = gemini_bridge_full_trimmed_inner(source, role)
+            if trimmed[0] < 0 or gemini_bridge_full_region_ascii_folded_equals(
+                source, trimmed[0], trimmed[1], StringSlice("assistant")
+            ):
+                return True
+        index = gemini_request_content_skip_ws(source, item_end, array[1] - 1)
+        if index < array[1] - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, array[1] - 1)
+        else:
+            break
+    return False
+
+
+def copilot_request_has_agent(
+    source: GeminiRequestContentStringView,
+    root: Array[Int64, 2],
+) -> Bool:
+    if root[0] < 0 or gemini_request_content_byte(source, root[0]) != 123:
+        return False
+    var messages = copilot_request_object_member(
+        source, root[0], root[1], StringSlice("messages")
+    )
+    if copilot_request_array_has_message_agent(source, messages):
+        return True
+    var input = copilot_request_object_member(
+        source, root[0], root[1], StringSlice("input")
+    )
+    return copilot_request_array_has_responses_agent(source, input)
+
+
+def copilot_request_image_payload_present(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    for key in [StringSlice("image_url"), StringSlice("file_id")]:
+        var token = copilot_request_object_member(source, start, end, key)
+        if copilot_request_nonblank_string(source, token):
+            return True
+    return False
+
+
+def copilot_request_responses_image_item(
+    source: GeminiRequestContentStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    if start < 0 or gemini_request_content_byte(source, start) != 123:
+        return False
+    var kind = copilot_request_object_member(
+        source, start, end, StringSlice("type")
+    )
+    return copilot_request_string_token_equals(
+        source, kind[0], kind[1], StringSlice("input_image"), False
+    ) and copilot_request_image_payload_present(source, start, end)
+
+
+def copilot_request_content_has_responses_image(
+    source: GeminiRequestContentStringView,
+    content: Array[Int64, 2],
+) -> Bool:
+    if content[0] < 0 or gemini_request_content_byte(source, content[0]) != 91:
+        return False
+    var index = gemini_request_content_skip_ws(source, content[0] + 1, content[1] - 1)
+    while index < content[1] - 1:
+        var item_end = gemini_request_content_value_end(source, index, content[1] - 1, 0)
+        if item_end < 0:
+            return False
+        if copilot_request_responses_image_item(source, index, item_end):
+            return True
+        index = gemini_request_content_skip_ws(source, item_end, content[1] - 1)
+        if index < content[1] - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, content[1] - 1)
+        else:
+            break
+    return False
+
+
+def copilot_request_responses_input_has_image(
+    source: GeminiRequestContentStringView,
+    array: Array[Int64, 2],
+) -> Bool:
+    if array[0] < 0 or gemini_request_content_byte(source, array[0]) != 91:
+        return False
+    var index = gemini_request_content_skip_ws(source, array[0] + 1, array[1] - 1)
+    while index < array[1] - 1:
+        var item_end = gemini_request_content_value_end(source, index, array[1] - 1, 0)
+        if item_end < 0:
+            return False
+        if copilot_request_responses_image_item(source, index, item_end):
+            return True
+        if gemini_request_content_byte(source, index) == 123:
+            var kind = copilot_request_object_member(
+                source, index, item_end, StringSlice("type")
+            )
+            if copilot_request_string_token_equals(
+                source, kind[0], kind[1], StringSlice("message"), False
+            ):
+                var content = copilot_request_object_member(
+                    source, index, item_end, StringSlice("content")
+                )
+                if copilot_request_content_has_responses_image(source, content):
+                    return True
+        index = gemini_request_content_skip_ws(source, item_end, array[1] - 1)
+        if index < array[1] - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, array[1] - 1)
+        else:
+            break
+    return False
+
+
+def copilot_request_chat_content_has_image(
+    source: GeminiRequestContentStringView,
+    content: Array[Int64, 2],
+) -> Bool:
+    if content[0] < 0 or gemini_request_content_byte(source, content[0]) != 91:
+        return False
+    var index = gemini_request_content_skip_ws(source, content[0] + 1, content[1] - 1)
+    while index < content[1] - 1:
+        var item_end = gemini_request_content_value_end(source, index, content[1] - 1, 0)
+        if item_end < 0:
+            return False
+        if gemini_request_content_byte(source, index) == 123:
+            var kind = copilot_request_object_member(
+                source, index, item_end, StringSlice("type")
+            )
+            if copilot_request_string_token_equals(
+                source, kind[0], kind[1], StringSlice("image_url"), False
+            ):
+                var image = copilot_request_object_member(
+                    source, index, item_end, StringSlice("image_url")
+                )
+                if image[0] >= 0 and gemini_request_content_byte(source, image[0]) == 123:
+                    var url = copilot_request_object_member(
+                        source, image[0], image[1], StringSlice("url")
+                    )
+                    if copilot_request_nonblank_string(source, url):
+                        return True
+        index = gemini_request_content_skip_ws(source, item_end, content[1] - 1)
+        if index < content[1] - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, content[1] - 1)
+        else:
+            break
+    return False
+
+
+def copilot_request_chat_messages_have_image(
+    source: GeminiRequestContentStringView,
+    array: Array[Int64, 2],
+) -> Bool:
+    if array[0] < 0 or gemini_request_content_byte(source, array[0]) != 91:
+        return False
+    var index = gemini_request_content_skip_ws(source, array[0] + 1, array[1] - 1)
+    while index < array[1] - 1:
+        var item_end = gemini_request_content_value_end(source, index, array[1] - 1, 0)
+        if item_end < 0:
+            return False
+        if gemini_request_content_byte(source, index) == 123:
+            var role = copilot_request_object_member(
+                source, index, item_end, StringSlice("role")
+            )
+            if copilot_request_string_token_equals(
+                source, role[0], role[1], StringSlice("user"), False
+            ):
+                var content = copilot_request_object_member(
+                    source, index, item_end, StringSlice("content")
+                )
+                if copilot_request_chat_content_has_image(source, content):
+                    return True
+        index = gemini_request_content_skip_ws(source, item_end, array[1] - 1)
+        if index < array[1] - 1 and gemini_request_content_byte(source, index) == 44:
+            index = gemini_request_content_skip_ws(source, index + 1, array[1] - 1)
+        else:
+            break
+    return False
+
+
+def copilot_request_has_vision(
+    source: GeminiRequestContentStringView,
+    root: Array[Int64, 2],
+) -> Bool:
+    if root[0] < 0 or gemini_request_content_byte(source, root[0]) != 123:
+        return False
+    var input = copilot_request_object_member(
+        source, root[0], root[1], StringSlice("input")
+    )
+    if copilot_request_responses_input_has_image(source, input):
+        return True
+    var messages = copilot_request_object_member(
+        source, root[0], root[1], StringSlice("messages")
+    )
+    return copilot_request_chat_messages_have_image(source, messages)
+
+
+@export("prodex_copilot_request_policy_v1")
+def prodex_copilot_request_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    input_address: UInt64,
+    input_length: Int64,
+    output_address: UInt64,
+    output_capacity: Int64,
+    written_address: UInt64,
+    result_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != COPILOT_REQUEST_POLICY_ABI_VERSION:
+        return COPILOT_REQUEST_POLICY_STATUS_ABI
+    if (
+        operation < COPILOT_REQUEST_POLICY_STRIP_ENCRYPTED
+        or operation > COPILOT_REQUEST_POLICY_VISION_INPUT
+        or input_length < 0
+        or input_address == 0
+        or written_address == 0
+        or result_address == 0
+        or (operation == COPILOT_REQUEST_POLICY_STRIP_ENCRYPTED and (
+            output_capacity <= 0 or output_address == 0
+        ))
+    ):
+        return COPILOT_REQUEST_POLICY_STATUS_INVALID
+    var utf8_view = ProdexRichStringView(UInt(input_address), UInt(input_length))
+    if not rich_view_valid(utf8_view, input_length):
+        return COPILOT_REQUEST_POLICY_STATUS_INVALID
+    var source = GeminiRequestContentStringView(
+        input_address, UInt64(input_length)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    written[] = 0
+    result[] = 0
+    var root = copilot_request_root(source)
+    if root[0] < 0:
+        return COPILOT_REQUEST_POLICY_STATUS_INVALID
+    if operation == COPILOT_REQUEST_POLICY_AGENT_INPUT:
+        result[] = 1 if copilot_request_has_agent(source, root) else 0
+        return 0
+    if operation == COPILOT_REQUEST_POLICY_VISION_INPUT:
+        result[] = 1 if copilot_request_has_vision(source, root) else 0
+        return 0
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var writer = GeminiRequestContentWriter(output, output_capacity, 0)
+    var changed: Int64 = 0
+    if not copilot_request_write_stripped_value(
+        source, root[0], root[1], Pointer(to=writer), Pointer(to=changed), 0
+    ):
+        written[] = writer.written
+        if writer.written >= output_capacity:
+            return COPILOT_REQUEST_POLICY_STATUS_CAPACITY
+        return COPILOT_REQUEST_POLICY_STATUS_INVALID
+    written[] = writer.written
+    result[] = changed
+    return 0

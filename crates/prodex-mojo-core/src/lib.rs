@@ -95,6 +95,8 @@ pub mod codex_config;
 pub mod confirmation_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod context;
+#[cfg(feature = "mojo-provider-constraints")]
+pub mod copilot_request_policy;
 #[cfg(feature = "mojo-rich")]
 pub mod gemini_code_assist_policy;
 #[cfg(feature = "mojo-rich")]
