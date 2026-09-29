@@ -80,6 +80,7 @@ comptime KIRO_UNSUPPORTED_PATH_ERROR: Int64 = 47
 comptime KIRO_REQUEST_VALIDATION_ERROR: Int64 = 48
 comptime KIRO_ANTHROPIC_REQUEST_REWRITE: Int64 = 49
 comptime KIRO_RESPONSE_HAS_TOOL_CALLS: Int64 = 50
+comptime KIRO_RAW_RESPONSES_ITEMS_FROM_CHAT_MESSAGE: Int64 = 51
 
 comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
 comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
@@ -1380,6 +1381,10 @@ def kiro_write_operation(
         if result == 1:
             return kiro_put_literal(writer, StringSlice("true"))
         return kiro_put_literal(writer, StringSlice("false"))
+    if operation == KIRO_RAW_RESPONSES_ITEMS_FROM_CHAT_MESSAGE:
+        if input.input_present != 1:
+            return False
+        return kiro_raw_responses_items_from_chat_message(writer, input.input)
     if operation == KIRO_MODEL_LIST:
         return (
             kiro_put_literal(writer, StringSlice('{"object":"list","data":'))
@@ -2536,7 +2541,7 @@ def kiro_raw_object_string_member(
         view, object_bounds[0], object_bounds[1], key
     )
     if kiro_raw_present(value) and deepseek_json_byte(view, value[0]) == 34:
-        return value
+        return value^
     return Array[Int64, 2](fill=-1)^
 
 def kiro_raw_role_is(
@@ -2569,6 +2574,8 @@ def kiro_raw_write_message_item(
     ):
         return True
     var content = kiro_raw_member(view, message, StringSlice("content"))
+    if not kiro_raw_present(content):
+        return True
     var saved = writer[].written
     var first_saved = first[]
     if not kiro_raw_item_prefix(writer, first):
@@ -2720,14 +2727,41 @@ def kiro_raw_write_tool_output_item(
     ):
         return False
     var saved = writer[].written
-    var text_result = kiro_raw_put_text_json_string(writer, view, content)
-    if text_result == 0:
-        writer[].written = saved
+    if not kiro_raw_present(content):
         if not kiro_put_literal(writer, StringSlice('""')):
             return False
-    elif text_result < 0:
-        return False
+    else:
+        var text_result = kiro_raw_put_text_json_string(writer, view, content)
+        if text_result == 0:
+            writer[].written = saved
+            if not kiro_put_literal(writer, StringSlice('""')):
+                return False
+        elif text_result < 0:
+            return False
     return kiro_put_byte(writer, 125)
+
+
+def kiro_raw_responses_items_from_chat_message(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    if not kiro_put_byte(writer, 91):
+        return False
+    var message = kiro_raw_root(view)
+    if not kiro_raw_present(message):
+        return kiro_put_byte(writer, 93)
+    var first: Int64 = 1
+    var first_ptr = Pointer(to=first)
+    if (
+        not kiro_raw_write_message_item(writer, view, message, first_ptr)
+        or not kiro_raw_write_tool_calls(writer, view, message, first_ptr)
+        or not kiro_raw_write_legacy_function_call_item(
+            writer, view, message, first_ptr
+        )
+        or not kiro_raw_write_tool_output_item(writer, view, message, first_ptr)
+    ):
+        return False
+    return kiro_put_byte(writer, 93)
 
 def kiro_raw_write_chat_input(
     writer: Pointer[mut=True, KiroResponseWriter, _],
