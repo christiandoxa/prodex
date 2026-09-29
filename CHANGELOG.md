@@ -2,7 +2,7 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.433.1 - 2026-09-29
+## 0.434.0 - 2026-09-29
 
 ### Runtime
 
@@ -18,6 +18,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### CLI
 
+- Persist resumed pasted attachments (`670e153`)
 - Migrate quota render casefold policy (`97a9e27`)
 - Remember thread model and trust workspace (`688e364`)
 - Pretrust managed-profile resume workspace (`6589315`)
@@ -30,6 +31,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Align Codex 0.159.0 (`39a9d2c`)
 - Migrate secret backend identity (`44d43df`)
 - Migrate Copilot export host identity (`bfe7cdb`)
 - Migrate Presidio identity policy (`3bf0f7d`)
@@ -60,6 +62,75 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Centralize model provider classification (`1717673`)
 - Migrate Kiro response tool-call policy (`b2d6a32`)
 - Migrate Gemini stream metadata merge (`bb24169`)
+# Prodex 0.434.0
+
+## New Features
+
+- Align the audited compatibility baseline with official Codex
+  `rust-v0.159.0`, including opt-in `instant_interrupt` steering and
+  item-anchored `thread/items/list` pagination.
+- Track Codex 0.159's relocated internal-metadata destination gate and
+  Responses failure classifier at their new upstream owners without weakening
+  Prodex security or quota semantics.
+- Keep `instant_interrupt` upstream-owned and disabled by default unless the
+  user or Codex configuration explicitly enables it.
+- Preserve additive app-server cursor shapes opaquely so clients can use the
+  new item-anchor pagination without a Prodex-specific protocol fork.
+
+## Bug Fixes
+
+- Fix Super resume after an interrupted overlay when pasted text or attached
+  media is still referenced through a deleted `.prodex-overlay-*` path.
+  Resume now repairs the rollout to durable shared attachment paths before
+  Codex reads it.
+- Fix attachment path scanning across escaped JSON newlines so a path such as
+  `pasted-text-1.txt\nimage file: ...` no longer treats the escape and the
+  following media reference as part of the pasted-text filename.
+- Preserve the pre-migration Gemini stream identifier contract in the
+  authoritative Mojo response kernel, restoring UUID-shaped text, media, and
+  citation item IDs without a Rust fallback.
+- Preserve zero-prompt Super direct resume for managed-profile sessions and
+  retain the last selected main-agent model and reasoning effort per provider.
+
+## Codex 0.159.0 Compatibility
+
+- Internal tool metadata remains restricted to explicitly opted-in providers or
+  upstream-approved HTTPS OpenAI/ChatGPT destinations. Codex 0.159 moved this
+  gate into its model-provider boundary; the core client still strips metadata
+  when the gate resolves false.
+- Explicit quota, balance/spend-limit, rate-limit, overload, and
+  `invalid_prompt` classes remain preserved after Codex extracted failed
+  Responses classification into `sse/responses_error.rs`.
+- Codex's new TUI/session persistence and Windows process-launch fixes remain
+  upstream-owned.
+- Exact tagged-source replay, official Linux binary verification, and isolated
+  app-server initialize smoke all pass for `rust-v0.159.0`.
+
+## Resume Attachment Durability
+
+A Super overlay is temporary, but pasted text and media must survive longer
+than the overlay itself. Prodex now runs targeted session maintenance before a
+direct resume and repairs stale attachment references to durable shared Codex
+storage. This covers direct `prodex s <uuid>` resume and the shared resume
+repair path used by normal runtime launches.
+
+## Verification
+
+- Codex 0.159.0 compatibility watchdog: `in_sync`, zero diffs.
+- Offline upstream baseline guard and self-test: pass.
+- Shared Codex filesystem suite: 74/74 tests pass.
+- Stale-overlay pasted-text/media resume regression: pass.
+- Static guards: 25/25 pass.
+- Official Codex 0.159.0 Linux musl binary reports `codex-cli 0.159.0`.
+
+## Changelog
+
+- Accommodate Codex `rust-v0.159.0` at the audited compatibility boundary.
+- Repair durable pasted-text and media references before Super resume.
+- Restore Gemini stream identifier compatibility in the Mojo owner.
+- Carry forward the post-0.433.0 Mojo migration and runtime-policy cleanup.
+
+Full Changelog: [0.433.0...0.434.0](https://github.com/christiandoxa/prodex/compare/0.433.0...0.434.0)
 
 ## 0.433.0 - 2026-09-28
 
