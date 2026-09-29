@@ -76,14 +76,14 @@
     {
       "id": "playwright-mcp",
       "repository": "https://github.com/microsoft/playwright-mcp",
-      "latest_stable": "0.0.82",
-      "release": "v0.0.82",
-      "commit": "f1257a5a67aff872f947fae274759f7d54853862",
-      "git_tree": "099d3156de5e672b3c54ed9e4afd416c352e48db",
+      "latest_stable": "0.0.83",
+      "release": "v0.0.83",
+      "commit": "f183dad4a52965583e3cc1d59b88cdc279e2e57d",
+      "git_tree": "8059a67e0b899671573481f80a8259161fb601e0",
       "npm": {
         "package": "@playwright/mcp",
-        "version": "0.0.82",
-        "integrity": "sha512-OCqftfb8H4dnqm/njbTBRk3seUvUPttOlJUxCtEzXGETYOlRH5Qt3bbXIjmZIuWAxD9RF+yg1ASrPeXvm0y5cA==",
+        "version": "0.0.83",
+        "integrity": "sha512-oNcl+Ae2/IAjhfPeP46BfIkSakfmprY+aOtkv5MjrQ4lPav4/yNtPhL0iq8SlIM90oApWgBDUxaNKvktazUKOg==",
         "node": ">=18"
       },
       "license": "Apache-2.0",
@@ -94,7 +94,7 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Stable v0.0.82 is verified from the official release tag and npm package; retain the pinned package and Node.js >=18 runtime contract."
+      "notes": "Stable v0.0.83 is verified from the official release tag and npm package; retain the pinned package and Node.js >=18 runtime contract."
     },
     {
       "id": "ponytail",
