@@ -228,3 +228,52 @@ fn quota_runtime_log_ignores_unknown_profiles() {
         None
     );
 }
+
+#[test]
+fn quota_provider_filter_uses_mojo_casefold_identity() {
+    let auth_only = |label: &str| QuotaReport {
+        name: "test".to_string(),
+        active: false,
+        auth: AuthSummary {
+            label: label.to_string(),
+            quota_compatible: true,
+        },
+        workspace_id: None,
+        workspace_name: None,
+        result: Err("not fetched".to_string()),
+        fetched_at: 0,
+    };
+    assert!(QuotaProviderFilter::OpenAi.matches_report(&auth_only("CHATGPT")));
+    assert!(QuotaProviderFilter::Gemini.matches_report(&auth_only("GeMiNi")));
+    assert!(QuotaProviderFilter::Anthropic.matches_report(&auth_only("ANTHROPIC")));
+    assert!(QuotaProviderFilter::Copilot.matches_report(&auth_only("CoPiLoT")));
+    assert!(QuotaProviderFilter::Kiro.matches_report(&auth_only("KIRO")));
+    assert!(QuotaProviderFilter::DeepSeek.matches_report(&auth_only("DEEPSEEK-KEY")));
+    assert!(QuotaProviderFilter::Local.matches_report(&auth_only("LOCAL")));
+    assert!(!QuotaProviderFilter::OpenAi.matches_report(&auth_only(" chatgpt ")));
+
+    let external = |provider: &str| QuotaReport {
+        name: "external".to_string(),
+        active: false,
+        auth: AuthSummary {
+            label: "other".to_string(),
+            quota_compatible: true,
+        },
+        workspace_id: None,
+        workspace_name: None,
+        result: Ok(ProviderQuotaSnapshot::External(ExternalQuotaInfo {
+            provider: provider.to_string(),
+            account: None,
+            plan: None,
+            status: "ok".to_string(),
+            main: "ok".to_string(),
+            reset: None,
+            available: Some(true),
+            details: Vec::new(),
+        })),
+        fetched_at: 0,
+    };
+    assert!(QuotaProviderFilter::DeepSeek.matches_report(&external("dEePsEeK")));
+    assert!(QuotaProviderFilter::Local.matches_report(&external("LOCAL OPENAI-COMPATIBLE")));
+    assert!(!QuotaProviderFilter::Local.matches_report(&external(" Local OpenAI-compatible ")));
+}

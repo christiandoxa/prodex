@@ -3938,10 +3938,11 @@
         "crates/prodex-app/src/app_commands/super_main_catalog.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/provider_models.rs",
         "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
-        "crates/prodex-provider-core/src/translators/kiro/response.rs"
+        "crates/prodex-provider-core/src/translators/kiro/response.rs",
+        "crates/prodex-app/src/runtime_external_provider_config.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/runtime_launch/proxy_startup/provider_models.rs",
-      "rust_owner_before": "case-insensitive exact model/alias matching in Super model choices and dynamic provider model lookup, including external dynamic catalog slug lookup, including Kiro model endpoint lookup.",
+      "rust_owner_before": "case-insensitive exact model/alias matching in Super model choices and dynamic provider model lookup, including external dynamic catalog slug lookup, including Kiro model endpoint lookup, including static external-provider metadata lookup.",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct rich-catalog exact resolver test plus Super and provider-model caller tests cover mixed case, aliases, empty input, and non-trimming whitespace behavior",
       "production_fallback": false,
@@ -4049,16 +4050,17 @@
         "crates/prodex-runtime-proxy/src/error_policy/rate_limit_header.rs",
         "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs",
         "crates/prodex-runtime-proxy/src/log_event.rs",
-        "crates/prodex-runtime-proxy/src/websocket_message.rs"
+        "crates/prodex-runtime-proxy/src/websocket_message.rs",
+        "crates/prodex-app/src/quota_support.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/prompt identity, app runtime headers/processes, and runtime-proxy request/response/header/log/websocket policy",
+      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/prompt identity, app/runtime-proxy headers and routing, quota report labels, provider/media policy, and related runtime string classification",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo equality coverage preserves empty strings, mixed case, and whitespace sensitivity, while Super catalog/prompt caller tests preserve selection behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "caller-owned trimming where historically required, string/header/JSON acquisition, iteration, routing/forwarding/logging decisions, and byte-level URL syntax; Mojo owns exact ASCII-folded string equality"
+      "rust_adapter_scope": "caller-owned trimming where historically required, string/header/JSON acquisition, iteration, routing/forwarding/quota/logging decisions, and byte-level URL syntax; Mojo owns exact ASCII-folded string equality"
     },
     {
       "name": "gemini_guardrail_text_classification",

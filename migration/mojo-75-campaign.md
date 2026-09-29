@@ -3335,3 +3335,12 @@ trimmed ASCII-casefold equality, strict optional presence, wildcard optional aut
 matching, and Kiro's historical empty-string-as-absent semantics. The duplicated Rust
 trim/casefold/optional matching helper was deleted. Rust retains provider enum dispatch
 and combines typed Mojo boolean results only; there is no semantic Rust fallback.
+
+
+## Quota report and external metadata identity cleanup
+
+Quota report auth/provider label matching now uses the authoritative exact ASCII-casefold
+Mojo primitive, preserving mixed-case matches while retaining whitespace sensitivity.
+Static external-provider model metadata lookup now uses the exact rich-catalog Mojo
+resolver instead of a Rust eq_ignore_ascii_case scan. Rust retains quota snapshot/DTO
+ownership, provider filtering, static metadata tables, and fallback description mapping.
