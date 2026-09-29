@@ -21,6 +21,11 @@ enum ProfileIdentityOperation {
     RemoveTargets = 9,
     DeleteHome = 10,
     SanitizeSlug = 11,
+    TrimmedEqual = 12,
+    TrimmedCasefoldEqual = 13,
+    OptionalCasefoldEqual = 14,
+    OptionalCasefoldWildcard = 15,
+    OptionalNonemptyCasefoldEqual = 16,
 }
 
 #[repr(C)]
@@ -382,6 +387,68 @@ pub fn find_matching_profile_identity(
         .ok_or(MojoError::InvalidOutput)
 }
 
+fn profile_identity_relation(
+    operation: ProfileIdentityOperation,
+    left: Option<&str>,
+    right: Option<&str>,
+) -> Result<bool, MojoError> {
+    let left_value = left.unwrap_or_default();
+    let right_value = right.unwrap_or_default();
+    let flags = optional_flag(left, PROFILE_PRIMARY_PRESENT)
+        | optional_flag(right, PROFILE_SECONDARY_PRESENT);
+    let result = call_kernel(operation, left_value, right_value, flags, 0, 0, 1)?;
+    match result.result {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn trimmed_equal(left: &str, right: &str) -> Result<bool, MojoError> {
+    profile_identity_relation(
+        ProfileIdentityOperation::TrimmedEqual,
+        Some(left),
+        Some(right),
+    )
+}
+
+pub fn trimmed_casefold_equal(left: &str, right: &str) -> Result<bool, MojoError> {
+    profile_identity_relation(
+        ProfileIdentityOperation::TrimmedCasefoldEqual,
+        Some(left),
+        Some(right),
+    )
+}
+
+pub fn optional_trimmed_casefold_equal(
+    left: Option<&str>,
+    right: Option<&str>,
+) -> Result<bool, MojoError> {
+    profile_identity_relation(ProfileIdentityOperation::OptionalCasefoldEqual, left, right)
+}
+
+pub fn optional_trimmed_casefold_wildcard(
+    left: Option<&str>,
+    right: Option<&str>,
+) -> Result<bool, MojoError> {
+    profile_identity_relation(
+        ProfileIdentityOperation::OptionalCasefoldWildcard,
+        left,
+        right,
+    )
+}
+
+pub fn optional_nonempty_trimmed_casefold_equal(
+    left: Option<&str>,
+    right: Option<&str>,
+) -> Result<bool, MojoError> {
+    profile_identity_relation(
+        ProfileIdentityOperation::OptionalNonemptyCasefoldEqual,
+        left,
+        right,
+    )
+}
+
 pub fn remove_profile_targets_plan(
     records: &[ProfileRemovalRecord<'_>],
     remove_all: bool,
@@ -484,5 +551,14 @@ mod tests {
             AddProfileSourcePlan::CopyCurrent
         );
         assert!(should_activate_profile(false, false).unwrap());
+        assert!(trimmed_equal(" GitHub.COM ", "GitHub.COM").unwrap());
+        assert!(!trimmed_equal("GitHub.COM", "github.com").unwrap());
+        assert!(trimmed_casefold_equal(" User@Example.COM ", "user@example.com").unwrap());
+        assert!(optional_trimmed_casefold_equal(Some(" ACCT "), Some("acct")).unwrap());
+        assert!(!optional_trimmed_casefold_equal(Some(""), None).unwrap());
+        assert!(optional_trimmed_casefold_wildcard(None, Some("oauth")).unwrap());
+        assert!(optional_trimmed_casefold_wildcard(Some(" OAuth "), Some("oauth")).unwrap());
+        assert!(optional_nonempty_trimmed_casefold_equal(Some("  "), None).unwrap());
+        assert!(!optional_nonempty_trimmed_casefold_equal(Some("arn:a"), None).unwrap());
     }
 }

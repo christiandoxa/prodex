@@ -21,6 +21,11 @@ comptime PROFILE_IDENTITY_FIND_MATCH: Int64 = 8
 comptime PROFILE_IDENTITY_REMOVE_TARGETS: Int64 = 9
 comptime PROFILE_IDENTITY_DELETE_HOME: Int64 = 10
 comptime PROFILE_IDENTITY_SANITIZE_SLUG: Int64 = 11
+comptime PROFILE_IDENTITY_TRIMMED_EQUAL: Int64 = 12
+comptime PROFILE_IDENTITY_TRIMMED_CASEFOLD_EQUAL: Int64 = 13
+comptime PROFILE_IDENTITY_OPTIONAL_CASEFOLD_EQUAL: Int64 = 14
+comptime PROFILE_IDENTITY_OPTIONAL_CASEFOLD_WILDCARD: Int64 = 15
+comptime PROFILE_IDENTITY_OPTIONAL_NONEMPTY_CASEFOLD_EQUAL: Int64 = 16
 
 comptime PROFILE_PRIMARY_PRESENT: Int64 = 1
 comptime PROFILE_SECONDARY_PRESENT: Int64 = 2
@@ -505,6 +510,47 @@ def profile_remove_targets(
     return -11
 
 
+def profile_optional_casefold_equal(
+    left: ProdexRichStringView,
+    right: ProdexRichStringView,
+    left_present: Bool,
+    right_present: Bool,
+) -> Bool:
+    if left_present != right_present:
+        return False
+    if not left_present:
+        return True
+    return profile_normalized_equal(left, right, True)
+
+
+def profile_optional_casefold_wildcard(
+    left: ProdexRichStringView,
+    right: ProdexRichStringView,
+    left_present: Bool,
+    right_present: Bool,
+) -> Bool:
+    if not left_present or not right_present:
+        return True
+    return profile_normalized_equal(left, right, True)
+
+
+def profile_optional_nonempty_casefold_equal(
+    left: ProdexRichStringView,
+    right: ProdexRichStringView,
+    left_present: Bool,
+    right_present: Bool,
+) -> Bool:
+    var left_bounds = rich_trim_bounds(left)
+    var right_bounds = rich_trim_bounds(right)
+    var left_effective = left_present and left_bounds[1] > left_bounds[0]
+    var right_effective = right_present and right_bounds[1] > right_bounds[0]
+    if left_effective != right_effective:
+        return False
+    if not left_effective:
+        return True
+    return profile_normalized_equal(left, right, True)
+
+
 @export("prodex_mojo_profile_identity_v1")
 def prodex_mojo_profile_identity_v1(
     abi_version: Int64,
@@ -525,7 +571,7 @@ def prodex_mojo_profile_identity_v1(
         return PROFILE_IDENTITY_ABI
     if (
         operation < 0
-        or operation > PROFILE_IDENTITY_SANITIZE_SLUG
+        or operation > PROFILE_IDENTITY_OPTIONAL_NONEMPTY_CASEFOLD_EQUAL
         or primary_length < 0
         or secondary_length < 0
         or record_count < 0
@@ -706,6 +752,49 @@ def prodex_mojo_profile_identity_v1(
             StringSlice("api_key"),
         ):
             return PROFILE_IDENTITY_CAPACITY
+        return PROFILE_IDENTITY_OK
+
+    if operation == PROFILE_IDENTITY_TRIMMED_EQUAL:
+        result[] = Int64(profile_normalized_equal(primary, secondary, False))
+        return PROFILE_IDENTITY_OK
+
+    if operation == PROFILE_IDENTITY_TRIMMED_CASEFOLD_EQUAL:
+        result[] = Int64(profile_normalized_equal(primary, secondary, True))
+        return PROFILE_IDENTITY_OK
+
+    var primary_present = (flags & PROFILE_PRIMARY_PRESENT) != 0
+    var secondary_present = (flags & PROFILE_SECONDARY_PRESENT) != 0
+    if operation == PROFILE_IDENTITY_OPTIONAL_CASEFOLD_EQUAL:
+        result[] = Int64(
+            profile_optional_casefold_equal(
+                primary,
+                secondary,
+                primary_present,
+                secondary_present,
+            )
+        )
+        return PROFILE_IDENTITY_OK
+
+    if operation == PROFILE_IDENTITY_OPTIONAL_CASEFOLD_WILDCARD:
+        result[] = Int64(
+            profile_optional_casefold_wildcard(
+                primary,
+                secondary,
+                primary_present,
+                secondary_present,
+            )
+        )
+        return PROFILE_IDENTITY_OK
+
+    if operation == PROFILE_IDENTITY_OPTIONAL_NONEMPTY_CASEFOLD_EQUAL:
+        result[] = Int64(
+            profile_optional_nonempty_casefold_equal(
+                primary,
+                secondary,
+                primary_present,
+                secondary_present,
+            )
+        )
         return PROFILE_IDENTITY_OK
 
     return PROFILE_IDENTITY_INVALID

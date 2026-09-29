@@ -3325,3 +3325,13 @@ runtime_tuning.mojo scalar-config ABI. Mojo owns each caller's historical trim/n
 contract, ASCII-casefold classification, many-terminals alias, unknown-token handling,
 and OpenAI identity. The Rust lowercase/match tables were deleted; Rust retains enum
 mapping, CLI error strings, and config/policy DTO ownership only.
+
+
+## Stored profile identity-match migration
+
+Stored-profile matching for Copilot, Kiro, Gemini, and Anthropic now reuses the existing
+profile_identity.mojo owner. The kernel distinguishes trimmed case-sensitive equality,
+trimmed ASCII-casefold equality, strict optional presence, wildcard optional auth-method
+matching, and Kiro's historical empty-string-as-absent semantics. The duplicated Rust
+trim/casefold/optional matching helper was deleted. Rust retains provider enum dispatch
+and combines typed Mojo boolean results only; there is no semantic Rust fallback.

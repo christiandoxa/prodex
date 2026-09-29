@@ -344,3 +344,46 @@ fn explicit_profile_activation_survives_merge_against_older_active_profile() {
     assert_eq!(merged.active_profile.as_deref(), Some("first"));
     assert!(merged.last_run_selected_at["first"] > 20);
 }
+
+#[test]
+fn profile_provider_identity_matches_use_mojo_semantics() {
+    let copilot = ProfileProvider::Copilot {
+        host: " GitHub.COM ".to_string(),
+        login: "octo".to_string(),
+        api_url: "https://api.github.com".to_string(),
+        access_type_sku: None,
+        copilot_plan: None,
+    };
+    assert!(copilot.copilot_matches("GitHub.COM", " octo "));
+    assert!(!copilot.copilot_matches("github.com", "octo"));
+
+    let gemini = ProfileProvider::Gemini {
+        email: " User-ID ".to_string(),
+        project_id: None,
+    };
+    assert!(gemini.gemini_matches("user-id"));
+
+    let anthropic = ProfileProvider::Anthropic {
+        account: Some(" Acct ".to_string()),
+        auth_method: Some(" OAuth ".to_string()),
+    };
+    assert!(anthropic.anthropic_matches(Some("acct"), Some("oauth")));
+    assert!(anthropic.anthropic_matches(Some("ACCT"), None));
+    assert!(!anthropic.anthropic_matches(None, Some("oauth")));
+    let empty_account = ProfileProvider::Anthropic {
+        account: Some(String::new()),
+        auth_method: None,
+    };
+    assert!(!empty_account.anthropic_matches(None, None));
+
+    let kiro = ProfileProvider::Kiro {
+        auth_key: "key ".to_string(),
+        auth_kind: None,
+        profile_arn: Some(" ARN:Example ".to_string()),
+        profile_name: Some("  ".to_string()),
+        start_url: None,
+        region: None,
+    };
+    assert!(kiro.kiro_matches("key", Some("arn:example"), None));
+    assert!(!kiro.kiro_matches("key", None, None));
+}
