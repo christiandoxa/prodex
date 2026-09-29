@@ -101,11 +101,19 @@ function operationMetadataViolations(manifest) {
     for (const id of operationIds.length ? operationIds : [null]) {
       const previousOwner = owners.find((owner) => owner.id === null || id === null || owner.id === id);
       if (previousOwner) {
-        violations.push(
-          `${operation.name}: Mojo entry ${operation.mojo_entry} is already claimed by ${previousOwner.name}`,
-        );
+        const sharedGroup = operation.shared_mojo_entry_group;
+        const explicitlyConsolidated =
+          typeof sharedGroup === "string" &&
+          sharedGroup.length > 0 &&
+          previousOwner.sharedGroup === sharedGroup &&
+          previousOwner.mojoSource === operation.mojo_source;
+        if (!explicitlyConsolidated) {
+          violations.push(
+            `${operation.name}: Mojo entry ${operation.mojo_entry} is already claimed by ${previousOwner.name}`,
+          );
+        }
       } else {
-        owners.push({ id, name: operation.name });
+        owners.push({ id, name: operation.name, sharedGroup: operation.shared_mojo_entry_group ?? null, mojoSource: operation.mojo_source ?? null });
       }
     }
     exportOwners.set(operation.mojo_entry, owners);
@@ -203,6 +211,16 @@ function selfTest() {
         mojo_entry: "shared_entry", mojo_operation_ids: { second: 1 } },
     ],
   }, []), /Mojo entry .* is already claimed by/u);
+  assert.equal(validateManifest({
+    ...manifest,
+    authoritative_operations: [
+      { ...operation, mojo_entry: "shared_entry", mojo_source: "mojo/shared.mojo",
+        mojo_operation_ids: { first: 1 }, shared_mojo_entry_group: "shared_semantics" },
+      { ...operation, name: "other_operation", introduced_in: "0.419.1",
+        mojo_entry: "shared_entry", mojo_source: "mojo/shared.mojo",
+        mojo_operation_ids: { second: 1 }, shared_mojo_entry_group: "shared_semantics" },
+    ],
+  }, []), true);
   const cleanupManifest = {
     baseline_sha: BASELINE_SHA,
     release_target: RELEASE_TARGET,
