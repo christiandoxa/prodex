@@ -11,7 +11,18 @@ pub(crate) fn repair_resume_session_metadata_prefix_from_codex_args(
     codex_args: &[OsString],
 ) -> Result<Option<std::path::PathBuf>> {
     let paths = AppPaths::discover()?;
-    repair_resume_session_in_shared_home(&paths.shared_codex_root, codex_args)
+    repair_resume_session_for_launch(&paths, codex_args)
+}
+
+pub(crate) fn repair_resume_session_for_launch(
+    paths: &AppPaths,
+    codex_args: &[OsString],
+) -> Result<Option<std::path::PathBuf>> {
+    let session_file = repair_resume_session_in_shared_home(&paths.shared_codex_root, codex_args)?;
+    if let Some(session_file) = session_file.as_deref() {
+        prodex_shared_codex_fs::maintain_managed_codex_session_file(paths, session_file)?;
+    }
+    Ok(session_file)
 }
 
 pub(crate) fn repair_super_resume_session_metadata(args: &prodex_cli::SuperArgs) -> Result<()> {
@@ -161,4 +172,95 @@ fn repair_resume_session_in_profile_home(
         return;
     }
     let _ = prodex_session_store::repair_resume_session_metadata_prefix(profile_home, session_id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn resume_repair_rewrites_stale_overlay_attachment_paths_before_launch() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-resume-attachment-repair-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join(".codex"),
+            legacy_shared_codex_root: root.join("legacy"),
+        };
+        let session_id = "01900000-0000-7000-8000-000000000434";
+        let attachment_id = "34d42e43-d282-44e7-8786-74f086b8e151";
+        let stale_overlay = paths.managed_profiles_root.join(".prodex-overlay-dead-0");
+        let stale_text = stale_overlay
+            .join("attachments")
+            .join(attachment_id)
+            .join("pasted-text-1.txt");
+        let stale_image = stale_overlay
+            .join("attachments")
+            .join(attachment_id)
+            .join("image-1.png");
+
+        let stable_dir = paths
+            .shared_codex_root
+            .join("attachments")
+            .join(attachment_id);
+        fs::create_dir_all(&stable_dir).unwrap();
+        let stable_text = stable_dir.join("pasted-text-1.txt");
+        let stable_image = stable_dir.join("image-1.png");
+        fs::write(&stable_text, b"durable pasted text").unwrap();
+        fs::write(&stable_image, b"durable image").unwrap();
+
+        let session_file = paths
+            .shared_codex_root
+            .join("sessions/2026/09/29")
+            .join(format!("rollout-2026-09-29T15-00-00-{session_id}.jsonl"));
+        fs::create_dir_all(session_file.parent().unwrap()).unwrap();
+        fs::write(
+            &session_file,
+            format!(
+                "{{\"timestamp\":\"2026-09-29T08:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"cwd\":\"/tmp/workspace\",\"originator\":\"codex-cli\",\"cli_version\":\"0.159.0\"}}}}\n\
+                 {{\"timestamp\":\"2026-09-29T08:00:01Z\",\"type\":\"response_item\",\"payload\":{{\"type\":\"message\",\"role\":\"user\",\"content\":[{{\"type\":\"input_text\",\"text\":\"pasted text file: {}\\nimage file: {}\"}}]}}}}\n",
+                stale_text.display(),
+                stale_image.display(),
+            ),
+        )
+        .unwrap();
+
+        assert!(
+            !stale_overlay.exists(),
+            "the old overlay must already be gone"
+        );
+
+        let args = [OsString::from("resume"), OsString::from(session_id)];
+        let repaired =
+            repair_resume_session_for_launch(&paths, &args).expect("resume repair should succeed");
+        assert_eq!(repaired.as_deref(), Some(session_file.as_path()));
+
+        let contents = fs::read_to_string(&session_file).unwrap();
+        assert!(
+            contents.contains(&stable_text.display().to_string()),
+            "{contents}"
+        );
+        assert!(
+            contents.contains(&stable_image.display().to_string()),
+            "{contents}"
+        );
+        assert!(
+            !contents.contains(&stale_overlay.display().to_string()),
+            "{contents}"
+        );
+        assert_eq!(fs::read(&stable_text).unwrap(), b"durable pasted text");
+        assert_eq!(fs::read(&stable_image).unwrap(), b"durable image");
+
+        fs::remove_dir_all(root).unwrap();
+    }
 }

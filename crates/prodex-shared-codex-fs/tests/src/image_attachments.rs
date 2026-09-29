@@ -707,6 +707,68 @@ fn persist_codex_session_attachment_image_rewrites_to_existing_stable_copy_when_
 }
 
 #[test]
+fn persist_codex_session_attachment_paths_stop_at_escaped_json_newline() {
+    let temp_dir = ImageAttachmentTestDir::new("attachment-json-newline");
+    let codex_home = temp_dir.path.join("codex-home");
+    let sessions_dir = codex_home.join("sessions/2026/09/29");
+    let attachment_id = "34d42e43-d282-44e7-8786-74f086b8e151";
+    let old_root = temp_dir
+        .path
+        .join("deleted-overlay/attachments")
+        .join(attachment_id);
+    let old_text = old_root.join("pasted-text-1.txt");
+    let old_image = old_root.join("image-1.png");
+    let stable_root = codex_home.join("attachments").join(attachment_id);
+    let stable_text = stable_root.join("pasted-text-1.txt");
+    let stable_image = stable_root.join("image-1.png");
+    let session_file = sessions_dir.join("rollout.jsonl");
+
+    fs::create_dir_all(&sessions_dir).expect("sessions dir should exist");
+    fs::create_dir_all(&stable_root).expect("stable attachment dir should exist");
+    fs::write(&stable_text, b"stable pasted text").expect("stable paste should write");
+    fs::write(&stable_image, b"stable image").expect("stable image should write");
+    fs::write(
+        &session_file,
+        serde_json::json!({
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": format!(
+                        "pasted text file: {}\nimage file: {}",
+                        old_text.display(),
+                        old_image.display()
+                    )
+                }]
+            }
+        })
+        .to_string(),
+    )
+    .expect("session should write");
+
+    persist_codex_session_image_attachments(&codex_home)
+        .expect("attachment maintenance should succeed");
+
+    let rewritten = fs::read_to_string(&session_file).expect("session should be readable");
+    let value: serde_json::Value =
+        serde_json::from_str(&rewritten).expect("rewritten session should remain valid JSON");
+    let text = value["payload"]["content"][0]["text"]
+        .as_str()
+        .expect("input text should remain a string");
+    assert!(
+        text.contains(stable_text.to_string_lossy().as_ref()),
+        "{text}"
+    );
+    assert!(
+        text.contains(stable_image.to_string_lossy().as_ref()),
+        "{text}"
+    );
+    assert!(!text.contains("deleted-overlay"), "{text}");
+}
+
+#[test]
 fn persist_codex_session_pasted_text_rewrites_to_existing_stable_copy_when_source_is_gone() {
     let temp_dir = ImageAttachmentTestDir::new("pasted-text-source-gone");
     let codex_home = temp_dir.path.join("codex-home");
