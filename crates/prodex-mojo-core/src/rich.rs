@@ -57,7 +57,7 @@ pub use catalog::{
     CatalogChoice, CatalogChoicesPlan, CatalogConfigurationInput, CatalogConfigurationPlan,
     CatalogModel, CatalogPlanModel, CatalogPlanRole, CatalogPlannedModel, CatalogReasoningModel,
     CatalogReasoningPlan, ascii_casefold_contains, ascii_casefold_ends_with,
-    ascii_casefold_equal_exact, ascii_casefold_starts_with, merge_catalog_ids,
+    ascii_casefold_equal_exact, ascii_casefold_find, ascii_casefold_starts_with, merge_catalog_ids,
     plan_catalog_choices, plan_catalog_configuration, plan_dynamic_catalog, resolve_catalog_model,
     resolve_catalog_model_exact, resolve_catalog_reasoning,
 };

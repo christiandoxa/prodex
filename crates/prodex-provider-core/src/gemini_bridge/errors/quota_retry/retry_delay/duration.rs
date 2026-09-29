@@ -1,5 +1,7 @@
 //! Gemini retry-delay duration parsing helpers.
 
+use prodex_mojo_core::rich::{ascii_casefold_find, ascii_casefold_starts_with};
+
 pub(super) fn gemini_provider_core_duration_ms(value: &str) -> Option<u64> {
     let value = value.trim();
     if let Some(number) = value.strip_suffix("ms") {
@@ -26,12 +28,13 @@ pub(super) fn gemini_provider_core_duration_ms(value: &str) -> Option<u64> {
 }
 
 pub(super) fn gemini_provider_core_retry_delay_ms_from_message(message: &str) -> Option<u64> {
-    let lower = message.to_ascii_lowercase();
     ["please retry in ", "suggested retry after "]
         .into_iter()
         .find_map(|marker| {
-            let start = lower.find(marker)? + marker.len();
-            gemini_provider_core_duration_token_ms(&lower[start..])
+            let start = ascii_casefold_find(message, marker)
+                .expect("Mojo Gemini retry-delay marker search failed")?
+                + marker.len();
+            gemini_provider_core_duration_token_ms(&message[start..])
         })
 }
 
@@ -64,11 +67,42 @@ fn gemini_provider_core_duration_token_ms(value: &str) -> Option<u64> {
     }
     let number = &value[..number_len];
     let suffix = &value[number_len..];
-    if suffix.starts_with("ms") {
+    if ascii_casefold_starts_with(suffix, "ms")
+        .expect("Mojo Gemini retry-delay suffix comparison failed")
+    {
         gemini_provider_core_duration_ms(&format!("{number}ms"))
-    } else if suffix.starts_with('s') {
+    } else if ascii_casefold_starts_with(suffix, "s")
+        .expect("Mojo Gemini retry-delay suffix comparison failed")
+    {
         gemini_provider_core_duration_ms(&format!("{number}s"))
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retry_delay_message_uses_mojo_casefold_find() {
+        assert_eq!(
+            gemini_provider_core_retry_delay_ms_from_message(
+                "Quota: PLEASE RETRY IN 1.5S after cooldown"
+            ),
+            Some(1500)
+        );
+        assert_eq!(
+            gemini_provider_core_retry_delay_ms_from_message("Ω SUGGESTED RETRY AFTER 250MS"),
+            Some(250)
+        );
+        assert_eq!(
+            gemini_provider_core_retry_delay_ms_from_message("please retry in 2s"),
+            Some(2000)
+        );
+        assert_eq!(
+            gemini_provider_core_retry_delay_ms_from_message("retry later"),
+            None
+        );
     }
 }

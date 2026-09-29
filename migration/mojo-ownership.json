@@ -456,7 +456,8 @@
           "model_catalog_configuration_resolution",
           "provider_catalog_exact_model_identity",
           "catalog_exact_ascii_casefold_equality",
-          "catalog_ascii_casefold_relations"
+          "catalog_ascii_casefold_relations",
+          "catalog_ascii_casefold_find"
         ]
       },
       "mojo/prodex_core/log_semantics.mojo": {
@@ -4199,10 +4200,11 @@
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_precommit.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
         "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-        "crates/prodex-optional-tools/src/optional_tools.rs"
+        "crates/prodex-optional-tools/src/optional_tools.rs",
+        "crates/prodex-runtime-proxy/src/transport_failure.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/media/mime.rs",
-      "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching across provider/runtime text classification plus optional-tool probe compatibility diagnostics",
+      "rust_owner_before": "ASCII case-insensitive prefix/suffix/contains matching across provider/runtime text classification, optional-tool diagnostics, and transport-failure message classification",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo relation coverage preserves Rust starts_with/ends_with/contains empty-needle semantics and 70k exact equality, with Copilot/Gemini caller regressions preserving case and trim behavior",
       "production_fallback": false,
@@ -4410,6 +4412,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "typed enum/bool decoding, CLI error text, policy DTO mapping, and Codex config source ownership"
+    },
+    {
+      "name": "catalog_ascii_casefold_find",
+      "domain": "catalog/text-search",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust to_ascii_lowercase shadow strings used to locate case-insensitive retry markers before parsing numeric suffixes",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_ascii_casefold_find_v1",
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_catalog.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay/duration.rs",
+      "consumer_marker": "ascii_casefold_find",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay/duration.rs",
+        "crates/prodex-runtime-proxy/src/error_policy/retry_after.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/errors/quota_retry/retry_delay/duration.rs",
+      "rust_owner_before": "ASCII case-insensitive substring position search implemented by allocating lowercase shadow strings before retry-delay parsing",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo byte-offset tests cover mixed case, Unicode prefixes, empty needle, misses, and >64 KiB inputs, with provider/runtime retry regressions preserving uppercase unit parsing",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "marker selection, numeric duration parsing, duration clamping, and caller-specific retry policy mapping"
     }
   ],
   "rust_semantic_reductions": [

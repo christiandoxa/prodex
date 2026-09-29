@@ -1,4 +1,6 @@
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+use prodex_mojo_core::rich::{
+    ascii_casefold_equal_exact, ascii_casefold_find, ascii_casefold_starts_with,
+};
 use std::time::Duration;
 
 const RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS: i64 = 0;
@@ -21,9 +23,11 @@ const _: () = {
 };
 
 pub fn runtime_retry_after_from_message(message: &str) -> Option<Duration> {
-    let lower = message.to_ascii_lowercase();
-    let start = lower.find("try again in")? + "try again in".len();
-    runtime_retry_after_duration_token(&lower[start..])
+    let marker = "try again in";
+    let start = ascii_casefold_find(message, marker)
+        .expect("Mojo retry-after marker search failed")?
+        + marker.len();
+    runtime_retry_after_duration_token(&message[start..])
 }
 
 pub fn runtime_retry_after_from_headers<'a>(
@@ -55,9 +59,15 @@ fn runtime_retry_after_duration_token(value: &str) -> Option<Duration> {
     }
     let number = &value[..number_len];
     let suffix = value[number_len..].trim_start();
-    let mode = if suffix.starts_with("ms") {
+    let mode = if ascii_casefold_starts_with(suffix, "ms")
+        .expect("Mojo retry-after suffix comparison failed")
+    {
         RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS
-    } else if suffix.starts_with('s') || suffix.starts_with("second") {
+    } else if ascii_casefold_starts_with(suffix, "s")
+        .expect("Mojo retry-after suffix comparison failed")
+        || ascii_casefold_starts_with(suffix, "second")
+            .expect("Mojo retry-after suffix comparison failed")
+    {
         RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS
     } else {
         return None;

@@ -3344,3 +3344,13 @@ Mojo primitive, preserving mixed-case matches while retaining whitespace sensiti
 Static external-provider model metadata lookup now uses the exact rich-catalog Mojo
 resolver instead of a Rust eq_ignore_ascii_case scan. Rust retains quota snapshot/DTO
 ownership, provider filtering, static metadata tables, and fallback description mapping.
+
+
+## ASCII casefold substring-position migration
+
+The rich-catalog Mojo kernel now exposes case-insensitive substring search with the
+original byte offset. Gemini retry-delay and runtime Retry-After message parsing use
+that offset directly instead of allocating lowercase shadow strings; uppercase S/MS
+suffixes are classified by the existing Mojo starts-with relation. Runtime transport
+failure message rules also use Mojo contains. Rust retains numeric duration parsing,
+retry policy mapping, IO-error kind mapping, and ordered rule precedence.
