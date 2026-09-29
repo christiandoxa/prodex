@@ -11,7 +11,7 @@ name = "prodex_session_store"
 path = "src/lib.rs"
 
 [dependencies]
-prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime", "mojo-rich"] }
 anyhow = { workspace = true }
 chrono = { workspace = true }
 prodex_core = { workspace = true }

@@ -1,3 +1,4 @@
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::collections::BTreeSet;
 use std::env;
 use std::ffi::OsString;
@@ -249,10 +250,10 @@ fn push_proxy_bypass_part(parts: &mut Vec<String>, value: &str) {
     if trimmed.is_empty() {
         return;
     }
-    if !parts
-        .iter()
-        .any(|existing| existing.eq_ignore_ascii_case(trimmed))
-    {
+    if !parts.iter().any(|existing| {
+        ascii_casefold_equal_exact(existing, trimmed)
+            .expect("Mojo proxy-bypass identity comparison failed")
+    }) {
         parts.push(trimmed.to_string());
     }
 }

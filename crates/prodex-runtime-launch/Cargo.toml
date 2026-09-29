@@ -12,10 +12,10 @@ path = "src/lib.rs"
 
 [features]
 default = ["mojo"]
-mojo = ["prodex_mojo_core/mojo-runtime"]
+mojo = ["prodex_mojo_core/mojo-runtime", "prodex_mojo_core/mojo-rich"]
 
 [dependencies]
-prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime", "mojo-rich"] }
 anyhow = { workspace = true }
 codex_config = { workspace = true }
 prodex_quota = { workspace = true }

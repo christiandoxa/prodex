@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use prodex_state::AppState;
 use std::env;
 use std::fs;
@@ -239,7 +240,10 @@ pub fn resolve_session_report_by_id<'a>(
 
     let exact_matches = reports
         .iter()
-        .filter(|report| report.id.eq_ignore_ascii_case(selector))
+        .filter(|report| {
+            ascii_casefold_equal_exact(&report.id, selector)
+                .expect("Mojo session-id comparison failed")
+        })
         .collect::<Vec<_>>();
     if exact_matches.len() == 1 {
         return Ok(exact_matches[0]);
@@ -469,7 +473,9 @@ fn resolve_exact_session_reports_by_id_in_store(
         else {
             continue;
         };
-        if report.id.eq_ignore_ascii_case(selector) {
+        if ascii_casefold_equal_exact(&report.id, selector)
+            .expect("Mojo session-id comparison failed")
+        {
             matches.push(report);
         }
     }

@@ -1,4 +1,5 @@
 use super::report::session_value_metadata;
+use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::path::Path;
 
 pub(super) fn session_lines_start_resume_metadata<'a>(
@@ -70,7 +71,7 @@ pub(super) fn session_path_id_matching_selector(
 }
 
 pub(super) fn session_id_matches_selector(id: &str, selector: &str, exact: bool) -> bool {
-    id.eq_ignore_ascii_case(selector)
+    ascii_casefold_equal_exact(id, selector).expect("Mojo session selector comparison failed")
         || (!exact && id.to_lowercase().starts_with(&selector.to_lowercase()))
 }
 
