@@ -1,5 +1,7 @@
 //! Small Gemini bridge value parsing and collection helpers.
 
+use prodex_mojo_core::provider_constraints::provider_boolean_token;
+
 pub fn gemini_provider_core_collect_string_values(
     value: Option<&serde_json::Value>,
     values: &mut Vec<String>,
@@ -67,11 +69,7 @@ pub fn gemini_provider_core_bool_value(value: &serde_json::Value) -> Option<bool
 }
 
 pub fn gemini_provider_core_bool_str(value: &str) -> Option<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
-    }
+    provider_boolean_token(value).expect("Mojo Gemini boolean token classification failed")
 }
 
 pub fn gemini_provider_core_parse_command_specific_tool(value: &str) -> Option<(String, String)> {
@@ -113,4 +111,19 @@ pub fn gemini_provider_core_stream_error(value: &serde_json::Value) -> Option<(S
         .unwrap_or("Gemini stream returned an embedded provider error")
         .to_string();
     Some((code, message))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gemini_bool_tokens_use_mojo_policy() {
+        assert_eq!(gemini_provider_core_bool_str(" YES "), Some(true));
+        assert_eq!(
+            gemini_provider_core_bool_str("\u{2003}off\u{2003}"),
+            Some(false)
+        );
+        assert_eq!(gemini_provider_core_bool_str("maybe"), None);
+    }
 }

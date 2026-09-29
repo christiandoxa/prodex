@@ -523,7 +523,8 @@
           "gemini_bridge_request_kernel",
           "gemini_translator_request_planning",
           "gemini_request_content_shape_fallbacks",
-          "gemini_bridge_request_fallbacks"
+          "gemini_bridge_request_fallbacks",
+          "provider_scalar_policy"
         ]
       },
       "mojo/prodex_core/quota.mojo": {
@@ -4340,6 +4341,36 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "borrow model string and map the Mojo boolean into existing declaration-override orchestration"
+    },
+    {
+      "name": "provider_scalar_policy",
+      "domain": "provider/scalar-policy",
+      "introduced_in": "0.433.0",
+      "baseline_state": "Rust lowercase match tables for provider reasoning-effort parsing, Copilot prompt-token limits, and Gemini boolean tokens",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_provider_scalar_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "reasoning_effort": 0,
+        "copilot_prompt_token_limit": 1,
+        "boolean_token": 2
+      },
+      "mojo_source": "mojo/prodex_core/provider_constraints.mojo",
+      "consumer": "crates/prodex-provider-core/src/reasoning_effort.rs",
+      "consumer_marker": "provider_reasoning_effort_class",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/reasoning_effort.rs",
+        "crates/prodex-provider-core/src/runtime_metadata.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/util.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/provider_constraints.rs",
+      "rust_owner_before": "trimmed ASCII-casefold token classification for reasoning effort and Gemini booleans plus the Copilot model-to-prompt-token-limit table",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo adapter coverage plus provider-core reasoning, Copilot prompt-limit, and Gemini boolean caller tests preserve mixed-case, Unicode-whitespace, unknown-token, and numeric results",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed Mojo enum/numeric/Option decoding, provider-local enum mapping, and caller-owned JSON value acquisition"
     }
   ],
   "rust_semantic_reductions": [

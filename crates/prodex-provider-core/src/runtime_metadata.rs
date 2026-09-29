@@ -139,20 +139,8 @@ pub const fn provider_runtime_metadata(
 }
 
 pub fn copilot_prompt_token_limit_for_model(model: &str) -> Option<usize> {
-    let model = model.trim().to_ascii_lowercase();
-    match model.as_str() {
-        "auto" | "codex" | "gpt-5.3-codex" | "gpt-5.1-codex" | "gpt-5.1-codex-max"
-        | "gpt-5.1-codex-mini" => Some(272_000),
-        "gpt-5.5" | "gpt-5.4" => Some(922_000),
-        "claude-sonnet-4.6"
-        | "claude-opus-4.8"
-        | "claude-opus-4.7"
-        | "claude-opus-4.6"
-        | "gemini-3.1-pro-preview"
-        | "gemini-3.5-flash" => Some(936_000),
-        "gpt-5-mini" | "gpt-5.4-mini" | "gpt-5.4-nano" | "raptor-mini" => Some(128_000),
-        _ => None,
-    }
+    prodex_mojo_core::provider_constraints::provider_copilot_prompt_token_limit(model)
+        .expect("Mojo Copilot prompt-token policy failed")
 }
 
 #[cfg(test)]
@@ -201,5 +189,14 @@ mod tests {
             copilot_prompt_token_limit_for_model("gpt-5.4"),
             Some(922_000)
         );
+        assert_eq!(
+            copilot_prompt_token_limit_for_model(" CLAUDE-OPUS-4.8 "),
+            Some(936_000)
+        );
+        assert_eq!(
+            copilot_prompt_token_limit_for_model("gpt-5.4-NANO"),
+            Some(128_000)
+        );
+        assert_eq!(copilot_prompt_token_limit_for_model("unknown"), None);
     }
 }

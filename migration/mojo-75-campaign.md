@@ -3305,3 +3305,13 @@ extraction, Retry-After and rate-limit header lookup, stable/free-form log-key c
 and websocket error-code identity now reuse the authoritative exact ASCII-casefold Mojo
 primitive. The Rust eq_ignore_ascii_case copies were deleted; the byte-level percent-dot
 URL parser remains Rust-owned because it is syntax parsing rather than string policy.
+
+
+## Provider scalar-policy migration
+
+Reasoning-effort token parsing, Copilot model prompt-token limits, and Gemini boolean
+token classification now share the provider_constraints.mojo scalar-policy ABI. Mojo
+owns Unicode-whitespace trimming, ASCII-casefold token/model identity, effort enum
+classification, boolean aliases, and the complete model-to-token-limit table. The three
+Rust lowercase/match tables were deleted; Rust retains typed enum/Option mapping and JSON
+value acquisition only, with no Rust semantic fallback.
