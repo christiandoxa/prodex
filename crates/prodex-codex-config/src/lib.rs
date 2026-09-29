@@ -75,7 +75,8 @@ fn codex_mojo_args(args: &[OsString]) -> Vec<Option<&str>> {
 
 impl CodexModelProviderSetting {
     pub fn is_openai(&self) -> bool {
-        self.provider_id.eq_ignore_ascii_case("openai")
+        prodex_mojo_core::runtime::runtime_model_provider_is_openai(&self.provider_id)
+            .expect("Mojo Codex model-provider identity classification failed")
     }
 }
 
@@ -352,6 +353,26 @@ fn codex_non_openai_model_provider_for_args(
 fn normalize_model_provider_value(raw_value: &str) -> Option<String> {
     prodex_mojo_core::codex_config::normalize_value(raw_value)
         .expect("Mojo Codex model-provider normalization returned invalid output")
+}
+
+#[cfg(test)]
+mod scalar_policy_tests {
+    use super::*;
+
+    #[test]
+    fn codex_model_provider_openai_identity_uses_mojo() {
+        let setting = CodexModelProviderSetting {
+            provider_id: "OPENAI".to_string(),
+            source: CodexModelProviderSource::CliOverride,
+        };
+        assert!(setting.is_openai());
+
+        let setting = CodexModelProviderSetting {
+            provider_id: " openai ".to_string(),
+            source: CodexModelProviderSource::CliOverride,
+        };
+        assert!(!setting.is_openai());
+    }
 }
 
 #[cfg(test)]

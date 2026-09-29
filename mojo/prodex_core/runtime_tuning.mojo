@@ -1,6 +1,106 @@
 from std.memory import Pointer
 
+from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
+from rich_types import ProdexRichStringView
+
 comptime RUNTIME_TUNING_INT64_MAX: Int64 = 9223372036854775807
+
+comptime RUNTIME_SCALAR_CONFIG_ABI_VERSION: Int64 = 1
+comptime RUNTIME_SCALAR_CONFIG_LOG_FORMAT: Int64 = 0
+comptime RUNTIME_SCALAR_CONFIG_PROXY_PRESET: Int64 = 1
+comptime RUNTIME_SCALAR_CONFIG_WEB_SEARCH: Int64 = 2
+comptime RUNTIME_SCALAR_CONFIG_CLOCK_SOURCE: Int64 = 3
+comptime RUNTIME_SCALAR_CONFIG_OPENAI_PROVIDER: Int64 = 4
+comptime RUNTIME_SCALAR_CONFIG_MAX_BYTES: Int64 = 9_223_372_036_854_775_807
+
+
+
+def runtime_scalar_ascii_lower(value: UInt8) -> UInt8:
+    if value >= 65 and value <= 90:
+        return value + 32
+    return value
+
+
+def runtime_scalar_range_equals[literal: StaticString](
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> Bool:
+    if end - start != Int64(literal.byte_length()):
+        return False
+    var source = rich_view_ptr(view)
+    var wanted = literal.unsafe_ptr()
+    for index in range(end - start):
+        if (
+            runtime_scalar_ascii_lower(source[unsafe_offset=start + index])
+            != wanted[unsafe_offset=index]
+        ):
+            return False
+    return True
+
+
+@export("prodex_runtime_scalar_config_policy_v1")
+def prodex_runtime_scalar_config_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_SCALAR_CONFIG_ABI_VERSION:
+        return -3
+    if (
+        operation < RUNTIME_SCALAR_CONFIG_LOG_FORMAT
+        or operation > RUNTIME_SCALAR_CONFIG_OPENAI_PROVIDER
+        or length < 0
+        or length > RUNTIME_SCALAR_CONFIG_MAX_BYTES
+        or (length > 0 and address == 0)
+    ):
+        return -2
+    var view = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(view, RUNTIME_SCALAR_CONFIG_MAX_BYTES):
+        return -2
+    var bounds = rich_trim_bounds(view)
+
+    if operation == RUNTIME_SCALAR_CONFIG_LOG_FORMAT:
+        if runtime_scalar_range_equals["text"](view, bounds[0], bounds[1]):
+            return 0
+        if runtime_scalar_range_equals["json"](view, bounds[0], bounds[1]):
+            return 1
+        return -1
+
+    if operation == RUNTIME_SCALAR_CONFIG_PROXY_PRESET:
+        if bounds[0] != 0 or bounds[1] != length:
+            return -1
+        if runtime_scalar_range_equals["low"](view, 0, length):
+            return 0
+        if runtime_scalar_range_equals["default"](view, 0, length):
+            return 1
+        if (
+            runtime_scalar_range_equals["many-terminals"](view, 0, length)
+            or runtime_scalar_range_equals["many_terminals"](view, 0, length)
+        ):
+            return 2
+        if runtime_scalar_range_equals["aggressive"](view, 0, length):
+            return 3
+        return -1
+
+    if operation == RUNTIME_SCALAR_CONFIG_WEB_SEARCH:
+        if runtime_scalar_range_equals["disabled"](view, 0, length):
+            return 0
+        if runtime_scalar_range_equals["cached"](view, 0, length):
+            return 1
+        if runtime_scalar_range_equals["indexed"](view, 0, length):
+            return 2
+        if runtime_scalar_range_equals["live"](view, 0, length):
+            return 3
+        return -1
+
+    if operation == RUNTIME_SCALAR_CONFIG_CLOCK_SOURCE:
+        if runtime_scalar_range_equals["system"](view, 0, length):
+            return 0
+        if runtime_scalar_range_equals["external"](view, 0, length):
+            return 1
+        return -1
+
+    return Int64(runtime_scalar_range_equals["openai"](view, 0, length))
 
 
 def runtime_tuning_saturating_add(left: Int64, right: Int64) -> Int64:

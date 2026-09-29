@@ -1,3 +1,7 @@
+use prodex_mojo_core::runtime::{
+    RuntimeLogFormatClass, RuntimeProxyPresetClass, runtime_log_format_class,
+    runtime_proxy_preset_class,
+};
 use serde::{Deserialize, Deserializer, de};
 use std::path::PathBuf;
 
@@ -24,10 +28,12 @@ impl RuntimeLogFormat {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "text" => Some(Self::Text),
-            "json" => Some(Self::Json),
-            _ => None,
+        match runtime_log_format_class(value)
+            .expect("Mojo runtime log-format classification failed")
+        {
+            Some(RuntimeLogFormatClass::Text) => Some(Self::Text),
+            Some(RuntimeLogFormatClass::Json) => Some(Self::Json),
+            None => None,
         }
     }
 }
@@ -81,15 +87,14 @@ impl RuntimePolicyProxyPreset {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        if value != value.trim() {
-            return None;
-        }
-        match value.to_ascii_lowercase().as_str() {
-            "low" => Some(Self::Low),
-            "default" => Some(Self::Default),
-            "many-terminals" | "many_terminals" => Some(Self::ManyTerminals),
-            "aggressive" => Some(Self::Aggressive),
-            _ => None,
+        match runtime_proxy_preset_class(value)
+            .expect("Mojo runtime proxy-preset classification failed")
+        {
+            Some(RuntimeProxyPresetClass::Low) => Some(Self::Low),
+            Some(RuntimeProxyPresetClass::Default) => Some(Self::Default),
+            Some(RuntimeProxyPresetClass::ManyTerminals) => Some(Self::ManyTerminals),
+            Some(RuntimeProxyPresetClass::Aggressive) => Some(Self::Aggressive),
+            None => None,
         }
     }
 
@@ -146,4 +151,23 @@ pub struct RuntimePolicyRuntimeFile {
 pub struct RuntimePolicySecretsFile {
     pub backend: Option<String>,
     pub keyring_service: Option<String>,
+}
+
+#[cfg(test)]
+mod scalar_policy_tests {
+    use super::*;
+
+    #[test]
+    fn runtime_policy_scalar_parsers_use_mojo() {
+        assert_eq!(
+            RuntimeLogFormat::parse(" JSON "),
+            Some(RuntimeLogFormat::Json)
+        );
+        assert_eq!(
+            RuntimePolicyProxyPreset::parse("Many_Terminals"),
+            Some(RuntimePolicyProxyPreset::ManyTerminals)
+        );
+        assert_eq!(RuntimePolicyProxyPreset::parse(" many-terminals "), None);
+        assert_eq!(RuntimePolicyProxyPreset::parse("unknown"), None);
+    }
 }

@@ -3315,3 +3315,13 @@ owns Unicode-whitespace trimming, ASCII-casefold token/model identity, effort en
 classification, boolean aliases, and the complete model-to-token-limit table. The three
 Rust lowercase/match tables were deleted; Rust retains typed enum/Option mapping and JSON
 value acquisition only, with no Rust semantic fallback.
+
+
+## Runtime scalar-config migration
+
+Runtime log-format parsing, runtime-proxy preset aliases, Super web-search mode,
+current-time clock-source parsing, and Codex OpenAI provider identity now share the
+runtime_tuning.mojo scalar-config ABI. Mojo owns each caller's historical trim/no-trim
+contract, ASCII-casefold classification, many-terminals alias, unknown-token handling,
+and OpenAI identity. The Rust lowercase/match tables were deleted; Rust retains enum
+mapping, CLI error strings, and config/policy DTO ownership only.

@@ -7,9 +7,11 @@ pub use calibration::{
 };
 pub use smart_context_policy::*;
 pub use tuning::{
+    RuntimeClockSourceClass, RuntimeLogFormatClass, RuntimeProxyPresetClass,
     RuntimeTuningCapacityDefaults, RuntimeTuningDefaults, RuntimeTuningProxyPresetDefaults,
-    runtime_tuning_capacity_defaults, runtime_tuning_defaults,
-    runtime_tuning_proxy_preset_defaults,
+    RuntimeWebSearchModeClass, runtime_clock_source_class, runtime_log_format_class,
+    runtime_model_provider_is_openai, runtime_proxy_preset_class, runtime_tuning_capacity_defaults,
+    runtime_tuning_defaults, runtime_tuning_proxy_preset_defaults, runtime_web_search_mode_class,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

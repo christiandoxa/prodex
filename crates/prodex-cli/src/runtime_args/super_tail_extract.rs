@@ -8,6 +8,10 @@ use crate::{
     parse_sub_agent_provider, parse_sub_agent_reasoning_effort, parse_sub_agent_url,
 };
 use prodex_mojo_core::launch::{ScannedSuperOverride, SuperOverrideKind};
+use prodex_mojo_core::runtime::{
+    RuntimeClockSourceClass, RuntimeWebSearchModeClass, runtime_clock_source_class,
+    runtime_web_search_mode_class,
+};
 use prodex_optional_tools::OptionalToolId;
 
 const API_KEY_OPTION: &str = "--api-key";
@@ -396,20 +400,23 @@ fn apply_override(args: &mut SuperArgs, value: SuperOverride) {
 }
 
 fn parse_web_search_mode(value: &str) -> Result<CodexWebSearchMode, String> {
-    match value.to_ascii_lowercase().as_str() {
-        "disabled" => Ok(CodexWebSearchMode::Disabled),
-        "cached" => Ok(CodexWebSearchMode::Cached),
-        "indexed" => Ok(CodexWebSearchMode::Indexed),
-        "live" => Ok(CodexWebSearchMode::Live),
-        _ => Err("expected disabled, cached, indexed, or live".to_string()),
+    match runtime_web_search_mode_class(value).expect("Mojo web-search mode classification failed")
+    {
+        Some(RuntimeWebSearchModeClass::Disabled) => Ok(CodexWebSearchMode::Disabled),
+        Some(RuntimeWebSearchModeClass::Cached) => Ok(CodexWebSearchMode::Cached),
+        Some(RuntimeWebSearchModeClass::Indexed) => Ok(CodexWebSearchMode::Indexed),
+        Some(RuntimeWebSearchModeClass::Live) => Ok(CodexWebSearchMode::Live),
+        None => Err("expected disabled, cached, indexed, or live".to_string()),
     }
 }
 
 fn parse_current_time_clock_source(value: &str) -> Result<CodexCurrentTimeClockSource, String> {
-    match value.to_ascii_lowercase().as_str() {
-        "system" => Ok(CodexCurrentTimeClockSource::System),
-        "external" => Ok(CodexCurrentTimeClockSource::External),
-        _ => Err("expected system or external".to_string()),
+    match runtime_clock_source_class(value)
+        .expect("Mojo current-time clock-source classification failed")
+    {
+        Some(RuntimeClockSourceClass::System) => Ok(CodexCurrentTimeClockSource::System),
+        Some(RuntimeClockSourceClass::External) => Ok(CodexCurrentTimeClockSource::External),
+        None => Err("expected system or external".to_string()),
     }
 }
 
