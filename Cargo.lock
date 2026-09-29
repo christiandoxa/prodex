@@ -2697,6 +2697,7 @@ version = "0.433.0"
 dependencies = [
  "anyhow",
  "prodex-cli",
+ "prodex-mojo-core",
  "prodex-redaction",
  "reqwest",
  "serde",

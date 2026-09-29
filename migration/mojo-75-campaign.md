@@ -3401,3 +3401,12 @@ for Cookie header detection and Secure, Path, Max-Age, and Expires attribute nam
 Rust eq_ignore_ascii_case copies were deleted. Host lowercase canonicalization remains
 Rust-owned because it materializes a normalized map key rather than deciding equality.
 Mixed-case boundary coverage preserves the previous HTTP cookie behavior.
+
+
+## Presidio identity-policy cleanup
+
+Prodex Presidio config validation now reuses the authoritative exact ASCII-casefold Mojo
+primitive for open/closed fail-mode validation, fail-closed selection, exact trusted-host
+matching, and localhost recognition. The Rust eq_ignore_ascii_case/lowercase decision
+copies were deleted. Trusted-host lowercase canonicalization remains Rust-owned because
+it materializes normalized persisted/runtime values rather than deciding equality.

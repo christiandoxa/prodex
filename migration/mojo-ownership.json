@@ -4061,16 +4061,17 @@
         "crates/prodex-runtime-launch/src/profile.rs",
         "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs",
         "crates/prodex-quota/src/render/windows.rs",
-        "crates/prodex-runtime-cookies/src/lib.rs"
+        "crates/prodex-runtime-cookies/src/lib.rs",
+        "crates/prodex-presidio/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-app/src/app_commands/super_main_catalog.rs",
-      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/runtime identity, proxy/quota/session policy, usage-limit classification, quota rendering, and runtime cookie header/attribute parsing",
+      "rust_owner_before": "exact ASCII case-insensitive equality repeated across catalog/runtime identity, proxy/quota/session policy, runtime cookie parsing, Presidio fail-mode/trusted-host policy, and recovery/rendering paths",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo equality coverage preserves empty strings, mixed case, and whitespace sensitivity, while Super catalog/prompt caller tests preserve selection behavior",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "caller-owned trimming where historically required, Unicode prefix matching where distinct, string/header/session/environment acquisition, JSON/cookie traversal, recovery state, iteration, routing and state ownership; Mojo owns exact ASCII-folded equality"
+      "rust_adapter_scope": "caller-owned trimming where historically required, Unicode prefix matching and lowercase canonicalization where distinct, string/header/session/environment acquisition, JSON/cookie/URL traversal, recovery state, iteration, routing and state ownership; Mojo owns exact ASCII-folded equality"
     },
     {
       "name": "gemini_guardrail_text_classification",
