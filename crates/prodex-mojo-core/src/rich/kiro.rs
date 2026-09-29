@@ -15,8 +15,6 @@ pub enum KiroKernelOperation {
     LegacyFunctionTool = 6,
     LegacyToolChoice = 7,
     ChatCompletionResponse = 8,
-    AnthropicToolUseBlock = 9,
-    AnthropicResponse = 10,
     ChatCompletionChunk = 11,
     ChatRoleDelta = 12,
     ChatEmptyDelta = 13,
@@ -301,6 +299,16 @@ unsafe extern "C" {
         written_address: u64,
         issue_address: u64,
     ) -> i64;
+    fn prodex_mojo_kiro_anthropic_response_rewrite_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        model_address: u64,
+        model_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_mojo_kiro_chat_response_rewrite_v1(
         abi_version: i64,
         input_address: u64,
@@ -331,8 +339,6 @@ fn operation_code(operation: KiroKernelOperation) -> i64 {
         KiroKernelOperation::LegacyFunctionTool => 6,
         KiroKernelOperation::LegacyToolChoice => 7,
         KiroKernelOperation::ChatCompletionResponse => 8,
-        KiroKernelOperation::AnthropicToolUseBlock => 9,
-        KiroKernelOperation::AnthropicResponse => 10,
         KiroKernelOperation::ChatCompletionChunk => 11,
         KiroKernelOperation::ChatRoleDelta => 12,
         KiroKernelOperation::ChatEmptyDelta => 13,
@@ -549,6 +555,68 @@ pub fn kiro_rewrite_chat_request_json(input: &str) -> Result<KiroChatRewrite, Mo
         body: output,
         issue,
     })
+}
+
+/// Rewrite one canonical Kiro Responses JSON value into an Anthropic message JSON.
+pub fn kiro_rewrite_anthropic_response_json(
+    input: &str,
+    requested_model: &str,
+) -> Result<Vec<u8>, MojoError> {
+    ensure_rich_abi()?;
+    if input.len() > KIRO_RESPONSE_MAX_BYTES || requested_model.len() > KIRO_KERNEL_MAX_BYTES {
+        return Err(MojoError::InvalidInput);
+    }
+    let capacity = input
+        .len()
+        .checked_add(requested_model.len())
+        .and_then(|value| value.checked_add(4096))
+        .ok_or(MojoError::InvalidInput)?;
+    let mut output = Vec::new();
+    output
+        .try_reserve_exact(capacity)
+        .map_err(|_| MojoError::Capacity)?;
+    output.resize(capacity, 0);
+    loop {
+        let mut written = 0_i64;
+        let status = unsafe {
+            prodex_mojo_kiro_anthropic_response_rewrite_v1(
+                RICH_ABI_VERSION,
+                input.as_ptr() as u64,
+                i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+                requested_model.as_ptr() as u64,
+                i64::try_from(requested_model.len()).map_err(|_| MojoError::InvalidInput)?,
+                mojo_mut_pointer_address(output.as_mut_ptr()),
+                i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+                mojo_mut_pointer_address(&mut written),
+            )
+        };
+        if status == 3 {
+            let capacity = output
+                .len()
+                .checked_mul(2)
+                .map(|capacity| capacity.min(KIRO_RESPONSE_MAX_OUTPUT_BYTES))
+                .filter(|capacity| *capacity > output.len())
+                .ok_or(MojoError::Capacity)?;
+            output
+                .try_reserve_exact(capacity - output.len())
+                .map_err(|_| MojoError::Capacity)?;
+            output.resize(capacity, 0);
+            continue;
+        }
+        if status != 0 {
+            return Err(match status {
+                1 | 2 => MojoError::InvalidInput,
+                4 => MojoError::AbiMismatch,
+                _ => MojoError::InvalidOutput,
+            });
+        }
+        let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+        if written > output.len() {
+            return Err(MojoError::InvalidOutput);
+        }
+        output.truncate(written);
+        return Ok(output);
+    }
 }
 
 /// Rewrite one canonical Kiro Responses JSON value into Chat Completions JSON.

@@ -384,5 +384,8 @@ mod acp_tests;
 #[path = "kiro/request_tests.rs"]
 mod request_tests;
 #[cfg(test)]
+#[path = "kiro/response_tests.rs"]
+mod response_tests;
+#[cfg(test)]
 #[path = "kiro/tests.rs"]
 mod tests;

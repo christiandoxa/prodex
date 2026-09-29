@@ -720,8 +720,6 @@ const KIRO_RESPONSE_HELPER_OPERATIONS = [
   "KiroKernelOperation::InvalidRequestError",
   "KiroKernelOperation::UnsupportedPathError",
   "KiroKernelOperation::FinishReason",
-  "KiroKernelOperation::AnthropicToolUseBlock",
-  "KiroKernelOperation::AnthropicResponse",
 ];
 const DEEPSEEK_STRICT_TOOLS_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs";
 const DEEPSEEK_STRICT_SCHEMA_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_tools/strict_schema.rs";
@@ -884,6 +882,15 @@ export function findViolations(files) {
     const violations = KIRO_RESPONSE_HELPER_OPERATIONS
       .filter((marker) => !contents.includes(marker))
       .map((marker) => `${filePath}: Kiro response hard replacement must retain ${marker}`);
+    const start = contents.indexOf("pub fn kiro_provider_core_anthropic_message_value_from_response");
+    const mapper = start < 0 ? "" : contents.slice(start);
+    if (
+      !mapper.includes("kiro_rewrite_anthropic_response_json(")
+      || FEATURE_OFF_RUST_PATH.test(mapper)
+      || /response\.(?:get|pointer)\s*\(|output\.(?:iter|get)\s*\(|KiroKernelOperation::Anthropic(?:ToolUseBlock|Response)|kiro_provider_core_stream_content_text/u.test(mapper)
+    ) {
+      violations.push(`${filePath}: Kiro Anthropic response mapping must use one raw Mojo rewrite without a Rust copy`);
+    }
     if (/\bfn\s+kiro_provider_core_anthropic_(?:stop_reason|tool_use_block)\s*\(/u.test(contents)) {
       violations.push(`${filePath}: contains replaced Rust Kiro Anthropic response semantics`);
     }
@@ -2199,8 +2206,9 @@ function selfTest() {
     KiroKernelOperation::InvalidRequestError;
     KiroKernelOperation::UnsupportedPathError;
     KiroKernelOperation::FinishReason;
-    KiroKernelOperation::AnthropicToolUseBlock;
-    KiroKernelOperation::AnthropicResponse;
+    pub fn kiro_provider_core_anthropic_message_value_from_response(value: &Value, model: &str) -> Value {
+      prodex_mojo_core::rich::kiro_rewrite_anthropic_response_json(value, model)
+    }
     pub fn kiro_provider_core_apply_response_runtime_metadata() {}
   `), []);
   assert.match(kiroChatResponseViolations(`

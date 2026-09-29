@@ -3441,3 +3441,25 @@ Focused validation passes cargo fmt, the Mojo core build check, the prodex-app
 Mojo-core check, git diff --check, the Mojo authority guard, and the no-fallback
 guard. The canonical broad report counts 63,304 Mojo LOC and 195,676 Rust
 production LOC, totaling 258,980 LOC: 24.443586377326433% Mojo.
+
+## Kiro Anthropic response hard replacement
+
+Kiro Responses-to-Anthropic message projection now runs through one bounded raw-JSON
+Mojo rewrite. Mojo owns output traversal, tool/text ordering, tool argument JSON decode
+and invalid-input fallback, raw ID/name/usage preservation, stop-reason precedence,
+defaults, and final Anthropic message assembly. Rust now serializes the caller-owned
+Serde value, invokes the raw ABI, and decodes the returned JSON only; the previous Rust
+walk/reconstruction path was deleted with no fallback recomputation.
+
+The wave also removes the now-dead generic AnthropicToolUseBlock and AnthropicResponse
+Kiro kernel operations, updates the no-fallback guard and ownership inventory to the
+new raw ABI, and fixes two existing Mojo chat-response edge cases exposed by the new
+focused suite: valid non-object top-level values now retain default response shaping,
+and leading non-object output items no longer stop first-message text discovery.
+
+Validation passes 50 focused Kiro translator tests, 36 prodex-mojo-core rich tests,
+focused clippy with warnings denied, cargo fmt, git diff --check, the Mojo ownership,
+authority, and no-fallback guards. Ownership reports 137 authoritative operations and
+92.73% Mojo in the eligible semantic inventory. The canonical broad report counts
+63,642 Mojo LOC and 195,667 Rust production LOC, totaling 259,309 LOC:
+24.54291983695128% Mojo.
