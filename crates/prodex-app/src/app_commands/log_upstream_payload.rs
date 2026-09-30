@@ -3,7 +3,6 @@ use base64::Engine;
 pub(super) use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use serde_json::Value;
 use std::collections::BTreeMap;
-use std::str;
 
 const MAX_DECODED_UPSTREAM_PAYLOAD_BYTES: usize = 128 * 1024;
 
@@ -74,33 +73,29 @@ pub(crate) fn upstream_payload_event_from_runtime_line(line: &str) -> Option<Ups
 }
 
 fn readable_upstream_payload(payload_bytes: &[u8], fields: &BTreeMap<String, String>) -> String {
-    if let Ok(payload) = str::from_utf8(payload_bytes)
-        && upstream_payload_is_readable_text(payload)
-    {
-        return payload.to_string();
+    let classification = prodex_mojo_core::log::classify_upstream_payload(payload_bytes)
+        .expect("Mojo upstream-payload classifier returned invalid output");
+    if classification.readable_text {
+        return String::from_utf8(payload_bytes.to_vec())
+            .expect("Mojo readable-text classification validates UTF-8");
     }
-    if payload_bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd])
-        && let Ok(decoded) =
-            runtime_log::decode_zstd_bounded(payload_bytes, MAX_DECODED_UPSTREAM_PAYLOAD_BYTES)
-        && let Ok(payload) = String::from_utf8(decoded)
-        && upstream_payload_is_readable_text(&payload)
+    if matches!(
+        classification.binary_kind,
+        prodex_mojo_core::log::UpstreamPayloadBinaryKind::Zstd
+    ) && let Ok(decoded) =
+        runtime_log::decode_zstd_bounded(payload_bytes, MAX_DECODED_UPSTREAM_PAYLOAD_BYTES)
+        && prodex_mojo_core::log::classify_upstream_payload(&decoded)
+            .expect("Mojo decoded upstream-payload classifier returned invalid output")
+            .readable_text
     {
-        return payload;
+        return String::from_utf8(decoded)
+            .expect("Mojo readable decoded-text classification validates UTF-8");
     }
 
     if let Some(path) = upstream_payload_binary_path(fields) {
         return format!("[binary payload: path={path}]");
     }
-    format!(
-        "[binary payload: {}]",
-        upstream_payload_binary_kind(payload_bytes)
-    )
-}
-
-fn upstream_payload_is_readable_text(payload: &str) -> bool {
-    !payload
-        .chars()
-        .any(|ch| ch.is_control() && !matches!(ch, '\n' | '\r' | '\t'))
+    format!("[binary payload: {}]", classification.binary_kind.label())
 }
 
 fn upstream_payload_binary_path(fields: &BTreeMap<String, String>) -> Option<&str> {
@@ -117,37 +112,6 @@ fn upstream_payload_binary_path(fields: &BTreeMap<String, String>) -> Option<&st
     .find_map(|key| fields.get(key).map(String::as_str))
     .map(|path| path.trim())
     .filter(|path| !path.is_empty())
-}
-
-fn upstream_payload_binary_kind(payload_bytes: &[u8]) -> &'static str {
-    if payload_bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
-        return "PNG image";
-    }
-    if payload_bytes.starts_with(&[0xff, 0xd8, 0xff]) {
-        return "JPEG image";
-    }
-    if payload_bytes.starts_with(b"GIF87a") || payload_bytes.starts_with(b"GIF89a") {
-        return "GIF image";
-    }
-    if payload_bytes.starts_with(b"%PDF-") {
-        return "PDF document";
-    }
-    if payload_bytes.starts_with(b"PK\x03\x04") {
-        return "ZIP archive";
-    }
-    if payload_bytes.starts_with(&[0x1f, 0x8b]) {
-        return "gzip stream";
-    }
-    if payload_bytes.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
-        return "zstd stream";
-    }
-    if payload_bytes.len() >= 12
-        && payload_bytes.starts_with(b"RIFF")
-        && &payload_bytes[8..12] == b"WEBP"
-    {
-        return "WebP image";
-    }
-    "unknown binary data"
 }
 
 pub(crate) fn render_upstream_payload_lines(payload: &str, width: usize) -> Vec<String> {

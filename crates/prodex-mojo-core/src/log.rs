@@ -14,6 +14,12 @@ struct LogStringView {
 
 unsafe extern "C" {
     fn prodex_mojo_log_level_classify_v1(abi_version: i64, event: u64, level: u64) -> i64;
+    fn prodex_mojo_upstream_payload_classify_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 #[inline]
@@ -61,9 +67,90 @@ pub fn classify_log_level(line: &str) -> Result<Option<&'static str>, MojoError>
     }
 }
 
+const UPSTREAM_PAYLOAD_ABI_VERSION: i64 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UpstreamPayloadBinaryKind {
+    Unknown,
+    Png,
+    Jpeg,
+    Gif,
+    Pdf,
+    Zip,
+    Gzip,
+    Zstd,
+    Webp,
+}
+
+impl UpstreamPayloadBinaryKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Unknown => "unknown binary data",
+            Self::Png => "PNG image",
+            Self::Jpeg => "JPEG image",
+            Self::Gif => "GIF image",
+            Self::Pdf => "PDF document",
+            Self::Zip => "ZIP archive",
+            Self::Gzip => "gzip stream",
+            Self::Zstd => "zstd stream",
+            Self::Webp => "WebP image",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UpstreamPayloadClassification {
+    pub readable_text: bool,
+    pub binary_kind: UpstreamPayloadBinaryKind,
+}
+
+pub fn classify_upstream_payload(
+    payload: &[u8],
+) -> Result<UpstreamPayloadClassification, MojoError> {
+    let mut output = [-1_i64; 2];
+    let status = unsafe {
+        prodex_mojo_upstream_payload_classify_v1(
+            UPSTREAM_PAYLOAD_ABI_VERSION,
+            payload.as_ptr() as usize as u64,
+            i64::try_from(payload.len()).map_err(|_| MojoError::InvalidInput)?,
+            mutable_pointer_address(output.as_mut_ptr()),
+        )
+    };
+    if status != 0 {
+        return Err(MojoError::InvalidInput);
+    }
+    let readable_text = match output[0] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let binary_kind = match output[1] {
+        0 => UpstreamPayloadBinaryKind::Unknown,
+        1 => UpstreamPayloadBinaryKind::Png,
+        2 => UpstreamPayloadBinaryKind::Jpeg,
+        3 => UpstreamPayloadBinaryKind::Gif,
+        4 => UpstreamPayloadBinaryKind::Pdf,
+        5 => UpstreamPayloadBinaryKind::Zip,
+        6 => UpstreamPayloadBinaryKind::Gzip,
+        7 => UpstreamPayloadBinaryKind::Zstd,
+        8 => UpstreamPayloadBinaryKind::Webp,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(UpstreamPayloadClassification {
+        readable_text,
+        binary_kind,
+    })
+}
+
 pub fn self_test() -> bool {
     classify_log_level("level=error") == Ok(Some("error"))
         && classify_log_level("2026-05-05T00:00:00Z info heartbeat") == Ok(Some("info"))
+        && classify_upstream_payload(b"hello\nworld").is_ok_and(|plan| {
+            plan.readable_text && plan.binary_kind == UpstreamPayloadBinaryKind::Unknown
+        })
+        && classify_upstream_payload(b"\x89PNG\r\n\x1a\n").is_ok_and(|plan| {
+            !plan.readable_text && plan.binary_kind == UpstreamPayloadBinaryKind::Png
+        })
 }
 
 const TRANSCRIPT_ABI_VERSION: i64 = 1;
