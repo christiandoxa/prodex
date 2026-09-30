@@ -87,30 +87,31 @@ pub fn auth_summary_from_stored_auth(stored_auth: &StoredAuth) -> AuthSummary {
             .as_deref()
             .is_some_and(|key| !key.trim().is_empty())
     });
-    let auth_mode = stored_auth
-        .auth_mode
-        .as_deref()
-        .map(normalize_auth_mode_label);
-
-    if has_chatgpt_token {
-        return AuthSummaryKind::Chatgpt.into_summary();
-    }
-
-    if auth_mode.as_deref() == Some("bedrockapikey") || has_bedrock_api_key {
-        return AuthSummaryKind::BedrockApiKey.into_summary();
-    }
-
-    if auth_mode.as_deref() == Some("apikey") || has_api_key {
-        return AuthSummaryKind::ApiKey.into_summary();
-    }
-
-    AuthSummaryKind::Other(
-        stored_auth
-            .auth_mode
-            .clone()
-            .unwrap_or_else(|| "auth-present".to_string()),
+    match prodex_mojo_core::quota::quota_auth_summary_kind(
+        stored_auth.auth_mode.as_deref(),
+        has_chatgpt_token,
+        has_api_key,
+        has_bedrock_api_key,
     )
-    .into_summary()
+    .expect("Mojo quota auth-summary policy returned invalid output")
+    {
+        prodex_mojo_core::quota::QuotaAuthSummaryKind::Chatgpt => {
+            AuthSummaryKind::Chatgpt.into_summary()
+        }
+        prodex_mojo_core::quota::QuotaAuthSummaryKind::BedrockApiKey => {
+            AuthSummaryKind::BedrockApiKey.into_summary()
+        }
+        prodex_mojo_core::quota::QuotaAuthSummaryKind::ApiKey => {
+            AuthSummaryKind::ApiKey.into_summary()
+        }
+        prodex_mojo_core::quota::QuotaAuthSummaryKind::Other => AuthSummaryKind::Other(
+            stored_auth
+                .auth_mode
+                .clone()
+                .unwrap_or_else(|| "auth-present".to_string()),
+        )
+        .into_summary(),
+    }
 }
 
 pub fn usage_auth_from_stored_auth(stored_auth: &StoredAuth) -> Result<UsageAuth> {
@@ -123,17 +124,22 @@ pub fn usage_auth_from_stored_auth(stored_auth: &StoredAuth) -> Result<UsageAuth
             .as_deref()
             .is_some_and(|key| !key.trim().is_empty())
     });
-    let auth_mode = stored_auth
-        .auth_mode
-        .as_deref()
-        .map(normalize_auth_mode_label);
-    if auth_mode.as_deref() == Some("bedrockapikey") || has_bedrock_api_key {
-        bail!(
-            "quota endpoint requires a ChatGPT access token. Amazon Bedrock API key auth is provider-managed."
-        );
-    }
-    if auth_mode.as_deref() == Some("apikey") || has_api_key {
-        bail!("quota endpoint requires a ChatGPT access token. Run `codex login` first.");
+    match prodex_mojo_core::quota::quota_usage_auth_kind(
+        stored_auth.auth_mode.as_deref(),
+        has_api_key,
+        has_bedrock_api_key,
+    )
+    .expect("Mojo quota usage-auth compatibility policy returned invalid output")
+    {
+        prodex_mojo_core::quota::QuotaUsageAuthKind::BedrockApiKey => {
+            bail!(
+                "quota endpoint requires a ChatGPT access token. Amazon Bedrock API key auth is provider-managed."
+            );
+        }
+        prodex_mojo_core::quota::QuotaUsageAuthKind::ApiKey => {
+            bail!("quota endpoint requires a ChatGPT access token. Run `codex login` first.");
+        }
+        prodex_mojo_core::quota::QuotaUsageAuthKind::ChatgptEligible => {}
     }
 
     let tokens = stored_auth
@@ -179,15 +185,6 @@ pub fn usage_auth_from_stored_auth(stored_auth: &StoredAuth) -> Result<UsageAuth
     })
 }
 
-fn normalize_auth_mode_label(value: &str) -> String {
-    value
-        .trim()
-        .chars()
-        .filter(|ch| !matches!(ch, '_' | '-' | ' '))
-        .flat_map(char::to_lowercase)
-        .collect()
-}
-
 pub fn usage_auth_needs_proactive_refresh(auth: &UsageAuth, now: i64) -> bool {
     usage_auth_needs_proactive_refresh_with_policy(
         auth,
@@ -203,12 +200,14 @@ pub fn usage_auth_needs_proactive_refresh_with_policy(
     expiry_skew_seconds: i64,
     refresh_interval_days: i64,
 ) -> bool {
-    if let Some(expires_at) = auth.expires_at {
-        return expires_at <= now.saturating_add(expiry_skew_seconds);
-    }
-
-    auth.last_refresh
-        .is_some_and(|last_refresh| now - last_refresh >= refresh_interval_days * 86_400)
+    prodex_mojo_core::quota::quota_auth_needs_proactive_refresh(
+        auth.expires_at,
+        auth.last_refresh,
+        now,
+        expiry_skew_seconds,
+        refresh_interval_days,
+    )
+    .expect("Mojo quota auth-refresh policy returned invalid output")
 }
 
 pub fn usage_auth_sync_source_label(source: UsageAuthSyncSource) -> &'static str {

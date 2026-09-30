@@ -645,6 +645,33 @@ unsafe extern "C" {
         scale_bps: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_quota_auth_summary_kind_v1(
+        abi_version: i64,
+        auth_mode_address: u64,
+        auth_mode_length: i64,
+        auth_mode_present: i64,
+        has_chatgpt_token: i64,
+        has_api_key: i64,
+        has_bedrock_api_key: i64,
+    ) -> i64;
+    fn prodex_quota_usage_auth_kind_v1(
+        abi_version: i64,
+        auth_mode_address: u64,
+        auth_mode_length: i64,
+        auth_mode_present: i64,
+        has_api_key: i64,
+        has_bedrock_api_key: i64,
+    ) -> i64;
+    fn prodex_quota_auth_proactive_refresh_v1(
+        abi_version: i64,
+        expires_at_present: i64,
+        expires_at: i64,
+        last_refresh_present: i64,
+        last_refresh: i64,
+        now: i64,
+        expiry_skew_seconds: i64,
+        refresh_interval_days: i64,
+    ) -> i64;
     fn prodex_quota_auth_filter_parse_v1(
         abi_version: i64,
         input_address: u64,
@@ -704,6 +731,101 @@ pub fn scale_quota_pressure_for_plan(
     };
     quota_model_policy_status(status)?;
     Ok(output)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaAuthSummaryKind {
+    Chatgpt,
+    BedrockApiKey,
+    ApiKey,
+    Other,
+}
+
+pub fn quota_auth_summary_kind(
+    auth_mode: Option<&str>,
+    has_chatgpt_token: bool,
+    has_api_key: bool,
+    has_bedrock_api_key: bool,
+) -> Result<QuotaAuthSummaryKind, crate::MojoError> {
+    let raw = auth_mode.unwrap_or_default();
+    let result = unsafe {
+        prodex_quota_auth_summary_kind_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            raw.as_ptr() as usize as u64,
+            i64::try_from(raw.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::from(auth_mode.is_some()),
+            i64::from(has_chatgpt_token),
+            i64::from(has_api_key),
+            i64::from(has_bedrock_api_key),
+        )
+    };
+    match result {
+        0 => Ok(QuotaAuthSummaryKind::Chatgpt),
+        1 => Ok(QuotaAuthSummaryKind::BedrockApiKey),
+        2 => Ok(QuotaAuthSummaryKind::ApiKey),
+        3 => Ok(QuotaAuthSummaryKind::Other),
+        -1 => Err(crate::MojoError::InvalidInput),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuotaUsageAuthKind {
+    ChatgptEligible,
+    BedrockApiKey,
+    ApiKey,
+}
+
+pub fn quota_usage_auth_kind(
+    auth_mode: Option<&str>,
+    has_api_key: bool,
+    has_bedrock_api_key: bool,
+) -> Result<QuotaUsageAuthKind, crate::MojoError> {
+    let raw = auth_mode.unwrap_or_default();
+    let result = unsafe {
+        prodex_quota_usage_auth_kind_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            raw.as_ptr() as usize as u64,
+            i64::try_from(raw.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::from(auth_mode.is_some()),
+            i64::from(has_api_key),
+            i64::from(has_bedrock_api_key),
+        )
+    };
+    match result {
+        0 => Ok(QuotaUsageAuthKind::ChatgptEligible),
+        1 => Ok(QuotaUsageAuthKind::BedrockApiKey),
+        2 => Ok(QuotaUsageAuthKind::ApiKey),
+        -1 => Err(crate::MojoError::InvalidInput),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn quota_auth_needs_proactive_refresh(
+    expires_at: Option<i64>,
+    last_refresh: Option<i64>,
+    now: i64,
+    expiry_skew_seconds: i64,
+    refresh_interval_days: i64,
+) -> Result<bool, crate::MojoError> {
+    let result = unsafe {
+        prodex_quota_auth_proactive_refresh_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            i64::from(expires_at.is_some()),
+            expires_at.unwrap_or_default(),
+            i64::from(last_refresh.is_some()),
+            last_refresh.unwrap_or_default(),
+            now,
+            expiry_skew_seconds,
+            refresh_interval_days,
+        )
+    };
+    match result {
+        0 => Ok(false),
+        1 => Ok(true),
+        -1 => Err(crate::MojoError::InvalidInput),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
 }
 
 pub fn quota_auth_filter_parse(raw: &str) -> Result<QuotaAuthFilterPlan, crate::MojoError> {
@@ -775,6 +897,24 @@ fn quota_model_policy_kernel_preserves_expected_contracts() {
     assert_eq!(plan_capacity_pressure_scale_bps(" Pro-20x "), Ok(2_000));
     assert_eq!(scale_quota_pressure_for_plan(-10, 5_000), Ok(-5));
     assert_eq!(quota_report_sort_next(5), Ok(0));
+    assert_eq!(
+        quota_auth_summary_kind(Some(" Bedrock_API-Key "), false, false, false).unwrap(),
+        QuotaAuthSummaryKind::BedrockApiKey
+    );
+    assert_eq!(
+        quota_auth_summary_kind(Some("api-key"), true, true, false).unwrap(),
+        QuotaAuthSummaryKind::Chatgpt
+    );
+    assert_eq!(
+        quota_usage_auth_kind(Some("chatgpt"), true, false).unwrap(),
+        QuotaUsageAuthKind::ApiKey
+    );
+    assert_eq!(
+        quota_usage_auth_kind(Some("api-key"), false, true).unwrap(),
+        QuotaUsageAuthKind::BedrockApiKey
+    );
+    assert!(quota_auth_needs_proactive_refresh(Some(110), None, 100, 10, 8).unwrap());
+    assert!(quota_auth_needs_proactive_refresh(None, Some(0), 8 * 86_400, 10, 8).unwrap());
     let filter = quota_auth_filter_parse(" CHATGPT ").expect("filter parse");
     assert_eq!(filter, QuotaAuthFilterPlan::Label("chatgpt".to_string()));
     assert_eq!(
