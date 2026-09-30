@@ -1,5 +1,6 @@
 use super::RuntimeAsyncLoggerInner;
 use fs2::FileExt;
+use prodex_mojo_core::log_throughput_policy as mojo_retention;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{self, Write};
@@ -104,26 +105,45 @@ impl RuntimeLogPolicy {
 
     pub(super) fn normalized(self) -> Self {
         let defaults = Self::default();
+        let max_file_bytes = mojo_retention::bounded_policy_value(
+            Some(self.max_file_bytes),
+            defaults.max_file_bytes,
+            1,
+            MAX_RUNTIME_LOG_FILE_BYTES,
+        )
+        .expect("Mojo runtime-log max-file policy returned invalid output");
+        let max_files = mojo_retention::bounded_policy_value(
+            u64::try_from(self.max_files).ok(),
+            u64::try_from(defaults.max_files).expect("default max files fits u64"),
+            1,
+            u64::try_from(MAX_RUNTIME_LOG_FILES).expect("max files fits u64"),
+        )
+        .and_then(|value| {
+            usize::try_from(value).map_err(|_| prodex_mojo_core::MojoError::InvalidOutput)
+        })
+        .expect("Mojo runtime-log max-files policy returned invalid output");
+        let total_bytes = mojo_retention::bounded_policy_value(
+            Some(self.total_bytes),
+            defaults.total_bytes,
+            1,
+            MAX_RUNTIME_LOG_TOTAL_BYTES,
+        )
+        .expect("Mojo runtime-log total-bytes policy returned invalid output");
+        let max_age_seconds = mojo_retention::bounded_policy_value(
+            u64::try_from(self.max_age_seconds).ok(),
+            u64::try_from(defaults.max_age_seconds).expect("default max age fits u64"),
+            1,
+            u64::try_from(MAX_RUNTIME_LOG_AGE_SECONDS).expect("max age fits u64"),
+        )
+        .and_then(|value| {
+            i64::try_from(value).map_err(|_| prodex_mojo_core::MojoError::InvalidOutput)
+        })
+        .expect("Mojo runtime-log max-age policy returned invalid output");
         Self {
-            max_file_bytes: bounded_value(
-                self.max_file_bytes,
-                defaults.max_file_bytes,
-                1,
-                MAX_RUNTIME_LOG_FILE_BYTES,
-            ),
-            max_files: bounded_value(self.max_files, defaults.max_files, 1, MAX_RUNTIME_LOG_FILES),
-            total_bytes: bounded_value(
-                self.total_bytes,
-                defaults.total_bytes,
-                1,
-                MAX_RUNTIME_LOG_TOTAL_BYTES,
-            ),
-            max_age_seconds: bounded_value(
-                self.max_age_seconds,
-                defaults.max_age_seconds,
-                1,
-                MAX_RUNTIME_LOG_AGE_SECONDS,
-            ),
+            max_file_bytes,
+            max_files,
+            total_bytes,
+            max_age_seconds,
             record_to_disk: self.record_to_disk,
         }
     }
@@ -251,8 +271,11 @@ pub(super) fn write_log_line(
     let mut active_path = writer.ensure_active_path(requested_path)?;
     let line_len = u64::try_from(line.len()).unwrap_or(u64::MAX);
     let current_size = writer.active_size(&active_path)?;
+    let rotation =
+        mojo_retention::log_rotation_plan(current_size, line_len, inner.policy.max_file_bytes)
+            .expect("Mojo runtime-log rotation policy returned invalid output");
     let mut rotated = false;
-    if current_size > 0 && current_size.saturating_add(line_len) > inner.policy.max_file_bytes {
+    if rotation.rotate_before_write {
         active_path = writer.rotate(requested_path, &active_path)?;
         rotated = true;
     }
@@ -263,8 +286,7 @@ pub(super) fn write_log_line(
     let next_size = writer.active_size(&active_path)?.saturating_add(line_len);
     writer.active_sizes.insert(active_path.clone(), next_size);
 
-    if line_len > inner.policy.max_file_bytes && writer.rotate(requested_path, &active_path).is_ok()
-    {
+    if rotation.rotate_after_oversized_line && writer.rotate(requested_path, &active_path).is_ok() {
         rotated = true;
     }
     if rotated {
@@ -594,8 +616,13 @@ fn remove_expired_runtime_logs(
     remaining_count: &mut usize,
 ) {
     for log in logs {
-        if log.modified_epoch_seconds < oldest_allowed
-            && runtime_log_is_removable(&log.path, protected_paths)
+        let removable = runtime_log_is_removable(&log.path, protected_paths);
+        if mojo_retention::log_expired_removal_allowed(
+            log.modified_epoch_seconds,
+            oldest_allowed,
+            removable,
+        )
+        .expect("Mojo runtime-log expiry policy returned invalid output")
             && remove_runtime_log_file(log, report, total_bytes, remaining_count)
         {
             removed_paths.insert(log.path.clone());
@@ -613,12 +640,19 @@ fn remove_over_budget_runtime_logs(
     remaining_count: &mut usize,
 ) {
     for log in logs {
-        if *remaining_count <= policy.max_files && *total_bytes <= policy.total_bytes {
+        let plan = mojo_retention::log_over_budget_plan(
+            *remaining_count,
+            policy.max_files,
+            *total_bytes,
+            policy.total_bytes,
+            removed_paths.contains(&log.path),
+            runtime_log_is_removable(&log.path, protected_paths),
+        )
+        .expect("Mojo runtime-log budget policy returned invalid output");
+        if plan.within_budget {
             break;
         }
-        if removed_paths.contains(&log.path)
-            || !runtime_log_is_removable(&log.path, protected_paths)
-        {
+        if !plan.remove_current {
             continue;
         }
         if remove_runtime_log_file(log, report, total_bytes, remaining_count) {
@@ -690,30 +724,39 @@ fn remove_runtime_log_file(
 }
 
 fn bounded_environment_u64(name: &str, default: u64, min: u64, max: u64) -> u64 {
-    std::env::var(name)
+    let parsed = std::env::var(name)
         .ok()
-        .and_then(|value| value.parse().ok())
-        .map_or(default, |value| bounded_value(value, default, min, max))
+        .and_then(|value| value.parse::<u64>().ok());
+    mojo_retention::bounded_policy_value(parsed, default, min, max)
+        .expect("Mojo runtime-log environment bound policy returned invalid output")
 }
 
 fn bounded_environment_usize(name: &str, default: usize, min: usize, max: usize) -> usize {
-    std::env::var(name)
+    let parsed = std::env::var(name)
         .ok()
-        .and_then(|value| value.parse().ok())
-        .map_or(default, |value| bounded_value(value, default, min, max))
+        .and_then(|value| value.parse::<u64>().ok());
+    mojo_retention::bounded_policy_value(
+        parsed,
+        u64::try_from(default).expect("runtime-log default fits u64"),
+        u64::try_from(min).expect("runtime-log min fits u64"),
+        u64::try_from(max).expect("runtime-log max fits u64"),
+    )
+    .and_then(|value| {
+        usize::try_from(value).map_err(|_| prodex_mojo_core::MojoError::InvalidOutput)
+    })
+    .expect("Mojo runtime-log environment max-files policy returned invalid output")
 }
 
 fn bounded_environment_i64(name: &str, default: i64, min: i64, max: i64) -> i64 {
-    std::env::var(name)
+    let parsed = std::env::var(name)
         .ok()
-        .and_then(|value| value.parse().ok())
-        .map_or(default, |value| bounded_value(value, default, min, max))
-}
-
-fn bounded_value<T: Ord + Copy>(value: T, default: T, min: T, max: T) -> T {
-    if value >= min && value <= max {
-        value
-    } else {
-        default
-    }
+        .and_then(|value| value.parse::<u64>().ok());
+    mojo_retention::bounded_policy_value(
+        parsed,
+        u64::try_from(default).expect("runtime-log default age fits u64"),
+        u64::try_from(min).expect("runtime-log min age fits u64"),
+        u64::try_from(max).expect("runtime-log max age fits u64"),
+    )
+    .and_then(|value| i64::try_from(value).map_err(|_| prodex_mojo_core::MojoError::InvalidOutput))
+    .expect("Mojo runtime-log environment max-age policy returned invalid output")
 }

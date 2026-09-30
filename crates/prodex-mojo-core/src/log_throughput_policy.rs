@@ -27,6 +27,18 @@ unsafe extern "C" {
         rate_address: u64,
     ) -> i64;
 
+    fn prodex_log_retention_policy_v1(
+        abi_version: i64,
+        operation: i64,
+        input0: u64,
+        input1: u64,
+        input2: u64,
+        input3: u64,
+        input4: u64,
+        input5: u64,
+        output_address: u64,
+    ) -> i64;
+
     fn prodex_log_throughput_stream_rate_v1(
         abi_version: i64,
         first_tokens: u64,
@@ -53,6 +65,131 @@ fn bool_output(value: i64) -> Result<bool, MojoError> {
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+const RETENTION_BOUNDED_VALUE: i64 = 1;
+const RETENTION_ROTATION: i64 = 2;
+const RETENTION_EXPIRED: i64 = 3;
+const RETENTION_OVER_BUDGET: i64 = 4;
+
+fn retention_call(operation: i64, input: [u64; 6]) -> Result<[u64; 4], MojoError> {
+    let mut output = [0_u64; 4];
+    status(unsafe {
+        prodex_log_retention_policy_v1(
+            ABI_VERSION,
+            operation,
+            input[0],
+            input[1],
+            input[2],
+            input[3],
+            input[4],
+            input[5],
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    Ok(output)
+}
+
+pub fn bounded_policy_value(
+    value: Option<u64>,
+    default: u64,
+    min: u64,
+    max: u64,
+) -> Result<u64, MojoError> {
+    Ok(retention_call(
+        RETENTION_BOUNDED_VALUE,
+        [
+            u64::from(value.is_some()),
+            value.unwrap_or_default(),
+            default,
+            min,
+            max,
+            0,
+        ],
+    )?[0])
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogRotationPlan {
+    pub rotate_before_write: bool,
+    pub rotate_after_oversized_line: bool,
+}
+
+pub fn log_rotation_plan(
+    current_size: u64,
+    line_len: u64,
+    max_file_bytes: u64,
+) -> Result<LogRotationPlan, MojoError> {
+    let output = retention_call(
+        RETENTION_ROTATION,
+        [current_size, line_len, max_file_bytes, 0, 0, 0],
+    )?;
+    Ok(LogRotationPlan {
+        rotate_before_write: bool_output(
+            i64::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?,
+        )?,
+        rotate_after_oversized_line: bool_output(
+            i64::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?,
+        )?,
+    })
+}
+
+fn signed_order_key(value: i64) -> u64 {
+    (value as u64) ^ (1_u64 << 63)
+}
+
+pub fn log_expired_removal_allowed(
+    modified_epoch_seconds: i64,
+    oldest_allowed: i64,
+    removable: bool,
+) -> Result<bool, MojoError> {
+    let output = retention_call(
+        RETENTION_EXPIRED,
+        [
+            signed_order_key(modified_epoch_seconds),
+            signed_order_key(oldest_allowed),
+            u64::from(removable),
+            0,
+            0,
+            0,
+        ],
+    )?;
+    bool_output(i64::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LogOverBudgetPlan {
+    pub within_budget: bool,
+    pub remove_current: bool,
+}
+
+pub fn log_over_budget_plan(
+    remaining_count: usize,
+    max_files: usize,
+    total_bytes: u64,
+    total_budget: u64,
+    already_removed: bool,
+    removable: bool,
+) -> Result<LogOverBudgetPlan, MojoError> {
+    let output = retention_call(
+        RETENTION_OVER_BUDGET,
+        [
+            u64::try_from(remaining_count).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(max_files).map_err(|_| MojoError::InvalidInput)?,
+            total_bytes,
+            total_budget,
+            u64::from(already_removed),
+            u64::from(removable),
+        ],
+    )?;
+    Ok(LogOverBudgetPlan {
+        within_budget: bool_output(
+            i64::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?,
+        )?,
+        remove_current: bool_output(
+            i64::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?,
+        )?,
+    })
 }
 
 pub fn sample_plan(
@@ -162,5 +299,22 @@ mod tests {
         assert_eq!(stream_rate(100, 1000, 110, 1200).unwrap(), None);
         assert_eq!(stream_rate(200, 1000, 100, 3000).unwrap(), None);
         assert_eq!(stream_rate(100, 3000, 200, 1000).unwrap(), None);
+        assert_eq!(bounded_policy_value(Some(9), 5, 1, 8).unwrap(), 5);
+        assert_eq!(bounded_policy_value(Some(7), 5, 1, 8).unwrap(), 7);
+        assert_eq!(
+            log_rotation_plan(10, 5, 12).unwrap(),
+            LogRotationPlan {
+                rotate_before_write: true,
+                rotate_after_oversized_line: false,
+            }
+        );
+        assert!(log_expired_removal_allowed(10, 20, true).unwrap());
+        assert_eq!(
+            log_over_budget_plan(6, 5, 100, 200, false, true).unwrap(),
+            LogOverBudgetPlan {
+                within_budget: false,
+                remove_current: true,
+            }
+        );
     }
 }
