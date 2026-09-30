@@ -69,6 +69,27 @@ pub struct AdaptiveRoutingPlan {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AffinityOutcomeInput {
+    pub hard_binding_conflict: bool,
+    pub exact_binding_mismatch: bool,
+    pub profile_usable: bool,
+    pub excluded: bool,
+    pub hard_affinity: bool,
+    pub soft_policy_allowed: bool,
+    /// 0 = none, 1 = selection backoff, 2 = half-open probe wait.
+    pub local_rejection: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AffinityOutcomePlan {
+    /// 0 = unavailable, 1 = select hard, 2 = select soft, 3 = reject soft quota.
+    pub action: i64,
+    /// Stable reason tag; zero means no unavailable reason.
+    pub reason: i64,
+    pub unavailable_hard: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AffinitySelectionInput {
     pub route_kind: i64,
     pub strict_candidate_match: bool,
@@ -160,6 +181,16 @@ unsafe extern "C" {
         exploration_rate_bps: i64,
         diagnostic_seed: u64,
     ) -> i64;
+    fn prodex_runtime_affinity_outcome_plan_v1(
+        hard_binding_conflict: i64,
+        exact_binding_mismatch: i64,
+        profile_usable: i64,
+        excluded: i64,
+        hard_affinity: i64,
+        soft_policy_allowed: i64,
+        local_rejection: i64,
+        output: *mut i64,
+    ) -> i64;
     fn prodex_runtime_affinity_selection_plan_v1(
         route_kind: i64,
         strict_candidate_match: i64,
@@ -229,6 +260,39 @@ pub fn websocket_response_plan(
         transport_retry_allowed: output[1] == 1,
         committed_profile_promotion_allowed: output[2] == 1,
         reset_retry_index_on_local_block: output[3] == 1,
+    })
+}
+
+pub fn affinity_outcome_plan(
+    input: AffinityOutcomeInput,
+) -> Result<AffinityOutcomePlan, MojoError> {
+    if !(0..=2).contains(&input.local_rejection) {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [-1_i64; 3];
+    let status = unsafe {
+        prodex_runtime_affinity_outcome_plan_v1(
+            i64::from(input.hard_binding_conflict),
+            i64::from(input.exact_binding_mismatch),
+            i64::from(input.profile_usable),
+            i64::from(input.excluded),
+            i64::from(input.hard_affinity),
+            i64::from(input.soft_policy_allowed),
+            input.local_rejection,
+            output.as_mut_ptr(),
+        )
+    };
+    if status != 0
+        || !(0..=3).contains(&output[0])
+        || !(0..=6).contains(&output[1])
+        || !matches!(output[2], 0 | 1)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(AffinityOutcomePlan {
+        action: output[0],
+        reason: output[1],
+        unavailable_hard: output[2] == 1,
     })
 }
 

@@ -16,6 +16,99 @@ fn healthy_summary() -> RuntimeSelectionQuotaSummary {
 }
 
 #[test]
+fn affinity_outcome_precedence_is_mojo_authoritative() {
+    let base = RuntimeAffinityOutcomeInput {
+        hard_binding_conflict: false,
+        exact_binding_mismatch: false,
+        profile_usable: true,
+        excluded: false,
+        hard_affinity: false,
+        soft_policy_allowed: true,
+        local_rejection: RuntimeAffinityLocalRejection::None,
+    };
+
+    assert_eq!(
+        runtime_affinity_outcome(RuntimeAffinityOutcomeInput {
+            hard_binding_conflict: true,
+            ..base
+        }),
+        RuntimeAffinityOutcome::Unavailable {
+            reason: "hard_binding_conflict",
+            hard: true,
+        }
+    );
+    assert_eq!(
+        runtime_affinity_outcome(RuntimeAffinityOutcomeInput {
+            exact_binding_mismatch: true,
+            hard_affinity: true,
+            ..base
+        }),
+        RuntimeAffinityOutcome::Unavailable {
+            reason: "binding_identity_mismatch",
+            hard: true,
+        }
+    );
+    assert_eq!(
+        runtime_affinity_outcome(RuntimeAffinityOutcomeInput {
+            profile_usable: false,
+            ..base
+        }),
+        RuntimeAffinityOutcome::Unavailable {
+            reason: "hard_binding_unavailable",
+            hard: false,
+        }
+    );
+    assert_eq!(
+        runtime_affinity_outcome(RuntimeAffinityOutcomeInput {
+            excluded: true,
+            ..base
+        }),
+        RuntimeAffinityOutcome::Unavailable {
+            reason: "bound_profile_unavailable",
+            hard: false,
+        }
+    );
+    assert_eq!(
+        runtime_affinity_outcome(RuntimeAffinityOutcomeInput {
+            hard_affinity: true,
+            ..base
+        }),
+        RuntimeAffinityOutcome::SelectHard
+    );
+    assert_eq!(
+        runtime_affinity_outcome(RuntimeAffinityOutcomeInput {
+            soft_policy_allowed: false,
+            ..base
+        }),
+        RuntimeAffinityOutcome::RejectSoftQuota
+    );
+    assert_eq!(
+        runtime_affinity_outcome(RuntimeAffinityOutcomeInput {
+            local_rejection: RuntimeAffinityLocalRejection::SelectionBackoff,
+            ..base
+        }),
+        RuntimeAffinityOutcome::Unavailable {
+            reason: "selection_backoff",
+            hard: false,
+        }
+    );
+    assert_eq!(
+        runtime_affinity_outcome(RuntimeAffinityOutcomeInput {
+            local_rejection: RuntimeAffinityLocalRejection::RouteCircuitHalfOpenProbeWait,
+            ..base
+        }),
+        RuntimeAffinityOutcome::Unavailable {
+            reason: "route_circuit_half_open_probe_wait",
+            hard: false,
+        }
+    );
+    assert_eq!(
+        runtime_affinity_outcome(base),
+        RuntimeAffinityOutcome::SelectSoft
+    );
+}
+
+#[test]
 fn hard_affinity_detects_no_rotate_sources() {
     let affinity = RuntimeCandidateAffinity {
         route_kind: RuntimeRouteKind::Responses,

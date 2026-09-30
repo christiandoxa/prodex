@@ -578,7 +578,7 @@ def prodex_runtime_soft_affinity_policy_v1(
         and weekly_status <= 2
     )
     var precommit_guard = five_hour_status == 3
-    var allowed = False
+    var allowed: Bool
     if affinity_kind == 0:
         allowed = summary_allows or (
             (route_kind == 0 or route_kind == 2) and quota_source_present == 0
@@ -622,6 +622,91 @@ def runtime_selection_duration_is_at_least(
         elapsed_seconds == stale_after_seconds
         and elapsed_nanoseconds >= stale_after_nanoseconds
     )
+
+
+
+comptime AFFINITY_OUTCOME_UNAVAILABLE: Int64 = 0
+comptime AFFINITY_OUTCOME_SELECT_HARD: Int64 = 1
+comptime AFFINITY_OUTCOME_SELECT_SOFT: Int64 = 2
+comptime AFFINITY_OUTCOME_REJECT_SOFT_QUOTA: Int64 = 3
+
+comptime AFFINITY_REASON_NONE: Int64 = 0
+comptime AFFINITY_REASON_HARD_BINDING_CONFLICT: Int64 = 1
+comptime AFFINITY_REASON_BINDING_IDENTITY_MISMATCH: Int64 = 2
+comptime AFFINITY_REASON_HARD_BINDING_UNAVAILABLE: Int64 = 3
+comptime AFFINITY_REASON_BOUND_PROFILE_UNAVAILABLE: Int64 = 4
+comptime AFFINITY_REASON_SELECTION_BACKOFF: Int64 = 5
+comptime AFFINITY_REASON_ROUTE_CIRCUIT_HALF_OPEN_PROBE_WAIT: Int64 = 6
+
+
+@export("prodex_runtime_affinity_outcome_plan_v1")
+def prodex_runtime_affinity_outcome_plan_v1(
+    hard_binding_conflict: Int64,
+    exact_binding_mismatch: Int64,
+    profile_usable: Int64,
+    excluded: Int64,
+    hard_affinity: Int64,
+    soft_policy_allowed: Int64,
+    local_rejection: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        hard_binding_conflict < 0
+        or hard_binding_conflict > 1
+        or exact_binding_mismatch < 0
+        or exact_binding_mismatch > 1
+        or profile_usable < 0
+        or profile_usable > 1
+        or excluded < 0
+        or excluded > 1
+        or hard_affinity < 0
+        or hard_affinity > 1
+        or soft_policy_allowed < 0
+        or soft_policy_allowed > 1
+        or local_rejection < 0
+        or local_rejection > 2
+    ):
+        return 1
+
+    output[unsafe_offset=0] = AFFINITY_OUTCOME_SELECT_SOFT
+    output[unsafe_offset=1] = AFFINITY_REASON_NONE
+    output[unsafe_offset=2] = 0
+
+    if hard_binding_conflict == 1:
+        output[unsafe_offset=0] = AFFINITY_OUTCOME_UNAVAILABLE
+        output[unsafe_offset=1] = AFFINITY_REASON_HARD_BINDING_CONFLICT
+        output[unsafe_offset=2] = 1
+        return 0
+    if exact_binding_mismatch == 1:
+        output[unsafe_offset=0] = AFFINITY_OUTCOME_UNAVAILABLE
+        output[unsafe_offset=1] = AFFINITY_REASON_BINDING_IDENTITY_MISMATCH
+        output[unsafe_offset=2] = hard_affinity
+        return 0
+    if profile_usable == 0:
+        output[unsafe_offset=0] = AFFINITY_OUTCOME_UNAVAILABLE
+        output[unsafe_offset=1] = AFFINITY_REASON_HARD_BINDING_UNAVAILABLE
+        output[unsafe_offset=2] = hard_affinity
+        return 0
+    if excluded == 1:
+        output[unsafe_offset=0] = AFFINITY_OUTCOME_UNAVAILABLE
+        output[unsafe_offset=1] = AFFINITY_REASON_BOUND_PROFILE_UNAVAILABLE
+        output[unsafe_offset=2] = hard_affinity
+        return 0
+    if hard_affinity == 1:
+        output[unsafe_offset=0] = AFFINITY_OUTCOME_SELECT_HARD
+        return 0
+    if soft_policy_allowed == 0:
+        output[unsafe_offset=0] = AFFINITY_OUTCOME_REJECT_SOFT_QUOTA
+        return 0
+    if local_rejection == 1:
+        output[unsafe_offset=0] = AFFINITY_OUTCOME_UNAVAILABLE
+        output[unsafe_offset=1] = AFFINITY_REASON_SELECTION_BACKOFF
+        return 0
+    if local_rejection == 2:
+        output[unsafe_offset=0] = AFFINITY_OUTCOME_UNAVAILABLE
+        output[unsafe_offset=1] = AFFINITY_REASON_ROUTE_CIRCUIT_HALF_OPEN_PROBE_WAIT
+        return 0
+    return 0
 
 
 @export("prodex_runtime_websocket_reuse_stale_v1")
