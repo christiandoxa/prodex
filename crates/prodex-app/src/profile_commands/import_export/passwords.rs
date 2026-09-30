@@ -4,6 +4,7 @@ use crate::{ExportProfileArgs, ProfileExportPayload, print_stderr_line, print_st
 use anyhow::{Context, Result, bail};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use prodex_mojo_core::confirmation_policy::{ConfirmationPolicy, confirmation_value};
+use prodex_mojo_core::profile_export::ProfileExportPasswordAction;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
@@ -22,37 +23,53 @@ const PROFILE_EXPORT_PASSWORD_ENV: &str = "PRODEX_PROFILE_EXPORT_PASSWORD";
 const PROFILE_IMPORT_PASSWORD_ENV: &str = "PRODEX_PROFILE_IMPORT_PASSWORD";
 
 pub(super) fn resolve_export_password_mode(args: &ExportProfileArgs) -> Result<bool> {
-    if args.password_protect {
-        return Ok(true);
-    }
-    if args.no_password {
-        return Ok(false);
-    }
-    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
-        bail!(
+    let interactive = io::stdin().is_terminal() && io::stderr().is_terminal();
+    match prodex_mojo_core::profile_export::profile_export_password_mode_action(
+        args.password_protect,
+        args.no_password,
+        interactive,
+    )
+    .expect("Mojo profile-export password-mode policy returned invalid output")
+    {
+        ProfileExportPasswordAction::Protect => Ok(true),
+        ProfileExportPasswordAction::Unprotected => Ok(false),
+        ProfileExportPasswordAction::Prompt => prompt_export_password_mode_tui().or_else(|_| {
+            prompt_yes_no(
+                "Password-protect export file containing profile tokens? [Y/n]: ",
+                true,
+            )
+        }),
+        ProfileExportPasswordAction::NonInteractiveError => bail!(
             "non-interactive profile export requires --password-protect with {} set, or --no-password to write an unencrypted bundle",
             PROFILE_EXPORT_PASSWORD_ENV
-        );
+        ),
+        _ => unreachable!("validated Mojo profile-export password-mode action"),
     }
-    prompt_export_password_mode_tui().or_else(|_| {
-        prompt_yes_no(
-            "Password-protect export file containing profile tokens? [Y/n]: ",
-            true,
-        )
-    })
 }
 
 pub(super) fn resolve_export_password() -> Result<Zeroizing<String>> {
-    if let Ok(password) = env::var(PROFILE_EXPORT_PASSWORD_ENV)
-        && !password.trim().is_empty()
+    let environment = env::var(PROFILE_EXPORT_PASSWORD_ENV).ok();
+    let env_nonempty = environment
+        .as_deref()
+        .is_some_and(|password| !password.trim().is_empty());
+    let interactive = io::stdin().is_terminal() && io::stderr().is_terminal();
+    match prodex_mojo_core::profile_export::profile_password_source_action(
+        env_nonempty,
+        interactive,
+    )
+    .expect("Mojo profile-export password-source policy returned invalid output")
     {
-        return Ok(Zeroizing::new(password));
-    }
-    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
-        bail!(
+        ProfileExportPasswordAction::Environment => {
+            return Ok(Zeroizing::new(
+                environment.expect("Mojo environment action requires password"),
+            ));
+        }
+        ProfileExportPasswordAction::NonInteractiveError => bail!(
             "password protection requested but no interactive terminal is available; set {}",
             PROFILE_EXPORT_PASSWORD_ENV
-        );
+        ),
+        ProfileExportPasswordAction::Prompt => {}
+        _ => unreachable!("validated Mojo profile-export password-source action"),
     }
 
     let password = Zeroizing::new(prompt_profile_export_password_tui(
@@ -60,42 +77,68 @@ pub(super) fn resolve_export_password() -> Result<Zeroizing<String>> {
         "Export password",
         "Enter a password for the encrypted profile bundle.",
     )?);
-    if password.is_empty() {
-        bail!("export password cannot be empty");
+    match prodex_mojo_core::profile_export::profile_export_password_validation(
+        password.is_empty(),
+        true,
+    )
+    .expect("Mojo profile-export password validation returned invalid output")
+    {
+        ProfileExportPasswordAction::Empty => bail!("export password cannot be empty"),
+        ProfileExportPasswordAction::Valid => {}
+        _ => unreachable!("initial export-password validation cannot mismatch"),
     }
     let confirmation = Zeroizing::new(prompt_profile_export_password_tui(
         "Profile Export",
         "Confirm export password",
         "Enter the same password again.",
     )?);
-    if password != confirmation {
-        bail!("export passwords did not match");
+    match prodex_mojo_core::profile_export::profile_export_password_validation(
+        false,
+        password == confirmation,
+    )
+    .expect("Mojo profile-export password confirmation returned invalid output")
+    {
+        ProfileExportPasswordAction::Valid => Ok(password),
+        ProfileExportPasswordAction::Mismatch => bail!("export passwords did not match"),
+        _ => unreachable!("confirmed export-password validation returned invalid action"),
     }
-    Ok(password)
 }
 
 pub(super) fn resolve_import_password() -> Result<String> {
-    if let Ok(password) = env::var(PROFILE_IMPORT_PASSWORD_ENV)
-        && !password.trim().is_empty()
+    let environment = env::var(PROFILE_IMPORT_PASSWORD_ENV).ok();
+    let env_nonempty = environment
+        .as_deref()
+        .is_some_and(|password| !password.trim().is_empty());
+    let interactive = io::stdin().is_terminal() && io::stderr().is_terminal();
+    match prodex_mojo_core::profile_export::profile_password_source_action(
+        env_nonempty,
+        interactive,
+    )
+    .expect("Mojo profile-import password-source policy returned invalid output")
     {
-        return Ok(password);
-    }
-    if !io::stdin().is_terminal() || !io::stderr().is_terminal() {
-        bail!(
+        ProfileExportPasswordAction::Environment => {
+            return Ok(environment.expect("Mojo environment action requires password"));
+        }
+        ProfileExportPasswordAction::NonInteractiveError => bail!(
             "profile export bundle is password-protected; set {} or rerun in a terminal",
             PROFILE_IMPORT_PASSWORD_ENV
-        );
+        ),
+        ProfileExportPasswordAction::Prompt => {}
+        _ => unreachable!("validated Mojo profile-import password-source action"),
     }
 
-    let password = prompt_profile_export_password_tui(
+    let password = Zeroizing::new(prompt_profile_export_password_tui(
         "Profile Import",
         "Export password",
         "Enter the password for this encrypted profile bundle.",
-    )?;
-    if password.is_empty() {
-        bail!("import password cannot be empty");
+    )?);
+    match prodex_mojo_core::profile_export::profile_import_password_validation(password.is_empty())
+        .expect("Mojo profile-import password validation returned invalid output")
+    {
+        ProfileExportPasswordAction::Valid => Ok((*password).clone()),
+        ProfileExportPasswordAction::Empty => bail!("import password cannot be empty"),
+        _ => unreachable!("validated Mojo profile-import password action"),
     }
-    Ok(password)
 }
 
 fn prompt_profile_export_password_tui(title: &str, label: &str, detail: &str) -> Result<String> {

@@ -134,3 +134,75 @@ def prodex_profile_import_auth_update_plan_v1(
     if incoming_email_present == 1:
         return PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH_EMAIL
     return PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH
+
+
+comptime PROFILE_PASSWORD_PLAN_MODE: Int64 = 1
+comptime PROFILE_PASSWORD_PLAN_SOURCE: Int64 = 2
+comptime PROFILE_PASSWORD_PLAN_VALIDATE_EXPORT: Int64 = 3
+comptime PROFILE_PASSWORD_PLAN_VALIDATE_IMPORT: Int64 = 4
+
+comptime PROFILE_PASSWORD_ACTION_PROTECT: Int64 = 0
+comptime PROFILE_PASSWORD_ACTION_UNPROTECTED: Int64 = 1
+comptime PROFILE_PASSWORD_ACTION_PROMPT: Int64 = 2
+comptime PROFILE_PASSWORD_ACTION_ENVIRONMENT: Int64 = 3
+comptime PROFILE_PASSWORD_ACTION_ERROR_NON_INTERACTIVE: Int64 = 4
+comptime PROFILE_PASSWORD_ACTION_VALID: Int64 = 5
+comptime PROFILE_PASSWORD_ACTION_ERROR_EMPTY: Int64 = 6
+comptime PROFILE_PASSWORD_ACTION_ERROR_MISMATCH: Int64 = 7
+
+
+@export("prodex_profile_export_password_plan_v1")
+def prodex_profile_export_password_plan_v1(
+    abi_version: Int64,
+    operation: Int64,
+    input0: Int64,
+    input1: Int64,
+    input2: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != PROFILE_EXPORT_POLICY_ABI_VERSION
+        or operation < PROFILE_PASSWORD_PLAN_MODE
+        or operation > PROFILE_PASSWORD_PLAN_VALIDATE_IMPORT
+        or (input0 != 0 and input0 != 1)
+        or (input1 != 0 and input1 != 1)
+        or (input2 != 0 and input2 != 1)
+    ):
+        return -1
+
+    if operation == PROFILE_PASSWORD_PLAN_MODE:
+        var password_protect = input0 == 1
+        var no_password = input1 == 1
+        var interactive = input2 == 1
+        if password_protect:
+            return PROFILE_PASSWORD_ACTION_PROTECT
+        if no_password:
+            return PROFILE_PASSWORD_ACTION_UNPROTECTED
+        return (
+            PROFILE_PASSWORD_ACTION_PROMPT
+            if interactive
+            else PROFILE_PASSWORD_ACTION_ERROR_NON_INTERACTIVE
+        )
+
+    if operation == PROFILE_PASSWORD_PLAN_SOURCE:
+        var env_nonempty = input0 == 1
+        var interactive = input1 == 1
+        if env_nonempty:
+            return PROFILE_PASSWORD_ACTION_ENVIRONMENT
+        return (
+            PROFILE_PASSWORD_ACTION_PROMPT
+            if interactive
+            else PROFILE_PASSWORD_ACTION_ERROR_NON_INTERACTIVE
+        )
+
+    if operation == PROFILE_PASSWORD_PLAN_VALIDATE_EXPORT:
+        var empty = input0 == 1
+        var matches = input1 == 1
+        if empty:
+            return PROFILE_PASSWORD_ACTION_ERROR_EMPTY
+        if not matches:
+            return PROFILE_PASSWORD_ACTION_ERROR_MISMATCH
+        return PROFILE_PASSWORD_ACTION_VALID
+
+    if input0 == 1:
+        return PROFILE_PASSWORD_ACTION_ERROR_EMPTY
+    return PROFILE_PASSWORD_ACTION_VALID

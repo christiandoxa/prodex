@@ -28,6 +28,13 @@ pub enum ProfileExportPolicyViolation {
 }
 
 unsafe extern "C" {
+    fn prodex_profile_export_password_plan_v1(
+        abi_version: i64,
+        operation: i64,
+        input0: i64,
+        input1: i64,
+        input2: i64,
+    ) -> i64;
     fn prodex_profile_import_auth_update_plan_v1(
         abi_version: i64,
         existing_update_present: i64,
@@ -127,6 +134,75 @@ pub fn validate_pbkdf2_iterations(iterations: u32) -> Result<(), ProfileExportPo
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileExportPasswordAction {
+    Protect,
+    Unprotected,
+    Prompt,
+    Environment,
+    NonInteractiveError,
+    Valid,
+    Empty,
+    Mismatch,
+}
+
+fn profile_password_plan(
+    operation: i64,
+    input0: bool,
+    input1: bool,
+    input2: bool,
+) -> Result<ProfileExportPasswordAction, MojoError> {
+    let result = unsafe {
+        prodex_profile_export_password_plan_v1(
+            ABI_VERSION,
+            operation,
+            i64::from(input0),
+            i64::from(input1),
+            i64::from(input2),
+        )
+    };
+    match result {
+        0 => Ok(ProfileExportPasswordAction::Protect),
+        1 => Ok(ProfileExportPasswordAction::Unprotected),
+        2 => Ok(ProfileExportPasswordAction::Prompt),
+        3 => Ok(ProfileExportPasswordAction::Environment),
+        4 => Ok(ProfileExportPasswordAction::NonInteractiveError),
+        5 => Ok(ProfileExportPasswordAction::Valid),
+        6 => Ok(ProfileExportPasswordAction::Empty),
+        7 => Ok(ProfileExportPasswordAction::Mismatch),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn profile_export_password_mode_action(
+    password_protect: bool,
+    no_password: bool,
+    interactive: bool,
+) -> Result<ProfileExportPasswordAction, MojoError> {
+    profile_password_plan(1, password_protect, no_password, interactive)
+}
+
+pub fn profile_password_source_action(
+    env_nonempty: bool,
+    interactive: bool,
+) -> Result<ProfileExportPasswordAction, MojoError> {
+    profile_password_plan(2, env_nonempty, interactive, false)
+}
+
+pub fn profile_export_password_validation(
+    empty: bool,
+    matches: bool,
+) -> Result<ProfileExportPasswordAction, MojoError> {
+    profile_password_plan(3, empty, matches, false)
+}
+
+pub fn profile_import_password_validation(
+    empty: bool,
+) -> Result<ProfileExportPasswordAction, MojoError> {
+    profile_password_plan(4, empty, false, false)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProfileImportAuthUpdateAction {
     Append,
     ReplaceAuth,
@@ -190,6 +266,26 @@ mod tests {
         );
         assert!(validate_pbkdf2_iterations(50_000).is_ok());
         assert_eq!(validate_argon2(0x13, 8 * 1024, 1, 1), Ok(()));
+        assert_eq!(
+            profile_export_password_mode_action(false, false, false).unwrap(),
+            ProfileExportPasswordAction::NonInteractiveError
+        );
+        assert_eq!(
+            profile_export_password_mode_action(true, true, false).unwrap(),
+            ProfileExportPasswordAction::Protect
+        );
+        assert_eq!(
+            profile_password_source_action(true, false).unwrap(),
+            ProfileExportPasswordAction::Environment
+        );
+        assert_eq!(
+            profile_export_password_validation(false, false).unwrap(),
+            ProfileExportPasswordAction::Mismatch
+        );
+        assert_eq!(
+            profile_import_password_validation(true).unwrap(),
+            ProfileExportPasswordAction::Empty
+        );
         assert_eq!(
             profile_import_auth_update_action(false, false).unwrap(),
             ProfileImportAuthUpdateAction::Append
