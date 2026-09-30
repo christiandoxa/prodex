@@ -1177,6 +1177,10 @@ comptime DEEPSEEK_POLICY_RESPONSES_REQUEST_PARAMS: Int64 = 12
 comptime DEEPSEEK_POLICY_RESPONSE_FORMAT_SHAPE: Int64 = 13
 comptime DEEPSEEK_POLICY_METADATA_SHAPE: Int64 = 14
 comptime DEEPSEEK_POLICY_JSON_GUIDANCE: Int64 = 15
+comptime DEEPSEEK_POLICY_NATIVE_WEB_SEARCH: Int64 = 16
+comptime DEEPSEEK_POLICY_NATIVE_FALLBACK_SAFE: Int64 = 17
+comptime DEEPSEEK_POLICY_AUTO_CHAT_FALLBACK: Int64 = 18
+comptime DEEPSEEK_POLICY_STRICT_BINDING_ROUTE: Int64 = 19
 
 
 def deepseek_policy_set(
@@ -2761,6 +2765,80 @@ def deepseek_tools_shape_plan(
         return False
     return True
 
+
+def deepseek_native_web_search_plan(
+    view: ProdexRichStringView, mode: Int64, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    if mode < 0 or mode > 3:
+        return False
+    # Runtime mode tags: 0 auto, 1 off, 2 OpenAI-chat, 3 Anthropic.
+    var native_mode = mode == 0 or mode == 3
+    if not native_mode:
+        deepseek_policy_set(output, 0)
+        return True
+    var root = deepseek_input_object_bounds(view)
+    if root[0] < 0:
+        return False
+    var search = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("web_search_options")
+    )
+    deepseek_policy_set(output, Int64(1) if search[0] >= 0 else Int64(0))
+    return True
+
+
+def deepseek_plain_starts_with(
+    view: ProdexRichStringView, prefix: StringSlice
+) -> Bool:
+    var prefix_length = Int64(prefix.byte_length())
+    if Int64(view.len) < prefix_length:
+        return False
+    var ptr = rich_view_ptr(view)
+    var expected = prefix.unsafe_ptr()
+    for offset in range(prefix_length):
+        if ptr[unsafe_offset=offset] != expected[unsafe_offset=offset]:
+            return False
+    return True
+
+
+def deepseek_native_fallback_safe_plan(
+    view: ProdexRichStringView, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    var safe = (
+        deepseek_plain_starts_with(
+            view, StringSlice("Anthropic Messages does not translate chat field ")
+        )
+        or deepseek_plain_starts_with(
+            view, StringSlice("Anthropic Messages does not translate web_search_options field ")
+        )
+        or deepseek_plain_starts_with(
+            view, StringSlice("Anthropic web search ")
+        )
+    )
+    deepseek_policy_set(output, Int64(1) if safe else Int64(0))
+    return True
+
+
+def deepseek_auto_chat_fallback_plan(
+    mode: Int64, output: Pointer[mut=True, Int64, _]
+) -> Bool:
+    if mode < 0 or mode > 3:
+        return False
+    deepseek_policy_set(output, Int64(1) if mode == 0 else Int64(0))
+    return True
+
+
+def deepseek_strict_binding_route_plan(
+    strict_tools: Bool,
+    endpoint_tag: Int64,
+    output: Pointer[mut=True, Int64, _],
+) -> Bool:
+    # Endpoint tag 0=responses, all other provider endpoint tags stay on primary.
+    if endpoint_tag < 0:
+        return False
+    deepseek_policy_set(output, Int64(1) if strict_tools and endpoint_tag == 0 else Int64(0))
+    return True
+
+
 def deepseek_request_policy_v1(
     abi_version: Int64,
     operation: Int64,
@@ -2817,6 +2895,14 @@ def deepseek_request_policy_v1(
         ok = deepseek_metadata_shape_plan(view, output)
     elif operation == DEEPSEEK_POLICY_JSON_GUIDANCE:
         ok = deepseek_json_guidance_plan(view, output)
+    elif operation == DEEPSEEK_POLICY_NATIVE_WEB_SEARCH:
+        ok = deepseek_native_web_search_plan(view, scalar, output)
+    elif operation == DEEPSEEK_POLICY_NATIVE_FALLBACK_SAFE:
+        ok = deepseek_native_fallback_safe_plan(view, output)
+    elif operation == DEEPSEEK_POLICY_AUTO_CHAT_FALLBACK:
+        ok = deepseek_auto_chat_fallback_plan(scalar, output)
+    elif operation == DEEPSEEK_POLICY_STRICT_BINDING_ROUTE:
+        ok = deepseek_strict_binding_route_plan(flag == 1, scalar, output)
     else:
         return DEEPSEEK_KERNEL_STATUS_INVALID
     return DEEPSEEK_KERNEL_STATUS_OK if ok else DEEPSEEK_KERNEL_STATUS_INVALID

@@ -68,6 +68,10 @@ pub enum DeepSeekRequestPolicyOperation {
     ResponseFormatShape = 13,
     MetadataShape = 14,
     JsonGuidance = 15,
+    NativeWebSearch = 16,
+    NativeFallbackSafe = 17,
+    AutoChatFallback = 18,
+    StrictBindingRoute = 19,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

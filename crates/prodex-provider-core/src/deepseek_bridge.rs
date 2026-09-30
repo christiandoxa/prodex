@@ -54,6 +54,11 @@ pub use self::request_params::{
     deepseek_provider_core_user_id_from_responses_request,
     deepseek_provider_core_validate_reasoning_shape,
 };
+pub use self::request_policy::{
+    deepseek_provider_core_auto_chat_fallback_body,
+    deepseek_provider_core_native_translation_fallback_is_safe,
+    deepseek_provider_core_use_beta_binding_route, deepseek_provider_core_uses_native_web_search,
+};
 pub use self::request_probe::deepseek_provider_core_simple_request;
 
 pub use self::request_tools::{
