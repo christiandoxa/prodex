@@ -26,6 +26,8 @@ comptime PROFILE_IDENTITY_TRIMMED_CASEFOLD_EQUAL: Int64 = 13
 comptime PROFILE_IDENTITY_OPTIONAL_CASEFOLD_EQUAL: Int64 = 14
 comptime PROFILE_IDENTITY_OPTIONAL_CASEFOLD_WILDCARD: Int64 = 15
 comptime PROFILE_IDENTITY_OPTIONAL_NONEMPTY_CASEFOLD_EQUAL: Int64 = 16
+comptime PROFILE_IDENTITY_FIRST_PRESENT_SOURCE: Int64 = 17
+comptime PROFILE_IDENTITY_REMOVED_ACTIVE_CHOICE: Int64 = 18
 
 comptime PROFILE_PRIMARY_PRESENT: Int64 = 1
 comptime PROFILE_SECONDARY_PRESENT: Int64 = 2
@@ -166,7 +168,6 @@ def profile_sanitize_slug(
     var index = bounds[0]
     while index < bounds[1]:
         var width = rich_codepoint_width(source[unsafe_offset=index])
-        var codepoint = rich_codepoint(source, index, width)
         var value: UInt8 = 45
         if width == 1:
             var byte = profile_lower_ascii(source[unsafe_offset=index])
@@ -316,9 +317,9 @@ def profile_validate_name(view: ProdexRichStringView) -> Int64:
         var value = ptr[unsafe_offset=index]
         if value == 47 or value == 92:
             return 2
-    if length == 1 and ptr[0] == 46:
+    if length == 1 and ptr[unsafe_offset=0] == 46:
         return 3
-    if length == 2 and ptr[0] == 46 and ptr[1] == 46:
+    if length == 2 and ptr[unsafe_offset=0] == 46 and ptr[unsafe_offset=1] == 46:
         return 3
     for index in range(length):
         var value = ptr[unsafe_offset=index]
@@ -571,7 +572,7 @@ def prodex_mojo_profile_identity_v1(
         return PROFILE_IDENTITY_ABI
     if (
         operation < 0
-        or operation > PROFILE_IDENTITY_OPTIONAL_NONEMPTY_CASEFOLD_EQUAL
+        or operation > PROFILE_IDENTITY_REMOVED_ACTIVE_CHOICE
         or primary_length < 0
         or secondary_length < 0
         or record_count < 0
@@ -760,6 +761,30 @@ def prodex_mojo_profile_identity_v1(
 
     if operation == PROFILE_IDENTITY_TRIMMED_CASEFOLD_EQUAL:
         result[] = Int64(profile_normalized_equal(primary, secondary, True))
+        return PROFILE_IDENTITY_OK
+
+    if operation == PROFILE_IDENTITY_FIRST_PRESENT_SOURCE:
+        if flags < 0 or flags > 255:
+            return PROFILE_IDENTITY_INVALID
+        result[] = -1
+        for index in range(8):
+            if flags & (Int64(1) << Int64(index)) != 0:
+                result[] = Int64(index)
+                break
+        return PROFILE_IDENTITY_OK
+
+    if operation == PROFILE_IDENTITY_REMOVED_ACTIVE_CHOICE:
+        if flags < 0 or flags > 7:
+            return PROFILE_IDENTITY_INVALID
+        var current_present = (flags & 1) != 0
+        var current_removed = (flags & 2) != 0
+        var remaining_present = (flags & 4) != 0
+        if current_present and not current_removed:
+            result[] = 1
+        elif current_removed and remaining_present:
+            result[] = 2
+        else:
+            result[] = 0
         return PROFILE_IDENTITY_OK
 
     var primary_present = (flags & PROFILE_PRIMARY_PRESENT) != 0

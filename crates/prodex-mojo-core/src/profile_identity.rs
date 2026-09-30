@@ -26,6 +26,8 @@ enum ProfileIdentityOperation {
     OptionalCasefoldEqual = 14,
     OptionalCasefoldWildcard = 15,
     OptionalNonemptyCasefoldEqual = 16,
+    FirstPresentSource = 17,
+    RemovedActiveChoice = 18,
 }
 
 #[repr(C)]
@@ -449,6 +451,66 @@ pub fn optional_nonempty_trimmed_casefold_equal(
     )
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RemovedActiveProfileChoice {
+    None,
+    Current,
+    FirstRemaining,
+}
+
+pub fn first_present_identity_source(present: &[bool]) -> Result<Option<usize>, MojoError> {
+    if present.len() > 8 {
+        return Err(MojoError::InvalidInput);
+    }
+    let flags = present
+        .iter()
+        .enumerate()
+        .fold(0_i64, |flags, (index, present)| {
+            flags | (i64::from(*present) << index)
+        });
+    let result = call_kernel(
+        ProfileIdentityOperation::FirstPresentSource,
+        "",
+        "",
+        flags,
+        0,
+        0,
+        1,
+    )?;
+    if result.result == -1 {
+        return Ok(None);
+    }
+    let index = usize::try_from(result.result).map_err(|_| MojoError::InvalidOutput)?;
+    (index < present.len() && present[index])
+        .then_some(Some(index))
+        .ok_or(MojoError::InvalidOutput)
+}
+
+pub fn removed_active_profile_choice(
+    current_present: bool,
+    current_removed: bool,
+    remaining_present: bool,
+) -> Result<RemovedActiveProfileChoice, MojoError> {
+    let flags = i64::from(current_present)
+        | (i64::from(current_removed) << 1)
+        | (i64::from(remaining_present) << 2);
+    let result = call_kernel(
+        ProfileIdentityOperation::RemovedActiveChoice,
+        "",
+        "",
+        flags,
+        0,
+        0,
+        1,
+    )?;
+    match result.result {
+        0 => Ok(RemovedActiveProfileChoice::None),
+        1 => Ok(RemovedActiveProfileChoice::Current),
+        2 => Ok(RemovedActiveProfileChoice::FirstRemaining),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 pub fn remove_profile_targets_plan(
     records: &[ProfileRemovalRecord<'_>],
     remove_all: bool,
@@ -560,5 +622,21 @@ mod tests {
         assert!(optional_trimmed_casefold_wildcard(Some(" OAuth "), Some("oauth")).unwrap());
         assert!(optional_nonempty_trimmed_casefold_equal(Some("  "), None).unwrap());
         assert!(!optional_nonempty_trimmed_casefold_equal(Some("arn:a"), None).unwrap());
+        assert_eq!(
+            first_present_identity_source(&[false, true, true]).unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            first_present_identity_source(&[false, false]).unwrap(),
+            None
+        );
+        assert_eq!(
+            removed_active_profile_choice(true, true, true).unwrap(),
+            RemovedActiveProfileChoice::FirstRemaining
+        );
+        assert_eq!(
+            removed_active_profile_choice(true, false, true).unwrap(),
+            RemovedActiveProfileChoice::Current
+        );
     }
 }
