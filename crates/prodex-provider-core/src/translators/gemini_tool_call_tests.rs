@@ -32,6 +32,58 @@ fn gemini_chat_tool_call_item_keeps_signature_and_wrapped_arguments() {
 }
 
 #[test]
+fn gemini_apply_patch_unified_diff_is_mojo_owned() {
+    let input = concat!(
+        "diff --git a/README.md b/docs/README.md\r\n",
+        "--- a/README.md\r\n",
+        "+++ b/docs/README.md\r\n",
+        "@@ -1 +1 @@ title\r\n",
+        "-old\r\n",
+        "+new\r\n",
+    );
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({"diff": input})),
+        concat!(
+            "*** Begin Patch\n",
+            "*** Update File: README.md\n",
+            "*** Move to: docs/README.md\n",
+            "@@ title\n",
+            "-old\n",
+            "+new\n",
+            "*** End Patch",
+        )
+    );
+
+    let add = concat!(
+        "--- /dev/null\n",
+        "+++ b/new.txt\n",
+        "@@ -0,0 +1,2 @@\n",
+        "+hello\n",
+        "+world\n",
+    );
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({"patch": add})),
+        concat!(
+            "*** Begin Patch\n",
+            "*** Add File: new.txt\n",
+            "+hello\n",
+            "+world\n",
+            "*** End Patch",
+        )
+    );
+
+    let delete = concat!("--- a/gone.txt\n", "+++ /dev/null\n",);
+    assert_eq!(
+        gemini_custom_apply_patch_input(&json!({"text": delete})),
+        concat!(
+            "*** Begin Patch\n",
+            "*** Delete File: gone.txt\n",
+            "*** End Patch",
+        )
+    );
+}
+
+#[test]
 fn gemini_provider_core_shapes_completed_stream_tool_call_items() {
     assert_eq!(
         gemini_provider_core_stream_completed_tool_call_arguments("apply_patch", "*** Begin Patch"),
