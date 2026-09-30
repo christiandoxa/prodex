@@ -861,3 +861,140 @@ def prodex_redaction_gateway_extra_v1(
     )
     written[] = output_length
     return REACTION_OK
+
+
+comptime REACTION_JSON_INSPECT_SCHEMA_ONLY: Int64 = 0
+comptime REACTION_JSON_INSPECT_DIRECT_STRINGS: Int64 = 1
+comptime REACTION_JSON_INSPECT_ALL_STRINGS: Int64 = 2
+
+comptime REACTION_JSON_SENSITIVE_NONE: Int64 = 0
+comptime REACTION_JSON_SENSITIVE_PRIVATE_KEY: Int64 = 1
+comptime REACTION_JSON_SENSITIVE_API_KEY: Int64 = 2
+comptime REACTION_JSON_SENSITIVE_ACCESS_TOKEN: Int64 = 3
+comptime REACTION_JSON_SENSITIVE_PASSWORD: Int64 = 4
+
+
+def reaction_view_equals_literal(
+    view: ProdexRichStringView, literal: StringSlice
+) -> Bool:
+    if Int64(view.len) != Int64(literal.byte_length()):
+        return False
+    var source = rich_view_ptr(view)
+    var target = literal.unsafe_ptr()
+    for index in range(Int64(view.len)):
+        if source[unsafe_offset=index] != target[unsafe_offset=index]:
+            return False
+    return True
+
+
+def reaction_presidio_inspect_mode(view: ProdexRichStringView) -> Int64:
+    if (
+        reaction_view_equals_literal(view, StringSlice("arguments"))
+        or reaction_view_equals_literal(view, StringSlice("output"))
+    ):
+        return REACTION_JSON_INSPECT_ALL_STRINGS
+    if (
+        reaction_view_equals_literal(view, StringSlice("content"))
+        or reaction_view_equals_literal(view, StringSlice("input"))
+        or reaction_view_equals_literal(view, StringSlice("instructions"))
+        or reaction_view_equals_literal(view, StringSlice("prompt"))
+        or reaction_view_equals_literal(view, StringSlice("text"))
+    ):
+        return REACTION_JSON_INSPECT_DIRECT_STRINGS
+    return REACTION_JSON_INSPECT_SCHEMA_ONLY
+
+
+def reaction_presidio_known_metadata(view: ProdexRichStringView) -> Bool:
+    return (
+        reaction_view_equals_literal(view, StringSlice("background"))
+        or reaction_view_equals_literal(view, StringSlice("call_id"))
+        or reaction_view_equals_literal(view, StringSlice("conversation"))
+        or reaction_view_equals_literal(view, StringSlice("id"))
+        or reaction_view_equals_literal(view, StringSlice("include"))
+        or reaction_view_equals_literal(view, StringSlice("max_completion_tokens"))
+        or reaction_view_equals_literal(view, StringSlice("max_output_tokens"))
+        or reaction_view_equals_literal(view, StringSlice("model"))
+        or reaction_view_equals_literal(view, StringSlice("name"))
+        or reaction_view_equals_literal(view, StringSlice("parallel_tool_calls"))
+        or reaction_view_equals_literal(view, StringSlice("previous_response_id"))
+        or reaction_view_equals_literal(view, StringSlice("prompt_cache_key"))
+        or reaction_view_equals_literal(view, StringSlice("reasoning"))
+        or reaction_view_equals_literal(view, StringSlice("response_format"))
+        or reaction_view_equals_literal(view, StringSlice("role"))
+        or reaction_view_equals_literal(view, StringSlice("server_label"))
+        or reaction_view_equals_literal(view, StringSlice("service_tier"))
+        or reaction_view_equals_literal(view, StringSlice("store"))
+        or reaction_view_equals_literal(view, StringSlice("stream"))
+        or reaction_view_equals_literal(view, StringSlice("temperature"))
+        or reaction_view_equals_literal(view, StringSlice("top_k"))
+        or reaction_view_equals_literal(view, StringSlice("top_p"))
+        or reaction_view_equals_literal(view, StringSlice("truncation"))
+        or reaction_view_equals_literal(view, StringSlice("type"))
+        or reaction_view_equals_literal(view, StringSlice("user"))
+        or reaction_view_equals_literal(view, StringSlice("verbosity"))
+    )
+
+
+def reaction_presidio_unsupported_modality(view: ProdexRichStringView) -> Bool:
+    return (
+        reaction_view_equals_literal(view, StringSlice("audio"))
+        or reaction_view_equals_literal(view, StringSlice("audio_url"))
+        or reaction_view_equals_literal(view, StringSlice("file"))
+        or reaction_view_equals_literal(view, StringSlice("image"))
+        or reaction_view_equals_literal(view, StringSlice("image_url"))
+        or reaction_view_equals_literal(view, StringSlice("input_audio"))
+        or reaction_view_equals_literal(view, StringSlice("input_file"))
+        or reaction_view_equals_literal(view, StringSlice("input_image"))
+        or reaction_view_equals_literal(view, StringSlice("video"))
+    )
+
+
+def reaction_presidio_sensitive_kind(view: ProdexRichStringView) -> Int64:
+    var source = rich_view_ptr(view)
+    var length = Int64(view.len)
+    if not reaction_key_sensitive_ptr(source, length):
+        return REACTION_JSON_SENSITIVE_NONE
+    if reaction_normalized_key_contains(
+        source, length, StringSlice("privatekey")
+    ):
+        return REACTION_JSON_SENSITIVE_PRIVATE_KEY
+    if reaction_normalized_key_contains(source, length, StringSlice("apikey")):
+        return REACTION_JSON_SENSITIVE_API_KEY
+    if (
+        reaction_normalized_key_contains(source, length, StringSlice("token"))
+        or reaction_normalized_key_matches(
+            source, length, StringSlice("authorization")
+        )
+    ):
+        return REACTION_JSON_SENSITIVE_ACCESS_TOKEN
+    return REACTION_JSON_SENSITIVE_PASSWORD
+
+
+@export("prodex_redaction_json_field_plan_v1")
+def prodex_redaction_json_field_plan_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != REACTION_ABI_VERSION
+        or input_length < 0
+        or (input_length > 0 and input_address == 0)
+        or output_address == 0
+    ):
+        return REACTION_INVALID
+    var view = reaction_view(input_address, input_length)
+    if not rich_view_valid(view, input_length):
+        return REACTION_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = reaction_presidio_inspect_mode(view)
+    output[unsafe_offset=1] = reaction_presidio_sensitive_kind(view)
+    output[unsafe_offset=2] = Int64(reaction_presidio_known_metadata(view))
+    output[unsafe_offset=3] = Int64(reaction_presidio_unsupported_modality(view))
+    output[unsafe_offset=4] = Int64(
+        reaction_view_equals_literal(view, StringSlice("tools"))
+    )
+    return REACTION_OK

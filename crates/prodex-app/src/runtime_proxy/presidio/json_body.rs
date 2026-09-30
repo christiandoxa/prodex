@@ -1,6 +1,10 @@
 //! Bounded schema-aware JSON content walking for Presidio inspection.
 
 use prodex_domain::{FindingKind, InspectionCoverage};
+use prodex_mojo_core::redaction::{
+    JsonFieldPlan, JsonInspectionMode as PresidioJsonInspectMode, JsonSensitiveKind,
+    json_field_plan,
+};
 use std::error::Error;
 use std::fmt;
 
@@ -67,13 +71,6 @@ struct PresidioJsonWalkState {
     total_text_bytes: usize,
     unsupported_modality: bool,
     opaque_content: bool,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PresidioJsonInspectMode {
-    SchemaOnly,
-    DirectStrings,
-    AllStrings,
 }
 
 fn collect_json_content_at(
@@ -162,10 +159,12 @@ fn collect_json_object_content(
     let skip_tools = path == "$" || json_object_declares_tools(fields);
     let inspect_all_strings = inspect_mode == PresidioJsonInspectMode::AllStrings;
     for (key, value) in fields {
-        if skip_tools && key == "tools" {
+        let field_plan =
+            json_field_plan(key).expect("Mojo Presidio JSON field policy returned invalid output");
+        if skip_tools && field_plan.tools_field {
             continue;
         }
-        if unsupported_modality_field(key) && !value.is_null() {
+        if field_plan.unsupported_modality && !value.is_null() {
             state.unsupported_modality = true;
             continue;
         }
@@ -174,12 +173,21 @@ fn collect_json_object_content(
             sensitive_kind,
             path,
             depth,
-            key,
-            inspect_all_strings,
+            PresidioJsonFieldContext {
+                key,
+                inspect_all_strings,
+                plan: field_plan,
+            },
             state,
         )?;
     }
     Ok(())
+}
+
+struct PresidioJsonFieldContext<'a> {
+    key: &'a str,
+    inspect_all_strings: bool,
+    plan: JsonFieldPlan,
 }
 
 fn collect_json_object_field(
@@ -187,25 +195,28 @@ fn collect_json_object_field(
     sensitive_kind: Option<FindingKind>,
     path: &str,
     depth: usize,
-    key: &str,
-    inspect_all_strings: bool,
+    field: PresidioJsonFieldContext<'_>,
     state: &mut PresidioJsonWalkState,
 ) -> Result<(), PresidioJsonContentError> {
-    let field_mode = json_string_inspection_mode(key);
-    if !inspect_all_strings
-        && field_mode == PresidioJsonInspectMode::SchemaOnly
+    if !field.inspect_all_strings
+        && field.plan.inspection_mode == PresidioJsonInspectMode::SchemaOnly
         && !value.is_null()
-        && !json_field_is_known_protocol_metadata(key)
+        && !field.plan.known_protocol_metadata
     {
         state.opaque_content = true;
     }
-    let child_mode = if inspect_all_strings {
+    let child_mode = if field.inspect_all_strings {
         PresidioJsonInspectMode::AllStrings
     } else {
-        field_mode
+        field.plan.inspection_mode
     };
-    let child_sensitive_kind = sensitive_json_key_kind(key).or(sensitive_kind);
-    let child_path = json_content_child_path(path, key, field_mode, inspect_all_strings);
+    let child_sensitive_kind = presidio_finding_kind(field.plan.sensitive_kind).or(sensitive_kind);
+    let child_path = json_content_child_path(
+        path,
+        field.key,
+        field.plan.inspection_mode,
+        field.inspect_all_strings,
+    );
     collect_json_content_at(
         value,
         child_mode,
@@ -231,86 +242,18 @@ fn json_content_child_path(
     }
 }
 
-fn sensitive_json_key_kind(key: &str) -> Option<FindingKind> {
-    if !redaction::redaction_key_looks_sensitive(key) {
-        return None;
+fn presidio_finding_kind(kind: JsonSensitiveKind) -> Option<FindingKind> {
+    match kind {
+        JsonSensitiveKind::None => None,
+        JsonSensitiveKind::PrivateKey => Some(FindingKind::PrivateKey),
+        JsonSensitiveKind::ApiKey => Some(FindingKind::ApiKey),
+        JsonSensitiveKind::AccessToken => Some(FindingKind::AccessToken),
+        JsonSensitiveKind::Password => Some(FindingKind::Password),
     }
-    let normalized = key
-        .bytes()
-        .filter(u8::is_ascii_alphanumeric)
-        .map(|byte| byte.to_ascii_lowercase())
-        .collect::<Vec<_>>();
-    let normalized = std::str::from_utf8(&normalized).ok()?;
-    Some(if normalized.contains("privatekey") {
-        FindingKind::PrivateKey
-    } else if normalized.contains("apikey") {
-        FindingKind::ApiKey
-    } else if normalized.contains("token") || normalized == "authorization" {
-        FindingKind::AccessToken
-    } else {
-        FindingKind::Password
-    })
-}
-
-fn json_string_inspection_mode(key: &str) -> PresidioJsonInspectMode {
-    match key {
-        "arguments" | "output" => PresidioJsonInspectMode::AllStrings,
-        "content" | "input" | "instructions" | "prompt" | "text" => {
-            PresidioJsonInspectMode::DirectStrings
-        }
-        _ => PresidioJsonInspectMode::SchemaOnly,
-    }
-}
-
-fn json_field_is_known_protocol_metadata(key: &str) -> bool {
-    matches!(
-        key,
-        "background"
-            | "call_id"
-            | "conversation"
-            | "id"
-            | "include"
-            | "max_completion_tokens"
-            | "max_output_tokens"
-            | "model"
-            | "name"
-            | "parallel_tool_calls"
-            | "previous_response_id"
-            | "prompt_cache_key"
-            | "reasoning"
-            | "response_format"
-            | "role"
-            | "server_label"
-            | "service_tier"
-            | "store"
-            | "stream"
-            | "temperature"
-            | "top_k"
-            | "top_p"
-            | "truncation"
-            | "type"
-            | "user"
-            | "verbosity"
-    )
 }
 
 fn json_object_declares_tools(fields: &serde_json::Map<String, serde_json::Value>) -> bool {
     fields.get("role").and_then(serde_json::Value::as_str) == Some("developer")
-}
-
-fn unsupported_modality_field(key: &str) -> bool {
-    matches!(
-        key,
-        "audio"
-            | "audio_url"
-            | "file"
-            | "image"
-            | "image_url"
-            | "input_audio"
-            | "input_file"
-            | "input_image"
-            | "video"
-    )
 }
 
 pub(super) fn replace_json_string_values<'a>(
@@ -371,19 +314,20 @@ fn replace_json_object_strings<'a>(
     let skip_tools = root || json_object_declares_tools(fields);
     let inspect_all_strings = inspect_mode == PresidioJsonInspectMode::AllStrings;
     for (key, value) in fields {
-        if skip_tools && key == "tools" {
+        let field_plan =
+            json_field_plan(key).expect("Mojo Presidio JSON field policy returned invalid output");
+        if skip_tools && field_plan.tools_field {
             continue;
         }
-        if unsupported_modality_field(key) {
+        if field_plan.unsupported_modality {
             continue;
         }
-        let field_mode = json_string_inspection_mode(key);
         replace_json_string_values_at(
             value,
             if inspect_all_strings {
                 PresidioJsonInspectMode::AllStrings
             } else {
-                field_mode
+                field_plan.inspection_mode
             },
             values,
             false,
