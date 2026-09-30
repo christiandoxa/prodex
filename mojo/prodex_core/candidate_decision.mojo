@@ -1294,3 +1294,76 @@ def prodex_runtime_gateway_adaptive_plan_v1(
     else:
         reason[unsafe_offset=0] = ADAPTIVE_PLAN_REASON_ADAPTIVE_ENABLED
     return 0
+
+
+comptime WEBSOCKET_FAILURE_FINISH: Int64 = 0
+comptime WEBSOCKET_FAILURE_CONTINUE: Int64 = 1
+comptime WEBSOCKET_QUOTA_FALLBACK_READY: Int64 = 0
+comptime WEBSOCKET_QUOTA_FALLBACK_LAST_CHANCE: Int64 = 1
+comptime WEBSOCKET_QUOTA_FALLBACK_UNAVAILABLE: Int64 = 2
+
+
+@export("prodex_runtime_websocket_failure_disposition_v1")
+def prodex_runtime_websocket_failure_disposition_v1(
+    affinity_releasable: Int64,
+    inflight_saturated: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        affinity_releasable < 0
+        or affinity_releasable > 1
+        or inflight_saturated < 0
+        or inflight_saturated > 1
+    ):
+        return 1
+    output[unsafe_offset=0] = (
+        WEBSOCKET_FAILURE_CONTINUE
+        if affinity_releasable == 1
+        else WEBSOCKET_FAILURE_FINISH
+    )
+    output[unsafe_offset=1] = Int64(inflight_saturated == 0)
+    output[unsafe_offset=2] = Int64(
+        affinity_releasable == 1 and inflight_saturated == 0
+    )
+    return 0
+
+
+@export("prodex_runtime_websocket_full_context_signal_v1")
+def prodex_runtime_websocket_full_context_signal_v1(
+    previous_response_present: Int64,
+    session_present: Int64,
+    owner_matches: Int64,
+) abi("C") -> Int64:
+    if (
+        previous_response_present < 0
+        or previous_response_present > 1
+        or session_present < 0
+        or session_present > 1
+        or owner_matches < 0
+        or owner_matches > 1
+    ):
+        return -1
+    return Int64(
+        previous_response_present == 1
+        and session_present == 1
+        and owner_matches == 1
+    )
+
+
+@export("prodex_runtime_websocket_quota_fallback_plan_v1")
+def prodex_runtime_websocket_quota_fallback_plan_v1(
+    route_eligible_fallback: Int64,
+    has_context_constraint: Int64,
+) abi("C") -> Int64:
+    if (
+        route_eligible_fallback < 0
+        or route_eligible_fallback > 1
+        or has_context_constraint < 0
+        or has_context_constraint > 1
+    ):
+        return -1
+    if route_eligible_fallback == 1:
+        return WEBSOCKET_QUOTA_FALLBACK_READY
+    if has_context_constraint == 1:
+        return WEBSOCKET_QUOTA_FALLBACK_UNAVAILABLE
+    return WEBSOCKET_QUOTA_FALLBACK_LAST_CHANCE

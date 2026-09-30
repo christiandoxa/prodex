@@ -123,6 +123,20 @@ pub struct AffinitySelectionPlan {
     pub noncompact_session_priority: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebsocketFailureDispositionPlan {
+    pub continue_selection: bool,
+    pub mark_backoff: bool,
+    pub exclude_profile: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebsocketQuotaFallbackPlan {
+    Ready,
+    LastChance,
+    Unavailable,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct WebsocketResponsePlanInput {
     pub reuse_existing_session: bool,
@@ -213,6 +227,20 @@ unsafe extern "C" {
         compact_session_matches_session: i64,
         output: *mut i64,
     ) -> i64;
+    fn prodex_runtime_websocket_failure_disposition_v1(
+        affinity_releasable: i64,
+        inflight_saturated: i64,
+        output: *mut i64,
+    ) -> i64;
+    fn prodex_runtime_websocket_full_context_signal_v1(
+        previous_response_present: i64,
+        session_present: i64,
+        owner_matches: i64,
+    ) -> i64;
+    fn prodex_runtime_websocket_quota_fallback_plan_v1(
+        route_eligible_fallback: i64,
+        has_context_constraint: i64,
+    ) -> i64;
     fn prodex_runtime_websocket_response_plan_v1(
         reuse_existing_session: i64,
         request_previous_response_present: i64,
@@ -227,6 +255,63 @@ unsafe extern "C" {
         direct_fallback_reason: i64,
         output: *mut i64,
     ) -> i64;
+}
+
+pub fn websocket_failure_disposition_plan(
+    affinity_releasable: bool,
+    inflight_saturated: bool,
+) -> Result<WebsocketFailureDispositionPlan, MojoError> {
+    let mut output = [-1_i64; 3];
+    let status = unsafe {
+        prodex_runtime_websocket_failure_disposition_v1(
+            i64::from(affinity_releasable),
+            i64::from(inflight_saturated),
+            output.as_mut_ptr(),
+        )
+    };
+    if status != 0 || output.iter().any(|value| !matches!(value, 0 | 1)) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(WebsocketFailureDispositionPlan {
+        continue_selection: output[0] == 1,
+        mark_backoff: output[1] == 1,
+        exclude_profile: output[2] == 1,
+    })
+}
+
+pub fn websocket_full_context_signal_eligible(
+    previous_response_present: bool,
+    session_present: bool,
+    owner_matches: bool,
+) -> Result<bool, MojoError> {
+    match unsafe {
+        prodex_runtime_websocket_full_context_signal_v1(
+            i64::from(previous_response_present),
+            i64::from(session_present),
+            i64::from(owner_matches),
+        )
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn websocket_quota_fallback_plan(
+    route_eligible_fallback: bool,
+    has_context_constraint: bool,
+) -> Result<WebsocketQuotaFallbackPlan, MojoError> {
+    match unsafe {
+        prodex_runtime_websocket_quota_fallback_plan_v1(
+            i64::from(route_eligible_fallback),
+            i64::from(has_context_constraint),
+        )
+    } {
+        0 => Ok(WebsocketQuotaFallbackPlan::Ready),
+        1 => Ok(WebsocketQuotaFallbackPlan::LastChance),
+        2 => Ok(WebsocketQuotaFallbackPlan::Unavailable),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn websocket_response_plan(

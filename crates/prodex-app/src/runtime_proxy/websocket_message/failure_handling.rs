@@ -299,11 +299,17 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             ),
         );
         mark_runtime_profile_retry_backoff_for_delay(self.shared, &profile_name, retry_after)?;
-        if self.candidate_has_hard_affinity(&profile_name) {
+        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+            !self.candidate_has_hard_affinity(&profile_name),
+            false,
+        );
+        if !plan.continue_selection {
             forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
-        self.excluded_profiles.insert(profile_name);
+        if plan.exclude_profile {
+            self.excluded_profiles.insert(profile_name);
+        }
         self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
@@ -321,7 +327,11 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.request_id, self.session_id, profile_name, via
             ),
         );
-        if self.candidate_has_hard_affinity(&profile_name) {
+        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+            !self.candidate_has_hard_affinity(&profile_name),
+            false,
+        );
+        if !plan.continue_selection {
             forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
@@ -333,7 +343,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             self.request_session_id.as_deref(),
         )?;
         self.clear_profile_affinity(&profile_name, true);
-        self.excluded_profiles.insert(profile_name);
+        if plan.exclude_profile {
+            self.excluded_profiles.insert(profile_name);
+        }
         self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), true));
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
@@ -476,10 +488,14 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             ),
         );
         self.mark_overload_backoff(&profile_name)?;
-        if !self.quota_blocked_affinity_is_releasable(
-            &profile_name,
-            self.request_requires_locked_previous_response_affinity(),
-        ) {
+        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+            self.quota_blocked_affinity_is_releasable(
+                &profile_name,
+                self.request_requires_locked_previous_response_affinity(),
+            ),
+            false,
+        );
+        if !plan.continue_selection {
             runtime_proxy_log(
                 self.shared,
                 format!(
@@ -490,7 +506,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
-        self.excluded_profiles.insert(profile_name);
+        if plan.exclude_profile {
+            self.excluded_profiles.insert(profile_name);
+        }
         self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
@@ -501,13 +519,17 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         reason: &'static str,
         reset_previous_response_retry_index: bool,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
-        if reason != "profile_inflight_saturated" {
+        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+            self.quota_blocked_affinity_is_releasable(
+                &profile_name,
+                self.request_requires_locked_previous_response_affinity(),
+            ),
+            reason == "profile_inflight_saturated",
+        );
+        if plan.mark_backoff {
             mark_runtime_profile_retry_backoff(self.shared, &profile_name)?;
         }
-        if !self.quota_blocked_affinity_is_releasable(
-            &profile_name,
-            self.request_requires_locked_previous_response_affinity(),
-        ) {
+        if !plan.continue_selection {
             send_runtime_proxy_websocket_error(
                 &mut *self.local_socket,
                 503,
@@ -527,7 +549,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 ),
             );
         }
-        if reason != "profile_inflight_saturated" {
+        if plan.exclude_profile {
             self.excluded_profiles.insert(profile_name);
         }
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
@@ -590,10 +612,11 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     fn try_signal_quota_full_context_retry(&mut self, profile_name: &str) -> Result<bool> {
-        if self.previous_response_id.is_none()
-            || self.request_session_id.is_none()
-            || self.bound_profile.as_deref() != Some(profile_name)
-            || !self.prepare_quota_fallback(profile_name)?
+        if !runtime_proxy_crate::runtime_websocket_full_context_signal_eligible(
+            self.previous_response_id.is_some(),
+            self.request_session_id.is_some(),
+            self.bound_profile.as_deref() == Some(profile_name),
+        ) || !self.prepare_quota_fallback(profile_name)?
         {
             return Ok(false);
         }
@@ -619,43 +642,48 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     fn prepare_quota_fallback(&mut self, profile_name: &str) -> Result<bool> {
         let mut excluded_profiles = self.excluded_profiles.clone();
         excluded_profiles.insert(profile_name.to_string());
-        if runtime_has_route_eligible_quota_fallback_for_model(
+        let route_eligible_fallback = runtime_has_route_eligible_quota_fallback_for_model(
             self.shared,
             profile_name,
             &excluded_profiles,
             RuntimeRouteKind::Websocket,
             runtime_smart_context_model_name_from_body(self.request_text.as_bytes()).as_deref(),
-        )? {
-            return Ok(true);
-        }
-        if self.previous_response_id.is_some()
+        )?;
+        let has_context_constraint = self.previous_response_id.is_some()
             || self.request_requires_previous_response_affinity
             || self.request_turn_state.is_some()
             || self.pinned_profile.is_some()
             || self.turn_state_profile.is_some()
-            || self.compact_followup_profile.is_some()
-        {
-            return Ok(false);
+            || self.compact_followup_profile.is_some();
+        match runtime_proxy_crate::runtime_websocket_quota_fallback_plan(
+            route_eligible_fallback,
+            has_context_constraint,
+        ) {
+            runtime_proxy_crate::RuntimeWebsocketQuotaFallbackPlan::Ready => Ok(true),
+            runtime_proxy_crate::RuntimeWebsocketQuotaFallbackPlan::Unavailable => Ok(false),
+            runtime_proxy_crate::RuntimeWebsocketQuotaFallbackPlan::LastChance => {
+                let Some(fallback_profile) = runtime_quota_last_chance_profile_for_route(
+                    self.shared,
+                    &excluded_profiles,
+                    RuntimeRouteKind::Websocket,
+                    self.prompt_cache_key.as_deref(),
+                    runtime_smart_context_model_name_from_body(self.request_text.as_bytes())
+                        .as_deref(),
+                )?
+                else {
+                    return Ok(false);
+                };
+                runtime_proxy_log(
+                    self.shared,
+                    format!(
+                        "request={} websocket_session={} quota_last_chance profile={} failed_profile={}",
+                        self.request_id, self.session_id, fallback_profile, profile_name
+                    ),
+                );
+                self.quota_last_chance_profile = Some(fallback_profile);
+                Ok(true)
+            }
         }
-        let Some(fallback_profile) = runtime_quota_last_chance_profile_for_route(
-            self.shared,
-            &excluded_profiles,
-            RuntimeRouteKind::Websocket,
-            self.prompt_cache_key.as_deref(),
-            runtime_smart_context_model_name_from_body(self.request_text.as_bytes()).as_deref(),
-        )?
-        else {
-            return Ok(false);
-        };
-        runtime_proxy_log(
-            self.shared,
-            format!(
-                "request={} websocket_session={} quota_last_chance profile={} failed_profile={}",
-                self.request_id, self.session_id, fallback_profile, profile_name
-            ),
-        );
-        self.quota_last_chance_profile = Some(fallback_profile);
-        Ok(true)
     }
 
     pub(super) fn handle_candidate_overloaded(
@@ -677,10 +705,14 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         );
         self.mark_overload_backoff(&profile_name)?;
         self.saw_overload_failure = true;
-        if !self.quota_blocked_affinity_is_releasable(
-            &profile_name,
-            self.request_requires_locked_previous_response_affinity(),
-        ) {
+        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+            self.quota_blocked_affinity_is_releasable(
+                &profile_name,
+                self.request_requires_locked_previous_response_affinity(),
+            ),
+            false,
+        );
+        if !plan.continue_selection {
             runtime_proxy_log(
                 self.shared,
                 format!(
@@ -691,7 +723,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
-        self.excluded_profiles.insert(profile_name);
+        if plan.exclude_profile {
+            self.excluded_profiles.insert(profile_name);
+        }
         self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
@@ -708,13 +742,17 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.request_id, self.session_id, profile_name, reason
             ),
         );
-        if reason != "profile_inflight_saturated" {
+        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+            self.quota_blocked_affinity_is_releasable(
+                &profile_name,
+                self.request_requires_locked_previous_response_affinity(),
+            ),
+            reason == "profile_inflight_saturated",
+        );
+        if plan.mark_backoff {
             mark_runtime_profile_retry_backoff(self.shared, &profile_name)?;
         }
-        if !self.quota_blocked_affinity_is_releasable(
-            &profile_name,
-            self.request_requires_locked_previous_response_affinity(),
-        ) {
+        if !plan.continue_selection {
             send_runtime_proxy_websocket_error(
                 &mut *self.local_socket,
                 503,
@@ -734,7 +772,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 ),
             );
         }
-        if reason != "profile_inflight_saturated" {
+        if plan.exclude_profile {
             self.excluded_profiles.insert(profile_name);
         }
         Ok(RuntimeWebsocketMessageLoopAction::Continue)

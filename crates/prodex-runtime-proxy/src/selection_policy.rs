@@ -607,6 +607,71 @@ pub fn runtime_soft_affinity_rejection_reason(
     runtime_quota_policy_reason(runtime_soft_affinity_policy_mojo(input)).unwrap_or("quota_unknown")
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeWebsocketFailureDispositionPlan {
+    pub continue_selection: bool,
+    pub mark_backoff: bool,
+    pub exclude_profile: bool,
+}
+
+pub fn runtime_websocket_failure_disposition(
+    affinity_releasable: bool,
+    inflight_saturated: bool,
+) -> RuntimeWebsocketFailureDispositionPlan {
+    let plan = prodex_mojo_core::runtime::websocket_failure_disposition_plan(
+        affinity_releasable,
+        inflight_saturated,
+    )
+    .expect("Mojo websocket failure disposition returned an invalid result");
+    RuntimeWebsocketFailureDispositionPlan {
+        continue_selection: plan.continue_selection,
+        mark_backoff: plan.mark_backoff,
+        exclude_profile: plan.exclude_profile,
+    }
+}
+
+pub fn runtime_websocket_full_context_signal_eligible(
+    previous_response_present: bool,
+    session_present: bool,
+    owner_matches: bool,
+) -> bool {
+    prodex_mojo_core::runtime::websocket_full_context_signal_eligible(
+        previous_response_present,
+        session_present,
+        owner_matches,
+    )
+    .expect("Mojo websocket full-context retry policy returned an invalid result")
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeWebsocketQuotaFallbackPlan {
+    Ready,
+    LastChance,
+    Unavailable,
+}
+
+pub fn runtime_websocket_quota_fallback_plan(
+    route_eligible_fallback: bool,
+    has_context_constraint: bool,
+) -> RuntimeWebsocketQuotaFallbackPlan {
+    match prodex_mojo_core::runtime::websocket_quota_fallback_plan(
+        route_eligible_fallback,
+        has_context_constraint,
+    )
+    .expect("Mojo websocket quota-fallback policy returned an invalid result")
+    {
+        prodex_mojo_core::runtime::WebsocketQuotaFallbackPlan::Ready => {
+            RuntimeWebsocketQuotaFallbackPlan::Ready
+        }
+        prodex_mojo_core::runtime::WebsocketQuotaFallbackPlan::LastChance => {
+            RuntimeWebsocketQuotaFallbackPlan::LastChance
+        }
+        prodex_mojo_core::runtime::WebsocketQuotaFallbackPlan::Unavailable => {
+            RuntimeWebsocketQuotaFallbackPlan::Unavailable
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "../tests/src/selection_policy.rs"]
 mod tests;
