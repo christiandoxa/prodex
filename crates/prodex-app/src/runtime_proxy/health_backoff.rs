@@ -80,16 +80,15 @@ pub(crate) fn runtime_profile_recovery_wait_for_route(
             .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
             .copied()
             .filter(|until| *until > now);
-        let recovery_at = [retry_until, transport_until, circuit_until]
-            .into_iter()
-            .flatten()
-            .max();
-        if recovery_at.is_some_and(|until| until > now) {
-            earliest = match (earliest, recovery_at) {
-                (Some(current), Some(next)) => Some(current.min(next)),
-                (None, Some(next)) => Some(next),
-                (current, None) => current,
-            };
+        let recovery_at = prodex_mojo_core::runtime::profile_recovery_at(
+            retry_until,
+            transport_until,
+            circuit_until,
+            now,
+        )
+        .expect("Mojo profile recovery planner returned invalid output");
+        if let Some(next) = recovery_at {
+            earliest = Some(earliest.map_or(next, |current| current.min(next)));
         }
     }
     Ok(earliest)
@@ -133,55 +132,68 @@ pub(crate) fn clear_runtime_recovered_profiles(
         if runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some() {
             return true;
         }
-        let retry_active = include_retry_backoff
-            && runtime
-                .profile_retry_backoff_until
-                .get(profile_name)
-                .is_some_and(|until| *until > now);
-        let transport_active = runtime_profile_transport_backoff_until_from_map(
+        let retry_until = include_retry_backoff
+            .then(|| {
+                runtime
+                    .profile_retry_backoff_until
+                    .get(profile_name)
+                    .copied()
+            })
+            .flatten();
+        let transport_until = runtime_profile_transport_backoff_until_from_map(
             &runtime.profile_transport_backoff_until,
             profile_name,
             route_kind,
             now,
-        )
-        .is_some();
-        let circuit_active = runtime
+        );
+        let circuit_until = runtime
             .profile_route_circuit_open_until
             .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
-            .is_some_and(|until| *until > now);
-        retry_active || transport_active || circuit_active
+            .copied();
+        prodex_mojo_core::runtime::profile_selection_backoff_active(
+            retry_until,
+            transport_until,
+            circuit_until,
+            now,
+        )
+        .expect("Mojo selection-backoff policy returned invalid output")
     });
     Ok(before.saturating_sub(excluded_profiles.len()))
 }
 
 pub(crate) fn prune_runtime_profile_retry_backoff(runtime: &mut RuntimeRotationState, now: i64) {
-    runtime
-        .profile_retry_backoff_until
-        .retain(|_, until| *until > now);
+    runtime.profile_retry_backoff_until.retain(|_, until| {
+        prodex_mojo_core::runtime::profile_backoff_should_retain(true, *until, now)
+            .expect("Mojo retry-backoff retention returned invalid output")
+    });
 }
 
 pub(crate) fn prune_runtime_profile_transport_backoff(
     runtime: &mut RuntimeRotationState,
     now: i64,
 ) {
-    runtime
-        .profile_transport_backoff_until
-        .retain(|_, until| *until > now);
+    runtime.profile_transport_backoff_until.retain(|_, until| {
+        prodex_mojo_core::runtime::profile_backoff_should_retain(true, *until, now)
+            .expect("Mojo transport-backoff retention returned invalid output")
+    });
 }
 
 pub(crate) fn prune_runtime_profile_route_circuits(runtime: &mut RuntimeRotationState, now: i64) {
     runtime
         .profile_route_circuit_open_until
         .retain(|key, until| {
-            if *until > now {
-                return true;
-            }
             let health_key = runtime_profile_route_circuit_health_key(key);
-            runtime_profile_effective_health_score_from_map(
+            let health_score = runtime_profile_effective_health_score_from_map(
                 &runtime.profile_health,
                 &health_key,
                 now,
-            ) > 0
+            );
+            prodex_mojo_core::runtime::profile_route_circuit_should_retain(
+                *until,
+                now,
+                health_score,
+            )
+            .expect("Mojo route-circuit retention returned invalid output")
         });
 }
 
@@ -246,8 +258,13 @@ pub(crate) fn mark_runtime_profile_retry_backoff_for_delay(
         .map(|delay| delay.as_millis().saturating_add(999) / 1_000)
         .and_then(|seconds| i64::try_from(seconds).ok())
         .unwrap_or_default();
-    let backoff_seconds = RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS.max(retry_after_seconds);
-    let until = now.saturating_add(backoff_seconds);
+    let plan = prodex_mojo_core::runtime::profile_retry_backoff_plan(
+        retry_after_seconds,
+        RUNTIME_PROFILE_RETRY_BACKOFF_SECONDS,
+        now,
+    )
+    .expect("Mojo retry-backoff planner returned invalid output");
+    let until = plan.until;
     runtime
         .profile_retry_backoff_until
         .insert(profile_name.to_string(), until);
@@ -300,15 +317,15 @@ pub(crate) fn mark_runtime_profile_transport_backoff(
     )
     .unwrap_or(now)
     .saturating_sub(now);
-    let next_backoff_seconds = if existing_remaining > 0 {
-        existing_remaining.saturating_mul(2).clamp(
-            RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS,
-            RUNTIME_PROFILE_TRANSPORT_BACKOFF_MAX_SECONDS,
-        )
-    } else {
-        RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS
-    };
-    let until = now.saturating_add(next_backoff_seconds);
+    let plan = prodex_mojo_core::runtime::profile_transport_backoff_plan(
+        existing_remaining,
+        RUNTIME_PROFILE_TRANSPORT_BACKOFF_SECONDS,
+        RUNTIME_PROFILE_TRANSPORT_BACKOFF_MAX_SECONDS,
+        now,
+    )
+    .expect("Mojo transport-backoff planner returned invalid output");
+    let next_backoff_seconds = plan.seconds;
+    let until = plan.until;
     runtime
         .profile_transport_backoff_until
         .entry(route_key.clone())
