@@ -28,6 +28,21 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_runtime_lineage_candidate_plan_v1(
+        abi_version: i64,
+        profile_valid: i64,
+        conflict_sentinel: i64,
+        profile_available: i64,
+        binding_identity_present: i64,
+        existing_identity_present: i64,
+        binding_identity_matches: i64,
+    ) -> i64;
+    fn prodex_runtime_lineage_resolution_plan_v1(
+        abi_version: i64,
+        conflict: i64,
+        owner_count: i64,
+        unavailable_count: i64,
+    ) -> i64;
     fn prodex_runtime_lineage_release_plan_v1(
         abi_version: i64,
         previous_response_present: i64,
@@ -127,6 +142,100 @@ pub fn response_turn_state_key(response_id: &str, turn_state: &str) -> Result<St
     build(BUILD_RESPONSE_TURN_STATE, response_id, Some(turn_state))
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeLineageCandidateKind {
+    Owner,
+    Unavailable,
+    Conflict,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeLineageIdentityAction {
+    Keep,
+    Set,
+    Conflict,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeLineageCandidatePlan {
+    pub kind: RuntimeLineageCandidateKind,
+    pub identity_action: RuntimeLineageIdentityAction,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeLineageResolutionKind {
+    Unbound,
+    Owned,
+    Unavailable,
+    Conflict,
+}
+
+pub fn candidate_plan(
+    profile_valid: bool,
+    conflict_sentinel: bool,
+    profile_available: bool,
+    binding_identity_present: bool,
+    existing_identity_present: bool,
+    binding_identity_matches: bool,
+) -> Result<RuntimeLineageCandidatePlan, MojoError> {
+    let result = unsafe {
+        prodex_runtime_lineage_candidate_plan_v1(
+            ABI_VERSION,
+            i64::from(profile_valid),
+            i64::from(conflict_sentinel),
+            i64::from(profile_available),
+            i64::from(binding_identity_present),
+            i64::from(existing_identity_present),
+            i64::from(binding_identity_matches),
+        )
+    };
+    if result == -4 {
+        return Err(MojoError::AbiMismatch);
+    }
+    if result < 0 {
+        return Err(MojoError::InvalidInput);
+    }
+    let kind = match result & 0xff {
+        1 => RuntimeLineageCandidateKind::Owner,
+        2 => RuntimeLineageCandidateKind::Unavailable,
+        3 => RuntimeLineageCandidateKind::Conflict,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let identity_action = match (result >> 8) & 0xff {
+        0 => RuntimeLineageIdentityAction::Keep,
+        1 => RuntimeLineageIdentityAction::Set,
+        2 => RuntimeLineageIdentityAction::Conflict,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(RuntimeLineageCandidatePlan {
+        kind,
+        identity_action,
+    })
+}
+
+pub fn resolution_plan(
+    conflict: bool,
+    owner_count: usize,
+    unavailable_count: usize,
+) -> Result<RuntimeLineageResolutionKind, MojoError> {
+    let result = unsafe {
+        prodex_runtime_lineage_resolution_plan_v1(
+            ABI_VERSION,
+            i64::from(conflict),
+            i64::try_from(owner_count).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(unavailable_count).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match result {
+        0 => Ok(RuntimeLineageResolutionKind::Unbound),
+        1 => Ok(RuntimeLineageResolutionKind::Owned),
+        2 => Ok(RuntimeLineageResolutionKind::Unavailable),
+        3 => Ok(RuntimeLineageResolutionKind::Conflict),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RuntimeLineageReleasePlan {
     pub response: bool,
@@ -194,6 +303,41 @@ pub fn response_turn_state_parts(
         usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?,
         usize::try_from(output[3]).map_err(|_| MojoError::InvalidOutput)?,
     )))
+}
+
+#[cfg(test)]
+mod hard_binding_plan_tests {
+    use super::*;
+
+    #[test]
+    fn candidate_and_resolution_precedence_is_mojo_authoritative() {
+        assert_eq!(
+            candidate_plan(true, false, true, true, false, false).unwrap(),
+            RuntimeLineageCandidatePlan {
+                kind: RuntimeLineageCandidateKind::Owner,
+                identity_action: RuntimeLineageIdentityAction::Set,
+            }
+        );
+        assert_eq!(
+            candidate_plan(true, false, true, true, true, false).unwrap(),
+            RuntimeLineageCandidatePlan {
+                kind: RuntimeLineageCandidateKind::Conflict,
+                identity_action: RuntimeLineageIdentityAction::Conflict,
+            }
+        );
+        assert_eq!(
+            resolution_plan(false, 1, 0).unwrap(),
+            RuntimeLineageResolutionKind::Owned
+        );
+        assert_eq!(
+            resolution_plan(false, 0, 1).unwrap(),
+            RuntimeLineageResolutionKind::Unavailable
+        );
+        assert_eq!(
+            resolution_plan(false, 1, 1).unwrap(),
+            RuntimeLineageResolutionKind::Conflict
+        );
+    }
 }
 
 #[cfg(test)]

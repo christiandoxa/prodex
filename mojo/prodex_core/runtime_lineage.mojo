@@ -328,3 +328,80 @@ def prodex_runtime_lineage_release_plan_v1(
         if compact_session_matches == 1:
             mask |= LINEAGE_RELEASE_COMPACT_SESSION
     return mask
+
+
+comptime LINEAGE_CANDIDATE_OWNER: Int64 = 1
+comptime LINEAGE_CANDIDATE_UNAVAILABLE: Int64 = 2
+comptime LINEAGE_CANDIDATE_CONFLICT: Int64 = 3
+
+comptime LINEAGE_RESOLUTION_UNBOUND: Int64 = 0
+comptime LINEAGE_RESOLUTION_OWNED: Int64 = 1
+comptime LINEAGE_RESOLUTION_UNAVAILABLE: Int64 = 2
+comptime LINEAGE_RESOLUTION_CONFLICT: Int64 = 3
+
+
+@export("prodex_runtime_lineage_candidate_plan_v1")
+def prodex_runtime_lineage_candidate_plan_v1(
+    abi_version: Int64,
+    profile_valid: Int64,
+    conflict_sentinel: Int64,
+    profile_available: Int64,
+    binding_identity_present: Int64,
+    existing_identity_present: Int64,
+    binding_identity_matches: Int64,
+) abi("C") -> Int64:
+    if abi_version != LINEAGE_ABI_VERSION:
+        return -4
+    for value in [
+        profile_valid,
+        conflict_sentinel,
+        profile_available,
+        binding_identity_present,
+        existing_identity_present,
+        binding_identity_matches,
+    ]:
+        if value != 0 and value != 1:
+            return -1
+
+    var candidate = LINEAGE_CANDIDATE_UNAVAILABLE
+    if profile_valid == 0 or conflict_sentinel == 1:
+        candidate = LINEAGE_CANDIDATE_CONFLICT
+    elif profile_available == 1:
+        candidate = LINEAGE_CANDIDATE_OWNER
+
+    var identity_action: Int64 = 0
+    if binding_identity_present == 1:
+        if existing_identity_present == 0:
+            identity_action = 1
+        elif binding_identity_matches == 0:
+            candidate = LINEAGE_CANDIDATE_CONFLICT
+            identity_action = 2
+    return candidate | (identity_action << 8)
+
+
+@export("prodex_runtime_lineage_resolution_plan_v1")
+def prodex_runtime_lineage_resolution_plan_v1(
+    abi_version: Int64,
+    conflict: Int64,
+    owner_count: Int64,
+    unavailable_count: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != LINEAGE_ABI_VERSION
+        or (conflict != 0 and conflict != 1)
+        or owner_count < 0
+        or unavailable_count < 0
+    ):
+        return -1
+    if (
+        conflict == 1
+        or owner_count > 1
+        or unavailable_count > 1
+        or (owner_count == 1 and unavailable_count > 0)
+    ):
+        return LINEAGE_RESOLUTION_CONFLICT
+    if owner_count == 1:
+        return LINEAGE_RESOLUTION_OWNED
+    if unavailable_count == 1:
+        return LINEAGE_RESOLUTION_UNAVAILABLE
+    return LINEAGE_RESOLUTION_UNBOUND
