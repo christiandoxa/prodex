@@ -1,5 +1,5 @@
 from std.memory import Pointer
-from runtime_math import INT64_MAX
+from runtime_math import INT64_MAX, INT64_MIN
 
 comptime RUNTIME_PROFILE_HEALTH_SCORE_ABI_VERSION: Int64 = 1
 comptime RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT: Int64 = 14
@@ -129,6 +129,10 @@ comptime RUNTIME_HEALTH_SCALAR_BACKOFF_SORT_KEY: Int64 = 4
 comptime RUNTIME_HEALTH_SCALAR_HALF_OPEN_SECONDS: Int64 = 5
 comptime RUNTIME_HEALTH_SCALAR_OPEN_SECONDS: Int64 = 6
 comptime RUNTIME_HEALTH_SCALAR_SOFTEN_UNTIL: Int64 = 7
+comptime RUNTIME_HEALTH_SCALAR_SCORE_RETAIN: Int64 = 8
+comptime RUNTIME_HEALTH_SCALAR_SCORE_REPLACE: Int64 = 9
+comptime RUNTIME_HEALTH_SCALAR_SCORE_CLEAR: Int64 = 10
+comptime RUNTIME_HEALTH_SCALAR_HEALTH_SCORE: Int64 = 11
 
 def runtime_health_saturating_shift_multiplier(exponent: Int64) -> Int64:
     if exponent <= 0:
@@ -220,6 +224,120 @@ def prodex_runtime_health_scalar_v1(
             fields[unsafe_offset=5],
         ) / 2
         output[unsafe_offset=0] = runtime_profile_health_saturating_add(route, coupled)
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_SCORE_RETAIN:
+        if field_count != 4:
+            return 1
+        if fields[unsafe_offset=0] < 0 or fields[unsafe_offset=0] > 1:
+            return 2
+        var retention = fields[unsafe_offset=3]
+        if retention < 0:
+            retention = 0
+        var now = fields[unsafe_offset=2]
+        var oldest_allowed = now - retention
+        if retention > 0 and now < INT64_MIN + retention:
+            oldest_allowed = INT64_MIN
+        output[unsafe_offset=0] = Int64(
+            fields[unsafe_offset=0] == 1
+            and fields[unsafe_offset=1] >= oldest_allowed
+        )
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_SCORE_REPLACE:
+        if field_count != 5:
+            return 1
+        var current_present = fields[unsafe_offset=0]
+        var current_score = fields[unsafe_offset=1]
+        var incoming_score = fields[unsafe_offset=3]
+        if (
+            current_present < 0
+            or current_present > 1
+            or current_score < 0
+            or current_score > UINT32_MAX
+            or incoming_score < 0
+            or incoming_score > UINT32_MAX
+        ):
+            return 2
+        if current_present == 0:
+            output[unsafe_offset=0] = 1
+            return 0
+        var current_updated = fields[unsafe_offset=2]
+        var incoming_updated = fields[unsafe_offset=4]
+        output[unsafe_offset=0] = Int64(
+            incoming_updated > current_updated
+            or (
+                incoming_updated == current_updated
+                and (
+                    (incoming_score == 0 and current_score != 0)
+                    or (
+                        incoming_score != 0
+                        and current_score != 0
+                        and incoming_score > current_score
+                    )
+                )
+            )
+        )
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_SCORE_CLEAR:
+        if field_count != 2:
+            return 1
+        if (
+            fields[unsafe_offset=0] < 0
+            or fields[unsafe_offset=0] > 1
+            or fields[unsafe_offset=1] < 0
+            or fields[unsafe_offset=1] > UINT32_MAX
+        ):
+            return 2
+        output[unsafe_offset=0] = Int64(
+            fields[unsafe_offset=0] == 1 and fields[unsafe_offset=1] != 0
+        )
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_HEALTH_SCORE:
+        if field_count != 11:
+            return 1
+        for index in range(0, 8, 2):
+            var score = fields[unsafe_offset=index]
+            if score < 0 or score > UINT32_MAX:
+                return 2
+        var now = fields[unsafe_offset=8]
+        var health_decay = fields[unsafe_offset=9]
+        var bad_decay = fields[unsafe_offset=10]
+        var global_score = runtime_profile_health_effective_score(
+            fields[unsafe_offset=0],
+            fields[unsafe_offset=1],
+            now,
+            health_decay,
+        )
+        var route_score = runtime_profile_health_effective_score(
+            fields[unsafe_offset=2],
+            fields[unsafe_offset=3],
+            now,
+            health_decay,
+        )
+        var coupled_health = runtime_profile_health_effective_score(
+            fields[unsafe_offset=4],
+            fields[unsafe_offset=5],
+            now,
+            health_decay,
+        )
+        var coupled_bad = runtime_profile_health_effective_score(
+            fields[unsafe_offset=6],
+            fields[unsafe_offset=7],
+            now,
+            bad_decay,
+        )
+        var coupling = runtime_profile_health_saturating_add(
+            coupled_health, coupled_bad
+        ) / 2
+        var total = runtime_profile_health_saturating_add(
+            global_score, route_score
+        )
+        output[unsafe_offset=0] = runtime_profile_health_saturating_add(
+            total, coupling
+        )
         return 0
 
     if operation == RUNTIME_HEALTH_SCALAR_BACKOFF_SORT_KEY:

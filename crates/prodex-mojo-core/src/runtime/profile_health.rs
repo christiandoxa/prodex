@@ -121,6 +121,10 @@ const RUNTIME_HEALTH_SCALAR_BACKOFF_SORT_KEY: i64 = 4;
 const RUNTIME_HEALTH_SCALAR_HALF_OPEN_SECONDS: i64 = 5;
 const RUNTIME_HEALTH_SCALAR_OPEN_SECONDS: i64 = 6;
 const RUNTIME_HEALTH_SCALAR_SOFTEN_UNTIL: i64 = 7;
+const RUNTIME_HEALTH_SCALAR_SCORE_RETAIN: i64 = 8;
+const RUNTIME_HEALTH_SCALAR_SCORE_REPLACE: i64 = 9;
+const RUNTIME_HEALTH_SCALAR_SCORE_CLEAR: i64 = 10;
+const RUNTIME_HEALTH_SCALAR_HEALTH_SCORE: i64 = 11;
 
 fn runtime_health_scalar<const N: usize, const M: usize>(
     operation: i64,
@@ -204,6 +208,97 @@ pub fn profile_health_performance_score(
         ],
     )?;
     u32::try_from(score).map_err(|_| crate::MojoError::InvalidOutput)
+}
+
+pub fn profile_score_should_retain(
+    profile_present: bool,
+    updated_at: i64,
+    now: i64,
+    retention_seconds: i64,
+) -> Result<bool, crate::MojoError> {
+    let [value] = runtime_health_scalar::<4, 1>(
+        RUNTIME_HEALTH_SCALAR_SCORE_RETAIN,
+        [
+            i64::from(profile_present),
+            updated_at,
+            now,
+            retention_seconds,
+        ],
+    )?;
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn profile_score_should_replace(
+    current: Option<(u32, i64)>,
+    incoming: (u32, i64),
+) -> Result<bool, crate::MojoError> {
+    let [value] = runtime_health_scalar::<5, 1>(
+        RUNTIME_HEALTH_SCALAR_SCORE_REPLACE,
+        [
+            i64::from(current.is_some()),
+            i64::from(current.map_or(0, |value| value.0)),
+            current.map_or(0, |value| value.1),
+            i64::from(incoming.0),
+            incoming.1,
+        ],
+    )?;
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn profile_score_should_clear(current: Option<u32>) -> Result<bool, crate::MojoError> {
+    let [value] = runtime_health_scalar::<2, 1>(
+        RUNTIME_HEALTH_SCALAR_SCORE_CLEAR,
+        [
+            i64::from(current.is_some()),
+            i64::from(current.unwrap_or_default()),
+        ],
+    )?;
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn profile_health_score(
+    global_score: u32,
+    global_updated_at: i64,
+    route_score: u32,
+    route_updated_at: i64,
+    coupled_score: u32,
+    coupled_updated_at: i64,
+    coupled_bad_pairing_score: u32,
+    coupled_bad_pairing_updated_at: i64,
+    now: i64,
+    health_decay_seconds: i64,
+    bad_pairing_decay_seconds: i64,
+) -> Result<u32, crate::MojoError> {
+    let [value] = runtime_health_scalar::<11, 1>(
+        RUNTIME_HEALTH_SCALAR_HEALTH_SCORE,
+        [
+            i64::from(global_score),
+            global_updated_at,
+            i64::from(route_score),
+            route_updated_at,
+            i64::from(coupled_score),
+            coupled_updated_at,
+            i64::from(coupled_bad_pairing_score),
+            coupled_bad_pairing_updated_at,
+            now,
+            health_decay_seconds,
+            bad_pairing_decay_seconds,
+        ],
+    )?;
+    u32::try_from(value).map_err(|_| crate::MojoError::InvalidOutput)
 }
 
 pub fn profile_backoff_sort_key(
