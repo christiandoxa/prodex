@@ -11,6 +11,7 @@ enum Operation {
     ModelNonempty = 3,
     ProviderUrlPolicy = 4,
     ChildSpecScalarPolicy = 5,
+    PromptSteps = 6,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -161,6 +162,41 @@ pub fn provider_url_violation(
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubAgentPromptStepPlan {
+    pub provider: bool,
+    pub local_url: bool,
+    pub model: bool,
+    pub reasoning_effort: bool,
+    pub max_concurrency: bool,
+}
+
+pub fn prompt_step_plan(
+    provider_explicit: bool,
+    provider_is_local: bool,
+    url_present: bool,
+    model_explicit: bool,
+    effort_explicit: bool,
+) -> Result<SubAgentPromptStepPlan, MojoError> {
+    let scalar = i64::from(provider_explicit)
+        | (i64::from(provider_is_local) << 1)
+        | (i64::from(url_present) << 2)
+        | (i64::from(model_explicit) << 3)
+        | (i64::from(effort_explicit) << 4);
+    let result = call(Operation::PromptSteps, "", scalar)?;
+    if result[0] != 0 || result[1] < 0 || result[1] > 31 {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mask = result[1];
+    Ok(SubAgentPromptStepPlan {
+        provider: mask & 1 != 0,
+        local_url: mask & 2 != 0,
+        model: mask & 4 != 0,
+        reasoning_effort: mask & 8 != 0,
+        max_concurrency: mask & 16 != 0,
+    })
+}
+
 pub fn child_spec_scalar_violation(
     recursion_marker: &str,
     task_max_bytes: usize,
@@ -244,6 +280,26 @@ mod tests {
         assert_eq!(
             child_spec_scalar_violation("PRODEX_SUB_AGENT", 0).unwrap(),
             Some(ChildSpecScalarViolation::InvalidTaskSize)
+        );
+        assert_eq!(
+            prompt_step_plan(false, true, false, false, false).unwrap(),
+            SubAgentPromptStepPlan {
+                provider: true,
+                local_url: true,
+                model: true,
+                reasoning_effort: true,
+                max_concurrency: true,
+            }
+        );
+        assert_eq!(
+            prompt_step_plan(true, false, false, true, true).unwrap(),
+            SubAgentPromptStepPlan {
+                provider: false,
+                local_url: false,
+                model: false,
+                reasoning_effort: false,
+                max_concurrency: true,
+            }
         );
     }
 }

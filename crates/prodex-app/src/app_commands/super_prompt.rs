@@ -178,21 +178,30 @@ pub(super) fn super_sub_agent_prompt_steps(
     model_explicit: bool,
     effort_explicit: bool,
 ) -> Vec<SuperSubAgentPromptStep> {
-    let mut steps = Vec::with_capacity(5);
-    if !provider_explicit {
-        steps.push(SuperSubAgentPromptStep::Provider);
-    }
-    if config.provider == prodex_provider_core::ProviderId::Local && config.url.is_none() {
-        steps.push(SuperSubAgentPromptStep::LocalUrl);
-    }
-    if !model_explicit {
-        steps.push(SuperSubAgentPromptStep::Model);
-    }
-    if !effort_explicit {
-        steps.push(SuperSubAgentPromptStep::ReasoningEffort);
-    }
-    steps.push(SuperSubAgentPromptStep::MaxConcurrency);
-    steps
+    let plan = prodex_mojo_core::sub_agent_policy::prompt_step_plan(
+        provider_explicit,
+        config.provider == prodex_provider_core::ProviderId::Local,
+        config.url.is_some(),
+        model_explicit,
+        effort_explicit,
+    )
+    .expect("Mojo sub-agent prompt-step policy returned invalid output");
+    [
+        (plan.provider, SuperSubAgentPromptStep::Provider),
+        (plan.local_url, SuperSubAgentPromptStep::LocalUrl),
+        (plan.model, SuperSubAgentPromptStep::Model),
+        (
+            plan.reasoning_effort,
+            SuperSubAgentPromptStep::ReasoningEffort,
+        ),
+        (
+            plan.max_concurrency,
+            SuperSubAgentPromptStep::MaxConcurrency,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(enabled, step)| enabled.then_some(step))
+    .collect()
 }
 
 fn prompt_super_sub_agent_config(
@@ -269,7 +278,9 @@ pub(super) fn run_super_sub_agent_prompt_steps(
     effort_explicit: bool,
     mut prompt: impl FnMut(SuperSubAgentPromptStep, &mut SubAgentConfig) -> Result<()>,
 ) -> Result<SubAgentConfig> {
-    if !provider_explicit {
+    if super_sub_agent_prompt_steps(&config, provider_explicit, true, true)
+        .contains(&SuperSubAgentPromptStep::Provider)
+    {
         prompt(SuperSubAgentPromptStep::Provider, &mut config)?;
     }
     for step in super_sub_agent_prompt_steps(&config, true, model_explicit, effort_explicit) {
