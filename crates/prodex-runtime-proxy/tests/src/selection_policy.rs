@@ -749,3 +749,49 @@ impl AffinityProfileCase {
         }
     }
 }
+
+#[test]
+fn websocket_failure_disposition_is_mojo_authoritative() {
+    assert_eq!(
+        runtime_websocket_failure_disposition(false, false),
+        RuntimeWebsocketFailureDispositionPlan {
+            continue_selection: false,
+            mark_backoff: true,
+            exclude_profile: false,
+        }
+    );
+    assert_eq!(
+        runtime_websocket_failure_disposition(true, false),
+        RuntimeWebsocketFailureDispositionPlan {
+            continue_selection: true,
+            mark_backoff: true,
+            exclude_profile: true,
+        }
+    );
+    assert_eq!(
+        runtime_websocket_failure_disposition(true, true),
+        RuntimeWebsocketFailureDispositionPlan {
+            continue_selection: true,
+            mark_backoff: false,
+            exclude_profile: false,
+        }
+    );
+    assert!(runtime_websocket_full_context_signal_eligible(
+        true, true, true
+    ));
+    assert!(!runtime_websocket_full_context_signal_eligible(
+        true, false, true
+    ));
+    assert_eq!(
+        runtime_websocket_quota_fallback_plan(true, true),
+        RuntimeWebsocketQuotaFallbackPlan::Ready
+    );
+    assert_eq!(
+        runtime_websocket_quota_fallback_plan(false, true),
+        RuntimeWebsocketQuotaFallbackPlan::Unavailable
+    );
+    assert_eq!(
+        runtime_websocket_quota_fallback_plan(false, false),
+        RuntimeWebsocketQuotaFallbackPlan::LastChance
+    );
+}
