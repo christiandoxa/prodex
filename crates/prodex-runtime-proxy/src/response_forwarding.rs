@@ -1,6 +1,6 @@
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::collections::BTreeSet;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::{
     RuntimeTokenUsage, runtime_connection_header_tokens,
@@ -15,6 +15,14 @@ unsafe extern "C" {
         length: i64,
         present: i64,
         numeric: u64,
+    ) -> i64;
+    fn prodex_runtime_token_usage_progress_plan_v1(
+        abi_version: i64,
+        output_tokens: u64,
+        last_output_present: i64,
+        last_output_tokens: u64,
+        last_log_present: i64,
+        elapsed_since_last_log_ms: u64,
     ) -> i64;
 }
 
@@ -222,8 +230,6 @@ pub fn runtime_generation_elapsed_ms(started_at: Option<Instant>) -> Option<u64>
     started_at.and_then(|started_at| started_at.elapsed().as_millis().max(1).try_into().ok())
 }
 
-const RUNTIME_LIVE_USAGE_LOG_INTERVAL: Duration = Duration::from_millis(250);
-
 /// Throttles cumulative output-token snapshots before logging them for live viewers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RuntimeTokenUsageProgress {
@@ -238,21 +244,34 @@ impl RuntimeTokenUsageProgress {
         usage: RuntimeTokenUsage,
         observed_at: Instant,
     ) -> Option<RuntimeTokenUsage> {
-        if usage.output_tokens == 0
-            || self
-                .last_output_tokens
-                .is_some_and(|last| usage.output_tokens <= last)
-        {
-            return None;
+        let elapsed_since_last_log_ms = self
+            .last_logged_at
+            .map(|last| observed_at.saturating_duration_since(last).as_millis())
+            .and_then(|value| u64::try_from(value).ok())
+            .unwrap_or(u64::MAX);
+        let action = unsafe {
+            prodex_runtime_token_usage_progress_plan_v1(
+                1,
+                usage.output_tokens,
+                i64::from(self.last_output_tokens.is_some()),
+                self.last_output_tokens.unwrap_or_default(),
+                i64::from(self.last_logged_at.is_some()),
+                elapsed_since_last_log_ms,
+            )
+        };
+        match action {
+            0 => None,
+            1 => {
+                self.last_output_tokens = Some(usage.output_tokens);
+                None
+            }
+            2 => {
+                self.last_output_tokens = Some(usage.output_tokens);
+                self.last_logged_at = Some(observed_at);
+                Some(usage)
+            }
+            _ => panic!("Mojo token-usage progress planner returned invalid output"),
         }
-        self.last_output_tokens = Some(usage.output_tokens);
-        if self.last_logged_at.is_some_and(|last| {
-            observed_at.saturating_duration_since(last) < RUNTIME_LIVE_USAGE_LOG_INTERVAL
-        }) {
-            return None;
-        }
-        self.last_logged_at = Some(observed_at);
-        Some(usage)
     }
 }
 
@@ -260,8 +279,11 @@ pub fn runtime_token_usage_event_is_live(
     event_type: Option<&str>,
     token_usage: Option<RuntimeTokenUsage>,
 ) -> bool {
-    runtime_response_event_is_generation_start(event_type)
-        && token_usage.is_some_and(|usage| usage.output_tokens > 0)
+    response_forwarding_mojo_bool(
+        8,
+        event_type,
+        token_usage.map_or(0, |usage| usage.output_tokens),
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
