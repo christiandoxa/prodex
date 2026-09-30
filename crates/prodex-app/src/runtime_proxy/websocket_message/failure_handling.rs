@@ -143,11 +143,15 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                         .response_transport_generation(response_id)
                 });
         let transport_generation = self.websocket_session.transport_generation();
-        let crossed_transport_generation = owner_transport_generation
-            .is_some_and(|owner_generation| owner_generation != transport_generation);
-        let recovery_signal = self.previous_response_id.is_some()
-            && self.request_session_id.is_some()
-            && owner_matches;
+        let recovery_plan = runtime_proxy_crate::runtime_websocket_invalid_previous_response_plan(
+            self.previous_response_id.is_some(),
+            self.request_session_id.is_some(),
+            owner_matches,
+            owner_transport_generation.is_some(),
+            owner_transport_generation
+                .is_some_and(|owner_generation| owner_generation == transport_generation),
+        );
+        let recovery_signal = recovery_plan.recovery_signal;
         if let Some(previous_response_id) = self.previous_response_id.as_deref() {
             clear_runtime_dead_response_bindings(
                 self.shared,
@@ -164,15 +168,16 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 false,
             )?;
         }
-        let (payload, action) = if recovery_signal {
-            (
+        let (payload, action) = match recovery_plan.action {
+            runtime_proxy_crate::RuntimeWebsocketInvalidPreviousResponseAction::FullContextRetry => (
                 runtime_proxy_crate::runtime_translate_invalid_previous_response_websocket_error(
                     payload,
                 ),
                 "codex_full_context_retry_signal",
-            )
-        } else {
-            (payload, "pass_through")
+            ),
+            runtime_proxy_crate::RuntimeWebsocketInvalidPreviousResponseAction::PassThrough => {
+                (payload, "pass_through")
+            }
         };
         let (logical_provider, transport_provider_hash) =
             runtime_response_trace_provider_labels(self.shared, &profile_name);
@@ -246,12 +251,16 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                     runtime_proxy_log_field("stream_committed", "false"),
                     runtime_proxy_log_field(
                         "chain_reuse_reason",
-                        if crossed_transport_generation {
-                            "upstream_websocket_reconnect"
-                        } else if owner_matches {
-                            "bound_profile_affinity"
-                        } else {
-                            "unbound_previous_response"
+                        match recovery_plan.chain_reuse_reason {
+                            runtime_proxy_crate::RuntimeWebsocketChainReuseReason::UpstreamReconnect => {
+                                "upstream_websocket_reconnect"
+                            }
+                            runtime_proxy_crate::RuntimeWebsocketChainReuseReason::BoundProfileAffinity => {
+                                "bound_profile_affinity"
+                            }
+                            runtime_proxy_crate::RuntimeWebsocketChainReuseReason::UnboundPreviousResponse => {
+                                "unbound_previous_response"
+                            }
                         },
                     ),
                     runtime_proxy_log_field("action", action),

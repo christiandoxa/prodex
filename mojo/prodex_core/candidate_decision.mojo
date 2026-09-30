@@ -1457,3 +1457,55 @@ def prodex_runtime_waitable_candidate_eligible_v1(
     if mode == WAITABLE_CANDIDATE_MODE_WAITABLE:
         return hard_limited
     return 1 - hard_limited
+
+
+comptime WEBSOCKET_INVALID_PREVIOUS_ACTION_PASS_THROUGH: Int64 = 0
+comptime WEBSOCKET_INVALID_PREVIOUS_ACTION_FULL_CONTEXT_RETRY: Int64 = 1
+
+comptime WEBSOCKET_CHAIN_REUSE_UPSTREAM_RECONNECT: Int64 = 0
+comptime WEBSOCKET_CHAIN_REUSE_BOUND_PROFILE: Int64 = 1
+comptime WEBSOCKET_CHAIN_REUSE_UNBOUND_PREVIOUS_RESPONSE: Int64 = 2
+
+
+@export("prodex_runtime_websocket_invalid_previous_response_plan_v1")
+def prodex_runtime_websocket_invalid_previous_response_plan_v1(
+    previous_response_present: Int64,
+    session_present: Int64,
+    owner_matches: Int64,
+    owner_generation_present: Int64,
+    owner_generation_matches: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    for value in [
+        previous_response_present,
+        session_present,
+        owner_matches,
+        owner_generation_present,
+        owner_generation_matches,
+    ]:
+        if value != 0 and value != 1:
+            return 1
+
+    var recovery_signal = (
+        previous_response_present == 1
+        and session_present == 1
+        and owner_matches == 1
+    )
+    var crossed_transport_generation = (
+        owner_generation_present == 1 and owner_generation_matches == 0
+    )
+    var chain_reuse_reason = WEBSOCKET_CHAIN_REUSE_UNBOUND_PREVIOUS_RESPONSE
+    if crossed_transport_generation:
+        chain_reuse_reason = WEBSOCKET_CHAIN_REUSE_UPSTREAM_RECONNECT
+    elif owner_matches == 1:
+        chain_reuse_reason = WEBSOCKET_CHAIN_REUSE_BOUND_PROFILE
+
+    output[unsafe_offset=0] = Int64(recovery_signal)
+    output[unsafe_offset=1] = Int64(crossed_transport_generation)
+    output[unsafe_offset=2] = chain_reuse_reason
+    output[unsafe_offset=3] = (
+        WEBSOCKET_INVALID_PREVIOUS_ACTION_FULL_CONTEXT_RETRY
+        if recovery_signal
+        else WEBSOCKET_INVALID_PREVIOUS_ACTION_PASS_THROUGH
+    )
+    return 0

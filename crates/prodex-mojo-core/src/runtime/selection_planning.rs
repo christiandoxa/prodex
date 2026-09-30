@@ -160,6 +160,27 @@ pub struct WebsocketFailureDispositionPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebsocketInvalidPreviousResponseAction {
+    PassThrough,
+    FullContextRetry,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebsocketChainReuseReason {
+    UpstreamReconnect,
+    BoundProfileAffinity,
+    UnboundPreviousResponse,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WebsocketInvalidPreviousResponsePlan {
+    pub recovery_signal: bool,
+    pub crossed_transport_generation: bool,
+    pub chain_reuse_reason: WebsocketChainReuseReason,
+    pub action: WebsocketInvalidPreviousResponseAction,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebsocketQuotaFallbackPlan {
     Ready,
     LastChance,
@@ -280,6 +301,14 @@ unsafe extern "C" {
         inflight_saturated: i64,
         output: *mut i64,
     ) -> i64;
+    fn prodex_runtime_websocket_invalid_previous_response_plan_v1(
+        previous_response_present: i64,
+        session_present: i64,
+        owner_matches: i64,
+        owner_generation_present: i64,
+        owner_generation_matches: i64,
+        output: *mut i64,
+    ) -> i64;
     fn prodex_runtime_websocket_full_context_signal_v1(
         previous_response_present: i64,
         session_present: i64,
@@ -374,6 +403,46 @@ pub fn websocket_failure_disposition_plan(
         continue_selection: output[0] == 1,
         mark_backoff: output[1] == 1,
         exclude_profile: output[2] == 1,
+    })
+}
+
+pub fn websocket_invalid_previous_response_plan(
+    previous_response_present: bool,
+    session_present: bool,
+    owner_matches: bool,
+    owner_generation_present: bool,
+    owner_generation_matches: bool,
+) -> Result<WebsocketInvalidPreviousResponsePlan, MojoError> {
+    let mut output = [-1_i64; 4];
+    let status = unsafe {
+        prodex_runtime_websocket_invalid_previous_response_plan_v1(
+            i64::from(previous_response_present),
+            i64::from(session_present),
+            i64::from(owner_matches),
+            i64::from(owner_generation_present),
+            i64::from(owner_generation_matches),
+            output.as_mut_ptr(),
+        )
+    };
+    if status != 0 || !matches!(output[0], 0 | 1) || !matches!(output[1], 0 | 1) {
+        return Err(MojoError::InvalidOutput);
+    }
+    let chain_reuse_reason = match output[2] {
+        0 => WebsocketChainReuseReason::UpstreamReconnect,
+        1 => WebsocketChainReuseReason::BoundProfileAffinity,
+        2 => WebsocketChainReuseReason::UnboundPreviousResponse,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let action = match output[3] {
+        0 => WebsocketInvalidPreviousResponseAction::PassThrough,
+        1 => WebsocketInvalidPreviousResponseAction::FullContextRetry,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(WebsocketInvalidPreviousResponsePlan {
+        recovery_signal: output[0] == 1,
+        crossed_transport_generation: output[1] == 1,
+        chain_reuse_reason,
+        action,
     })
 }
 
@@ -799,6 +868,45 @@ mod quota_selection_tests {
         assert_eq!(
             quota_selection_policy(QUOTA_SELECTION_MODE_PRECOMMIT_FLOOR, compact).unwrap(),
             1
+        );
+    }
+}
+
+#[cfg(test)]
+mod websocket_invalid_previous_response_tests {
+    use super::*;
+
+    #[test]
+    fn websocket_invalid_previous_response_plan_preserves_recovery_precedence() {
+        let reconnect =
+            websocket_invalid_previous_response_plan(true, true, true, true, false).unwrap();
+        assert!(reconnect.recovery_signal);
+        assert!(reconnect.crossed_transport_generation);
+        assert_eq!(
+            reconnect.chain_reuse_reason,
+            WebsocketChainReuseReason::UpstreamReconnect
+        );
+        assert_eq!(
+            reconnect.action,
+            WebsocketInvalidPreviousResponseAction::FullContextRetry
+        );
+
+        let bound = websocket_invalid_previous_response_plan(true, true, true, true, true).unwrap();
+        assert_eq!(
+            bound.chain_reuse_reason,
+            WebsocketChainReuseReason::BoundProfileAffinity
+        );
+
+        let unbound =
+            websocket_invalid_previous_response_plan(true, true, false, false, false).unwrap();
+        assert!(!unbound.recovery_signal);
+        assert_eq!(
+            unbound.chain_reuse_reason,
+            WebsocketChainReuseReason::UnboundPreviousResponse
+        );
+        assert_eq!(
+            unbound.action,
+            WebsocketInvalidPreviousResponseAction::PassThrough
         );
     }
 }

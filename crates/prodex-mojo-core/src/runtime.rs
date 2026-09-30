@@ -61,13 +61,14 @@ pub use selection_planning::{
     SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND, SOFT_AFFINITY_POLICY_QUOTA_HEALTHY,
     SOFT_AFFINITY_POLICY_QUOTA_THIN, SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN,
     SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE, SoftAffinityPolicyInput,
-    WaitableCandidateInput, WaitableCandidateMode, WebsocketFailureDispositionPlan,
-    WebsocketQuotaFallbackPlan, WebsocketResponsePlan, WebsocketResponsePlanInput,
-    WebsocketTransportFailurePlan, adaptive_routing_plan, affinity_outcome_plan,
-    affinity_selection_plan, quota_selection_policy, soft_affinity_policy,
+    WaitableCandidateInput, WaitableCandidateMode, WebsocketChainReuseReason,
+    WebsocketFailureDispositionPlan, WebsocketInvalidPreviousResponseAction,
+    WebsocketInvalidPreviousResponsePlan, WebsocketQuotaFallbackPlan, WebsocketResponsePlan,
+    WebsocketResponsePlanInput, WebsocketTransportFailurePlan, adaptive_routing_plan,
+    affinity_outcome_plan, affinity_selection_plan, quota_selection_policy, soft_affinity_policy,
     waitable_candidate_eligible, websocket_failure_disposition_plan,
-    websocket_full_context_signal_eligible, websocket_quota_fallback_plan, websocket_response_plan,
-    websocket_transport_failure_plan,
+    websocket_full_context_signal_eligible, websocket_invalid_previous_response_plan,
+    websocket_quota_fallback_plan, websocket_response_plan, websocket_transport_failure_plan,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
