@@ -7341,3 +7341,59 @@ def prodex_provider_retry_plan_v1(
     output[unsafe_offset=0] = decision
     output[unsafe_offset=1] = remaining
     return PROVIDER_RETRY_STATUS_OK
+
+
+comptime PROVIDER_RETRY_TRANSITION_TERMINAL: Int64 = 0
+comptime PROVIDER_RETRY_TRANSITION_NEXT_MODEL: Int64 = 1
+comptime PROVIDER_RETRY_TRANSITION_ROTATE_CREDENTIAL: Int64 = 2
+
+
+def provider_retry_budget_allows(index: Int64, count: Int64) -> Bool:
+    if count <= 0 or index < 0 or index >= count:
+        return False
+    var max_attempts = count - 1
+    if max_attempts > 255:
+        max_attempts = 255
+    var attempted = index
+    if attempted > 255:
+        attempted = 255
+    return max_attempts - attempted > 0
+
+
+@export("prodex_provider_retry_transition_v1")
+def prodex_provider_retry_transition_v1(
+    abi_version: Int64,
+    error_class: Int64,
+    model_index: Int64,
+    model_count: Int64,
+    auth_index: Int64,
+    auth_count: Int64,
+    retry_enabled: Int64,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_RETRY_ABI_VERSION:
+        return -4
+    if (
+        error_class < PROVIDER_ERROR_AUTH
+        or error_class > PROVIDER_ERROR_OTHER
+        or model_index < 0
+        or model_count < 0
+        or auth_index < 0
+        or auth_count < 0
+        or (retry_enabled != 0 and retry_enabled != 1)
+    ):
+        return -1
+    if retry_enabled == 0:
+        return PROVIDER_RETRY_TRANSITION_TERMINAL
+    if (
+        provider_retry_budget_allows(model_index, model_count)
+        and provider_retry_eligible(PROVIDER_RETRY_CAUSE_NEXT_MODEL, error_class)
+    ):
+        return PROVIDER_RETRY_TRANSITION_NEXT_MODEL
+    if (
+        provider_retry_budget_allows(auth_index, auth_count)
+        and provider_retry_eligible(
+            PROVIDER_RETRY_CAUSE_ROTATE_CREDENTIAL, error_class
+        )
+    ):
+        return PROVIDER_RETRY_TRANSITION_ROTATE_CREDENTIAL
+    return PROVIDER_RETRY_TRANSITION_TERMINAL
