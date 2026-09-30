@@ -9,7 +9,6 @@ import {
   classifyChangedPaths,
   forceHeavyForCiEvent,
   normalizeChangedPath,
-  requiresRuntimeProxyBench,
 } from "./ci-impact.mjs";
 import { buildSteps } from "./changed-tests.mjs";
 import {
@@ -138,24 +137,6 @@ test("classifies Rust, workflow, runtime CI, and stress paths as heavy", () => {
   }
 });
 
-test("runs runtime proxy benchmarks only for their owning paths", () => {
-  for (const filePath of [
-    ".github/workflows/ci.yml",
-    "benches/runtime_proxy_hot_paths.rs",
-    "crates/prodex-app/src/runtime_proxy/selection.rs",
-    "crates/prodex-app/src/bench_support/selection_cases.rs",
-    "crates/prodex-bench-support/src/lib.rs",
-    "crates/prodex-mojo-core/src/runtime.rs",
-    "crates/prodex-runtime-proxy/src/selection_plan.rs",
-    "scripts/ci/runtime-proxy-bench-thresholds.json",
-  ]) {
-    assert.equal(requiresRuntimeProxyBench([filePath]), true, filePath);
-  }
-  assert.equal(requiresRuntimeProxyBench(["Cargo.toml", "Cargo.lock", "CHANGELOG.md"]), false);
-  assert.equal(requiresRuntimeProxyBench(["crates/prodex-provider-spi/src/lib.rs"]), false);
-  assert.equal(requiresRuntimeProxyBench([]), false);
-  assert.equal(requiresRuntimeProxyBench(null), true);
-});
 
 test("runtime-stress weighted sharding balances duration hints", () => {
   const testNames = [
@@ -457,7 +438,6 @@ test("CLI reads git diff paths from base and head", async () => {
     );
     const emptyResult = JSON.parse(emptyStdout);
     assert.equal(emptyResult.heavy, true);
-    assert.equal(emptyResult.runtimeBench, false);
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
   }
@@ -478,11 +458,11 @@ test("CLI writes GitHub outputs", async () => {
 
     assert.match(
       stdout,
-      /^heavy=true\nruntime_bench=true\nreason=heavy path matched: src\/main\.rs\n$/,
+      /^heavy=true\nreason=heavy path matched: src\/main\.rs\n$/,
     );
     assert.equal(
       await fs.readFile(outputPath, "utf8"),
-      "heavy=true\nruntime_bench=true\nreason=heavy path matched: src/main.rs\n",
+      "heavy=true\nreason=heavy path matched: src/main.rs\n",
     );
   } finally {
     await fs.rm(tempDir, { recursive: true, force: true });
