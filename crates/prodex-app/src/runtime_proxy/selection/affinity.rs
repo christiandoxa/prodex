@@ -122,57 +122,79 @@ pub(super) fn runtime_affinity_selection_decision(
     affinity_kind: RuntimeAffinitySelectionKind,
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<RuntimeAffinitySelectionDecision> {
-    if runtime_hard_binding_conflict(selection) {
-        return Ok(record_runtime_unavailable_affinity(
-            trace,
-            affinity_kind,
-            selection,
-            true,
-            "hard_binding_conflict",
-        ));
+    let hard_binding_conflict = runtime_hard_binding_conflict(selection);
+    if hard_binding_conflict {
+        return Ok(
+            match runtime_proxy_crate::runtime_affinity_outcome(
+                runtime_proxy_crate::RuntimeAffinityOutcomeInput {
+                    hard_binding_conflict: true,
+                    exact_binding_mismatch: false,
+                    profile_usable: true,
+                    excluded: false,
+                    hard_affinity: true,
+                    soft_policy_allowed: true,
+                    local_rejection: runtime_proxy_crate::RuntimeAffinityLocalRejection::None,
+                },
+            ) {
+                runtime_proxy_crate::RuntimeAffinityOutcome::Unavailable { reason, hard } => {
+                    record_runtime_unavailable_affinity(
+                        trace,
+                        affinity_kind,
+                        selection,
+                        hard,
+                        reason,
+                    )
+                }
+                _ => unreachable!("hard-binding conflict must be unavailable"),
+            },
+        );
     }
+
     let Some(profile_name) = runtime_affinity_selection_profile(affinity_kind, selection) else {
         return Ok(RuntimeAffinitySelectionDecision::Continue);
     };
     let hard_affinity = runtime_affinity_is_hard(shared, selection, affinity_kind, profile_name)?;
-    let exact_binding = runtime_profile_has_exact_binding_identity(shared, profile_name)?;
-    if exact_binding == Some(false) {
-        return Ok(record_runtime_unavailable_affinity(
-            trace,
-            affinity_kind,
-            selection,
+    let exact_binding_mismatch =
+        runtime_profile_has_exact_binding_identity(shared, profile_name)? == Some(false);
+    let profile_usable = runtime_profile_is_usable_for_hard_binding(shared, profile_name)?;
+    let excluded = selection.excluded_profiles.contains(profile_name);
+
+    match runtime_proxy_crate::runtime_affinity_outcome(
+        runtime_proxy_crate::RuntimeAffinityOutcomeInput {
+            hard_binding_conflict: false,
+            exact_binding_mismatch,
+            profile_usable,
+            excluded,
             hard_affinity,
-            "binding_identity_mismatch",
-        ));
+            soft_policy_allowed: true,
+            local_rejection: runtime_proxy_crate::RuntimeAffinityLocalRejection::None,
+        },
+    ) {
+        runtime_proxy_crate::RuntimeAffinityOutcome::Unavailable { reason, hard } => Ok(
+            record_runtime_unavailable_affinity(trace, affinity_kind, selection, hard, reason),
+        ),
+        runtime_proxy_crate::RuntimeAffinityOutcome::SelectHard => {
+            Ok(record_runtime_selected_affinity(
+                trace,
+                profile_name,
+                true,
+                None,
+                runtime_selection_trace_affinity_kind(affinity_kind),
+            ))
+        }
+        runtime_proxy_crate::RuntimeAffinityOutcome::SelectSoft => {
+            runtime_soft_affinity_selection_decision(
+                shared,
+                selection,
+                affinity_kind,
+                profile_name,
+                trace,
+            )
+        }
+        runtime_proxy_crate::RuntimeAffinityOutcome::RejectSoftQuota => {
+            unreachable!("hard-affinity precheck cannot reject soft quota")
+        }
     }
-    if !runtime_profile_is_usable_for_hard_binding(shared, profile_name)? {
-        return Ok(record_runtime_unavailable_affinity(
-            trace,
-            affinity_kind,
-            selection,
-            hard_affinity,
-            "hard_binding_unavailable",
-        ));
-    }
-    if selection.excluded_profiles.contains(profile_name) {
-        return Ok(record_runtime_unavailable_affinity(
-            trace,
-            affinity_kind,
-            selection,
-            hard_affinity,
-            "bound_profile_unavailable",
-        ));
-    }
-    if hard_affinity {
-        return Ok(record_runtime_selected_affinity(
-            trace,
-            profile_name,
-            true,
-            None,
-            runtime_selection_trace_affinity_kind(affinity_kind),
-        ));
-    }
-    runtime_soft_affinity_selection_decision(shared, selection, affinity_kind, profile_name, trace)
 }
 
 fn runtime_soft_affinity_selection_decision(
@@ -214,42 +236,55 @@ fn runtime_soft_affinity_selection_decision(
         has_route_eligible_quota_fallback,
         responses_critical_floor_percent: runtime_proxy_responses_quota_critical_floor_percent(),
     };
-    if runtime_proxy_crate::runtime_soft_affinity_allowed(soft_policy) {
-        if let Some(reason) = runtime_soft_affinity_local_rejection_reason(
-            shared,
-            profile_name,
-            selection.route_kind,
-        )? {
-            return Ok(record_runtime_unavailable_affinity(
+    let soft_policy_allowed = runtime_proxy_crate::runtime_soft_affinity_allowed(soft_policy);
+    let local_rejection = if soft_policy_allowed {
+        runtime_soft_affinity_local_rejection(shared, profile_name, selection.route_kind)?
+    } else {
+        runtime_proxy_crate::RuntimeAffinityLocalRejection::None
+    };
+
+    match runtime_proxy_crate::runtime_affinity_outcome(
+        runtime_proxy_crate::RuntimeAffinityOutcomeInput {
+            hard_binding_conflict: false,
+            exact_binding_mismatch: false,
+            profile_usable: true,
+            excluded: false,
+            hard_affinity: false,
+            soft_policy_allowed,
+            local_rejection,
+        },
+    ) {
+        runtime_proxy_crate::RuntimeAffinityOutcome::Unavailable { reason, hard } => Ok(
+            record_runtime_unavailable_affinity(trace, affinity_kind, selection, hard, reason),
+        ),
+        runtime_proxy_crate::RuntimeAffinityOutcome::SelectSoft => {
+            Ok(record_runtime_selected_affinity(
+                trace,
+                profile_name,
+                false,
+                Some(quota_summary),
+                runtime_selection_trace_affinity_kind(affinity_kind),
+            ))
+        }
+        runtime_proxy_crate::RuntimeAffinityOutcome::RejectSoftQuota => {
+            record_runtime_rejected_affinity(
+                shared,
                 trace,
                 affinity_kind,
-                selection,
-                false,
-                reason,
-            ));
+                selection.route_kind,
+                profile_name,
+                runtime_proxy_crate::runtime_soft_affinity_rejection_reason(soft_policy),
+                RuntimeRejectedAffinityQuota {
+                    source: quota_source,
+                    summary: quota_summary,
+                },
+            );
+            Ok(RuntimeAffinitySelectionDecision::Continue)
         }
-        return Ok(record_runtime_selected_affinity(
-            trace,
-            profile_name,
-            false,
-            Some(quota_summary),
-            runtime_selection_trace_affinity_kind(affinity_kind),
-        ));
+        runtime_proxy_crate::RuntimeAffinityOutcome::SelectHard => {
+            unreachable!("soft-affinity finalizer cannot select hard")
+        }
     }
-
-    record_runtime_rejected_affinity(
-        shared,
-        trace,
-        affinity_kind,
-        selection.route_kind,
-        profile_name,
-        runtime_proxy_crate::runtime_soft_affinity_rejection_reason(soft_policy),
-        RuntimeRejectedAffinityQuota {
-            source: quota_source,
-            summary: quota_summary,
-        },
-    );
-    Ok(RuntimeAffinitySelectionDecision::Continue)
 }
 
 fn runtime_affinity_is_hard(
@@ -288,11 +323,11 @@ fn runtime_affinity_is_hard(
         }))
 }
 
-fn runtime_soft_affinity_local_rejection_reason(
+fn runtime_soft_affinity_local_rejection(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     route_kind: RuntimeRouteKind,
-) -> Result<Option<&'static str>> {
+) -> Result<runtime_proxy_crate::RuntimeAffinityLocalRejection> {
     let now = Local::now().timestamp();
     let in_backoff = {
         let mut runtime = shared
@@ -310,12 +345,14 @@ fn runtime_soft_affinity_local_rejection_reason(
         )
     };
     if in_backoff {
-        return Ok(Some("selection_backoff"));
+        return Ok(runtime_proxy_crate::RuntimeAffinityLocalRejection::SelectionBackoff);
     }
     if !reserve_runtime_profile_route_circuit_half_open_probe(shared, profile_name, route_kind)? {
-        return Ok(Some("route_circuit_half_open_probe_wait"));
+        return Ok(
+            runtime_proxy_crate::RuntimeAffinityLocalRejection::RouteCircuitHalfOpenProbeWait,
+        );
     }
-    Ok(None)
+    Ok(runtime_proxy_crate::RuntimeAffinityLocalRejection::None)
 }
 
 fn runtime_profile_is_usable_for_hard_binding(

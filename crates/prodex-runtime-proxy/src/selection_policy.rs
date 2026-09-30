@@ -475,6 +475,73 @@ pub fn runtime_quota_soft_affinity_rejection_reason(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeAffinityLocalRejection {
+    None,
+    SelectionBackoff,
+    RouteCircuitHalfOpenProbeWait,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RuntimeAffinityOutcomeInput {
+    pub hard_binding_conflict: bool,
+    pub exact_binding_mismatch: bool,
+    pub profile_usable: bool,
+    pub excluded: bool,
+    pub hard_affinity: bool,
+    pub soft_policy_allowed: bool,
+    pub local_rejection: RuntimeAffinityLocalRejection,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeAffinityOutcome {
+    Unavailable { reason: &'static str, hard: bool },
+    SelectHard,
+    SelectSoft,
+    RejectSoftQuota,
+}
+
+pub fn runtime_affinity_outcome(input: RuntimeAffinityOutcomeInput) -> RuntimeAffinityOutcome {
+    let local_rejection = match input.local_rejection {
+        RuntimeAffinityLocalRejection::None => 0,
+        RuntimeAffinityLocalRejection::SelectionBackoff => 1,
+        RuntimeAffinityLocalRejection::RouteCircuitHalfOpenProbeWait => 2,
+    };
+    let plan = prodex_mojo_core::runtime::affinity_outcome_plan(
+        prodex_mojo_core::runtime::AffinityOutcomeInput {
+            hard_binding_conflict: input.hard_binding_conflict,
+            exact_binding_mismatch: input.exact_binding_mismatch,
+            profile_usable: input.profile_usable,
+            excluded: input.excluded,
+            hard_affinity: input.hard_affinity,
+            soft_policy_allowed: input.soft_policy_allowed,
+            local_rejection,
+        },
+    )
+    .expect("Mojo affinity outcome planning returned an invalid result");
+    match plan.action {
+        0 => {
+            let reason = match plan.reason {
+                1 => "hard_binding_conflict",
+                2 => "binding_identity_mismatch",
+                3 => "hard_binding_unavailable",
+                4 => "bound_profile_unavailable",
+                5 => "selection_backoff",
+                6 => "route_circuit_half_open_probe_wait",
+                _ => unreachable!("validated Mojo unavailable affinity reason"),
+            };
+            RuntimeAffinityOutcome::Unavailable {
+                reason,
+                hard: plan.unavailable_hard,
+            }
+        }
+        1 => RuntimeAffinityOutcome::SelectHard,
+        2 => RuntimeAffinityOutcome::SelectSoft,
+        3 => RuntimeAffinityOutcome::RejectSoftQuota,
+        _ => unreachable!("validated Mojo affinity outcome action"),
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeAffinitySelectionKind {
     Strict,
     Pinned,
