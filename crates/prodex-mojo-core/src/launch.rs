@@ -231,6 +231,16 @@ const _: () = {
 };
 
 unsafe extern "C" {
+    fn prodex_login_menu_policy_v1(
+        abi_version: i64,
+        operation: i64,
+        input0: i64,
+        input1: i64,
+        input2: i64,
+        input3: i64,
+        input4: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_mojo_launch_args_v1(
         version: i64,
         operation: i64,
@@ -296,6 +306,69 @@ pub(super) fn boolean(value: i64) -> Result<bool, MojoError> {
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+fn login_menu_policy(operation: i64, input: [usize; 5]) -> Result<[i64; 4], MojoError> {
+    let [input0, input1, input2, input3, input4] =
+        input.map(|value| i64::try_from(value).map_err(|_| MojoError::InvalidInput));
+    let mut output = [-1_i64; 4];
+    let status = unsafe {
+        prodex_login_menu_policy_v1(
+            1,
+            operation,
+            input0?,
+            input1?,
+            input2?,
+            input3?,
+            input4?,
+            output.as_mut_ptr() as u64,
+        )
+    };
+    match status {
+        0 => Ok(output),
+        1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn login_menu_layout(rows: usize, entry_count: usize) -> Result<(usize, bool), MojoError> {
+    let output = login_menu_policy(1, [rows, entry_count, 0, 0, 0])?;
+    Ok((
+        usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?,
+        boolean(output[1])?,
+    ))
+}
+
+pub fn login_menu_window_offset(
+    selected: usize,
+    current_offset: usize,
+    visible_items: usize,
+    entry_count: usize,
+) -> Result<usize, MojoError> {
+    usize::try_from(
+        login_menu_policy(2, [selected, current_offset, visible_items, entry_count, 0])?[0],
+    )
+    .map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn login_menu_key_plan(
+    key_tag: usize,
+    digit: usize,
+    selected: usize,
+    visible_items: usize,
+    entry_count: usize,
+) -> Result<(usize, i64, Option<usize>), MojoError> {
+    let output = login_menu_policy(3, [key_tag, digit, selected, visible_items, entry_count])?;
+    let next_selected = usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?;
+    if !(0..=2).contains(&output[1]) {
+        return Err(MojoError::InvalidOutput);
+    }
+    let action_index = if output[2] < 0 {
+        None
+    } else {
+        Some(usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?)
+    };
+    Ok((next_selected, output[1], action_index))
 }
 
 pub fn login_argument_plan(arguments: &[Option<&str>]) -> Result<LoginArgumentPlan, MojoError> {
