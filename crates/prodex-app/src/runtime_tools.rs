@@ -46,7 +46,10 @@ pub(super) fn session_app_server_companion_eligible(
     strategy.args.super_mode
         && !prodex_runtime_launch::is_codex_exec_invocation(runtime_args)
         && !prodex_runtime_launch::codex_resume_requested(runtime_args)
-        && !runtime_args.iter().any(|arg| arg == "--remote")
+        && !runtime_args.iter().any(|arg| {
+            let arg = arg.to_string_lossy();
+            arg == "--remote" || arg.starts_with("--remote=")
+        })
 }
 
 pub(crate) struct RuntimeToolLaunchStrategy {
@@ -332,6 +335,21 @@ mod tests {
                 "{extracted_prefix} should be consumed before Codex launch"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn explicit_remote_equals_skips_private_app_server_companion() {
+        let strategy = RuntimeToolLaunchStrategy::new_with_sub_agent(
+            super_as_caveman_args(&["prodex", "s", "--remote=unix:///tmp/user-selected.sock"]),
+            None,
+        )
+        .expect("Codex feature plan should succeed");
+
+        assert!(!session_app_server_companion_eligible(
+            &strategy,
+            &strategy.codex_args
+        ));
     }
 
     #[cfg(unix)]

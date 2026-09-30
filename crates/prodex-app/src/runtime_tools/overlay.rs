@@ -176,6 +176,103 @@ fn merge_overlay_toml(target: &mut toml::Value, patch: toml::Value) {
     }
 }
 
+fn codex_remote_requested(args: &[std::ffi::OsString]) -> bool {
+    args.iter().any(|arg| {
+        let arg = arg.to_string_lossy();
+        arg == "--remote" || arg.starts_with("--remote=")
+    })
+}
+
+fn codex_no_daemon_requested(args: &[std::ffi::OsString]) -> bool {
+    args.iter().any(|arg| arg == "--no-daemon")
+}
+
+fn project_super_workspace_trust(
+    codex_home: &Path,
+    codex_args: &[std::ffi::OsString],
+) -> Result<()> {
+    let mut trust_args = Vec::new();
+    let mut index = 0;
+    while index < codex_args.len() {
+        let Some(arg) = codex_args[index].to_str() else {
+            index += 1;
+            continue;
+        };
+        match arg {
+            "-c" | "--config" => {
+                if let Some(value) = codex_args.get(index + 1)
+                    && value
+                        .to_str()
+                        .is_some_and(|value| value.trim_start().starts_with("projects="))
+                {
+                    trust_args.extend([codex_args[index].clone(), value.clone()]);
+                }
+                index += 2;
+                continue;
+            }
+            value if value.starts_with("--config=") => {
+                if value
+                    .trim_start_matches("--config=")
+                    .trim_start()
+                    .starts_with("projects=")
+                {
+                    trust_args.push(codex_args[index].clone());
+                }
+            }
+            value
+                if value.starts_with("-c")
+                    && value.len() > 2
+                    && value
+                        .trim_start_matches("-c")
+                        .trim_start_matches('=')
+                        .trim_start()
+                        .starts_with("projects=") =>
+            {
+                trust_args.push(codex_args[index].clone());
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    if trust_args.is_empty() {
+        return Ok(());
+    }
+    configure_overlay_codex_home(codex_home, &trust_args, false)
+}
+
+fn ensure_local_super_uses_owned_server(
+    super_mode: bool,
+    has_private_companion: bool,
+    runtime_args: &mut Vec<std::ffi::OsString>,
+) {
+    if !super_mode
+        || prodex_runtime_launch::is_codex_exec_invocation(runtime_args)
+        || codex_remote_requested(runtime_args)
+        || has_private_companion
+        || codex_no_daemon_requested(runtime_args)
+    {
+        return;
+    }
+    runtime_args.insert(0, std::ffi::OsString::from("--no-daemon"));
+}
+
+#[cfg(unix)]
+fn connect_child_to_private_companion(
+    child: &mut prodex_runtime_launch::ChildProcessPlan,
+    socket: &Path,
+) {
+    if codex_remote_requested(&child.args) {
+        return;
+    }
+    child.args.splice(
+        0..0,
+        [
+            std::ffi::OsString::from("--remote"),
+            std::ffi::OsString::from(format!("unix://{}", socket.display())),
+        ],
+    );
+}
+
 pub(crate) fn project_in_app_resume_model_settings(
     codex_home: &Path,
     codex_args: &mut Vec<std::ffi::OsString>,
@@ -437,9 +534,21 @@ fn prepare_overlay_launch(
             ],
         )?;
     }
-    if session_app_server_companion_eligible(strategy, &runtime_args) {
+    let has_private_companion = session_app_server_companion_eligible(strategy, &runtime_args);
+    if strategy.args.super_mode
+        && !prodex_runtime_launch::is_codex_exec_invocation(&runtime_args)
+        && !codex_remote_requested(&runtime_args)
+    {
+        project_super_workspace_trust(&overlay_home, &runtime_args)?;
+    }
+    if has_private_companion {
         project_fresh_super_config(strategy, &overlay_home, &mut runtime_args)?;
     }
+    ensure_local_super_uses_owned_server(
+        strategy.args.super_mode,
+        has_private_companion,
+        &mut runtime_args,
+    );
     crate::runtime_launch::emit_runtime_timing(
         "startup.provider_catalog_prepare_ms",
         stage_started,
@@ -502,12 +611,13 @@ fn attach_session_app_server_companion(
     prepared: &PreparedRuntimeLaunch,
     overlay_home: &Path,
     runtime_proxy: Option<&RuntimeProxyEndpoint>,
-    plan: RuntimeLaunchPlan,
+    mut plan: RuntimeLaunchPlan,
     companion: Option<(prodex_runtime_launch::ChildProcessPlan, PathBuf)>,
 ) -> RuntimeLaunchPlan {
     let Some((mut companion, socket)) = companion else {
         return plan;
     };
+    connect_child_to_private_companion(&mut plan.child, &socket);
     strategy.finalize_child_plan(&mut companion, overlay_home, runtime_proxy);
     if prepared.managed
         && !companion
@@ -612,6 +722,81 @@ mod overlay_tests {
         let error = required_optional_tool_error(&plan, &required)
             .expect("required incompatible RTK must remain fatal");
         assert!(error.contains("required optional tool rtk is unavailable"));
+    }
+
+    #[test]
+    fn super_workspace_trust_is_persisted_into_overlay_config() {
+        let root = temp_overlay("super-workspace-trust");
+        std::fs::create_dir_all(&root).unwrap();
+        let args = vec![
+            OsString::from("-c"),
+            OsString::from("projects={\"/tmp/super-workspace\"={trust_level=\"trusted\"}}"),
+            OsString::from("resume"),
+            OsString::from("01900000-0000-7000-8000-000000000777"),
+        ];
+
+        project_super_workspace_trust(&root, &args).unwrap();
+
+        let rendered = std::fs::read_to_string(root.join("config.toml")).unwrap();
+        let config: toml::Value = toml::from_str(&rendered).unwrap();
+        assert_eq!(
+            config["projects"]["/tmp/super-workspace"]["trust_level"].as_str(),
+            Some("trusted")
+        );
+        assert_eq!(args[2], OsString::from("resume"));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn local_super_resume_disables_implicit_daemon_reuse() {
+        let mut args = vec![
+            OsString::from("resume"),
+            OsString::from("01900000-0000-7000-8000-000000000778"),
+        ];
+
+        ensure_local_super_uses_owned_server(true, false, &mut args);
+
+        assert_eq!(args.first(), Some(&OsString::from("--no-daemon")));
+        assert!(args.iter().any(|arg| arg == "resume"));
+    }
+
+    #[test]
+    fn local_super_private_companion_does_not_add_no_daemon() {
+        let mut args = Vec::new();
+
+        ensure_local_super_uses_owned_server(true, true, &mut args);
+
+        assert!(!args.iter().any(|arg| arg == "--no-daemon"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_companion_becomes_the_tui_remote_server() {
+        let mut child = prodex_runtime_launch::ChildProcessPlan::new(
+            OsString::from("codex"),
+            PathBuf::from("/tmp/codex-home"),
+        );
+        let socket = PathBuf::from("/tmp/prodex-super-private.sock");
+
+        connect_child_to_private_companion(&mut child, &socket);
+
+        assert_eq!(child.args.first(), Some(&OsString::from("--remote")));
+        assert_eq!(
+            child.args.get(1),
+            Some(&OsString::from("unix:///tmp/prodex-super-private.sock"))
+        );
+    }
+
+    #[test]
+    fn explicit_remote_super_transport_is_preserved() {
+        let mut args = vec![
+            OsString::from("--remote"),
+            OsString::from("unix:///tmp/user-selected.sock"),
+        ];
+
+        ensure_local_super_uses_owned_server(true, false, &mut args);
+
+        assert!(!args.iter().any(|arg| arg == "--no-daemon"));
     }
 
     #[test]
