@@ -1,5 +1,7 @@
 use super::local_rewrite::RuntimeLocalRewriteProxyShared;
-use super::provider_bridge::{RuntimeProviderRouteKind, runtime_provider_route_kind};
+use super::provider_bridge::{
+    RuntimeProviderRouteKind, runtime_provider_route_endpoint, runtime_provider_route_kind,
+};
 use crate::RuntimeProxyRequest;
 use prodex_provider_core::{
     ProviderCapabilityStatus, ProviderEndpoint, ProviderErrorClass, ProviderId, provider_adapter,
@@ -117,16 +119,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_provider_stream_
 pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_provider_endpoint(
     path: &str,
 ) -> Option<ProviderEndpoint> {
-    match runtime_provider_route_kind(path)? {
-        RuntimeProviderRouteKind::Responses => Some(ProviderEndpoint::Responses),
-        RuntimeProviderRouteKind::ResponsesCompact => Some(ProviderEndpoint::ResponsesCompact),
-        RuntimeProviderRouteKind::ChatCompletions => Some(ProviderEndpoint::ChatCompletions),
-        RuntimeProviderRouteKind::Messages => Some(ProviderEndpoint::Messages),
-        RuntimeProviderRouteKind::Embeddings => Some(ProviderEndpoint::Embeddings),
-        RuntimeProviderRouteKind::ModelsList | RuntimeProviderRouteKind::ModelsSingle(_) => {
-            Some(ProviderEndpoint::Models)
-        }
-    }
+    runtime_provider_route_kind(path).map(runtime_provider_route_endpoint)
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_gateway_route_uses_compact_dispatch(

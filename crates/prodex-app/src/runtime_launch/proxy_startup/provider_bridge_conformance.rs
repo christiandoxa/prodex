@@ -1,14 +1,12 @@
 use super::{
     RuntimeProviderBridgeKind, RuntimeProviderRouteKind, runtime_provider_label,
-    runtime_provider_model_from_body, runtime_provider_route_kind,
+    runtime_provider_model_from_body, runtime_provider_route_endpoint, runtime_provider_route_kind,
 };
 use prodex_provider_core::{
     ProviderEndpoint, ProviderTransformInput, ProviderTransformLoss, ProviderTransformResult,
     provider_translator,
 };
-use runtime_proxy_crate::{
-    path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
-};
+use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use std::collections::BTreeMap;
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_request_conformance_result(
@@ -16,12 +14,14 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_request_conform
     request: &crate::RuntimeProxyRequest,
     body: &[u8],
 ) -> Option<ProviderTransformResult> {
-    let path = path_without_query(&request.path_and_query);
-    let endpoint = match runtime_provider_route_kind(path) {
-        Some(RuntimeProviderRouteKind::Responses) => ProviderEndpoint::Responses,
-        Some(RuntimeProviderRouteKind::ResponsesCompact) => ProviderEndpoint::ResponsesCompact,
-        _ => return None,
-    };
+    let route = runtime_provider_route_kind(&request.path_and_query)?;
+    if !matches!(
+        route,
+        RuntimeProviderRouteKind::Responses | RuntimeProviderRouteKind::ResponsesCompact
+    ) {
+        return None;
+    }
+    let endpoint = runtime_provider_route_endpoint(route);
     let mut input = ProviderTransformInput::new(endpoint, body.to_vec());
     input.model = runtime_provider_model_from_body(body);
     input.headers = runtime_provider_conformance_headers(&request.headers);

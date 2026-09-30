@@ -15,7 +15,8 @@ const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>()
 
 mod routing;
 pub use routing::{
-    RuntimeProxyPathPlan, WebsocketEventKind, runtime_proxy_path_plan, websocket_event_kind,
+    RuntimeProviderRoutePlan, RuntimeProxyPathPlan, WebsocketEventKind,
+    runtime_provider_route_plan, runtime_proxy_path_plan, websocket_event_kind,
 };
 #[path = "rich/log_parser.rs"]
 mod log_parser;
@@ -381,6 +382,12 @@ unsafe extern "C" {
         path_address: u64,
         path_length: i64,
         websocket: i64,
+        output: *mut i64,
+    ) -> i64;
+    fn prodex_runtime_provider_route_plan_v1(
+        abi_version: i64,
+        path_address: u64,
+        path_length: i64,
         output: *mut i64,
     ) -> i64;
     fn prodex_provider_error_classify_v1(
