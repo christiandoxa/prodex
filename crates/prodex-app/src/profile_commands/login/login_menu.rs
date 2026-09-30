@@ -12,8 +12,6 @@ use terminal_ui::{
     tui_title_style,
 };
 
-const LOGIN_MENU_MIN_VISIBLE_ITEMS: usize = 3;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum LoginMenuAction {
     Method(LoginMethod),
@@ -197,32 +195,33 @@ fn apply_login_menu_key(
     visible_items: usize,
     entries: &[LoginMenuEntry],
 ) -> Result<Option<LoginMenuAction>> {
-    let last = entries.len().saturating_sub(1);
-    match key {
-        LoginMenuKey::Up => *selected = selected.saturating_sub(1),
-        LoginMenuKey::Down => *selected = (*selected + 1).min(last),
-        LoginMenuKey::PageUp => {
-            *selected = selected.saturating_sub(login_menu_page_step(visible_items))
-        }
-        LoginMenuKey::PageDown => {
-            *selected = (*selected + login_menu_page_step(visible_items)).min(last)
-        }
-        LoginMenuKey::Home => *selected = 0,
-        LoginMenuKey::End => *selected = last,
-        LoginMenuKey::Enter => return Ok(Some(entries[*selected].action)),
-        LoginMenuKey::Digit(index) => {
-            return Ok(entries
-                .get(index.saturating_sub(1))
-                .map(|entry| entry.action));
-        }
-        LoginMenuKey::Cancel => bail!("login cancelled"),
-        LoginMenuKey::Ignore => {}
+    let (key_tag, digit) = match key {
+        LoginMenuKey::Up => (0, 0),
+        LoginMenuKey::Down => (1, 0),
+        LoginMenuKey::PageUp => (2, 0),
+        LoginMenuKey::PageDown => (3, 0),
+        LoginMenuKey::Home => (4, 0),
+        LoginMenuKey::End => (5, 0),
+        LoginMenuKey::Enter => (6, 0),
+        LoginMenuKey::Cancel => (7, 0),
+        LoginMenuKey::Digit(index) => (8, index),
+        LoginMenuKey::Ignore => (9, 0),
+    };
+    let (next_selected, action, action_index) = prodex_mojo_core::launch::login_menu_key_plan(
+        key_tag,
+        digit,
+        *selected,
+        visible_items,
+        entries.len(),
+    )
+    .expect("Mojo login-menu key policy returned invalid output");
+    *selected = next_selected;
+    match action {
+        0 => Ok(None),
+        1 => Ok(action_index.and_then(|index| entries.get(index).map(|entry| entry.action))),
+        2 => bail!("login cancelled"),
+        _ => unreachable!("validated Mojo login-menu action"),
     }
-    Ok(None)
-}
-
-fn login_menu_page_step(visible_items: usize) -> usize {
-    visible_items.saturating_sub(1).max(1)
 }
 
 fn login_menu_key_from_event(key: KeyEvent) -> LoginMenuKey {
@@ -308,21 +307,8 @@ pub(super) fn show_login_guidance(kind: LoginGuidanceKind) -> Result<()> {
 }
 
 fn login_menu_layout_for_rows(rows: usize, entry_count: usize) -> LoginMenuLayout {
-    if entry_count == 0 {
-        return LoginMenuLayout {
-            visible_items: 0,
-            compact: true,
-        };
-    }
-
-    let rows = rows.max(8);
-    let compact = rows < 16;
-    let reserved_rows = if compact { 5 } else { 7 };
-    let min_visible = LOGIN_MENU_MIN_VISIBLE_ITEMS.min(entry_count);
-    let visible_items = rows
-        .saturating_sub(reserved_rows)
-        .max(min_visible)
-        .min(entry_count);
+    let (visible_items, compact) = prodex_mojo_core::launch::login_menu_layout(rows, entry_count)
+        .expect("Mojo login-menu layout policy returned invalid output");
     LoginMenuLayout {
         visible_items,
         compact,
@@ -335,20 +321,13 @@ fn login_menu_window_offset(
     visible_items: usize,
     entry_count: usize,
 ) -> usize {
-    if entry_count == 0 || visible_items == 0 {
-        return 0;
-    }
-    let max_offset = entry_count.saturating_sub(visible_items);
-    if selected < current_offset {
-        selected.min(max_offset)
-    } else if selected >= current_offset.saturating_add(visible_items) {
-        selected
-            .saturating_add(1)
-            .saturating_sub(visible_items)
-            .min(max_offset)
-    } else {
-        current_offset.min(max_offset)
-    }
+    prodex_mojo_core::launch::login_menu_window_offset(
+        selected,
+        current_offset,
+        visible_items,
+        entry_count,
+    )
+    .expect("Mojo login-menu window policy returned invalid output")
 }
 
 fn render_login_menu_tui(

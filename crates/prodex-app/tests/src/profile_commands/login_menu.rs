@@ -64,3 +64,35 @@ fn api_key_guidance_still_shows_guidance() {
         super::super::PromptLoginSelection::Guidance(LoginGuidanceKind::DeepSeekApiKey)
     );
 }
+
+#[test]
+fn login_menu_navigation_policy_is_mojo_backed() {
+    let entries = login_menu_entries();
+    let compact = login_menu_layout_for_rows(12, entries.len());
+    assert!(compact.compact);
+    assert_eq!(compact.visible_items, 7);
+    let roomy = login_menu_layout_for_rows(24, entries.len());
+    assert!(!roomy.compact);
+    assert_eq!(roomy.visible_items, entries.len());
+
+    assert_eq!(login_menu_window_offset(6, 0, 4, entries.len()), 3);
+    assert_eq!(login_menu_window_offset(1, 3, 4, entries.len()), 1);
+
+    let mut selected = 2;
+    assert_eq!(
+        apply_login_menu_key(LoginMenuKey::Down, &mut selected, 4, entries).unwrap(),
+        None
+    );
+    assert_eq!(selected, 3);
+    assert_eq!(
+        apply_login_menu_key(LoginMenuKey::PageUp, &mut selected, 4, entries).unwrap(),
+        None
+    );
+    assert_eq!(selected, 0);
+
+    assert_eq!(
+        apply_login_menu_key(LoginMenuKey::Digit(9), &mut selected, 4, entries).unwrap(),
+        Some(entries[8].action)
+    );
+    assert!(apply_login_menu_key(LoginMenuKey::Cancel, &mut selected, 4, entries).is_err());
+}

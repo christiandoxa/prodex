@@ -625,3 +625,157 @@ def prodex_mojo_launch_args_v1(
             written = launch_append_range(0, 0, count, output, 0)
     metadata[unsafe_offset=0] = written
     return 0
+
+
+comptime LOGIN_MENU_POLICY_ABI_VERSION: Int64 = 1
+comptime LOGIN_MENU_POLICY_LAYOUT: Int64 = 1
+comptime LOGIN_MENU_POLICY_OFFSET: Int64 = 2
+comptime LOGIN_MENU_POLICY_KEY: Int64 = 3
+
+comptime LOGIN_MENU_KEY_UP: Int64 = 0
+comptime LOGIN_MENU_KEY_DOWN: Int64 = 1
+comptime LOGIN_MENU_KEY_PAGE_UP: Int64 = 2
+comptime LOGIN_MENU_KEY_PAGE_DOWN: Int64 = 3
+comptime LOGIN_MENU_KEY_HOME: Int64 = 4
+comptime LOGIN_MENU_KEY_END: Int64 = 5
+comptime LOGIN_MENU_KEY_ENTER: Int64 = 6
+comptime LOGIN_MENU_KEY_CANCEL: Int64 = 7
+comptime LOGIN_MENU_KEY_DIGIT: Int64 = 8
+comptime LOGIN_MENU_KEY_IGNORE: Int64 = 9
+
+comptime LOGIN_MENU_ACTION_NONE: Int64 = 0
+comptime LOGIN_MENU_ACTION_SELECT: Int64 = 1
+comptime LOGIN_MENU_ACTION_CANCEL: Int64 = 2
+
+
+@export("prodex_login_menu_policy_v1")
+def prodex_login_menu_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    input0: Int64,
+    input1: Int64,
+    input2: Int64,
+    input3: Int64,
+    input4: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != LOGIN_MENU_POLICY_ABI_VERSION
+        or operation < LOGIN_MENU_POLICY_LAYOUT
+        or operation > LOGIN_MENU_POLICY_KEY
+        or output_address == 0
+    ):
+        return 1
+    for value in [input0, input1, input2, input3, input4]:
+        if value < 0:
+            return 1
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(4):
+        output[unsafe_offset=index] = 0
+
+    if operation == LOGIN_MENU_POLICY_LAYOUT:
+        var rows = input0
+        var entry_count = input1
+        if entry_count == 0:
+            output[unsafe_offset=0] = 0
+            output[unsafe_offset=1] = 1
+            return 0
+        if rows < Int64(8):
+            rows = Int64(8)
+        var compact = rows < Int64(16)
+        var reserved = Int64(5) if compact else Int64(7)
+        var min_visible = Int64(3)
+        if entry_count < min_visible:
+            min_visible = entry_count
+        var visible = rows - reserved
+        if visible < min_visible:
+            visible = min_visible
+        if visible > entry_count:
+            visible = entry_count
+        output[unsafe_offset=0] = visible
+        output[unsafe_offset=1] = Int64(compact)
+        return 0
+
+    if operation == LOGIN_MENU_POLICY_OFFSET:
+        var selected = input0
+        var current_offset = input1
+        var visible_items = input2
+        var entry_count = input3
+        if entry_count == 0 or visible_items == 0:
+            return 0
+        var max_offset = entry_count - visible_items
+        if max_offset < 0:
+            max_offset = 0
+        var next_offset = current_offset
+        if next_offset > max_offset:
+            next_offset = max_offset
+        if selected < current_offset:
+            next_offset = selected
+            if next_offset > max_offset:
+                next_offset = max_offset
+        elif selected >= current_offset + visible_items:
+            next_offset = selected + 1 - visible_items
+            if next_offset < 0:
+                next_offset = 0
+            if next_offset > max_offset:
+                next_offset = max_offset
+        output[unsafe_offset=0] = next_offset
+        return 0
+
+    var key = input0
+    var digit = input1
+    var selected = input2
+    var visible_items = input3
+    var entry_count = input4
+    if key < LOGIN_MENU_KEY_UP or key > LOGIN_MENU_KEY_IGNORE:
+        return 1
+    var last = entry_count - 1
+    if last < 0:
+        last = 0
+    var next_selected = selected
+    if next_selected > last:
+        next_selected = last
+    var action = LOGIN_MENU_ACTION_NONE
+    var action_index: Int64 = -1
+    var page_step = visible_items - 1
+    if page_step < 1:
+        page_step = 1
+
+    if key == LOGIN_MENU_KEY_UP:
+        next_selected -= 1
+        if next_selected < 0:
+            next_selected = 0
+    elif key == LOGIN_MENU_KEY_DOWN:
+        next_selected += 1
+        if next_selected > last:
+            next_selected = last
+    elif key == LOGIN_MENU_KEY_PAGE_UP:
+        next_selected -= page_step
+        if next_selected < 0:
+            next_selected = 0
+    elif key == LOGIN_MENU_KEY_PAGE_DOWN:
+        next_selected += page_step
+        if next_selected > last:
+            next_selected = last
+    elif key == LOGIN_MENU_KEY_HOME:
+        next_selected = 0
+    elif key == LOGIN_MENU_KEY_END:
+        next_selected = last
+    elif key == LOGIN_MENU_KEY_ENTER:
+        if entry_count > 0:
+            action = LOGIN_MENU_ACTION_SELECT
+            action_index = next_selected
+    elif key == LOGIN_MENU_KEY_CANCEL:
+        action = LOGIN_MENU_ACTION_CANCEL
+    elif key == LOGIN_MENU_KEY_DIGIT:
+        if digit >= 1 and digit <= entry_count:
+            action = LOGIN_MENU_ACTION_SELECT
+            action_index = digit - 1
+
+    output[unsafe_offset=0] = next_selected
+    output[unsafe_offset=1] = action
+    output[unsafe_offset=2] = action_index
+    return 0
