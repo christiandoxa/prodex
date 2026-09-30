@@ -130,6 +130,10 @@ const RUNTIME_HEALTH_SCALAR_BACKOFF_UPDATE_RETAIN: i64 = 13;
 const RUNTIME_HEALTH_SCALAR_BACKOFF_MERGE: i64 = 14;
 const RUNTIME_HEALTH_SCALAR_SELECTION_BACKOFF_ACTIVE: i64 = 15;
 const RUNTIME_HEALTH_SCALAR_TRANSPORT_UNTIL: i64 = 16;
+const RUNTIME_HEALTH_SCALAR_ROUTE_CIRCUIT_RETAIN: i64 = 17;
+const RUNTIME_HEALTH_SCALAR_RETRY_BACKOFF_PLAN: i64 = 18;
+const RUNTIME_HEALTH_SCALAR_TRANSPORT_BACKOFF_PLAN: i64 = 19;
+const RUNTIME_HEALTH_SCALAR_RECOVERY_AT: i64 = 20;
 
 fn runtime_health_scalar<const N: usize, const M: usize>(
     operation: i64,
@@ -411,6 +415,84 @@ pub fn profile_transport_backoff_until(
             route_until.unwrap_or_default(),
             i64::from(global_until.is_some()),
             global_until.unwrap_or_default(),
+            now,
+        ],
+    )?;
+    match output[0] {
+        0 => Ok(None),
+        1 => Ok(Some(output[1])),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProfileBackoffPlan {
+    pub seconds: i64,
+    pub until: i64,
+}
+
+pub fn profile_route_circuit_should_retain(
+    until: i64,
+    now: i64,
+    effective_health_score: u32,
+) -> Result<bool, crate::MojoError> {
+    let [value] = runtime_health_scalar::<3, 1>(
+        RUNTIME_HEALTH_SCALAR_ROUTE_CIRCUIT_RETAIN,
+        [until, now, i64::from(effective_health_score)],
+    )?;
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn profile_retry_backoff_plan(
+    retry_after_seconds: i64,
+    default_seconds: i64,
+    now: i64,
+) -> Result<ProfileBackoffPlan, crate::MojoError> {
+    let output = runtime_health_scalar::<3, 2>(
+        RUNTIME_HEALTH_SCALAR_RETRY_BACKOFF_PLAN,
+        [retry_after_seconds, default_seconds, now],
+    )?;
+    Ok(ProfileBackoffPlan {
+        seconds: output[0],
+        until: output[1],
+    })
+}
+
+pub fn profile_transport_backoff_plan(
+    existing_remaining: i64,
+    minimum_seconds: i64,
+    maximum_seconds: i64,
+    now: i64,
+) -> Result<ProfileBackoffPlan, crate::MojoError> {
+    let output = runtime_health_scalar::<4, 2>(
+        RUNTIME_HEALTH_SCALAR_TRANSPORT_BACKOFF_PLAN,
+        [existing_remaining, minimum_seconds, maximum_seconds, now],
+    )?;
+    Ok(ProfileBackoffPlan {
+        seconds: output[0],
+        until: output[1],
+    })
+}
+
+pub fn profile_recovery_at(
+    retry_until: Option<i64>,
+    transport_until: Option<i64>,
+    circuit_until: Option<i64>,
+    now: i64,
+) -> Result<Option<i64>, crate::MojoError> {
+    let output = runtime_health_scalar::<7, 2>(
+        RUNTIME_HEALTH_SCALAR_RECOVERY_AT,
+        [
+            i64::from(retry_until.is_some()),
+            retry_until.unwrap_or_default(),
+            i64::from(transport_until.is_some()),
+            transport_until.unwrap_or_default(),
+            i64::from(circuit_until.is_some()),
+            circuit_until.unwrap_or_default(),
             now,
         ],
     )?;

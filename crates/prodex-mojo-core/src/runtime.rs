@@ -26,7 +26,7 @@ pub use continuation_status::{
     CONTINUATION_VERIFY_PLAN, continuation_status_transition,
 };
 pub use profile_health::{
-    ProfileBackoffMergeAction, ProfileBackoffSoftening, ProfileHealthBumpInput,
+    ProfileBackoffMergeAction, ProfileBackoffPlan, ProfileBackoffSoftening, ProfileHealthBumpInput,
     ProfileHealthBumpPlan, ProfileHealthRecoveryPlan, ProfileHealthScoreInput,
     RUNTIME_PROFILE_HEALTH_SCORE_FIELD_COUNT, RUNTIME_PROFILE_HEALTH_SCORE_MAX_COUNT,
     profile_backoff_merge_action, profile_backoff_should_retain, profile_backoff_sort_key,
@@ -36,9 +36,10 @@ pub use profile_health::{
     profile_health_performance_score, profile_health_recovery_plan, profile_health_score,
     profile_health_sort_key_batch, profile_inflight_effective_hard_limit,
     profile_inflight_soft_limit, profile_inflight_weight, profile_latency_failure_score,
-    profile_latency_next_score, profile_latency_penalty, profile_score_should_clear,
+    profile_latency_next_score, profile_latency_penalty, profile_recovery_at,
+    profile_retry_backoff_plan, profile_route_circuit_should_retain, profile_score_should_clear,
     profile_score_should_replace, profile_score_should_retain, profile_selection_backoff_active,
-    profile_soften_backoff_until, profile_transport_backoff_until,
+    profile_soften_backoff_until, profile_transport_backoff_plan, profile_transport_backoff_until,
 };
 pub use profile_rotation::profile_selection_order_batch;
 pub use prompt_cache_affinity::prompt_cache_affinity_batch;

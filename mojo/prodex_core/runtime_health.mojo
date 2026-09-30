@@ -138,6 +138,10 @@ comptime RUNTIME_HEALTH_SCALAR_BACKOFF_UPDATE_RETAIN: Int64 = 13
 comptime RUNTIME_HEALTH_SCALAR_BACKOFF_MERGE: Int64 = 14
 comptime RUNTIME_HEALTH_SCALAR_SELECTION_BACKOFF_ACTIVE: Int64 = 15
 comptime RUNTIME_HEALTH_SCALAR_TRANSPORT_UNTIL: Int64 = 16
+comptime RUNTIME_HEALTH_SCALAR_ROUTE_CIRCUIT_RETAIN: Int64 = 17
+comptime RUNTIME_HEALTH_SCALAR_RETRY_BACKOFF_PLAN: Int64 = 18
+comptime RUNTIME_HEALTH_SCALAR_TRANSPORT_BACKOFF_PLAN: Int64 = 19
+comptime RUNTIME_HEALTH_SCALAR_RECOVERY_AT: Int64 = 20
 
 def runtime_health_saturating_shift_multiplier(exponent: Int64) -> Int64:
     if exponent <= 0:
@@ -449,6 +453,93 @@ def prodex_runtime_health_scalar_v1(
             output[unsafe_offset=1] = fields[unsafe_offset=3]
         return 0
 
+    if operation == RUNTIME_HEALTH_SCALAR_ROUTE_CIRCUIT_RETAIN:
+        if field_count != 3:
+            return 1
+        var health_score = fields[unsafe_offset=2]
+        if health_score < 0 or health_score > UINT32_MAX:
+            return 2
+        output[unsafe_offset=0] = Int64(
+            fields[unsafe_offset=0] > fields[unsafe_offset=1]
+            or health_score > 0
+        )
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_RETRY_BACKOFF_PLAN:
+        if field_count != 3 or output_count != 2:
+            return 1
+        var retry_after = fields[unsafe_offset=0]
+        var default_seconds = fields[unsafe_offset=1]
+        var now = fields[unsafe_offset=2]
+        if retry_after < 0 or default_seconds < 0:
+            return 2
+        var seconds = max(default_seconds, retry_after)
+        var until: Int64
+        if seconds > 0 and now > INT64_MAX - seconds:
+            until = INT64_MAX
+        elif seconds > 0 and now < INT64_MIN + seconds and now < 0:
+            # Positive seconds cannot underflow; keep the branch explicit for ABI safety.
+            until = now + seconds
+        else:
+            until = now + seconds
+        output[unsafe_offset=0] = seconds
+        output[unsafe_offset=1] = until
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_TRANSPORT_BACKOFF_PLAN:
+        if field_count != 4 or output_count != 2:
+            return 1
+        var existing_remaining = fields[unsafe_offset=0]
+        var minimum = fields[unsafe_offset=1]
+        var maximum = fields[unsafe_offset=2]
+        var now = fields[unsafe_offset=3]
+        if (
+            existing_remaining < 0
+            or minimum < 0
+            or maximum < minimum
+        ):
+            return 2
+        var seconds = minimum
+        if existing_remaining > 0:
+            var doubled: Int64
+            if existing_remaining > INT64_MAX / 2:
+                doubled = INT64_MAX
+            else:
+                doubled = existing_remaining * 2
+            seconds = min(max(doubled, minimum), maximum)
+        var until: Int64
+        if seconds > 0 and now > INT64_MAX - seconds:
+            until = INT64_MAX
+        else:
+            until = now + seconds
+        output[unsafe_offset=0] = seconds
+        output[unsafe_offset=1] = until
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_RECOVERY_AT:
+        if field_count != 7 or output_count != 2:
+            return 1
+        for index in [0, 2, 4]:
+            if fields[unsafe_offset=index] < 0 or fields[unsafe_offset=index] > 1:
+                return 2
+        var now = fields[unsafe_offset=6]
+        var present = False
+        var recovery_at: Int64 = INT64_MIN
+        if fields[unsafe_offset=0] == 1 and fields[unsafe_offset=1] > now:
+            present = True
+            recovery_at = fields[unsafe_offset=1]
+        if fields[unsafe_offset=2] == 1 and fields[unsafe_offset=3] > now:
+            if not present or fields[unsafe_offset=3] > recovery_at:
+                recovery_at = fields[unsafe_offset=3]
+            present = True
+        if fields[unsafe_offset=4] == 1 and fields[unsafe_offset=5] > now:
+            if not present or fields[unsafe_offset=5] > recovery_at:
+                recovery_at = fields[unsafe_offset=5]
+            present = True
+        output[unsafe_offset=0] = Int64(present)
+        output[unsafe_offset=1] = recovery_at if present else 0
+        return 0
+
     if operation == RUNTIME_HEALTH_SCALAR_BACKOFF_SORT_KEY:
         if field_count != 4 or output_count != 4:
             return 1
@@ -539,7 +630,7 @@ def prodex_runtime_health_scalar_v1(
             output[unsafe_offset=1] = until
             output[unsafe_offset=2] = 1
             return 0
-        var max_until = now
+        var max_until: Int64
         if max_future > 0 and now > INT64_MAX - max_future:
             max_until = INT64_MAX
         else:
