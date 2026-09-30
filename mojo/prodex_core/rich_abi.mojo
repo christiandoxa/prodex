@@ -1,7 +1,11 @@
 from std.memory import Pointer
 from std.sys.info import align_of, size_of
 
-from gemini_sse_state import gemini_response_part_plan
+from gemini_sse_state import (
+    gemini_completion_guardrail_plan,
+    gemini_response_once_event_plan,
+    gemini_response_part_plan,
+)
 from rich_text import rich_view_matches_literal
 from rich_types import (
     ProdexRichContextRecord,
@@ -344,6 +348,48 @@ def prodex_mojo_rich_anthropic_response_plan_v2(
     ):
         return ANTHROPIC_RESPONSE_PLAN_STATUS_CAPACITY
     return ANTHROPIC_RESPONSE_PLAN_STATUS_OK
+
+@export("prodex_mojo_rich_gemini_once_event_plan_v1")
+def prodex_mojo_rich_gemini_once_event_plan_v1(
+    abi_version: Int64,
+    already_emitted: Int64,
+    content_present: Int64,
+    requires_content: Int64,
+    output_emit: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    return gemini_response_once_event_plan(
+        already_emitted,
+        content_present,
+        requires_content,
+        output_emit,
+    )
+
+
+@export("prodex_mojo_rich_gemini_completion_guardrail_plan_v1")
+def prodex_mojo_rich_gemini_completion_guardrail_plan_v1(
+    abi_version: Int64,
+    output_is_empty: Int64,
+    reasoning_is_empty: Int64,
+    tool_calls_empty: Int64,
+    tool_intent_present: Int64,
+    wait_or_poll_present: Int64,
+    unverified_success: Int64,
+    output_action: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 4
+    return gemini_completion_guardrail_plan(
+        output_is_empty,
+        reasoning_is_empty,
+        tool_calls_empty,
+        tool_intent_present,
+        wait_or_poll_present,
+        unverified_success,
+        output_action,
+    )
+
 
 @export("prodex_mojo_rich_gemini_response_part_plan_v1")
 def prodex_mojo_rich_gemini_response_part_plan_v1(

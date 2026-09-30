@@ -18,7 +18,7 @@ impl RuntimeGeminiSseState {
     }
 
     pub(in super::super) fn complete_event(&mut self) -> Option<String> {
-        if self.completed {
+        if !super::gemini_provider_core_once_event_should_emit(self.completed, true, false) {
             return None;
         }
         self.apply_forced_output_text();
@@ -61,61 +61,77 @@ impl RuntimeGeminiSseState {
         events: &mut Vec<String>,
         output_is_empty: bool,
     ) -> bool {
-        if output_is_empty && self.reasoning_content.is_empty() {
-            let suffix = self
-                .finish_reason
-                .as_deref()
-                .map(|reason| format!(" finishReason={reason}"))
-                .unwrap_or_default();
-            if let Some(event) = self.failed_event(
-                "gemini_empty_response",
-                &format!("Gemini returned no visible response content.{suffix}"),
-            ) {
-                events.push(event);
-            }
-            return true;
-        }
-        if self.tool_calls.is_empty()
-            && let Some(tool_name) = runtime_gemini_tool_intent_without_call(&self.output_text)
-        {
-            if let Some(event) = self.failed_event(
-                "gemini_tool_intent_without_call",
-                &format!(
-                    "Gemini stopped after announcing a `{tool_name}` tool call instead of emitting the tool call."
-                ),
-            ) {
-                events.push(event);
-            }
-            return true;
-        }
-        if self.tool_calls.is_empty()
-            && let Some(reason) = runtime_gemini_non_actionable_wait_or_poll_text(&self.output_text)
-        {
-            if let Some(event) = self.failed_event(
-                "gemini_non_actionable_wait_or_poll",
-                &format!(
-                    "Gemini stopped with non-actionable wait/poll narration instead of waiting on the running tool session: {reason}."
-                ),
-            ) {
-                events.push(event);
-            }
-            return true;
-        }
-        if self.tool_calls.is_empty()
+        let tool_calls_empty = self.tool_calls.is_empty();
+        let tool_intent = tool_calls_empty
+            .then(|| runtime_gemini_tool_intent_without_call(&self.output_text))
+            .flatten();
+        let wait_or_poll = tool_calls_empty
+            .then(|| runtime_gemini_non_actionable_wait_or_poll_text(&self.output_text))
+            .flatten();
+        let unverified_success = tool_calls_empty
             && runtime_gemini_unverified_success_claim(
                 &self.output_text,
                 &self.conversation_messages,
-            )
-        {
-            if let Some(event) = self.failed_event(
-                "gemini_unverified_success_claim",
-                "Gemini made a success/up-to-date/no-blocker final claim without a clean verification tool result after the relevant action.",
-            ) {
-                events.push(event);
+            );
+        match super::gemini_provider_core_completion_guardrail_action(
+            output_is_empty,
+            self.reasoning_content.is_empty(),
+            tool_calls_empty,
+            tool_intent.is_some(),
+            wait_or_poll.is_some(),
+            unverified_success,
+        ) {
+            super::GeminiProviderCoreCompletionGuardrailAction::None => false,
+            super::GeminiProviderCoreCompletionGuardrailAction::EmptyResponse => {
+                let suffix = self
+                    .finish_reason
+                    .as_deref()
+                    .map(|reason| format!(" finishReason={reason}"))
+                    .unwrap_or_default();
+                if let Some(event) = self.failed_event(
+                    "gemini_empty_response",
+                    &format!("Gemini returned no visible response content.{suffix}"),
+                ) {
+                    events.push(event);
+                }
+                true
             }
-            return true;
+            super::GeminiProviderCoreCompletionGuardrailAction::ToolIntentWithoutCall => {
+                let tool_name =
+                    tool_intent.expect("Mojo tool-intent guardrail requires detected tool intent");
+                if let Some(event) = self.failed_event(
+                    "gemini_tool_intent_without_call",
+                    &format!(
+                        "Gemini stopped after announcing a \x60{tool_name}\x60 tool call instead of emitting the tool call."
+                    ),
+                ) {
+                    events.push(event);
+                }
+                true
+            }
+            super::GeminiProviderCoreCompletionGuardrailAction::NonActionableWait => {
+                let reason =
+                    wait_or_poll.expect("Mojo wait guardrail requires detected wait narration");
+                if let Some(event) = self.failed_event(
+                    "gemini_non_actionable_wait_or_poll",
+                    &format!(
+                        "Gemini stopped with non-actionable wait/poll narration instead of waiting on the running tool session: {reason}."
+                    ),
+                ) {
+                    events.push(event);
+                }
+                true
+            }
+            super::GeminiProviderCoreCompletionGuardrailAction::UnverifiedSuccess => {
+                if let Some(event) = self.failed_event(
+                    "gemini_unverified_success_claim",
+                    "Gemini made a success/up-to-date/no-blocker final claim without a clean verification tool result after the relevant action.",
+                ) {
+                    events.push(event);
+                }
+                true
+            }
         }
-        false
     }
 
     pub(super) fn flush_pending_output_text_events(&mut self) -> Vec<String> {

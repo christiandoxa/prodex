@@ -20,6 +20,23 @@ pub struct GeminiResponsePartInput {
 }
 
 unsafe extern "C" {
+    fn prodex_mojo_rich_gemini_once_event_plan_v1(
+        abi_version: i64,
+        already_emitted: i64,
+        content_present: i64,
+        requires_content: i64,
+        output_emit: *mut i64,
+    ) -> i64;
+    fn prodex_mojo_rich_gemini_completion_guardrail_plan_v1(
+        abi_version: i64,
+        output_is_empty: i64,
+        reasoning_is_empty: i64,
+        tool_calls_empty: i64,
+        tool_intent_present: i64,
+        wait_or_poll_present: i64,
+        unverified_success: i64,
+        output_action: *mut i64,
+    ) -> i64;
     fn prodex_mojo_rich_gemini_response_part_plan_v1(
         abi_version: i64,
         has_text: i64,
@@ -36,6 +53,80 @@ unsafe extern "C" {
         suppress_visible_text: i64,
         output_actions: *mut i64,
     ) -> i64;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeminiCompletionGuardrailAction {
+    None,
+    EmptyResponse,
+    ToolIntentWithoutCall,
+    NonActionableWait,
+    UnverifiedSuccess,
+}
+
+pub fn plan_gemini_once_event(
+    already_emitted: bool,
+    content_present: bool,
+    requires_content: bool,
+) -> Result<bool, MojoError> {
+    super::ensure_rich_abi()?;
+    let mut emit = -1_i64;
+    let status = unsafe {
+        prodex_mojo_rich_gemini_once_event_plan_v1(
+            GEMINI_RESPONSE_STATE_ABI_VERSION,
+            i64::from(already_emitted),
+            i64::from(content_present),
+            i64::from(requires_content),
+            &mut emit,
+        )
+    };
+    match (status, emit) {
+        (0, 0) => Ok(false),
+        (0, 1) => Ok(true),
+        (1, _) => Err(MojoError::InvalidInput),
+        (4, _) => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn plan_gemini_completion_guardrail(
+    output_is_empty: bool,
+    reasoning_is_empty: bool,
+    tool_calls_empty: bool,
+    tool_intent_present: bool,
+    wait_or_poll_present: bool,
+    unverified_success: bool,
+) -> Result<GeminiCompletionGuardrailAction, MojoError> {
+    super::ensure_rich_abi()?;
+    let mut action = -1_i64;
+    let status = unsafe {
+        prodex_mojo_rich_gemini_completion_guardrail_plan_v1(
+            GEMINI_RESPONSE_STATE_ABI_VERSION,
+            i64::from(output_is_empty),
+            i64::from(reasoning_is_empty),
+            i64::from(tool_calls_empty),
+            i64::from(tool_intent_present),
+            i64::from(wait_or_poll_present),
+            i64::from(unverified_success),
+            &mut action,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    match action {
+        0 => Ok(GeminiCompletionGuardrailAction::None),
+        1 => Ok(GeminiCompletionGuardrailAction::EmptyResponse),
+        2 => Ok(GeminiCompletionGuardrailAction::ToolIntentWithoutCall),
+        3 => Ok(GeminiCompletionGuardrailAction::NonActionableWait),
+        4 => Ok(GeminiCompletionGuardrailAction::UnverifiedSuccess),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn plan_gemini_response_part(input: GeminiResponsePartInput) -> Result<u8, MojoError> {

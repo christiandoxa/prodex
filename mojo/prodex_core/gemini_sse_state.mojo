@@ -75,3 +75,62 @@ def gemini_response_part_plan(
 
     output_actions[] = actions
     return GEMINI_RESPONSE_STATE_STATUS_OK
+
+
+comptime GEMINI_COMPLETION_GUARDRAIL_NONE: Int64 = 0
+comptime GEMINI_COMPLETION_GUARDRAIL_EMPTY: Int64 = 1
+comptime GEMINI_COMPLETION_GUARDRAIL_TOOL_INTENT: Int64 = 2
+comptime GEMINI_COMPLETION_GUARDRAIL_WAIT: Int64 = 3
+comptime GEMINI_COMPLETION_GUARDRAIL_UNVERIFIED_SUCCESS: Int64 = 4
+
+
+def gemini_response_once_event_plan(
+    already_emitted: Int64,
+    content_present: Int64,
+    requires_content: Int64,
+    output_emit: Pointer[mut=True, Int64, _],
+) -> Int64:
+    if (
+        not gemini_response_state_flag_valid(already_emitted)
+        or not gemini_response_state_flag_valid(content_present)
+        or not gemini_response_state_flag_valid(requires_content)
+    ):
+        return GEMINI_RESPONSE_STATE_STATUS_INVALID
+    output_emit[] = Int64(
+        already_emitted == 0
+        and (requires_content == 0 or content_present == 1)
+    )
+    return GEMINI_RESPONSE_STATE_STATUS_OK
+
+
+def gemini_completion_guardrail_plan(
+    output_is_empty: Int64,
+    reasoning_is_empty: Int64,
+    tool_calls_empty: Int64,
+    tool_intent_present: Int64,
+    wait_or_poll_present: Int64,
+    unverified_success: Int64,
+    output_action: Pointer[mut=True, Int64, _],
+) -> Int64:
+    for value in [
+        output_is_empty,
+        reasoning_is_empty,
+        tool_calls_empty,
+        tool_intent_present,
+        wait_or_poll_present,
+        unverified_success,
+    ]:
+        if not gemini_response_state_flag_valid(value):
+            return GEMINI_RESPONSE_STATE_STATUS_INVALID
+
+    var action = GEMINI_COMPLETION_GUARDRAIL_NONE
+    if output_is_empty == 1 and reasoning_is_empty == 1:
+        action = GEMINI_COMPLETION_GUARDRAIL_EMPTY
+    elif tool_calls_empty == 1 and tool_intent_present == 1:
+        action = GEMINI_COMPLETION_GUARDRAIL_TOOL_INTENT
+    elif tool_calls_empty == 1 and wait_or_poll_present == 1:
+        action = GEMINI_COMPLETION_GUARDRAIL_WAIT
+    elif tool_calls_empty == 1 and unverified_success == 1:
+        action = GEMINI_COMPLETION_GUARDRAIL_UNVERIFIED_SUCCESS
+    output_action[] = action
+    return GEMINI_RESPONSE_STATE_STATUS_OK
