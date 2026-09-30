@@ -10,6 +10,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Align Codex 0.159.2 (`016a520`)
 - Migrate Kiro chat message items (`9cc96a9`)
 - Align Codex 0.159.1 (`0fa6400`)
 - Migrate Copilot request policy (`a4d3c39`)
