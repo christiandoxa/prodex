@@ -23,37 +23,43 @@ pub(crate) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
         runtime_route_selection_view(&state),
         &state.current_profile,
     ) {
-        if excluded_profiles.contains(&name) {
-            continue;
-        }
         let Some(entry) = state.entry(&name) else {
             continue;
         };
-        if entry
-            .cached_auth_summary
+        let hard_limited = runtime_profile_inflight_hard_limited_for_context(
+            shared,
+            &name,
+            runtime_route_kind_inflight_context(route_kind),
+        )?;
+        let snapshot_blocks = entry
+            .cached_usage_snapshot
             .as_ref()
-            .is_some_and(|summary| !summary.quota_compatible)
-            || !entry.supports_codex_runtime()
-            || entry.cached_probe_entry.is_some()
-            || entry.inflight_count >= inflight_soft_limit
-            || entry.in_selection_backoff
-            || entry.auth_failure_active
-            || entry.health_sort_key > 0
-            || runtime_profile_inflight_hard_limited_for_context(
-                shared,
-                &name,
-                runtime_route_kind_inflight_context(route_kind),
-            )?
-            || entry
-                .cached_usage_snapshot
-                .as_ref()
-                .is_some_and(|snapshot| {
-                    runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
-                })
-        {
-            continue;
+            .is_some_and(|snapshot| {
+                runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
+            });
+        let eligible = prodex_mojo_core::runtime::waitable_candidate_eligible(
+            prodex_mojo_core::runtime::WaitableCandidateMode::ColdStart,
+            prodex_mojo_core::runtime::WaitableCandidateInput {
+                context_allowed: !excluded_profiles.contains(&name),
+                auth_compatible: !entry
+                    .cached_auth_summary
+                    .as_ref()
+                    .is_some_and(|summary| !summary.quota_compatible),
+                supports_runtime: entry.supports_codex_runtime(),
+                cached_probe_present: entry.cached_probe_entry.is_some(),
+                soft_limited: entry.inflight_count >= inflight_soft_limit,
+                in_selection_backoff: entry.in_selection_backoff,
+                auth_failure_active: entry.auth_failure_active,
+                health_penalized: entry.health_sort_key > 0,
+                hard_limited,
+                snapshot_blocks,
+                quota_blocked: false,
+            },
+        )
+        .expect("Mojo cold-start candidate policy returned invalid output");
+        if eligible {
+            count += 1;
         }
-        count += 1;
     }
     Ok(count)
 }
@@ -79,35 +85,38 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
         build_runtime_response_probe_plan(&state, excluded_profiles, route_kind, None, now)
             .ready_candidates
     {
-        if wait_affinity_owner.is_some_and(|owner| owner != candidate.name) {
-            continue;
-        }
-        if excluded_profiles.contains(&candidate.name) {
-            continue;
-        }
         let Some(entry) = state.entry(&candidate.name) else {
             continue;
         };
-        if !entry.supports_codex_runtime()
-            || entry.in_selection_backoff
-            || entry.auth_failure_active
-            || entry.health_sort_key > 0
-        {
-            continue;
-        }
-        if runtime_quota_precommit_guard_reason(
-            runtime_quota_summary_for_route(&candidate.usage, route_kind),
-            route_kind,
-        )
-        .is_some()
-        {
-            continue;
-        }
-        if runtime_profile_inflight_hard_limited_for_context(
+        let hard_limited = runtime_profile_inflight_hard_limited_for_context(
             shared,
             &candidate.name,
             runtime_route_kind_inflight_context(route_kind),
-        )? {
+        )?;
+        let quota_blocked = runtime_quota_precommit_guard_reason(
+            runtime_quota_summary_for_route(&candidate.usage, route_kind),
+            route_kind,
+        )
+        .is_some();
+        let eligible = prodex_mojo_core::runtime::waitable_candidate_eligible(
+            prodex_mojo_core::runtime::WaitableCandidateMode::Waitable,
+            prodex_mojo_core::runtime::WaitableCandidateInput {
+                context_allowed: !excluded_profiles.contains(&candidate.name)
+                    && wait_affinity_owner.is_none_or(|owner| owner == candidate.name),
+                auth_compatible: true,
+                supports_runtime: entry.supports_codex_runtime(),
+                cached_probe_present: false,
+                soft_limited: false,
+                in_selection_backoff: entry.in_selection_backoff,
+                auth_failure_active: entry.auth_failure_active,
+                health_penalized: entry.health_sort_key > 0,
+                hard_limited,
+                snapshot_blocks: false,
+                quota_blocked,
+            },
+        )
+        .expect("Mojo waitable candidate policy returned invalid output");
+        if eligible {
             waitable_profiles.insert(candidate.name.clone());
         }
     }
@@ -137,32 +146,37 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
         build_runtime_response_probe_plan(&state, &BTreeSet::new(), route_kind, None, now)
             .ready_candidates
     {
-        if !waited_profiles.contains(&candidate.name) {
-            continue;
-        }
         let Some(entry) = state.entry(&candidate.name) else {
             continue;
         };
-        if !entry.supports_codex_runtime()
-            || entry.in_selection_backoff
-            || entry.auth_failure_active
-            || entry.health_sort_key > 0
-        {
-            continue;
-        }
-        if runtime_quota_precommit_guard_reason(
-            runtime_quota_summary_for_route(&candidate.usage, route_kind),
-            route_kind,
-        )
-        .is_some()
-        {
-            continue;
-        }
-        if !runtime_profile_inflight_hard_limited_for_context(
+        let hard_limited = runtime_profile_inflight_hard_limited_for_context(
             shared,
             &candidate.name,
             runtime_route_kind_inflight_context(route_kind),
-        )? {
+        )?;
+        let quota_blocked = runtime_quota_precommit_guard_reason(
+            runtime_quota_summary_for_route(&candidate.usage, route_kind),
+            route_kind,
+        )
+        .is_some();
+        let eligible = prodex_mojo_core::runtime::waitable_candidate_eligible(
+            prodex_mojo_core::runtime::WaitableCandidateMode::Relieved,
+            prodex_mojo_core::runtime::WaitableCandidateInput {
+                context_allowed: waited_profiles.contains(&candidate.name),
+                auth_compatible: true,
+                supports_runtime: entry.supports_codex_runtime(),
+                cached_probe_present: false,
+                soft_limited: false,
+                in_selection_backoff: entry.in_selection_backoff,
+                auth_failure_active: entry.auth_failure_active,
+                health_penalized: entry.health_sort_key > 0,
+                hard_limited,
+                snapshot_blocks: false,
+                quota_blocked,
+            },
+        )
+        .expect("Mojo relief candidate policy returned invalid output");
+        if eligible {
             return Ok(true);
         }
     }
