@@ -9,6 +9,23 @@ comptime MODE_TIMESTAMP_PERSIST: Int64 = 0
 comptime MODE_FRESHNESS: Int64 = 1
 comptime MODE_SNAPSHOT_USABLE: Int64 = 2
 comptime MODE_PROBE_APPLY: Int64 = 3
+comptime MODE_CACHED_SOURCE: Int64 = 4
+comptime MODE_MODEL_CACHED_SOURCE: Int64 = 5
+comptime MODE_MODEL_FINALIZE: Int64 = 6
+comptime MODE_UNKNOWN_WINDOW: Int64 = 7
+
+comptime CACHED_SUMMARY_UNKNOWN: Int64 = 0
+comptime CACHED_SUMMARY_LIVE: Int64 = 1
+comptime CACHED_SUMMARY_SNAPSHOT: Int64 = 2
+comptime CACHED_SUMMARY_RETIRED: Int64 = 3
+
+comptime CACHED_SOURCE_NONE: Int64 = 0
+comptime CACHED_SOURCE_LIVE: Int64 = 1
+comptime CACHED_SOURCE_SNAPSHOT: Int64 = 2
+
+comptime CACHED_MODEL_STANDARD: Int64 = 0
+comptime CACHED_MODEL_LUNA: Int64 = 1
+comptime CACHED_MODEL_RETIRED: Int64 = 2
 
 comptime INT64_MAX: Int64 = 9223372036854775807
 comptime INT64_MIN: Int64 = -9223372036854775808
@@ -53,7 +70,7 @@ def prodex_runtime_state_quota_policy_v1(
 ) abi("C") -> Int64:
     if abi_version != RUNTIME_STATE_QUOTA_ABI_VERSION:
         return RUNTIME_STATE_QUOTA_ABI
-    if mode < MODE_TIMESTAMP_PERSIST or mode > MODE_PROBE_APPLY or output_address == 0:
+    if mode < MODE_TIMESTAMP_PERSIST or mode > MODE_UNKNOWN_WINDOW or output_address == 0:
         return RUNTIME_STATE_QUOTA_INVALID
 
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
@@ -106,6 +123,87 @@ def prodex_runtime_state_quota_policy_v1(
             output[unsafe_offset=0] = Int64(
                 state_quota_saturating_sub(input5, input4) <= input6
             )
+        return RUNTIME_STATE_QUOTA_OK
+
+    if mode == MODE_CACHED_SOURCE:
+        if (
+            not state_quota_valid_bool(input0)
+            or not state_quota_valid_bool(input1)
+            or not state_quota_valid_bool(input2)
+        ):
+            return RUNTIME_STATE_QUOTA_INVALID
+        if input0 == 1:
+            output[unsafe_offset=0] = CACHED_SUMMARY_LIVE
+            output[unsafe_offset=1] = CACHED_SOURCE_LIVE
+        elif input1 == 1 and input2 == 1:
+            output[unsafe_offset=0] = CACHED_SUMMARY_SNAPSHOT
+            output[unsafe_offset=1] = CACHED_SOURCE_SNAPSHOT
+        else:
+            output[unsafe_offset=0] = CACHED_SUMMARY_UNKNOWN
+            output[unsafe_offset=1] = CACHED_SOURCE_NONE
+        return RUNTIME_STATE_QUOTA_OK
+
+    if mode == MODE_MODEL_CACHED_SOURCE:
+        if (
+            input0 < CACHED_MODEL_STANDARD
+            or input0 > CACHED_MODEL_RETIRED
+            or not state_quota_valid_bool(input1)
+            or not state_quota_valid_bool(input2)
+            or not state_quota_valid_bool(input3)
+            or not state_quota_valid_bool(input4)
+            or not state_quota_valid_bool(input5)
+        ):
+            return RUNTIME_STATE_QUOTA_INVALID
+
+        if input0 == CACHED_MODEL_RETIRED:
+            output[unsafe_offset=0] = CACHED_SUMMARY_RETIRED
+            if input1 == 1:
+                output[unsafe_offset=1] = CACHED_SOURCE_LIVE
+            elif input2 == 1 and input3 == 1:
+                output[unsafe_offset=1] = CACHED_SOURCE_SNAPSHOT
+            else:
+                output[unsafe_offset=1] = CACHED_SOURCE_NONE
+            return RUNTIME_STATE_QUOTA_OK
+
+        if input1 == 1:
+            output[unsafe_offset=0] = CACHED_SUMMARY_LIVE
+            output[unsafe_offset=1] = CACHED_SOURCE_LIVE
+            return RUNTIME_STATE_QUOTA_OK
+
+        if input4 == 1 and input2 == 1 and input5 == 0:
+            output[unsafe_offset=0] = CACHED_SUMMARY_UNKNOWN
+            output[unsafe_offset=1] = CACHED_SOURCE_NONE
+            return RUNTIME_STATE_QUOTA_OK
+
+        if input2 == 1 and input3 == 1:
+            output[unsafe_offset=0] = CACHED_SUMMARY_SNAPSHOT
+            output[unsafe_offset=1] = CACHED_SOURCE_SNAPSHOT
+        else:
+            output[unsafe_offset=0] = CACHED_SUMMARY_UNKNOWN
+            output[unsafe_offset=1] = CACHED_SOURCE_NONE
+        return RUNTIME_STATE_QUOTA_OK
+
+    if mode == MODE_MODEL_FINALIZE:
+        if (
+            input0 < CACHED_MODEL_STANDARD
+            or input0 > CACHED_MODEL_RETIRED
+            or not state_quota_valid_bool(input1)
+        ):
+            return RUNTIME_STATE_QUOTA_INVALID
+        output[unsafe_offset=0] = Int64(
+            input0 == CACHED_MODEL_LUNA and input1 == 1
+        )
+        return RUNTIME_STATE_QUOTA_OK
+
+    if mode == MODE_UNKNOWN_WINDOW:
+        if (
+            not state_quota_valid_bool(input0)
+            or not state_quota_valid_bool(input1)
+        ):
+            return RUNTIME_STATE_QUOTA_INVALID
+        output[unsafe_offset=0] = Int64(input0 == 0)
+        if input0 == 0:
+            output[unsafe_offset=1] = input2 if input1 == 1 else INT64_MAX
         return RUNTIME_STATE_QUOTA_OK
 
     # probe apply:
