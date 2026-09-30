@@ -4,6 +4,7 @@ from std.memory import Pointer
 comptime SSE_LINE_BLANK: Int64 = 0
 comptime SSE_LINE_IGNORE: Int64 = 1
 comptime SSE_LINE_DATA: Int64 = 2
+comptime SSE_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
 
 
 @export("prodex_runtime_sse_line_plan_v1")
@@ -117,4 +118,31 @@ def prodex_runtime_sse_inspection_step_v1(
     output[unsafe_offset=1] = committed
     if action == SSE_INSPECTION_CONTINUE and precommit_hold == 0:
         output[unsafe_offset=1] = 1
+    return 0
+
+
+@export("prodex_runtime_sse_event_byte_plan_v1")
+def prodex_runtime_sse_event_byte_plan_v1(
+    current_bytes: UInt64,
+    data_bytes: UInt64,
+    max_bytes: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if output_address == 0:
+        return 1
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var next_bytes: UInt64
+    if SSE_UINT64_MAX - current_bytes < data_bytes:
+        next_bytes = SSE_UINT64_MAX
+    else:
+        next_bytes = current_bytes + data_bytes
+    if next_bytes != SSE_UINT64_MAX:
+        if SSE_UINT64_MAX - next_bytes < 1:
+            next_bytes = SSE_UINT64_MAX
+        else:
+            next_bytes += 1
+    output[unsafe_offset=0] = next_bytes
+    output[unsafe_offset=1] = UInt64(next_bytes > max_bytes)
     return 0
