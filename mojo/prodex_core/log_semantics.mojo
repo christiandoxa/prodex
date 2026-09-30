@@ -344,26 +344,26 @@ def prodex_mojo_transcript_event_classify_v1(
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    output[0] = TRANSCRIPT_EVENT_UNKNOWN
-    output[1] = TRANSCRIPT_PROTOCOL_TOOL
+    output[unsafe_offset=0] = TRANSCRIPT_EVENT_UNKNOWN
+    output[unsafe_offset=1] = TRANSCRIPT_PROTOCOL_TOOL
 
     if transcript_is_protocol_event(event):
-        output[0] = TRANSCRIPT_EVENT_PROTOCOL
-        output[1] = transcript_protocol_source(event)
+        output[unsafe_offset=0] = TRANSCRIPT_EVENT_PROTOCOL
+        output[unsafe_offset=1] = transcript_protocol_source(event)
         return 0
     if transcript_is_status_event(event):
-        output[0] = (
+        output[unsafe_offset=0] = (
             TRANSCRIPT_EVENT_STATUS_ERROR
             if transcript_status_is_error(event, status)
             else TRANSCRIPT_EVENT_STATUS_TERMINAL
         )
         return 0
     if transcript_view_equals["user_message"](event):
-        output[0] = TRANSCRIPT_EVENT_USER
+        output[unsafe_offset=0] = TRANSCRIPT_EVENT_USER
     elif transcript_view_equals["agent_message"](event):
-        output[0] = TRANSCRIPT_EVENT_ASSISTANT
+        output[unsafe_offset=0] = TRANSCRIPT_EVENT_ASSISTANT
     elif transcript_view_equals["agent_reasoning"](event):
-        output[0] = TRANSCRIPT_EVENT_REASONING
+        output[unsafe_offset=0] = TRANSCRIPT_EVENT_REASONING
     return 0
 
 
@@ -387,30 +387,30 @@ def prodex_mojo_transcript_item_classify_v1(
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    output[0] = TRANSCRIPT_ITEM_UNKNOWN
-    output[1] = TRANSCRIPT_PROTOCOL_TOOL
+    output[unsafe_offset=0] = TRANSCRIPT_ITEM_UNKNOWN
+    output[unsafe_offset=1] = TRANSCRIPT_PROTOCOL_TOOL
     if transcript_view_equals["message"](item):
-        output[0] = TRANSCRIPT_ITEM_MESSAGE
+        output[unsafe_offset=0] = TRANSCRIPT_ITEM_MESSAGE
     elif transcript_view_equals["function_call"](item):
-        output[0] = TRANSCRIPT_ITEM_FUNCTION_CALL
+        output[unsafe_offset=0] = TRANSCRIPT_ITEM_FUNCTION_CALL
     elif transcript_view_equals["function_call_output"](item):
-        output[0] = TRANSCRIPT_ITEM_FUNCTION_OUTPUT
+        output[unsafe_offset=0] = TRANSCRIPT_ITEM_FUNCTION_OUTPUT
     elif transcript_view_equals["custom_tool_call"](item):
-        output[0] = TRANSCRIPT_ITEM_CUSTOM_CALL
+        output[unsafe_offset=0] = TRANSCRIPT_ITEM_CUSTOM_CALL
     elif transcript_view_equals["custom_tool_call_output"](item):
-        output[0] = TRANSCRIPT_ITEM_CUSTOM_OUTPUT
+        output[unsafe_offset=0] = TRANSCRIPT_ITEM_CUSTOM_OUTPUT
     elif (
         transcript_view_equals["local_shell_call"](item)
         or transcript_view_equals["shell_call"](item)
     ):
-        output[0] = TRANSCRIPT_ITEM_SHELL_CALL
+        output[unsafe_offset=0] = TRANSCRIPT_ITEM_SHELL_CALL
     elif (
         transcript_view_equals["local_shell_call_output"](item)
         or transcript_view_equals["shell_call_output"](item)
     ):
-        output[0] = TRANSCRIPT_ITEM_SHELL_OUTPUT
+        output[unsafe_offset=0] = TRANSCRIPT_ITEM_SHELL_OUTPUT
     elif transcript_view_equals["reasoning"](item):
-        output[0] = TRANSCRIPT_ITEM_REASONING
+        output[unsafe_offset=0] = TRANSCRIPT_ITEM_REASONING
     elif (
         transcript_protocol_source(item) != TRANSCRIPT_PROTOCOL_TOOL
         or transcript_view_equals["computer_call"](item)
@@ -419,8 +419,8 @@ def prodex_mojo_transcript_item_classify_v1(
         or transcript_view_equals["file_search_call"](item)
         or transcript_view_equals["code_interpreter_call"](item)
     ):
-        output[0] = TRANSCRIPT_ITEM_PROTOCOL
-        output[1] = transcript_protocol_source(item)
+        output[unsafe_offset=0] = TRANSCRIPT_ITEM_PROTOCOL
+        output[unsafe_offset=1] = transcript_protocol_source(item)
     return 0
 
 
@@ -448,8 +448,8 @@ def prodex_mojo_transcript_operation_span_v1(
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    output[0] = 0
-    output[1] = 0
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = 0
 
     var bounds = rich_trim_bounds(view)
     if bounds[0] >= bounds[1]:
@@ -468,8 +468,8 @@ def prodex_mojo_transcript_operation_span_v1(
             end = cursor + width
         count += 1
         cursor += width
-    output[0] = end
-    output[1] = Int64(count > PRODEX_TRANSCRIPT_OPERATION_CHARS)
+    output[unsafe_offset=0] = end
+    output[unsafe_offset=1] = Int64(count > PRODEX_TRANSCRIPT_OPERATION_CHARS)
     return 0
 
 
@@ -529,4 +529,121 @@ def prodex_mojo_transcript_tool_name_v1(
         for index in range(4):
             output[unsafe_offset=index] = fallback[unsafe_offset=index]
         written[] = 4
+    return 0
+
+
+comptime PRODEX_UPSTREAM_PAYLOAD_ABI_VERSION: Int64 = 1
+comptime UPSTREAM_BINARY_UNKNOWN: Int64 = 0
+comptime UPSTREAM_BINARY_PNG: Int64 = 1
+comptime UPSTREAM_BINARY_JPEG: Int64 = 2
+comptime UPSTREAM_BINARY_GIF: Int64 = 3
+comptime UPSTREAM_BINARY_PDF: Int64 = 4
+comptime UPSTREAM_BINARY_ZIP: Int64 = 5
+comptime UPSTREAM_BINARY_GZIP: Int64 = 6
+comptime UPSTREAM_BINARY_ZSTD: Int64 = 7
+comptime UPSTREAM_BINARY_WEBP: Int64 = 8
+
+
+def upstream_payload_prefix(
+    ptr: Pointer[mut=False, UInt8, _], length: Int64, literal: StringSlice
+) -> Bool:
+    var expected_length = Int64(literal.byte_length())
+    if expected_length > length:
+        return False
+    var expected = literal.unsafe_ptr()
+    for index in range(expected_length):
+        if ptr[unsafe_offset=index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def upstream_payload_magic_kind(
+    ptr: Pointer[mut=False, UInt8, _], length: Int64
+) -> Int64:
+    if (
+        length >= 8
+        and ptr[unsafe_offset=0] == 0x89
+        and ptr[unsafe_offset=1] == 0x50
+        and ptr[unsafe_offset=2] == 0x4E
+        and ptr[unsafe_offset=3] == 0x47
+        and ptr[unsafe_offset=4] == 0x0D
+        and ptr[unsafe_offset=5] == 0x0A
+        and ptr[unsafe_offset=6] == 0x1A
+        and ptr[unsafe_offset=7] == 0x0A
+    ):
+        return UPSTREAM_BINARY_PNG
+    if length >= 3 and ptr[unsafe_offset=0] == 0xFF and ptr[unsafe_offset=1] == 0xD8 and ptr[unsafe_offset=2] == 0xFF:
+        return UPSTREAM_BINARY_JPEG
+    if (
+        upstream_payload_prefix(ptr, length, StringSlice("GIF87a"))
+        or upstream_payload_prefix(ptr, length, StringSlice("GIF89a"))
+    ):
+        return UPSTREAM_BINARY_GIF
+    if upstream_payload_prefix(ptr, length, StringSlice("%PDF-")):
+        return UPSTREAM_BINARY_PDF
+    if length >= 4 and ptr[unsafe_offset=0] == 0x50 and ptr[unsafe_offset=1] == 0x4B and ptr[unsafe_offset=2] == 0x03 and ptr[unsafe_offset=3] == 0x04:
+        return UPSTREAM_BINARY_ZIP
+    if length >= 2 and ptr[unsafe_offset=0] == 0x1F and ptr[unsafe_offset=1] == 0x8B:
+        return UPSTREAM_BINARY_GZIP
+    if (
+        length >= 4
+        and ptr[unsafe_offset=0] == 0x28
+        and ptr[unsafe_offset=1] == 0xB5
+        and ptr[unsafe_offset=2] == 0x2F
+        and ptr[unsafe_offset=3] == 0xFD
+    ):
+        return UPSTREAM_BINARY_ZSTD
+    if (
+        length >= 12
+        and upstream_payload_prefix(ptr, length, StringSlice("RIFF"))
+        and ptr[unsafe_offset=8] == 0x57
+        and ptr[unsafe_offset=9] == 0x45
+        and ptr[unsafe_offset=10] == 0x42
+        and ptr[unsafe_offset=11] == 0x50
+    ):
+        return UPSTREAM_BINARY_WEBP
+    return UPSTREAM_BINARY_UNKNOWN
+
+
+@export("prodex_mojo_upstream_payload_classify_v1")
+def prodex_mojo_upstream_payload_classify_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != PRODEX_UPSTREAM_PAYLOAD_ABI_VERSION
+        or input_length < 0
+        or output_address == 0
+        or (input_length > 0 and input_address == 0)
+    ):
+        return 1
+
+    var ptr = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = upstream_payload_magic_kind(ptr, input_length)
+
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, input_length):
+        return 0
+
+    var cursor: Int64 = 0
+    while cursor < input_length:
+        var width = rich_codepoint_width(ptr[unsafe_offset=cursor])
+        var codepoint = rich_codepoint(ptr, cursor, width)
+        if (
+            transcript_codepoint_is_control(codepoint)
+            and codepoint != 9
+            and codepoint != 10
+            and codepoint != 13
+        ):
+            return 0
+        cursor += width
+    output[unsafe_offset=0] = 1
     return 0
