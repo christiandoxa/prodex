@@ -5,18 +5,27 @@ use super::*;
 fn native_web_search_route_is_selected_only_for_native_modes_with_options() {
     let body = br#"{"web_search_options":{}}"#;
     for mode in [
-        RuntimeDeepSeekWebSearchMode::Auto,
-        RuntimeDeepSeekWebSearchMode::Anthropic,
+        RuntimeDeepSeekWebSearchMode::Auto as i64,
+        RuntimeDeepSeekWebSearchMode::Anthropic as i64,
     ] {
-        assert!(runtime_deepseek_uses_native_web_search(mode, body).unwrap());
+        assert!(
+            prodex_provider_core::deepseek_provider_core_uses_native_web_search(mode, body)
+                .unwrap()
+        );
     }
     assert!(
-        !runtime_deepseek_uses_native_web_search(RuntimeDeepSeekWebSearchMode::OpenAiChat, body)
-            .unwrap()
+        !prodex_provider_core::deepseek_provider_core_uses_native_web_search(
+            RuntimeDeepSeekWebSearchMode::OpenAiChat as i64,
+            body
+        )
+        .unwrap()
     );
     assert!(
-        !runtime_deepseek_uses_native_web_search(RuntimeDeepSeekWebSearchMode::Auto, br#"{}"#)
-            .unwrap()
+        !prodex_provider_core::deepseek_provider_core_uses_native_web_search(
+            RuntimeDeepSeekWebSearchMode::Auto as i64,
+            br#"{}"#
+        )
+        .unwrap()
     );
 }
 
@@ -33,9 +42,11 @@ fn auto_native_translation_falls_back_without_dropping_other_chat_fields() {
     }))
     .unwrap();
 
-    let fallback =
-        runtime_deepseek_auto_chat_fallback_body(&body, RuntimeDeepSeekWebSearchMode::Auto)
-            .expect("auto mode should have a safe chat fallback");
+    let fallback = prodex_provider_core::deepseek_provider_core_auto_chat_fallback_body(
+        RuntimeDeepSeekWebSearchMode::Auto as i64,
+        &body,
+    )
+    .expect("auto mode should have a safe chat fallback");
     let fallback: serde_json::Value = serde_json::from_slice(&fallback).unwrap();
     assert!(fallback.get("web_search_options").is_none());
     assert_eq!(fallback["model"], "deepseek-v4-flash");
@@ -50,8 +61,11 @@ fn auto_native_translation_falls_back_without_dropping_other_chat_fields() {
 fn explicit_anthropic_mode_has_no_chat_fallback() {
     let body = br#"{"web_search_options":{}}"#;
     assert!(
-        runtime_deepseek_auto_chat_fallback_body(body, RuntimeDeepSeekWebSearchMode::Anthropic,)
-            .is_none()
+        prodex_provider_core::deepseek_provider_core_auto_chat_fallback_body(
+            RuntimeDeepSeekWebSearchMode::Anthropic as i64,
+            body,
+        )
+        .is_none()
     );
 }
 
@@ -64,7 +78,9 @@ fn only_known_native_capability_rejections_allow_auto_fallback() {
         prodex_provider_core::ProviderWireFormat::AnthropicMessages,
         "Anthropic Messages does not translate chat field `response_format`",
     );
-    assert!(runtime_deepseek_native_translation_fallback_is_safe(&safe));
+    assert!(
+        prodex_provider_core::deepseek_provider_core_native_translation_fallback_is_safe(&safe)
+    );
 
     let unsafe_result = prodex_provider_core::ProviderTransformResult::rejected(
         ProviderId::Anthropic,
@@ -73,9 +89,11 @@ fn only_known_native_capability_rejections_allow_auto_fallback() {
         prodex_provider_core::ProviderWireFormat::AnthropicMessages,
         "translated message must be an object",
     );
-    assert!(!runtime_deepseek_native_translation_fallback_is_safe(
-        &unsafe_result
-    ));
+    assert!(
+        !prodex_provider_core::deepseek_provider_core_native_translation_fallback_is_safe(
+            &unsafe_result
+        )
+    );
 
     let unsupported = prodex_provider_core::ProviderTransformResult::unsupported(
         ProviderId::Anthropic,
@@ -84,9 +102,11 @@ fn only_known_native_capability_rejections_allow_auto_fallback() {
         prodex_provider_core::ProviderWireFormat::AnthropicMessages,
         "Anthropic Messages request translation requires Mojo support",
     );
-    assert!(!runtime_deepseek_native_translation_fallback_is_safe(
-        &unsupported
-    ));
+    assert!(
+        !prodex_provider_core::deepseek_provider_core_native_translation_fallback_is_safe(
+            &unsupported
+        )
+    );
 }
 
 #[test]

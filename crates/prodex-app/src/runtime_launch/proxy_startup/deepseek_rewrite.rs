@@ -75,6 +75,7 @@ pub(crate) struct RuntimeDeepSeekRewriteOptions {
     pub(crate) web_search_mode: RuntimeDeepSeekWebSearchMode,
 }
 
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum RuntimeDeepSeekWebSearchMode {
     #[default]
