@@ -24,6 +24,15 @@ unsafe extern "C" {
         capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_redaction_presidio_transport_policy_v1(
+        abi_version: i64,
+        operation: i64,
+        input0: i64,
+        input1: i64,
+        input2: i64,
+        input3: i64,
+        input4: i64,
+    ) -> i64;
     fn prodex_redaction_gateway_extra_v1(
         abi_version: i64,
         input_address: u64,
@@ -124,6 +133,69 @@ pub fn json_field_plan(value: &str) -> Result<JsonFieldPlan, MojoError> {
     })
 }
 
+fn presidio_transport_policy(operation: i64, inputs: [bool; 5]) -> Result<bool, MojoError> {
+    let result = unsafe {
+        prodex_redaction_presidio_transport_policy_v1(
+            REDACTION_ABI_VERSION,
+            operation,
+            i64::from(inputs[0]),
+            i64::from(inputs[1]),
+            i64::from(inputs[2]),
+            i64::from(inputs[3]),
+            i64::from(inputs[4]),
+        )
+    };
+    match result {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn presidio_fail_closed(
+    rollout_enforce: bool,
+    governance_enforcing: bool,
+    legacy_local_enabled: bool,
+    tenant_detector_enabled: bool,
+    explicit_fail_closed: bool,
+) -> Result<bool, MojoError> {
+    presidio_transport_policy(
+        0,
+        [
+            rollout_enforce,
+            governance_enforcing,
+            legacy_local_enabled,
+            tenant_detector_enabled,
+            explicit_fail_closed,
+        ],
+    )
+}
+
+pub fn presidio_local_inspection_required(
+    rollout_off: bool,
+    governance_enforcing: bool,
+    legacy_local_enabled: bool,
+    configured_detector_enabled: bool,
+) -> Result<bool, MojoError> {
+    presidio_transport_policy(
+        1,
+        [
+            rollout_off,
+            governance_enforcing,
+            legacy_local_enabled,
+            configured_detector_enabled,
+            false,
+        ],
+    )
+}
+
+pub fn presidio_external_coverage_denied(
+    fail_closed: bool,
+    coverage_full: bool,
+) -> Result<bool, MojoError> {
+    presidio_transport_policy(2, [fail_closed, coverage_full, false, false, false])
+}
+
 pub fn key_looks_sensitive(value: &str) -> Result<bool, MojoError> {
     let result = unsafe {
         prodex_redaction_key_sensitive_v1(
@@ -189,6 +261,21 @@ pub fn redact_gateway_text(value: &str) -> Result<String, MojoError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn presidio_transport_policy_contract_is_mojo_authoritative() {
+        assert!(!presidio_fail_closed(false, false, false, false, false).unwrap());
+        assert!(presidio_fail_closed(true, false, false, false, false).unwrap());
+        assert!(presidio_fail_closed(false, true, false, false, false).unwrap());
+        assert!(presidio_fail_closed(false, false, true, false, false).unwrap());
+        assert!(presidio_fail_closed(false, false, false, true, false).unwrap());
+        assert!(presidio_fail_closed(false, false, false, false, true).unwrap());
+        assert!(!presidio_local_inspection_required(true, false, false, false).unwrap());
+        assert!(presidio_local_inspection_required(false, false, false, false).unwrap());
+        assert!(presidio_external_coverage_denied(true, false).unwrap());
+        assert!(!presidio_external_coverage_denied(true, true).unwrap());
+        assert!(!presidio_external_coverage_denied(false, false).unwrap());
+    }
 
     #[test]
     fn redaction_kernel_smoke() {
