@@ -16,6 +16,7 @@ mojo = ["prodex_provider_core/mojo"]
 
 [dependencies]
 prodex_provider_core = { workspace = true }
+prodex_mojo_core = { workspace = true, features = ["mojo-provider-constraints"] }
 
 [lints]
 workspace = true

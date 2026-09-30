@@ -7242,3 +7242,102 @@ def prodex_copilot_request_policy_v1(
     written[] = writer.written
     result[] = changed
     return 0
+
+
+comptime PROVIDER_RETRY_ABI_VERSION: Int64 = 1
+comptime PROVIDER_RETRY_STATUS_OK: Int64 = 0
+comptime PROVIDER_RETRY_STATUS_INVALID: Int64 = 1
+comptime PROVIDER_RETRY_STATUS_ABI: Int64 = 4
+
+comptime PROVIDER_RETRY_STAGE_BEFORE_DISPATCH: Int64 = 0
+comptime PROVIDER_RETRY_STAGE_BEFORE_FIRST_BYTE: Int64 = 1
+comptime PROVIDER_RETRY_STAGE_AFTER_FIRST_BYTE: Int64 = 2
+comptime PROVIDER_RETRY_STAGE_AFTER_CANCELLATION: Int64 = 3
+
+comptime PROVIDER_RETRY_CAUSE_NEXT_MODEL: Int64 = 0
+comptime PROVIDER_RETRY_CAUSE_ROTATE_CREDENTIAL: Int64 = 1
+comptime PROVIDER_RETRY_CAUSE_NEXT_PROVIDER: Int64 = 2
+
+comptime PROVIDER_ERROR_AUTH: Int64 = 0
+comptime PROVIDER_ERROR_QUOTA: Int64 = 1
+comptime PROVIDER_ERROR_RATE_LIMIT: Int64 = 2
+comptime PROVIDER_ERROR_TRANSIENT: Int64 = 3
+comptime PROVIDER_ERROR_NOT_FOUND: Int64 = 4
+comptime PROVIDER_ERROR_OTHER: Int64 = 5
+
+comptime PROVIDER_RETRY_ALLOWED: Int64 = 0
+comptime PROVIDER_RETRY_DENIED_COMMITTED: Int64 = 1
+comptime PROVIDER_RETRY_DENIED_BUDGET_EXHAUSTED: Int64 = 2
+comptime PROVIDER_RETRY_DENIED_NOT_RETRYABLE: Int64 = 3
+
+
+def provider_retry_eligible(cause: Int64, error_class: Int64) -> Bool:
+    if cause == PROVIDER_RETRY_CAUSE_NEXT_MODEL:
+        return (
+            error_class == PROVIDER_ERROR_QUOTA
+            or error_class == PROVIDER_ERROR_RATE_LIMIT
+            or error_class == PROVIDER_ERROR_TRANSIENT
+            or error_class == PROVIDER_ERROR_NOT_FOUND
+        )
+    if cause == PROVIDER_RETRY_CAUSE_ROTATE_CREDENTIAL:
+        return (
+            error_class == PROVIDER_ERROR_AUTH
+            or error_class == PROVIDER_ERROR_QUOTA
+            or error_class == PROVIDER_ERROR_RATE_LIMIT
+            or error_class == PROVIDER_ERROR_TRANSIENT
+        )
+    return (
+        error_class == PROVIDER_ERROR_QUOTA
+        or error_class == PROVIDER_ERROR_RATE_LIMIT
+        or error_class == PROVIDER_ERROR_TRANSIENT
+    )
+
+
+@export("prodex_provider_retry_plan_v1")
+def prodex_provider_retry_plan_v1(
+    abi_version: Int64,
+    max_precommit_attempts: Int64,
+    stage: Int64,
+    cause: Int64,
+    error_class: Int64,
+    attempted_precommit_retries: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_RETRY_ABI_VERSION:
+        return PROVIDER_RETRY_STATUS_ABI
+    if (
+        max_precommit_attempts < 0
+        or max_precommit_attempts > 255
+        or stage < PROVIDER_RETRY_STAGE_BEFORE_DISPATCH
+        or stage > PROVIDER_RETRY_STAGE_AFTER_CANCELLATION
+        or cause < PROVIDER_RETRY_CAUSE_NEXT_MODEL
+        or cause > PROVIDER_RETRY_CAUSE_NEXT_PROVIDER
+        or error_class < PROVIDER_ERROR_AUTH
+        or error_class > PROVIDER_ERROR_OTHER
+        or attempted_precommit_retries < 0
+        or attempted_precommit_retries > 255
+        or output_address == 0
+    ):
+        return PROVIDER_RETRY_STATUS_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var remaining = max_precommit_attempts - attempted_precommit_retries
+    if remaining < 0:
+        remaining = 0
+
+    var decision = PROVIDER_RETRY_ALLOWED
+    if (
+        stage == PROVIDER_RETRY_STAGE_AFTER_FIRST_BYTE
+        or stage == PROVIDER_RETRY_STAGE_AFTER_CANCELLATION
+    ):
+        decision = PROVIDER_RETRY_DENIED_COMMITTED
+    elif not provider_retry_eligible(cause, error_class):
+        decision = PROVIDER_RETRY_DENIED_NOT_RETRYABLE
+    elif remaining == 0:
+        decision = PROVIDER_RETRY_DENIED_BUDGET_EXHAUSTED
+
+    output[unsafe_offset=0] = decision
+    output[unsafe_offset=1] = remaining
+    return PROVIDER_RETRY_STATUS_OK
