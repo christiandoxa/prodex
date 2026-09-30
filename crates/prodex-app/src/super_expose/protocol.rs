@@ -1,5 +1,6 @@
 use super::exec::execute_direct;
 use super::logging::ExposeAuditLog;
+use super::optional_tools::ExposeOptionalTools;
 use super::run::RunManager;
 use super::session_prompt_write::{
     ExistingSessionPromptWrite, PromptOutputReadRequest, SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES,
@@ -147,6 +148,7 @@ pub(super) struct DispatchContext<'a> {
     pub(super) display_name: &'a str,
     pub(super) workspace: &'a Path,
     pub(super) mode: SuperExposeMode,
+    pub(super) optional_tools: &'a ExposeOptionalTools,
     pub(super) audit: &'a ExposeAuditLog,
 }
 
@@ -160,6 +162,7 @@ fn tool_call(
     let instance_id = context.instance_id;
     let workspace = context.workspace;
     let mode = context.mode;
+    let optional_tools = context.optional_tools;
     let audit = context.audit;
     let object = params
         .as_object()
@@ -251,7 +254,7 @@ fn tool_call(
             value
         }
         ExposeTool::List => json!({"instance_id": instance_id, "runs":manager.list()}),
-        ExposeTool::Exec => execute_direct(arguments, workspace, audit)?,
+        ExposeTool::Exec => execute_direct(arguments, workspace, audit, optional_tools)?,
         ExposeTool::SessionPromptWrite => {
             let message =
                 required_string(arguments, "message", SESSION_PROMPT_WRITE_MAX_MESSAGE_BYTES)?;
@@ -407,9 +410,17 @@ fn initialize_result(
     }))
 }
 
-fn expose_instructions(workspace: &Path, instance_id: &str, mode: SuperExposeMode) -> String {
+fn expose_instructions(
+    workspace: &Path,
+    instance_id: &str,
+    mode: SuperExposeMode,
+    optional_tools: &ExposeOptionalTools,
+) -> String {
     if mode.exec_only() {
-        return "Exec-only Prodex Super endpoint. Only prodex_super_exec is exposed.".to_string();
+        return format!(
+            "Exec-only Prodex Super endpoint. Only prodex_super_exec is exposed.\n{}",
+            optional_tools.instructions()
+        );
     }
     let workspace_name = workspace
         .file_name()
@@ -417,8 +428,10 @@ fn expose_instructions(workspace: &Path, instance_id: &str, mode: SuperExposeMod
         .filter(|name| !name.is_empty())
         .unwrap_or("workspace");
     format!(
-        "This is a local full-access Prodex Super runtime starting in {:?} (instance {}). The initial directory is context, not a filesystem jail: runs retain normal OS-user filesystem, process, network, Git, and local-tool authority. For development requests, resolve one compatible existing plain prodex s with prodex_session_prompt_write first, then read its exact returned PID, thread_id, and cursor. Use prodex_session_preempt for one exact session when the current turn and all pending queued prompts must stop; it never kills a process. Start one prodex_super_start fallback only after authoritative no_session; never run both paths in parallel or treat ambiguity, stale identity, addressability, queue, source, or verification errors as no_session. A fresh idle prodex s needs no manual bootstrap prompt. Include consequential external actions in the user's task, and poll an existing run instead of starting duplicates. The expose URL is ephemeral capability authentication; anyone with it can control this instance.",
-        workspace_name, instance_id
+        "This is a local full-access Prodex Super runtime starting in {:?} (instance {}). The initial directory is context, not a filesystem jail: runs retain normal OS-user filesystem, process, network, Git, and local-tool authority. For development requests, resolve one compatible existing plain prodex s with prodex_session_prompt_write first, then read its exact returned PID, thread_id, and cursor. Use prodex_session_preempt for one exact session when the current turn and all pending queued prompts must stop; it never kills a process. Start one prodex_super_start fallback only after authoritative no_session; never run both paths in parallel or treat ambiguity, stale identity, addressability, queue, source, or verification errors as no_session. A fresh idle prodex s needs no manual bootstrap prompt. Include consequential external actions in the user's task, and poll an existing run instead of starting duplicates. The expose URL is ephemeral capability authentication; anyone with it can control this instance.\n{}",
+        workspace_name,
+        instance_id,
+        optional_tools.instructions()
     )
 }
 
@@ -448,7 +461,8 @@ mod tests {
 
     #[test]
     fn full_mode_exposes_the_exact_preserved_tool_contract() {
-        let tools = tools(SuperExposeMode::Full);
+        let optional_tools = ExposeOptionalTools::empty_for_tests();
+        let tools = tools(SuperExposeMode::Full, &optional_tools);
         let names = tools
             .iter()
             .filter_map(|tool| tool["name"].as_str())
@@ -486,7 +500,8 @@ mod tests {
 
     #[test]
     fn exec_mode_exposes_only_direct_exec() {
-        let names = tools(SuperExposeMode::Exec)
+        let optional_tools = ExposeOptionalTools::empty_for_tests();
+        let names = tools(SuperExposeMode::Exec, &optional_tools)
             .into_iter()
             .filter_map(|tool| tool["name"].as_str().map(str::to_string))
             .collect::<Vec<_>>();
@@ -497,6 +512,27 @@ mod tests {
             SuperExposeMode::Exec,
             "prodex_session_prompt_write"
         ));
+    }
+
+    #[test]
+    fn exec_tool_advertises_validated_optional_tool_snapshot() {
+        let optional_tools = ExposeOptionalTools::with_tool_for_tests(
+            prodex_optional_tools::OptionalToolId::Rtk,
+            Some(std::path::PathBuf::from("/validated/rtk")),
+            std::path::PathBuf::from("/prodex"),
+        );
+        let tools = tools(SuperExposeMode::Exec, &optional_tools);
+        let exec = tools
+            .iter()
+            .find(|tool| tool["name"] == "prodex_super_exec")
+            .expect("exec tool");
+        assert!(
+            exec["description"]
+                .as_str()
+                .is_some_and(|value| value.contains("optional:rtk"))
+        );
+        assert_eq!(exec["_meta"]["prodex/optionalTools"][1]["id"], "rtk");
+        assert_eq!(exec["_meta"]["prodex/optionalTools"][1]["available"], true);
     }
 
     #[test]

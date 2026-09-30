@@ -179,6 +179,8 @@ Prodex Super keeps a deliberately small optional stack:
 
 Caveman is externally installed and validated; Smart Context is built into the Codex runtime proxy, not guaranteed for native opaque CLIs. Every default Codex-based `prodex s` or `prodex playwright` launch adds the installed compatible Playwright MCP package to its temporary overlay when Node.js 18+ and `npx` pass launch-time validation. Prodex does not require one exact optional-tool version at runtime: missing tools are skipped, compatible releases at or above each minimum are accepted, and an installed-but-incompatible tool fails with an upgrade instruction. Release qualification still tracks the latest stable references. See [Optional Tools](docs/optional-tools.md) for minimum versions, latest-stable references, managed paths, and validation rules.
 
+`prodex s expose exec` snapshots the same launch-resolved optional-tool stack when the endpoint starts and advertises the usable entries in MCP initialize instructions and the `prodex_super_exec` tool metadata. Remote callers can use explicit `program: "optional:<tool>"` aliases without guessing installation paths: `optional:rtk` and `optional:codebase-memory-mcp` run their validated executables directly, `optional:playwright-mcp` runs the validated Playwright MCP package through `npx --no-install`, and `optional:caveman`, `optional:ponytail`, `optional:playwright`, and `optional:presidio` launch the corresponding Prodex Super integration. Presidio is advertised only while both configured services pass a bounded health probe. Ordinary `program` names and absolute paths keep their existing behavior and are never silently remapped.
+
 <details>
 <summary>Install and verify the Super tools</summary>
 

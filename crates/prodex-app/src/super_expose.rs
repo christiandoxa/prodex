@@ -20,6 +20,8 @@ mod exec;
 mod logging;
 #[path = "super_expose/openai_tunnel.rs"]
 mod openai_tunnel;
+#[path = "super_expose/optional_tools.rs"]
+mod optional_tools;
 #[path = "super_expose/protocol.rs"]
 mod protocol;
 #[path = "super_expose/run.rs"]
@@ -81,11 +83,16 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
         .canonicalize()
         .context("failed to canonicalize expose workspace")?;
     let audit = logging::ExposeAuditLog::new()?;
+    let optional_tools = optional_tools::ExposeOptionalTools::discover();
     audit.event(
         "super_expose_starting",
         [
             crate::runtime_proxy_log_field("mode", expose.mode.as_str()),
             crate::runtime_proxy_log_field("bind", "loopback"),
+            crate::runtime_proxy_log_field(
+                "optional_tools_available",
+                optional_tools.available_count().to_string(),
+            ),
         ],
     );
     let token = capability_token()?;
@@ -136,6 +143,7 @@ pub(crate) fn handle_super_expose(mut expose: SuperExposeArgs) -> Result<()> {
                 display_name: &display_name,
                 workspace: &workspace,
                 mode: expose.mode,
+                optional_tools: &optional_tools,
                 audit: &audit,
             },
         );
@@ -385,6 +393,7 @@ struct SuperExposeRequestContext<'a> {
     display_name: &'a str,
     workspace: &'a std::path::Path,
     mode: prodex_cli::SuperExposeMode,
+    optional_tools: &'a optional_tools::ExposeOptionalTools,
     audit: &'a logging::ExposeAuditLog,
 }
 
@@ -402,6 +411,7 @@ fn handle_super_expose_request(
         display_name,
         workspace,
         mode,
+        optional_tools,
         audit,
     } = context;
     if request.url().split('?').next() != Some(expected_path) {
@@ -503,6 +513,7 @@ fn handle_super_expose_request(
         display_name,
         workspace,
         mode,
+        optional_tools,
         audit,
     };
     let _ = request.respond(protocol::dispatch(&body, &headers, &dispatch_context));

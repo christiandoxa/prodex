@@ -45,7 +45,7 @@ pub(crate) use self::mcp_jsonl_bridge::*;
 pub(crate) use self::ping::*;
 pub(crate) use self::presidio::{
     ensure_presidio_services_for_super_launch, ensure_required_presidio_services_for_super_launch,
-    stored_presidio_preference,
+    presidio_expose_health, stored_presidio_preference,
 };
 pub(crate) use self::prodex_update::*;
 pub(crate) use self::quota::*;
