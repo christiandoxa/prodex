@@ -303,19 +303,25 @@ fn runtime_provider_sse_append_data_line(
     event_bytes: &mut usize,
     event_max_bytes: usize,
 ) -> io::Result<bool> {
-    if line.is_empty() {
-        return Ok(!data_lines.is_empty());
+    let plan = runtime_proxy_crate::runtime_sse_line_plan(line.as_bytes());
+    match plan.kind {
+        runtime_proxy_crate::RuntimeSseLineKind::Blank => Ok(!data_lines.is_empty()),
+        runtime_proxy_crate::RuntimeSseLineKind::Ignore => Ok(false),
+        runtime_proxy_crate::RuntimeSseLineKind::Data => {
+            let data = &line[plan.value_start..plan.value_end];
+            let byte_plan = runtime_proxy_crate::runtime_sse_event_byte_plan(
+                *event_bytes,
+                data.len(),
+                event_max_bytes,
+            );
+            *event_bytes = byte_plan.next_bytes;
+            if byte_plan.exceeds_limit {
+                return Err(runtime_provider_sse_limit_error("event", event_max_bytes));
+            }
+            data_lines.push(data.to_string());
+            Ok(false)
+        }
     }
-    let Some(data) = line.strip_prefix("data:") else {
-        return Ok(false);
-    };
-    let data = data.trim_start();
-    *event_bytes = event_bytes.saturating_add(data.len()).saturating_add(1);
-    if *event_bytes > event_max_bytes {
-        return Err(runtime_provider_sse_limit_error("event", event_max_bytes));
-    }
-    data_lines.push(data.to_string());
-    Ok(false)
 }
 
 fn runtime_provider_sse_limit_error(kind: &str, max_bytes: usize) -> io::Error {

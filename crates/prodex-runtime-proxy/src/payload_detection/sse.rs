@@ -45,6 +45,7 @@ pub enum RuntimeSseInspectionProgress {
 }
 
 const RUNTIME_SSE_LINE_BLANK: i64 = 0;
+const RUNTIME_SSE_LINE_IGNORE: i64 = 1;
 const RUNTIME_SSE_LINE_DATA: i64 = 2;
 const RUNTIME_SSE_INSPECTION_CONTINUE: i64 = 0;
 const RUNTIME_SSE_INSPECTION_QUOTA_BLOCKED: i64 = 1;
@@ -54,6 +55,12 @@ const RUNTIME_SSE_INSPECTION_PREVIOUS_RESPONSE_NOT_FOUND: i64 = 4;
 
 unsafe extern "C" {
     fn prodex_runtime_sse_line_plan_v1(address: u64, length: i64, output_address: u64) -> i64;
+    fn prodex_runtime_sse_event_byte_plan_v1(
+        current_bytes: u64,
+        data_bytes: u64,
+        max_bytes: u64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_runtime_sse_inspection_step_v1(
         committed: i64,
         quota_blocked: i64,
@@ -65,7 +72,21 @@ unsafe extern "C" {
     ) -> i64;
 }
 
-fn runtime_sse_line_plan(line: &[u8]) -> (i64, usize, usize) {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeSseLineKind {
+    Blank,
+    Ignore,
+    Data,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeSseLinePlan {
+    pub kind: RuntimeSseLineKind,
+    pub value_start: usize,
+    pub value_end: usize,
+}
+
+pub fn runtime_sse_line_plan(line: &[u8]) -> RuntimeSseLinePlan {
     let mut output = [0_i64; 3];
     let status = unsafe {
         prodex_runtime_sse_line_plan_v1(
@@ -75,14 +96,57 @@ fn runtime_sse_line_plan(line: &[u8]) -> (i64, usize, usize) {
         )
     };
     assert_eq!(status, 0, "Mojo SSE line planner returned invalid status");
-    assert!((0..=2).contains(&output[0]), "Mojo SSE line tag is invalid");
-    let start = usize::try_from(output[1]).expect("validated Mojo SSE value start");
-    let end = usize::try_from(output[2]).expect("validated Mojo SSE value end");
+    let kind = match output[0] {
+        RUNTIME_SSE_LINE_BLANK => RuntimeSseLineKind::Blank,
+        RUNTIME_SSE_LINE_IGNORE => RuntimeSseLineKind::Ignore,
+        RUNTIME_SSE_LINE_DATA => RuntimeSseLineKind::Data,
+        _ => panic!("Mojo SSE line tag is invalid"),
+    };
+    let value_start = usize::try_from(output[1]).expect("validated Mojo SSE value start");
+    let value_end = usize::try_from(output[2]).expect("validated Mojo SSE value end");
     assert!(
-        start <= end && end <= line.len(),
+        value_start <= value_end && value_end <= line.len(),
         "Mojo SSE line span is invalid"
     );
-    (output[0], start, end)
+    RuntimeSseLinePlan {
+        kind,
+        value_start,
+        value_end,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeSseEventBytePlan {
+    pub next_bytes: usize,
+    pub exceeds_limit: bool,
+}
+
+pub fn runtime_sse_event_byte_plan(
+    current_bytes: usize,
+    data_bytes: usize,
+    max_bytes: usize,
+) -> RuntimeSseEventBytePlan {
+    let mut output = [0_u64; 2];
+    let status = unsafe {
+        prodex_runtime_sse_event_byte_plan_v1(
+            u64::try_from(current_bytes).expect("SSE event bytes fit u64"),
+            u64::try_from(data_bytes).expect("SSE data bytes fit u64"),
+            u64::try_from(max_bytes).expect("SSE event limit fits u64"),
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    assert_eq!(
+        status, 0,
+        "Mojo SSE event byte planner returned invalid status"
+    );
+    RuntimeSseEventBytePlan {
+        next_bytes: usize::try_from(output[0]).unwrap_or(usize::MAX),
+        exceeds_limit: match output[1] {
+            0 => false,
+            1 => true,
+            _ => panic!("Mojo SSE event byte planner returned invalid flag"),
+        },
+    }
 }
 
 fn runtime_sse_inspection_step(
@@ -155,11 +219,11 @@ fn runtime_sse_finish_line<F>(
 ) where
     F: FnMut(RuntimeParsedSseEvent),
 {
-    let (kind, value_start, value_end) = runtime_sse_line_plan(line);
-    if kind == RUNTIME_SSE_LINE_BLANK {
+    let plan = runtime_sse_line_plan(line);
+    if plan.kind == RuntimeSseLineKind::Blank {
         runtime_sse_emit_event(data_lines, parse_event, on_event);
-    } else if kind == RUNTIME_SSE_LINE_DATA {
-        match std::str::from_utf8(&line[value_start..value_end]) {
+    } else if plan.kind == RuntimeSseLineKind::Data {
+        match std::str::from_utf8(&line[plan.value_start..plan.value_end]) {
             Ok(text) if !runtime_sse_event_marked_invalid(data_lines) => {
                 data_lines.push(text.to_owned());
             }
@@ -404,22 +468,38 @@ mod planner_tests {
 
     #[test]
     fn sse_line_planner_handles_sse_field_shapes() {
-        type Case = (&'static [u8], (i64, usize, usize));
+        type Case = (&'static [u8], RuntimeSseLineKind, usize, usize);
         let cases: &[Case] = &[
-            (b"\n", (RUNTIME_SSE_LINE_BLANK, 0, 0)),
-            (b"\r\n", (RUNTIME_SSE_LINE_BLANK, 0, 0)),
-            (b": ping\n", (1, 6, 6)),
-            (b"data\n", (RUNTIME_SSE_LINE_DATA, 4, 4)),
-            (b"data:\n", (RUNTIME_SSE_LINE_DATA, 5, 5)),
-            (b"data: hello\r\n", (RUNTIME_SSE_LINE_DATA, 6, 11)),
-            (b"data:  hello\n", (RUNTIME_SSE_LINE_DATA, 6, 12)),
-            (b"event: message\n", (1, 14, 14)),
-            (b"database: nope\n", (1, 14, 14)),
-            (b"data:\xff\n", (RUNTIME_SSE_LINE_DATA, 5, 6)),
+            (b"\n", RuntimeSseLineKind::Blank, 0, 0),
+            (b"\r\n", RuntimeSseLineKind::Blank, 0, 0),
+            (b": ping\n", RuntimeSseLineKind::Ignore, 6, 6),
+            (b"data\n", RuntimeSseLineKind::Data, 4, 4),
+            (b"data:\n", RuntimeSseLineKind::Data, 5, 5),
+            (b"data: hello\r\n", RuntimeSseLineKind::Data, 6, 11),
+            (b"data:  hello\n", RuntimeSseLineKind::Data, 6, 12),
+            (b"event: message\n", RuntimeSseLineKind::Ignore, 14, 14),
+            (b"database: nope\n", RuntimeSseLineKind::Ignore, 14, 14),
+            (b"data:\xff\n", RuntimeSseLineKind::Data, 5, 6),
         ];
-        for (line, expected) in cases {
-            assert_eq!(runtime_sse_line_plan(line), *expected, "line={line:?}");
+        for (line, kind, value_start, value_end) in cases {
+            assert_eq!(
+                runtime_sse_line_plan(line),
+                RuntimeSseLinePlan {
+                    kind: *kind,
+                    value_start: *value_start,
+                    value_end: *value_end,
+                },
+                "line={line:?}"
+            );
         }
+        assert_eq!(
+            runtime_sse_event_byte_plan(7, 4, 12),
+            RuntimeSseEventBytePlan {
+                next_bytes: 12,
+                exceeds_limit: false,
+            }
+        );
+        assert!(runtime_sse_event_byte_plan(8, 4, 12).exceeds_limit);
     }
 
     #[test]
