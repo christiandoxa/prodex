@@ -119,46 +119,79 @@ impl<'a> RuntimeHardBindingCandidates<'a> {
         let Some(binding) = binding else {
             return;
         };
-        if !prodex_runtime_state::runtime_identity_component_is_valid(&binding.profile_name)
-            || binding.profile_name == prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
-            || binding.profile_name == prodex_state::HARD_BINDING_CONFLICT_PROFILE
-        {
-            self.conflict = true;
-        } else if self.profiles.contains_key(&binding.profile_name) {
-            self.owners.insert(binding.profile_name.clone());
-        } else {
-            self.unavailable.insert(binding.profile_name.clone());
+        let incoming_identity = binding.binding_identity.as_ref();
+        let existing_identity = self.binding_identity.as_ref();
+        let plan = prodex_mojo_core::runtime_lineage::candidate_plan(
+            prodex_runtime_state::runtime_identity_component_is_valid(&binding.profile_name),
+            binding.profile_name == prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
+                || binding.profile_name == prodex_state::HARD_BINDING_CONFLICT_PROFILE,
+            self.profiles.contains_key(&binding.profile_name),
+            incoming_identity.is_some(),
+            existing_identity.is_some(),
+            match (existing_identity, incoming_identity) {
+                (Some(existing), Some(incoming)) => existing == incoming,
+                _ => false,
+            },
+        )
+        .expect("Mojo hard-binding candidate planner returned invalid output");
+
+        match plan.kind {
+            prodex_mojo_core::runtime_lineage::RuntimeLineageCandidateKind::Owner => {
+                self.owners.insert(binding.profile_name.clone());
+            }
+            prodex_mojo_core::runtime_lineage::RuntimeLineageCandidateKind::Unavailable => {
+                self.unavailable.insert(binding.profile_name.clone());
+            }
+            prodex_mojo_core::runtime_lineage::RuntimeLineageCandidateKind::Conflict => {
+                self.conflict = true;
+            }
         }
-        if let Some(binding_identity) = binding.binding_identity.as_ref() {
-            match self.binding_identity.as_ref() {
-                Some(existing) if existing != binding_identity => self.conflict = true,
-                None => self.binding_identity = Some(binding_identity.clone()),
-                Some(_) => {}
+        match plan.identity_action {
+            prodex_mojo_core::runtime_lineage::RuntimeLineageIdentityAction::Keep => {}
+            prodex_mojo_core::runtime_lineage::RuntimeLineageIdentityAction::Set => {
+                self.binding_identity = incoming_identity.cloned();
+            }
+            prodex_mojo_core::runtime_lineage::RuntimeLineageIdentityAction::Conflict => {
+                self.conflict = true;
             }
         }
     }
 
     fn resolution(self) -> prodex_runtime_state::RuntimeHardBindingResolution {
-        if self.conflict
-            || self.owners.len() > 1
-            || self.unavailable.len() > 1
-            || (self.owners.len() == 1 && !self.unavailable.is_empty())
-        {
-            return prodex_runtime_state::RuntimeHardBindingResolution::Conflict;
+        let plan = prodex_mojo_core::runtime_lineage::resolution_plan(
+            self.conflict,
+            self.owners.len(),
+            self.unavailable.len(),
+        )
+        .expect("Mojo hard-binding resolution planner returned invalid output");
+        match plan {
+            prodex_mojo_core::runtime_lineage::RuntimeLineageResolutionKind::Conflict => {
+                prodex_runtime_state::RuntimeHardBindingResolution::Conflict
+            }
+            prodex_mojo_core::runtime_lineage::RuntimeLineageResolutionKind::Owned => {
+                prodex_runtime_state::RuntimeHardBindingResolution::Owned {
+                    profile_name: self
+                        .owners
+                        .into_iter()
+                        .next()
+                        .expect("Mojo owned resolution requires one owner"),
+                    binding_identity: self.binding_identity,
+                }
+            }
+            prodex_mojo_core::runtime_lineage::RuntimeLineageResolutionKind::Unavailable => {
+                prodex_runtime_state::RuntimeHardBindingResolution::Unavailable {
+                    profile_name: self
+                        .unavailable
+                        .into_iter()
+                        .next()
+                        .expect("Mojo unavailable resolution requires one profile"),
+                    binding_identity: self.binding_identity,
+                }
+            }
+            prodex_mojo_core::runtime_lineage::RuntimeLineageResolutionKind::Unbound => {
+                prodex_runtime_state::RuntimeHardBindingResolution::Unbound
+            }
         }
-        if let Some(profile_name) = self.owners.into_iter().next() {
-            return prodex_runtime_state::RuntimeHardBindingResolution::Owned {
-                profile_name,
-                binding_identity: self.binding_identity,
-            };
-        }
-        if let Some(profile_name) = self.unavailable.into_iter().next() {
-            return prodex_runtime_state::RuntimeHardBindingResolution::Unavailable {
-                profile_name,
-                binding_identity: self.binding_identity,
-            };
-        }
-        prodex_runtime_state::RuntimeHardBindingResolution::Unbound
     }
 }
 
