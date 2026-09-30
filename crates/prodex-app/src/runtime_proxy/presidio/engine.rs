@@ -49,44 +49,50 @@ pub(super) enum RuntimePresidioFailClosedPolicy {
 }
 
 impl RuntimePresidioFailClosedPolicy {
-    pub(super) const fn derive(
+    pub(super) fn derive(
         rollout: prodex_config::GovernanceRolloutMode,
         governance_mode: prodex_config::GovernanceMode,
         legacy_local_enabled: bool,
         tenant_detector_enabled: bool,
         explicit_fail_closed: Option<bool>,
     ) -> Self {
-        if matches!(rollout, prodex_config::GovernanceRolloutMode::Enforce)
-            || governance_mode.is_enforcing()
-            || legacy_local_enabled
-            || tenant_detector_enabled
-            || matches!(explicit_fail_closed, Some(true))
-        {
-            Self::Closed
-        } else {
-            Self::Open
-        }
+        let closed = prodex_mojo_core::redaction::presidio_fail_closed(
+            matches!(rollout, prodex_config::GovernanceRolloutMode::Enforce),
+            governance_mode.is_enforcing(),
+            legacy_local_enabled,
+            tenant_detector_enabled,
+            explicit_fail_closed == Some(true),
+        )
+        .expect("Mojo Presidio fail-closed policy returned invalid output");
+        if closed { Self::Closed } else { Self::Open }
     }
 
     pub(super) const fn is_closed(self) -> bool {
         matches!(self, Self::Closed)
     }
 
-    pub(super) const fn denies_external_coverage(self, coverage: InspectionCoverage) -> bool {
-        self.is_closed() && !matches!(coverage, InspectionCoverage::Full)
+    pub(super) fn denies_external_coverage(self, coverage: InspectionCoverage) -> bool {
+        prodex_mojo_core::redaction::presidio_external_coverage_denied(
+            self.is_closed(),
+            matches!(coverage, InspectionCoverage::Full),
+        )
+        .expect("Mojo Presidio coverage policy returned invalid output")
     }
 }
 
-pub(super) const fn runtime_local_inspection_required(
+pub(super) fn runtime_local_inspection_required(
     rollout: prodex_config::GovernanceRolloutMode,
     governance_mode: prodex_config::GovernanceMode,
     legacy_local_enabled: bool,
     configured_detector_enabled: bool,
 ) -> bool {
-    !matches!(rollout, prodex_config::GovernanceRolloutMode::Off)
-        || governance_mode.is_enforcing()
-        || legacy_local_enabled
-        || configured_detector_enabled
+    prodex_mojo_core::redaction::presidio_local_inspection_required(
+        matches!(rollout, prodex_config::GovernanceRolloutMode::Off),
+        governance_mode.is_enforcing(),
+        legacy_local_enabled,
+        configured_detector_enabled,
+    )
+    .expect("Mojo Presidio local-inspection policy returned invalid output")
 }
 
 pub(super) async fn runtime_presidio_redact_body(

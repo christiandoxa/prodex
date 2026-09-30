@@ -998,3 +998,49 @@ def prodex_redaction_json_field_plan_v1(
         reaction_view_equals_literal(view, StringSlice("tools"))
     )
     return REACTION_OK
+
+
+comptime PRESIDIO_TRANSPORT_POLICY_ABI_VERSION: Int64 = 1
+comptime PRESIDIO_TRANSPORT_POLICY_FAIL_CLOSED: Int64 = 0
+comptime PRESIDIO_TRANSPORT_POLICY_LOCAL_REQUIRED: Int64 = 1
+comptime PRESIDIO_TRANSPORT_POLICY_COVERAGE_DENIED: Int64 = 2
+
+
+@export("prodex_redaction_presidio_transport_policy_v1")
+def prodex_redaction_presidio_transport_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    input0: Int64,
+    input1: Int64,
+    input2: Int64,
+    input3: Int64,
+    input4: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != PRESIDIO_TRANSPORT_POLICY_ABI_VERSION
+        or operation < PRESIDIO_TRANSPORT_POLICY_FAIL_CLOSED
+        or operation > PRESIDIO_TRANSPORT_POLICY_COVERAGE_DENIED
+    ):
+        return -1
+    for value in [input0, input1, input2, input3, input4]:
+        if value != 0 and value != 1:
+            return -1
+
+    if operation == PRESIDIO_TRANSPORT_POLICY_FAIL_CLOSED:
+        return Int64(
+            input0 == 1
+            or input1 == 1
+            or input2 == 1
+            or input3 == 1
+            or input4 == 1
+        )
+    if operation == PRESIDIO_TRANSPORT_POLICY_LOCAL_REQUIRED:
+        # input0 is rollout_off; all other inputs retain their positive meaning.
+        return Int64(
+            input0 == 0
+            or input1 == 1
+            or input2 == 1
+            or input3 == 1
+        )
+    # coverage denied: input0 fail_closed, input1 coverage_full.
+    return Int64(input0 == 1 and input1 == 0)
