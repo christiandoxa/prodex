@@ -4,7 +4,9 @@ use crate::translator::{
 };
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat, provider_supported_endpoints};
 use prodex_mojo_core::MojoError;
-use prodex_mojo_core::rich::KIRO_RESPONSE_MAX_BYTES;
+use prodex_mojo_core::rich::{
+    KiroChatResponseInputPlan, kiro_chat_response_input_plan, kiro_rewrite_chat_response_json,
+};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
@@ -208,22 +210,23 @@ impl ProviderTranslator for KiroTranslator {
             );
         }
         if input.endpoint == ProviderEndpoint::ChatCompletions {
-            if input.body.len() > KIRO_RESPONSE_MAX_BYTES {
-                return ProviderTransformResult::rejected(
-                    self.provider(),
-                    input.endpoint,
-                    self.upstream_wire_format(),
-                    self.client_wire_format(),
-                    "Kiro chat completions response body exceeds the safe size limit",
-                )
-                .with_metadata(
-                    "error_code",
-                    Value::String("response_too_large".to_string()),
-                );
-            }
-            let response = match serde_json::from_slice::<Value>(&input.body) {
-                Ok(response) => response,
-                Err(_) => {
+            match kiro_chat_response_input_plan(&input.body)
+                .expect("Mojo Kiro response input planner returned invalid output")
+            {
+                KiroChatResponseInputPlan::TooLarge => {
+                    return ProviderTransformResult::rejected(
+                        self.provider(),
+                        input.endpoint,
+                        self.upstream_wire_format(),
+                        self.client_wire_format(),
+                        "Kiro chat completions response body exceeds the safe size limit",
+                    )
+                    .with_metadata(
+                        "error_code",
+                        Value::String("response_too_large".to_string()),
+                    );
+                }
+                KiroChatResponseInputPlan::InvalidJson => {
                     return ProviderTransformResult::rejected(
                         self.provider(),
                         input.endpoint,
@@ -233,52 +236,36 @@ impl ProviderTranslator for KiroTranslator {
                     )
                     .with_metadata("error_code", Value::String("invalid_json".to_string()));
                 }
-            };
-            if !response.is_object() {
-                return ProviderTransformResult::rejected(
-                    self.provider(),
-                    input.endpoint,
-                    self.upstream_wire_format(),
-                    self.client_wire_format(),
-                    "Kiro chat completions response body must be a JSON object",
-                )
-                .with_metadata(
-                    "error_code",
-                    Value::String("invalid_response_body".to_string()),
-                );
-            }
-            let response =
-                match response::kiro_provider_core_try_chat_completion_value_from_response(
-                    &response, 0,
-                ) {
-                    Ok(response) => response,
-                    Err(error) => {
-                        return ProviderTransformResult::rejected(
-                            self.provider(),
-                            input.endpoint,
-                            self.upstream_wire_format(),
-                            self.client_wire_format(),
-                            "failed to rewrite Kiro chat completions response body",
-                        )
-                        .with_metadata(
-                            "error_code",
-                            Value::String(kiro_response_error_code(error).to_string()),
-                        );
-                    }
-                };
-            let body = match serde_json::to_vec(&response) {
-                Ok(body) => body,
-                Err(_) => {
+                KiroChatResponseInputPlan::InvalidResponseBody => {
                     return ProviderTransformResult::rejected(
                         self.provider(),
                         input.endpoint,
                         self.upstream_wire_format(),
                         self.client_wire_format(),
-                        "failed to serialize rewritten Kiro chat completions response body",
+                        "Kiro chat completions response body must be a JSON object",
                     )
                     .with_metadata(
                         "error_code",
                         Value::String("invalid_response_body".to_string()),
+                    );
+                }
+                KiroChatResponseInputPlan::Valid => {}
+            }
+            let raw = std::str::from_utf8(&input.body)
+                .expect("Mojo Kiro response input planner validated UTF-8");
+            let body = match kiro_rewrite_chat_response_json(raw, 0) {
+                Ok(body) => body,
+                Err(error) => {
+                    return ProviderTransformResult::rejected(
+                        self.provider(),
+                        input.endpoint,
+                        self.upstream_wire_format(),
+                        self.client_wire_format(),
+                        "failed to rewrite Kiro chat completions response body",
+                    )
+                    .with_metadata(
+                        "error_code",
+                        Value::String(kiro_response_error_code(error).to_string()),
                     );
                 }
             };

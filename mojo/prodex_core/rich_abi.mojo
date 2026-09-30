@@ -35,6 +35,7 @@ from openai_compat import openai_compat_kernel_v1
 from kiro import (
     kiro_anthropic_response_rewrite_v1,
     kiro_chat_request_rewrite_v1,
+    kiro_chat_response_input_plan_v1,
     kiro_chat_response_rewrite_v1,
     kiro_kernel_v1,
     kiro_request_validation_json_v1,
@@ -554,6 +555,21 @@ def prodex_mojo_kiro_anthropic_response_rewrite_v1(
         output_address,
         output_capacity,
         written_address,
+    )
+
+
+@export("prodex_mojo_kiro_chat_response_input_plan_v1")
+def prodex_mojo_kiro_chat_response_input_plan_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    return kiro_chat_response_input_plan_v1(
+        abi_version,
+        input_address,
+        input_length,
+        output_address,
     )
 
 
