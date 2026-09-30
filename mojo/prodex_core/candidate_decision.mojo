@@ -1394,3 +1394,66 @@ def prodex_runtime_websocket_transport_failure_plan_v1(
     if committed == 0 and precommit_transport_retry_allowed == 1:
         return WEBSOCKET_TRANSPORT_FAILURE_RETRY
     return WEBSOCKET_TRANSPORT_FAILURE_ERROR
+
+
+comptime WAITABLE_CANDIDATE_MODE_COLD_START: Int64 = 0
+comptime WAITABLE_CANDIDATE_MODE_WAITABLE: Int64 = 1
+comptime WAITABLE_CANDIDATE_MODE_RELIEVED: Int64 = 2
+
+
+@export("prodex_runtime_waitable_candidate_eligible_v1")
+def prodex_runtime_waitable_candidate_eligible_v1(
+    mode: Int64,
+    context_allowed: Int64,
+    auth_compatible: Int64,
+    supports_runtime: Int64,
+    cached_probe_present: Int64,
+    soft_limited: Int64,
+    in_selection_backoff: Int64,
+    auth_failure_active: Int64,
+    health_penalized: Int64,
+    hard_limited: Int64,
+    snapshot_blocks: Int64,
+    quota_blocked: Int64,
+) abi("C") -> Int64:
+    if mode < WAITABLE_CANDIDATE_MODE_COLD_START or mode > WAITABLE_CANDIDATE_MODE_RELIEVED:
+        return -1
+    for value in [
+        context_allowed,
+        auth_compatible,
+        supports_runtime,
+        cached_probe_present,
+        soft_limited,
+        in_selection_backoff,
+        auth_failure_active,
+        health_penalized,
+        hard_limited,
+        snapshot_blocks,
+        quota_blocked,
+    ]:
+        if value != 0 and value != 1:
+            return -1
+
+    if (
+        context_allowed == 0
+        or supports_runtime == 0
+        or in_selection_backoff == 1
+        or auth_failure_active == 1
+        or health_penalized == 1
+    ):
+        return 0
+
+    if mode == WAITABLE_CANDIDATE_MODE_COLD_START:
+        return Int64(
+            auth_compatible == 1
+            and cached_probe_present == 0
+            and soft_limited == 0
+            and hard_limited == 0
+            and snapshot_blocks == 0
+        )
+
+    if quota_blocked == 1:
+        return 0
+    if mode == WAITABLE_CANDIDATE_MODE_WAITABLE:
+        return hard_limited
+    return 1 - hard_limited

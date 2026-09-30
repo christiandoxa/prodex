@@ -124,6 +124,28 @@ pub struct AffinitySelectionPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WaitableCandidateMode {
+    ColdStart,
+    Waitable,
+    Relieved,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WaitableCandidateInput {
+    pub context_allowed: bool,
+    pub auth_compatible: bool,
+    pub supports_runtime: bool,
+    pub cached_probe_present: bool,
+    pub soft_limited: bool,
+    pub in_selection_backoff: bool,
+    pub auth_failure_active: bool,
+    pub health_penalized: bool,
+    pub hard_limited: bool,
+    pub snapshot_blocks: bool,
+    pub quota_blocked: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebsocketTransportFailurePlan {
     Error,
     ReuseWatchdog,
@@ -234,6 +256,20 @@ unsafe extern "C" {
         compact_session_matches_session: i64,
         output: *mut i64,
     ) -> i64;
+    fn prodex_runtime_waitable_candidate_eligible_v1(
+        mode: i64,
+        context_allowed: i64,
+        auth_compatible: i64,
+        supports_runtime: i64,
+        cached_probe_present: i64,
+        soft_limited: i64,
+        in_selection_backoff: i64,
+        auth_failure_active: i64,
+        health_penalized: i64,
+        hard_limited: i64,
+        snapshot_blocks: i64,
+        quota_blocked: i64,
+    ) -> i64;
     fn prodex_runtime_websocket_transport_failure_plan_v1(
         committed: i64,
         reuse_existing_session: i64,
@@ -267,6 +303,37 @@ unsafe extern "C" {
         direct_fallback_reason: i64,
         output: *mut i64,
     ) -> i64;
+}
+
+pub fn waitable_candidate_eligible(
+    mode: WaitableCandidateMode,
+    input: WaitableCandidateInput,
+) -> Result<bool, MojoError> {
+    let mode = match mode {
+        WaitableCandidateMode::ColdStart => 0,
+        WaitableCandidateMode::Waitable => 1,
+        WaitableCandidateMode::Relieved => 2,
+    };
+    match unsafe {
+        prodex_runtime_waitable_candidate_eligible_v1(
+            mode,
+            i64::from(input.context_allowed),
+            i64::from(input.auth_compatible),
+            i64::from(input.supports_runtime),
+            i64::from(input.cached_probe_present),
+            i64::from(input.soft_limited),
+            i64::from(input.in_selection_backoff),
+            i64::from(input.auth_failure_active),
+            i64::from(input.health_penalized),
+            i64::from(input.hard_limited),
+            i64::from(input.snapshot_blocks),
+            i64::from(input.quota_blocked),
+        )
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn websocket_transport_failure_plan(
@@ -612,6 +679,60 @@ pub fn adaptive_routing_plan(
         quality_score_bps: (quality_score_present == 1).then_some(quality_score_bps),
         reason,
     })
+}
+
+#[cfg(test)]
+mod waitable_candidate_tests {
+    use super::*;
+
+    #[test]
+    fn waitable_candidate_modes_preserve_expected_gate_semantics() {
+        let base = WaitableCandidateInput {
+            context_allowed: true,
+            auth_compatible: true,
+            supports_runtime: true,
+            cached_probe_present: false,
+            soft_limited: false,
+            in_selection_backoff: false,
+            auth_failure_active: false,
+            health_penalized: false,
+            hard_limited: false,
+            snapshot_blocks: false,
+            quota_blocked: false,
+        };
+        assert!(waitable_candidate_eligible(WaitableCandidateMode::ColdStart, base).unwrap());
+        assert!(
+            !waitable_candidate_eligible(
+                WaitableCandidateMode::ColdStart,
+                WaitableCandidateInput {
+                    hard_limited: true,
+                    ..base
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            waitable_candidate_eligible(
+                WaitableCandidateMode::Waitable,
+                WaitableCandidateInput {
+                    hard_limited: true,
+                    ..base
+                },
+            )
+            .unwrap()
+        );
+        assert!(waitable_candidate_eligible(WaitableCandidateMode::Relieved, base).unwrap());
+        assert!(
+            !waitable_candidate_eligible(
+                WaitableCandidateMode::Relieved,
+                WaitableCandidateInput {
+                    quota_blocked: true,
+                    ..base
+                },
+            )
+            .unwrap()
+        );
+    }
 }
 
 #[cfg(test)]
