@@ -428,24 +428,36 @@ fn update_super_choice_selection(
     len: usize,
     escape_selects_last: bool,
 ) -> Result<Option<usize>> {
-    match key.code {
-        KeyCode::Up | KeyCode::Char('k') => *selected = selected.checked_sub(1).unwrap_or(len - 1),
-        KeyCode::Down | KeyCode::Char('j') => *selected = (*selected + 1) % len,
-        KeyCode::PageUp => *selected = selected.saturating_sub(10),
-        KeyCode::PageDown => *selected = selected.saturating_add(10).min(len - 1),
-        KeyCode::Home => *selected = 0,
-        KeyCode::End => *selected = len - 1,
-        KeyCode::Enter => return Ok(Some(*selected)),
-        KeyCode::Esc if escape_selects_last => return Ok(Some(len - 1)),
-        KeyCode::Esc => bail!("Prodex Super prompt cancelled"),
+    let key_tag = match key.code {
+        KeyCode::Up | KeyCode::Char('k') => 0,
+        KeyCode::Down | KeyCode::Char('j') => 1,
+        KeyCode::PageUp => 2,
+        KeyCode::PageDown => 3,
+        KeyCode::Home => 4,
+        KeyCode::End => 5,
+        KeyCode::Enter => 6,
+        KeyCode::Esc => 7,
         KeyCode::Char('c') | KeyCode::Char('z')
             if key.modifiers.contains(KeyModifiers::CONTROL) =>
         {
-            bail!("Prodex Super prompt cancelled")
+            8
         }
-        _ => {}
+        _ => 9,
+    };
+    let (next_selected, action, choice) = prodex_mojo_core::launch::super_choice_key_plan(
+        key_tag,
+        *selected,
+        len,
+        escape_selects_last,
+    )
+    .expect("Mojo Super choice policy returned invalid output");
+    *selected = next_selected;
+    match action {
+        0 => Ok(None),
+        1 => Ok(choice),
+        2 => bail!("Prodex Super prompt cancelled"),
+        _ => unreachable!("validated Mojo Super choice action"),
     }
-    Ok(None)
 }
 
 pub(super) fn visible_choice_range(
@@ -453,11 +465,8 @@ pub(super) fn visible_choice_range(
     len: usize,
     height: u16,
 ) -> std::ops::Range<usize> {
-    let visible = usize::from(height).max(1).min(len);
-    let start = selected
-        .saturating_sub(visible / 2)
-        .min(len.saturating_sub(visible));
-    start..start + visible
+    prodex_mojo_core::launch::super_choice_visible_range(selected, len, usize::from(height))
+        .expect("Mojo Super choice window policy returned invalid output")
 }
 
 pub(super) fn bounded_tui_text(value: &str, width: u16) -> String {
@@ -638,5 +647,49 @@ pub(crate) fn prompt_super_presidio_opt_in() -> Result<bool> {
                 _ => {}
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod super_choice_policy_tests {
+    use super::*;
+    use crossterm::event::KeyEvent;
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn super_choice_navigation_policy_is_mojo_backed() {
+        assert_eq!(visible_choice_range(5, 10, 3), 4..7);
+        assert_eq!(visible_choice_range(0, 10, 0), 0..1);
+
+        let mut selected = 0;
+        assert_eq!(
+            update_super_choice_selection(key(KeyCode::Up), &mut selected, 5, false).unwrap(),
+            None
+        );
+        assert_eq!(selected, 4);
+        assert_eq!(
+            update_super_choice_selection(key(KeyCode::Down), &mut selected, 5, false).unwrap(),
+            None
+        );
+        assert_eq!(selected, 0);
+        assert_eq!(
+            update_super_choice_selection(key(KeyCode::PageDown), &mut selected, 5, false).unwrap(),
+            None
+        );
+        assert_eq!(selected, 4);
+        assert_eq!(
+            update_super_choice_selection(key(KeyCode::Enter), &mut selected, 5, false).unwrap(),
+            Some(4)
+        );
+
+        let mut escaped = 1;
+        assert_eq!(
+            update_super_choice_selection(key(KeyCode::Esc), &mut escaped, 5, true).unwrap(),
+            Some(4)
+        );
+        assert!(update_super_choice_selection(key(KeyCode::Esc), &mut escaped, 5, false).is_err());
     }
 }

@@ -779,3 +779,129 @@ def prodex_login_menu_policy_v1(
     output[unsafe_offset=1] = action
     output[unsafe_offset=2] = action_index
     return 0
+
+
+comptime SUPER_CHOICE_POLICY_ABI_VERSION: Int64 = 1
+comptime SUPER_CHOICE_POLICY_RANGE: Int64 = 1
+comptime SUPER_CHOICE_POLICY_KEY: Int64 = 2
+
+comptime SUPER_CHOICE_KEY_UP: Int64 = 0
+comptime SUPER_CHOICE_KEY_DOWN: Int64 = 1
+comptime SUPER_CHOICE_KEY_PAGE_UP: Int64 = 2
+comptime SUPER_CHOICE_KEY_PAGE_DOWN: Int64 = 3
+comptime SUPER_CHOICE_KEY_HOME: Int64 = 4
+comptime SUPER_CHOICE_KEY_END: Int64 = 5
+comptime SUPER_CHOICE_KEY_ENTER: Int64 = 6
+comptime SUPER_CHOICE_KEY_ESCAPE: Int64 = 7
+comptime SUPER_CHOICE_KEY_CANCEL: Int64 = 8
+comptime SUPER_CHOICE_KEY_IGNORE: Int64 = 9
+
+comptime SUPER_CHOICE_ACTION_NONE: Int64 = 0
+comptime SUPER_CHOICE_ACTION_SELECT: Int64 = 1
+comptime SUPER_CHOICE_ACTION_CANCEL: Int64 = 2
+
+
+@export("prodex_super_choice_policy_v1")
+def prodex_super_choice_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    input0: Int64,
+    input1: Int64,
+    input2: Int64,
+    input3: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SUPER_CHOICE_POLICY_ABI_VERSION
+        or operation < SUPER_CHOICE_POLICY_RANGE
+        or operation > SUPER_CHOICE_POLICY_KEY
+        or output_address == 0
+    ):
+        return 1
+    for value in [input0, input1, input2, input3]:
+        if value < 0:
+            return 1
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(4):
+        output[unsafe_offset=index] = 0
+
+    if operation == SUPER_CHOICE_POLICY_RANGE:
+        var selected = input0
+        var length = input1
+        var height = input2
+        if length == 0:
+            return 1
+        var visible = height
+        if visible < 1:
+            visible = 1
+        if visible > length:
+            visible = length
+        var half = visible // 2
+        var start = selected - half
+        if start < 0:
+            start = 0
+        var max_start = length - visible
+        if start > max_start:
+            start = max_start
+        output[unsafe_offset=0] = start
+        output[unsafe_offset=1] = start + visible
+        return 0
+
+    var key = input0
+    var selected = input1
+    var length = input2
+    var escape_selects_last = input3 == 1
+    if (
+        key < SUPER_CHOICE_KEY_UP
+        or key > SUPER_CHOICE_KEY_IGNORE
+        or length == 0
+        or selected >= length
+        or input3 > 1
+    ):
+        return 1
+
+    var last = length - 1
+    var next_selected = selected
+    var action = SUPER_CHOICE_ACTION_NONE
+    var action_index: Int64 = -1
+
+    if key == SUPER_CHOICE_KEY_UP:
+        if next_selected == 0:
+            next_selected = last
+        else:
+            next_selected -= 1
+    elif key == SUPER_CHOICE_KEY_DOWN:
+        next_selected += 1
+        if next_selected >= length:
+            next_selected = 0
+    elif key == SUPER_CHOICE_KEY_PAGE_UP:
+        next_selected -= 10
+        if next_selected < 0:
+            next_selected = 0
+    elif key == SUPER_CHOICE_KEY_PAGE_DOWN:
+        next_selected += 10
+        if next_selected > last:
+            next_selected = last
+    elif key == SUPER_CHOICE_KEY_HOME:
+        next_selected = 0
+    elif key == SUPER_CHOICE_KEY_END:
+        next_selected = last
+    elif key == SUPER_CHOICE_KEY_ENTER:
+        action = SUPER_CHOICE_ACTION_SELECT
+        action_index = next_selected
+    elif key == SUPER_CHOICE_KEY_ESCAPE:
+        if escape_selects_last:
+            action = SUPER_CHOICE_ACTION_SELECT
+            action_index = last
+        else:
+            action = SUPER_CHOICE_ACTION_CANCEL
+    elif key == SUPER_CHOICE_KEY_CANCEL:
+        action = SUPER_CHOICE_ACTION_CANCEL
+
+    output[unsafe_offset=0] = next_selected
+    output[unsafe_offset=1] = action
+    output[unsafe_offset=2] = action_index
+    return 0
