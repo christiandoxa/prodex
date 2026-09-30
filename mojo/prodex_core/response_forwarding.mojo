@@ -12,6 +12,13 @@ comptime RESPONSE_FORWARDING_WEBSOCKET_TERMINAL_RESET: Int64 = 4
 comptime RESPONSE_FORWARDING_RECORD_RESPONSE_IDS: Int64 = 5
 comptime RESPONSE_FORWARDING_COMMITTED_PREVIOUS_RESPONSE_NOT_FOUND: Int64 = 6
 comptime RESPONSE_FORWARDING_GENERATION_START_ONCE: Int64 = 7
+comptime RESPONSE_FORWARDING_USAGE_EVENT_LIVE: Int64 = 8
+
+comptime RESPONSE_USAGE_PROGRESS_ABI_VERSION: Int64 = 1
+comptime RESPONSE_USAGE_PROGRESS_IGNORE: Int64 = 0
+comptime RESPONSE_USAGE_PROGRESS_SUPPRESS: Int64 = 1
+comptime RESPONSE_USAGE_PROGRESS_LOG: Int64 = 2
+comptime RESPONSE_USAGE_PROGRESS_INTERVAL_MS: UInt64 = 250
 
 
 def response_ascii_lower(value: UInt8) -> UInt8:
@@ -137,7 +144,7 @@ def prodex_runtime_response_forwarding_classify_v1(
 ) abi("C") -> Int64:
     if (
         operation < RESPONSE_FORWARDING_SKIP_HEADER
-        or operation > RESPONSE_FORWARDING_GENERATION_START_ONCE
+        or operation > RESPONSE_FORWARDING_USAGE_EVENT_LIVE
         or present < 0
         or present > 1
         or length < 0
@@ -213,9 +220,47 @@ def prodex_runtime_response_forwarding_classify_v1(
         var previous_response_not_found = (_numeric >> 1) & 1
         return Int64(committed == 1 and previous_response_not_found == 1)
 
-    var already_started = _numeric & 1
+    if operation == RESPONSE_FORWARDING_GENERATION_START_ONCE:
+        var already_started = _numeric & 1
+        return Int64(
+            already_started == 0
+            and present == 1
+            and response_generation_start(address, length)
+        )
+
     return Int64(
-        already_started == 0
-        and present == 1
+        present == 1
+        and _numeric > 0
         and response_generation_start(address, length)
     )
+
+
+@export("prodex_runtime_token_usage_progress_plan_v1")
+def prodex_runtime_token_usage_progress_plan_v1(
+    abi_version: Int64,
+    output_tokens: UInt64,
+    last_output_present: Int64,
+    last_output_tokens: UInt64,
+    last_log_present: Int64,
+    elapsed_since_last_log_ms: UInt64,
+) abi("C") -> Int64:
+    if (
+        abi_version != RESPONSE_USAGE_PROGRESS_ABI_VERSION
+        or (last_output_present != 0 and last_output_present != 1)
+        or (last_log_present != 0 and last_log_present != 1)
+    ):
+        return -1
+    if (
+        output_tokens == 0
+        or (
+            last_output_present == 1
+            and output_tokens <= last_output_tokens
+        )
+    ):
+        return RESPONSE_USAGE_PROGRESS_IGNORE
+    if (
+        last_log_present == 1
+        and elapsed_since_last_log_ms < RESPONSE_USAGE_PROGRESS_INTERVAL_MS
+    ):
+        return RESPONSE_USAGE_PROGRESS_SUPPRESS
+    return RESPONSE_USAGE_PROGRESS_LOG
