@@ -734,7 +734,7 @@ def prodex_quota_openai_model_capacity_plan(
         unknown_luna = 1
 
     var selected_pair = QUOTA_MODEL_PAIR_NONE
-    var ready: Int64 = 0
+    var ready: Int64
     if model_kind == QUOTA_MODEL_KIND_NONE:
         selected_pair = QUOTA_MODEL_PAIR_DEFAULT
         ready = generic_ready
@@ -1199,3 +1199,142 @@ def prodex_quota_report_sort_next_v1(
     if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION or sort < 0 or sort > 5:
         return -1
     return (sort + 1) % 6
+
+
+comptime QUOTA_AUTH_SUMMARY_CHATGPT: Int64 = 0
+comptime QUOTA_AUTH_SUMMARY_BEDROCK_API_KEY: Int64 = 1
+comptime QUOTA_AUTH_SUMMARY_API_KEY: Int64 = 2
+comptime QUOTA_AUTH_SUMMARY_OTHER: Int64 = 3
+
+
+@export("prodex_quota_auth_summary_kind_v1")
+def prodex_quota_auth_summary_kind_v1(
+    abi_version: Int64,
+    auth_mode_address: UInt,
+    auth_mode_length: Int64,
+    auth_mode_present: Int64,
+    has_chatgpt_token: Int64,
+    has_api_key: Int64,
+    has_bedrock_api_key: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != QUOTA_MODEL_POLICY_ABI_VERSION
+        or auth_mode_length < 0
+        or (auth_mode_length > 0 and auth_mode_address == 0)
+        or (auth_mode_present != 0 and auth_mode_present != 1)
+        or (has_chatgpt_token != 0 and has_chatgpt_token != 1)
+        or (has_api_key != 0 and has_api_key != 1)
+        or (has_bedrock_api_key != 0 and has_bedrock_api_key != 1)
+    ):
+        return -1
+
+    var mode = quota_model_policy_view(auth_mode_address, auth_mode_length)
+    if auth_mode_present == 1 and not rich_view_valid(mode, auth_mode_length):
+        return -1
+
+    if (
+        has_chatgpt_token == 1
+        or (
+            auth_mode_present == 1
+            and quota_plan_type_matches(mode, StringSlice("chatgpt"))
+        )
+    ):
+        return QUOTA_AUTH_SUMMARY_CHATGPT
+    if (
+        has_bedrock_api_key == 1
+        or (
+            auth_mode_present == 1
+            and quota_plan_type_matches(mode, StringSlice("bedrockapikey"))
+        )
+    ):
+        return QUOTA_AUTH_SUMMARY_BEDROCK_API_KEY
+    if (
+        has_api_key == 1
+        or (
+            auth_mode_present == 1
+            and quota_plan_type_matches(mode, StringSlice("apikey"))
+        )
+    ):
+        return QUOTA_AUTH_SUMMARY_API_KEY
+    return QUOTA_AUTH_SUMMARY_OTHER
+
+
+@export("prodex_quota_auth_proactive_refresh_v1")
+def prodex_quota_auth_proactive_refresh_v1(
+    abi_version: Int64,
+    expires_at_present: Int64,
+    expires_at: Int64,
+    last_refresh_present: Int64,
+    last_refresh: Int64,
+    now: Int64,
+    expiry_skew_seconds: Int64,
+    refresh_interval_days: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != QUOTA_MODEL_POLICY_ABI_VERSION
+        or (expires_at_present != 0 and expires_at_present != 1)
+        or (last_refresh_present != 0 and last_refresh_present != 1)
+    ):
+        return -1
+
+    if expires_at_present == 1:
+        var threshold = Int128(now) + Int128(expiry_skew_seconds)
+        if threshold > Int128(INT64_MAX):
+            threshold = Int128(INT64_MAX)
+        elif threshold < Int128(INT64_MIN):
+            threshold = Int128(INT64_MIN)
+        return Int64(expires_at <= Int64(threshold))
+
+    if last_refresh_present == 0:
+        return 0
+
+    var interval = Int128(refresh_interval_days) * Int128(86_400)
+    var elapsed = Int128(now) - Int128(last_refresh)
+    return Int64(elapsed >= interval)
+
+
+comptime QUOTA_USAGE_AUTH_CHATGPT_ELIGIBLE: Int64 = 0
+comptime QUOTA_USAGE_AUTH_BEDROCK_API_KEY: Int64 = 1
+comptime QUOTA_USAGE_AUTH_API_KEY: Int64 = 2
+
+
+@export("prodex_quota_usage_auth_kind_v1")
+def prodex_quota_usage_auth_kind_v1(
+    abi_version: Int64,
+    auth_mode_address: UInt,
+    auth_mode_length: Int64,
+    auth_mode_present: Int64,
+    has_api_key: Int64,
+    has_bedrock_api_key: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != QUOTA_MODEL_POLICY_ABI_VERSION
+        or auth_mode_length < 0
+        or (auth_mode_length > 0 and auth_mode_address == 0)
+        or (auth_mode_present != 0 and auth_mode_present != 1)
+        or (has_api_key != 0 and has_api_key != 1)
+        or (has_bedrock_api_key != 0 and has_bedrock_api_key != 1)
+    ):
+        return -1
+
+    var mode = quota_model_policy_view(auth_mode_address, auth_mode_length)
+    if auth_mode_present == 1 and not rich_view_valid(mode, auth_mode_length):
+        return -1
+
+    if (
+        has_bedrock_api_key == 1
+        or (
+            auth_mode_present == 1
+            and quota_plan_type_matches(mode, StringSlice("bedrockapikey"))
+        )
+    ):
+        return QUOTA_USAGE_AUTH_BEDROCK_API_KEY
+    if (
+        has_api_key == 1
+        or (
+            auth_mode_present == 1
+            and quota_plan_type_matches(mode, StringSlice("apikey"))
+        )
+    ):
+        return QUOTA_USAGE_AUTH_API_KEY
+    return QUOTA_USAGE_AUTH_CHATGPT_ELIGIBLE
