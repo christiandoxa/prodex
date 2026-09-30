@@ -14,8 +14,9 @@ use super::RuntimeGeminiBindingRecorder;
 use prodex_domain::RequestId;
 use prodex_provider_core::PRODEX_GEMINI_DEFAULT_MODEL as GEMINI_DEFAULT_MODEL;
 use prodex_provider_core::{
-    GeminiProviderCoreResponsePartInput, GeminiProviderCoreStreamToolCall,
-    gemini_provider_core_citation_text,
+    GeminiProviderCoreCompletionGuardrailAction, GeminiProviderCoreResponsePartInput,
+    GeminiProviderCoreStreamToolCall, gemini_provider_core_citation_text,
+    gemini_provider_core_completion_guardrail_action,
     gemini_provider_core_conversation_requests_command_output_only as runtime_gemini_conversation_requests_command_output_only,
     gemini_provider_core_finish_reason_failure, gemini_provider_core_finish_reason_incomplete,
     gemini_provider_core_forced_command_output as runtime_gemini_forced_command_output,
@@ -23,8 +24,8 @@ use prodex_provider_core::{
     gemini_provider_core_internal_instruction_corpus,
     gemini_provider_core_media_content_item_from_part, gemini_provider_core_merge_stream_metadata,
     gemini_provider_core_non_actionable_wait_or_poll_text as runtime_gemini_non_actionable_wait_or_poll_text,
-    gemini_provider_core_output_item_done_event, gemini_provider_core_output_text_delta_event,
-    gemini_provider_core_prompt_feedback_failure,
+    gemini_provider_core_once_event_should_emit, gemini_provider_core_output_item_done_event,
+    gemini_provider_core_output_text_delta_event, gemini_provider_core_prompt_feedback_failure,
     gemini_provider_core_reasoning_summary_part_added_event,
     gemini_provider_core_reasoning_summary_text_delta_event,
     gemini_provider_core_response_completed_event, gemini_provider_core_response_created_event,
@@ -167,7 +168,7 @@ impl RuntimeGeminiSseState {
                 .collect::<Vec<_>>();
         }
         let mut events = Vec::new();
-        if !self.created {
+        if gemini_provider_core_once_event_should_emit(self.created, true, false) {
             let sequence_number = self.next_sequence_number();
             events.push(self.event(
                 "response.created",
@@ -379,10 +380,15 @@ impl RuntimeGeminiSseState {
     }
 
     fn observe_grounding(&mut self, value: &serde_json::Value) -> Option<String> {
-        if self.web_search_call.is_some() {
+        let item = gemini_provider_core_web_search_call_from_grounding(value, &self.response_id);
+        if !gemini_provider_core_once_event_should_emit(
+            self.web_search_call.is_some(),
+            item.is_some(),
+            true,
+        ) {
             return None;
         }
-        let item = gemini_provider_core_web_search_call_from_grounding(value, &self.response_id)?;
+        let item = item.expect("Mojo grounding gate requires a web-search item");
         self.web_search_call = Some(item.clone());
         let sequence_number = self.next_sequence_number();
         Some(self.event(
@@ -392,7 +398,7 @@ impl RuntimeGeminiSseState {
     }
 
     pub(super) fn incomplete_event(&mut self, reason: &str, message: &str) -> Option<String> {
-        if self.completed {
+        if !gemini_provider_core_once_event_should_emit(self.completed, true, false) {
             return None;
         }
         let sequence_number = self.next_sequence_number();
@@ -410,7 +416,7 @@ impl RuntimeGeminiSseState {
     }
 
     pub(super) fn failed_event(&mut self, code: &str, message: &str) -> Option<String> {
-        if self.completed {
+        if !gemini_provider_core_once_event_should_emit(self.completed, true, false) {
             return None;
         }
         let sequence_number = self.next_sequence_number();

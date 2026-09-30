@@ -38,6 +38,64 @@ pub struct GeminiProviderCoreResponsePartPlan {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GeminiProviderCoreCompletionGuardrailAction {
+    None,
+    EmptyResponse,
+    ToolIntentWithoutCall,
+    NonActionableWait,
+    UnverifiedSuccess,
+}
+
+pub fn gemini_provider_core_once_event_should_emit(
+    already_emitted: bool,
+    content_present: bool,
+    requires_content: bool,
+) -> bool {
+    prodex_mojo_core::rich::plan_gemini_once_event(
+        already_emitted,
+        content_present,
+        requires_content,
+    )
+    .expect("Mojo Gemini once-event planner returned invalid output")
+}
+
+pub fn gemini_provider_core_completion_guardrail_action(
+    output_is_empty: bool,
+    reasoning_is_empty: bool,
+    tool_calls_empty: bool,
+    tool_intent_present: bool,
+    wait_or_poll_present: bool,
+    unverified_success: bool,
+) -> GeminiProviderCoreCompletionGuardrailAction {
+    match prodex_mojo_core::rich::plan_gemini_completion_guardrail(
+        output_is_empty,
+        reasoning_is_empty,
+        tool_calls_empty,
+        tool_intent_present,
+        wait_or_poll_present,
+        unverified_success,
+    )
+    .expect("Mojo Gemini completion guardrail planner returned invalid output")
+    {
+        prodex_mojo_core::rich::GeminiCompletionGuardrailAction::None => {
+            GeminiProviderCoreCompletionGuardrailAction::None
+        }
+        prodex_mojo_core::rich::GeminiCompletionGuardrailAction::EmptyResponse => {
+            GeminiProviderCoreCompletionGuardrailAction::EmptyResponse
+        }
+        prodex_mojo_core::rich::GeminiCompletionGuardrailAction::ToolIntentWithoutCall => {
+            GeminiProviderCoreCompletionGuardrailAction::ToolIntentWithoutCall
+        }
+        prodex_mojo_core::rich::GeminiCompletionGuardrailAction::NonActionableWait => {
+            GeminiProviderCoreCompletionGuardrailAction::NonActionableWait
+        }
+        prodex_mojo_core::rich::GeminiCompletionGuardrailAction::UnverifiedSuccess => {
+            GeminiProviderCoreCompletionGuardrailAction::UnverifiedSuccess
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GeminiProviderCoreResponsePartPlanError {
     InvalidInput,
     InvalidOutput,

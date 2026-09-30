@@ -73,7 +73,11 @@ impl RuntimeGeminiSseState {
     }
 
     fn output_text_item_added_event(&mut self) -> Option<String> {
-        if self.output_text_item_added {
+        if !super::gemini_provider_core_once_event_should_emit(
+            self.output_text_item_added,
+            true,
+            false,
+        ) {
             return None;
         }
         self.output_text_item_added = true;
@@ -90,7 +94,11 @@ impl RuntimeGeminiSseState {
         if let Some(event) = self.output_text_item_added_event() {
             events.push(event);
         }
-        if !self.reasoning_summary_part_added {
+        if super::gemini_provider_core_once_event_should_emit(
+            self.reasoning_summary_part_added,
+            true,
+            false,
+        ) {
             self.reasoning_summary_part_added = true;
             let sequence_number = self.next_sequence_number();
             events.push(self.event(
@@ -127,7 +135,11 @@ impl RuntimeGeminiSseState {
     }
 
     pub(super) fn complete_output_text_item_events(&mut self) -> Vec<String> {
-        if self.output_text.is_empty() || self.output_text_item_done {
+        if !super::gemini_provider_core_once_event_should_emit(
+            self.output_text_item_done,
+            !self.output_text.is_empty(),
+            true,
+        ) {
             return Vec::new();
         }
         let mut events = Vec::new();
@@ -154,7 +166,11 @@ impl RuntimeGeminiSseState {
     }
 
     pub(super) fn observe_citation_text(&mut self, text: String) -> Vec<String> {
-        if self.citation_item_done || text.is_empty() {
+        if !super::gemini_provider_core_once_event_should_emit(
+            self.citation_item_done,
+            !text.is_empty(),
+            true,
+        ) {
             return Vec::new();
         }
         self.citation_item_done = true;
@@ -175,7 +191,11 @@ impl RuntimeGeminiSseState {
     }
 
     pub(super) fn complete_media_item_events(&mut self) -> Vec<String> {
-        if self.media_content_items.is_empty() || self.media_item_done {
+        if !super::gemini_provider_core_once_event_should_emit(
+            self.media_item_done,
+            !self.media_content_items.is_empty(),
+            true,
+        ) {
             return Vec::new();
         }
         self.media_item_done = true;
@@ -195,7 +215,11 @@ impl RuntimeGeminiSseState {
     }
 
     pub(super) fn complete_image_generation_item_events(&mut self) -> Vec<String> {
-        if self.image_generation_items.is_empty() || self.image_generation_items_done {
+        if !super::gemini_provider_core_once_event_should_emit(
+            self.image_generation_items_done,
+            !self.image_generation_items.is_empty(),
+            true,
+        ) {
             return Vec::new();
         }
         self.image_generation_items_done = true;

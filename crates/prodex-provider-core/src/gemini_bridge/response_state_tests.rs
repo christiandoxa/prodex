@@ -63,3 +63,40 @@ fn response_part_plan_preserves_stream_and_buffered_actions() {
             .is_ok_and(|plan| { plan.record_media && plan.record_native && plan.record_image })
     );
 }
+
+#[test]
+fn lifecycle_and_completion_guardrail_precedence_is_mojo_authoritative() {
+    assert!(gemini_provider_core_once_event_should_emit(
+        false, true, true
+    ));
+    assert!(!gemini_provider_core_once_event_should_emit(
+        true, true, true
+    ));
+    assert!(!gemini_provider_core_once_event_should_emit(
+        false, false, true
+    ));
+    assert!(gemini_provider_core_once_event_should_emit(
+        false, false, false
+    ));
+
+    assert_eq!(
+        gemini_provider_core_completion_guardrail_action(true, true, true, true, true, true),
+        GeminiProviderCoreCompletionGuardrailAction::EmptyResponse
+    );
+    assert_eq!(
+        gemini_provider_core_completion_guardrail_action(false, true, true, true, true, true),
+        GeminiProviderCoreCompletionGuardrailAction::ToolIntentWithoutCall
+    );
+    assert_eq!(
+        gemini_provider_core_completion_guardrail_action(false, true, true, false, true, true),
+        GeminiProviderCoreCompletionGuardrailAction::NonActionableWait
+    );
+    assert_eq!(
+        gemini_provider_core_completion_guardrail_action(false, true, true, false, false, true),
+        GeminiProviderCoreCompletionGuardrailAction::UnverifiedSuccess
+    );
+    assert_eq!(
+        gemini_provider_core_completion_guardrail_action(false, true, false, true, true, true),
+        GeminiProviderCoreCompletionGuardrailAction::None
+    );
+}

@@ -103,8 +103,10 @@ pub use self::response::{
     gemini_provider_core_web_search_call_from_grounding,
 };
 pub use self::response_state::{
-    GeminiProviderCoreResponsePartInput, GeminiProviderCoreResponsePartPlan,
-    GeminiProviderCoreResponsePartPlanError, gemini_provider_core_response_part_plan,
+    GeminiProviderCoreCompletionGuardrailAction, GeminiProviderCoreResponsePartInput,
+    GeminiProviderCoreResponsePartPlan, GeminiProviderCoreResponsePartPlanError,
+    gemini_provider_core_completion_guardrail_action, gemini_provider_core_once_event_should_emit,
+    gemini_provider_core_response_part_plan,
 };
 pub use self::tooling::{
     gemini_provider_core_apply_gemini3_tool_declaration_overrides,
