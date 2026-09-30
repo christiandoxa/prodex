@@ -291,10 +291,10 @@ impl RuntimeWebsocketResponseLoop<'_> {
         }
         self.forward_text(&text)?;
         if inspected.terminal_event {
-            let reset_upstream_socket = !self.realtime_websocket
-                && matches!(
+            let reset_upstream_socket =
+                runtime_proxy_crate::runtime_websocket_terminal_should_reset(
                     inspected.event_type.as_deref(),
-                    Some("error" | "response.failed" | "response.incomplete")
+                    self.realtime_websocket,
                 );
             return Ok(RuntimeWebsocketTextResult::Terminal(
                 RuntimeWebsocketTextTerminal {
@@ -380,9 +380,11 @@ impl RuntimeWebsocketResponseLoop<'_> {
                 })
             }
             Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound) => {
-                if runtime_proxy_crate::runtime_proxy_body_is_invalid_previous_response_id(
-                    text.as_bytes(),
-                ) {
+                let invalid_previous_response_id =
+                    runtime_proxy_crate::runtime_proxy_body_is_invalid_previous_response_id(
+                        text.as_bytes(),
+                    );
+                if invalid_previous_response_id {
                     self.log_continuation_trace(None, 0, false);
                 }
                 self.close_and_reset();
@@ -390,10 +392,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
                     profile_name: self.profile_name.to_string(),
                     payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
                     turn_state: self.upstream_turn_state.clone(),
-                    invalid_previous_response_id:
-                        runtime_proxy_crate::runtime_proxy_body_is_invalid_previous_response_id(
-                            text.as_bytes(),
-                        ),
+                    invalid_previous_response_id,
                 })
             }
             None => None,
@@ -474,7 +473,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
         let generation_ms = (event_type == Some("response.completed"))
             .then(|| runtime_proxy_crate::runtime_generation_elapsed_ms(self.generation_started_at))
             .flatten();
-        if !inspected.precommit_hold {
+        if runtime_proxy_crate::runtime_response_ids_should_record(inspected.precommit_hold) {
             self.committed_response_ids
                 .extend(inspected.response_ids.iter().cloned());
             self.websocket_session
@@ -532,10 +531,13 @@ impl RuntimeWebsocketResponseLoop<'_> {
                 generation_ms,
             });
         }
-        let committed_previous_response_not_found = self.committed
-            && matches!(
-                inspected.retry_kind,
-                Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
+        let committed_previous_response_not_found =
+            runtime_proxy_crate::runtime_committed_previous_response_not_found(
+                self.committed,
+                matches!(
+                    inspected.retry_kind,
+                    Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
+                ),
             );
         if committed_previous_response_not_found {
             record_runtime_websocket_committed_previous_response_not_found(
@@ -552,9 +554,10 @@ impl RuntimeWebsocketResponseLoop<'_> {
     }
 
     fn observe_generation_start(&mut self, event_type: Option<&str>) {
-        if self.generation_started_at.is_none()
-            && runtime_proxy_crate::runtime_response_event_is_generation_start(event_type)
-        {
+        if runtime_proxy_crate::runtime_response_generation_should_start(
+            event_type,
+            self.generation_started_at.is_some(),
+        ) {
             self.generation_started_at = Some(Instant::now());
         }
     }

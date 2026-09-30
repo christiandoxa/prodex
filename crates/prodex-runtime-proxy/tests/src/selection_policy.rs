@@ -795,3 +795,23 @@ fn websocket_failure_disposition_is_mojo_authoritative() {
         RuntimeWebsocketQuotaFallbackPlan::LastChance
     );
 }
+
+#[test]
+fn websocket_transport_failure_precedence_is_mojo_authoritative() {
+    assert_eq!(
+        runtime_websocket_transport_failure_plan(false, true, true),
+        RuntimeWebsocketTransportFailurePlan::ReuseWatchdog
+    );
+    assert_eq!(
+        runtime_websocket_transport_failure_plan(false, false, true),
+        RuntimeWebsocketTransportFailurePlan::RetryTransport
+    );
+    assert_eq!(
+        runtime_websocket_transport_failure_plan(true, true, true),
+        RuntimeWebsocketTransportFailurePlan::Error
+    );
+    assert_eq!(
+        runtime_websocket_transport_failure_plan(false, false, false),
+        RuntimeWebsocketTransportFailurePlan::Error
+    );
+}

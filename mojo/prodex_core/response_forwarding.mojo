@@ -8,6 +8,10 @@ comptime RESPONSE_FORWARDING_SKIP_HEADER: Int64 = 0
 comptime RESPONSE_FORWARDING_CONTENT_TYPE_SSE: Int64 = 1
 comptime RESPONSE_FORWARDING_USAGE_EVENT_LOGGABLE: Int64 = 2
 comptime RESPONSE_FORWARDING_GENERATION_START: Int64 = 3
+comptime RESPONSE_FORWARDING_WEBSOCKET_TERMINAL_RESET: Int64 = 4
+comptime RESPONSE_FORWARDING_RECORD_RESPONSE_IDS: Int64 = 5
+comptime RESPONSE_FORWARDING_COMMITTED_PREVIOUS_RESPONSE_NOT_FOUND: Int64 = 6
+comptime RESPONSE_FORWARDING_GENERATION_START_ONCE: Int64 = 7
 
 
 def response_ascii_lower(value: UInt8) -> UInt8:
@@ -133,7 +137,7 @@ def prodex_runtime_response_forwarding_classify_v1(
 ) abi("C") -> Int64:
     if (
         operation < RESPONSE_FORWARDING_SKIP_HEADER
-        or operation > RESPONSE_FORWARDING_GENERATION_START
+        or operation > RESPONSE_FORWARDING_GENERATION_START_ONCE
         or present < 0
         or present > 1
         or length < 0
@@ -185,4 +189,33 @@ def prodex_runtime_response_forwarding_classify_v1(
             or response_ends_with(address, length, StringSlice(".completed"))
         )
 
-    return Int64(present == 1 and response_generation_start(address, length))
+    if operation == RESPONSE_FORWARDING_GENERATION_START:
+        return Int64(present == 1 and response_generation_start(address, length))
+
+    if operation == RESPONSE_FORWARDING_WEBSOCKET_TERMINAL_RESET:
+        var realtime = _numeric & 1
+        return Int64(
+            realtime == 0
+            and present == 1
+            and (
+                response_equals(address, length, StringSlice("error"))
+                or response_equals(address, length, StringSlice("response.failed"))
+                or response_equals(address, length, StringSlice("response.incomplete"))
+            )
+        )
+
+    if operation == RESPONSE_FORWARDING_RECORD_RESPONSE_IDS:
+        var precommit_hold = _numeric & 1
+        return Int64(precommit_hold == 0)
+
+    if operation == RESPONSE_FORWARDING_COMMITTED_PREVIOUS_RESPONSE_NOT_FOUND:
+        var committed = _numeric & 1
+        var previous_response_not_found = (_numeric >> 1) & 1
+        return Int64(committed == 1 and previous_response_not_found == 1)
+
+    var already_started = _numeric & 1
+    return Int64(
+        already_started == 0
+        and present == 1
+        and response_generation_start(address, length)
+    )

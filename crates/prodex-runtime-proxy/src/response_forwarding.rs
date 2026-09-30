@@ -188,6 +188,35 @@ pub fn runtime_response_event_is_generation_start(event_type: Option<&str>) -> b
     response_forwarding_mojo_bool(3, event_type, 0)
 }
 
+pub fn runtime_websocket_terminal_should_reset(
+    event_type: Option<&str>,
+    realtime_websocket: bool,
+) -> bool {
+    response_forwarding_mojo_bool(4, event_type, u64::from(realtime_websocket))
+}
+
+pub fn runtime_response_ids_should_record(precommit_hold: bool) -> bool {
+    response_forwarding_mojo_bool(5, None, u64::from(precommit_hold))
+}
+
+pub fn runtime_committed_previous_response_not_found(
+    committed: bool,
+    previous_response_not_found: bool,
+) -> bool {
+    response_forwarding_mojo_bool(
+        6,
+        None,
+        u64::from(committed) | (u64::from(previous_response_not_found) << 1),
+    )
+}
+
+pub fn runtime_response_generation_should_start(
+    event_type: Option<&str>,
+    already_started: bool,
+) -> bool {
+    response_forwarding_mojo_bool(7, event_type, u64::from(already_started))
+}
+
 /// Measures elapsed generation time with a positive millisecond floor.
 pub fn runtime_generation_elapsed_ms(started_at: Option<Instant>) -> Option<u64> {
     started_at.and_then(|started_at| started_at.elapsed().as_millis().max(1).try_into().ok())
@@ -586,6 +615,26 @@ mod classifier_tests {
             );
         }
         assert!(!runtime_response_event_is_generation_start(None));
+        assert!(runtime_websocket_terminal_should_reset(
+            Some("response.failed"),
+            false
+        ));
+        assert!(!runtime_websocket_terminal_should_reset(
+            Some("response.failed"),
+            true
+        ));
+        assert!(runtime_response_ids_should_record(false));
+        assert!(!runtime_response_ids_should_record(true));
+        assert!(runtime_committed_previous_response_not_found(true, true));
+        assert!(!runtime_committed_previous_response_not_found(false, true));
+        assert!(runtime_response_generation_should_start(
+            Some("response.output_text.delta"),
+            false
+        ));
+        assert!(!runtime_response_generation_should_start(
+            Some("response.output_text.delta"),
+            true
+        ));
         assert!(!runtime_token_usage_event_is_live(
             Some("response.output_text.delta"),
             Some(RuntimeTokenUsage::default())
