@@ -11,10 +11,14 @@ pub fn compact_runtime_profile_scores(
     profiles: &BTreeMap<String, ProfileEntry>,
     now: i64,
 ) -> BTreeMap<String, RuntimeProfileHealth> {
-    let oldest_allowed = now.saturating_sub(crate::RUNTIME_SCORE_RETENTION_SECONDS);
     scores.retain(|key, value| {
-        profiles.contains_key(runtime_profile_score_profile_name(key))
-            && value.updated_at >= oldest_allowed
+        prodex_mojo_core::runtime::profile_score_should_retain(
+            profiles.contains_key(runtime_profile_score_profile_name(key)),
+            value.updated_at,
+            now,
+            crate::RUNTIME_SCORE_RETENTION_SECONDS,
+        )
+        .expect("Mojo profile score retention policy returned invalid output")
     });
     scores
 }
@@ -27,12 +31,13 @@ pub fn merge_runtime_profile_scores(
 ) -> BTreeMap<String, RuntimeProfileHealth> {
     let mut merged = existing.clone();
     for (key, value) in incoming {
-        let should_replace = merged.get(key).is_none_or(|current| {
-            value.updated_at > current.updated_at
-                || (value.updated_at == current.updated_at
-                    && ((value.score == 0 && current.score != 0)
-                        || (value.score != 0 && current.score != 0 && value.score > current.score)))
-        });
+        let should_replace = prodex_mojo_core::runtime::profile_score_should_replace(
+            merged
+                .get(key)
+                .map(|current| (current.score, current.updated_at)),
+            (value.score, value.updated_at),
+        )
+        .expect("Mojo profile score merge policy returned invalid output");
         if should_replace {
             merged.insert(key.clone(), value.clone());
         }
@@ -45,9 +50,10 @@ pub fn clear_runtime_profile_score(
     key: &str,
     now: i64,
 ) -> bool {
-    let changed = profile_health
-        .get(key)
-        .is_some_and(|entry| entry.score != 0);
+    let changed = prodex_mojo_core::runtime::profile_score_should_clear(
+        profile_health.get(key).map(|entry| entry.score),
+    )
+    .expect("Mojo profile score clear policy returned invalid output");
     if changed {
         profile_health.insert(
             key.to_string(),
@@ -73,11 +79,13 @@ pub fn runtime_profile_effective_score(
     now: i64,
     decay_seconds: i64,
 ) -> u32 {
-    let decay = now
-        .saturating_sub(entry.updated_at)
-        .saturating_div(decay_seconds.max(1))
-        .clamp(0, i64::from(u32::MAX)) as u32;
-    entry.score.saturating_sub(decay)
+    prodex_mojo_core::runtime::profile_health_effective_score(
+        entry.score,
+        entry.updated_at,
+        now,
+        decay_seconds,
+    )
+    .expect("Mojo profile health decay returned invalid output")
 }
 
 pub fn runtime_profile_effective_health_score_from_map(
@@ -124,32 +132,44 @@ pub fn runtime_profile_route_health_score(
     )
 }
 
+fn runtime_profile_health_raw(
+    profile_health: &BTreeMap<String, RuntimeProfileHealth>,
+    key: &str,
+) -> (u32, i64) {
+    profile_health
+        .get(key)
+        .map(|entry| (entry.score, entry.updated_at))
+        .unwrap_or((0, 0))
+}
+
 pub fn runtime_profile_route_coupling_score(
     profile_health: &BTreeMap<String, RuntimeProfileHealth>,
     profile_name: &str,
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    runtime_route_coupled_kinds(route_kind)
-        .iter()
+    let coupled_kind = runtime_route_coupled_kinds(route_kind)
+        .first()
         .copied()
-        .map(|coupled_kind| {
-            let route_score = runtime_profile_effective_health_score_from_map(
-                profile_health,
-                &runtime_profile_route_health_key(profile_name, coupled_kind),
-                now,
-            );
-            let bad_pairing_score = runtime_profile_effective_score_from_map(
-                profile_health,
-                &runtime_profile_route_bad_pairing_key(profile_name, coupled_kind),
-                now,
-                crate::RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
-            );
-            route_score
-                .saturating_add(bad_pairing_score)
-                .saturating_div(2)
-        })
-        .fold(0, u32::saturating_add)
+        .expect("every runtime route has one coupled route");
+    let (route_score, route_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_health_key(profile_name, coupled_kind),
+    );
+    let (bad_pairing_score, bad_pairing_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_bad_pairing_key(profile_name, coupled_kind),
+    );
+    prodex_mojo_core::runtime::profile_health_coupling_score(
+        route_score,
+        route_updated_at,
+        bad_pairing_score,
+        bad_pairing_updated_at,
+        now,
+        crate::RUNTIME_PROFILE_HEALTH_DECAY_SECONDS,
+        crate::RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+    )
+    .expect("Mojo profile coupling score returned invalid output")
 }
 
 pub fn runtime_profile_route_performance_score(
@@ -158,26 +178,27 @@ pub fn runtime_profile_route_performance_score(
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    let route_score = runtime_profile_effective_score_from_map(
+    let coupled_kind = runtime_route_coupled_kinds(route_kind)
+        .first()
+        .copied()
+        .expect("every runtime route has one coupled route");
+    let (route_score, route_updated_at) = runtime_profile_health_raw(
         profile_health,
         &runtime_profile_route_performance_key(profile_name, route_kind),
+    );
+    let (coupled_score, coupled_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_performance_key(profile_name, coupled_kind),
+    );
+    prodex_mojo_core::runtime::profile_health_performance_score(
+        route_score,
+        route_updated_at,
+        coupled_score,
+        coupled_updated_at,
         now,
         crate::RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
-    );
-    let coupled_score = runtime_route_coupled_kinds(route_kind)
-        .iter()
-        .copied()
-        .map(|coupled_kind| {
-            runtime_profile_effective_score_from_map(
-                profile_health,
-                &runtime_profile_route_performance_key(profile_name, coupled_kind),
-                now,
-                crate::RUNTIME_PROFILE_PERFORMANCE_DECAY_SECONDS,
-            )
-            .saturating_div(2)
-        })
-        .fold(0, u32::saturating_add);
-    route_score.saturating_add(coupled_score)
+    )
+    .expect("Mojo profile performance score returned invalid output")
 }
 
 pub fn runtime_profile_health_score(
@@ -186,19 +207,38 @@ pub fn runtime_profile_health_score(
     now: i64,
     route_kind: RuntimeRouteKind,
 ) -> u32 {
-    runtime_profile_global_health_score(profile_health, profile_name, now)
-        .saturating_add(runtime_profile_route_health_score(
-            profile_health,
-            profile_name,
-            now,
-            route_kind,
-        ))
-        .saturating_add(runtime_profile_route_coupling_score(
-            profile_health,
-            profile_name,
-            now,
-            route_kind,
-        ))
+    let coupled_kind = runtime_route_coupled_kinds(route_kind)
+        .first()
+        .copied()
+        .expect("every runtime route has one coupled route");
+    let (global_score, global_updated_at) =
+        runtime_profile_health_raw(profile_health, profile_name);
+    let (route_score, route_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_health_key(profile_name, route_kind),
+    );
+    let (coupled_score, coupled_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_health_key(profile_name, coupled_kind),
+    );
+    let (coupled_bad_score, coupled_bad_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_bad_pairing_key(profile_name, coupled_kind),
+    );
+    prodex_mojo_core::runtime::profile_health_score(
+        global_score,
+        global_updated_at,
+        route_score,
+        route_updated_at,
+        coupled_score,
+        coupled_updated_at,
+        coupled_bad_score,
+        coupled_bad_updated_at,
+        now,
+        crate::RUNTIME_PROFILE_HEALTH_DECAY_SECONDS,
+        crate::RUNTIME_PROFILE_BAD_PAIRING_DECAY_SECONDS,
+    )
+    .expect("Mojo profile health score returned invalid output")
 }
 
 pub fn runtime_profile_health_sort_key(
@@ -222,28 +262,31 @@ fn profile_health_score_input(
         .first()
         .copied()
         .expect("every runtime route has one coupled route");
-    let value = |key: String| {
-        profile_health
-            .get(&key)
-            .map(|entry| (entry.score, entry.updated_at))
-            .unwrap_or((0, 0))
-    };
-    let (global_score, global_updated_at) = value(profile_name.to_string());
-    let (route_health_score, route_health_updated_at) =
-        value(runtime_profile_route_health_key(profile_name, route_kind));
-    let (route_bad_pairing_score, route_bad_pairing_updated_at) = value(
-        runtime_profile_route_bad_pairing_key(profile_name, route_kind),
+    let (global_score, global_updated_at) =
+        runtime_profile_health_raw(profile_health, profile_name);
+    let (route_health_score, route_health_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_health_key(profile_name, route_kind),
     );
-    let (coupled_health_score, coupled_health_updated_at) =
-        value(runtime_profile_route_health_key(profile_name, coupled_kind));
-    let (coupled_bad_pairing_score, coupled_bad_pairing_updated_at) = value(
-        runtime_profile_route_bad_pairing_key(profile_name, coupled_kind),
+    let (route_bad_pairing_score, route_bad_pairing_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_bad_pairing_key(profile_name, route_kind),
     );
-    let (route_performance_score, route_performance_updated_at) = value(
-        runtime_profile_route_performance_key(profile_name, route_kind),
+    let (coupled_health_score, coupled_health_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_health_key(profile_name, coupled_kind),
     );
-    let (coupled_performance_score, coupled_performance_updated_at) = value(
-        runtime_profile_route_performance_key(profile_name, coupled_kind),
+    let (coupled_bad_pairing_score, coupled_bad_pairing_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_bad_pairing_key(profile_name, coupled_kind),
+    );
+    let (route_performance_score, route_performance_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_performance_key(profile_name, route_kind),
+    );
+    let (coupled_performance_score, coupled_performance_updated_at) = runtime_profile_health_raw(
+        profile_health,
+        &runtime_profile_route_performance_key(profile_name, coupled_kind),
     );
     prodex_mojo_core::runtime::ProfileHealthScoreInput {
         global_score,
