@@ -1,4 +1,5 @@
 use super::logging::ExposeAuditLog;
+use super::optional_tools::ExposeOptionalTools;
 use serde_json::{Value, json};
 use std::ffi::OsString;
 use std::io::{self, Read, Write};
@@ -24,12 +25,14 @@ pub(super) const EXEC_MAX_OUTPUT_BYTES: usize = 128 * 1024;
 const EXEC_LOG_COMMAND_MAX_BYTES: usize = 2 * 1024;
 
 struct ExecRequest {
-    program: String,
+    requested_program: String,
+    program: PathBuf,
     args: Vec<OsString>,
     cwd: PathBuf,
     env: Vec<(OsString, OsString)>,
     stdin: Vec<u8>,
     timeout: Duration,
+    optional_tool: Option<prodex_optional_tools::OptionalToolId>,
 }
 
 struct CapturedOutput {
@@ -41,8 +44,9 @@ pub(super) fn execute_direct(
     arguments: &Value,
     default_cwd: &Path,
     audit: &ExposeAuditLog,
+    optional_tools: &ExposeOptionalTools,
 ) -> std::result::Result<Value, String> {
-    let request = match parse_request(arguments, default_cwd) {
+    let request = match parse_request(arguments, default_cwd, optional_tools) {
         Ok(request) => request,
         Err(error) => {
             audit.event(
@@ -61,7 +65,7 @@ pub(super) fn execute_direct(
             return Err(error);
         }
     };
-    let program = safe_program_label(Some(&request.program));
+    let program = safe_program_label(Some(&request.requested_program));
     let command = exec_log_command_preview(&request);
     let cwd = bounded_text(
         &crate::redaction_redact_secret_like_text(&request.cwd.to_string_lossy()),
@@ -80,7 +84,7 @@ pub(super) fn execute_direct(
         ],
     );
     let shutdown = Arc::new(AtomicBool::new(false));
-    let result = run(request, &shutdown);
+    let result = run(request, &shutdown, optional_tools);
     let fields = match result.as_ref() {
         Ok(value) => vec![
             crate::runtime_proxy_log_field("program", program),
@@ -159,7 +163,7 @@ fn safe_program_label(program: Option<&str>) -> String {
 
 fn exec_log_command_preview(request: &ExecRequest) -> String {
     let mut rendered = Vec::with_capacity(request.args.len().saturating_add(1));
-    rendered.push(exec_log_argument(&request.program, false));
+    rendered.push(exec_log_argument(&request.requested_program, false));
     let mut redact_next = false;
     for argument in &request.args {
         let raw = argument.to_string_lossy();
@@ -232,13 +236,26 @@ pub(super) fn execute_tool(
     shutdown: &Arc<AtomicBool>,
     default_cwd: &Path,
 ) -> std::result::Result<Value, String> {
-    let request = parse_request(arguments, default_cwd)?;
-    run(request, shutdown)
+    let optional_tools = ExposeOptionalTools::empty_for_tests();
+    let request = parse_request(arguments, default_cwd, &optional_tools)?;
+    run(request, shutdown, &optional_tools)
+}
+
+#[cfg(test)]
+pub(super) fn execute_tool_with_optional_tools(
+    arguments: &Value,
+    shutdown: &Arc<AtomicBool>,
+    default_cwd: &Path,
+    optional_tools: &ExposeOptionalTools,
+) -> std::result::Result<Value, String> {
+    let request = parse_request(arguments, default_cwd, optional_tools)?;
+    run(request, shutdown, optional_tools)
 }
 
 fn parse_request(
     arguments: &Value,
     default_cwd: &Path,
+    optional_tools: &ExposeOptionalTools,
 ) -> std::result::Result<ExecRequest, String> {
     let Some(object) = arguments.as_object() else {
         return Err("tool arguments must be an object".to_string());
@@ -248,14 +265,17 @@ fn parse_request(
         .and_then(Value::as_str)
         .ok_or_else(|| "program is required".to_string())?;
     validate_path_text(program, "program", EXEC_MAX_PROGRAM_BYTES, false)?;
+    let resolved = optional_tools.resolve_exec(program, parse_args(object.get("args"))?)?;
 
     Ok(ExecRequest {
-        program: program.to_string(),
-        args: parse_args(object.get("args"))?,
+        requested_program: program.to_string(),
+        program: resolved.program,
+        args: resolved.args,
         cwd: parse_cwd(object.get("cwd"), default_cwd)?,
         env: parse_env(object.get("env"))?,
         stdin: parse_stdin(object.get("stdin"))?,
         timeout: parse_timeout(object.get("timeout_ms"))?,
+        optional_tool: resolved.optional_tool,
     })
 }
 
@@ -394,7 +414,11 @@ fn validate_env_key(key: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
-fn run(request: ExecRequest, shutdown: &Arc<AtomicBool>) -> std::result::Result<Value, String> {
+fn run(
+    request: ExecRequest,
+    shutdown: &Arc<AtomicBool>,
+    optional_tools: &ExposeOptionalTools,
+) -> std::result::Result<Value, String> {
     let mut command = Command::new(&request.program);
     command
         .args(&request.args)
@@ -406,6 +430,12 @@ fn run(request: ExecRequest, shutdown: &Arc<AtomicBool>) -> std::result::Result<
     for (key, value) in &request.env {
         command.env(key, value);
     }
+    let requested_path = request
+        .env
+        .iter()
+        .find(|(key, _)| key.to_string_lossy().eq_ignore_ascii_case("PATH"))
+        .map(|(_, value)| value.as_os_str());
+    optional_tools.apply_environment(&mut command, requested_path);
     command.env_remove("CONTROL_PLANE_API_KEY");
     crate::configure_child_process_group(&mut command, true);
     crate::configure_child_parent_death(&mut command);
@@ -478,7 +508,9 @@ fn run(request: ExecRequest, shutdown: &Arc<AtomicBool>) -> std::result::Result<
     };
     Ok(json!({
         "status": result_status,
-        "program": request.program,
+        "program": request.requested_program,
+        "optional_tool": request.optional_tool.map(|tool| tool.as_str()),
+        "available_optional_tools": optional_tools.available_ids(),
         "arg_count": request.args.len(),
         "cwd": request.cwd.to_string_lossy(),
         "pid": pid,

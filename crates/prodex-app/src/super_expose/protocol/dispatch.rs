@@ -22,7 +22,12 @@ pub(in crate::super_expose) fn dispatch(
         Err(response) => return response,
     };
     let server_name = format!("Prodex Super — {}", context.display_name);
-    let instructions = expose_instructions(context.workspace, context.instance_id, context.mode);
+    let instructions = expose_instructions(
+        context.workspace,
+        context.instance_id,
+        context.mode,
+        context.optional_tools,
+    );
     match dispatch_method(&request, context, &server_name, &instructions) {
         MethodDispatch::Immediate(response) => response,
         MethodDispatch::Rpc(result) => finish_dispatch_result(request, result, context),
@@ -231,7 +236,11 @@ fn dispatch_method(
         ExposeMethod::ServerDiscover => Ok(server_discover_result(server_name, instructions)),
         ExposeMethod::Initialize => initialize_result(&request.params, server_name, instructions),
         ExposeMethod::Ping => Ok(json!({})),
-        ExposeMethod::ToolsList => Ok(tools_list_result(context.mode, server_name)),
+        ExposeMethod::ToolsList => Ok(tools_list_result(
+            context.mode,
+            server_name,
+            context.optional_tools,
+        )),
         ExposeMethod::ToolsCall => tool_call(&request.params, request.tool_kind, context),
         ExposeMethod::Notification => {
             audit_dispatch_completion(context, request.method_kind, request.tool_kind, true);
@@ -271,10 +280,14 @@ fn server_discover_result(server_name: &str, instructions: &str) -> Value {
     })
 }
 
-fn tools_list_result(mode: SuperExposeMode, server_name: &str) -> Value {
+fn tools_list_result(
+    mode: SuperExposeMode,
+    server_name: &str,
+    optional_tools: &ExposeOptionalTools,
+) -> Value {
     json!({
         "resultType": "complete",
-        "tools": tools(mode),
+        "tools": tools(mode, optional_tools),
         "ttlMs": 300_000,
         "cacheScope": "private",
         "_meta": {"io.modelcontextprotocol/serverInfo": {

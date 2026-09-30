@@ -23,6 +23,29 @@ pub(crate) fn stored_presidio_preference() -> Result<Option<bool>> {
     Ok(load_presidio_config(&paths)?.map(|config| config.enabled))
 }
 
+pub(crate) fn presidio_expose_health() -> (bool, String) {
+    let result = (|| -> Result<bool> {
+        let paths = AppPaths::discover()?;
+        let mut config = load_presidio_config(&paths)?.unwrap_or_default();
+        config.timeout_ms = config.timeout_ms.clamp(100, 1_000);
+        let client = PresidioBlockingClient::from_config(&config)?;
+        let analyzer = client.probe_health(&config.analyzer_url);
+        let anonymizer = client.probe_health(&config.anonymizer_url);
+        Ok(analyzer.ok && anonymizer.ok)
+    })();
+    match result {
+        Ok(true) => (
+            true,
+            "Presidio Analyzer and Anonymizer are healthy".to_string(),
+        ),
+        Ok(false) => (
+            false,
+            "Presidio Analyzer or Anonymizer is not healthy".to_string(),
+        ),
+        Err(_) => (false, "Presidio health could not be validated".to_string()),
+    }
+}
+
 pub(crate) fn ensure_presidio_services_for_super_launch(paths: &AppPaths) -> Result<()> {
     ensure_presidio_services_for_super_launch_inner(paths, false)
 }
