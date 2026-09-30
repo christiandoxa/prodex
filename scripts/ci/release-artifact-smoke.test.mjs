@@ -100,8 +100,10 @@ test("release stages immutable binary artifacts and waits before public version 
   assert.doesNotMatch(publish, /--clobber|gh release edit/u);
   assert.ok(
     publish.indexOf("Wait for the absolute publication target") <
-      publish.indexOf("Create release tag"),
+      publish.indexOf("- name: Publish GitHub release"),
   );
+  assert.match(publish, /gh release create "\$\{tag\}"[\s\S]*?--target "\$\{TARGET_SHA\}"/u);
+  assert.doesNotMatch(publish, /push origin "refs\/tags\//u);
 });
 
 test("release manifest renderer rejects Codex executable names", async (t) => {

@@ -461,14 +461,20 @@ export function validateReleaseContainerPublication(contents) {
     "- sync-release-docs",
     "subject-path: release-assets/SHA256SUMS",
     "find release-assets -maxdepth 1 -type f -print0",
-    'git tag "${version}" "${TARGET_SHA}"',
-    'push origin "refs/tags/${version}"',
+    'TARGET_SHA: $' + '{{ steps.release.outputs.target_sha }}',
+    'gh release create "${tag}" release-assets/*',
+    '--target "${TARGET_SHA}"',
     "--checkpoint P --release-sha",
     "refusing to overwrite it",
   ]) {
     if (!release.includes(marker)) {
       violations.push(`.github/workflows/standalone-release.yml: release publication missing ${marker}`);
     }
+  }
+  if (release.includes('git tag "${version}"') || release.includes('push origin "refs/tags/')) {
+    violations.push(
+      ".github/workflows/standalone-release.yml: release tags must be created atomically by the GitHub Releases API",
+    );
   }
   if (release.includes("--clobber") || release.includes("gh release edit")) {
     violations.push(

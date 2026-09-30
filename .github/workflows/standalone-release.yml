@@ -1218,7 +1218,7 @@ jobs:
           done
           exit "${status}"
 
-      - name: Validate curated release notes before tagging
+      - name: Validate curated release notes before publishing
         shell: bash
         run: |
           set -euo pipefail
@@ -1303,30 +1303,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Create release tag
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TARGET_SHA: ${{ steps.release.outputs.target_sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          version="${{ steps.release.outputs.version }}"
-          git fetch origin --tags --force
-          if release_tag_sha="$(git rev-list -n1 "${version}" 2>/dev/null)"; then
-            if [ "${release_tag_sha}" != "${TARGET_SHA}" ]; then
-              echo "release tag ${version} targets ${release_tag_sha}, not ${TARGET_SHA}" >&2
-              exit 1
-            fi
-            echo "release tag ${version} already targets ${TARGET_SHA}"
-            exit 0
-          fi
-          git tag "${version}" "${TARGET_SHA}"
-          auth="$(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 --wrap=0)"
-          git -c http.https://github.com/.extraheader="AUTHORIZATION: basic ${auth}" push origin "refs/tags/${version}"
-
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ steps.release.outputs.target_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -1375,6 +1355,7 @@ jobs:
             *) echo "could not verify whether release ${tag} exists" >&2; exit 1 ;;
           esac
           gh release create "${tag}" release-assets/* \
+            --target "${TARGET_SHA}" \
             --title "${title}" \
             --notes-file "${notes_file}" \
             --latest
