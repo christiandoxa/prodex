@@ -288,3 +288,177 @@ def prodex_runtime_repo_module_path_v1(
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
     var written = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))
     return repo_module_from_path(source, length, output, output_capacity, written)
+
+
+comptime REPO_CHUNK_ACCEPT: Int64 = 0
+comptime REPO_CHUNK_REJECT_CAPACITY: Int64 = 1
+comptime REPO_CHUNK_REJECT_INVALID: Int64 = 2
+
+comptime REPO_DUPLICATE_SKIP: Int64 = 0
+comptime REPO_DUPLICATE_APPEND: Int64 = 1
+comptime REPO_DUPLICATE_STOP_CAPACITY: Int64 = 2
+
+comptime REPO_SYMBOL_KIND_MODULE: Int64 = 1
+comptime REPO_SYMBOL_KIND_SYMBOL: Int64 = 2
+comptime REPO_SYMBOL_KIND_TEST: Int64 = 3
+
+
+@export("prodex_runtime_repo_chunk_plan_v1")
+def prodex_runtime_repo_chunk_plan_v1(
+    abi_version: Int64,
+    current_count: Int64,
+    max_count: Int64,
+    byte_len: Int64,
+    text_len: Int64,
+    hash_matches: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != REPO_MAP_ABI_VERSION
+        or current_count < 0
+        or max_count < 0
+        or byte_len < 0
+        or text_len < 0
+        or (hash_matches != 0 and hash_matches != 1)
+    ):
+        return -1
+    if current_count >= max_count:
+        return REPO_CHUNK_REJECT_CAPACITY
+    if byte_len != text_len or hash_matches == 0:
+        return REPO_CHUNK_REJECT_INVALID
+    return REPO_CHUNK_ACCEPT
+
+
+@export("prodex_runtime_repo_duplicate_plan_v1")
+def prodex_runtime_repo_duplicate_plan_v1(
+    abi_version: Int64,
+    occurrence_count: Int64,
+    duplicate_count: Int64,
+    max_duplicate_count: Int64,
+    max_occurrences: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != REPO_MAP_ABI_VERSION
+        or occurrence_count < 0
+        or duplicate_count < 0
+        or max_duplicate_count < 0
+        or max_occurrences < 0
+    ):
+        return -1
+    if occurrence_count < 2:
+        return REPO_DUPLICATE_SKIP
+    if duplicate_count >= max_duplicate_count:
+        return REPO_DUPLICATE_STOP_CAPACITY
+    var occurrences_complete = Int64(occurrence_count <= max_occurrences)
+    return REPO_DUPLICATE_APPEND | (occurrences_complete << 8)
+
+
+@export("prodex_runtime_repo_path_distance_v1")
+def prodex_runtime_repo_path_distance_v1(
+    abi_version: Int64,
+    start: Int64,
+    end: Int64,
+    line: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != REPO_MAP_ABI_VERSION
+        or start < 0
+        or end < start
+        or line < 0
+    ):
+        return -1
+    if start <= line and line <= end:
+        return 0
+    var left = start - line if start >= line else line - start
+    var right = end - line if end >= line else line - end
+    return min(left, right)
+
+
+@export("prodex_runtime_repo_symbol_kind_v1")
+def prodex_runtime_repo_symbol_kind_v1(
+    abi_version: Int64,
+    label_address: UInt,
+    label_length: Int64,
+    text_address: UInt,
+    text_length: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != REPO_MAP_ABI_VERSION
+        or label_length < 0
+        or text_length < 0
+        or (label_length > 0 and label_address == 0)
+        or (text_length > 0 and text_address == 0)
+    ):
+        return -1
+    var label = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(label_address)
+    )
+    if (
+        label_length == 11
+        and range_starts_with["test_symbol"](label, 0, label_length)
+    ):
+        return REPO_SYMBOL_KIND_TEST
+    if (
+        label_length == 6
+        and range_starts_with["symbol"](label, 0, label_length)
+    ):
+        var text = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(text_address)
+        )
+        if repo_module_like(text, text_length):
+            return REPO_SYMBOL_KIND_MODULE
+    return REPO_SYMBOL_KIND_SYMBOL
+
+
+def repo_lexical_less(
+    left: Pointer[mut=False, UInt8, _],
+    left_length: Int64,
+    right: Pointer[mut=False, UInt8, _],
+    right_length: Int64,
+) -> Bool:
+    var common = min(left_length, right_length)
+    for index in range(common):
+        var left_byte = left[unsafe_offset=index]
+        var right_byte = right[unsafe_offset=index]
+        if left_byte < right_byte:
+            return True
+        if left_byte > right_byte:
+            return False
+    return left_length < right_length
+
+
+@export("prodex_runtime_repo_entry_replace_v1")
+def prodex_runtime_repo_entry_replace_v1(
+    abi_version: Int64,
+    incoming_order: UInt64,
+    current_order: UInt64,
+    incoming_id_address: UInt,
+    incoming_id_length: Int64,
+    current_id_address: UInt,
+    current_id_length: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != REPO_MAP_ABI_VERSION
+        or incoming_id_length < 0
+        or current_id_length < 0
+        or (incoming_id_length > 0 and incoming_id_address == 0)
+        or (current_id_length > 0 and current_id_address == 0)
+    ):
+        return -1
+    if incoming_order > current_order:
+        return 1
+    if incoming_order < current_order:
+        return 0
+    var incoming = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(incoming_id_address)
+    )
+    var current = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(current_id_address)
+    )
+    return Int64(
+        repo_lexical_less(
+            incoming,
+            incoming_id_length,
+            current,
+            current_id_length,
+        )
+    )

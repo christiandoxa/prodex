@@ -1920,12 +1920,19 @@ export function findViolations(files) {
   const runtimeRepoMapViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-app/src/runtime_state_shared/line_index.rs") return [];
     const required = [
-      "prodex_mojo_core::runtime_repo_map::repo_module_like(",
+      "prodex_mojo_core::runtime_repo_map::repo_chunk_plan(",
+      "prodex_mojo_core::runtime_repo_map::repo_duplicate_plan(",
+      "prodex_mojo_core::runtime_repo_map::repo_path_distance(",
+      "prodex_mojo_core::runtime_repo_map::repo_symbol_kind(",
+      "prodex_mojo_core::runtime_repo_map::repo_entry_should_replace(",
       "prodex_mojo_core::runtime_repo_map::repo_module_from_path(",
     ];
     const violations = required
       .filter((call) => !contents.includes(call))
       .map((call) => `${filePath}: repo-map migration must retain Mojo call ${call}`);
+    if (contents.includes("fn runtime_smart_context_repo_map_symbol_is_module_like(")) {
+      violations.push(filePath + ": contains restored Rust repo-map symbol classification semantics");
+    }
     if (/\bfn\s+runtime_smart_context_repo_map_declaration_keyword\s*\(|trim_start_matches\("a\/"\)|split\(\['\/',/u.test(contents)) {
       violations.push(`${filePath}: contains restored Rust repo-map module/path semantics`);
     }
