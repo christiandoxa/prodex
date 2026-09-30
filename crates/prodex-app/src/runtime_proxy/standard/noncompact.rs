@@ -561,8 +561,19 @@ fn handle_runtime_noncompact_attempt(
                     "request={request_id} transport=http local_selection_blocked profile={profile_name} route=standard reason=quota_exhausted_before_send"
                 ),
             );
-            clear_noncompact_session_profile(session_profile, &profile_name);
-            loop_state.excluded_profiles.insert(profile_name);
+            let plan = runtime_noncompact_failure_plan(
+                prodex_mojo_core::runtime::NoncompactFailureKind::LocalBlocked,
+                session_profile,
+                &profile_name,
+                false,
+                false,
+            );
+            if plan.clear_session {
+                clear_noncompact_session_profile(session_profile, &profile_name);
+            }
+            if plan.exclude_profile {
+                loop_state.excluded_profiles.insert(profile_name);
+            }
             Ok(None)
         }
         RuntimeStandardAttempt::ProfileInflightSaturated { profile_name } => {
@@ -585,17 +596,44 @@ fn handle_runtime_noncompact_attempt(
                     "request={request_id} transport=http standard_transport_failure profile={profile_name} stage={stage}"
                 ),
             );
-            if session_profile.as_deref() == Some(profile_name.as_str()) {
+            let plan = runtime_noncompact_failure_plan(
+                prodex_mojo_core::runtime::NoncompactFailureKind::Transport,
+                session_profile,
+                &profile_name,
+                false,
+                false,
+            );
+            if plan.terminal {
                 return Ok(Some(build_runtime_proxy_text_response(
                     503,
                     runtime_proxy_local_selection_failure_message(),
                 )));
             }
-            loop_state.record_transport_failure_at(stage);
-            loop_state.excluded_profiles.insert(profile_name);
+            if plan.record_transport_failure {
+                loop_state.record_transport_failure_at(stage);
+            }
+            if plan.exclude_profile {
+                loop_state.excluded_profiles.insert(profile_name);
+            }
             Ok(None)
         }
     }
+}
+
+fn runtime_noncompact_failure_plan(
+    kind: prodex_mojo_core::runtime::NoncompactFailureKind,
+    session_profile: &Option<String>,
+    profile_name: &str,
+    overload: bool,
+    quota_fallback_available: bool,
+) -> prodex_mojo_core::runtime::NoncompactFailurePlan {
+    prodex_mojo_core::runtime::noncompact_failure_plan(
+        kind,
+        session_profile.as_deref() == Some(profile_name),
+        overload,
+        quota_fallback_available,
+    )
+    .expect("Mojo noncompact failure policy returned invalid output")
 }
 
 fn handle_runtime_noncompact_rate_limited(
@@ -614,12 +652,28 @@ fn handle_runtime_noncompact_rate_limited(
             retry_after.map_or(0, |delay| delay.as_millis()),
         ),
     );
-    mark_runtime_profile_retry_backoff_for_delay(shared, &profile_name, retry_after)?;
-    if session_profile.as_deref() == Some(profile_name.as_str()) {
+    let plan = runtime_noncompact_failure_plan(
+        prodex_mojo_core::runtime::NoncompactFailureKind::RateLimited,
+        session_profile,
+        &profile_name,
+        false,
+        false,
+    );
+    if plan.mark_backoff {
+        mark_runtime_profile_retry_backoff_for_delay(shared, &profile_name, retry_after)?;
+    }
+    if plan.terminal {
         return Ok(Some(response));
     }
-    loop_state.excluded_profiles.insert(profile_name);
-    loop_state.last_failure = Some((response, false));
+    if plan.clear_session {
+        clear_noncompact_session_profile(session_profile, &profile_name);
+    }
+    if plan.exclude_profile {
+        loop_state.excluded_profiles.insert(profile_name.clone());
+    }
+    if plan.store_last_failure {
+        loop_state.last_failure = Some((response, plan.last_failure_retryable));
+    }
     Ok(None)
 }
 
@@ -648,13 +702,28 @@ fn handle_runtime_noncompact_profile_unavailable(
             "request={request_id} transport=http standard_profile_unavailable profile={profile_name}"
         ),
     );
-    if session_profile.as_deref() == Some(profile_name.as_str()) {
+    let plan = runtime_noncompact_failure_plan(
+        prodex_mojo_core::runtime::NoncompactFailureKind::Unavailable,
+        session_profile,
+        &profile_name,
+        false,
+        false,
+    );
+    if plan.terminal {
         return Ok(Some(response));
     }
-    mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-    clear_noncompact_session_profile(session_profile, &profile_name);
-    loop_state.excluded_profiles.insert(profile_name);
-    loop_state.last_failure = Some((response, false));
+    if plan.mark_backoff {
+        mark_runtime_profile_retry_backoff(shared, &profile_name)?;
+    }
+    if plan.clear_session {
+        clear_noncompact_session_profile(session_profile, &profile_name);
+    }
+    if plan.exclude_profile {
+        loop_state.excluded_profiles.insert(profile_name.clone());
+    }
+    if plan.store_last_failure {
+        loop_state.last_failure = Some((response, plan.last_failure_retryable));
+    }
     Ok(None)
 }
 
@@ -716,18 +785,32 @@ fn handle_runtime_noncompact_retryable(
             ),
         );
     }
-    if !overload
-        && !runtime_has_route_eligible_quota_fallback(
+    let quota_fallback_available = if overload {
+        false
+    } else {
+        runtime_has_route_eligible_quota_fallback(
             shared,
             &profile_name,
             &BTreeSet::new(),
             RuntimeRouteKind::Standard,
         )?
-    {
+    };
+    let plan = runtime_noncompact_failure_plan(
+        prodex_mojo_core::runtime::NoncompactFailureKind::Retryable,
+        session_profile,
+        &profile_name,
+        overload,
+        quota_fallback_available,
+    );
+    if plan.terminal {
         return Ok(Some(response));
     }
-    loop_state.excluded_profiles.insert(profile_name);
-    loop_state.last_failure = Some((response, !overload));
+    if plan.exclude_profile {
+        loop_state.excluded_profiles.insert(profile_name.clone());
+    }
+    if plan.store_last_failure {
+        loop_state.last_failure = Some((response, plan.last_failure_retryable));
+    }
     Ok(None)
 }
 
@@ -751,7 +834,16 @@ fn handle_runtime_noncompact_auth_failed(
         None,
         request_session_id,
     )?;
-    clear_noncompact_session_profile(session_profile, &profile_name);
+    let plan = runtime_noncompact_failure_plan(
+        prodex_mojo_core::runtime::NoncompactFailureKind::AuthFailed,
+        session_profile,
+        &profile_name,
+        false,
+        false,
+    );
+    if plan.clear_session {
+        clear_noncompact_session_profile(session_profile, &profile_name);
+    }
     if released_affinity {
         runtime_proxy_log(
             shared,
@@ -760,8 +852,14 @@ fn handle_runtime_noncompact_auth_failed(
             ),
         );
     }
-    loop_state.excluded_profiles.insert(profile_name);
-    loop_state.last_failure = Some((response, true));
+    if plan.exclude_profile {
+        loop_state.excluded_profiles.insert(profile_name.clone());
+    }
+    if plan.store_last_failure {
+        loop_state.last_failure = Some((response, plan.last_failure_retryable));
+    } else if plan.terminal {
+        return Ok(Some(response));
+    }
     Ok(None)
 }
 

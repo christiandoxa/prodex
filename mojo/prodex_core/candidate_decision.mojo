@@ -1509,3 +1509,84 @@ def prodex_runtime_websocket_invalid_previous_response_plan_v1(
         else WEBSOCKET_INVALID_PREVIOUS_ACTION_PASS_THROUGH
     )
     return 0
+
+
+comptime NONCOMPACT_FAILURE_RATE_LIMITED: Int64 = 0
+comptime NONCOMPACT_FAILURE_RETRYABLE: Int64 = 1
+comptime NONCOMPACT_FAILURE_UNAVAILABLE: Int64 = 2
+comptime NONCOMPACT_FAILURE_AUTH_FAILED: Int64 = 3
+comptime NONCOMPACT_FAILURE_TRANSPORT: Int64 = 4
+comptime NONCOMPACT_FAILURE_LOCAL_BLOCKED: Int64 = 5
+
+@export("prodex_runtime_noncompact_failure_plan_v1")
+def prodex_runtime_noncompact_failure_plan_v1(
+    failure_kind: Int64,
+    session_owned: Int64,
+    overload: Int64,
+    quota_fallback_available: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        failure_kind < NONCOMPACT_FAILURE_RATE_LIMITED
+        or failure_kind > NONCOMPACT_FAILURE_LOCAL_BLOCKED
+        or (session_owned != 0 and session_owned != 1)
+        or (overload != 0 and overload != 1)
+        or (quota_fallback_available != 0 and quota_fallback_available != 1)
+    ):
+        return 1
+
+    # output:
+    # 0 terminal
+    # 1 mark_backoff
+    # 2 clear_session
+    # 3 exclude_profile
+    # 4 store_last_failure
+    # 5 last_failure_retryable
+    # 6 record_transport_failure
+    for index in range(7):
+        output[unsafe_offset=index] = 0
+
+    if failure_kind == NONCOMPACT_FAILURE_RATE_LIMITED:
+        output[unsafe_offset=0] = session_owned
+        output[unsafe_offset=1] = 1
+        output[unsafe_offset=3] = 1 - session_owned
+        output[unsafe_offset=4] = 1 - session_owned
+        return 0
+
+    if failure_kind == NONCOMPACT_FAILURE_UNAVAILABLE:
+        output[unsafe_offset=0] = session_owned
+        if session_owned == 0:
+            output[unsafe_offset=1] = 1
+            output[unsafe_offset=2] = 1
+            output[unsafe_offset=3] = 1
+            output[unsafe_offset=4] = 1
+        return 0
+
+    if failure_kind == NONCOMPACT_FAILURE_RETRYABLE:
+        output[unsafe_offset=1] = 1
+        output[unsafe_offset=2] = 1
+        if overload == 0 and quota_fallback_available == 0:
+            output[unsafe_offset=0] = 1
+        else:
+            output[unsafe_offset=3] = 1
+            output[unsafe_offset=4] = 1
+            output[unsafe_offset=5] = 1 - overload
+        return 0
+
+    if failure_kind == NONCOMPACT_FAILURE_AUTH_FAILED:
+        output[unsafe_offset=2] = 1
+        output[unsafe_offset=3] = 1
+        output[unsafe_offset=4] = 1
+        output[unsafe_offset=5] = 1
+        return 0
+
+    if failure_kind == NONCOMPACT_FAILURE_TRANSPORT:
+        output[unsafe_offset=0] = session_owned
+        output[unsafe_offset=3] = 1 - session_owned
+        output[unsafe_offset=6] = 1 - session_owned
+        return 0
+
+    # local selection blocked
+    output[unsafe_offset=2] = 1
+    output[unsafe_offset=3] = 1
+    return 0
