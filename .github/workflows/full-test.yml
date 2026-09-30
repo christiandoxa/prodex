@@ -67,8 +67,8 @@ jobs:
           archive="$(find "${target_dir}/${target}/release/build" -type f \
             -name libprodex_mojo_core.a -print -quit)"
           test -s "${archive}"
-          mkdir -p "target/mojo-runtime/${target}"
-          cp "${archive}" "target/mojo-runtime/${target}/libprodex_mojo_core.a"
+          mkdir -p ".prodex-ci/mojo-runtime/${target}"
+          cp "${archive}" ".prodex-ci/mojo-runtime/${target}/libprodex_mojo_core.a"
 
       - name: Upload Linux runtime Mojo archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

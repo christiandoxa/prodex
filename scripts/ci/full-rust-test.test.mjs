@@ -88,6 +88,19 @@ test("scheduled full suite runs disjoint workspace and prodex-app partitions in 
   assert.match(archive, /PRODEX_MOJO_REQUIRED=1/);
   assert.match(workflow, /needs: \[full_test_shards, mojo-runtime-linux-archive\]/);
   assert.match(workflow, /name: Download runtime Mojo archive/);
+  assert.match(
+    archive,
+    /mkdir -p "\.prodex-ci\/mojo-runtime\/\$\{target\}"/,
+  );
+  assert.match(
+    archive,
+    /cp "\$\{archive\}" "\.prodex-ci\/mojo-runtime\/\$\{target\}\/libprodex_mojo_core\.a"/,
+  );
+  assert.match(
+    archive,
+    /path: \.prodex-ci\/mojo-runtime\/x86_64-unknown-linux-gnu\/libprodex_mojo_core\.a/,
+  );
+  assert.doesNotMatch(archive, /path: target\/mojo-runtime\//);
   assert.match(workflow, /name: Full tests \(\$\{\{ matrix\.label \}\}\)/);
   assert.match(workflow, /full_test_shards:/);
   assert.match(workflow, /--full-test-matrix/);
@@ -98,6 +111,16 @@ test("scheduled full suite runs disjoint workspace and prodex-app partitions in 
   assert.match(workflow, /Test temp-backed state with a symlinked TMPDIR[\s\S]*?if: matrix\.suite == 'remainder'/);
   assert.match(workflow, /filter_status=\$\?/);
   assert.doesNotMatch(workflow, /if \[ "\$\{status\}" -ne 0 \]; then\n\s+break/);
+});
+
+test("push CI omits redundant optional-tool freshness lane", () => {
+  const ci = readFileSync(".github/workflows/ci.yml", "utf8");
+  const release = readFileSync(".github/workflows/standalone-release.yml", "utf8");
+
+  assert.doesNotMatch(ci, /\n  optional-tools-freshness:\n/);
+  assert.doesNotMatch(ci, /\n      - optional-tools-freshness\n/);
+  assert.match(release, /Verify optional-tool freshness at release cut/);
+  assert.match(release, /optional-tools-freshness\.mjs/);
 });
 
 test("fresh benchmark compiles required Mojo runtime with the pinned toolchain", () => {
