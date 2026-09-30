@@ -53,11 +53,54 @@ impl ProviderRetryPolicy {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProviderRetryTransition {
+    Terminal,
+    NextModel,
+    RotateCredential,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ProviderRetryPlan {
     pub stage: ProviderRetryStage,
     pub decision: ProviderRetryDecision,
     pub attempted_precommit_retries: u8,
     pub remaining_precommit_retries: u8,
+}
+
+fn provider_error_class_tag(error_class: ProviderErrorClass) -> i64 {
+    match error_class {
+        ProviderErrorClass::Auth => 0,
+        ProviderErrorClass::Quota => 1,
+        ProviderErrorClass::RateLimit => 2,
+        ProviderErrorClass::Transient => 3,
+        ProviderErrorClass::NotFound => 4,
+        ProviderErrorClass::Other => 5,
+    }
+}
+
+pub fn plan_provider_retry_transition(
+    error_class: ProviderErrorClass,
+    model_index: usize,
+    model_count: usize,
+    auth_index: usize,
+    auth_count: usize,
+    retry_enabled: bool,
+) -> ProviderRetryTransition {
+    match prodex_mojo_core::provider_constraints::provider_retry_transition(
+        provider_error_class_tag(error_class),
+        model_index,
+        model_count,
+        auth_index,
+        auth_count,
+        retry_enabled,
+    )
+    .expect("Mojo provider retry transition policy returned invalid output")
+    {
+        0 => ProviderRetryTransition::Terminal,
+        1 => ProviderRetryTransition::NextModel,
+        2 => ProviderRetryTransition::RotateCredential,
+        _ => unreachable!("validated Mojo provider retry transition"),
+    }
 }
 
 pub fn plan_provider_retry(
@@ -78,14 +121,7 @@ pub fn plan_provider_retry(
         ProviderRetryCause::RotateCredential => 1,
         ProviderRetryCause::NextProvider => 2,
     };
-    let error_class_tag = match error_class {
-        ProviderErrorClass::Auth => 0,
-        ProviderErrorClass::Quota => 1,
-        ProviderErrorClass::RateLimit => 2,
-        ProviderErrorClass::Transient => 3,
-        ProviderErrorClass::NotFound => 4,
-        ProviderErrorClass::Other => 5,
-    };
+    let error_class_tag = provider_error_class_tag(error_class);
     let plan = prodex_mojo_core::provider_constraints::provider_retry_plan(
         policy.max_precommit_attempts,
         stage_tag,
@@ -178,6 +214,22 @@ mod tests {
             )
             .decision,
             ProviderRetryDecision::DeniedBudgetExhausted
+        );
+        assert_eq!(
+            plan_provider_retry_transition(ProviderErrorClass::NotFound, 0, 2, 0, 2, true),
+            ProviderRetryTransition::NextModel
+        );
+        assert_eq!(
+            plan_provider_retry_transition(ProviderErrorClass::Auth, 1, 2, 0, 2, true),
+            ProviderRetryTransition::RotateCredential
+        );
+        assert_eq!(
+            plan_provider_retry_transition(ProviderErrorClass::Transient, 1, 2, 1, 2, true),
+            ProviderRetryTransition::Terminal
+        );
+        assert_eq!(
+            plan_provider_retry_transition(ProviderErrorClass::NotFound, 0, 2, 0, 2, false),
+            ProviderRetryTransition::Terminal
         );
     }
 }

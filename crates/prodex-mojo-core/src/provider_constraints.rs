@@ -73,6 +73,10 @@ mod scalar_policy_tests {
         assert_eq!(provider_retry_plan(1, 2, 0, 4, 0).unwrap().decision, 1);
         assert_eq!(provider_retry_plan(1, 1, 0, 0, 0).unwrap().decision, 3);
         assert_eq!(provider_retry_plan(1, 1, 0, 4, 1).unwrap().decision, 2);
+        assert_eq!(provider_retry_transition(4, 0, 2, 0, 2, true).unwrap(), 1);
+        assert_eq!(provider_retry_transition(0, 1, 2, 0, 2, true).unwrap(), 2);
+        assert_eq!(provider_retry_transition(3, 1, 2, 1, 2, true).unwrap(), 0);
+        assert_eq!(provider_retry_transition(4, 0, 2, 0, 2, false).unwrap(), 0);
     }
 }
 
@@ -86,6 +90,15 @@ pub struct ProviderRetryScalarPlan {
 }
 
 unsafe extern "C" {
+    fn prodex_provider_retry_transition_v1(
+        abi_version: i64,
+        error_class: i64,
+        model_index: i64,
+        model_count: i64,
+        auth_index: i64,
+        auth_count: i64,
+        retry_enabled: i64,
+    ) -> i64;
     fn prodex_provider_retry_plan_v1(
         abi_version: i64,
         max_precommit_attempts: i64,
@@ -95,6 +108,36 @@ unsafe extern "C" {
         attempted_precommit_retries: i64,
         output_address: u64,
     ) -> i64;
+}
+
+pub fn provider_retry_transition(
+    error_class: i64,
+    model_index: usize,
+    model_count: usize,
+    auth_index: usize,
+    auth_count: usize,
+    retry_enabled: bool,
+) -> Result<i64, crate::MojoError> {
+    if !(0..=5).contains(&error_class) {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let result = unsafe {
+        prodex_provider_retry_transition_v1(
+            PROVIDER_RETRY_ABI_VERSION,
+            error_class,
+            i64::try_from(model_index).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::try_from(model_count).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::try_from(auth_index).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::try_from(auth_count).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::from(retry_enabled),
+        )
+    };
+    match result {
+        0..=2 => Ok(result),
+        -1 => Err(crate::MojoError::InvalidInput),
+        -4 => Err(crate::MojoError::AbiMismatch),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
 }
 
 pub fn provider_retry_plan(

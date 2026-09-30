@@ -7,7 +7,6 @@ use super::local_rewrite::{
     RuntimeLocalRewriteProxyShared, RuntimeLocalRewriteUpstreamResponse,
     RuntimeLocalRewriteUpstreamResult,
 };
-use super::local_rewrite_application_data_plane::runtime_gateway_application_provider_retry_precommit;
 use super::local_rewrite_model_memory::runtime_local_rewrite_model_selection;
 use super::local_rewrite_response::runtime_local_rewrite_buffered_response_from_response;
 use super::local_rewrite_search_fallback::{
@@ -35,7 +34,7 @@ use super::provider_bridge::{
 use crate::{RuntimeHeapTrimmedBufferedResponseParts, RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::Result;
 use prodex_provider_core::{ProviderEndpoint, ProviderId, provider_core_lossless_body};
-use prodex_provider_spi::ProviderRetryCause;
+use prodex_provider_spi::{ProviderRetryTransition, plan_provider_retry_transition};
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde_json::json;
 
@@ -139,21 +138,7 @@ enum AnthropicAttemptOutcome {
     InternalFailure(anyhow::Error),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum AnthropicRetryTransition {
-    ModelFallback,
-    CredentialRotation,
-    TerminalBuffered,
-}
-
 const RUNTIME_ANTHROPIC_FIRST_EVENT_RETRY_LIMIT: u8 = 1;
-
-fn runtime_anthropic_first_event_retry_allowed(
-    attempted_retries: u8,
-    first_event_committed: bool,
-) -> bool {
-    !first_event_committed && attempted_retries < RUNTIME_ANTHROPIC_FIRST_EVENT_RETRY_LIMIT
-}
 
 pub(super) fn send_runtime_anthropic_upstream_request(
     request_id: u64,
@@ -341,44 +326,44 @@ fn send_responses_attempts(
                 class,
                 pending_request,
             } => {
-                let can_retry =
-                    runtime_anthropic_first_event_retry_allowed(first_event_retries, false);
-                if can_retry
-                    && attempt.model_index + 1 < model_chain.len()
-                    && runtime_gateway_application_provider_retry_precommit(
-                        ProviderRetryCause::NextModel,
-                        class,
-                        attempt.model_index,
-                        model_chain.len(),
-                    )
-                {
-                    log_model_fallback(
-                        request_id,
-                        shared,
-                        selected_auth.label.as_str(),
-                        model,
-                        &model_chain[attempt.model_index + 1],
-                        200,
-                        class,
-                    );
-                    first_event_retries += 1;
-                    cursor.next_model();
-                    continue;
+                match plan_provider_retry_transition(
+                    class,
+                    attempt.model_index,
+                    model_chain.len(),
+                    attempt.auth_index,
+                    auth_count,
+                    first_event_retries < RUNTIME_ANTHROPIC_FIRST_EVENT_RETRY_LIMIT,
+                ) {
+                    ProviderRetryTransition::NextModel => {
+                        log_model_fallback(
+                            request_id,
+                            shared,
+                            selected_auth.label.as_str(),
+                            model,
+                            &model_chain[attempt.model_index + 1],
+                            200,
+                            class,
+                        );
+                        first_event_retries += 1;
+                        cursor.next_model();
+                        continue;
+                    }
+                    ProviderRetryTransition::RotateCredential => {
+                        log_auth_rotation(
+                            request_id,
+                            shared,
+                            selected_auth.label.as_str(),
+                            200,
+                            class,
+                        );
+                        first_event_retries += 1;
+                        cursor.next_credential();
+                        continue;
+                    }
+                    ProviderRetryTransition::Terminal => {
+                        return Ok(live_response(response, pending_request));
+                    }
                 }
-                if can_retry
-                    && runtime_gateway_application_provider_retry_precommit(
-                        ProviderRetryCause::RotateCredential,
-                        class,
-                        attempt.auth_index,
-                        auth_count,
-                    )
-                {
-                    log_auth_rotation(request_id, shared, selected_auth.label.as_str(), 200, class);
-                    first_event_retries += 1;
-                    cursor.next_credential();
-                    continue;
-                }
-                return Ok(live_response(response, pending_request));
             }
             AnthropicAttemptOutcome::InternalFailure(error) => return Err(error),
         }
@@ -535,15 +520,13 @@ fn classify_buffered_outcome(
     class: RuntimeProviderErrorClass,
 ) -> AnthropicAttemptOutcome {
     match classify_retry_transition(attempt, cursor, class) {
-        AnthropicRetryTransition::ModelFallback => {
+        ProviderRetryTransition::NextModel => {
             AnthropicAttemptOutcome::ModelFallback { status, class }
         }
-        AnthropicRetryTransition::CredentialRotation => {
+        ProviderRetryTransition::RotateCredential => {
             AnthropicAttemptOutcome::CredentialRotation { status, class }
         }
-        AnthropicRetryTransition::TerminalBuffered => {
-            AnthropicAttemptOutcome::TerminalBuffered(parts)
-        }
+        ProviderRetryTransition::Terminal => AnthropicAttemptOutcome::TerminalBuffered(parts),
     }
 }
 
@@ -551,26 +534,15 @@ fn classify_retry_transition(
     attempt: AnthropicAttempt,
     cursor: &AnthropicAttemptCursor,
     class: RuntimeProviderErrorClass,
-) -> AnthropicRetryTransition {
-    if attempt.model_index + 1 < cursor.model_count
-        && runtime_gateway_application_provider_retry_precommit(
-            ProviderRetryCause::NextModel,
-            class,
-            attempt.model_index,
-            cursor.model_count,
-        )
-    {
-        return AnthropicRetryTransition::ModelFallback;
-    }
-    if runtime_gateway_application_provider_retry_precommit(
-        ProviderRetryCause::RotateCredential,
+) -> ProviderRetryTransition {
+    plan_provider_retry_transition(
         class,
+        attempt.model_index,
+        cursor.model_count,
         attempt.auth_index,
         cursor.auth_count,
-    ) {
-        return AnthropicRetryTransition::CredentialRotation;
-    }
-    AnthropicRetryTransition::TerminalBuffered
+        true,
+    )
 }
 
 fn send_passthrough_attempts(
@@ -620,22 +592,21 @@ fn send_passthrough_attempts(
         let parts = runtime_local_rewrite_buffered_response_from_response(response)?;
         let class =
             runtime_provider_error_class(RuntimeProviderBridgeKind::Anthropic, status, &parts.body);
-        if runtime_gateway_application_provider_retry_precommit(
-            ProviderRetryCause::RotateCredential,
-            class,
-            auth_index,
-            auth_count,
-        ) {
-            log_auth_rotation(
-                request_id,
-                shared,
-                selected_auth.label.as_str(),
-                status,
-                class,
-            );
-            continue;
+        match plan_provider_retry_transition(class, 0, 1, auth_index, auth_count, true) {
+            ProviderRetryTransition::RotateCredential => {
+                log_auth_rotation(
+                    request_id,
+                    shared,
+                    selected_auth.label.as_str(),
+                    status,
+                    class,
+                );
+                continue;
+            }
+            ProviderRetryTransition::Terminal | ProviderRetryTransition::NextModel => {
+                return Ok(buffered(parts));
+            }
         }
-        return Ok(buffered(parts));
     }
     anyhow::bail!("no Anthropic auth attempts were available")
 }
@@ -732,11 +703,9 @@ fn log_auth_rotation(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        AnthropicAttempt, AnthropicAttemptCursor, AnthropicRetryTransition,
-        classify_retry_transition,
-    };
+    use super::{AnthropicAttempt, AnthropicAttemptCursor, classify_retry_transition};
     use prodex_provider_core::ProviderErrorClass;
+    use prodex_provider_spi::ProviderRetryTransition;
 
     #[test]
     fn anthropic_attempt_cursor_exhausts_models_before_rotating_credentials() {
@@ -793,7 +762,7 @@ mod tests {
         let first = cursor.current().unwrap();
         assert_eq!(
             classify_retry_transition(first, &cursor, ProviderErrorClass::NotFound),
-            AnthropicRetryTransition::ModelFallback
+            ProviderRetryTransition::NextModel
         );
 
         let last_model = AnthropicAttempt {
@@ -802,11 +771,11 @@ mod tests {
         };
         assert_eq!(
             classify_retry_transition(last_model, &cursor, ProviderErrorClass::Auth),
-            AnthropicRetryTransition::CredentialRotation
+            ProviderRetryTransition::RotateCredential
         );
         assert_eq!(
             classify_retry_transition(last_model, &cursor, ProviderErrorClass::Other),
-            AnthropicRetryTransition::TerminalBuffered
+            ProviderRetryTransition::Terminal
         );
 
         let final_attempt = AnthropicAttempt {
@@ -815,7 +784,7 @@ mod tests {
         };
         assert_eq!(
             classify_retry_transition(final_attempt, &cursor, ProviderErrorClass::Transient),
-            AnthropicRetryTransition::TerminalBuffered
+            ProviderRetryTransition::Terminal
         );
     }
 }
