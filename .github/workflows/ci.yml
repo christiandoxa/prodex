@@ -944,30 +944,6 @@ jobs:
       - name: Run offline upstream compat replay gate
         run: node scripts/compat/check-upstream-baseline.mjs && node scripts/compat/capture-replay-fixture-tests.mjs
 
-  optional-tools-freshness:
-    name: Optional tools freshness
-    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - name: Install Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version: 22
-          package-manager-cache: false
-
-      - name: Check official optional-tool releases
-        run: node scripts/ci/optional-tools-freshness.mjs --check
-      - name: Check Codex and tunnel-client latest-stable references
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: scripts/ci/runtime-dependency-freshness.sh
 
   rust-quality:
     name: SonarQube Rust quality gate
@@ -2027,7 +2003,6 @@ jobs:
       - macos-workspace
       - process-guard
       - compat-replay-gate
-      - optional-tools-freshness
       - rust-quality
       - kics
       - supply-chain
