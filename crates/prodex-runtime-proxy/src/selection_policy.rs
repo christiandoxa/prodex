@@ -661,6 +661,67 @@ pub fn runtime_websocket_failure_disposition(
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeWebsocketInvalidPreviousResponseAction {
+    PassThrough,
+    FullContextRetry,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeWebsocketChainReuseReason {
+    UpstreamReconnect,
+    BoundProfileAffinity,
+    UnboundPreviousResponse,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RuntimeWebsocketInvalidPreviousResponsePlan {
+    pub recovery_signal: bool,
+    pub crossed_transport_generation: bool,
+    pub chain_reuse_reason: RuntimeWebsocketChainReuseReason,
+    pub action: RuntimeWebsocketInvalidPreviousResponseAction,
+}
+
+pub fn runtime_websocket_invalid_previous_response_plan(
+    previous_response_present: bool,
+    session_present: bool,
+    owner_matches: bool,
+    owner_generation_present: bool,
+    owner_generation_matches: bool,
+) -> RuntimeWebsocketInvalidPreviousResponsePlan {
+    let plan = prodex_mojo_core::runtime::websocket_invalid_previous_response_plan(
+        previous_response_present,
+        session_present,
+        owner_matches,
+        owner_generation_present,
+        owner_generation_matches,
+    )
+    .expect("Mojo websocket invalid-previous-response policy returned invalid output");
+    RuntimeWebsocketInvalidPreviousResponsePlan {
+        recovery_signal: plan.recovery_signal,
+        crossed_transport_generation: plan.crossed_transport_generation,
+        chain_reuse_reason: match plan.chain_reuse_reason {
+            prodex_mojo_core::runtime::WebsocketChainReuseReason::UpstreamReconnect => {
+                RuntimeWebsocketChainReuseReason::UpstreamReconnect
+            }
+            prodex_mojo_core::runtime::WebsocketChainReuseReason::BoundProfileAffinity => {
+                RuntimeWebsocketChainReuseReason::BoundProfileAffinity
+            }
+            prodex_mojo_core::runtime::WebsocketChainReuseReason::UnboundPreviousResponse => {
+                RuntimeWebsocketChainReuseReason::UnboundPreviousResponse
+            }
+        },
+        action: match plan.action {
+            prodex_mojo_core::runtime::WebsocketInvalidPreviousResponseAction::PassThrough => {
+                RuntimeWebsocketInvalidPreviousResponseAction::PassThrough
+            }
+            prodex_mojo_core::runtime::WebsocketInvalidPreviousResponseAction::FullContextRetry => {
+                RuntimeWebsocketInvalidPreviousResponseAction::FullContextRetry
+            }
+        },
+    }
+}
+
 pub fn runtime_websocket_full_context_signal_eligible(
     previous_response_present: bool,
     session_present: bool,

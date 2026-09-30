@@ -109,6 +109,32 @@ fn affinity_outcome_precedence_is_mojo_authoritative() {
 }
 
 #[test]
+fn websocket_invalid_previous_response_plan_preserves_recovery_and_reuse_reason() {
+    let reconnect = runtime_websocket_invalid_previous_response_plan(true, true, true, true, false);
+    assert!(reconnect.recovery_signal);
+    assert!(reconnect.crossed_transport_generation);
+    assert_eq!(
+        reconnect.chain_reuse_reason,
+        RuntimeWebsocketChainReuseReason::UpstreamReconnect
+    );
+    assert_eq!(
+        reconnect.action,
+        RuntimeWebsocketInvalidPreviousResponseAction::FullContextRetry
+    );
+
+    let unbound = runtime_websocket_invalid_previous_response_plan(true, true, false, false, false);
+    assert!(!unbound.recovery_signal);
+    assert_eq!(
+        unbound.chain_reuse_reason,
+        RuntimeWebsocketChainReuseReason::UnboundPreviousResponse
+    );
+    assert_eq!(
+        unbound.action,
+        RuntimeWebsocketInvalidPreviousResponseAction::PassThrough
+    );
+}
+
+#[test]
 fn hard_affinity_detects_no_rotate_sources() {
     let affinity = RuntimeCandidateAffinity {
         route_kind: RuntimeRouteKind::Responses,
