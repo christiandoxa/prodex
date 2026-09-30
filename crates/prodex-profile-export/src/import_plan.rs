@@ -245,20 +245,8 @@ pub fn profile_import_identity_parts_target_key(
     account_id: Option<&str>,
     email: Option<&str>,
 ) -> Option<String> {
-    let account_id = account_id
-        .map(str::trim)
-        .filter(|account_id| !account_id.is_empty());
-    let email = email
-        .map(str::trim)
-        .filter(|email| !email.is_empty())
-        .map(str::to_ascii_lowercase);
-
-    match (account_id, email) {
-        (Some(account_id), Some(email)) => Some(format!("account:{account_id}|email:{email}")),
-        (Some(account_id), None) => Some(format!("account:{account_id}")),
-        (None, Some(email)) => Some(format!("email:{email}")),
-        (None, None) => None,
-    }
+    prodex_mojo_core::profile_identity::canonical_profile_identity_key(account_id, email)
+        .expect("Mojo profile-import identity-key policy returned invalid output")
 }
 
 pub fn validate_profile_import_source_names<'a>(
@@ -295,20 +283,37 @@ pub fn queue_profile_import_auth_update(
     email: Option<String>,
     auth_json: String,
 ) {
-    if let Some(existing) = auth_updates
-        .iter_mut()
-        .find(|update| update.target_profile_name == target_profile_name)
-    {
-        existing.auth_json = auth_json;
-        if email.is_some() {
+    use prodex_mojo_core::profile_export::ProfileImportAuthUpdateAction;
+
+    let existing_index = auth_updates
+        .iter()
+        .position(|update| update.target_profile_name == target_profile_name);
+    let action = prodex_mojo_core::profile_export::profile_import_auth_update_action(
+        existing_index.is_some(),
+        email.is_some(),
+    )
+    .expect("Mojo profile-import auth-update policy returned invalid output");
+
+    match action {
+        ProfileImportAuthUpdateAction::Append => {
+            auth_updates.push(ProfileImportAuthUpdatePlan {
+                target_profile_name: target_profile_name.to_string(),
+                email,
+                auth_json,
+            });
+        }
+        ProfileImportAuthUpdateAction::ReplaceAuth => {
+            auth_updates
+                .get_mut(existing_index.expect("Mojo replace action requires existing update"))
+                .expect("existing auth-update index remains valid")
+                .auth_json = auth_json;
+        }
+        ProfileImportAuthUpdateAction::ReplaceAuthAndEmail => {
+            let existing = auth_updates
+                .get_mut(existing_index.expect("Mojo replace action requires existing update"))
+                .expect("existing auth-update index remains valid");
+            existing.auth_json = auth_json;
             existing.email = email;
         }
-        return;
     }
-
-    auth_updates.push(ProfileImportAuthUpdatePlan {
-        target_profile_name: target_profile_name.to_string(),
-        email,
-        auth_json,
-    });
 }
