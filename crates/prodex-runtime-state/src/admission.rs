@@ -12,6 +12,15 @@ pub enum RuntimeRouteKind {
     Standard,
 }
 
+fn runtime_route_kind_tag(route_kind: RuntimeRouteKind) -> u8 {
+    match route_kind {
+        RuntimeRouteKind::Responses => 0,
+        RuntimeRouteKind::Compact => 1,
+        RuntimeRouteKind::Websocket => 2,
+        RuntimeRouteKind::Standard => 3,
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeWaitDurationMetrics {
     pub wait_total_ns: u64,
@@ -222,26 +231,36 @@ impl RuntimeProxyLaneAdmission {
         let lane_limit = self.limit(lane);
         loop {
             let active = active_request_count.load(Ordering::SeqCst);
-            if active >= active_request_limit {
-                return Err(RuntimeProxyAdmissionLimit::Global {
-                    active,
-                    limit: active_request_limit,
-                });
-            }
             let lane_active = lane_active_count.load(Ordering::SeqCst);
-            if lane_active >= lane_limit && !bypass_lane_limit {
-                return Err(RuntimeProxyAdmissionLimit::Lane {
-                    active: lane_active,
-                    limit: lane_limit,
-                });
-            }
-            if active_request_count
-                .compare_exchange(
+            let plan = prodex_mojo_core::runtime_state::admission_plan(
+                active,
+                active_request_limit,
+                lane_active,
+                lane_limit,
+                bypass_lane_limit,
+            )
+            .expect("Mojo admission planner returned invalid output");
+            let (next_active, next_lane_active, bypassed_lane_limit) = match plan {
+                prodex_mojo_core::runtime_state::RuntimeAdmissionPlan::Allow {
+                    next_active,
+                    next_lane_active,
+                    bypassed_lane_limit,
+                } => (next_active, next_lane_active, bypassed_lane_limit),
+                prodex_mojo_core::runtime_state::RuntimeAdmissionPlan::GlobalLimit {
                     active,
-                    active.saturating_add(1),
-                    Ordering::SeqCst,
-                    Ordering::SeqCst,
-                )
+                    limit,
+                } => {
+                    return Err(RuntimeProxyAdmissionLimit::Global { active, limit });
+                }
+                prodex_mojo_core::runtime_state::RuntimeAdmissionPlan::LaneLimit {
+                    active,
+                    limit,
+                } => {
+                    return Err(RuntimeProxyAdmissionLimit::Lane { active, limit });
+                }
+            };
+            if active_request_count
+                .compare_exchange(active, next_active, Ordering::SeqCst, Ordering::SeqCst)
                 .is_err()
             {
                 continue;
@@ -249,7 +268,7 @@ impl RuntimeProxyLaneAdmission {
             if lane_active_count
                 .compare_exchange(
                     lane_active,
-                    lane_active.saturating_add(1),
+                    next_lane_active,
                     Ordering::SeqCst,
                     Ordering::SeqCst,
                 )
@@ -271,7 +290,7 @@ impl RuntimeProxyLaneAdmission {
                     lane_release_underflows_total: self.release_underflows_total_counter(lane),
                     wait: Arc::clone(&self.wait),
                 },
-                bypassed_lane_limit: lane_active >= lane_limit && bypass_lane_limit,
+                bypassed_lane_limit,
             });
         }
     }
@@ -328,17 +347,18 @@ impl RuntimeProxyLaneAdmission {
             .profile_inflight
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let weight = weight.max(1);
         let current = inflight.get(profile_name).copied().unwrap_or(0);
-        let next = current.saturating_add(weight);
-        if hard_limit.is_some_and(|limit| next > limit) {
+        let plan = prodex_mojo_core::runtime_state::profile_inflight_acquire_plan(
+            current, weight, hard_limit,
+        )
+        .expect("Mojo profile in-flight acquire planner returned invalid output");
+        if !plan.accepted {
             return None;
         }
-        let count = inflight.entry(profile_name.to_string()).or_default();
-        *count = next;
+        inflight.insert(profile_name.to_string(), plan.next);
         self.profile_inflight_admissions_total
             .fetch_add(1, Ordering::Relaxed);
-        Some(*count)
+        Some(plan.next)
     }
 
     pub fn release_profile_inflight(
@@ -350,32 +370,25 @@ impl RuntimeProxyLaneAdmission {
             .profile_inflight
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let weight = weight.max(1);
-        let (remaining, count_before, underflow) = match inflight.get_mut(profile_name) {
-            Some(count) if *count >= weight => {
-                let count_before = *count;
-                *count -= weight;
-                (*count, count_before, false)
-            }
-            Some(count) => {
-                let count_before = *count;
-                *count = 0;
-                (0, count_before, true)
-            }
-            None => (0, 0, true),
-        };
-        if remaining == 0 {
+        let plan = prodex_mojo_core::runtime_state::profile_inflight_release_plan(
+            inflight.get(profile_name).copied(),
+            weight,
+        )
+        .expect("Mojo profile in-flight release planner returned invalid output");
+        if plan.remaining == 0 {
             inflight.remove(profile_name);
+        } else {
+            inflight.insert(profile_name.to_string(), plan.remaining);
         }
         drop(inflight);
         self.profile_inflight_releases_total
             .fetch_add(1, Ordering::Relaxed);
-        if underflow {
+        if plan.underflow {
             self.profile_inflight_release_underflows_total
                 .fetch_add(1, Ordering::Relaxed);
         }
         self.record_inflight_release();
-        (remaining, count_before, underflow)
+        (plan.remaining, plan.count_before, plan.underflow)
     }
 
     pub fn set_profile_inflight(&self, profile_name: impl Into<String>, count: usize) {
@@ -443,12 +456,16 @@ impl RuntimeProxyLaneAdmission {
     }
 
     pub fn limit(&self, lane: RuntimeRouteKind) -> usize {
-        match lane {
-            RuntimeRouteKind::Responses => self.limits.responses,
-            RuntimeRouteKind::Compact => self.limits.compact,
-            RuntimeRouteKind::Websocket => self.limits.websocket,
-            RuntimeRouteKind::Standard => self.limits.standard,
-        }
+        prodex_mojo_core::runtime_state::lane_limit(
+            runtime_route_kind_tag(lane),
+            [
+                self.limits.responses,
+                self.limits.compact,
+                self.limits.websocket,
+                self.limits.standard,
+            ],
+        )
+        .expect("Mojo lane-limit planner returned invalid output")
     }
 
     pub fn admissions_total_counter(&self, lane: RuntimeRouteKind) -> Arc<AtomicU64> {
