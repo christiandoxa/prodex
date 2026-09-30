@@ -24,7 +24,7 @@ pub(super) use self::provider_bridge_routing::{
     RuntimeProviderRouteKind, runtime_provider_canonical_model,
     runtime_provider_model_fallback_chain, runtime_provider_models_buffered_response,
     runtime_provider_request_body_with_model, runtime_provider_request_ledger_message,
-    runtime_provider_route_kind,
+    runtime_provider_route_endpoint, runtime_provider_route_kind,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

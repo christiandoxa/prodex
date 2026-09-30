@@ -15,8 +15,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_native_passthro
     kind: RuntimeProviderBridgeKind,
     path_and_query: &str,
 ) -> bool {
-    let path = path_without_query(path_and_query);
-    let Some(route) = runtime_provider_route_kind(path) else {
+    let Some(route) = runtime_provider_route_kind(path_and_query) else {
         return true;
     };
     if matches!(kind, RuntimeProviderBridgeKind::OpenAiResponses)
@@ -24,9 +23,13 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_native_passthro
     {
         return true;
     }
-    let Some(endpoint) = runtime_provider_route_endpoint(route) else {
+    if matches!(
+        route,
+        RuntimeProviderRouteKind::ModelsList | RuntimeProviderRouteKind::ModelsSingle(_)
+    ) {
         return false;
-    };
+    }
+    let endpoint = runtime_provider_route_endpoint(route);
     if matches!(endpoint, ProviderEndpoint::ResponsesCompact) {
         return false;
     }
@@ -47,8 +50,7 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_models_buffered
     {
         return None;
     }
-    let path = path_without_query(path_and_query);
-    let route = runtime_provider_route_kind(path)?;
+    let route = runtime_provider_route_kind(path_and_query)?;
     if !matches!(
         route,
         RuntimeProviderRouteKind::ModelsList | RuntimeProviderRouteKind::ModelsSingle(_)
@@ -172,39 +174,43 @@ pub(in crate::runtime_launch::proxy_startup) enum RuntimeProviderRouteKind<'a> {
     ModelsSingle(&'a str),
 }
 
-fn runtime_provider_route_endpoint(
+pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_route_endpoint(
     route: RuntimeProviderRouteKind<'_>,
-) -> Option<ProviderEndpoint> {
+) -> ProviderEndpoint {
     match route {
-        RuntimeProviderRouteKind::Responses => Some(ProviderEndpoint::Responses),
-        RuntimeProviderRouteKind::ResponsesCompact => Some(ProviderEndpoint::ResponsesCompact),
-        RuntimeProviderRouteKind::ChatCompletions => Some(ProviderEndpoint::ChatCompletions),
-        RuntimeProviderRouteKind::Messages => Some(ProviderEndpoint::Messages),
-        RuntimeProviderRouteKind::Embeddings => Some(ProviderEndpoint::Embeddings),
-        RuntimeProviderRouteKind::ModelsList | RuntimeProviderRouteKind::ModelsSingle(_) => None,
+        RuntimeProviderRouteKind::Responses => ProviderEndpoint::Responses,
+        RuntimeProviderRouteKind::ResponsesCompact => ProviderEndpoint::ResponsesCompact,
+        RuntimeProviderRouteKind::ChatCompletions => ProviderEndpoint::ChatCompletions,
+        RuntimeProviderRouteKind::Messages => ProviderEndpoint::Messages,
+        RuntimeProviderRouteKind::Embeddings => ProviderEndpoint::Embeddings,
+        RuntimeProviderRouteKind::ModelsList | RuntimeProviderRouteKind::ModelsSingle(_) => {
+            ProviderEndpoint::Models
+        }
     }
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_route_kind(
     path_and_query: &str,
 ) -> Option<RuntimeProviderRouteKind<'_>> {
-    let path = path_without_query(path_and_query);
-    match path {
-        "/v1/responses" | "/responses" => Some(RuntimeProviderRouteKind::Responses),
-        "/v1/responses/compact" | "/responses/compact" => {
-            Some(RuntimeProviderRouteKind::ResponsesCompact)
+    let plan = prodex_mojo_core::rich::runtime_provider_route_plan(path_and_query)
+        .expect("Mojo provider-route planning returned invalid output");
+    match plan.route_kind {
+        -1 => None,
+        0 => Some(RuntimeProviderRouteKind::Responses),
+        1 => Some(RuntimeProviderRouteKind::ResponsesCompact),
+        2 => Some(RuntimeProviderRouteKind::ChatCompletions),
+        3 => Some(RuntimeProviderRouteKind::Messages),
+        4 => Some(RuntimeProviderRouteKind::Embeddings),
+        5 => Some(RuntimeProviderRouteKind::ModelsList),
+        6 => {
+            let (start, end) = plan
+                .model_id_range
+                .expect("Mojo model route requires model-id range");
+            Some(RuntimeProviderRouteKind::ModelsSingle(
+                &path_and_query[start..end],
+            ))
         }
-        "/v1/chat/completions" | "/chat/completions" => {
-            Some(RuntimeProviderRouteKind::ChatCompletions)
-        }
-        "/v1/messages" | "/messages" => Some(RuntimeProviderRouteKind::Messages),
-        "/v1/embeddings" | "/embeddings" => Some(RuntimeProviderRouteKind::Embeddings),
-        "/v1/models" | "/models" => Some(RuntimeProviderRouteKind::ModelsList),
-        _ => ["/v1/models/", "/models/"]
-            .into_iter()
-            .find_map(|prefix| path.strip_prefix(prefix))
-            .filter(|id| !id.is_empty())
-            .map(RuntimeProviderRouteKind::ModelsSingle),
+        _ => unreachable!("validated Mojo provider route tag"),
     }
 }
 

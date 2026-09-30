@@ -89,6 +89,66 @@ fn runtime_proxy_mount_suffix_start(
     Ok(Some(index))
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeProviderRoutePlan {
+    /// -1 unsupported; 0 responses; 1 compact; 2 chat; 3 messages;
+    /// 4 embeddings; 5 models list; 6 models single.
+    pub route_kind: i64,
+    pub model_id_range: Option<(usize, usize)>,
+    pub path_end: usize,
+}
+
+pub fn runtime_provider_route_plan(
+    path_and_query: &str,
+) -> Result<RuntimeProviderRoutePlan, MojoError> {
+    ensure_rich_abi()?;
+    let path_length = i64::try_from(path_and_query.len()).map_err(|_| MojoError::InvalidInput)?;
+    let mut output = [-1_i64; 4];
+    let status = unsafe {
+        prodex_runtime_provider_route_plan_v1(
+            1,
+            path_and_query.as_ptr() as usize as u64,
+            path_length,
+            output.as_mut_ptr(),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    if !(-1..=6).contains(&output[0]) {
+        return Err(MojoError::InvalidOutput);
+    }
+    let path_end = usize::try_from(output[3]).map_err(|_| MojoError::InvalidOutput)?;
+    if path_end > path_and_query.len() || !path_and_query.is_char_boundary(path_end) {
+        return Err(MojoError::InvalidOutput);
+    }
+    let model_id_range = if output[0] == 6 {
+        let start = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
+        let end = usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?;
+        if start >= end
+            || end != path_end
+            || !path_and_query.is_char_boundary(start)
+            || !path_and_query.is_char_boundary(end)
+        {
+            return Err(MojoError::InvalidOutput);
+        }
+        Some((start, end))
+    } else {
+        if output[1] != -1 || output[2] != -1 {
+            return Err(MojoError::InvalidOutput);
+        }
+        None
+    };
+    Ok(RuntimeProviderRoutePlan {
+        route_kind: output[0],
+        model_id_range,
+        path_end,
+    })
+}
+
 pub fn runtime_proxy_path_plan(
     path_and_query: &str,
     websocket: bool,

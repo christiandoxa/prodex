@@ -227,13 +227,13 @@ def prodex_runtime_proxy_request_metadata_v1(
         StringSlice("x-codex-window-id"),
     )
 
-    output[0] = previous
-    output[1] = session
-    output[2] = prompt_cache
-    output[3] = turn_state
-    output[4] = turn_id
-    output[5] = thread_id
-    output[6] = window_id
+    output[unsafe_offset=0] = previous
+    output[unsafe_offset=1] = session
+    output[unsafe_offset=2] = prompt_cache
+    output[unsafe_offset=3] = turn_state
+    output[unsafe_offset=4] = turn_id
+    output[unsafe_offset=5] = thread_id
+    output[unsafe_offset=6] = window_id
 
     var shape: Int64 = -1
     var requires_affinity: Int64 = 0
@@ -246,9 +246,9 @@ def prodex_runtime_proxy_request_metadata_v1(
         Pointer(to=requires_affinity),
         Pointer(to=full_history),
     )
-    output[7] = requires_affinity
-    output[8] = shape
-    output[9] = full_history
+    output[unsafe_offset=7] = requires_affinity
+    output[unsafe_offset=8] = shape
+    output[unsafe_offset=9] = full_history
     return RUNTIME_PROXY_REQUEST_OK
 
 
@@ -468,4 +468,101 @@ def prodex_runtime_proxy_path_plan_v1(
     output[unsafe_offset=8] = Int64(realtime_websocket)
     output[unsafe_offset=9] = route
     output[unsafe_offset=10] = Int64(websocket == 1 or responses or chat)
+    return RUNTIME_PROXY_REQUEST_OK
+
+
+comptime RUNTIME_PROVIDER_ROUTE_RESPONSES: Int64 = 0
+comptime RUNTIME_PROVIDER_ROUTE_RESPONSES_COMPACT: Int64 = 1
+comptime RUNTIME_PROVIDER_ROUTE_CHAT_COMPLETIONS: Int64 = 2
+comptime RUNTIME_PROVIDER_ROUTE_MESSAGES: Int64 = 3
+comptime RUNTIME_PROVIDER_ROUTE_EMBEDDINGS: Int64 = 4
+comptime RUNTIME_PROVIDER_ROUTE_MODELS_LIST: Int64 = 5
+comptime RUNTIME_PROVIDER_ROUTE_MODELS_SINGLE: Int64 = 6
+
+
+@export("prodex_runtime_provider_route_plan_v1")
+def prodex_runtime_provider_route_plan_v1(
+    abi_version: Int64,
+    path_address: UInt,
+    path_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != RUNTIME_PROXY_REQUEST_ABI_VERSION
+        or path_length < 0
+        or (path_length > 0 and path_address == 0)
+        or output_address == 0
+    ):
+        return RUNTIME_PROXY_REQUEST_INVALID
+
+    var view = ProdexRichStringView(path_address, UInt(path_length))
+    if not rich_view_valid(view, path_length):
+        return RUNTIME_PROXY_REQUEST_INVALID
+    var source = rich_view_ptr(view)
+    var path_end = path_length
+    for index in range(path_length):
+        if source[unsafe_offset=index] == 63:
+            path_end = index
+            break
+
+    var route: Int64 = -1
+    var model_start: Int64 = -1
+    var model_end: Int64 = -1
+    if (
+        runtime_proxy_range_equal(source, 0, path_end, StringSlice("/v1/responses"))
+        or runtime_proxy_range_equal(source, 0, path_end, StringSlice("/responses"))
+    ):
+        route = RUNTIME_PROVIDER_ROUTE_RESPONSES
+    elif (
+        runtime_proxy_range_equal(source, 0, path_end, StringSlice("/v1/responses/compact"))
+        or runtime_proxy_range_equal(source, 0, path_end, StringSlice("/responses/compact"))
+    ):
+        route = RUNTIME_PROVIDER_ROUTE_RESPONSES_COMPACT
+    elif (
+        runtime_proxy_range_equal(source, 0, path_end, StringSlice("/v1/chat/completions"))
+        or runtime_proxy_range_equal(source, 0, path_end, StringSlice("/chat/completions"))
+    ):
+        route = RUNTIME_PROVIDER_ROUTE_CHAT_COMPLETIONS
+    elif (
+        runtime_proxy_range_equal(source, 0, path_end, StringSlice("/v1/messages"))
+        or runtime_proxy_range_equal(source, 0, path_end, StringSlice("/messages"))
+    ):
+        route = RUNTIME_PROVIDER_ROUTE_MESSAGES
+    elif (
+        runtime_proxy_range_equal(source, 0, path_end, StringSlice("/v1/embeddings"))
+        or runtime_proxy_range_equal(source, 0, path_end, StringSlice("/embeddings"))
+    ):
+        route = RUNTIME_PROVIDER_ROUTE_EMBEDDINGS
+    elif (
+        runtime_proxy_range_equal(source, 0, path_end, StringSlice("/v1/models"))
+        or runtime_proxy_range_equal(source, 0, path_end, StringSlice("/models"))
+    ):
+        route = RUNTIME_PROVIDER_ROUTE_MODELS_LIST
+    else:
+        comptime V1_MODELS = StringSlice("/v1/models/")
+        comptime MODELS = StringSlice("/models/")
+        var v1_length = Int64(V1_MODELS.byte_length())
+        var models_length = Int64(MODELS.byte_length())
+        if (
+            path_end > v1_length
+            and runtime_proxy_path_prefix(source, path_end, V1_MODELS)
+        ):
+            route = RUNTIME_PROVIDER_ROUTE_MODELS_SINGLE
+            model_start = v1_length
+            model_end = path_end
+        elif (
+            path_end > models_length
+            and runtime_proxy_path_prefix(source, path_end, MODELS)
+        ):
+            route = RUNTIME_PROVIDER_ROUTE_MODELS_SINGLE
+            model_start = models_length
+            model_end = path_end
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = route
+    output[unsafe_offset=1] = model_start
+    output[unsafe_offset=2] = model_end
+    output[unsafe_offset=3] = path_end
     return RUNTIME_PROXY_REQUEST_OK
