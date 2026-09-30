@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.159.1 release",
+      "baseline_source": "openai/codex rust-v0.159.2 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -818,6 +818,26 @@
             "keys.push(original)",
             "get_active_project_for_lookup",
             "normalize_lookup_key"
+          ]
+        },
+        {
+          "path": "codex-rs/utils/process/src/lib.rs",
+          "reason": "Codex 0.159.2 centralizes console-free Windows background process construction here; CREATE_NO_WINDOW must remain applied while non-Windows launches keep ordinary Command semantics.",
+          "required_contains": [
+            "pub fn background_command",
+            "CREATE_NO_WINDOW",
+            "command.creation_flags",
+            "Command::new(program)"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/spawn.rs",
+          "reason": "Codex 0.159.2 routes redirected shell-tool children through the console-free background helper while inherited/interactive stdio keeps normal process creation.",
+          "required_contains": [
+            "StdioPolicy::RedirectForShellTool",
+            "codex_utils_process::background_command",
+            "StdioPolicy::Inherit",
+            "Command::new(&program)"
           ]
         }
       ],
@@ -1791,9 +1811,33 @@
             "ThreadItemsListAnchor",
             "item_id: String"
           ]
+        },
+        {
+          "id": "process.background-command-no-console",
+          "kind": "process_launch",
+          "file": "codex-rs/utils/process/src/lib.rs",
+          "reason": "Windows background helpers must suppress console allocation without changing non-Windows process construction.",
+          "file_contains_all": [
+            "pub fn background_command",
+            "CREATE_NO_WINDOW",
+            "command.creation_flags",
+            "Command::new(program)"
+          ]
+        },
+        {
+          "id": "core.redirect-shell-tool-background-command",
+          "kind": "process_launch",
+          "file": "codex-rs/core/src/spawn.rs",
+          "reason": "Redirected shell-tool processes use the 0.159.2 background helper while inherited/interactive stdio remains an ordinary launch.",
+          "file_contains_all": [
+            "StdioPolicy::RedirectForShellTool",
+            "codex_utils_process::background_command",
+            "StdioPolicy::Inherit",
+            "Command::new(&program)"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.159.1",
+      "tested_codex_release": "rust-v0.159.2",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -2065,6 +2109,21 @@
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.159.1, recognize GPT-6.1 Sol as an 872,000-token large/max-context OpenAI model for runtime launch and Smart Context budgeting, track the new Bedrock default without duplicating the upstream catalog, and preserve existing transport/auth/quota/session semantics.",
           "compatibility_evidence": "Exact 0.159.0 and 0.159.1 tagged source archives, release/tag metadata, official Linux musl binary checksum/version smoke, 858 current critical-file/semantic markers replayed with zero misses, isolated app-server initialize, focused GPT-6.1 context-policy tests, and baseline guards are recorded in migration/codex-rust-v0.159.1-audit.md."
+        },
+        {
+          "from": "rust-v0.159.1",
+          "to": "rust-v0.159.2",
+          "upstream_commit": "ff6aec96948b70d94983af2641a6b67c94faeff5",
+          "upstream_tag_object": "8b9fa496bbf2c47aebd62e85a080b9a522a455b5",
+          "upstream_release_date": "2026-09-29T23:57:16Z",
+          "tree_comparison": "exact tagged source archives; 47 changed files, 387 additions, 76 deletions",
+          "runtime_changes": [
+            "Windows background and sandboxed command launches centralize CREATE_NO_WINDOW handling in codex_utils_process::background_command to suppress console-window flashes.",
+            "Redirected shell-tool children use the background helper while inherited/interactive stdio keeps normal Command construction; Windows Job Object launches retain suspended containment while adding CREATE_NO_WINDOW.",
+            "Responses transport, model catalogs (including GPT-6.1 Sol), provider authentication, quota/error classification, project trust, session persistence, and app-server protocol contracts remain compatible with the 0.159.1 baseline."
+          ],
+          "prodex_action": "Advance the tested Codex baseline to 0.159.2, track the upstream Windows console-suppression process helper and redirected-shell call site, preserve the existing GPT-6.1 Sol context policy, and keep all transport/auth/quota/session/protocol boundaries unchanged.",
+          "compatibility_evidence": "Exact 0.159.1 and 0.159.2 tagged source archives, release/tag metadata, official Linux musl CLI and app-server asset checksum/version verification, zero-miss baseline replay plus new process markers, isolated app-server initialize, and baseline guards are recorded in migration/codex-rust-v0.159.2-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -2087,17 +2146,16 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.159.1",
-      "name": "0.159.1",
-      "published_at": "2026-09-29T20:32:34Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.159.1",
+      "tag_name": "rust-v0.159.2",
+      "name": "0.159.2",
+      "published_at": "2026-09-29T23:57:16Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.159.2",
       "body_head": [
-        "## New Features",
-        "- Added GPT-6.1 Sol as the default model in the bundled catalog and Amazon Bedrock Mantle and Runtime catalogs. (#49323, #49342)",
+        "## Bug Fixes",
+        "- Suppressed console windows flashing on Windows when Codex launches background processes and sandboxed commands. (#49385)",
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.159.0...rust-v0.159.1",
-        "- #49323 [0.159] Prepare 0.159.1 release backports @andrewgu-oai",
-        "- #49342 [0.159] Backport GPT-6.1 Sol Bedrock catalogs @celia-oai"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.159.1...rust-v0.159.2",
+        "- #49385 [0.159] Backport Windows console suppression for 0.159.2 @andrewgu-oai"
       ]
     }
   },

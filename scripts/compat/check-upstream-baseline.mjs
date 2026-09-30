@@ -56,6 +56,8 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/app-server/src/request_processors/mcp_event_stream.rs",
   "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
   "codex-rs/app-server/src/request_serialization.rs",
+  "codex-rs/utils/process/src/lib.rs",
+  "codex-rs/core/src/spawn.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -647,6 +649,18 @@ const REQUIRED_FILE_CONTAINS = {
     "ThreadPath",
     "RequestSerializationAccess",
     "QueuedInitializedRequest",
+  ],
+  "codex-rs/utils/process/src/lib.rs": [
+    "pub fn background_command",
+    "CREATE_NO_WINDOW",
+    "command.creation_flags",
+    "Command::new(program)",
+  ],
+  "codex-rs/core/src/spawn.rs": [
+    "StdioPolicy::RedirectForShellTool",
+    "codex_utils_process::background_command",
+    "StdioPolicy::Inherit",
+    "Command::new(&program)",
   ],
 };
 
@@ -1459,6 +1473,28 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "Thread",
       "ThreadPath",
       "RequestSerializationAccess",
+    ],
+  },
+  {
+    id: "process.background-command-no-console",
+    kind: "process_launch",
+    file: "codex-rs/utils/process/src/lib.rs",
+    file_contains_all: [
+      "pub fn background_command",
+      "CREATE_NO_WINDOW",
+      "command.creation_flags",
+      "Command::new(program)",
+    ],
+  },
+  {
+    id: "core.redirect-shell-tool-background-command",
+    kind: "process_launch",
+    file: "codex-rs/core/src/spawn.rs",
+    file_contains_all: [
+      "StdioPolicy::RedirectForShellTool",
+      "codex_utils_process::background_command",
+      "StdioPolicy::Inherit",
+      "Command::new(&program)",
     ],
   },
 ];
