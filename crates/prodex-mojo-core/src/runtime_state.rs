@@ -6,6 +6,10 @@ const MODE_QUEUE_PRESSURE: i64 = 1;
 const MODE_QUEUE_ENQUEUE: i64 = 2;
 const MODE_ENQUEUE_BACKLOG: i64 = 3;
 const MODE_QUEUE_THRESHOLD: i64 = 4;
+const MODE_ADMISSION_PLAN: i64 = 5;
+const MODE_PROFILE_INFLIGHT_ACQUIRE: i64 = 6;
+const MODE_PROFILE_INFLIGHT_RELEASE: i64 = 7;
+const MODE_LANE_LIMIT: i64 = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RuntimeStateMutationPolicy {
@@ -22,6 +26,38 @@ pub struct RuntimeStateMutationPolicy {
 pub struct RuntimeBackgroundQueuePlan {
     pub backlog: usize,
     pub pressure_active: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeAdmissionPlan {
+    Allow {
+        next_active: usize,
+        next_lane_active: usize,
+        bypassed_lane_limit: bool,
+    },
+    GlobalLimit {
+        active: usize,
+        limit: usize,
+    },
+    LaneLimit {
+        active: usize,
+        limit: usize,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeProfileInflightAcquirePlan {
+    pub accepted: bool,
+    pub next: usize,
+    pub weight: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeProfileInflightReleasePlan {
+    pub remaining: usize,
+    pub count_before: usize,
+    pub underflow: bool,
+    pub weight: usize,
 }
 
 unsafe extern "C" {
@@ -155,6 +191,92 @@ pub fn queue_enqueue_plan(
     })
 }
 
+pub fn admission_plan(
+    active: usize,
+    active_limit: usize,
+    lane_active: usize,
+    lane_limit: usize,
+    bypass_lane_limit: bool,
+) -> Result<RuntimeAdmissionPlan, MojoError> {
+    let output = call(
+        MODE_ADMISSION_PLAN,
+        i64::from(bypass_lane_limit),
+        0,
+        [active, lane_active, 0],
+        [active_limit, lane_limit, 0],
+        0,
+    )?;
+    match output[0] {
+        0 => Ok(RuntimeAdmissionPlan::Allow {
+            next_active: usize_output(output[1])?,
+            next_lane_active: usize_output(output[2])?,
+            bypassed_lane_limit: bool_output(output[3])?,
+        }),
+        1 => Ok(RuntimeAdmissionPlan::GlobalLimit {
+            active: usize_output(output[1])?,
+            limit: usize_output(output[2])?,
+        }),
+        2 => Ok(RuntimeAdmissionPlan::LaneLimit {
+            active: usize_output(output[1])?,
+            limit: usize_output(output[2])?,
+        }),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn profile_inflight_acquire_plan(
+    current: usize,
+    weight: usize,
+    hard_limit: Option<usize>,
+) -> Result<RuntimeProfileInflightAcquirePlan, MojoError> {
+    let output = call(
+        MODE_PROFILE_INFLIGHT_ACQUIRE,
+        i64::from(hard_limit.is_some()),
+        0,
+        [current, weight, 0],
+        [hard_limit.unwrap_or_default(), 0, 0],
+        0,
+    )?;
+    Ok(RuntimeProfileInflightAcquirePlan {
+        accepted: bool_output(output[0])?,
+        next: usize_output(output[1])?,
+        weight: usize_output(output[2])?,
+    })
+}
+
+pub fn profile_inflight_release_plan(
+    current: Option<usize>,
+    weight: usize,
+) -> Result<RuntimeProfileInflightReleasePlan, MojoError> {
+    let output = call(
+        MODE_PROFILE_INFLIGHT_RELEASE,
+        i64::from(current.is_some()),
+        0,
+        [current.unwrap_or_default(), weight, 0],
+        [0; 3],
+        0,
+    )?;
+    Ok(RuntimeProfileInflightReleasePlan {
+        remaining: usize_output(output[0])?,
+        count_before: usize_output(output[1])?,
+        underflow: bool_output(output[2])?,
+        weight: usize_output(output[3])?,
+    })
+}
+
+pub fn lane_limit(route_kind: u8, limits: [usize; 4]) -> Result<usize, MojoError> {
+    usize_output(
+        call(
+            MODE_LANE_LIMIT,
+            0,
+            i64::from(route_kind),
+            [limits[0], limits[1], limits[2]],
+            [0; 3],
+            limits[3],
+        )?[0],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,5 +299,38 @@ mod tests {
                 pressure_active: true,
             }
         );
+        assert_eq!(
+            admission_plan(1, 2, 2, 2, true).unwrap(),
+            RuntimeAdmissionPlan::Allow {
+                next_active: 2,
+                next_lane_active: 3,
+                bypassed_lane_limit: true,
+            }
+        );
+        assert_eq!(
+            admission_plan(2, 2, 0, 2, false).unwrap(),
+            RuntimeAdmissionPlan::GlobalLimit {
+                active: 2,
+                limit: 2,
+            }
+        );
+        assert_eq!(
+            profile_inflight_acquire_plan(1, 1, Some(2)).unwrap(),
+            RuntimeProfileInflightAcquirePlan {
+                accepted: true,
+                next: 2,
+                weight: 1,
+            }
+        );
+        assert_eq!(
+            profile_inflight_release_plan(Some(1), 2).unwrap(),
+            RuntimeProfileInflightReleasePlan {
+                remaining: 0,
+                count_before: 1,
+                underflow: true,
+                weight: 2,
+            }
+        );
+        assert_eq!(lane_limit(3, [1, 2, 3, 4]).unwrap(), 4);
     }
 }
