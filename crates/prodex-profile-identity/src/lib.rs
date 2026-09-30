@@ -48,6 +48,13 @@ pub fn find_matching_profile_identity(
     discovered.get(index).map(|(name, _)| name.clone())
 }
 
+fn first_present_identity_value<const N: usize>(values: [Option<String>; N]) -> Option<String> {
+    let present = values.each_ref().map(Option::is_some);
+    let index = mojo_profile_identity::first_present_identity_source(&present)
+        .expect("Mojo profile identity source planner returned invalid output")?;
+    values.into_iter().nth(index).flatten()
+}
+
 #[derive(Deserialize)]
 struct StoredAuth {
     tokens: Option<StoredTokens>,
@@ -150,11 +157,12 @@ struct TokenAccountClaims {
 
 impl TokenAccountClaims {
     fn into_account_id(self) -> Option<String> {
-        self.auth
-            .and_then(|auth| auth.chatgpt_account_id)
-            .or(self.auth_chatgpt_account_id)
-            .or(self.chatgpt_account_id)
-            .and_then(normalize_optional_account_id)
+        first_present_identity_value([
+            self.auth.and_then(|auth| auth.chatgpt_account_id),
+            self.auth_chatgpt_account_id,
+            self.chatgpt_account_id,
+        ])
+        .and_then(normalize_optional_account_id)
     }
 }
 
@@ -198,24 +206,31 @@ fn parse_identity_from_stored_auth(stored_auth: &StoredAuth) -> Result<ProfileId
         .filter(|token| !token.is_empty())
         .and_then(|token| parse_account_id_from_access_token(token).ok().flatten());
 
+    let ProfileIdentity {
+        email,
+        account_id: id_token_account_id,
+    } = id_token_identity;
     Ok(ProfileIdentity {
-        email: id_token_identity.email,
-        account_id: id_token_identity
-            .account_id
-            .or(access_token_account_id)
-            .or(stored_account_id),
+        email,
+        account_id: first_present_identity_value([
+            id_token_account_id,
+            access_token_account_id,
+            stored_account_id,
+        ]),
     })
 }
 
 pub fn parse_identity_from_id_token(raw_jwt: &str) -> Result<ProfileIdentity> {
     let claims: IdTokenClaims = parse_jwt_payload(raw_jwt)?;
+    let IdTokenClaims {
+        email,
+        profile,
+        auth,
+    } = claims;
     Ok(ProfileIdentity {
-        email: claims
-            .email
-            .or_else(|| claims.profile.and_then(|profile| profile.email))
+        email: first_present_identity_value([email, profile.and_then(|profile| profile.email)])
             .and_then(normalize_optional_email),
-        account_id: claims
-            .auth
+        account_id: auth
             .and_then(|auth| auth.chatgpt_account_id)
             .and_then(normalize_optional_account_id),
     })
@@ -262,13 +277,15 @@ pub fn normalize_email(email: &str) -> String {
 }
 
 pub fn normalize_optional_email(email: impl AsRef<str>) -> Option<String> {
-    let email = email.as_ref().trim().to_string();
-    (!email.is_empty()).then_some(email)
+    let normalized = mojo_profile_identity::normalize_email(email.as_ref())
+        .expect("Mojo optional email normalization returned invalid output");
+    (!normalized.is_empty()).then_some(normalized)
 }
 
 pub fn normalize_optional_account_id(account_id: impl AsRef<str>) -> Option<String> {
-    let account_id = account_id.as_ref().trim().to_string();
-    (!account_id.is_empty()).then_some(account_id)
+    let normalized = mojo_profile_identity::normalize_account_id(account_id.as_ref())
+        .expect("Mojo optional account normalization returned invalid output");
+    (!normalized.is_empty()).then_some(normalized)
 }
 
 pub fn normalize_account_id(account_id: &str) -> String {
@@ -474,19 +491,25 @@ pub fn plan_removed_profile_state<'a>(
     current_active_profile: Option<&str>,
     removed_names: impl IntoIterator<Item = &'a str>,
 ) -> RemovedProfileStatePlan {
+    use mojo_profile_identity::RemovedActiveProfileChoice;
+
     let removed_names = removed_names
         .into_iter()
         .map(ToOwned::to_owned)
         .collect::<BTreeSet<_>>();
-    let active_profile = if current_active_profile
-        .is_some_and(|profile_name| removed_names.contains(profile_name))
+    let current_removed =
+        current_active_profile.is_some_and(|profile_name| removed_names.contains(profile_name));
+    let first_remaining = remaining_profile_names.into_iter().next();
+    let active_profile = match mojo_profile_identity::removed_active_profile_choice(
+        current_active_profile.is_some(),
+        current_removed,
+        first_remaining.is_some(),
+    )
+    .expect("Mojo removed-profile active selection returned invalid output")
     {
-        remaining_profile_names
-            .into_iter()
-            .next()
-            .map(ToOwned::to_owned)
-    } else {
-        current_active_profile.map(ToOwned::to_owned)
+        RemovedActiveProfileChoice::None => None,
+        RemovedActiveProfileChoice::Current => current_active_profile.map(ToOwned::to_owned),
+        RemovedActiveProfileChoice::FirstRemaining => first_remaining.map(ToOwned::to_owned),
     };
 
     RemovedProfileStatePlan {
