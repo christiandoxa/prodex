@@ -13,6 +13,7 @@ const ABI_VERSION: i64 = 1;
 const METADATA_WORDS: usize = 11;
 const SCAN_SUPER_OVERRIDES: i64 = 10;
 const FIND_SUPER_EXPOSE_ALIAS: i64 = 11;
+const LOGIN_POLICY: i64 = 12;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i64)]
@@ -42,6 +43,24 @@ pub struct LaunchArgumentPlan {
     pub arguments: Vec<LaunchArgument>,
     /// Dry-run presence for ExtractDryRun; review presence for Prepare.
     pub flag: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LoginArgumentMethod {
+    ChatGpt,
+    DeviceCode,
+    ApiKey,
+    AccessToken,
+    Claude,
+    Antigravity,
+    Status,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoginArgumentPlan {
+    pub method: LoginArgumentMethod,
+    pub removed_gemini_oauth: bool,
+    pub base_url_allowed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -277,6 +296,39 @@ pub(super) fn boolean(value: i64) -> Result<bool, MojoError> {
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+pub fn login_argument_plan(arguments: &[Option<&str>]) -> Result<LoginArgumentPlan, MojoError> {
+    let input = views(arguments)?;
+    let mut meta = [0_i64; METADATA_WORDS];
+    status(unsafe {
+        prodex_mojo_launch_args_v1(
+            ABI_VERSION,
+            LOGIN_POLICY,
+            0,
+            input.as_ptr() as u64,
+            input.len() as i64,
+            0,
+            0,
+            0,
+            meta.as_mut_ptr() as u64,
+        )
+    })?;
+    let method = match meta[0] {
+        0 => LoginArgumentMethod::ChatGpt,
+        1 => LoginArgumentMethod::DeviceCode,
+        2 => LoginArgumentMethod::ApiKey,
+        3 => LoginArgumentMethod::AccessToken,
+        4 => LoginArgumentMethod::Claude,
+        5 => LoginArgumentMethod::Antigravity,
+        6 => LoginArgumentMethod::Status,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(LoginArgumentPlan {
+        method,
+        removed_gemini_oauth: boolean(meta[1])?,
+        base_url_allowed: boolean(meta[2])?,
+    })
 }
 
 pub fn inspect_launch_arguments<'a>(
@@ -567,4 +619,32 @@ fn decode_super_override_consumed_count(
     }
     let split_index = i64::try_from(index + 1).map_err(|_| MojoError::InvalidOutput)?;
     Ok(usize::from(piece.index == split_index) + 1)
+}
+
+#[cfg(test)]
+mod login_policy_tests {
+    use super::*;
+
+    #[test]
+    fn login_argument_policy_preserves_method_precedence() {
+        let plan = login_argument_plan(&[
+            Some("--device-auth"),
+            Some("--with-claude"),
+            Some("--with-api-key"),
+            Some("--with-google"),
+        ])
+        .unwrap();
+        assert_eq!(plan.method, LoginArgumentMethod::ApiKey);
+        assert!(plan.removed_gemini_oauth);
+        assert!(plan.base_url_allowed);
+
+        let status = login_argument_plan(&[Some("status"), Some("--with-api-key")]).unwrap();
+        assert_eq!(status.method, LoginArgumentMethod::Status);
+        assert!(!status.removed_gemini_oauth);
+        assert!(!status.base_url_allowed);
+
+        let opaque = login_argument_plan(&[None, Some("--device-auth")]).unwrap();
+        assert_eq!(opaque.method, LoginArgumentMethod::DeviceCode);
+        assert!(!opaque.base_url_allowed);
+    }
 }

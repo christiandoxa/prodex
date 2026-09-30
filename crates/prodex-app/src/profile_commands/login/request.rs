@@ -3,44 +3,33 @@ use crate::validate_credential_free_http_url;
 use anyhow::Result;
 use std::ffi::OsString;
 
-pub(super) fn infer_login_method(codex_args: &[OsString]) -> LoginMethod {
-    if codex_args
-        .first()
-        .and_then(|arg| arg.to_str())
-        .is_some_and(|arg| arg == "status")
-    {
-        return LoginMethod::Status;
-    }
-    if codex_args.iter().any(|arg| arg == "--with-api-key") {
-        return LoginMethod::ApiKey;
-    }
-    if codex_args
+fn login_argument_plan(codex_args: &[OsString]) -> prodex_mojo_core::launch::LoginArgumentPlan {
+    let arguments = codex_args
         .iter()
-        .any(|arg| arg == "--with-claude" || arg == "--claude")
-    {
-        return LoginMethod::Claude;
+        .map(|arg| arg.to_str())
+        .collect::<Vec<_>>();
+    prodex_mojo_core::launch::login_argument_plan(&arguments)
+        .expect("Mojo login argument policy returned invalid output")
+}
+
+pub(super) fn infer_login_method(codex_args: &[OsString]) -> LoginMethod {
+    match login_argument_plan(codex_args).method {
+        prodex_mojo_core::launch::LoginArgumentMethod::ChatGpt => LoginMethod::ChatGpt,
+        prodex_mojo_core::launch::LoginArgumentMethod::DeviceCode => LoginMethod::DeviceCode,
+        prodex_mojo_core::launch::LoginArgumentMethod::ApiKey => LoginMethod::ApiKey,
+        prodex_mojo_core::launch::LoginArgumentMethod::AccessToken => LoginMethod::AccessToken,
+        prodex_mojo_core::launch::LoginArgumentMethod::Claude => LoginMethod::Claude,
+        prodex_mojo_core::launch::LoginArgumentMethod::Antigravity => LoginMethod::Antigravity,
+        prodex_mojo_core::launch::LoginArgumentMethod::Status => LoginMethod::Status,
     }
-    if codex_args.iter().any(|arg| {
-        arg == "--with-antigravity"
-            || arg == "--antigravity"
-            || arg == "--with-agy"
-            || arg == "--agy"
-    }) {
-        return LoginMethod::Antigravity;
-    }
-    if codex_args.iter().any(|arg| arg == "--with-access-token") {
-        return LoginMethod::AccessToken;
-    }
-    if codex_args.iter().any(|arg| arg == "--device-auth") {
-        return LoginMethod::DeviceCode;
-    }
-    LoginMethod::ChatGpt
 }
 
 pub(super) fn gemini_oauth_login_requested(codex_args: &[OsString]) -> bool {
-    codex_args
-        .iter()
-        .any(|arg| arg == "--with-google" || arg == "--google")
+    login_argument_plan(codex_args).removed_gemini_oauth
+}
+
+pub(super) fn login_method_allows_base_url(codex_args: &[OsString]) -> bool {
+    login_argument_plan(codex_args).base_url_allowed
 }
 
 pub(super) fn normalize_optional_base_url(value: &str) -> Result<Option<String>> {

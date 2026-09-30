@@ -422,7 +422,7 @@ fn resolve_login_request(
         );
     }
 
-    if openai_base_url_specified && inferred_method != LoginMethod::ApiKey {
+    if openai_base_url_specified && !login_method_allows_base_url(&codex_args) {
         bail!("--base-url is only supported for API key login");
     }
 

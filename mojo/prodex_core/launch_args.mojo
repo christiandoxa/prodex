@@ -34,6 +34,15 @@ comptime LAUNCH_PREPARE: Int64 = 8
 comptime LAUNCH_SCOPE_CONFIG: Int64 = 9
 comptime LAUNCH_SCAN_SUPER_OVERRIDES: Int64 = 10
 comptime LAUNCH_FIND_SUPER_EXPOSE_ALIAS: Int64 = 11
+comptime LAUNCH_LOGIN_POLICY: Int64 = 12
+
+comptime LOGIN_METHOD_CHATGPT: Int64 = 0
+comptime LOGIN_METHOD_DEVICE_CODE: Int64 = 1
+comptime LOGIN_METHOD_API_KEY: Int64 = 2
+comptime LOGIN_METHOD_ACCESS_TOKEN: Int64 = 3
+comptime LOGIN_METHOD_CLAUDE: Int64 = 4
+comptime LOGIN_METHOD_ANTIGRAVITY: Int64 = 5
+comptime LOGIN_METHOD_STATUS: Int64 = 6
 comptime SUPER_VALUE_KIND_LAST: Int64 = 23
 
 
@@ -264,6 +273,62 @@ def launch_find_super_expose_alias(arguments: UInt64, count: Int64) -> Int64:
     return -1
 
 
+def launch_login_policy(
+    arguments: UInt64,
+    count: Int64,
+    metadata: Pointer[mut=True, Int64, _],
+):
+    var has_api_key = False
+    var has_claude = False
+    var has_antigravity = False
+    var has_access_token = False
+    var has_device_code = False
+    var removed_gemini = False
+
+    for index in range(count):
+        var arg = launch_arg(arguments, 0, index)
+        if arg.valid_utf8 == 0:
+            continue
+        if index == 0 and launch_is["status"](arg):
+            metadata[unsafe_offset=0] = LOGIN_METHOD_STATUS
+            metadata[unsafe_offset=1] = 0
+            metadata[unsafe_offset=2] = 0
+            return
+        if launch_is["--with-api-key"](arg):
+            has_api_key = True
+        elif launch_is["--with-claude"](arg) or launch_is["--claude"](arg):
+            has_claude = True
+        elif (
+            launch_is["--with-antigravity"](arg)
+            or launch_is["--antigravity"](arg)
+            or launch_is["--with-agy"](arg)
+            or launch_is["--agy"](arg)
+        ):
+            has_antigravity = True
+        elif launch_is["--with-access-token"](arg):
+            has_access_token = True
+        elif launch_is["--device-auth"](arg):
+            has_device_code = True
+        if launch_is["--with-google"](arg) or launch_is["--google"](arg):
+            removed_gemini = True
+
+    var method = LOGIN_METHOD_CHATGPT
+    if has_api_key:
+        method = LOGIN_METHOD_API_KEY
+    elif has_claude:
+        method = LOGIN_METHOD_CLAUDE
+    elif has_antigravity:
+        method = LOGIN_METHOD_ANTIGRAVITY
+    elif has_access_token:
+        method = LOGIN_METHOD_ACCESS_TOKEN
+    elif has_device_code:
+        method = LOGIN_METHOD_DEVICE_CODE
+
+    metadata[unsafe_offset=0] = method
+    metadata[unsafe_offset=1] = Int64(removed_gemini)
+    metadata[unsafe_offset=2] = Int64(method == LOGIN_METHOD_API_KEY)
+
+
 def launch_append_range(
     source: UInt64,
     start: Int64,
@@ -420,7 +485,7 @@ def prodex_mojo_launch_args_v1(
     # Lengths are bounded by caller-owned storage and signed address arithmetic.
     if (
         operation < LAUNCH_INSPECT
-        or operation > LAUNCH_FIND_SUPER_EXPOSE_ALIAS
+        or operation > LAUNCH_LOGIN_POLICY
         or operation == 4
         or operation == 5
         or full_access < 0
@@ -451,6 +516,9 @@ def prodex_mojo_launch_args_v1(
         metadata[unsafe_offset=0] = launch_find_super_expose_alias(
             arguments, count
         )
+        return 0
+    if operation == LAUNCH_LOGIN_POLICY:
+        launch_login_policy(arguments, count, metadata)
         return 0
     if operation == LAUNCH_INSPECT:
         launch_inspect(arguments, count, metadata)
