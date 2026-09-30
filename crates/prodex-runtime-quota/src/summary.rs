@@ -11,7 +11,7 @@ use crate::window::{
     runtime_quota_window_observation, runtime_quota_window_observation_for_model_at,
     runtime_quota_window_status_from_proxy, runtime_quota_window_status_reason,
     runtime_quota_window_status_to_proxy, runtime_quota_window_summary_from_proxy,
-    runtime_quota_window_summary_to_proxy, runtime_quota_window_usable_for_auto_rotate,
+    runtime_quota_window_summary_to_proxy,
 };
 use prodex_quota::{
     RuntimeQuotaPressureBand, RuntimeQuotaSummary, RuntimeQuotaWindowStatus,
@@ -133,11 +133,15 @@ fn preserve_unknown_window_status(
         ("weekly", &mut summary.weekly),
     ] {
         if let Some(window) = find_main_window(pair, label)
-            && window.used_percent.is_none()
+            && let Some(reset_at) = prodex_mojo_core::runtime_state_quota::unknown_window_override(
+                window.used_percent.is_some(),
+                window.reset_at,
+            )
+            .expect("Mojo unknown-window override returned invalid output")
         {
             output.status = RuntimeQuotaWindowStatus::Unknown;
             output.remaining_percent = 0;
-            output.reset_at = window.reset_at.unwrap_or(i64::MAX);
+            output.reset_at = reset_at;
         }
     }
     summary
@@ -155,6 +159,51 @@ pub fn runtime_quota_summary_blocking_reset_at(
     )
 }
 
+fn cached_source_from_mojo(
+    source: prodex_mojo_core::runtime_state_quota::CachedQuotaSourceKind,
+) -> Option<RuntimeQuotaSource> {
+    use prodex_mojo_core::runtime_state_quota::CachedQuotaSourceKind;
+    match source {
+        CachedQuotaSourceKind::None => None,
+        CachedQuotaSourceKind::Live => Some(RuntimeQuotaSource::LiveProbe),
+        CachedQuotaSourceKind::Snapshot => Some(RuntimeQuotaSource::PersistedSnapshot),
+    }
+}
+
+fn cached_model_kind(requested_model: Option<&str>) -> i64 {
+    if prodex_quota::openai_model_is_retired_spark(requested_model) {
+        prodex_mojo_core::runtime_state_quota::CACHED_MODEL_RETIRED
+    } else if prodex_quota::openai_model_is_luna(requested_model) {
+        prodex_mojo_core::runtime_state_quota::CACHED_MODEL_LUNA
+    } else {
+        prodex_mojo_core::runtime_state_quota::CACHED_MODEL_STANDARD
+    }
+}
+
+fn cached_summary_from_plan(
+    plan: prodex_mojo_core::runtime_state_quota::CachedQuotaSummaryPlan,
+    live_probe_usage: Option<&UsageResponse>,
+    persisted_snapshot: Option<&RuntimeProfileUsageSnapshot>,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> (RuntimeQuotaSummary, Option<RuntimeQuotaSource>) {
+    use prodex_mojo_core::runtime_state_quota::CachedQuotaSummaryKind;
+    let summary = match plan.summary {
+        CachedQuotaSummaryKind::Unknown => unknown_runtime_quota_summary(),
+        CachedQuotaSummaryKind::Live => runtime_quota_summary_for_route(
+            live_probe_usage.expect("Mojo cached-source plan selected missing live usage"),
+            route_kind,
+        ),
+        CachedQuotaSummaryKind::Snapshot => runtime_quota_summary_from_usage_snapshot_at(
+            persisted_snapshot.expect("Mojo cached-source plan selected missing snapshot"),
+            route_kind,
+            now,
+        ),
+        CachedQuotaSummaryKind::Retired => retired_model_quota_summary(),
+    };
+    (summary, cached_source_from_mojo(plan.source))
+}
+
 pub fn runtime_quota_summary_from_cached_sources(
     live_probe_usage: Option<&UsageResponse>,
     persisted_snapshot: Option<&RuntimeProfileUsageSnapshot>,
@@ -162,38 +211,16 @@ pub fn runtime_quota_summary_from_cached_sources(
     now: i64,
     stale_grace_seconds: i64,
 ) -> (RuntimeQuotaSummary, Option<RuntimeQuotaSource>) {
-    if let Some(usage) = live_probe_usage {
-        return (
-            runtime_quota_summary_for_route(usage, route_kind),
-            Some(RuntimeQuotaSource::LiveProbe),
-        );
-    }
-
-    if let Some(snapshot) = persisted_snapshot
-        && runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
-    {
-        return (
-            runtime_quota_summary_from_usage_snapshot_at(snapshot, route_kind, now),
-            Some(RuntimeQuotaSource::PersistedSnapshot),
-        );
-    }
-
-    (
-        RuntimeQuotaSummary {
-            five_hour: RuntimeQuotaWindowSummary {
-                status: RuntimeQuotaWindowStatus::Unknown,
-                remaining_percent: 0,
-                reset_at: i64::MAX,
-            },
-            weekly: RuntimeQuotaWindowSummary {
-                status: RuntimeQuotaWindowStatus::Unknown,
-                remaining_percent: 0,
-                reset_at: i64::MAX,
-            },
-            route_band: RuntimeQuotaPressureBand::Unknown,
-        },
-        None,
+    let snapshot_usable = persisted_snapshot.is_some_and(|snapshot| {
+        runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
+    });
+    let plan = prodex_mojo_core::runtime_state_quota::cached_summary_source_plan(
+        live_probe_usage.is_some(),
+        persisted_snapshot.is_some(),
+        snapshot_usable,
     )
+    .expect("Mojo cached quota source planner returned invalid output");
+    cached_summary_from_plan(plan, live_probe_usage, persisted_snapshot, route_kind, now)
 }
 
 pub fn runtime_quota_summary_from_cached_sources_for_model(
@@ -204,48 +231,58 @@ pub fn runtime_quota_summary_from_cached_sources_for_model(
     now: i64,
     stale_grace_seconds: i64,
 ) -> (RuntimeQuotaSummary, Option<RuntimeQuotaSource>) {
-    if prodex_quota::openai_model_is_retired_spark(requested_model) {
-        let source = if live_probe_usage.is_some() {
-            Some(RuntimeQuotaSource::LiveProbe)
-        } else if persisted_snapshot.is_some_and(|snapshot| {
-            runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
-        }) {
-            Some(RuntimeQuotaSource::PersistedSnapshot)
+    let snapshot_usable = persisted_snapshot.is_some_and(|snapshot| {
+        runtime_usage_snapshot_is_usable(snapshot, now, stale_grace_seconds)
+    });
+    let snapshot_model_pair_present = requested_model.is_none_or(|model| {
+        persisted_snapshot.is_some_and(|snapshot| {
+            prodex_quota::openai_quota_runtime_window_pair_for_model(
+                &usage_from_runtime_usage_snapshot(snapshot),
+                Some(model),
+            )
+            .is_some()
+        })
+    });
+    let model_kind = cached_model_kind(requested_model);
+    let plan = prodex_mojo_core::runtime_state_quota::cached_model_summary_source_plan(
+        model_kind,
+        live_probe_usage.is_some(),
+        persisted_snapshot.is_some(),
+        snapshot_usable,
+        requested_model.is_some(),
+        snapshot_model_pair_present,
+    )
+    .expect("Mojo cached model quota source planner returned invalid output");
+
+    use prodex_mojo_core::runtime_state_quota::CachedQuotaSummaryKind;
+    let source = cached_source_from_mojo(plan.source);
+    let summary = match plan.summary {
+        CachedQuotaSummaryKind::Unknown => unknown_runtime_quota_summary(),
+        CachedQuotaSummaryKind::Retired => retired_model_quota_summary(),
+        CachedQuotaSummaryKind::Live => runtime_quota_summary_for_route_with_model(
+            live_probe_usage.expect("Mojo cached model plan selected missing live usage"),
+            route_kind,
+            requested_model,
+        ),
+        CachedQuotaSummaryKind::Snapshot => runtime_quota_summary_from_usage_snapshot_at(
+            persisted_snapshot.expect("Mojo cached model plan selected missing snapshot"),
+            route_kind,
+            now,
+        ),
+    };
+    let force_unknown = prodex_mojo_core::runtime_state_quota::cached_model_summary_force_unknown(
+        model_kind,
+        summary.route_band == RuntimeQuotaPressureBand::Exhausted,
+    )
+    .expect("Mojo cached model quota finalizer returned invalid output");
+    (
+        if force_unknown {
+            unknown_runtime_quota_summary()
         } else {
-            None
-        };
-        return (retired_model_quota_summary(), source);
-    }
-    if let Some(usage) = live_probe_usage {
-        return (
-            runtime_quota_summary_for_route_with_model(usage, route_kind, requested_model),
-            Some(RuntimeQuotaSource::LiveProbe),
-        );
-    }
-    if let Some(model) = requested_model
-        && let Some(snapshot) = persisted_snapshot
-        && prodex_quota::openai_quota_runtime_window_pair_for_model(
-            &usage_from_runtime_usage_snapshot(snapshot),
-            Some(model),
-        )
-        .is_none()
-    {
-        return (unknown_runtime_quota_summary(), None);
-    }
-    let summary = runtime_quota_summary_from_cached_sources(
-        live_probe_usage,
-        persisted_snapshot,
-        route_kind,
-        now,
-        stale_grace_seconds,
-    );
-    if prodex_quota::openai_model_is_luna(requested_model)
-        && summary.0.route_band == RuntimeQuotaPressureBand::Exhausted
-    {
-        (unknown_runtime_quota_summary(), summary.1)
-    } else {
-        summary
-    }
+            summary
+        },
+        source,
+    )
 }
 
 fn unknown_runtime_quota_summary() -> RuntimeQuotaSummary {
@@ -364,15 +401,12 @@ pub fn runtime_quota_summary_allows_soft_affinity(
     route_kind: RuntimeRouteKind,
     responses_critical_floor_percent: i64,
 ) -> bool {
-    source.is_some()
-        && runtime_quota_window_usable_for_auto_rotate(summary.five_hour.status)
-        && runtime_quota_window_usable_for_auto_rotate(summary.weekly.status)
-        && runtime_quota_precommit_guard_reason(
-            summary,
-            route_kind,
-            responses_critical_floor_percent,
-        )
-        .is_none()
+    runtime_proxy::runtime_quota_summary_allows_soft_affinity(
+        runtime_selection_quota_summary_to_proxy(summary),
+        runtime_quota_source_option_to_proxy(source),
+        route_kind,
+        responses_critical_floor_percent,
+    )
 }
 
 pub fn runtime_quota_soft_affinity_rejection_reason(
@@ -381,24 +415,12 @@ pub fn runtime_quota_soft_affinity_rejection_reason(
     route_kind: RuntimeRouteKind,
     responses_critical_floor_percent: i64,
 ) -> &'static str {
-    if source.is_none()
-        || matches!(summary.five_hour.status, RuntimeQuotaWindowStatus::Unknown)
-        || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Unknown)
-    {
-        "quota_windows_unavailable"
-    } else if let Some(reason) =
-        runtime_quota_precommit_guard_reason(summary, route_kind, responses_critical_floor_percent)
-    {
-        reason
-    } else if matches!(
-        summary.five_hour.status,
-        RuntimeQuotaWindowStatus::Exhausted
-    ) || matches!(summary.weekly.status, RuntimeQuotaWindowStatus::Exhausted)
-    {
-        "quota_exhausted"
-    } else {
-        runtime_quota_pressure_band_reason(summary.route_band)
-    }
+    runtime_proxy::runtime_quota_soft_affinity_rejection_reason(
+        runtime_selection_quota_summary_to_proxy(summary),
+        runtime_quota_source_option_to_proxy(source),
+        route_kind,
+        responses_critical_floor_percent,
+    )
 }
 
 pub fn runtime_quota_summary_log_fields(summary: RuntimeQuotaSummary) -> String {

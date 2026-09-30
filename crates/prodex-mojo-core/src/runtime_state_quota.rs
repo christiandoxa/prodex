@@ -5,6 +5,14 @@ const MODE_TIMESTAMP_PERSIST: i64 = 0;
 const MODE_FRESHNESS: i64 = 1;
 const MODE_SNAPSHOT_USABLE: i64 = 2;
 const MODE_PROBE_APPLY: i64 = 3;
+const MODE_CACHED_SOURCE: i64 = 4;
+const MODE_MODEL_CACHED_SOURCE: i64 = 5;
+const MODE_MODEL_FINALIZE: i64 = 6;
+const MODE_UNKNOWN_WINDOW: i64 = 7;
+
+pub const CACHED_MODEL_STANDARD: i64 = 0;
+pub const CACHED_MODEL_LUNA: i64 = 1;
+pub const CACHED_MODEL_RETIRED: i64 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProbeCacheFreshness {
@@ -26,6 +34,27 @@ pub struct ProbeUsageSnapshotApplyPlan {
     pub blocking_reset_at: Option<i64>,
     pub retry_backoff_until: Option<i64>,
     pub retry_backoff_changed: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CachedQuotaSummaryKind {
+    Unknown,
+    Live,
+    Snapshot,
+    Retired,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CachedQuotaSourceKind {
+    None,
+    Live,
+    Snapshot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CachedQuotaSummaryPlan {
+    pub summary: CachedQuotaSummaryKind,
+    pub source: CachedQuotaSourceKind,
 }
 
 unsafe extern "C" {
@@ -170,6 +199,122 @@ pub fn snapshot_usability(
     })
 }
 
+fn cached_summary_plan(output: [i64; 8]) -> Result<CachedQuotaSummaryPlan, MojoError> {
+    let summary = match output[0] {
+        0 => CachedQuotaSummaryKind::Unknown,
+        1 => CachedQuotaSummaryKind::Live,
+        2 => CachedQuotaSummaryKind::Snapshot,
+        3 => CachedQuotaSummaryKind::Retired,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let source = match output[1] {
+        0 => CachedQuotaSourceKind::None,
+        1 => CachedQuotaSourceKind::Live,
+        2 => CachedQuotaSourceKind::Snapshot,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(CachedQuotaSummaryPlan { summary, source })
+}
+
+pub fn cached_summary_source_plan(
+    live_present: bool,
+    snapshot_present: bool,
+    snapshot_usable: bool,
+) -> Result<CachedQuotaSummaryPlan, MojoError> {
+    cached_summary_plan(call(
+        MODE_CACHED_SOURCE,
+        [
+            i64::from(live_present),
+            i64::from(snapshot_present),
+            i64::from(snapshot_usable),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )?)
+}
+
+pub fn cached_model_summary_source_plan(
+    model_kind: i64,
+    live_present: bool,
+    snapshot_present: bool,
+    snapshot_usable: bool,
+    requested_model_present: bool,
+    snapshot_model_pair_present: bool,
+) -> Result<CachedQuotaSummaryPlan, MojoError> {
+    cached_summary_plan(call(
+        MODE_MODEL_CACHED_SOURCE,
+        [
+            model_kind,
+            i64::from(live_present),
+            i64::from(snapshot_present),
+            i64::from(snapshot_usable),
+            i64::from(requested_model_present),
+            i64::from(snapshot_model_pair_present),
+            0,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )?)
+}
+
+pub fn cached_model_summary_force_unknown(
+    model_kind: i64,
+    selected_band_exhausted: bool,
+) -> Result<bool, MojoError> {
+    bool_output(
+        call(
+            MODE_MODEL_FINALIZE,
+            [
+                model_kind,
+                i64::from(selected_band_exhausted),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
+        )?[0],
+    )
+}
+
+pub fn unknown_window_override(
+    used_percent_present: bool,
+    reset_at: Option<i64>,
+) -> Result<Option<i64>, MojoError> {
+    let output = call(
+        MODE_UNKNOWN_WINDOW,
+        [
+            i64::from(used_percent_present),
+            i64::from(reset_at.is_some()),
+            reset_at.unwrap_or_default(),
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+        ],
+    )?;
+    Ok(match bool_output(output[0])? {
+        true => Some(output[1]),
+        false => None,
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn probe_usage_snapshot_apply_plan(
     previous_snapshot_present: bool,
@@ -249,5 +394,27 @@ mod tests {
         assert_eq!(plan.blocking_reset_at, Some(120));
         assert_eq!(plan.retry_backoff_until, Some(120));
         assert!(plan.retry_backoff_changed);
+
+        assert_eq!(
+            cached_summary_source_plan(false, true, true).unwrap(),
+            CachedQuotaSummaryPlan {
+                summary: CachedQuotaSummaryKind::Snapshot,
+                source: CachedQuotaSourceKind::Snapshot,
+            }
+        );
+        assert_eq!(
+            cached_model_summary_source_plan(CACHED_MODEL_RETIRED, false, true, true, true, false,)
+                .unwrap(),
+            CachedQuotaSummaryPlan {
+                summary: CachedQuotaSummaryKind::Retired,
+                source: CachedQuotaSourceKind::Snapshot,
+            }
+        );
+        assert!(cached_model_summary_force_unknown(CACHED_MODEL_LUNA, true).unwrap());
+        assert_eq!(
+            unknown_window_override(false, Some(123)).unwrap(),
+            Some(123)
+        );
+        assert_eq!(unknown_window_override(true, Some(123)).unwrap(), None);
     }
 }
