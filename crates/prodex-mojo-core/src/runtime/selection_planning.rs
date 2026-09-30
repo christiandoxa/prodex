@@ -146,6 +146,27 @@ pub struct WaitableCandidateInput {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoncompactFailureKind {
+    RateLimited,
+    Retryable,
+    Unavailable,
+    AuthFailed,
+    Transport,
+    LocalBlocked,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct NoncompactFailurePlan {
+    pub terminal: bool,
+    pub mark_backoff: bool,
+    pub clear_session: bool,
+    pub exclude_profile: bool,
+    pub store_last_failure: bool,
+    pub last_failure_retryable: bool,
+    pub record_transport_failure: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WebsocketTransportFailurePlan {
     Error,
     ReuseWatchdog,
@@ -291,6 +312,13 @@ unsafe extern "C" {
         snapshot_blocks: i64,
         quota_blocked: i64,
     ) -> i64;
+    fn prodex_runtime_noncompact_failure_plan_v1(
+        failure_kind: i64,
+        session_owned: i64,
+        overload: i64,
+        quota_fallback_available: i64,
+        output: *mut i64,
+    ) -> i64;
     fn prodex_runtime_websocket_transport_failure_plan_v1(
         committed: i64,
         reuse_existing_session: i64,
@@ -363,6 +391,44 @@ pub fn waitable_candidate_eligible(
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+pub fn noncompact_failure_plan(
+    failure_kind: NoncompactFailureKind,
+    session_owned: bool,
+    overload: bool,
+    quota_fallback_available: bool,
+) -> Result<NoncompactFailurePlan, MojoError> {
+    let failure_kind = match failure_kind {
+        NoncompactFailureKind::RateLimited => 0,
+        NoncompactFailureKind::Retryable => 1,
+        NoncompactFailureKind::Unavailable => 2,
+        NoncompactFailureKind::AuthFailed => 3,
+        NoncompactFailureKind::Transport => 4,
+        NoncompactFailureKind::LocalBlocked => 5,
+    };
+    let mut output = [-1_i64; 7];
+    let status = unsafe {
+        prodex_runtime_noncompact_failure_plan_v1(
+            failure_kind,
+            i64::from(session_owned),
+            i64::from(overload),
+            i64::from(quota_fallback_available),
+            output.as_mut_ptr(),
+        )
+    };
+    if status != 0 || output.iter().any(|value| !matches!(value, 0 | 1)) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(NoncompactFailurePlan {
+        terminal: output[0] == 1,
+        mark_backoff: output[1] == 1,
+        clear_session: output[2] == 1,
+        exclude_profile: output[3] == 1,
+        store_last_failure: output[4] == 1,
+        last_failure_retryable: output[5] == 1,
+        record_transport_failure: output[6] == 1,
+    })
 }
 
 pub fn websocket_transport_failure_plan(
@@ -908,5 +974,37 @@ mod websocket_invalid_previous_response_tests {
             unbound.action,
             WebsocketInvalidPreviousResponseAction::PassThrough
         );
+    }
+}
+
+#[cfg(test)]
+mod noncompact_failure_plan_tests {
+    use super::*;
+
+    #[test]
+    fn noncompact_failure_plan_preserves_terminal_rotation_policy() {
+        let rate_owned =
+            noncompact_failure_plan(NoncompactFailureKind::RateLimited, true, false, false)
+                .unwrap();
+        assert!(rate_owned.terminal);
+        assert!(rate_owned.mark_backoff);
+        assert!(!rate_owned.exclude_profile);
+
+        let retry_no_fallback =
+            noncompact_failure_plan(NoncompactFailureKind::Retryable, false, false, false).unwrap();
+        assert!(retry_no_fallback.terminal);
+        assert!(retry_no_fallback.mark_backoff);
+        assert!(retry_no_fallback.clear_session);
+
+        let overload =
+            noncompact_failure_plan(NoncompactFailureKind::Retryable, false, true, false).unwrap();
+        assert!(!overload.terminal);
+        assert!(overload.exclude_profile);
+        assert!(!overload.last_failure_retryable);
+
+        let transport_owned =
+            noncompact_failure_plan(NoncompactFailureKind::Transport, true, false, false).unwrap();
+        assert!(transport_owned.terminal);
+        assert!(!transport_owned.record_transport_failure);
     }
 }

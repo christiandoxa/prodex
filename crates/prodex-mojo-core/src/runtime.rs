@@ -53,7 +53,8 @@ pub use selection_planning::{
     ADAPTIVE_PLAN_REASON_INSUFFICIENT_SAMPLES, ADAPTIVE_PLAN_REASON_SHADOW_EXPLORATION,
     ADAPTIVE_PLAN_REASON_SHADOW_ONLY, ADAPTIVE_ROUTING_MAX_COUNT, AdaptiveQualityInput,
     AdaptiveRoutingPlan, AffinityOutcomeInput, AffinityOutcomePlan, AffinitySelectionInput,
-    AffinitySelectionPlan, QUOTA_SELECTION_MODE_BAND_REASON, QUOTA_SELECTION_MODE_PRECOMMIT_FLOOR,
+    AffinitySelectionPlan, NoncompactFailureKind, NoncompactFailurePlan,
+    QUOTA_SELECTION_MODE_BAND_REASON, QUOTA_SELECTION_MODE_PRECOMMIT_FLOOR,
     QUOTA_SELECTION_MODE_PRECOMMIT_REASON, QUOTA_SELECTION_MODE_REJECTION_REASON,
     QUOTA_SELECTION_MODE_SUMMARY_ALLOWS, QUOTA_SELECTION_MODE_WINDOW_GUARD,
     QUOTA_SELECTION_MODE_WINDOW_USABLE, QuotaSelectionPolicyInput, SOFT_AFFINITY_POLICY_ALLOWED,
@@ -65,10 +66,11 @@ pub use selection_planning::{
     WebsocketFailureDispositionPlan, WebsocketInvalidPreviousResponseAction,
     WebsocketInvalidPreviousResponsePlan, WebsocketQuotaFallbackPlan, WebsocketResponsePlan,
     WebsocketResponsePlanInput, WebsocketTransportFailurePlan, adaptive_routing_plan,
-    affinity_outcome_plan, affinity_selection_plan, quota_selection_policy, soft_affinity_policy,
-    waitable_candidate_eligible, websocket_failure_disposition_plan,
-    websocket_full_context_signal_eligible, websocket_invalid_previous_response_plan,
-    websocket_quota_fallback_plan, websocket_response_plan, websocket_transport_failure_plan,
+    affinity_outcome_plan, affinity_selection_plan, noncompact_failure_plan,
+    quota_selection_policy, soft_affinity_policy, waitable_candidate_eligible,
+    websocket_failure_disposition_plan, websocket_full_context_signal_eligible,
+    websocket_invalid_previous_response_plan, websocket_quota_fallback_plan,
+    websocket_response_plan, websocket_transport_failure_plan,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
