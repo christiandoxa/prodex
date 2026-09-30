@@ -124,6 +124,13 @@ pub struct AffinitySelectionPlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebsocketTransportFailurePlan {
+    Error,
+    ReuseWatchdog,
+    RetryTransport,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WebsocketFailureDispositionPlan {
     pub continue_selection: bool,
     pub mark_backoff: bool,
@@ -227,6 +234,11 @@ unsafe extern "C" {
         compact_session_matches_session: i64,
         output: *mut i64,
     ) -> i64;
+    fn prodex_runtime_websocket_transport_failure_plan_v1(
+        committed: i64,
+        reuse_existing_session: i64,
+        precommit_transport_retry_allowed: i64,
+    ) -> i64;
     fn prodex_runtime_websocket_failure_disposition_v1(
         affinity_releasable: i64,
         inflight_saturated: i64,
@@ -255,6 +267,25 @@ unsafe extern "C" {
         direct_fallback_reason: i64,
         output: *mut i64,
     ) -> i64;
+}
+
+pub fn websocket_transport_failure_plan(
+    committed: bool,
+    reuse_existing_session: bool,
+    precommit_transport_retry_allowed: bool,
+) -> Result<WebsocketTransportFailurePlan, MojoError> {
+    match unsafe {
+        prodex_runtime_websocket_transport_failure_plan_v1(
+            i64::from(committed),
+            i64::from(reuse_existing_session),
+            i64::from(precommit_transport_retry_allowed),
+        )
+    } {
+        0 => Ok(WebsocketTransportFailurePlan::Error),
+        1 => Ok(WebsocketTransportFailurePlan::ReuseWatchdog),
+        2 => Ok(WebsocketTransportFailurePlan::RetryTransport),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn websocket_failure_disposition_plan(

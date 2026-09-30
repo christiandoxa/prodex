@@ -1367,3 +1367,30 @@ def prodex_runtime_websocket_quota_fallback_plan_v1(
     if has_context_constraint == 1:
         return WEBSOCKET_QUOTA_FALLBACK_UNAVAILABLE
     return WEBSOCKET_QUOTA_FALLBACK_LAST_CHANCE
+
+
+comptime WEBSOCKET_TRANSPORT_FAILURE_ERROR: Int64 = 0
+comptime WEBSOCKET_TRANSPORT_FAILURE_REUSE_WATCHDOG: Int64 = 1
+comptime WEBSOCKET_TRANSPORT_FAILURE_RETRY: Int64 = 2
+
+
+@export("prodex_runtime_websocket_transport_failure_plan_v1")
+def prodex_runtime_websocket_transport_failure_plan_v1(
+    committed: Int64,
+    reuse_existing_session: Int64,
+    precommit_transport_retry_allowed: Int64,
+) abi("C") -> Int64:
+    if (
+        committed < 0
+        or committed > 1
+        or reuse_existing_session < 0
+        or reuse_existing_session > 1
+        or precommit_transport_retry_allowed < 0
+        or precommit_transport_retry_allowed > 1
+    ):
+        return -1
+    if committed == 0 and reuse_existing_session == 1:
+        return WEBSOCKET_TRANSPORT_FAILURE_REUSE_WATCHDOG
+    if committed == 0 and precommit_transport_retry_allowed == 1:
+        return WEBSOCKET_TRANSPORT_FAILURE_RETRY
+    return WEBSOCKET_TRANSPORT_FAILURE_ERROR

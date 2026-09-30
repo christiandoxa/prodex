@@ -89,19 +89,25 @@ pub(super) fn handle_runtime_websocket_upstream_close(
         "websocket_upstream_close",
         &transport_error,
     );
-    if reuse_existing_session && !committed {
-        return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-            profile_name: profile_name.to_string(),
-            event: "upstream_close_before_commit",
-        });
+    match runtime_proxy_crate::runtime_websocket_transport_failure_plan(
+        committed,
+        reuse_existing_session,
+        precommit_transport_retry_allowed,
+    ) {
+        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::ReuseWatchdog => {
+            Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                profile_name: profile_name.to_string(),
+                event: "upstream_close_before_commit",
+            })
+        }
+        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::RetryTransport => {
+            Ok(RuntimeWebsocketAttempt::TransportFailed {
+                profile_name: profile_name.to_string(),
+                stage: "upstream_close_before_commit",
+            })
+        }
+        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::Error => Err(transport_error),
     }
-    if !committed && precommit_transport_retry_allowed {
-        return Ok(RuntimeWebsocketAttempt::TransportFailed {
-            profile_name: profile_name.to_string(),
-            stage: "upstream_close_before_commit",
-        });
-    }
-    Err(transport_error)
 }
 
 pub(super) fn handle_runtime_websocket_connection_closed(
@@ -156,19 +162,25 @@ pub(super) fn handle_runtime_websocket_connection_closed(
         "websocket_upstream_connection_closed",
         &transport_error,
     );
-    if reuse_existing_session && !committed {
-        return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-            profile_name: profile_name.to_string(),
-            event: "connection_closed_before_commit",
-        });
+    match runtime_proxy_crate::runtime_websocket_transport_failure_plan(
+        committed,
+        reuse_existing_session,
+        precommit_transport_retry_allowed,
+    ) {
+        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::ReuseWatchdog => {
+            Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                profile_name: profile_name.to_string(),
+                event: "connection_closed_before_commit",
+            })
+        }
+        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::RetryTransport => {
+            Ok(RuntimeWebsocketAttempt::TransportFailed {
+                profile_name: profile_name.to_string(),
+                stage: "connection_closed_before_commit",
+            })
+        }
+        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::Error => Err(transport_error),
     }
-    if !committed && precommit_transport_retry_allowed {
-        return Ok(RuntimeWebsocketAttempt::TransportFailed {
-            profile_name: profile_name.to_string(),
-            stage: "connection_closed_before_commit",
-        });
-    }
-    Err(transport_error)
 }
 
 pub(super) fn handle_runtime_websocket_read_error(
@@ -245,31 +257,42 @@ pub(super) fn handle_runtime_websocket_read_error(
             "websocket_first_frame_timeout",
             &transport_error,
         );
-        if reuse_existing_session {
-            runtime_proxy_log(
-                shared,
-                runtime_proxy_structured_log_message(
-                    "websocket_reuse_watchdog",
-                    [
-                        runtime_proxy_log_field("profile", profile_name),
-                        runtime_proxy_log_field("event", "no_first_upstream_frame_before_deadline"),
-                        runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
-                        runtime_proxy_log_field("committed", committed.to_string()),
-                    ],
-                ),
-            );
-            return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-                profile_name: profile_name.to_string(),
-                event: "no_first_upstream_frame_before_deadline",
-            });
+        match runtime_proxy_crate::runtime_websocket_transport_failure_plan(
+            committed,
+            reuse_existing_session,
+            precommit_transport_retry_allowed,
+        ) {
+            runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::ReuseWatchdog => {
+                runtime_proxy_log(
+                    shared,
+                    runtime_proxy_structured_log_message(
+                        "websocket_reuse_watchdog",
+                        [
+                            runtime_proxy_log_field("profile", profile_name),
+                            runtime_proxy_log_field(
+                                "event",
+                                "no_first_upstream_frame_before_deadline",
+                            ),
+                            runtime_proxy_log_field("elapsed_ms", elapsed_ms.to_string()),
+                            runtime_proxy_log_field("committed", committed.to_string()),
+                        ],
+                    ),
+                );
+                return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                    profile_name: profile_name.to_string(),
+                    event: "no_first_upstream_frame_before_deadline",
+                });
+            }
+            runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::RetryTransport => {
+                return Ok(RuntimeWebsocketAttempt::TransportFailed {
+                    profile_name: profile_name.to_string(),
+                    stage: "first_frame_timeout",
+                });
+            }
+            runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::Error => {
+                return Err(transport_error);
+            }
         }
-        if precommit_transport_retry_allowed {
-            return Ok(RuntimeWebsocketAttempt::TransportFailed {
-                profile_name: profile_name.to_string(),
-                stage: "first_frame_timeout",
-            });
-        }
-        return Err(transport_error);
     }
     if let Some(started_at) = reuse_started_at {
         runtime_proxy_log(
@@ -312,17 +335,23 @@ pub(super) fn handle_runtime_websocket_read_error(
         "websocket_upstream_read",
         &transport_error,
     );
-    if reuse_existing_session && !committed {
-        return Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
-            profile_name: profile_name.to_string(),
-            event: "upstream_read_error",
-        });
+    match runtime_proxy_crate::runtime_websocket_transport_failure_plan(
+        committed,
+        reuse_existing_session,
+        precommit_transport_retry_allowed,
+    ) {
+        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::ReuseWatchdog => {
+            Ok(RuntimeWebsocketAttempt::ReuseWatchdogTripped {
+                profile_name: profile_name.to_string(),
+                event: "upstream_read_error",
+            })
+        }
+        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::RetryTransport => {
+            Ok(RuntimeWebsocketAttempt::TransportFailed {
+                profile_name: profile_name.to_string(),
+                stage: "read_error",
+            })
+        }
+        runtime_proxy_crate::RuntimeWebsocketTransportFailurePlan::Error => Err(transport_error),
     }
-    if !committed && precommit_transport_retry_allowed {
-        return Ok(RuntimeWebsocketAttempt::TransportFailed {
-            profile_name: profile_name.to_string(),
-            stage: "read_error",
-        });
-    }
-    Err(transport_error)
 }

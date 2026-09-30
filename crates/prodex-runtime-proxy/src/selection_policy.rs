@@ -608,6 +608,37 @@ pub fn runtime_soft_affinity_rejection_reason(
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RuntimeWebsocketTransportFailurePlan {
+    Error,
+    ReuseWatchdog,
+    RetryTransport,
+}
+
+pub fn runtime_websocket_transport_failure_plan(
+    committed: bool,
+    reuse_existing_session: bool,
+    precommit_transport_retry_allowed: bool,
+) -> RuntimeWebsocketTransportFailurePlan {
+    match prodex_mojo_core::runtime::websocket_transport_failure_plan(
+        committed,
+        reuse_existing_session,
+        precommit_transport_retry_allowed,
+    )
+    .expect("Mojo websocket transport-failure planner returned an invalid result")
+    {
+        prodex_mojo_core::runtime::WebsocketTransportFailurePlan::Error => {
+            RuntimeWebsocketTransportFailurePlan::Error
+        }
+        prodex_mojo_core::runtime::WebsocketTransportFailurePlan::ReuseWatchdog => {
+            RuntimeWebsocketTransportFailurePlan::ReuseWatchdog
+        }
+        prodex_mojo_core::runtime::WebsocketTransportFailurePlan::RetryTransport => {
+            RuntimeWebsocketTransportFailurePlan::RetryTransport
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RuntimeWebsocketFailureDispositionPlan {
     pub continue_selection: bool,
     pub mark_backoff: bool,
