@@ -23,6 +23,8 @@ pub fn self_test() -> bool {
             .is_ok_and(|value| value == ProviderReasoningEffortClass::XHigh)
         && provider_copilot_prompt_token_limit(" GPT-5.4 ")
             .is_ok_and(|value| value == Some(922_000))
+        && provider_retry_plan(1, 1, 0, 4, 0)
+            .is_ok_and(|plan| plan.decision == 0 && plan.remaining_precommit_retries == 1)
 }
 
 #[cfg(test)]
@@ -61,7 +63,76 @@ mod scalar_policy_tests {
             Some(false)
         );
         assert_eq!(provider_boolean_token("maybe").unwrap(), None);
+        assert_eq!(
+            provider_retry_plan(1, 1, 0, 4, 0).unwrap(),
+            ProviderRetryScalarPlan {
+                decision: 0,
+                remaining_precommit_retries: 1,
+            }
+        );
+        assert_eq!(provider_retry_plan(1, 2, 0, 4, 0).unwrap().decision, 1);
+        assert_eq!(provider_retry_plan(1, 1, 0, 0, 0).unwrap().decision, 3);
+        assert_eq!(provider_retry_plan(1, 1, 0, 4, 1).unwrap().decision, 2);
     }
+}
+
+const PROVIDER_RETRY_ABI_VERSION: i64 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProviderRetryScalarPlan {
+    /// 0 allowed, 1 committed, 2 budget exhausted, 3 not retryable.
+    pub decision: i64,
+    pub remaining_precommit_retries: u8,
+}
+
+unsafe extern "C" {
+    fn prodex_provider_retry_plan_v1(
+        abi_version: i64,
+        max_precommit_attempts: i64,
+        stage: i64,
+        cause: i64,
+        error_class: i64,
+        attempted_precommit_retries: i64,
+        output_address: u64,
+    ) -> i64;
+}
+
+pub fn provider_retry_plan(
+    max_precommit_attempts: u8,
+    stage: i64,
+    cause: i64,
+    error_class: i64,
+    attempted_precommit_retries: u8,
+) -> Result<ProviderRetryScalarPlan, crate::MojoError> {
+    if !(0..=3).contains(&stage) || !(0..=2).contains(&cause) || !(0..=5).contains(&error_class) {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let mut output = [-1_i64; 2];
+    let status = unsafe {
+        prodex_provider_retry_plan_v1(
+            PROVIDER_RETRY_ABI_VERSION,
+            i64::from(max_precommit_attempts),
+            stage,
+            cause,
+            error_class,
+            i64::from(attempted_precommit_retries),
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(crate::MojoError::InvalidInput),
+        4 => return Err(crate::MojoError::AbiMismatch),
+        _ => return Err(crate::MojoError::InvalidOutput),
+    }
+    if !(0..=3).contains(&output[0]) || !(0..=255).contains(&output[1]) {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(ProviderRetryScalarPlan {
+        decision: output[0],
+        remaining_precommit_retries: u8::try_from(output[1])
+            .map_err(|_| crate::MojoError::InvalidOutput)?,
+    })
 }
 
 const PROVIDER_SCALAR_POLICY_ABI_VERSION: i64 = 1;

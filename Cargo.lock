@@ -2750,6 +2750,7 @@ dependencies = [
 name = "prodex-provider-spi"
 version = "0.434.2"
 dependencies = [
+ "prodex-mojo-core",
  "prodex-provider-core",
 ]
 
