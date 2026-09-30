@@ -125,6 +125,11 @@ const RUNTIME_HEALTH_SCALAR_SCORE_RETAIN: i64 = 8;
 const RUNTIME_HEALTH_SCALAR_SCORE_REPLACE: i64 = 9;
 const RUNTIME_HEALTH_SCALAR_SCORE_CLEAR: i64 = 10;
 const RUNTIME_HEALTH_SCALAR_HEALTH_SCORE: i64 = 11;
+const RUNTIME_HEALTH_SCALAR_BACKOFF_RETAIN: i64 = 12;
+const RUNTIME_HEALTH_SCALAR_BACKOFF_UPDATE_RETAIN: i64 = 13;
+const RUNTIME_HEALTH_SCALAR_BACKOFF_MERGE: i64 = 14;
+const RUNTIME_HEALTH_SCALAR_SELECTION_BACKOFF_ACTIVE: i64 = 15;
+const RUNTIME_HEALTH_SCALAR_TRANSPORT_UNTIL: i64 = 16;
 
 fn runtime_health_scalar<const N: usize, const M: usize>(
     operation: i64,
@@ -299,6 +304,121 @@ pub fn profile_health_score(
         ],
     )?;
     u32::try_from(value).map_err(|_| crate::MojoError::InvalidOutput)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileBackoffMergeAction {
+    Keep,
+    Insert,
+    Remove,
+}
+
+pub fn profile_backoff_should_retain(
+    profile_present: bool,
+    until: i64,
+    now: i64,
+) -> Result<bool, crate::MojoError> {
+    let [value] = runtime_health_scalar::<3, 1>(
+        RUNTIME_HEALTH_SCALAR_BACKOFF_RETAIN,
+        [i64::from(profile_present), until, now],
+    )?;
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn profile_backoff_update_should_retain(
+    key_matches_profile: bool,
+    updated_at_millis: i64,
+    now: i64,
+    retention_seconds: i64,
+) -> Result<bool, crate::MojoError> {
+    let [value] = runtime_health_scalar::<4, 1>(
+        RUNTIME_HEALTH_SCALAR_BACKOFF_UPDATE_RETAIN,
+        [
+            i64::from(key_matches_profile),
+            updated_at_millis,
+            now,
+            retention_seconds,
+        ],
+    )?;
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn profile_backoff_merge_action(
+    existing_updated_at: Option<i64>,
+    incoming_updated_at: Option<i64>,
+    incoming_value_present: bool,
+) -> Result<ProfileBackoffMergeAction, crate::MojoError> {
+    let [value] = runtime_health_scalar::<5, 1>(
+        RUNTIME_HEALTH_SCALAR_BACKOFF_MERGE,
+        [
+            i64::from(existing_updated_at.is_some()),
+            existing_updated_at.unwrap_or_default(),
+            i64::from(incoming_updated_at.is_some()),
+            incoming_updated_at.unwrap_or_default(),
+            i64::from(incoming_value_present),
+        ],
+    )?;
+    match value {
+        0 => Ok(ProfileBackoffMergeAction::Keep),
+        1 => Ok(ProfileBackoffMergeAction::Insert),
+        2 => Ok(ProfileBackoffMergeAction::Remove),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn profile_selection_backoff_active(
+    retry_until: Option<i64>,
+    transport_until: Option<i64>,
+    circuit_until: Option<i64>,
+    now: i64,
+) -> Result<bool, crate::MojoError> {
+    let [value] = runtime_health_scalar::<7, 1>(
+        RUNTIME_HEALTH_SCALAR_SELECTION_BACKOFF_ACTIVE,
+        [
+            i64::from(retry_until.is_some()),
+            retry_until.unwrap_or_default(),
+            i64::from(transport_until.is_some()),
+            transport_until.unwrap_or_default(),
+            i64::from(circuit_until.is_some()),
+            circuit_until.unwrap_or_default(),
+            now,
+        ],
+    )?;
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn profile_transport_backoff_until(
+    route_until: Option<i64>,
+    global_until: Option<i64>,
+    now: i64,
+) -> Result<Option<i64>, crate::MojoError> {
+    let output = runtime_health_scalar::<5, 2>(
+        RUNTIME_HEALTH_SCALAR_TRANSPORT_UNTIL,
+        [
+            i64::from(route_until.is_some()),
+            route_until.unwrap_or_default(),
+            i64::from(global_until.is_some()),
+            global_until.unwrap_or_default(),
+            now,
+        ],
+    )?;
+    match output[0] {
+        0 => Ok(None),
+        1 => Ok(Some(output[1])),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
 }
 
 pub fn profile_backoff_sort_key(

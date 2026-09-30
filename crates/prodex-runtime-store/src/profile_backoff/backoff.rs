@@ -18,11 +18,21 @@ pub fn compact_runtime_profile_backoffs(
     profiles: &BTreeMap<String, ProfileEntry>,
     now: i64,
 ) -> RuntimeProfileBackoffs {
-    backoffs
-        .retry_backoff_until
-        .retain(|profile_name, until| profiles.contains_key(profile_name) && *until > now);
+    backoffs.retry_backoff_until.retain(|profile_name, until| {
+        prodex_mojo_core::runtime::profile_backoff_should_retain(
+            profiles.contains_key(profile_name),
+            *until,
+            now,
+        )
+        .expect("Mojo retry backoff retention returned invalid output")
+    });
     backoffs.transport_backoff_until.retain(|key, until| {
-        runtime_profile_transport_backoff_key_matches_profiles(key, profiles) && *until > now
+        prodex_mojo_core::runtime::profile_backoff_should_retain(
+            runtime_profile_transport_backoff_key_matches_profiles(key, profiles),
+            *until,
+            now,
+        )
+        .expect("Mojo transport backoff retention returned invalid output")
     });
     backoffs
         .route_circuit_open_until
@@ -31,12 +41,14 @@ pub fn compact_runtime_profile_backoffs(
                 route_profile_key,
             ))
         });
-    let oldest_update = now
-        .saturating_sub(crate::RUNTIME_SCORE_RETENTION_SECONDS)
-        .saturating_mul(1_000);
     backoffs.updated_at.retain(|key, updated_at| {
-        runtime_profile_backoff_update_key_matches_profiles(key, profiles)
-            && *updated_at >= oldest_update
+        prodex_mojo_core::runtime::profile_backoff_update_should_retain(
+            runtime_profile_backoff_update_key_matches_profiles(key, profiles),
+            *updated_at,
+            now,
+            crate::RUNTIME_SCORE_RETENTION_SECONDS,
+        )
+        .expect("Mojo backoff update retention returned invalid output")
     });
     backoffs
 }
@@ -108,20 +120,23 @@ fn merge_runtime_profile_backoff_map(
         let update_key = format!("{update_prefix}{key}");
         let existing_updated_at = existing_updates.get(&update_key).copied();
         let incoming_updated_at = incoming_updates.get(&update_key).copied();
-        let incoming_is_newer = incoming_updated_at.is_some_and(|updated_at| {
-            existing_updated_at.is_none_or(|current| updated_at >= current)
-        });
-        if incoming_is_newer {
-            if let Some(until) = incoming.get(&key) {
-                merged.insert(key, *until);
-            } else {
+        match prodex_mojo_core::runtime::profile_backoff_merge_action(
+            existing_updated_at,
+            incoming_updated_at,
+            incoming.contains_key(&key),
+        )
+        .expect("Mojo backoff merge policy returned invalid output")
+        {
+            prodex_mojo_core::runtime::ProfileBackoffMergeAction::Keep => {}
+            prodex_mojo_core::runtime::ProfileBackoffMergeAction::Insert => {
+                let until = *incoming
+                    .get(&key)
+                    .expect("Mojo insert action requires incoming backoff");
+                merged.insert(key, until);
+            }
+            prodex_mojo_core::runtime::ProfileBackoffMergeAction::Remove => {
                 merged.remove(&key);
             }
-        } else if existing_updated_at.is_none()
-            && incoming_updated_at.is_none()
-            && let Some(until) = incoming.get(&key)
-        {
-            merged.insert(key, *until);
         }
     }
     merged
@@ -146,14 +161,12 @@ pub fn runtime_profile_transport_backoff_until_from_map(
     now: i64,
 ) -> Option<i64> {
     let route_key = runtime_profile_transport_backoff_key(profile_name, route_kind);
-    [
+    prodex_mojo_core::runtime::profile_transport_backoff_until(
         transport_backoff_until.get(&route_key).copied(),
         transport_backoff_until.get(profile_name).copied(),
-    ]
-    .into_iter()
-    .flatten()
-    .filter(|until| *until > now)
-    .max()
+        now,
+    )
+    .expect("Mojo transport backoff selection returned invalid output")
 }
 
 pub fn runtime_profile_transport_backoff_max_until(
@@ -178,21 +191,21 @@ pub fn runtime_profile_name_in_selection_backoff(
     route_kind: RuntimeRouteKind,
     now: i64,
 ) -> bool {
-    retry_backoff_until
-        .get(profile_name)
-        .copied()
-        .is_some_and(|until| until > now)
-        || runtime_profile_transport_backoff_until_from_map(
-            transport_backoff_until,
-            profile_name,
-            route_kind,
-            now,
-        )
-        .is_some()
-        || route_circuit_open_until
+    let transport_until = runtime_profile_transport_backoff_until_from_map(
+        transport_backoff_until,
+        profile_name,
+        route_kind,
+        now,
+    );
+    prodex_mojo_core::runtime::profile_selection_backoff_active(
+        retry_backoff_until.get(profile_name).copied(),
+        transport_until,
+        route_circuit_open_until
             .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
-            .copied()
-            .is_some_and(|until| until > now)
+            .copied(),
+        now,
+    )
+    .expect("Mojo selection backoff policy returned invalid output")
 }
 
 pub fn runtime_profile_backoff_sort_key(
@@ -296,21 +309,15 @@ pub fn runtime_soften_persisted_route_circuits_for_startup(
 ) -> bool {
     let mut changed = false;
     route_circuit_open_until.retain(|route_profile_key, until| {
-        if *until <= now {
-            changed = true;
-            return false;
-        }
-        let max_until = now.saturating_add(runtime_profile_route_circuit_probe_seconds(
-            profile_scores,
-            route_profile_key,
+        let softened = prodex_mojo_core::runtime::profile_soften_backoff_until(
+            *until,
             now,
-        ));
-        let next_until = (*until).min(max_until);
-        if next_until != *until {
-            changed = true;
-        }
-        *until = next_until;
-        true
+            runtime_profile_route_circuit_probe_seconds(profile_scores, route_profile_key, now),
+        )
+        .expect("Mojo route circuit softening returned invalid output");
+        changed |= softened.changed;
+        *until = softened.until;
+        softened.keep
     });
     changed
 }
