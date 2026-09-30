@@ -131,15 +131,21 @@ pub(super) fn runtime_smart_context_push_chunk_fingerprint(
     kind: &str,
     range: &RuntimeSmartContextArtifactSemanticLineRange,
 ) {
-    if chunks.len() >= RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS {
-        *complete = false;
-        return;
-    }
-    if range.byte_len != range.text.len()
-        || range.content_hash != runtime_proxy_crate::smart_context_hash_text(&range.text)
-    {
-        *complete = false;
-        return;
+    let plan = prodex_mojo_core::runtime_repo_map::repo_chunk_plan(
+        chunks.len(),
+        RUNTIME_SMART_CONTEXT_MAX_CHUNK_FINGERPRINTS,
+        range.byte_len,
+        range.text.len(),
+        range.content_hash == runtime_proxy_crate::smart_context_hash_text(&range.text),
+    )
+    .expect("Mojo repo-map chunk policy returned invalid output");
+    match plan {
+        prodex_mojo_core::runtime_repo_map::RepoChunkPlan::Accept => {}
+        prodex_mojo_core::runtime_repo_map::RepoChunkPlan::RejectCapacity
+        | prodex_mojo_core::runtime_repo_map::RepoChunkPlan::RejectInvalid => {
+            *complete = false;
+            return;
+        }
     }
     chunks.push(RuntimeSmartContextArtifactChunkFingerprint {
         start: range.start,
@@ -204,15 +210,23 @@ pub(super) fn runtime_smart_context_duplicate_chunk_fingerprints(
     let mut duplicates = Vec::new();
     let mut complete = true;
     for ((content_hash, byte_len), occurrences) in grouped {
-        if occurrences.len() < 2 {
-            continue;
-        }
-        if duplicates.len() >= RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_FINGERPRINTS {
-            complete = false;
-            break;
-        }
-        let occurrences_complete =
-            occurrences.len() <= RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_OCCURRENCES;
+        let plan = prodex_mojo_core::runtime_repo_map::repo_duplicate_plan(
+            occurrences.len(),
+            duplicates.len(),
+            RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_FINGERPRINTS,
+            RUNTIME_SMART_CONTEXT_MAX_DUPLICATE_CHUNK_OCCURRENCES,
+        )
+        .expect("Mojo repo-map duplicate policy returned invalid output");
+        let occurrences_complete = match plan {
+            prodex_mojo_core::runtime_repo_map::RepoDuplicatePlan::Skip => continue,
+            prodex_mojo_core::runtime_repo_map::RepoDuplicatePlan::StopCapacity => {
+                complete = false;
+                break;
+            }
+            prodex_mojo_core::runtime_repo_map::RepoDuplicatePlan::Append {
+                occurrences_complete,
+            } => occurrences_complete,
+        };
         complete &= occurrences_complete;
         duplicates.push(RuntimeSmartContextArtifactDuplicateChunkFingerprint {
             byte_len,
@@ -306,11 +320,12 @@ pub(super) fn runtime_smart_context_repo_map_nearest_path(
         .chain(line_index.diff_hunk_ranges.iter())
         .filter_map(|range| {
             let path = range.path.as_ref()?.clone();
-            let distance = if range.start <= line && line <= range.end {
-                0
-            } else {
-                range.start.abs_diff(line).min(range.end.abs_diff(line))
-            };
+            let distance = prodex_mojo_core::runtime_repo_map::repo_path_distance(
+                range.start,
+                range.end,
+                line,
+            )
+            .expect("Mojo repo-map path distance returned invalid output");
             Some((distance, range.start, path))
         })
         .min_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)))
@@ -320,12 +335,18 @@ pub(super) fn runtime_smart_context_repo_map_nearest_path(
 pub(super) fn runtime_smart_context_repo_map_symbol_kind(
     range: &RuntimeSmartContextArtifactSemanticLineRange,
 ) -> RuntimeSmartContextArtifactRepoMapEntryKind {
-    match range.label.as_deref() {
-        Some("test_symbol") => RuntimeSmartContextArtifactRepoMapEntryKind::Test,
-        Some("symbol") if runtime_smart_context_repo_map_symbol_is_module_like(&range.text) => {
+    match prodex_mojo_core::runtime_repo_map::repo_symbol_kind(range.label.as_deref(), &range.text)
+        .expect("Mojo repo-map symbol-kind policy returned invalid output")
+    {
+        prodex_mojo_core::runtime_repo_map::RepoSymbolKind::Module => {
             RuntimeSmartContextArtifactRepoMapEntryKind::Module
         }
-        _ => RuntimeSmartContextArtifactRepoMapEntryKind::Symbol,
+        prodex_mojo_core::runtime_repo_map::RepoSymbolKind::Symbol => {
+            RuntimeSmartContextArtifactRepoMapEntryKind::Symbol
+        }
+        prodex_mojo_core::runtime_repo_map::RepoSymbolKind::Test => {
+            RuntimeSmartContextArtifactRepoMapEntryKind::Test
+        }
     }
 }
 
@@ -338,11 +359,6 @@ pub(super) fn runtime_smart_context_repo_map_symbol_module(
         return runtime_smart_context_bounded_string(symbol);
     }
     path.and_then(runtime_smart_context_repo_map_module_from_path)
-}
-
-pub(super) fn runtime_smart_context_repo_map_symbol_is_module_like(text: &str) -> bool {
-    prodex_mojo_core::runtime_repo_map::repo_module_like(text)
-        .expect("Mojo repo-map module classifier returned invalid output")
 }
 
 pub(super) fn runtime_smart_context_repo_map_module_from_path(path: &str) -> Option<String> {
@@ -367,8 +383,13 @@ pub(super) fn runtime_smart_context_insert_repo_map_entry(
     entries
         .entry(key)
         .and_modify(|current| {
-            if entry.order > current.order
-                || entry.order == current.order && entry.artifact_id < current.artifact_id
+            if prodex_mojo_core::runtime_repo_map::repo_entry_should_replace(
+                entry.order,
+                current.order,
+                &entry.artifact_id,
+                &current.artifact_id,
+            )
+            .expect("Mojo repo-map entry replacement policy returned invalid output")
             {
                 *current = entry.clone();
             }
