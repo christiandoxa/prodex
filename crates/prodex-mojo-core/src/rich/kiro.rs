@@ -310,6 +310,12 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_mojo_kiro_chat_response_input_plan_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_mojo_kiro_chat_response_rewrite_v1(
         abi_version: i64,
         input_address: u64,
@@ -324,6 +330,14 @@ unsafe extern "C" {
 const KIRO_KERNEL_MAX_BYTES: usize = 4 * 1024 * 1024;
 /// Maximum canonical JSON response size accepted by Kiro response transforms.
 pub const KIRO_RESPONSE_MAX_BYTES: usize = 32 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KiroChatResponseInputPlan {
+    Valid,
+    TooLarge,
+    InvalidJson,
+    InvalidResponseBody,
+}
 const KIRO_RESPONSE_MAX_OUTPUT_BYTES: usize = 256 * 1024 * 1024;
 
 fn kernel_view(value: Option<&str>) -> RichStringView {
@@ -618,6 +632,32 @@ pub fn kiro_rewrite_anthropic_response_json(
         }
         output.truncate(written);
         return Ok(output);
+    }
+}
+
+pub fn kiro_chat_response_input_plan(input: &[u8]) -> Result<KiroChatResponseInputPlan, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_mojo_kiro_chat_response_input_plan_v1(
+            RICH_ABI_VERSION,
+            input.as_ptr() as u64,
+            i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut output),
+        )
+    };
+    match status {
+        0 => {}
+        1 | 2 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    match output {
+        0 => Ok(KiroChatResponseInputPlan::Valid),
+        1 => Ok(KiroChatResponseInputPlan::TooLarge),
+        2 => Ok(KiroChatResponseInputPlan::InvalidJson),
+        3 => Ok(KiroChatResponseInputPlan::InvalidResponseBody),
+        _ => Err(MojoError::InvalidOutput),
     }
 }
 

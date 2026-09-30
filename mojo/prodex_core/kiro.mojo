@@ -3695,6 +3695,54 @@ def kiro_anthropic_response_rewrite_v1(
     return KIRO_KERNEL_STATUS_OK
 
 
+comptime KIRO_CHAT_RESPONSE_INPUT_VALID: Int64 = 0
+comptime KIRO_CHAT_RESPONSE_INPUT_TOO_LARGE: Int64 = 1
+comptime KIRO_CHAT_RESPONSE_INPUT_INVALID_JSON: Int64 = 2
+comptime KIRO_CHAT_RESPONSE_INPUT_NOT_OBJECT: Int64 = 3
+
+
+def kiro_chat_response_input_plan_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+) -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return KIRO_KERNEL_STATUS_ABI
+    if input_length < 0 or output_address == 0 or (input_length > 0 and input_address == 0):
+        return KIRO_KERNEL_STATUS_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if input_length > KIRO_RESPONSE_MAX_BYTES:
+        output[] = KIRO_CHAT_RESPONSE_INPUT_TOO_LARGE
+        return KIRO_KERNEL_STATUS_OK
+
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, KIRO_RESPONSE_MAX_BYTES):
+        output[] = KIRO_CHAT_RESPONSE_INPUT_INVALID_JSON
+        return KIRO_KERNEL_STATUS_OK
+
+    var root_start = deepseek_json_skip_ws(view, 0, input_length)
+    if root_start >= input_length:
+        output[] = KIRO_CHAT_RESPONSE_INPUT_INVALID_JSON
+        return KIRO_KERNEL_STATUS_OK
+    var root_end = deepseek_json_value_end(view, root_start, input_length, 0)
+    if (
+        root_end < 0
+        or deepseek_json_skip_ws(view, root_end, input_length) != input_length
+    ):
+        output[] = KIRO_CHAT_RESPONSE_INPUT_INVALID_JSON
+        return KIRO_KERNEL_STATUS_OK
+    if deepseek_json_byte(view, root_start) != 123:
+        output[] = KIRO_CHAT_RESPONSE_INPUT_NOT_OBJECT
+        return KIRO_KERNEL_STATUS_OK
+
+    output[] = KIRO_CHAT_RESPONSE_INPUT_VALID
+    return KIRO_KERNEL_STATUS_OK
+
+
 def kiro_chat_response_rewrite_v1(
     abi_version: Int64,
     input_address: UInt,
