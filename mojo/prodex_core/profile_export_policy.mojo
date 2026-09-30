@@ -109,3 +109,28 @@ def prodex_profile_export_policy_v1(
     ):
         return PROFILE_EXPORT_ARGON2_PARALLELISM_ERROR
     return PROFILE_EXPORT_POLICY_OK
+
+
+comptime PROFILE_IMPORT_AUTH_UPDATE_APPEND: Int64 = 0
+comptime PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH: Int64 = 1
+comptime PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH_EMAIL: Int64 = 2
+
+
+@export("prodex_profile_import_auth_update_plan_v1")
+def prodex_profile_import_auth_update_plan_v1(
+    abi_version: Int64,
+    existing_update_present: Int64,
+    incoming_email_present: Int64,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_EXPORT_POLICY_ABI_VERSION:
+        return -4
+    if (
+        (existing_update_present != 0 and existing_update_present != 1)
+        or (incoming_email_present != 0 and incoming_email_present != 1)
+    ):
+        return -1
+    if existing_update_present == 0:
+        return PROFILE_IMPORT_AUTH_UPDATE_APPEND
+    if incoming_email_present == 1:
+        return PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH_EMAIL
+    return PROFILE_IMPORT_AUTH_UPDATE_REPLACE_AUTH

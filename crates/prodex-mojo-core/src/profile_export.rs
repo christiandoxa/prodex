@@ -28,6 +28,11 @@ pub enum ProfileExportPolicyViolation {
 }
 
 unsafe extern "C" {
+    fn prodex_profile_import_auth_update_plan_v1(
+        abi_version: i64,
+        existing_update_present: i64,
+        incoming_email_present: i64,
+    ) -> i64;
     fn prodex_profile_export_policy_v1(
         abi_version: i64,
         mode: i64,
@@ -121,6 +126,34 @@ pub fn validate_pbkdf2_iterations(iterations: u32) -> Result<(), ProfileExportPo
     )
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileImportAuthUpdateAction {
+    Append,
+    ReplaceAuth,
+    ReplaceAuthAndEmail,
+}
+
+pub fn profile_import_auth_update_action(
+    existing_update_present: bool,
+    incoming_email_present: bool,
+) -> Result<ProfileImportAuthUpdateAction, MojoError> {
+    let result = unsafe {
+        prodex_profile_import_auth_update_plan_v1(
+            ABI_VERSION,
+            i64::from(existing_update_present),
+            i64::from(incoming_email_present),
+        )
+    };
+    match result {
+        0 => Ok(ProfileImportAuthUpdateAction::Append),
+        1 => Ok(ProfileImportAuthUpdateAction::ReplaceAuth),
+        2 => Ok(ProfileImportAuthUpdateAction::ReplaceAuthAndEmail),
+        -1 => Err(MojoError::InvalidInput),
+        -4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 pub fn validate_argon2(
     version: u32,
     memory_kib: u32,
@@ -157,5 +190,17 @@ mod tests {
         );
         assert!(validate_pbkdf2_iterations(50_000).is_ok());
         assert_eq!(validate_argon2(0x13, 8 * 1024, 1, 1), Ok(()));
+        assert_eq!(
+            profile_import_auth_update_action(false, false).unwrap(),
+            ProfileImportAuthUpdateAction::Append
+        );
+        assert_eq!(
+            profile_import_auth_update_action(true, false).unwrap(),
+            ProfileImportAuthUpdateAction::ReplaceAuth
+        );
+        assert_eq!(
+            profile_import_auth_update_action(true, true).unwrap(),
+            ProfileImportAuthUpdateAction::ReplaceAuthAndEmail
+        );
     }
 }
