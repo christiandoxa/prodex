@@ -405,3 +405,77 @@ def prodex_runtime_lineage_resolution_plan_v1(
     if unavailable_count == 1:
         return LINEAGE_RESOLUTION_UNAVAILABLE
     return LINEAGE_RESOLUTION_UNBOUND
+
+
+comptime LINEAGE_LOOKUP_AFFINITY_NONE: Int64 = 0
+comptime LINEAGE_LOOKUP_AFFINITY_BOUND: Int64 = 1
+comptime LINEAGE_LOOKUP_AFFINITY_FALLBACK: Int64 = 2
+comptime LINEAGE_LOOKUP_AFFINITY_CURRENT: Int64 = 3
+
+comptime LINEAGE_OWNER_UNBOUND: Int64 = 0
+comptime LINEAGE_OWNER_OWNED: Int64 = 1
+comptime LINEAGE_OWNER_UNAVAILABLE: Int64 = 2
+comptime LINEAGE_OWNER_CONFLICT: Int64 = 3
+
+comptime LINEAGE_PROFILE_NONE: Int64 = 0
+comptime LINEAGE_PROFILE_OWNER: Int64 = 1
+comptime LINEAGE_PROFILE_CONFLICT_SENTINEL: Int64 = 2
+
+
+@export("prodex_runtime_lineage_lookup_affinity_v1")
+def prodex_runtime_lineage_lookup_affinity_v1(
+    abi_version: Int64,
+    turn_state_present: Int64,
+    bound_present: Int64,
+    fallback_present: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != LINEAGE_ABI_VERSION
+        or (turn_state_present != 0 and turn_state_present != 1)
+        or (bound_present != 0 and bound_present != 1)
+        or (fallback_present != 0 and fallback_present != 1)
+    ):
+        return -1
+    if turn_state_present == 0:
+        return LINEAGE_LOOKUP_AFFINITY_NONE
+    if bound_present == 1:
+        return LINEAGE_LOOKUP_AFFINITY_BOUND
+    if fallback_present == 1:
+        return LINEAGE_LOOKUP_AFFINITY_FALLBACK
+    return LINEAGE_LOOKUP_AFFINITY_CURRENT
+
+
+@export("prodex_runtime_lineage_owner_lookup_v1")
+def prodex_runtime_lineage_owner_lookup_v1(
+    abi_version: Int64,
+    owner_kind: Int64,
+    expected_identity_present: Int64,
+    identity_matches: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != LINEAGE_ABI_VERSION
+        or owner_kind < LINEAGE_OWNER_UNBOUND
+        or owner_kind > LINEAGE_OWNER_CONFLICT
+        or (expected_identity_present != 0 and expected_identity_present != 1)
+        or (identity_matches != 0 and identity_matches != 1)
+    ):
+        return -1
+
+    var normalized = owner_kind
+    if (
+        owner_kind == LINEAGE_OWNER_OWNED
+        and expected_identity_present == 1
+        and identity_matches == 0
+    ):
+        normalized = LINEAGE_OWNER_UNAVAILABLE
+
+    var profile_action = LINEAGE_PROFILE_NONE
+    if normalized == LINEAGE_OWNER_OWNED:
+        profile_action = LINEAGE_PROFILE_OWNER
+    elif (
+        normalized == LINEAGE_OWNER_UNAVAILABLE
+        or normalized == LINEAGE_OWNER_CONFLICT
+    ):
+        profile_action = LINEAGE_PROFILE_CONFLICT_SENTINEL
+
+    return normalized | (profile_action << 8)

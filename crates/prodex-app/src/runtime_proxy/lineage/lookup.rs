@@ -140,20 +140,28 @@ pub(crate) fn runtime_turn_state_affinity_profile(
     let Some(turn_state) = turn_state else {
         return Ok(None);
     };
-    if let Some(profile_name) = runtime_turn_state_bound_profile(shared, turn_state)? {
-        return Ok(Some(profile_name));
+    let bound_profile = runtime_turn_state_bound_profile(shared, turn_state)?;
+    match prodex_mojo_core::runtime_lineage::lookup_affinity_plan(
+        true,
+        bound_profile.is_some(),
+        fallback_profile.is_some(),
+    )
+    .expect("Mojo lineage affinity lookup returned invalid output")
+    {
+        prodex_mojo_core::runtime_lineage::RuntimeLineageLookupAffinity::None => Ok(None),
+        prodex_mojo_core::runtime_lineage::RuntimeLineageLookupAffinity::Bound => Ok(bound_profile),
+        prodex_mojo_core::runtime_lineage::RuntimeLineageLookupAffinity::Fallback => {
+            Ok(fallback_profile.map(str::to_string))
+        }
+        prodex_mojo_core::runtime_lineage::RuntimeLineageLookupAffinity::Current => Ok(Some(
+            shared
+                .runtime
+                .lock()
+                .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
+                .current_profile
+                .clone(),
+        )),
     }
-    if let Some(profile_name) = fallback_profile {
-        return Ok(Some(profile_name.to_string()));
-    }
-    Ok(Some(
-        shared
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
-            .current_profile
-            .clone(),
-    ))
 }
 
 pub(crate) fn runtime_session_bound_profile(
@@ -224,16 +232,67 @@ fn runtime_hard_binding_owner_for_runtime(
         &runtime.state.session_profile_bindings,
         &runtime.state.profiles,
     );
-    match resolution {
+    let (owner_kind, profile_name, expected_identity) = match &resolution {
+        prodex_runtime_state::RuntimeHardBindingResolution::Unbound => (
+            prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Unbound,
+            None,
+            None,
+        ),
         prodex_runtime_state::RuntimeHardBindingResolution::Owned {
             profile_name,
-            binding_identity: Some(expected),
-        } if runtime_profile_binding_identity(runtime, &profile_name).as_ref()
-            != Some(&expected) =>
-        {
-            prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(profile_name)
+            binding_identity,
+        } => (
+            prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Owned,
+            Some(profile_name.as_str()),
+            binding_identity.as_ref(),
+        ),
+        prodex_runtime_state::RuntimeHardBindingResolution::Unavailable {
+            profile_name,
+            binding_identity,
+        } => (
+            prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Unavailable,
+            Some(profile_name.as_str()),
+            binding_identity.as_ref(),
+        ),
+        prodex_runtime_state::RuntimeHardBindingResolution::Conflict => (
+            prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Conflict,
+            None,
+            None,
+        ),
+    };
+    let identity_matches = match (profile_name, expected_identity) {
+        (Some(profile_name), Some(expected)) => {
+            runtime_profile_binding_identity(runtime, profile_name).as_ref() == Some(expected)
         }
-        resolution => resolution.owner(),
+        _ => true,
+    };
+    let plan = prodex_mojo_core::runtime_lineage::owner_lookup_plan(
+        owner_kind,
+        expected_identity.is_some(),
+        identity_matches,
+    )
+    .expect("Mojo lineage owner lookup returned invalid output");
+    match plan.owner_kind {
+        prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Unbound => {
+            prodex_runtime_state::RuntimeHardBindingOwner::Unbound
+        }
+        prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Owned => {
+            prodex_runtime_state::RuntimeHardBindingOwner::Owned(
+                profile_name
+                    .expect("Mojo owned lineage lookup requires a profile")
+                    .to_string(),
+            )
+        }
+        prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Unavailable => {
+            prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(
+                profile_name
+                    .expect("Mojo unavailable lineage lookup requires a profile")
+                    .to_string(),
+            )
+        }
+        prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Conflict => {
+            prodex_runtime_state::RuntimeHardBindingOwner::Conflict
+        }
     }
 }
 
@@ -260,17 +319,34 @@ fn runtime_hard_binding_identity(
 fn runtime_hard_binding_profile_name(
     owner: &prodex_runtime_state::RuntimeHardBindingOwner,
 ) -> Option<String> {
-    match owner {
-        prodex_runtime_state::RuntimeHardBindingOwner::Owned(profile_name) => {
-            Some(profile_name.clone())
+    let (owner_kind, owner_profile) = match owner {
+        prodex_runtime_state::RuntimeHardBindingOwner::Unbound => (
+            prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Unbound,
+            None,
+        ),
+        prodex_runtime_state::RuntimeHardBindingOwner::Owned(profile_name) => (
+            prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Owned,
+            Some(profile_name.as_str()),
+        ),
+        prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(profile_name) => (
+            prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Unavailable,
+            Some(profile_name.as_str()),
+        ),
+        prodex_runtime_state::RuntimeHardBindingOwner::Conflict => (
+            prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerKind::Conflict,
+            None,
+        ),
+    };
+    let plan = prodex_mojo_core::runtime_lineage::owner_lookup_plan(owner_kind, false, true)
+        .expect("Mojo lineage owner profile policy returned invalid output");
+    match plan.profile_action {
+        prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerProfileAction::None => None,
+        prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerProfileAction::Owner => {
+            owner_profile.map(str::to_string)
         }
-        prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(_) => {
+        prodex_mojo_core::runtime_lineage::RuntimeLineageOwnerProfileAction::ConflictSentinel => {
             Some(prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string())
         }
-        prodex_runtime_state::RuntimeHardBindingOwner::Conflict => {
-            Some(prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string())
-        }
-        prodex_runtime_state::RuntimeHardBindingOwner::Unbound => None,
     }
 }
 

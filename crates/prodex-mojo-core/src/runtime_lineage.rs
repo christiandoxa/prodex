@@ -43,6 +43,18 @@ unsafe extern "C" {
         owner_count: i64,
         unavailable_count: i64,
     ) -> i64;
+    fn prodex_runtime_lineage_lookup_affinity_v1(
+        abi_version: i64,
+        turn_state_present: i64,
+        bound_present: i64,
+        fallback_present: i64,
+    ) -> i64;
+    fn prodex_runtime_lineage_owner_lookup_v1(
+        abi_version: i64,
+        owner_kind: i64,
+        expected_identity_present: i64,
+        identity_matches: i64,
+    ) -> i64;
     fn prodex_runtime_lineage_release_plan_v1(
         abi_version: i64,
         previous_response_present: i64,
@@ -236,6 +248,99 @@ pub fn resolution_plan(
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeLineageLookupAffinity {
+    None,
+    Bound,
+    Fallback,
+    Current,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeLineageOwnerKind {
+    Unbound,
+    Owned,
+    Unavailable,
+    Conflict,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeLineageOwnerProfileAction {
+    None,
+    Owner,
+    ConflictSentinel,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeLineageOwnerLookupPlan {
+    pub owner_kind: RuntimeLineageOwnerKind,
+    pub profile_action: RuntimeLineageOwnerProfileAction,
+}
+
+pub fn lookup_affinity_plan(
+    turn_state_present: bool,
+    bound_present: bool,
+    fallback_present: bool,
+) -> Result<RuntimeLineageLookupAffinity, MojoError> {
+    let result = unsafe {
+        prodex_runtime_lineage_lookup_affinity_v1(
+            ABI_VERSION,
+            i64::from(turn_state_present),
+            i64::from(bound_present),
+            i64::from(fallback_present),
+        )
+    };
+    match result {
+        0 => Ok(RuntimeLineageLookupAffinity::None),
+        1 => Ok(RuntimeLineageLookupAffinity::Bound),
+        2 => Ok(RuntimeLineageLookupAffinity::Fallback),
+        3 => Ok(RuntimeLineageLookupAffinity::Current),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn owner_lookup_plan(
+    owner_kind: RuntimeLineageOwnerKind,
+    expected_identity_present: bool,
+    identity_matches: bool,
+) -> Result<RuntimeLineageOwnerLookupPlan, MojoError> {
+    let owner_tag = match owner_kind {
+        RuntimeLineageOwnerKind::Unbound => 0,
+        RuntimeLineageOwnerKind::Owned => 1,
+        RuntimeLineageOwnerKind::Unavailable => 2,
+        RuntimeLineageOwnerKind::Conflict => 3,
+    };
+    let result = unsafe {
+        prodex_runtime_lineage_owner_lookup_v1(
+            ABI_VERSION,
+            owner_tag,
+            i64::from(expected_identity_present),
+            i64::from(identity_matches),
+        )
+    };
+    if result < 0 {
+        return Err(MojoError::InvalidInput);
+    }
+    let owner_kind = match result & 0xff {
+        0 => RuntimeLineageOwnerKind::Unbound,
+        1 => RuntimeLineageOwnerKind::Owned,
+        2 => RuntimeLineageOwnerKind::Unavailable,
+        3 => RuntimeLineageOwnerKind::Conflict,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let profile_action = match (result >> 8) & 0xff {
+        0 => RuntimeLineageOwnerProfileAction::None,
+        1 => RuntimeLineageOwnerProfileAction::Owner,
+        2 => RuntimeLineageOwnerProfileAction::ConflictSentinel,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(RuntimeLineageOwnerLookupPlan {
+        owner_kind,
+        profile_action,
+    })
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RuntimeLineageReleasePlan {
     pub response: bool,
@@ -336,6 +441,17 @@ mod hard_binding_plan_tests {
         assert_eq!(
             resolution_plan(false, 1, 1).unwrap(),
             RuntimeLineageResolutionKind::Conflict
+        );
+        assert_eq!(
+            lookup_affinity_plan(true, false, true).unwrap(),
+            RuntimeLineageLookupAffinity::Fallback
+        );
+        assert_eq!(
+            owner_lookup_plan(RuntimeLineageOwnerKind::Owned, true, false).unwrap(),
+            RuntimeLineageOwnerLookupPlan {
+                owner_kind: RuntimeLineageOwnerKind::Unavailable,
+                profile_action: RuntimeLineageOwnerProfileAction::ConflictSentinel,
+            }
         );
     }
 }
