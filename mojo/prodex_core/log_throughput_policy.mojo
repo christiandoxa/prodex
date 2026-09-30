@@ -40,8 +40,8 @@ def prodex_log_throughput_sample_plan_v1(
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    output[0] = Int64(reset)
-    output[1] = Int64(append)
+    output[unsafe_offset=0] = Int64(reset)
+    output[unsafe_offset=1] = Int64(append)
     return LOG_THROUGHPUT_OK
 
 
@@ -118,3 +118,81 @@ def prodex_log_throughput_stream_rate_v1(
     return throughput_write_rate(
         True, rate, valid_address, rate_address
     )
+
+
+comptime LOG_RETENTION_POLICY_ABI_VERSION: Int64 = 1
+comptime LOG_RETENTION_POLICY_BOUNDED_VALUE: Int64 = 1
+comptime LOG_RETENTION_POLICY_ROTATION: Int64 = 2
+comptime LOG_RETENTION_POLICY_EXPIRED: Int64 = 3
+comptime LOG_RETENTION_POLICY_OVER_BUDGET: Int64 = 4
+comptime LOG_RETENTION_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
+
+
+@export("prodex_log_retention_policy_v1")
+def prodex_log_retention_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    input0: UInt64,
+    input1: UInt64,
+    input2: UInt64,
+    input3: UInt64,
+    input4: UInt64,
+    input5: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_RETENTION_POLICY_ABI_VERSION:
+        return LOG_THROUGHPUT_ABI
+    if output_address == 0:
+        return LOG_THROUGHPUT_INVALID
+
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(4):
+        output[unsafe_offset=index] = 0
+
+    if operation == LOG_RETENTION_POLICY_BOUNDED_VALUE:
+        # input0 present, input1 value, input2 default, input3 min, input4 max
+        if input0 > 1 or input3 > input4:
+            return LOG_THROUGHPUT_INVALID
+        if input0 == 1 and input1 >= input3 and input1 <= input4:
+            output[unsafe_offset=0] = input1
+        else:
+            output[unsafe_offset=0] = input2
+        return LOG_THROUGHPUT_OK
+
+    if operation == LOG_RETENTION_POLICY_ROTATION:
+        # current_size, line_len, max_file_bytes
+        var current_size = input0
+        var line_len = input1
+        var max_file_bytes = input2
+        var next_size: UInt64
+        if LOG_RETENTION_UINT64_MAX - current_size < line_len:
+            next_size = LOG_RETENTION_UINT64_MAX
+        else:
+            next_size = current_size + line_len
+        output[unsafe_offset=0] = UInt64(
+            current_size > 0 and next_size > max_file_bytes
+        )
+        output[unsafe_offset=1] = UInt64(line_len > max_file_bytes)
+        return LOG_THROUGHPUT_OK
+
+    if operation == LOG_RETENTION_POLICY_EXPIRED:
+        # modified_epoch, oldest_allowed encoded with sign-bit bias, removable
+        if input2 > 1:
+            return LOG_THROUGHPUT_INVALID
+        output[unsafe_offset=0] = UInt64(input0 < input1 and input2 == 1)
+        return LOG_THROUGHPUT_OK
+
+    if operation == LOG_RETENTION_POLICY_OVER_BUDGET:
+        # remaining_count, max_files, total_bytes, total_budget, already_removed, removable
+        if input4 > 1 or input5 > 1:
+            return LOG_THROUGHPUT_INVALID
+        var within_budget = input0 <= input1 and input2 <= input3
+        output[unsafe_offset=0] = UInt64(within_budget)
+        output[unsafe_offset=1] = UInt64(
+            not within_budget and input4 == 0 and input5 == 1
+        )
+        return LOG_THROUGHPUT_OK
+
+    return LOG_THROUGHPUT_INVALID

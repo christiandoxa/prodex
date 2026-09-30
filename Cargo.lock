@@ -2841,6 +2841,7 @@ version = "0.434.2"
 dependencies = [
  "fs2",
  "libc",
+ "prodex-mojo-core",
  "prodex-runtime-proxy",
  "serde_json",
  "zstd",
