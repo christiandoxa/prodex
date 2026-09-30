@@ -133,6 +133,11 @@ comptime RUNTIME_HEALTH_SCALAR_SCORE_RETAIN: Int64 = 8
 comptime RUNTIME_HEALTH_SCALAR_SCORE_REPLACE: Int64 = 9
 comptime RUNTIME_HEALTH_SCALAR_SCORE_CLEAR: Int64 = 10
 comptime RUNTIME_HEALTH_SCALAR_HEALTH_SCORE: Int64 = 11
+comptime RUNTIME_HEALTH_SCALAR_BACKOFF_RETAIN: Int64 = 12
+comptime RUNTIME_HEALTH_SCALAR_BACKOFF_UPDATE_RETAIN: Int64 = 13
+comptime RUNTIME_HEALTH_SCALAR_BACKOFF_MERGE: Int64 = 14
+comptime RUNTIME_HEALTH_SCALAR_SELECTION_BACKOFF_ACTIVE: Int64 = 15
+comptime RUNTIME_HEALTH_SCALAR_TRANSPORT_UNTIL: Int64 = 16
 
 def runtime_health_saturating_shift_multiplier(exponent: Int64) -> Int64:
     if exponent <= 0:
@@ -338,6 +343,110 @@ def prodex_runtime_health_scalar_v1(
         output[unsafe_offset=0] = runtime_profile_health_saturating_add(
             total, coupling
         )
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_BACKOFF_RETAIN:
+        if field_count != 3:
+            return 1
+        if fields[unsafe_offset=0] < 0 or fields[unsafe_offset=0] > 1:
+            return 2
+        output[unsafe_offset=0] = Int64(
+            fields[unsafe_offset=0] == 1
+            and fields[unsafe_offset=1] > fields[unsafe_offset=2]
+        )
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_BACKOFF_UPDATE_RETAIN:
+        if field_count != 4:
+            return 1
+        if fields[unsafe_offset=0] < 0 or fields[unsafe_offset=0] > 1:
+            return 2
+        var retention = fields[unsafe_offset=3]
+        if retention < 0:
+            retention = 0
+        var now = fields[unsafe_offset=2]
+        var oldest_seconds = now - retention
+        if retention > 0 and now < INT64_MIN + retention:
+            oldest_seconds = INT64_MIN
+        var oldest_update: Int64
+        if oldest_seconds > 0 and oldest_seconds > INT64_MAX / 1000:
+            oldest_update = INT64_MAX
+        elif oldest_seconds < 0 and oldest_seconds < INT64_MIN / 1000:
+            oldest_update = INT64_MIN
+        else:
+            oldest_update = oldest_seconds * 1000
+        output[unsafe_offset=0] = Int64(
+            fields[unsafe_offset=0] == 1
+            and fields[unsafe_offset=1] >= oldest_update
+        )
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_BACKOFF_MERGE:
+        if field_count != 5:
+            return 1
+        for index in [0, 2, 4]:
+            if fields[unsafe_offset=index] < 0 or fields[unsafe_offset=index] > 1:
+                return 2
+        var existing_update_present = fields[unsafe_offset=0] == 1
+        var incoming_update_present = fields[unsafe_offset=2] == 1
+        var incoming_value_present = fields[unsafe_offset=4] == 1
+        var incoming_is_newer = (
+            incoming_update_present
+            and (
+                not existing_update_present
+                or fields[unsafe_offset=3] >= fields[unsafe_offset=1]
+            )
+        )
+        if incoming_is_newer:
+            output[unsafe_offset=0] = 1 if incoming_value_present else 2
+        elif (
+            not existing_update_present
+            and not incoming_update_present
+            and incoming_value_present
+        ):
+            output[unsafe_offset=0] = 1
+        else:
+            output[unsafe_offset=0] = 0
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_SELECTION_BACKOFF_ACTIVE:
+        if field_count != 7:
+            return 1
+        for index in [0, 2, 4]:
+            if fields[unsafe_offset=index] < 0 or fields[unsafe_offset=index] > 1:
+                return 2
+        var now = fields[unsafe_offset=6]
+        output[unsafe_offset=0] = Int64(
+            (fields[unsafe_offset=0] == 1 and fields[unsafe_offset=1] > now)
+            or (fields[unsafe_offset=2] == 1 and fields[unsafe_offset=3] > now)
+            or (fields[unsafe_offset=4] == 1 and fields[unsafe_offset=5] > now)
+        )
+        return 0
+
+    if operation == RUNTIME_HEALTH_SCALAR_TRANSPORT_UNTIL:
+        if field_count != 5 or output_count != 2:
+            return 1
+        for index in [0, 2]:
+            if fields[unsafe_offset=index] < 0 or fields[unsafe_offset=index] > 1:
+                return 2
+        var now = fields[unsafe_offset=4]
+        var route_active = (
+            fields[unsafe_offset=0] == 1 and fields[unsafe_offset=1] > now
+        )
+        var global_active = (
+            fields[unsafe_offset=2] == 1 and fields[unsafe_offset=3] > now
+        )
+        if not route_active and not global_active:
+            return 0
+        output[unsafe_offset=0] = 1
+        if route_active and global_active:
+            output[unsafe_offset=1] = max(
+                fields[unsafe_offset=1], fields[unsafe_offset=3]
+            )
+        elif route_active:
+            output[unsafe_offset=1] = fields[unsafe_offset=1]
+        else:
+            output[unsafe_offset=1] = fields[unsafe_offset=3]
         return 0
 
     if operation == RUNTIME_HEALTH_SCALAR_BACKOFF_SORT_KEY:
