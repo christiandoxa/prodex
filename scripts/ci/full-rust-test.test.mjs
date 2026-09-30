@@ -293,26 +293,29 @@ test("release verifies optional-tool freshness on the exact release SHA", () => 
   assert.match(verifyCi, /RELEASE_SHA: \$\{\{ steps\.target\.outputs\.target_sha \}\}/);
 });
 
-test("release validates curated notes before creating the tag", () => {
+test("release validates curated notes before API publication", () => {
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
-  const notes = workflow.indexOf("- name: Validate curated release notes before tagging");
-  const tag = workflow.indexOf("- name: Create release tag");
-  assert.ok(notes >= 0, "pre-tag release-note validation is missing");
-  assert.ok(tag > notes, "release notes must be validated before tag creation");
+  const notes = workflow.indexOf("- name: Validate curated release notes before publishing");
+  const publish = workflow.indexOf("- name: Publish GitHub release");
+  assert.ok(notes >= 0, "pre-publication release-note validation is missing");
+  assert.ok(publish > notes, "release notes must be validated before publication");
 });
 
-test("release waits for every asset provenance check before tagging", () => {
+test("release waits for every asset provenance check before API publication", () => {
   const workflow = readFileSync(".github/workflows/standalone-release.yml", "utf8");
   const provenance = workflow.indexOf("- name: Verify release provenance");
-  const tag = workflow.indexOf("- name: Create release tag");
+  const publish = workflow.indexOf("- name: Publish GitHub release");
 
   assert.ok(provenance >= 0, "release provenance verification is missing");
-  assert.ok(tag > provenance, "release provenance must precede tag creation");
-  const step = workflow.slice(provenance, tag);
+  assert.ok(publish > provenance, "release provenance must precede publication");
+  const step = workflow.slice(provenance, publish);
   assert.match(step, /gh attestation verify "\$\{asset\}"/);
   assert.match(step, /pids=\(\)/);
   assert.match(step, /wait "\$\{pids\[index\]\}"/);
   assert.match(step, /exit "\$\{status\}"/);
+  assert.doesNotMatch(workflow, /git tag "\$\{version\}"/);
+  assert.doesNotMatch(workflow, /push origin "refs\/tags\/\$\{version\}"/);
+  assert.match(workflow, /gh release create "\$\{tag\}"[\s\S]*?--target "\$\{TARGET_SHA\}"/);
 });
 
 test("runtime proxy matrix is generated before fan-out without a runner barrier", () => {
