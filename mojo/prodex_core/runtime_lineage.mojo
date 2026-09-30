@@ -280,3 +280,51 @@ def prodex_runtime_lineage_parts_v1(
     output[unsafe_offset=2] = turn_start
     output[unsafe_offset=3] = turn_end
     return LINEAGE_OK
+
+
+comptime LINEAGE_RELEASE_RESPONSE: Int64 = 1
+comptime LINEAGE_RELEASE_TURN_STATE: Int64 = 2
+comptime LINEAGE_RELEASE_SESSION: Int64 = 4
+comptime LINEAGE_RELEASE_COMPACT_SESSION: Int64 = 8
+
+
+@export("prodex_runtime_lineage_release_plan_v1")
+def prodex_runtime_lineage_release_plan_v1(
+    abi_version: Int64,
+    previous_response_present: Int64,
+    previous_response_matches: Int64,
+    turn_state_present: Int64,
+    turn_state_matches: Int64,
+    session_present: Int64,
+    session_matches: Int64,
+    compact_session_matches: Int64,
+) abi("C") -> Int64:
+    if abi_version != LINEAGE_ABI_VERSION:
+        return -4
+    for value in [
+        previous_response_present,
+        previous_response_matches,
+        turn_state_present,
+        turn_state_matches,
+        session_present,
+        session_matches,
+        compact_session_matches,
+    ]:
+        if value != 0 and value != 1:
+            return -1
+
+    var mask: Int64 = 0
+    if previous_response_present == 1 and previous_response_matches == 1:
+        mask |= LINEAGE_RELEASE_RESPONSE
+    if turn_state_present == 1 and turn_state_matches == 1:
+        mask |= LINEAGE_RELEASE_TURN_STATE
+
+    var release_session_affinity = (
+        previous_response_present == 0 and turn_state_present == 0
+    )
+    if release_session_affinity and session_present == 1:
+        if session_matches == 1:
+            mask |= LINEAGE_RELEASE_SESSION
+        if compact_session_matches == 1:
+            mask |= LINEAGE_RELEASE_COMPACT_SESSION
+    return mask

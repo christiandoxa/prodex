@@ -219,39 +219,63 @@ pub(super) fn release_runtime_affinity_bindings(
     session_id: Option<&str>,
     now: i64,
 ) -> bool {
-    let mut changed = false;
-    let release_session_affinity = previous_response_id.is_none() && turn_state.is_none();
-
-    if let Some(previous_response_id) = previous_response_id
-        && runtime
-            .state
-            .response_profile_bindings
-            .get(previous_response_id)
-            .is_some_and(|binding| binding.profile_name == profile_name)
-    {
+    let previous_response_matches = previous_response_id.is_some_and(|response_id| {
         runtime
             .state
             .response_profile_bindings
-            .remove(previous_response_id);
+            .get(response_id)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+    });
+    let turn_state_matches = turn_state.is_some_and(|turn_state| {
+        runtime
+            .turn_state_bindings
+            .get(turn_state)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+    });
+    let compact_key = session_id.map(runtime_compact_session_lineage_key);
+    let session_matches = session_id.is_some_and(|session_id| {
+        runtime
+            .session_id_bindings
+            .get(session_id)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+    });
+    let compact_session_matches = compact_key.as_deref().is_some_and(|key| {
+        runtime
+            .session_id_bindings
+            .get(key)
+            .is_some_and(|binding| binding.profile_name == profile_name)
+    });
+    let plan = prodex_mojo_core::runtime_lineage::release_plan(
+        previous_response_id.is_some(),
+        previous_response_matches,
+        turn_state.is_some(),
+        turn_state_matches,
+        session_id.is_some(),
+        session_matches,
+        compact_session_matches,
+    )
+    .expect("Mojo lineage release planner returned invalid output");
+
+    let mut changed = false;
+    if plan.response {
+        let response_id =
+            previous_response_id.expect("Mojo response release requires previous-response id");
+        runtime.state.response_profile_bindings.remove(response_id);
         let _ = clear_runtime_response_turn_state_lineage(
             &mut runtime.state.response_profile_bindings,
-            previous_response_id,
+            response_id,
         );
         let _ = runtime_mark_continuation_status_dead(
             &mut runtime.continuation_statuses,
             RuntimeContinuationBindingKind::Response,
-            previous_response_id,
+            response_id,
             now,
         );
         changed = true;
     }
 
-    if let Some(turn_state) = turn_state
-        && runtime
-            .turn_state_bindings
-            .get(turn_state)
-            .is_some_and(|binding| binding.profile_name == profile_name)
-    {
+    if plan.turn_state {
+        let turn_state = turn_state.expect("Mojo turn-state release requires turn-state id");
         runtime.turn_state_bindings.remove(turn_state);
         let _ = runtime_mark_continuation_status_dead(
             &mut runtime.continuation_statuses,
@@ -262,41 +286,32 @@ pub(super) fn release_runtime_affinity_bindings(
         changed = true;
     }
 
-    // Dropping previous_response or turn_state affinity should not also erase an existing
-    // session lineage. Fresh fallback may still need that session owner to preserve compact
-    // context or to reapply soft session affinity on the next selection pass.
-    if release_session_affinity && let Some(session_id) = session_id {
-        if runtime
-            .session_id_bindings
-            .get(session_id)
-            .is_some_and(|binding| binding.profile_name == profile_name)
-        {
-            runtime.session_id_bindings.remove(session_id);
-            runtime.state.session_profile_bindings.remove(session_id);
-            let _ = runtime_mark_continuation_status_dead(
-                &mut runtime.continuation_statuses,
-                RuntimeContinuationBindingKind::SessionId,
-                session_id,
-                now,
-            );
-            changed = true;
-        }
-        let compact_key = runtime_compact_session_lineage_key(session_id);
-        if runtime
-            .session_id_bindings
-            .get(&compact_key)
-            .is_some_and(|binding| binding.profile_name == profile_name)
-        {
-            runtime.session_id_bindings.remove(&compact_key);
-            runtime.state.session_profile_bindings.remove(&compact_key);
-            let _ = runtime_mark_continuation_status_dead(
-                &mut runtime.continuation_statuses,
-                RuntimeContinuationBindingKind::SessionId,
-                &compact_key,
-                now,
-            );
-            changed = true;
-        }
+    if plan.session {
+        let session_id = session_id.expect("Mojo session release requires session id");
+        runtime.session_id_bindings.remove(session_id);
+        runtime.state.session_profile_bindings.remove(session_id);
+        let _ = runtime_mark_continuation_status_dead(
+            &mut runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::SessionId,
+            session_id,
+            now,
+        );
+        changed = true;
+    }
+
+    if plan.compact_session {
+        let compact_key = compact_key
+            .as_deref()
+            .expect("Mojo compact-session release requires compact lineage key");
+        runtime.session_id_bindings.remove(compact_key);
+        runtime.state.session_profile_bindings.remove(compact_key);
+        let _ = runtime_mark_continuation_status_dead(
+            &mut runtime.continuation_statuses,
+            RuntimeContinuationBindingKind::SessionId,
+            compact_key,
+            now,
+        );
+        changed = true;
     }
 
     changed

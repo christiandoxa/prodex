@@ -28,6 +28,16 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_runtime_lineage_release_plan_v1(
+        abi_version: i64,
+        previous_response_present: i64,
+        previous_response_matches: i64,
+        turn_state_present: i64,
+        turn_state_matches: i64,
+        session_present: i64,
+        session_matches: i64,
+        compact_session_matches: i64,
+    ) -> i64;
     fn prodex_runtime_lineage_parts_v1(
         abi_version: i64,
         address: u64,
@@ -117,6 +127,49 @@ pub fn response_turn_state_key(response_id: &str, turn_state: &str) -> Result<St
     build(BUILD_RESPONSE_TURN_STATE, response_id, Some(turn_state))
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RuntimeLineageReleasePlan {
+    pub response: bool,
+    pub turn_state: bool,
+    pub session: bool,
+    pub compact_session: bool,
+}
+
+pub fn release_plan(
+    previous_response_present: bool,
+    previous_response_matches: bool,
+    turn_state_present: bool,
+    turn_state_matches: bool,
+    session_present: bool,
+    session_matches: bool,
+    compact_session_matches: bool,
+) -> Result<RuntimeLineageReleasePlan, crate::MojoError> {
+    let mask = unsafe {
+        prodex_runtime_lineage_release_plan_v1(
+            ABI_VERSION,
+            i64::from(previous_response_present),
+            i64::from(previous_response_matches),
+            i64::from(turn_state_present),
+            i64::from(turn_state_matches),
+            i64::from(session_present),
+            i64::from(session_matches),
+            i64::from(compact_session_matches),
+        )
+    };
+    if mask == -4 {
+        return Err(crate::MojoError::AbiMismatch);
+    }
+    if !(0..=15).contains(&mask) {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(RuntimeLineageReleasePlan {
+        response: mask & 1 != 0,
+        turn_state: mask & 2 != 0,
+        session: mask & 4 != 0,
+        compact_session: mask & 8 != 0,
+    })
+}
+
 pub fn response_turn_state_parts(
     key: &str,
 ) -> Result<Option<(usize, usize, usize, usize)>, MojoError> {
@@ -141,4 +194,53 @@ pub fn response_turn_state_parts(
         usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?,
         usize::try_from(output[3]).map_err(|_| MojoError::InvalidOutput)?,
     )))
+}
+
+#[cfg(test)]
+mod release_plan_tests {
+    use super::*;
+
+    #[test]
+    fn release_plan_preserves_session_when_response_or_turn_state_is_present() {
+        assert_eq!(
+            release_plan(true, true, false, false, true, true, true).unwrap(),
+            RuntimeLineageReleasePlan {
+                response: true,
+                turn_state: false,
+                session: false,
+                compact_session: false,
+            }
+        );
+        assert_eq!(
+            release_plan(false, false, true, true, true, true, true).unwrap(),
+            RuntimeLineageReleasePlan {
+                response: false,
+                turn_state: true,
+                session: false,
+                compact_session: false,
+            }
+        );
+    }
+
+    #[test]
+    fn release_plan_releases_session_lineage_only_without_response_or_turn_state() {
+        assert_eq!(
+            release_plan(false, false, false, false, true, true, true).unwrap(),
+            RuntimeLineageReleasePlan {
+                response: false,
+                turn_state: false,
+                session: true,
+                compact_session: true,
+            }
+        );
+        assert_eq!(
+            release_plan(false, false, false, false, true, false, true).unwrap(),
+            RuntimeLineageReleasePlan {
+                response: false,
+                turn_state: false,
+                session: false,
+                compact_session: true,
+            }
+        );
+    }
 }
