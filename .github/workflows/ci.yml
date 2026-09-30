@@ -29,7 +29,6 @@ jobs:
     timeout-minutes: 30
     outputs:
       heavy: ${{ steps.impact.outputs.heavy }}
-      runtime_bench: ${{ steps.impact.outputs.runtime_bench }}
       reason: ${{ steps.impact.outputs.reason }}
       prodex_app_matrix: ${{ steps.prodex-app-matrix.outputs.matrix }}
       windows_prodex_app_matrix: ${{ steps.prodex-app-matrix.outputs.windows_matrix }}
@@ -84,7 +83,6 @@ jobs:
       - name: Report CI impact
         run: |
           echo "heavy=${{ steps.impact.outputs.heavy }}"
-          echo "runtime_bench=${{ steps.impact.outputs.runtime_bench }}"
           echo "reason=${{ steps.impact.outputs.reason }}"
 
       - name: Generate runtime proxy shard matrix
@@ -1625,45 +1623,6 @@ jobs:
           path: ${{ env.RUNTIME_PROXY_ARTIFACT_DIR }}
           if-no-files-found: ignore
 
-  runtime-proxy-bench-smoke:
-    needs: [changes, mojo-runtime-linux-archive]
-    if: needs.changes.outputs.runtime_bench == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      CARGO_PROFILE_BENCH_DEBUG: "0"
-      RUSTC_WRAPPER: sccache
-      PRODEX_MOJO_ARCHIVE: ${{ github.workspace }}/.prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu/libprodex_mojo_core.a
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
-      - name: Download runtime Mojo archive
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with:
-          name: mojo-runtime-archive-x86_64-unknown-linux-gnu
-          path: .prodex-ci/mojo-runtime/x86_64-unknown-linux-gnu
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
-        with:
-          toolchain: 1.98.1
-
-      - name: Install sccache
-        uses: mozilla-actions/sccache-action@fc920bf0ec8de6ee65d409111f7ec508035751ba # v0.0.11
-
-      - name: Cache Rust dependencies
-        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          save-if: ${{ github.job == 'runtime-proxy-bench-smoke' }}
-
-      - name: Check runtime proxy benchmark regression thresholds
-        env:
-          PRODEX_RUNTIME_PROXY_BENCH_CHECK: "1"
-          PRODEX_RUNTIME_PROXY_BENCH_THRESHOLD_FILE: scripts/ci/runtime-proxy-bench-thresholds.json
-        run: cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths
-
   runtime-load-smoke:
     needs: [changes, mojo-runtime-linux-archive]
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.heavy == 'true'
@@ -2014,7 +1973,6 @@ jobs:
       - main-internal-core
       - env-sensitive-parallel-guard
       - main-internal-runtime-proxy
-      - runtime-proxy-bench-smoke
       - runtime-load-smoke
       - runtime-stress
       - real-mojo

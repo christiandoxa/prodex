@@ -318,7 +318,7 @@ test("release waits for every asset provenance check before tagging", () => {
 test("runtime proxy matrix is generated before fan-out without a runner barrier", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const changes = workflow.match(/\n  changes:\n([\s\S]*?)\n  fmt:/)?.[1];
-  const runtimeProxy = workflow.match(/\n  main-internal-runtime-proxy:\n([\s\S]*?)\n  runtime-proxy-bench-smoke:/)?.[1];
+  const runtimeProxy = workflow.match(/\n  main-internal-runtime-proxy:\n([\s\S]*?)\n  runtime-load-smoke:/)?.[1];
 
   assert.ok(changes, "changes job missing");
   assert.ok(runtimeProxy, "main-internal-runtime-proxy job missing");
@@ -329,25 +329,15 @@ test("runtime proxy matrix is generated before fan-out without a runner barrier"
   assert.doesNotMatch(workflow, /\n  runtime-proxy-shard-matrix:/);
 });
 
-test("runtime proxy benchmark remains independently gated with one cache writer", () => {
+test("push CI omits the skipped runtime proxy benchmark smoke lane", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
-  const runtimeProxy = workflow.match(
-    /\n  runtime-proxy-bench-smoke:\n([\s\S]*?)\n  runtime-load-smoke:/,
-  )?.[1];
+  const calibration = readFileSync(".github/workflows/bench-calibration.yml", "utf8");
   const telemetry = workflow.match(/\n  ci-duration-telemetry:\n([\s\S]*)/)?.[1];
 
-  assert.ok(runtimeProxy, "runtime proxy benchmark job missing");
-  assert.ok(telemetry, "CI duration telemetry job missing");
-  assert.match(runtimeProxy, /PRODEX_RUNTIME_PROXY_BENCH_CHECK/);
-  assert.match(runtimeProxy, /runtime_proxy_hot_paths/);
-  assert.doesNotMatch(runtimeProxy, /governance_hot_paths/);
-  assert.equal(
-    runtimeProxy.match(/save-if: \$\{\{ github\.job == 'runtime-proxy-bench-smoke' \}\}/g)?.length,
-    1,
-  );
-  assert.match(telemetry, /- runtime-proxy-bench-smoke/);
-  assert.doesNotMatch(workflow, /\n  runtime-governance-bench-smoke:/);
-  assert.doesNotMatch(telemetry, /- runtime-governance-bench-smoke/);
+  assert.doesNotMatch(workflow, /\n  runtime-proxy-bench-smoke:\n/);
+  assert.doesNotMatch(telemetry, /- runtime-proxy-bench-smoke/);
+  assert.match(calibration, /runtime_proxy_hot_paths/);
+  assert.match(calibration, /cargo bench --locked --features bench-support --bench runtime_proxy_hot_paths/);
 });
 
 test("runtime proxy logical suites pack without losing filters", () => {
@@ -437,7 +427,7 @@ test("scheduled CI delegates duplicate Ubuntu suites to the daily full test", ()
     ["auto-rotate", "profile-commands-internal"],
     ["profile-commands-internal", "main-internal-core"],
     ["main-internal-core", "env-sensitive-parallel-guard"],
-    ["main-internal-runtime-proxy", "runtime-proxy-bench-smoke"],
+    ["main-internal-runtime-proxy", "runtime-load-smoke"],
   ]) {
     const job = workflow.match(new RegExp(`\\n  ${jobName}:\\n([\\s\\S]*?)\\n  ${nextJob}:`))?.[1];
     assert.ok(job, `${jobName} job missing`);
@@ -451,7 +441,7 @@ test("scheduled CI delegates duplicate Ubuntu suites to the daily full test", ()
 test("large CI matrices use one cache writer and retain failure diagnostics", () => {
   const workflow = readFileSync(".github/workflows/ci.yml", "utf8");
   const core = workflow.match(/\n  main-internal-core:\n([\s\S]*?)\n  env-sensitive-parallel-guard:/)?.[1];
-  const runtime = workflow.match(/\n  main-internal-runtime-proxy:\n([\s\S]*?)\n  runtime-proxy-bench-smoke:/)?.[1];
+  const runtime = workflow.match(/\n  main-internal-runtime-proxy:\n([\s\S]*?)\n  runtime-load-smoke:/)?.[1];
   const stress = workflow.match(/\n  runtime-stress:\n([\s\S]*?)\n  ci-duration-telemetry:/)?.[1];
   const processGuard = workflow.match(/\n  process-guard:\n([\s\S]*?)\n  supply-chain:/)?.[1];
 
