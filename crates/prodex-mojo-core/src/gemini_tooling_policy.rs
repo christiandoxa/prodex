@@ -51,6 +51,14 @@ unsafe extern "C" {
         input_address: u64,
         input_length: i64,
     ) -> i64;
+    fn prodex_gemini_unified_diff_to_apply_patch_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
 }
 
 fn signed(value: usize) -> Result<i64, MojoError> {
@@ -124,6 +132,46 @@ pub fn gemini_model_uses_gemini3_toolset(model: &str) -> Result<bool, MojoError>
     }
 }
 
+pub fn gemini_unified_diff_to_apply_patch(input: &str) -> Result<Option<String>, MojoError> {
+    const MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+    let mut capacity = input.len().saturating_mul(2).saturating_add(4096).max(4096);
+    capacity = capacity.min(MAX_OUTPUT_BYTES);
+    loop {
+        let mut output = vec![0_u8; capacity];
+        let mut written = 0_i64;
+        let result = unsafe {
+            prodex_gemini_unified_diff_to_apply_patch_v1(
+                ABI_VERSION,
+                input.as_ptr() as usize as u64,
+                signed(input.len())?,
+                output.as_mut_ptr() as usize as u64,
+                signed(output.len())?,
+                (&mut written as *mut i64) as usize as u64,
+            )
+        };
+        match result {
+            0 => {
+                let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+                if written > output.len() {
+                    return Err(MojoError::InvalidOutput);
+                }
+                output.truncate(written);
+                return String::from_utf8(output)
+                    .map(Some)
+                    .map_err(|_| MojoError::InvalidOutput);
+            }
+            2 => return Ok(None),
+            3 if capacity < MAX_OUTPUT_BYTES => {
+                capacity = capacity.saturating_mul(2).min(MAX_OUTPUT_BYTES);
+            }
+            1 => return Err(MojoError::InvalidInput),
+            3 => return Err(MojoError::Capacity),
+            4 => return Err(MojoError::AbiMismatch),
+            _ => return Err(MojoError::InvalidOutput),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +208,45 @@ mod tests {
         assert_eq!(empty.suffix, "");
         assert!(empty.aliases.is_empty());
         assert!(!empty.mutating);
+    }
+
+    #[test]
+    fn gemini_unified_diff_kernel_converts_update_add_delete_and_move() {
+        let input = concat!(
+            "diff --git a/a.txt b/b.txt\n",
+            "--- a/a.txt\n",
+            "+++ b/b.txt\n",
+            "@@ -1 +1 @@ context\n",
+            "-old\n",
+            "+new\n",
+            "diff --git a/new.txt b/new.txt\n",
+            "--- /dev/null\n",
+            "+++ b/new.txt\n",
+            "@@ -0,0 +1 @@\n",
+            "+hello\n",
+            "diff --git a/gone.txt b/gone.txt\n",
+            "--- a/gone.txt\n",
+            "+++ /dev/null\n",
+        );
+        assert_eq!(
+            gemini_unified_diff_to_apply_patch(input).unwrap().unwrap(),
+            concat!(
+                "*** Begin Patch\n",
+                "*** Update File: a.txt\n",
+                "*** Move to: b.txt\n",
+                "@@ context\n",
+                "-old\n",
+                "+new\n",
+                "*** Add File: new.txt\n",
+                "+hello\n",
+                "*** Delete File: gone.txt\n",
+                "*** End Patch",
+            )
+        );
+        assert_eq!(
+            gemini_unified_diff_to_apply_patch("plain text").unwrap(),
+            None
+        );
     }
 
     #[test]

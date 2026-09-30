@@ -1,9 +1,5 @@
 use serde_json::Value;
 
-mod unified_diff;
-
-use self::unified_diff::gemini_unified_diff_to_apply_patch;
-
 pub(crate) fn gemini_custom_apply_patch_input(args_value: &Value) -> String {
     if let Some(input) = gemini_explicit_apply_patch_input(args_value) {
         return gemini_normalize_apply_patch_input(input).unwrap_or_else(|| input.to_string());
@@ -36,7 +32,10 @@ fn gemini_content_apply_patch_input(args_value: &Value) -> Option<&str> {
 }
 
 fn gemini_normalize_apply_patch_input(input: &str) -> Option<String> {
-    gemini_extract_apply_patch_block(input).or_else(|| gemini_unified_diff_to_apply_patch(input))
+    gemini_extract_apply_patch_block(input).or_else(|| {
+        prodex_mojo_core::gemini_tooling_policy::gemini_unified_diff_to_apply_patch(input)
+            .expect("Mojo Gemini unified-diff conversion failed")
+    })
 }
 
 fn gemini_extract_apply_patch_block(input: &str) -> Option<String> {
