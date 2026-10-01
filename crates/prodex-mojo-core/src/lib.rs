@@ -161,6 +161,8 @@ pub mod runtime_state_quota;
 #[cfg(feature = "mojo-runtime")]
 pub mod shared_attachment_policy;
 #[cfg(feature = "mojo-runtime")]
+pub mod shared_history_policy;
+#[cfg(feature = "mojo-runtime")]
 pub mod smart_context_artifact_ref;
 #[cfg(feature = "mojo-runtime")]
 pub mod smart_context_markers;

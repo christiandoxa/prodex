@@ -18,14 +18,36 @@ pub(super) fn is_history_jsonl(path: &Path) -> bool {
 
 pub(super) fn merge_history_files(source: &Path, destination: &Path) -> Result<()> {
     let mut merged = Vec::new();
-    let mut seen = BTreeSet::new();
 
     let destination_metadata = load_shared_codex_entry_metadata(destination)?;
     if let Some(metadata) = destination_metadata.as_ref() {
         ensure_shared_codex_file_public(destination, metadata)?;
-        load_history_lines(destination, &mut merged, &mut seen)?;
+        load_history_lines(destination, &mut merged)?;
     }
-    load_history_lines(source, &mut merged, &mut seen)?;
+    load_history_lines(source, &mut merged)?;
+
+    let plan = prodex_mojo_core::shared_history_policy::dedup_plan(
+        &merged
+            .iter()
+            .map(|entry| entry.line.as_str())
+            .collect::<Vec<_>>(),
+        CODEX_HISTORY_MERGE_MAX_BYTES,
+    )
+    .expect("Mojo history dedup policy returned invalid output");
+    if plan.exceeds_limit {
+        bail!(
+            "merged history {} exceeds safe size limit ({} bytes)",
+            destination.display(),
+            CODEX_HISTORY_MERGE_MAX_BYTES
+        );
+    }
+    let mut index = 0usize;
+    merged.retain(|_| {
+        let keep = plan.keep[index];
+        index += 1;
+        keep
+    });
+    debug_assert_eq!(merged.len(), plan.unique_count);
 
     merged.sort_by(|left, right| match (left.ts, right.ts) {
         (Some(left_ts), Some(right_ts)) => {
@@ -34,19 +56,10 @@ pub(super) fn merge_history_files(source: &Path, destination: &Path) -> Result<(
         _ => left.order.cmp(&right.order),
     });
 
-    let mut content = String::new();
+    let capacity = usize::try_from(plan.total_bytes)
+        .context("merged history size does not fit this platform")?;
+    let mut content = String::with_capacity(capacity);
     for (index, entry) in merged.iter().enumerate() {
-        let next_len = content
-            .len()
-            .saturating_add(usize::from(index > 0))
-            .saturating_add(entry.line.len());
-        if next_len as u64 > CODEX_HISTORY_MERGE_MAX_BYTES {
-            bail!(
-                "merged history {} exceeds safe size limit ({} bytes)",
-                destination.display(),
-                CODEX_HISTORY_MERGE_MAX_BYTES
-            );
-        }
         if index > 0 {
             content.push('\n');
         }
@@ -68,11 +81,7 @@ pub(super) fn merge_history_files(source: &Path, destination: &Path) -> Result<(
     )
 }
 
-fn load_history_lines(
-    path: &Path,
-    merged: &mut Vec<HistoryLine>,
-    seen: &mut BTreeSet<String>,
-) -> Result<()> {
+fn load_history_lines(path: &Path, merged: &mut Vec<HistoryLine>) -> Result<()> {
     let file = open_history_file_for_merge(path)?;
     let mut reader = BufReader::new(file);
     let mut raw_line = String::new();
@@ -99,7 +108,7 @@ fn load_history_lines(
         }
 
         let line = raw_line.trim_end_matches('\n').trim_end_matches('\r');
-        if line.is_empty() || !seen.insert(line.to_string()) {
+        if line.is_empty() {
             continue;
         }
 
