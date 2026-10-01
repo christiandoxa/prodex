@@ -2995,6 +2995,7 @@ dependencies = [
  "anyhow",
  "crossterm",
  "libc",
+ "prodex-mojo-core",
  "ratatui",
  "unicode-width",
 ]
