@@ -2,60 +2,119 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.434.3 - 2026-10-01
+
+### Runtime
+
+- Migrate websocket recovery policy (`a65206e`)
+- Migrate runtime health backoff policy (`b54ee48`)
+- Migrate websocket response failure policy (`068a5ed`)
+- Migrate websocket failure policy (`a4da101`)
+- Migrate runtime log retention policy (`6e42ebe`)
+- Migrate runtime admission policy (`d0832e6`)
+
+### CLI
+
+- Migrate profile password policy (`10cb1c1`)
+- Expose validated optional tools to exec (`fe31ee4`)
+- Migrate profile identity source policy (`6aa569f`)
+- Migrate quota auth policy (`303ac12`)
+- Migrate profile import identity policy (`11ede5e`)
+- Migrate profile backoff policy (`57ebb15`)
+- Migrate profile score policy (`3920a9b`)
+- Migrate cached quota source policy (`5589543`)
+
+### Claude
+
+- Migrate Anthropic retry transition (`3f7b187`)
+
+### Misc
+
+- Classify private key fields as sensitive (`a08813b`)
+- Align Codex 0.159.3 (`4a6f160`)
+- Migrate noncompact failure policy (`5d06911`)
+- Migrate Super choice policy (`1a93be4`)
+- Migrate login menu policy (`92c61df`)
+- Migrate lineage lookup policy (`3bd28ea`)
+- Migrate repo map indexing policy (`2f3dbed`)
+- Migrate login argument policy (`50d6191`)
+- Migrate provider SSE framing policy (`8d3d1a1`)
+- Migrate Presidio transport policy (`baf86b6`)
+- Migrate Super prompt step policy (`697a27c`)
+- Migrate waitable candidate policy (`3a16ee9`)
+- Migrate response usage progress policy (`7b71251`)
+- Migrate Gemini SSE lifecycle policy (`90ae761`)
+- Migrate hard binding resolution (`29c24ba`)
+- Migrate upstream payload classification (`c51bc72`)
+- Migrate lineage release policy (`a6cf981`)
+- Migrate Presidio JSON field policy (`3319ebe`)
+- Migrate provider route parsing (`a5b37b8`)
+- Migrate Kiro response input policy (`f4763b8`)
+- Migrate provider retry policy (`06622ce`)
+- Migrate affinity outcome policy (`46b7c6c`)
+- Migrate DeepSeek native search policy (`ea15989`)
+- Migrate Gemini unified diff parser (`4ec4ed9`)
+# Prodex 0.434.3
+
+## New Features
+
+### Codex 0.159.3 Compatibility
+
+- Advance the audited Codex compatibility target to `rust-v0.159.3`.
+- Accommodate Codex's new optional account-security setup reminder without
+  routing its authenticated account/read request through Prodex model-account
+  rotation.
+- Keep `chatgpt_base_url` Codex-owned for local ChatGPT bootstrap traffic while
+  model traffic continues through the governed Prodex model provider.
+- Guard the upstream reminder contract: local ChatGPT auth only, connected
+  app-server/saved-login identity match, remote-workspace and FedRAMP exclusion,
+  redirects disabled, three-second timeout, identity recheck, and action URLs
+  restricted to HTTPS `chatgpt.com`.
+
+## Bug Fixes
+
+- Restore the Mojo Presidio JSON-field policy so normalized `private_key`
+  fields are treated as sensitive and classified as private keys instead of
+  falling through to a non-sensitive result.
+
+## CI Maintenance
+
+- Split oversized noncompact runtime handling and Mojo quota/selection tests
+  into focused modules so the post-consolidation source stays within size
+  guard budgets.
+- Consolidate the repo-map module-like check onto the existing symbol-kind ABI,
+  refresh the reviewed `too_many_arguments` allowlist entries, and make the
+  optional-tool exec assertion normalize Windows CRLF output.
+
+## Verification
+
+- Exact 0.159.2-to-0.159.3 tagged-source comparison: 24 changed files, 833
+  additions, and 5 deletions.
+- Existing 0.159.2 compatibility replay: 511/511 source markers present on the
+  exact 0.159.3 tree.
+- Official 0.159.3 Linux musl CLI and app-server release assets match their
+  published SHA-256 digests; the CLI reports `codex-cli 0.159.3`.
+- Isolated official 0.159.3 app-server initialize handshake with
+  `experimentalApi=true`: accepted on Linux with the synthetic Codex home.
+- Prodex runtime-launch tests confirm account/read `chatgpt_base_url` remains
+  outside the local model proxy.
+- Prodex Mojo core all-features tests pass, including the private-key
+  classification regression; static size, ownership, allow-attribute, and
+  runtime guards pass after the post-consolidation splits.
+
+## Changelog
+
+- Align the audited Codex baseline with `rust-v0.159.3`.
+- Track the new account-security reminder's identity and origin safety
+  invariants while preserving Prodex's existing model-routing behavior.
+
+Full Changelog: [0.434.2...0.434.3](https://github.com/christiandoxa/prodex/compare/0.434.2...0.434.3)
+
 ## 0.434.2 - 2026-09-30
 
 ### CLI
 
 - Auto-trust local workspaces (`21ead45`)
-# Prodex 0.434.2
-
-## New Features
-
-- Super mode now projects local workspace trust through the same private
-  app-server boundary used by the Codex TUI, so `prodex s` starts directly in
-  trusted Super mode instead of requiring a separate Codex folder-consent step.
-
-## Bug Fixes
-
-- Make local `prodex s` Super launches trust the active workspace automatically
-  without showing Codex's **Folder access / Trust and continue** prompt.
-- Persist Super workspace trust into the temporary overlay `CODEX_HOME` before
-  Codex starts, so the app-server's server-side trust decision matches the TUI.
-- Route plain local Super TUI sessions through the private per-launch app-server
-  companion. Direct local resume paths disable implicit daemon reuse so they
-  cannot inherit stale trust state from another Codex daemon.
-
-## CI Maintenance
-
-- Remove the redundant optional-tool freshness lane from push CI; standalone
-  release continues to verify optional-tool freshness on the exact release SHA
-  before release cut and publish.
-- Fix the scheduled full-test Mojo archive artifact path so the full-test matrix
-  runs instead of being skipped after an archive upload failure.
-- Add CI regression coverage for both the artifact path contract and removal of
-  the redundant freshness lane.
-
-## Verification
-
-- Focused Super overlay regressions: 7/7 pass.
-- Super workspace/resume trust regressions: 4/4 pass.
-- Prodex app Clippy with warnings denied: pass.
-- Real TTY smoke from `/home/doxa/Documents/brispot`: the private app-server
-  starts at the launch overlay socket, Codex TUI connects to that same socket
-  with `--remote unix://.../.s`, and the overlay config contains
-  `[projects."/home/doxa/Documents/brispot"] trust_level = "trusted"`.
-- The smoke issued no model prompt and observed no `Folder access`,
-  `Trust this folder?`, or `Trust and continue` UI.
-- Full-test workflow regression suite: 23/23 pass.
-
-## Changelog
-
-- Auto-trust local Super workspaces at both the TUI and app-server trust
-  boundaries.
-- Repair the daily full-test Mojo artifact handoff and remove redundant push-CI
-  freshness noise.
-
-Full Changelog: [0.434.1...0.434.2](https://github.com/christiandoxa/prodex/compare/0.434.1...0.434.2)
 
 ## 0.434.1 - 2026-09-30
 
@@ -86,59 +145,6 @@ Full Changelog: [0.434.1...0.434.2](https://github.com/christiandoxa/prodex/comp
 - Remove runtime boolean duplicates (`7f1bf29`)
 - Centralize runtime catalog identity (`905fc58`)
 - Centralize runtime provider classification (`9109253`)
-
-### CLI
-
-- Support mixed attachment separators (`a37b9c8`)
-- Persist resumed pasted attachments (`670e153`)
-- Migrate quota render casefold policy (`97a9e27`)
-- Remember thread model and trust workspace (`688e364`)
-- Pretrust managed-profile resume workspace (`6589315`)
-- Remove quota identity duplicates (`3fbd892`)
-- Migrate stored profile identity matching (`9a5585b`)
-- Migrate login profile slug sanitizer (`8a5445d`)
-- Dedupe provider profile catalogs (`5b1b825`)
-- Classify profile import sources (`3549448`)
-- Remove provider profile alias duplicate (`d53ef80`)
-
-### Misc
-
-- Align Codex 0.159.0 (`39a9d2c`)
-- Migrate secret backend identity (`44d43df`)
-- Migrate Copilot export host identity (`bfe7cdb`)
-- Migrate Presidio identity policy (`3bf0f7d`)
-- Migrate usage-limit text policy (`590098b`)
-- Migrate session launch identity (`8837918`)
-- Remove binary host casefold duplicates (`af224ba`)
-- Add casefold substring search (`5e1b2ab`)
-- Migrate provider scalar policy (`7d1313a`)
-- Migrate Gemini tooling policy (`a32c1fe`)
-- Migrate confirmation token policy (`faa7f85`)
-- Migrate optional-tools policy (`821145c`)
-- Migrate provider casefold policy (`b7901eb`)
-- Add casefold text relations (`39efe4a`)
-- Finish exact identity cleanup (`29cc6cf`)
-- Remove exact identity duplicates (`2ec7f4d`)
-- Migrate Gemini exact-output guardrails (`65d5d0c`)
-- Migrate Gemini guardrail text policy (`62e44c1`)
-- Centralize exact casefold equality (`9e0983b`)
-- Resolve Kiro model identity (`8ef9a1c`)
-- Resolve external catalog identity (`4a4385f`)
-- Add exact catalog identity resolver (`5d8d37d`)
-- Dedupe sub-agent catalogs (`b8bef27`)
-- Dedupe bundled models in catalog (`4c1a5cd`)
-- Centralize CI truth policy (`4047999`)
-- Remove Gemini boolean duplicate (`b4640f6`)
-- Migrate DeepSeek config token policy (`dea1626`)
-- Hard-replace sub-agent launch policy (`dcd5741`)
-- Centralize model provider classification (`1717673`)
-- Migrate Kiro response tool-call policy (`b2d6a32`)
-- Migrate Gemini stream metadata merge (`bb24169`)
-
-## 0.433.0 - 2026-09-28
-
-### Runtime
-
 - Migrate runtime transcript semantics (`87bcb9a`)
 - Require runtime tuning Mojo unconditionally (`263740d`)
 - Migrate runtime lineage semantics (`3a10a02`)
@@ -146,152 +152,12 @@ Full Changelog: [0.434.1...0.434.2](https://github.com/christiandoxa/prodex/comp
 - Migrate runtime proxy request policy (`0e5042b`)
 - Migrate runtime state background policy (`49e8e08`)
 - Remove runtime feature-off fallbacks (`036d655`)
-
-### CLI
-
-- Pretrust resume workspaces (`acb9773`)
-- Migrate profile export policy limits (`6e49369`)
-- Migrate quota selection policy (`a80b29f`)
-- Migrate quota model policy (`f2795fd`)
-- Migrate profile identity planning (`eea5e32`)
-- Retire governance and quota rust oracles (`e6d850e`)
-
-### Deps
-
-- Bump the cargo group with 2 updates (`7170f87`)
-
-### Misc
-
-- Align with Codex 0.158.0 (`5c6421c`)
-- Migrate broker guard and throughput policy (`afb7fec`)
-- Migrate Super provider config policy (`cd9044d`)
-- Migrate Super expose dispatch validation (`676b245`)
-- Migrate sub-agent CLI policy (`71f1cbc`)
-- Migrate Super expose protocol policy (`5c4638e`)
-- Migrate provider usage policy (`169c27b`)
-- Migrate DeepSeek metadata policy (`3761073`)
-- Migrate route trace identifier policy (`4c05fae`)
-- Merge pull request #97 from christiandoxa/dependabot/github_actions/github-actions-3a0b6790fd (`a0bf1ba`)
-- Merge pull request #96 from christiandoxa/dependabot/cargo/cargo-b32a5ec21a (`e9f7189`)
-- Migrate route decision reason policy (`d687a17`)
-- Make Gemini stream shaping unconditional (`8353329`)
-- Consolidate hard binding remember policy (`af08157`)
-- Harden artifact line range parsing (`e48582b`)
-- Migrate smart context semantic markers (`f3c84fc`)
-- Migrate smart context artifact refs (`2374405`)
-- Migrate session report metadata (`635ef58`)
-- Migrate smart context repo map semantics (`53bd3da`)
-- Consolidate Gemini tool assembly (`aec663e`)
-- Migrate broker continuity semantics (`754f2a1`)
-- Migrate state and codex config policy (`7b06bb4`)
-- Migrate redaction semantics (`0cc1403`)
-- Hard replace cli launch feature gates (`40822dd`)
-- Remove prodex app feature fallbacks (`5271d68`)
-- Hard replace provider response fallbacks (`d4bd318`)
-- Remove Gemini bridge fallbacks (`f1df0c4`)
-- Hard replace Gemini request translation (`416db36`)
-- Hard replace DeepSeek stream shapes (`208df26`)
-- Hard replace Kiro ACP shapes (`f5e0d64`)
-- Hard replace Kiro response helpers (`9d612ba`)
-
-## 0.432.2 - 2026-09-27
-
-### Runtime
-
 - Support Codex 0.157.1 resume (`4dec9c0`)
 - Shorten overlays for Codex daemon sockets (`4ddf7d7`)
 - Own continuation binding retention (`b496617`)
 - Own continuation status policy (`04f03f7`)
 - Own runtime log tokenization (`26ebebe`)
-
-### CLI
-
-- Aggregate OpenAI pools in Mojo (`8fc4c10`)
-- Own quota status classification (`f70166a`)
-- Own OpenAI model quota planning (`b78bd72`)
-
-### Claude
-
-- Move Anthropic response defaults into Mojo (`598b5f3`)
-- Move Anthropic web-search shaping into Mojo (`42cf266`)
-
-### Docs
-
-- Record hard replacement authority and current share (`cf17b3c`)
-
-### Misc
-
-- Route Gemini text parts through Mojo (`1e38aac`)
-- Move Kiro chat responses into Mojo (`430336a`)
-- Move Gemini system instructions into Mojo (`c02469a`)
-- Isolate MSVC weak aliases (`bf06276`)
-- Support Codex 0.157.0 (`a96f995`)
-- Merge pull request #95 from christiandoxa/mojo-75-chat-response-20260925 (`37f9f12`)
-- Shape function history parts in Mojo (`376c06f`)
-- Move label validation to Mojo (`8cd0b67`)
-- Move request validation to Mojo (`87fba48`)
-- Own provider error classification (`e5e4e0e`)
-- Own Gemini stream event transform (`470f27d`)
-- Own rate-limit header classification (`978d600`)
-- Own SSE inspection transitions (`637d81b`)
-- Own SSE line planning (`aafd19f`)
-- Own response forwarding classification (`14b939d`)
-- Record collapsed Smart Context adapters (`f458dda`)
-- Own previous response error classification (`db4514b`)
-- Own request compatibility surface planning (`ed73a21`)
-- Own retry-after numeric policy (`12dc895`)
-- Route remaining human status through ratatui (`cb04b3e`)
-- Render interactive command status with ratatui (`bbaea3e`)
-- Own operational log detail planning (`3506b8b`)
-- Own operational log event classification (`b9b3343`)
-
-## 0.431.7 - 2026-09-24
-
-### Runtime
-
 - Remove obsolete native event provider argument (`033dbe5`)
-
-### CLI
-
-- Accept overridden hook trust writes (`be65261`)
-- Report incompatible optional tools as info (`c6c9df5`)
-- Skip incompatible optional tools by default (`b39fe11`)
-- Trust hooks by hash before launch (`1942397`)
-- Keep trust bypass CLI-only (`6295c79`)
-- Preserve Codex workspace bootstrap URL (`98a7beb`)
-- Preserve quota observations and accept unknown log tokens (`af60a49`)
-- Move config override matching into Mojo (`e362aea`)
-- Make Mojo authoritative for Codex argument plans (`e7a63eb`)
-
-### Claude
-
-- Move Anthropic Messages request shaping into Mojo (`dbbd8d7`)
-- Add complete Anthropic Messages request kernel (`b6a9147`)
-
-### Docs
-
-- Record stable 1.1 compiler baseline (`1c04046`)
-
-### Misc
-
-- Treat missing Playwright as optional (`7675cee`)
-- Show redacted expose exec commands (`da3ad15`)
-- Accept capability-compatible dependency versions (`2d2bb48`)
-- Align with Codex 0.156.1 (`6e1605d`)
-- Align with Codex 0.156.0 (`d42c691`)
-- Move complete Responses chat request planning to Mojo (`6fad0fb`)
-- Add complete Responses chat request kernel (`9002804`)
-- Move DeepSeek message semantics into Mojo (`2a2fd41`)
-- Add complete DeepSeek message normalization and adjacency (`02daf98`)
-- Copy validated JSON arena spans in bulk (`70a1aeb`)
-- Make Mojo authoritative for complete tool shaping (`c892781`)
-- Add complete provider tool transformation kernel (`17db154`)
-- Add versioned Codex argument planning kernel (`efef200`)
-
-## 0.430.4 - 2026-09-22
-
-### Runtime
-
 - Preserve overload backoff across second boundary (`cf95260`)
 - Restore final provider and prompt behavior (`4edab45`)
 - Own runtime doctor route summaries (`a92255d`)
@@ -299,66 +165,6 @@ Full Changelog: [0.434.1...0.434.2](https://github.com/christiandoxa/prodex/comp
 - Own runtime health decision policy (`9a28bae`)
 - Own runtime health backoff policy (`8cc944d`)
 - Restore runtime log command (`c641193`)
-
-### CLI
-
-- Handle zero-height profile terminals (`b5ff2d8`)
-- Keep native Antigravity profileless (`0e9aafd`)
-- Retain Antigravity CLI compatibility (`aa9b86b`)
-- Gate reset-credit URL with Mojo quota (`4d07c35`)
-- Add exec-only expose surface (`17b40fa`)
-- Restore local expose endpoint (`6d4766c`)
-- Restore OpenAI application ping (`8e3d256`)
-- Restore prodex info summary (`488fe17`)
-
-### Claude
-
-- Restore Anthropic Messages compatibility (`94c8c5a`)
-- Supervise OpenAI Secure MCP tunnel client (`6ca80f9`)
-
-### Docs
-
-- Align native provider compatibility guidance (`9daf777`)
-
-### Misc
-
-- Keep tunnel client alive after readiness (`c315b54`)
-- Revalidate latest tool trees (`b2ac0c8`)
-- Support tunnel-client 0.0.13 (`b19c2c3`)
-- Restore Windows session bridge portability (`9403127`)
-- Restore manual redeem command (`154876f`)
-- Restore preserved 0.429.4 behavior (`7122191`)
-- Preserve token usage json envelope (`1faf08a`)
-- Restore remaining interactive prompts (`ef861e9`)
-- Restore 0.429.4 terminal surfaces (`f5fc368`)
-- Restore migration guidance wording (`43ba4a3`)
-- Preserve Messages parity without Mojo (`ce669e4`)
-- Own Gemini request policy and assembly (`e563934`)
-- Own DeepSeek tool shape validation (`c26c825`)
-- Own DeepSeek request policy validation (`d59f787`)
-- Own DeepSeek bridge input shaping (`49c6c4c`)
-- Own common Gemini text transforms (`3f2e361`)
-- Complete DeepSeek request shaping (`6e244f4`)
-- Own DeepSeek request metadata (`f91fd90`)
-- Own DeepSeek input array shaping (`19206b4`)
-- Own common DeepSeek request shaping (`fd313e7`)
-- Own Kiro chat response rewrite (`7e84ecc`)
-- Own Kiro chat request rewrite (`d6fc0e1`)
-- Own Kiro raw request validation (`c07ee4d`)
-- Own OpenAI ping protocol (`15c8283`)
-- Move success command classification to Mojo (`a913132`)
-- Move stable metric semantics to Mojo (`cec29dc`)
-- Move intent diff selection to Mojo (`e5ee955`)
-- Satisfy Mojo classifier lint (`c44682d`)
-- Move git diff compaction to Mojo (`d5132fc`)
-- Move output classification and truncation to Mojo (`d18d85c`)
-- Plan operational health responses (`9321be2`)
-- Own application data-plane plans (`1d92475`)
-
-## 0.429.4 - 2026-09-16
-
-### Runtime
-
 - Route Luna Reserve through model-aware preflight (`856af3d`)
 - Accept explicit Luna Reserve bucket (`a910c77`)
 - Restore Reserve safety contract (`7d52c45`)
@@ -533,6 +339,43 @@ Full Changelog: [0.434.1...0.434.2](https://github.com/christiandoxa/prodex/comp
 
 ### CLI
 
+- Support mixed attachment separators (`a37b9c8`)
+- Persist resumed pasted attachments (`670e153`)
+- Migrate quota render casefold policy (`97a9e27`)
+- Remember thread model and trust workspace (`688e364`)
+- Pretrust managed-profile resume workspace (`6589315`)
+- Remove quota identity duplicates (`3fbd892`)
+- Migrate stored profile identity matching (`9a5585b`)
+- Migrate login profile slug sanitizer (`8a5445d`)
+- Dedupe provider profile catalogs (`5b1b825`)
+- Classify profile import sources (`3549448`)
+- Remove provider profile alias duplicate (`d53ef80`)
+- Pretrust resume workspaces (`acb9773`)
+- Migrate profile export policy limits (`6e49369`)
+- Migrate quota selection policy (`a80b29f`)
+- Migrate quota model policy (`f2795fd`)
+- Migrate profile identity planning (`eea5e32`)
+- Retire governance and quota rust oracles (`e6d850e`)
+- Aggregate OpenAI pools in Mojo (`8fc4c10`)
+- Own quota status classification (`f70166a`)
+- Own OpenAI model quota planning (`b78bd72`)
+- Accept overridden hook trust writes (`be65261`)
+- Report incompatible optional tools as info (`c6c9df5`)
+- Skip incompatible optional tools by default (`b39fe11`)
+- Trust hooks by hash before launch (`1942397`)
+- Keep trust bypass CLI-only (`6295c79`)
+- Preserve Codex workspace bootstrap URL (`98a7beb`)
+- Preserve quota observations and accept unknown log tokens (`af60a49`)
+- Move config override matching into Mojo (`e362aea`)
+- Make Mojo authoritative for Codex argument plans (`e7a63eb`)
+- Handle zero-height profile terminals (`b5ff2d8`)
+- Keep native Antigravity profileless (`0e9aafd`)
+- Retain Antigravity CLI compatibility (`aa9b86b`)
+- Gate reset-credit URL with Mojo quota (`4d07c35`)
+- Add exec-only expose surface (`17b40fa`)
+- Restore local expose endpoint (`6d4766c`)
+- Restore OpenAI application ping (`8e3d256`)
+- Restore prodex info summary (`488fe17`)
 - Revert "feat(mojo): migrate profile health scoring" (`b7ef44c`)
 - Migrate profile health scoring (`d033915`)
 - Propagate hook trust bypass to every launch (`efcaff4`)
@@ -618,6 +461,12 @@ Full Changelog: [0.434.1...0.434.2](https://github.com/christiandoxa/prodex/comp
 
 ### Claude
 
+- Move Anthropic response defaults into Mojo (`598b5f3`)
+- Move Anthropic web-search shaping into Mojo (`42cf266`)
+- Move Anthropic Messages request shaping into Mojo (`dbbd8d7`)
+- Add complete Anthropic Messages request kernel (`b6a9147`)
+- Restore Anthropic Messages compatibility (`94c8c5a`)
+- Supervise OpenAI Secure MCP tunnel client (`6ca80f9`)
 - Bound aggregate framing metadata (`e61caf7`)
 - Preserve safe Codex metadata headers (`6c28de0`)
 - Avoid copying ambiguous Claude state (`811cad0`)
@@ -641,6 +490,9 @@ Full Changelog: [0.434.1...0.434.2](https://github.com/christiandoxa/prodex/comp
 
 ### Docs
 
+- Record hard replacement authority and current share (`cf17b3c`)
+- Record stable 1.1 compiler baseline (`1c04046`)
+- Align native provider compatibility guidance (`9daf777`)
 - Document Luna Reserve routing (`a908be3`)
 - Remove obsolete ownership baseline (`1429b14`)
 - Remove completed integration ledger (`3cb24f7`)
@@ -703,6 +555,7 @@ Full Changelog: [0.434.1...0.434.2](https://github.com/christiandoxa/prodex/comp
 
 ### Deps
 
+- Bump the cargo group with 2 updates (`7170f87`)
 - Synchronize Dependabot cargo updates (`2227a42`)
 - Bump toml (`6112ed0`)
 - Bump the cargo group with 5 updates (`0e31f2a`)
@@ -742,6 +595,136 @@ Full Changelog: [0.434.1...0.434.2](https://github.com/christiandoxa/prodex/comp
 
 ### Misc
 
+- Align Codex 0.159.0 (`39a9d2c`)
+- Migrate secret backend identity (`44d43df`)
+- Migrate Copilot export host identity (`bfe7cdb`)
+- Migrate Presidio identity policy (`3bf0f7d`)
+- Migrate usage-limit text policy (`590098b`)
+- Migrate session launch identity (`8837918`)
+- Remove binary host casefold duplicates (`af224ba`)
+- Add casefold substring search (`5e1b2ab`)
+- Migrate provider scalar policy (`7d1313a`)
+- Migrate Gemini tooling policy (`a32c1fe`)
+- Migrate confirmation token policy (`faa7f85`)
+- Migrate optional-tools policy (`821145c`)
+- Migrate provider casefold policy (`b7901eb`)
+- Add casefold text relations (`39efe4a`)
+- Finish exact identity cleanup (`29cc6cf`)
+- Remove exact identity duplicates (`2ec7f4d`)
+- Migrate Gemini exact-output guardrails (`65d5d0c`)
+- Migrate Gemini guardrail text policy (`62e44c1`)
+- Centralize exact casefold equality (`9e0983b`)
+- Resolve Kiro model identity (`8ef9a1c`)
+- Resolve external catalog identity (`4a4385f`)
+- Add exact catalog identity resolver (`5d8d37d`)
+- Dedupe sub-agent catalogs (`b8bef27`)
+- Dedupe bundled models in catalog (`4c1a5cd`)
+- Centralize CI truth policy (`4047999`)
+- Remove Gemini boolean duplicate (`b4640f6`)
+- Migrate DeepSeek config token policy (`dea1626`)
+- Hard-replace sub-agent launch policy (`dcd5741`)
+- Centralize model provider classification (`1717673`)
+- Migrate Kiro response tool-call policy (`b2d6a32`)
+- Migrate Gemini stream metadata merge (`bb24169`)
+- Align with Codex 0.158.0 (`5c6421c`)
+- Migrate broker guard and throughput policy (`afb7fec`)
+- Migrate Super provider config policy (`cd9044d`)
+- Migrate Super expose dispatch validation (`676b245`)
+- Migrate sub-agent CLI policy (`71f1cbc`)
+- Migrate Super expose protocol policy (`5c4638e`)
+- Migrate provider usage policy (`169c27b`)
+- Migrate DeepSeek metadata policy (`3761073`)
+- Migrate route trace identifier policy (`4c05fae`)
+- Merge pull request #97 from christiandoxa/dependabot/github_actions/github-actions-3a0b6790fd (`a0bf1ba`)
+- Merge pull request #96 from christiandoxa/dependabot/cargo/cargo-b32a5ec21a (`e9f7189`)
+- Migrate route decision reason policy (`d687a17`)
+- Make Gemini stream shaping unconditional (`8353329`)
+- Consolidate hard binding remember policy (`af08157`)
+- Harden artifact line range parsing (`e48582b`)
+- Migrate smart context semantic markers (`f3c84fc`)
+- Migrate smart context artifact refs (`2374405`)
+- Migrate session report metadata (`635ef58`)
+- Migrate smart context repo map semantics (`53bd3da`)
+- Consolidate Gemini tool assembly (`aec663e`)
+- Migrate broker continuity semantics (`754f2a1`)
+- Migrate state and codex config policy (`7b06bb4`)
+- Migrate redaction semantics (`0cc1403`)
+- Hard replace cli launch feature gates (`40822dd`)
+- Remove prodex app feature fallbacks (`5271d68`)
+- Hard replace provider response fallbacks (`d4bd318`)
+- Remove Gemini bridge fallbacks (`f1df0c4`)
+- Hard replace Gemini request translation (`416db36`)
+- Hard replace DeepSeek stream shapes (`208df26`)
+- Hard replace Kiro ACP shapes (`f5e0d64`)
+- Hard replace Kiro response helpers (`9d612ba`)
+- Route Gemini text parts through Mojo (`1e38aac`)
+- Move Kiro chat responses into Mojo (`430336a`)
+- Move Gemini system instructions into Mojo (`c02469a`)
+- Isolate MSVC weak aliases (`bf06276`)
+- Support Codex 0.157.0 (`a96f995`)
+- Merge pull request #95 from christiandoxa/mojo-75-chat-response-20260925 (`37f9f12`)
+- Shape function history parts in Mojo (`376c06f`)
+- Move label validation to Mojo (`8cd0b67`)
+- Move request validation to Mojo (`87fba48`)
+- Own provider error classification (`e5e4e0e`)
+- Own Gemini stream event transform (`470f27d`)
+- Own rate-limit header classification (`978d600`)
+- Own SSE inspection transitions (`637d81b`)
+- Own SSE line planning (`aafd19f`)
+- Own response forwarding classification (`14b939d`)
+- Record collapsed Smart Context adapters (`f458dda`)
+- Own previous response error classification (`db4514b`)
+- Own request compatibility surface planning (`ed73a21`)
+- Own retry-after numeric policy (`12dc895`)
+- Route remaining human status through ratatui (`cb04b3e`)
+- Render interactive command status with ratatui (`bbaea3e`)
+- Own operational log detail planning (`3506b8b`)
+- Own operational log event classification (`b9b3343`)
+- Treat missing Playwright as optional (`7675cee`)
+- Show redacted expose exec commands (`da3ad15`)
+- Accept capability-compatible dependency versions (`2d2bb48`)
+- Align with Codex 0.156.1 (`6e1605d`)
+- Align with Codex 0.156.0 (`d42c691`)
+- Move complete Responses chat request planning to Mojo (`6fad0fb`)
+- Add complete Responses chat request kernel (`9002804`)
+- Move DeepSeek message semantics into Mojo (`2a2fd41`)
+- Add complete DeepSeek message normalization and adjacency (`02daf98`)
+- Copy validated JSON arena spans in bulk (`70a1aeb`)
+- Make Mojo authoritative for complete tool shaping (`c892781`)
+- Add complete provider tool transformation kernel (`17db154`)
+- Add versioned Codex argument planning kernel (`efef200`)
+- Keep tunnel client alive after readiness (`c315b54`)
+- Revalidate latest tool trees (`b2ac0c8`)
+- Support tunnel-client 0.0.13 (`b19c2c3`)
+- Restore Windows session bridge portability (`9403127`)
+- Restore manual redeem command (`154876f`)
+- Restore preserved 0.429.4 behavior (`7122191`)
+- Preserve token usage json envelope (`1faf08a`)
+- Restore remaining interactive prompts (`ef861e9`)
+- Restore 0.429.4 terminal surfaces (`f5fc368`)
+- Restore migration guidance wording (`43ba4a3`)
+- Preserve Messages parity without Mojo (`ce669e4`)
+- Own Gemini request policy and assembly (`e563934`)
+- Own DeepSeek tool shape validation (`c26c825`)
+- Own DeepSeek request policy validation (`d59f787`)
+- Own DeepSeek bridge input shaping (`49c6c4c`)
+- Own common Gemini text transforms (`3f2e361`)
+- Complete DeepSeek request shaping (`6e244f4`)
+- Own DeepSeek request metadata (`f91fd90`)
+- Own DeepSeek input array shaping (`19206b4`)
+- Own common DeepSeek request shaping (`fd313e7`)
+- Own Kiro chat response rewrite (`7e84ecc`)
+- Own Kiro chat request rewrite (`d6fc0e1`)
+- Own Kiro raw request validation (`c07ee4d`)
+- Own OpenAI ping protocol (`15c8283`)
+- Move success command classification to Mojo (`a913132`)
+- Move stable metric semantics to Mojo (`cec29dc`)
+- Move intent diff selection to Mojo (`e5ee955`)
+- Satisfy Mojo classifier lint (`c44682d`)
+- Move git diff compaction to Mojo (`d5132fc`)
+- Move output classification and truncation to Mojo (`d18d85c`)
+- Plan operational health responses (`9321be2`)
+- Own application data-plane plans (`1d92475`)
 - Update rustls handshake checks (`ca6feda`)
 - Upgrade rustls past TLS advisory (`49fef54`)
 - Revert "fix(ci): restore pure domain and historical guard evidence" (`ae6878a`)
