@@ -159,6 +159,32 @@ def prodex_provider_bridge_label_v1(
     )
 
 
+@export("prodex_provider_bridge_native_passthrough_v1")
+def prodex_provider_bridge_native_passthrough_v1(
+    abi_version: Int64,
+    provider: Int64,
+    route_kind: Int64,
+    capability_status: Int64,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_BRIDGE_METADATA_ABI_VERSION:
+        return -4
+    if provider < 0 or provider > 5 or route_kind < -1 or route_kind > 6:
+        return -1
+    if route_kind == -1:
+        return 1
+    if capability_status < 0 or capability_status > 6:
+        return -1
+
+    # Preserve the OpenAI Responses bridge exception before the generic model route rule.
+    if provider == 2 and route_kind != 1:
+        return 1
+    if route_kind == 5 or route_kind == 6:
+        return 0
+    if route_kind == 1:
+        return 0
+    return Int64(capability_status == 0 or capability_status == 2)
+
+
 @export("prodex_provider_bridge_function_tool_name_max_bytes_v1")
 def prodex_provider_bridge_function_tool_name_max_bytes_v1(
     abi_version: Int64,

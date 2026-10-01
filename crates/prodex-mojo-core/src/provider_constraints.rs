@@ -132,6 +132,13 @@ mod scalar_policy_tests {
             128
         );
         assert_eq!(provider_bridge_function_tool_name_max_bytes(3).unwrap(), 64);
+        assert!(provider_bridge_native_passthrough(2, 0, 1).unwrap());
+        assert!(!provider_bridge_native_passthrough(2, 1, 0).unwrap());
+        assert!(!provider_bridge_native_passthrough(3, 5, 0).unwrap());
+        assert!(provider_bridge_native_passthrough(3, 2, 0).unwrap());
+        assert!(provider_bridge_native_passthrough(3, 2, 2).unwrap());
+        assert!(!provider_bridge_native_passthrough(3, 2, 1).unwrap());
+        assert!(provider_bridge_native_passthrough(5, -1, -1).unwrap());
     }
 }
 
@@ -203,6 +210,12 @@ unsafe extern "C" {
     fn prodex_provider_bridge_function_tool_name_max_bytes_v1(
         abi_version: i64,
         provider: i64,
+    ) -> i64;
+    fn prodex_provider_bridge_native_passthrough_v1(
+        abi_version: i64,
+        provider: i64,
+        route_kind: i64,
+        capability_status: i64,
     ) -> i64;
     fn prodex_provider_retry_transition_v1(
         abi_version: i64,
@@ -324,6 +337,28 @@ pub fn provider_bridge_function_tool_name_max_bytes(
         -4 => Err(crate::MojoError::AbiMismatch),
         -1 => Err(crate::MojoError::InvalidInput),
         0.. => usize::try_from(value).map_err(|_| crate::MojoError::InvalidOutput),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn provider_bridge_native_passthrough(
+    provider: i64,
+    route_kind: i64,
+    capability_status: i64,
+) -> Result<bool, crate::MojoError> {
+    let value = unsafe {
+        prodex_provider_bridge_native_passthrough_v1(
+            PROVIDER_RETRY_ABI_VERSION,
+            provider,
+            route_kind,
+            capability_status,
+        )
+    };
+    match value {
+        -4 => Err(crate::MojoError::AbiMismatch),
+        -1 => Err(crate::MojoError::InvalidInput),
+        0 => Ok(false),
+        1 => Ok(true),
         _ => Err(crate::MojoError::InvalidOutput),
     }
 }
