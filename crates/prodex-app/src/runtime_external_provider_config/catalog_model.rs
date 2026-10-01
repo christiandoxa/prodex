@@ -110,7 +110,8 @@ pub(super) fn external_catalog_models(
     auto_compact_token_limit: u64,
 ) -> Result<Vec<Value>> {
     let dynamic_models = external_dynamic_catalog_models(codex_home, provider)?;
-    let mut models = Vec::with_capacity(provider.models().len() + dynamic_models.len() + 1);
+    let static_models = provider.models();
+    let mut models = Vec::with_capacity(static_models.len() + dynamic_models.len() + 1);
     let launch_model_context_window = external_dynamic_catalog_model(&dynamic_models, launch_model)
         .and_then(|model| model.context_window)
         .or_else(|| provider.model_prompt_token_limit(launch_model));
@@ -124,12 +125,12 @@ pub(super) fn external_catalog_models(
                     .or_else(|| provider.model_prompt_token_limit(&model.slug)),
             )
         }))
-        .chain(
-            provider
-                .models()
-                .iter()
-                .map(|model| (model.0, provider.model_prompt_token_limit(model.0))),
-        )
+        .chain(static_models.iter().map(|model| {
+            (
+                model.slug.as_str(),
+                provider.model_prompt_token_limit(&model.slug),
+            )
+        }))
         .collect::<Vec<_>>();
     let candidate_ids = candidates.iter().map(|(slug, _)| *slug).collect::<Vec<_>>();
     for index in external_catalog_model_indices(&candidate_ids)? {
@@ -146,10 +147,10 @@ pub(super) fn external_catalog_models(
         let (fallback_display_name, fallback_description) = provider.model_metadata(slug);
         let display_name = dynamic_model
             .and_then(|model| model.display_name.as_deref())
-            .unwrap_or(fallback_display_name);
+            .unwrap_or(fallback_display_name.as_str());
         let description = dynamic_model
             .and_then(|model| model.description.as_deref())
-            .unwrap_or(fallback_description);
+            .unwrap_or(fallback_description.as_str());
         let model_context_window = per_model_context_window.unwrap_or(context_window);
         let model_compact_limit = per_model_context_window
             .map(|cw| cw.saturating_mul(95).saturating_div(100))

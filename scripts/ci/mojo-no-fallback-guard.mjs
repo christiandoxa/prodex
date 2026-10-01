@@ -102,6 +102,7 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/render/model_capacity.rs",
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-app/src/app_commands/status.rs",
+  "crates/prodex-app/src/runtime_external_provider_config.rs",
   "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
   "crates/prodex-app/src/super_expose/protocol.rs",
   "crates/prodex-app/src/super_expose/openai_tunnel.rs",
@@ -679,6 +680,7 @@ const REDACTION_FILE = "crates/prodex-redaction/src/lib.rs";
 const PROFILE_IDENTITY_FILE = "crates/prodex-profile-identity/src/lib.rs";
 const SUPER_PROVIDER_CONFIG_FILE = "crates/prodex-cli/src/runtime_args.rs";
 const SUPER_PROVIDER_CONFIG_ADAPTER_FILE = "crates/prodex-mojo-core/src/super_provider_config.rs";
+const EXTERNAL_PROVIDER_CONFIG_FILE = "crates/prodex-app/src/runtime_external_provider_config.rs";
 const SUB_AGENT_POLICY_FILE = "crates/prodex-cli/src/sub_agent.rs";
 const SUB_AGENT_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
@@ -1573,10 +1575,40 @@ export function findViolations(files) {
         "prodex_super_external_provider_alias_v1(",
         "prodex_super_toml_string_v1(",
         "prodex_super_provider_config_v1(",
+        "prodex_external_catalog_model_count_v1(",
+        "prodex_external_catalog_model_at_v1(",
+        "prodex_external_catalog_model_find_exact_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": Super provider config ABI adapter must retain " + call);
+    }
+    return [];
+  });
+  const externalProviderCatalogViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === EXTERNAL_PROVIDER_CONFIG_FILE) {
+      const required = [
+        "external_catalog_static_models(",
+        "external_catalog_model_metadata(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": external-provider catalog migration must retain Mojo call " + call);
+      if (
+        /fn\s+models\(self\)\s*->\s*&'static\s*\[/u.test(contents)
+        || /Self::Anthropic\s*=>\s*&\[/u.test(contents)
+        || /Self::Copilot\s*=>\s*&\[/u.test(contents)
+        || /Self::Kiro\s*=>\s*&\[/u.test(contents)
+        || /resolve_catalog_model_exact\(&catalog,\s*model\)/u.test(contents)
+      ) {
+        violations.push(filePath + ": contains restored Rust external-provider static catalog semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs") {
+      return contents.includes("let static_models = provider.models();")
+        ? []
+        : [filePath + ": external-provider catalog builder must consume Mojo-owned static models"];
     }
     return [];
   });
@@ -2350,7 +2382,7 @@ export function findViolations(files) {
     ...quotaModelPolicyViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
-    ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...subAgentPolicyViolations, ...cliRuntimeFeatureViolations,
+    ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,

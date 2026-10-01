@@ -3702,3 +3702,22 @@ crates, `git diff --check`, and a dedicated no-fallback guard. The canonical
 broad report at this checkpoint counts **69,863 reachable Mojo LOC** and
 **199,781 Rust production LOC**, totaling **269,644 LOC**:
 **25.909347139190935% Mojo**. The 75% broad target remains in progress.
+
+## External provider static catalog hard replacement
+
+Static Anthropic, Copilot, and Kiro external-provider model metadata is now
+Mojo-owned in super_provider_config.mojo. Mojo owns the canonical ordered
+model table, indexed model materialization, and exact ASCII-casefold lookup for
+the 9 Anthropic, 24 Copilot, and 2 Kiro static entries. Rust retains dynamic
+account-catalog acquisition, provider-core reasoning/token metadata, JSON
+materialization, filesystem persistence, and launch-config I/O. The previous
+Rust models() table and Rust-side metadata lookup were deleted; no Rust
+semantic fallback remains.
+
+Validation in an isolated clean worktree passes the real-Mojo
+super_provider_config test, 8 focused prodex-app external-provider catalog
+tests, Clippy with warnings denied for prodex-mojo-core and prodex-app,
+git diff --check, and the dedicated no-fallback guard. The canonical broad
+report for this checkpoint counts **70,075 reachable Mojo LOC** and **199,710
+Rust production LOC**, totaling **269,785 LOC**: **25.97438701187983% Mojo**.
+The 75% broad target remains in progress.

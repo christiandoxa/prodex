@@ -43,6 +43,21 @@ pub enum RuntimeModelProviderClass {
 
 #[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalCatalogProviderClass {
+    Anthropic = 0,
+    Copilot = 1,
+    Kiro = 2,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalCatalogStaticModel {
+    pub slug: String,
+    pub display_name: String,
+    pub description: String,
+}
+
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeOpenAiScalarPolicy {
     ProviderName = 0,
     LargeContextModel = 1,
@@ -76,6 +91,26 @@ unsafe extern "C" {
     ) -> i64;
 
     fn prodex_runtime_model_provider_class_v1(abi_version: i64, address: u64, length: i64) -> i64;
+
+    fn prodex_external_catalog_model_count_v1(abi_version: i64, provider: i64) -> i64;
+
+    fn prodex_external_catalog_model_at_v1(
+        abi_version: i64,
+        provider: i64,
+        index: i64,
+        output_address: u64,
+        output_capacity: i64,
+        records_address: u64,
+        record_count: i64,
+        written_address: u64,
+    ) -> i64;
+
+    fn prodex_external_catalog_model_find_exact_v1(
+        abi_version: i64,
+        provider: i64,
+        address: u64,
+        length: i64,
+    ) -> i64;
 
     fn prodex_runtime_bool_token_v1(abi_version: i64, address: u64, length: i64) -> i64;
 
@@ -218,6 +253,95 @@ pub fn runtime_openai_scalar_policy(
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+fn external_catalog_record(output: &[u8], record: &[i64]) -> Result<String, MojoError> {
+    let [start, length] = <[i64; 2]>::try_from(record).map_err(|_| MojoError::InvalidOutput)?;
+    let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+    let length = usize::try_from(length).map_err(|_| MojoError::InvalidOutput)?;
+    let end = start.checked_add(length).ok_or(MojoError::InvalidOutput)?;
+    let bytes = output.get(start..end).ok_or(MojoError::InvalidOutput)?;
+    String::from_utf8(bytes.to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn external_catalog_static_model_count(
+    provider: ExternalCatalogProviderClass,
+) -> Result<usize, MojoError> {
+    let count = unsafe { prodex_external_catalog_model_count_v1(ABI_VERSION, provider as i64) };
+    usize::try_from(count).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn external_catalog_static_model(
+    provider: ExternalCatalogProviderClass,
+    index: usize,
+) -> Result<ExternalCatalogStaticModel, MojoError> {
+    const RECORDS: usize = 3;
+    const OUTPUT_CAPACITY: usize = 1024;
+    let mut output = vec![0_u8; OUTPUT_CAPACITY];
+    let mut records = [-1_i64; RECORDS * 2];
+    let mut written = -1_i64;
+    status(unsafe {
+        prodex_external_catalog_model_at_v1(
+            ABI_VERSION,
+            provider as i64,
+            i64::try_from(index).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            records.as_mut_ptr() as usize as u64,
+            i64::try_from(RECORDS).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    })?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    Ok(ExternalCatalogStaticModel {
+        slug: external_catalog_record(&output, &records[0..2])?,
+        display_name: external_catalog_record(&output, &records[2..4])?,
+        description: external_catalog_record(&output, &records[4..6])?,
+    })
+}
+
+pub fn external_catalog_static_models(
+    provider: ExternalCatalogProviderClass,
+) -> Result<Vec<ExternalCatalogStaticModel>, MojoError> {
+    let count = external_catalog_static_model_count(provider)?;
+    (0..count)
+        .map(|index| external_catalog_static_model(provider, index))
+        .collect()
+}
+
+pub fn external_catalog_model_find_exact(
+    provider: ExternalCatalogProviderClass,
+    model: &str,
+) -> Result<Option<usize>, MojoError> {
+    let index = unsafe {
+        prodex_external_catalog_model_find_exact_v1(
+            ABI_VERSION,
+            provider as i64,
+            model.as_ptr() as usize as u64,
+            signed_len(model)?,
+        )
+    };
+    match index {
+        -1 => Ok(None),
+        -2 => Err(MojoError::InvalidInput),
+        value if value >= 0 => Ok(Some(
+            usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?,
+        )),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn external_catalog_model_metadata(
+    provider: ExternalCatalogProviderClass,
+    model: &str,
+) -> Result<Option<ExternalCatalogStaticModel>, MojoError> {
+    external_catalog_model_find_exact(provider, model)?
+        .map(|index| external_catalog_static_model(provider, index))
+        .transpose()
 }
 
 pub fn runtime_model_provider_class(
@@ -428,6 +552,32 @@ mod tests {
         );
         assert_eq!(runtime_external_provider_class(" gemini ").unwrap(), None);
         assert_eq!(runtime_external_provider_class("unknown").unwrap(), None);
+        assert_eq!(
+            external_catalog_static_model_count(ExternalCatalogProviderClass::Anthropic).unwrap(),
+            9
+        );
+        assert_eq!(
+            external_catalog_static_model_count(ExternalCatalogProviderClass::Copilot).unwrap(),
+            24
+        );
+        assert_eq!(
+            external_catalog_static_model_count(ExternalCatalogProviderClass::Kiro).unwrap(),
+            2
+        );
+        let model =
+            external_catalog_model_metadata(ExternalCatalogProviderClass::Copilot, "GPT-5.1-CODEX")
+                .unwrap()
+                .unwrap();
+        assert_eq!(model.slug, "gpt-5.1-codex");
+        assert_eq!(model.display_name, "GPT-5.1 Codex");
+        assert!(
+            external_catalog_model_metadata(
+                ExternalCatalogProviderClass::Copilot,
+                " GPT-5.1-CODEX ",
+            )
+            .unwrap()
+            .is_none()
+        );
         assert_eq!(
             profile_import_source_class("CLAUDE").unwrap(),
             Some(ProfileImportSourceClass::Claude)
