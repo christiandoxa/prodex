@@ -114,6 +114,7 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/super_expose/openai_tunnel.rs",
   "crates/prodex-app/src/app_commands/log_event_source.rs",
   "crates/prodex-app/src/app_commands/log_stream.rs",
+  "crates/prodex-mojo-core/src/observability.rs",
   "crates/prodex-app/src/app_commands/ping.rs",
   "crates/prodex-app/src/app_commands/super_main_catalog.rs",
   "crates/prodex-app/src/app_commands/super_main_prompt.rs",
@@ -708,6 +709,8 @@ const SUPER_EXPOSE_TOOL_CONTRACT_FILE = "crates/prodex-app/src/super_expose/prot
 const SUPER_EXPOSE_RICH_FILE = "crates/prodex-mojo-core/src/rich/super_expose.rs";
 const LOG_TRANSCRIPT_FILE = "crates/prodex-app/src/app_commands/log_transcript.rs";
 const LOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/log.rs";
+const LOG_STREAM_FILE = "crates/prodex-app/src/app_commands/log_stream.rs";
+const OBSERVABILITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/observability.rs";
 const GEMINI_SCHEMA_FILE = "crates/prodex-provider-core/src/translators/gemini/request/schema.rs";
 const GEMINI_TOOLS_FILE = "crates/prodex-provider-core/src/translators/gemini/request/tools.rs";
 const GEMINI_STATUS_FILE = "crates/prodex-provider-core/src/translators/gemini/response/status.rs";
@@ -2370,6 +2373,27 @@ export function findViolations(files) {
     }
     return violations;
   });
+  const operationalDetailSpecViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === LOG_STREAM_FILE) {
+      const violations = contents.includes("operational_detail_spec(")
+        ? []
+        : [filePath + ": operational log detail rendering must retain Mojo-owned detail metadata"];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        production.includes("OPERATIONAL_DETAIL_SPECS")
+        || production.includes("enum OperationalDetailFormat")
+      ) {
+        violations.push(filePath + ": contains restored Rust operational detail metadata table");
+      }
+      return violations;
+    }
+    if (filePath === OBSERVABILITY_ADAPTER_FILE) {
+      return contents.includes("prodex_mojo_operational_detail_spec_v1(")
+        ? []
+        : [filePath + ": observability adapter must retain operational detail spec Mojo ABI"];
+    }
+    return [];
+  });
   const transcriptPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === LOG_TRANSCRIPT_FILE) {
       const required = [
@@ -2506,7 +2530,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...logThroughputViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
