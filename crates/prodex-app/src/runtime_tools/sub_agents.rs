@@ -5,8 +5,8 @@ use prodex_cli::{
     SuperLaunchTarget,
 };
 use prodex_mojo_core::sub_agent_policy::{
-    ChildSpecScalarViolation, ProviderUrlViolation, child_spec_scalar_violation, model_nonempty,
-    provider_url_violation,
+    ChildArgvAction, ChildSpecScalarViolation, ProviderUrlViolation, child_argv_plan,
+    child_spec_scalar_violation, model_nonempty, provider_url_violation,
 };
 use prodex_provider_core::{
     ProviderId, ProviderReasoningEffort, provider_catalog_entry, provider_model_spec,
@@ -494,45 +494,68 @@ fn acquire_sub_agent_slot(spec: &ChildLaunchSpec) -> Result<SubAgentSlotLease> {
 }
 
 fn child_argv(spec: &ChildLaunchSpec, task: &str) -> Vec<OsString> {
-    let mut args = vec![OsString::from("s"), OsString::from("--no-sub-agent")];
-    args.push(OsString::from(if spec.presidio_enabled {
-        "--presidio"
-    } else {
-        "--no-presidio"
-    }));
-    for tool in &spec.required_tools {
-        args.push(OsString::from("--require-tool"));
-        args.push(OsString::from(tool));
-    }
-    match spec.provider {
-        ProviderId::OpenAi => {
-            args.push(OsString::from("-c"));
-            args.push(OsString::from("model_provider=\"openai\""));
+    let plan = child_argv_plan(
+        spec.provider == ProviderId::OpenAi,
+        spec.provider == ProviderId::Local,
+        spec.presidio_enabled,
+        spec.required_tools.len(),
+        spec.model.is_some(),
+        spec.effort.is_some(),
+    )
+    .expect("Mojo sub-agent child argv planner returned invalid output");
+    let mut tools = spec.required_tools.iter();
+    let mut args = Vec::with_capacity(plan.len().saturating_mul(2));
+
+    for action in plan {
+        match action {
+            ChildArgvAction::Super => args.push(OsString::from("s")),
+            ChildArgvAction::NoSubAgent => args.push(OsString::from("--no-sub-agent")),
+            ChildArgvAction::Presidio => args.push(OsString::from("--presidio")),
+            ChildArgvAction::NoPresidio => args.push(OsString::from("--no-presidio")),
+            ChildArgvAction::RequireTool => {
+                args.push(OsString::from("--require-tool"));
+                args.push(OsString::from(
+                    tools.next().expect("Mojo child argv tool count must match"),
+                ));
+            }
+            ChildArgvAction::OpenAiProvider => {
+                args.push(OsString::from("-c"));
+                args.push(OsString::from("model_provider=\"openai\""));
+            }
+            ChildArgvAction::LocalProvider => {
+                args.push(OsString::from("--url"));
+                args.push(OsString::from(
+                    spec.local_url
+                        .as_deref()
+                        .expect("validated local child must have URL"),
+                ));
+            }
+            ChildArgvAction::NamedProvider => {
+                args.push(OsString::from("--provider"));
+                args.push(OsString::from(spec.provider.label()));
+            }
+            ChildArgvAction::Model => {
+                args.push(OsString::from("--model"));
+                args.push(OsString::from(
+                    spec.model
+                        .as_deref()
+                        .expect("Mojo child argv model action requires model"),
+                ));
+            }
+            ChildArgvAction::Effort => {
+                args.push(OsString::from("-c"));
+                args.push(OsString::from(format!(
+                    "model_reasoning_effort={}",
+                    spec.effort
+                        .expect("Mojo child argv effort action requires effort")
+                        .as_str()
+                )));
+            }
+            ChildArgvAction::Exec => args.push(OsString::from("exec")),
+            ChildArgvAction::Task => args.push(OsString::from(task)),
         }
-        ProviderId::Local => {
-            args.push(OsString::from("--url"));
-            args.push(OsString::from(
-                spec.local_url.as_deref().unwrap_or_default(),
-            ));
-        }
-        provider => {
-            args.push(OsString::from("--provider"));
-            args.push(OsString::from(provider.label()));
-        }
     }
-    if let Some(model) = &spec.model {
-        args.push(OsString::from("--model"));
-        args.push(OsString::from(model));
-    }
-    if let Some(effort) = spec.effort {
-        args.push(OsString::from("-c"));
-        args.push(OsString::from(format!(
-            "model_reasoning_effort={}",
-            effort.as_str()
-        )));
-    }
-    args.push(OsString::from("exec"));
-    args.push(OsString::from(task));
+    debug_assert!(tools.next().is_none());
     args
 }
 

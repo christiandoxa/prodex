@@ -3773,3 +3773,24 @@ failure, so this checkpoint does not wait on that lane. The canonical broad
 report at this checkpoint counts **70,743 reachable Mojo LOC** and **199,898
 Rust production LOC**, totaling **270,641 LOC**: **26.139055058176698% Mojo**.
 The 75% broad target remains in progress.
+
+## Sub-agent child argv planning hard replacement
+
+Sub-agent child process argument planning now runs through the existing
+`sub_agent_policy.mojo` owner. Mojo determines the exact ordered action stream
+for the Super command marker, recursion-disable flag, Presidio mode, repeated
+required-tool pairs, OpenAI/local/named provider routing, optional model and
+reasoning-effort overrides, and final `exec`/task placement. Rust retains only
+typed ABI decoding, `OsString` materialization of dynamic values, validated
+local URL/model/effort access, process spawning, locking, filesystem I/O, and
+child lifecycle management. The previous Rust provider/presidio/tool/model/
+effort argv branch planner was deleted; no Rust semantic fallback remains for
+the migrated argv ordering decisions.
+
+Focused validation passes the standalone Mojo build, the real-Mojo
+`sub_agent_policy` adapter test, all 3 focused `prodex-app` child-argv tests,
+Clippy with warnings denied for `prodex-mojo-core`, `git diff --check`, and the
+expanded no-fallback guard. The canonical broad report at this checkpoint
+counts **70,824 reachable Mojo LOC** and **200,012 Rust production LOC**,
+totaling **270,836 LOC**: **26.150142521673633% Mojo**. The 75% broad target
+remains in progress.

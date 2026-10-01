@@ -16,6 +16,21 @@ comptime OP_PROVIDER_URL_POLICY: Int64 = 4
 comptime OP_CHILD_SPEC_SCALAR_POLICY: Int64 = 5
 comptime OP_PROMPT_STEPS: Int64 = 6
 
+comptime SUB_AGENT_POLICY_CAPACITY: Int64 = 2
+
+comptime CHILD_ARGV_SUPER: Int64 = 0
+comptime CHILD_ARGV_NO_SUB_AGENT: Int64 = 1
+comptime CHILD_ARGV_PRESIDIO: Int64 = 2
+comptime CHILD_ARGV_NO_PRESIDIO: Int64 = 3
+comptime CHILD_ARGV_REQUIRE_TOOL: Int64 = 4
+comptime CHILD_ARGV_OPENAI_PROVIDER: Int64 = 5
+comptime CHILD_ARGV_LOCAL_PROVIDER: Int64 = 6
+comptime CHILD_ARGV_NAMED_PROVIDER: Int64 = 7
+comptime CHILD_ARGV_MODEL: Int64 = 8
+comptime CHILD_ARGV_EFFORT: Int64 = 9
+comptime CHILD_ARGV_EXEC: Int64 = 10
+comptime CHILD_ARGV_TASK: Int64 = 11
+
 comptime PROMPT_STEP_PROVIDER: Int64 = 1
 comptime PROMPT_STEP_LOCAL_URL: Int64 = 2
 comptime PROMPT_STEP_MODEL: Int64 = 4
@@ -225,4 +240,82 @@ def prodex_sub_agent_policy_v1(
         if not effort_explicit:
             mask |= PROMPT_STEP_REASONING_EFFORT
         result[unsafe_offset=1] = mask
+    return SUB_AGENT_POLICY_OK
+
+
+@export("prodex_sub_agent_child_argv_plan_v1")
+def prodex_sub_agent_child_argv_plan_v1(
+    abi_version: Int64,
+    provider_class: Int64,
+    presidio_enabled: Int64,
+    tool_count: Int64,
+    model_present: Int64,
+    effort_present: Int64,
+    actions_address: UInt,
+    action_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUB_AGENT_POLICY_ABI_VERSION:
+        return SUB_AGENT_POLICY_ABI
+    if (
+        provider_class < 0
+        or provider_class > 2
+        or presidio_enabled < 0
+        or presidio_enabled > 1
+        or tool_count < 0
+        or model_present < 0
+        or model_present > 1
+        or effort_present < 0
+        or effort_present > 1
+        or actions_address == 0
+        or action_capacity < 0
+        or written_address == 0
+    ):
+        return SUB_AGENT_POLICY_INVALID
+
+    var required = 6 + tool_count + model_present + effort_present
+    if action_capacity < required:
+        return SUB_AGENT_POLICY_CAPACITY
+
+    var actions = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(actions_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var cursor: Int64 = 0
+
+    actions[unsafe_offset=cursor] = CHILD_ARGV_SUPER
+    cursor += 1
+    actions[unsafe_offset=cursor] = CHILD_ARGV_NO_SUB_AGENT
+    cursor += 1
+    actions[unsafe_offset=cursor] = (
+        CHILD_ARGV_PRESIDIO if presidio_enabled == 1 else CHILD_ARGV_NO_PRESIDIO
+    )
+    cursor += 1
+
+    for _ in range(tool_count):
+        actions[unsafe_offset=cursor] = CHILD_ARGV_REQUIRE_TOOL
+        cursor += 1
+
+    if provider_class == 0:
+        actions[unsafe_offset=cursor] = CHILD_ARGV_OPENAI_PROVIDER
+    elif provider_class == 1:
+        actions[unsafe_offset=cursor] = CHILD_ARGV_LOCAL_PROVIDER
+    else:
+        actions[unsafe_offset=cursor] = CHILD_ARGV_NAMED_PROVIDER
+    cursor += 1
+
+    if model_present == 1:
+        actions[unsafe_offset=cursor] = CHILD_ARGV_MODEL
+        cursor += 1
+    if effort_present == 1:
+        actions[unsafe_offset=cursor] = CHILD_ARGV_EFFORT
+        cursor += 1
+
+    actions[unsafe_offset=cursor] = CHILD_ARGV_EXEC
+    cursor += 1
+    actions[unsafe_offset=cursor] = CHILD_ARGV_TASK
+    cursor += 1
+    written[] = cursor
     return SUB_AGENT_POLICY_OK

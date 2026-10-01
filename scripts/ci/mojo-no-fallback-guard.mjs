@@ -18,6 +18,7 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/app_commands/log_transcript.rs",
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
   "crates/prodex-cli/src/sub_agent.rs",
+  "crates/prodex-app/src/runtime_tools/sub_agents.rs",
   "crates/prodex-mojo-core/src/rich/super_expose.rs",
   "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
   "crates/prodex-app/src/super_expose/protocol/validation.rs",
@@ -686,6 +687,7 @@ const SUPER_PROVIDER_CONFIG_ADAPTER_FILE = "crates/prodex-mojo-core/src/super_pr
 const EXTERNAL_PROVIDER_CONFIG_FILE = "crates/prodex-app/src/runtime_external_provider_config.rs";
 const SUB_AGENT_POLICY_FILE = "crates/prodex-cli/src/sub_agent.rs";
 const SUB_AGENT_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy.rs";
+const SUB_AGENT_CHILD_FILE = "crates/prodex-app/src/runtime_tools/sub_agents.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
 const DOCTOR_CARGO_FILE = "crates/prodex-runtime-doctor/Cargo.toml";
 const RUNTIME_PROXY_CARGO_FILE = "crates/prodex-runtime-proxy/Cargo.toml";
@@ -1639,8 +1641,30 @@ export function findViolations(files) {
       return violations;
     }
     if (filePath === SUB_AGENT_POLICY_ADAPTER_FILE) {
-      return contents.includes("prodex_sub_agent_policy_v1(")
-        ? [] : [filePath + ": sub-agent policy adapter must retain Mojo ABI call"];
+      const required = [
+        "prodex_sub_agent_policy_v1(",
+        "prodex_sub_agent_child_argv_plan_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": sub-agent policy adapter must retain Mojo ABI call " + call);
+    }
+    if (filePath === SUB_AGENT_CHILD_FILE) {
+      const violations = contents.includes("child_argv_plan(")
+        ? []
+        : [filePath + ": sub-agent child argv construction must retain Mojo planner"];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      for (const retired of [
+        "let mut args = vec![OsString::from(\"s\"), OsString::from(\"--no-sub-agent\")];",
+        "args.push(OsString::from(if spec.presidio_enabled {",
+        "match spec.provider {",
+      ]) {
+        if (production.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust sub-agent child argv planning semantics");
+          break;
+        }
+      }
+      return violations;
     }
     return [];
   });

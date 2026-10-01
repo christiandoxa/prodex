@@ -67,6 +67,17 @@ unsafe extern "C" {
         scalar: i64,
         result_address: u64,
     ) -> i64;
+    fn prodex_sub_agent_child_argv_plan_v1(
+        abi_version: i64,
+        provider_class: i64,
+        presidio_enabled: i64,
+        tool_count: i64,
+        model_present: i64,
+        effort_present: i64,
+        actions_address: u64,
+        action_capacity: i64,
+        written_address: u64,
+    ) -> i64;
 }
 
 fn call(operation: Operation, input: &str, scalar: i64) -> Result<[i64; 3], MojoError> {
@@ -160,6 +171,90 @@ pub fn provider_url_violation(
         2 => Ok(Some(ProviderUrlViolation::NonLocalRejectsUrl)),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildArgvAction {
+    Super,
+    NoSubAgent,
+    Presidio,
+    NoPresidio,
+    RequireTool,
+    OpenAiProvider,
+    LocalProvider,
+    NamedProvider,
+    Model,
+    Effort,
+    Exec,
+    Task,
+}
+
+pub fn child_argv_plan(
+    provider_is_openai: bool,
+    provider_is_local: bool,
+    presidio_enabled: bool,
+    tool_count: usize,
+    model_present: bool,
+    effort_present: bool,
+) -> Result<Vec<ChildArgvAction>, MojoError> {
+    if provider_is_openai && provider_is_local {
+        return Err(MojoError::InvalidInput);
+    }
+    let provider_class = if provider_is_openai {
+        0
+    } else if provider_is_local {
+        1
+    } else {
+        2
+    };
+    let capacity = tool_count.checked_add(8).ok_or(MojoError::InvalidInput)?;
+    let mut actions = vec![-1_i64; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_sub_agent_child_argv_plan_v1(
+            ABI_VERSION,
+            provider_class,
+            i64::from(presidio_enabled),
+            i64::try_from(tool_count).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(model_present),
+            i64::from(effort_present),
+            actions.as_mut_ptr() as usize as u64,
+            i64::try_from(actions.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > actions.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    actions.truncate(written);
+    actions
+        .into_iter()
+        .map(|action| {
+            Ok(match action {
+                0 => ChildArgvAction::Super,
+                1 => ChildArgvAction::NoSubAgent,
+                2 => ChildArgvAction::Presidio,
+                3 => ChildArgvAction::NoPresidio,
+                4 => ChildArgvAction::RequireTool,
+                5 => ChildArgvAction::OpenAiProvider,
+                6 => ChildArgvAction::LocalProvider,
+                7 => ChildArgvAction::NamedProvider,
+                8 => ChildArgvAction::Model,
+                9 => ChildArgvAction::Effort,
+                10 => ChildArgvAction::Exec,
+                11 => ChildArgvAction::Task,
+                _ => return Err(MojoError::InvalidOutput),
+            })
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -300,6 +395,32 @@ mod tests {
                 reasoning_effort: false,
                 max_concurrency: true,
             }
+        );
+        assert_eq!(
+            child_argv_plan(false, false, true, 2, true, true).unwrap(),
+            vec![
+                ChildArgvAction::Super,
+                ChildArgvAction::NoSubAgent,
+                ChildArgvAction::Presidio,
+                ChildArgvAction::RequireTool,
+                ChildArgvAction::RequireTool,
+                ChildArgvAction::NamedProvider,
+                ChildArgvAction::Model,
+                ChildArgvAction::Effort,
+                ChildArgvAction::Exec,
+                ChildArgvAction::Task,
+            ]
+        );
+        assert_eq!(
+            child_argv_plan(true, false, false, 0, false, false).unwrap(),
+            vec![
+                ChildArgvAction::Super,
+                ChildArgvAction::NoSubAgent,
+                ChildArgvAction::NoPresidio,
+                ChildArgvAction::OpenAiProvider,
+                ChildArgvAction::Exec,
+                ChildArgvAction::Task,
+            ]
         );
     }
 }
