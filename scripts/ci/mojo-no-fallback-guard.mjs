@@ -25,6 +25,8 @@ const PROMOTED_FILES = [
   "crates/prodex-audit-log/src/lib.rs",
   "crates/prodex-core/src/lib.rs",
   "crates/prodex-mcp-stdio/src/lib.rs",
+  "crates/prodex-shared-codex-fs/src/history.rs",
+  "crates/prodex-mojo-core/src/shared_history_policy.rs",
   "crates/prodex-update-notice/src/lib.rs",
   "crates/prodex-shared-codex-fs/src/image_attachments.rs",
   "crates/prodex-runtime-cookies/src/lib.rs",
@@ -1072,6 +1074,29 @@ export function findViolations(files) {
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": runtime-cookie ABI adapter must retain " + call);
+    }
+    return [];
+  });
+  const sharedHistoryPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-shared-codex-fs/src/history.rs") {
+      const required = [
+        "shared_history_policy::dedup_plan(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": shared history hard replacement must retain " + call);
+      if (
+        contents.includes("let mut seen = BTreeSet::new()")
+        || contents.includes("!seen.insert(line.to_string())")
+        || contents.includes("let next_len = content")
+      ) {
+        violations.push(filePath + ": contains restored Rust shared-history dedup/size semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/shared_history_policy.rs" &&
+        !contents.includes("prodex_shared_history_dedup_plan_v1(")) {
+      return [filePath + ": shared history ABI adapter must retain prodex_shared_history_dedup_plan_v1("];
     }
     return [];
   });
@@ -2311,6 +2336,7 @@ export function findViolations(files) {
     ...auditUsageViolations,
     ...coreFilePolicyViolations,
     ...mcpStdioPolicyViolations,
+    ...sharedHistoryPolicyViolations,
     ...runtimeCookiePolicyViolations,
     ...updateNoticeMigrationViolations,
     ...sharedAttachmentMigrationViolations,

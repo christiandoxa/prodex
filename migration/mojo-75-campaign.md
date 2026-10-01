@@ -3683,3 +3683,22 @@ crates, `git diff --check`, and the expanded no-fallback guard. The canonical
 broad report at this checkpoint counts **69,729 reachable Mojo LOC** and
 **199,676 Rust production LOC**, totaling **269,405 LOC**:
 **25.882593121879697% Mojo**. The 75% broad target remains in progress.
+
+## Shared Codex history dedup and size-policy hard replacement
+
+Shared Codex `history.jsonl` merge now delegates exact-line first-win deduplication
+and merged-size admission to `shared_history_policy.mojo`. Rust retains bounded
+file acquisition, Serde timestamp extraction, the historical timestamp/order
+comparator, permissions, and atomic replacement. The previous Rust `BTreeSet`
+dedup state and per-line saturating merged-size planner were deleted; there is
+no Rust fallback for the migrated decisions. The timestamp sort remains Rust on
+purpose because the historical comparator falls back to insertion order when
+either side lacks `ts`, which is not a total-order key and must be preserved
+exactly rather than silently redefined during this wave.
+
+Focused validation passes the real-Mojo dedup/size test, all 75
+`prodex-shared-codex-fs` tests, Clippy with warnings denied for both affected
+crates, `git diff --check`, and a dedicated no-fallback guard. The canonical
+broad report at this checkpoint counts **69,863 reachable Mojo LOC** and
+**199,781 Rust production LOC**, totaling **269,644 LOC**:
+**25.909347139190935% Mojo**. The 75% broad target remains in progress.
