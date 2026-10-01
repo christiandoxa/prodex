@@ -455,6 +455,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/core_file_policy.mojo");
         sources.push("../../mojo/prodex_core/mcp_stdio_policy.mojo");
         sources.push("../../mojo/prodex_core/update_notice_policy.mojo");
+        sources.push("../../mojo/prodex_core/shared_attachment_policy.mojo");
         sources.push("../../mojo/prodex_core/launch_args.mojo");
         sources.push("../../mojo/prodex_core/runtime_feature_plan.mojo");
         sources.push("../../mojo/prodex_core/launch_config.mojo");

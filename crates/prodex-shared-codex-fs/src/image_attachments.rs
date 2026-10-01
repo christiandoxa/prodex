@@ -6,21 +6,7 @@ const CODEX_SESSION_ATTACHMENT_REWRITE_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 const SESSION_IMAGE_ATTACHMENT_DIR: &str = "image_attachments";
 const SESSION_ATTACHMENT_DIR: &str = "attachments";
-const CODEX_ATTACHMENT_PATH_MARKERS: [&str; 4] = [
-    "/attachments/",
-    "/attachments\\",
-    "\\attachments/",
-    "\\attachments\\",
-];
-const CODEX_PASTED_TEXT_PREFIX: &str = "pasted-text-";
-const CODEX_ATTACHMENT_IMAGE_PREFIX: &str = "image-";
-const CODEX_GOAL_OBJECTIVE_FILE: &str = "goal-objective.md";
 const CODEX_IMAGE_TAG_PREFIX: &str = "<image ";
-const CODEX_IMAGE_PATH_PREFIX: &str = r#"path=""#;
-const CODEX_IMAGE_PATH_ESCAPED_PREFIX: &str = r#"path=\""#;
-const CODEX_IMAGE_PATH_QUOTE: &str = r#"""#;
-const CODEX_IMAGE_PATH_ESCAPED_QUOTE: &str = r#"\""#;
-const CODEX_CLIPBOARD_PREFIX: &str = "codex-clipboard-";
 
 pub fn persist_codex_session_image_attachments(codex_home: &Path) -> Result<()> {
     let Some(_maintenance_lock) = try_lock_codex_session_maintenance(codex_home)? else {
@@ -60,7 +46,10 @@ fn persist_codex_session_image_attachments_in_dir(
 pub(super) fn is_codex_session_rollout_file(path: &Path) -> bool {
     path.file_name()
         .and_then(|name| name.to_str())
-        .is_some_and(|name| name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"))
+        .is_some_and(|name| {
+            prodex_mojo_core::shared_attachment_policy::rollout_file_name(name)
+                .expect("Mojo shared attachment rollout-name policy returned invalid output")
+        })
 }
 
 pub(crate) fn persist_codex_session_file_image_attachments(
@@ -185,22 +174,19 @@ pub(crate) fn codex_session_image_attachments_are_stable(
         };
         let tag_end = tag_start + relative_tag_end;
         let tag = &contents[tag_start..tag_end];
-        let Some((relative_path_start, path_prefix, path_quote)) = image_tag_path_attr(tag) else {
+        let Some((relative_path_start, relative_path_end)) = image_tag_path_range(tag) else {
             cursor = tag_end;
             continue;
         };
-        let path_start = tag_start + relative_path_start + path_prefix.len();
-        let Some(relative_path_end) = contents[path_start..tag_end].find(path_quote) else {
-            cursor = tag_end;
-            continue;
-        };
-        let raw_path = &contents[path_start..path_start + relative_path_end];
+        let path_start = tag_start + relative_path_start;
+        let path_end = tag_start + relative_path_end;
+        let raw_path = &contents[path_start..path_end];
         let decoded_path = decode_codex_session_path(raw_path);
         let path = Path::new(decoded_path.as_ref());
         let is_clipboard_path = path
             .file_name()
             .and_then(|name| name.to_str())
-            .is_some_and(|name| name.starts_with(CODEX_CLIPBOARD_PREFIX));
+            .is_some_and(codex_clipboard_file_name);
         if path.is_absolute() && is_clipboard_path && !path.starts_with(&stable_image_dir) {
             return false;
         }
@@ -249,23 +235,19 @@ pub(crate) fn codex_session_persisted_attachment_paths(contents: &str) -> Vec<Pa
         };
         let tag_end = tag_start + relative_tag_end;
         let tag = &contents[tag_start..tag_end];
-        let Some((relative_path_start, path_prefix, path_quote)) = image_tag_path_attr(tag) else {
+        let Some((relative_path_start, relative_path_end)) = image_tag_path_range(tag) else {
             cursor = tag_end;
             continue;
         };
-        let path_start = tag_start + relative_path_start + path_prefix.len();
-        let Some(relative_path_end) = contents[path_start..tag_end].find(path_quote) else {
-            cursor = tag_end;
-            continue;
-        };
-        let decoded_path =
-            decode_codex_session_path(&contents[path_start..path_start + relative_path_end]);
+        let path_start = tag_start + relative_path_start;
+        let path_end = tag_start + relative_path_end;
+        let decoded_path = decode_codex_session_path(&contents[path_start..path_end]);
         let path = Path::new(decoded_path.as_ref());
         if path.is_absolute()
             && path
                 .file_name()
                 .and_then(|name| name.to_str())
-                .is_some_and(|name| name.starts_with(CODEX_CLIPBOARD_PREFIX))
+                .is_some_and(codex_clipboard_file_name)
         {
             add_path(path);
         }
@@ -316,18 +298,13 @@ fn rewrite_codex_session_image_paths(codex_home: &Path, contents: &str) -> Resul
         };
         let tag_end = tag_start + relative_tag_end;
         let tag = &contents[tag_start..tag_end];
-        let Some((relative_path_start, path_prefix, path_quote)) = image_tag_path_attr(tag) else {
+        let Some((relative_path_start, relative_path_end)) = image_tag_path_range(tag) else {
             output.push_str(&contents[cursor..tag_end]);
             cursor = tag_end;
             continue;
         };
-        let path_start = tag_start + relative_path_start + path_prefix.len();
-        let Some(relative_path_end) = contents[path_start..tag_end].find(path_quote) else {
-            output.push_str(&contents[cursor..tag_end]);
-            cursor = tag_end;
-            continue;
-        };
-        let path_end = path_start + relative_path_end;
+        let path_start = tag_start + relative_path_start;
+        let path_end = tag_start + relative_path_end;
         let raw_path = &contents[path_start..path_end];
         let replacement = stable_codex_session_image_path(codex_home, raw_path)?;
 
@@ -340,19 +317,14 @@ fn rewrite_codex_session_image_paths(codex_home: &Path, contents: &str) -> Resul
     Ok(output)
 }
 
-fn image_tag_path_attr(tag: &str) -> Option<(usize, &'static str, &'static str)> {
-    tag.find(CODEX_IMAGE_PATH_ESCAPED_PREFIX)
-        .map(|offset| {
-            (
-                offset,
-                CODEX_IMAGE_PATH_ESCAPED_PREFIX,
-                CODEX_IMAGE_PATH_ESCAPED_QUOTE,
-            )
-        })
-        .or_else(|| {
-            tag.find(CODEX_IMAGE_PATH_PREFIX)
-                .map(|offset| (offset, CODEX_IMAGE_PATH_PREFIX, CODEX_IMAGE_PATH_QUOTE))
-        })
+fn image_tag_path_range(tag: &str) -> Option<(usize, usize)> {
+    prodex_mojo_core::shared_attachment_policy::image_tag_path_range(tag)
+        .expect("Mojo shared attachment image-tag policy returned invalid output")
+}
+
+fn codex_clipboard_file_name(file_name: &str) -> bool {
+    prodex_mojo_core::shared_attachment_policy::clipboard_file_name(file_name)
+        .expect("Mojo shared attachment clipboard-name policy returned invalid output")
 }
 
 fn stable_codex_session_image_path(codex_home: &Path, raw_path: &str) -> Result<Option<String>> {
@@ -364,7 +336,7 @@ fn stable_codex_session_image_path(codex_home: &Path, raw_path: &str) -> Result<
     let Some(file_name) = source.file_name().and_then(|name| name.to_str()) else {
         return Ok(None);
     };
-    if !file_name.starts_with(CODEX_CLIPBOARD_PREFIX) {
+    if !codex_clipboard_file_name(file_name) {
         return Ok(None);
     }
 
@@ -419,94 +391,13 @@ fn rewrite_codex_session_inline_clipboard_paths(
 }
 
 fn next_codex_session_clipboard_path(contents: &str, cursor: usize) -> Option<(usize, usize)> {
-    let marker_start = cursor + contents[cursor..].find(CODEX_CLIPBOARD_PREFIX)?;
-    let bytes = contents.as_bytes();
-
-    let mut path_start = marker_start;
-    while path_start > 0 && is_codex_session_path_byte(bytes[path_start - 1]) {
-        path_start -= 1;
-    }
-
-    let mut path_end = marker_start + CODEX_CLIPBOARD_PREFIX.len();
-    while path_end < bytes.len() && codex_session_path_continues(contents, path_end) {
-        path_end += 1;
-    }
-    while path_end > marker_start && bytes[path_end - 1] == b'.' {
-        path_end -= 1;
-    }
-
-    (path_start < marker_start && path_end > marker_start + CODEX_CLIPBOARD_PREFIX.len())
-        .then_some((path_start, path_end))
+    prodex_mojo_core::shared_attachment_policy::next_clipboard_path(contents, cursor)
+        .expect("Mojo shared attachment clipboard scanner returned invalid output")
 }
 
 fn next_codex_session_attachment_path(contents: &str, cursor: usize) -> Option<(usize, usize)> {
-    let (marker_start, marker_len) = CODEX_ATTACHMENT_PATH_MARKERS
-        .iter()
-        .filter_map(|marker| {
-            contents[cursor..]
-                .find(marker)
-                .map(|offset| (cursor + offset, marker.len()))
-        })
-        .min_by_key(|(start, _)| *start)?;
-    let bytes = contents.as_bytes();
-
-    let mut path_start = marker_start;
-    while path_start > 0 && is_codex_session_path_byte(bytes[path_start - 1]) {
-        path_start -= 1;
-    }
-
-    let mut path_end = marker_start + marker_len;
-    while path_end < bytes.len() && codex_session_path_continues(contents, path_end) {
-        path_end += 1;
-    }
-    while path_end > marker_start && bytes[path_end - 1] == b'.' {
-        path_end -= 1;
-    }
-
-    (path_start < marker_start && path_end > marker_start + marker_len)
-        .then_some((path_start, path_end))
-}
-
-fn codex_session_path_continues(contents: &str, index: usize) -> bool {
-    let bytes = contents.as_bytes();
-    if bytes[index] == b'\\' {
-        if index > 0 && bytes[index - 1] == b'\\' {
-            return true;
-        }
-        let mut end = index;
-        while bytes.get(end) == Some(&b'\\') {
-            end += 1;
-        }
-        let slash_count = end - index;
-        let json_escape = bytes
-            .get(end)
-            .is_some_and(|byte| matches!(byte, b'"' | b'b' | b'f' | b'n' | b'r' | b't' | b'u'));
-        if slash_count % 2 == 1 && json_escape {
-            return false;
-        }
-    }
-    is_codex_session_path_byte(bytes[index])
-}
-
-fn is_codex_session_path_byte(byte: u8) -> bool {
-    !matches!(
-        byte,
-        b'"' | b'\''
-            | b'<'
-            | b'>'
-            | b'('
-            | b')'
-            | b'['
-            | b']'
-            | b'{'
-            | b'}'
-            | b','
-            | b';'
-            | b' '
-            | b'\t'
-            | b'\r'
-            | b'\n'
-    )
+    prodex_mojo_core::shared_attachment_policy::next_attachment_path(contents, cursor)
+        .expect("Mojo shared attachment path scanner returned invalid output")
 }
 
 fn stable_codex_session_attachment_path(
@@ -613,9 +504,8 @@ fn codex_attachment_path_suffix(path: &Path) -> Option<PathBuf> {
 }
 
 fn codex_attachment_file_name_is_persistable(file_name: &str) -> bool {
-    file_name.starts_with(CODEX_PASTED_TEXT_PREFIX)
-        || file_name.starts_with(CODEX_ATTACHMENT_IMAGE_PREFIX)
-        || file_name == CODEX_GOAL_OBJECTIVE_FILE
+    prodex_mojo_core::shared_attachment_policy::persistable_attachment_file_name(file_name)
+        .expect("Mojo shared attachment filename policy returned invalid output")
 }
 
 fn codex_clipboard_source_is_persistable(source: &Path) -> bool {

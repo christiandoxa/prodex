@@ -3626,3 +3626,22 @@ with warnings denied, `git diff --check`, and the dedicated Mojo no-fallback
 rule. The canonical broad report at this checkpoint counts **68,957 reachable
 Mojo LOC** and **199,417 Rust production LOC**, totaling **268,374 LOC**:
 **25.69436681645763% Mojo**. The 75% broad target remains in progress.
+
+## Shared Codex attachment scanner hard replacement
+
+Session attachment path scanning now runs through `shared_attachment_policy.mojo`.
+Mojo owns image-tag path range extraction (including escaped JSON attributes),
+inline clipboard and attachment marker discovery, path-byte/JSON-escape boundary
+rules, trailing-dot trimming, clipboard filename classification, persistable
+attachment filename policy, and rollout filename classification. Rust retains
+filesystem `Path` interpretation, path containment/security checks, metadata,
+copying, zstd, and file I/O. The former Rust marker tables, path continuation
+scanner, byte classifier, image path-attribute parser, and filename policy were
+deleted; no Rust fallback remains.
+
+Focused validation passes the real-Mojo scanner policy test, all 75
+`prodex-shared-codex-fs` tests, Clippy with warnings denied, `git diff --check`,
+and a dedicated no-fallback regression rule. The canonical broad report counts
+**69,216 reachable Mojo LOC** and **199,403 Rust production LOC**, totaling
+**268,619 LOC**: **25.76735078307938% Mojo**. The 75% broad target remains in
+progress.
