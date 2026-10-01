@@ -115,6 +115,23 @@ mod scalar_policy_tests {
             provider_precommit_metric_class(true, 429, Some(2)).unwrap(),
             ProviderPrecommitMetricClass::RateLimited
         );
+        assert_eq!(
+            provider_bridge_rate_limit_header_prefix(3).unwrap(),
+            "deepseek"
+        );
+        assert_eq!(
+            provider_bridge_rate_limit_header_label(4).unwrap(),
+            "Google Gemini"
+        );
+        assert_eq!(
+            provider_bridge_chat_compatible_adapter_label(4).unwrap(),
+            "Gemini OpenAI-compatible"
+        );
+        assert_eq!(
+            provider_bridge_function_tool_name_max_bytes(2).unwrap(),
+            128
+        );
+        assert_eq!(provider_bridge_function_tool_name_max_bytes(3).unwrap(), 64);
     }
 }
 
@@ -175,6 +192,18 @@ pub enum ProviderPrecommitMetricClass {
 }
 
 unsafe extern "C" {
+    fn prodex_provider_bridge_label_v1(
+        abi_version: i64,
+        provider: i64,
+        label_kind: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_provider_bridge_function_tool_name_max_bytes_v1(
+        abi_version: i64,
+        provider: i64,
+    ) -> i64;
     fn prodex_provider_retry_transition_v1(
         abi_version: i64,
         error_class: i64,
@@ -204,6 +233,99 @@ unsafe extern "C" {
         f: i64,
         output_address: u64,
     ) -> i64;
+}
+
+const PROVIDER_BRIDGE_KIND_COUNT: usize = 6;
+const PROVIDER_BRIDGE_LABEL_MAX_BYTES: usize = 64;
+const PROVIDER_BRIDGE_LABEL_RATE_LIMIT_PREFIX: i64 = 0;
+const PROVIDER_BRIDGE_LABEL_RATE_LIMIT_HEADER: i64 = 1;
+const PROVIDER_BRIDGE_LABEL_CHAT_ADAPTER: i64 = 2;
+
+fn load_provider_bridge_label(provider: i64, label_kind: i64) -> Result<String, crate::MojoError> {
+    let mut output = [0_u8; PROVIDER_BRIDGE_LABEL_MAX_BYTES];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_provider_bridge_label_v1(
+            PROVIDER_RETRY_ABI_VERSION,
+            provider,
+            label_kind,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(crate::MojoError::InvalidInput),
+        2 => return Err(crate::MojoError::Capacity),
+        4 => return Err(crate::MojoError::AbiMismatch),
+        _ => return Err(crate::MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| crate::MojoError::InvalidOutput)
+}
+
+fn cached_provider_bridge_label(
+    cache: &'static std::sync::OnceLock<Result<Vec<String>, crate::MojoError>>,
+    label_kind: i64,
+    provider: i64,
+) -> Result<&'static str, crate::MojoError> {
+    let provider = usize::try_from(provider)
+        .ok()
+        .filter(|provider| *provider < PROVIDER_BRIDGE_KIND_COUNT)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    match cache.get_or_init(|| {
+        (0_i64..PROVIDER_BRIDGE_KIND_COUNT as i64)
+            .map(|kind| load_provider_bridge_label(kind, label_kind))
+            .collect()
+    }) {
+        Ok(labels) => labels
+            .get(provider)
+            .map(String::as_str)
+            .ok_or(crate::MojoError::InvalidOutput),
+        Err(error) => Err(*error),
+    }
+}
+
+pub fn provider_bridge_rate_limit_header_prefix(
+    provider: i64,
+) -> Result<&'static str, crate::MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, crate::MojoError>> =
+        std::sync::OnceLock::new();
+    cached_provider_bridge_label(&LABELS, PROVIDER_BRIDGE_LABEL_RATE_LIMIT_PREFIX, provider)
+}
+
+pub fn provider_bridge_rate_limit_header_label(
+    provider: i64,
+) -> Result<&'static str, crate::MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, crate::MojoError>> =
+        std::sync::OnceLock::new();
+    cached_provider_bridge_label(&LABELS, PROVIDER_BRIDGE_LABEL_RATE_LIMIT_HEADER, provider)
+}
+
+pub fn provider_bridge_chat_compatible_adapter_label(
+    provider: i64,
+) -> Result<&'static str, crate::MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, crate::MojoError>> =
+        std::sync::OnceLock::new();
+    cached_provider_bridge_label(&LABELS, PROVIDER_BRIDGE_LABEL_CHAT_ADAPTER, provider)
+}
+
+pub fn provider_bridge_function_tool_name_max_bytes(
+    provider: i64,
+) -> Result<usize, crate::MojoError> {
+    let value = unsafe {
+        prodex_provider_bridge_function_tool_name_max_bytes_v1(PROVIDER_RETRY_ABI_VERSION, provider)
+    };
+    match value {
+        -4 => Err(crate::MojoError::AbiMismatch),
+        -1 => Err(crate::MojoError::InvalidInput),
+        0.. => usize::try_from(value).map_err(|_| crate::MojoError::InvalidOutput),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
 }
 
 pub fn provider_retry_transition(

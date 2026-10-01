@@ -27,6 +27,7 @@ pub(super) use self::provider_bridge_routing::{
     runtime_provider_route_endpoint, runtime_provider_route_kind,
 };
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum RuntimeProviderBridgeKind {
     Anthropic,
@@ -50,43 +51,29 @@ impl RuntimeProviderBridgeKind {
     }
 
     pub(super) fn rate_limit_header_prefix(self) -> &'static str {
-        match self {
-            Self::Anthropic => "anthropic",
-            Self::Copilot => "copilot",
-            Self::OpenAiResponses => "openai",
-            Self::DeepSeek => "deepseek",
-            Self::Gemini => "gemini",
-            Self::Kiro => "kiro",
-        }
+        prodex_mojo_core::provider_constraints::provider_bridge_rate_limit_header_prefix(
+            self as i64,
+        )
+        .expect("Mojo provider bridge rate-limit prefix returned invalid output")
     }
 
     pub(super) fn rate_limit_header_label(self) -> &'static str {
-        match self {
-            Self::Anthropic => "Anthropic",
-            Self::Copilot => "Copilot",
-            Self::OpenAiResponses => "OpenAI",
-            Self::DeepSeek => "DeepSeek",
-            Self::Gemini => "Google Gemini",
-            Self::Kiro => "Kiro",
-        }
+        prodex_mojo_core::provider_constraints::provider_bridge_rate_limit_header_label(self as i64)
+            .expect("Mojo provider bridge rate-limit label returned invalid output")
     }
 
     pub(super) fn chat_compatible_adapter_label(self) -> &'static str {
-        match self {
-            Self::Gemini => "Gemini OpenAI-compatible",
-            Self::OpenAiResponses => "OpenAI-compatible",
-            Self::Anthropic => "Anthropic",
-            Self::Copilot => "Copilot",
-            Self::DeepSeek => "DeepSeek",
-            Self::Kiro => "Kiro",
-        }
+        prodex_mojo_core::provider_constraints::provider_bridge_chat_compatible_adapter_label(
+            self as i64,
+        )
+        .expect("Mojo provider bridge adapter label returned invalid output")
     }
 
     pub(super) fn function_tool_name_max_bytes(self) -> usize {
-        match self {
-            Self::Gemini | Self::OpenAiResponses => 128,
-            Self::Anthropic | Self::Copilot | Self::DeepSeek | Self::Kiro => 64,
-        }
+        prodex_mojo_core::provider_constraints::provider_bridge_function_tool_name_max_bytes(
+            self as i64,
+        )
+        .expect("Mojo provider bridge tool-name limit returned invalid output")
     }
 }
 

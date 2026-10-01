@@ -60,6 +60,119 @@ comptime PROVIDER_REASONING_EFFORT_MINIMAL: Int64 = 1
 comptime PROVIDER_REASONING_EFFORT_UNKNOWN: Int64 = 8
 
 
+comptime PROVIDER_BRIDGE_METADATA_ABI_VERSION: Int64 = 1
+comptime PROVIDER_BRIDGE_METADATA_OK: Int64 = 0
+comptime PROVIDER_BRIDGE_METADATA_INVALID: Int64 = 1
+comptime PROVIDER_BRIDGE_METADATA_CAPACITY: Int64 = 2
+comptime PROVIDER_BRIDGE_METADATA_ABI: Int64 = 4
+
+comptime PROVIDER_BRIDGE_LABEL_RATE_LIMIT_PREFIX: Int64 = 0
+comptime PROVIDER_BRIDGE_LABEL_RATE_LIMIT_HEADER: Int64 = 1
+comptime PROVIDER_BRIDGE_LABEL_CHAT_ADAPTER: Int64 = 2
+
+
+def provider_bridge_copy_label(
+    label: StringSlice,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) -> Int64:
+    if (
+        output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+    ):
+        return PROVIDER_BRIDGE_METADATA_INVALID
+    var length = Int64(label.byte_length())
+    if length > output_capacity:
+        return PROVIDER_BRIDGE_METADATA_CAPACITY
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var source = label.unsafe_ptr()
+    for index in range(length):
+        output[unsafe_offset=index] = source[unsafe_offset=index]
+    written[] = length
+    return PROVIDER_BRIDGE_METADATA_OK
+
+
+@export("prodex_provider_bridge_label_v1")
+def prodex_provider_bridge_label_v1(
+    abi_version: Int64,
+    provider: Int64,
+    label_kind: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_BRIDGE_METADATA_ABI_VERSION:
+        return PROVIDER_BRIDGE_METADATA_ABI
+    if provider < 0 or provider > 5 or label_kind < 0 or label_kind > 2:
+        return PROVIDER_BRIDGE_METADATA_INVALID
+
+    var label = StringSlice("")
+    if label_kind == PROVIDER_BRIDGE_LABEL_RATE_LIMIT_PREFIX:
+        if provider == 0:
+            label = StringSlice("anthropic")
+        elif provider == 1:
+            label = StringSlice("copilot")
+        elif provider == 2:
+            label = StringSlice("openai")
+        elif provider == 3:
+            label = StringSlice("deepseek")
+        elif provider == 4:
+            label = StringSlice("gemini")
+        else:
+            label = StringSlice("kiro")
+    elif label_kind == PROVIDER_BRIDGE_LABEL_RATE_LIMIT_HEADER:
+        if provider == 0:
+            label = StringSlice("Anthropic")
+        elif provider == 1:
+            label = StringSlice("Copilot")
+        elif provider == 2:
+            label = StringSlice("OpenAI")
+        elif provider == 3:
+            label = StringSlice("DeepSeek")
+        elif provider == 4:
+            label = StringSlice("Google Gemini")
+        else:
+            label = StringSlice("Kiro")
+    else:
+        if provider == 0:
+            label = StringSlice("Anthropic")
+        elif provider == 1:
+            label = StringSlice("Copilot")
+        elif provider == 2:
+            label = StringSlice("OpenAI-compatible")
+        elif provider == 3:
+            label = StringSlice("DeepSeek")
+        elif provider == 4:
+            label = StringSlice("Gemini OpenAI-compatible")
+        else:
+            label = StringSlice("Kiro")
+
+    return provider_bridge_copy_label(
+        label, output_address, output_capacity, written_address
+    )
+
+
+@export("prodex_provider_bridge_function_tool_name_max_bytes_v1")
+def prodex_provider_bridge_function_tool_name_max_bytes_v1(
+    abi_version: Int64,
+    provider: Int64,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_BRIDGE_METADATA_ABI_VERSION:
+        return -4
+    if provider < 0 or provider > 5:
+        return -1
+    if provider == 2 or provider == 4:
+        return 128
+    return 64
+
+
 comptime PROVIDER_PRECOMMIT_ABI_VERSION: Int64 = 1
 comptime PROVIDER_PRECOMMIT_STATUS_OK: Int64 = 0
 comptime PROVIDER_PRECOMMIT_STATUS_INVALID: Int64 = 1

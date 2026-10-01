@@ -3959,3 +3959,44 @@ no-fallback guard. The canonical broad report at this checkpoint counts
 **71,842 reachable Mojo LOC** and **200,546 Rust production LOC**, totaling
 **272,388 LOC**: **26.374877013671675% Mojo**. The 75% broad target remains in
 progress.
+
+## Provider bridge metadata hard replacement
+
+Static runtime provider-bridge metadata now lives in `provider_constraints.mojo`.
+Mojo owns the rate-limit header prefix, human-facing rate-limit label,
+chat-compatible adapter label, and function-tool name byte limit for all six
+runtime bridge kinds. `RuntimeProviderBridgeKind` is now `repr(i64)` so the
+existing bridge order is a stable Mojo ABI tag, which also removes the separate
+Rust bridge-kind mapper used by precommit policy. Rust retains the typed
+`ProviderId` mapping and execution/adapter boundaries. The four metadata match
+tables and the duplicate precommit tag mapper were deleted; no Rust semantic
+fallback remains for the migrated bridge metadata.
+
+Focused validation passes the standalone `provider_constraints.mojo` build,
+the real-Mojo provider scalar/precommit adapter test, the active provider-bridge
+metadata consumer test, Clippy with warnings denied for `prodex-mojo-core` and
+`prodex-app`, `git diff --check`, and the strengthened no-fallback guard. The
+canonical broad report at this checkpoint counts **71,942 reachable Mojo LOC**
+and **200,620 Rust production LOC**, totaling **272,562 LOC**:
+**26.394728538827863% Mojo**. The 75% broad target remains in progress.
+
+## Provider bridge metadata hard replacement
+
+Provider bridge static metadata now lives in the existing
+`provider_constraints.mojo` owner. Mojo owns per-provider rate-limit header
+prefixes and display labels, chat-compatible adapter labels, and function-tool
+name byte limits for Anthropic, Copilot, OpenAI Responses, DeepSeek, Gemini, and
+Kiro. `RuntimeProviderBridgeKind` is now `repr(i64)` so the existing provider
+order is the stable ABI tag; the previous Rust tag mapper and four Rust match
+tables were deleted. Rust retains provider enum ownership and dynamic request,
+header, validation, and transport execution; no Rust semantic fallback remains
+for the migrated metadata.
+
+Focused validation passes the standalone `provider_constraints.mojo` build,
+the real-Mojo provider scalar/bridge-metadata adapter test, the focused provider
+bridge metadata consumer test, the Gemini 128-byte function-name regression,
+Clippy with warnings denied for `prodex-mojo-core` and `prodex-app`,
+`git diff --check`, and the strengthened no-fallback guard. The canonical broad
+report at this checkpoint counts **71,942 reachable Mojo LOC** and **200,620
+Rust production LOC**, totaling **272,562 LOC**: **26.394728538827863% Mojo**.
+The 75% broad target remains in progress.
