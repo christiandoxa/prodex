@@ -17,10 +17,42 @@ use crate::{
     RUNTIME_PROFILE_OVERLOAD_HEALTH_PENALTY, RuntimeHeapTrimmedBufferedResponseParts,
     RuntimeRouteKind,
 };
-use prodex_mojo_core::rich::ascii_casefold_contains;
+use prodex_mojo_core::{
+    provider_constraints::{
+        ProviderPrecommitHealthAction, ProviderPrecommitLiveProgress, ProviderPrecommitMetricClass,
+        ProviderPrecommitSseAction, provider_precommit_buffered_fallback_class,
+        provider_precommit_health_action, provider_precommit_live_fallback_class,
+        provider_precommit_metric_class, provider_precommit_should_prefetch,
+        provider_precommit_sse_action,
+    },
+    rich::ascii_casefold_contains,
+};
 use prodex_provider_core::ProviderErrorClass;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+fn runtime_provider_bridge_kind_tag(provider: RuntimeProviderBridgeKind) -> i64 {
+    match provider {
+        RuntimeProviderBridgeKind::Anthropic => 0,
+        RuntimeProviderBridgeKind::Copilot => 1,
+        RuntimeProviderBridgeKind::OpenAiResponses => 2,
+        RuntimeProviderBridgeKind::DeepSeek => 3,
+        RuntimeProviderBridgeKind::Gemini => 4,
+        RuntimeProviderBridgeKind::Kiro => 5,
+    }
+}
+
+fn runtime_provider_error_class_from_tag(tag: i64) -> ProviderErrorClass {
+    match tag {
+        0 => ProviderErrorClass::Auth,
+        1 => ProviderErrorClass::Quota,
+        2 => ProviderErrorClass::RateLimit,
+        3 => ProviderErrorClass::Transient,
+        4 => ProviderErrorClass::NotFound,
+        5 => ProviderErrorClass::Other,
+        _ => unreachable!("validated Mojo provider error class"),
+    }
+}
 
 pub(super) fn runtime_local_rewrite_record_provider_health(
     shared: &RuntimeLocalRewriteProxyShared,
@@ -29,18 +61,31 @@ pub(super) fn runtime_local_rewrite_record_provider_health(
     result: &anyhow::Result<RuntimeLocalRewriteUpstreamResult>,
     fallback_class: Option<ProviderErrorClass>,
 ) {
-    match result {
-        Err(error) => note_runtime_profile_transport_failure(
-            &shared.runtime_shared,
-            profile_name,
-            route_kind,
-            "governed_provider_dispatch",
-            error,
-        ),
-        Ok(response)
-            if fallback_class == Some(ProviderErrorClass::Transient)
-                || response.status() == 503 =>
-        {
+    let (result_ok, status) = result
+        .as_ref()
+        .map(|response| (true, response.status()))
+        .unwrap_or((false, 0));
+    let action = provider_precommit_health_action(
+        result_ok,
+        status,
+        fallback_class.map(|class| class as i64),
+    )
+    .expect("Mojo provider precommit health policy returned invalid output");
+    match action {
+        ProviderPrecommitHealthAction::TransportFailure => {
+            let error = result
+                .as_ref()
+                .err()
+                .expect("transport failure action requires upstream error");
+            note_runtime_profile_transport_failure(
+                &shared.runtime_shared,
+                profile_name,
+                route_kind,
+                "governed_provider_dispatch",
+                error,
+            );
+        }
+        ProviderPrecommitHealthAction::Overload => {
             let _ = bump_runtime_profile_health_score(
                 &shared.runtime_shared,
                 profile_name,
@@ -49,7 +94,7 @@ pub(super) fn runtime_local_rewrite_record_provider_health(
                 "governed_provider_overload",
             );
         }
-        Ok(response) if (200..400).contains(&response.status()) && fallback_class.is_none() => {
+        ProviderPrecommitHealthAction::Commit => {
             let _ = commit_runtime_proxy_profile_selection_with_policy(
                 &shared.runtime_shared,
                 profile_name,
@@ -57,7 +102,7 @@ pub(super) fn runtime_local_rewrite_record_provider_health(
                 false,
             );
         }
-        Ok(_) => {}
+        ProviderPrecommitHealthAction::None => {}
     }
 }
 
@@ -75,31 +120,34 @@ pub(super) fn runtime_local_rewrite_record_provider_metric(
         | RuntimeProviderBridgeKind::DeepSeek
         | RuntimeProviderBridgeKind::Kiro => prodex_observability::ProviderKind::Other,
     };
-    let result = match (result, fallback_class) {
-        (Err(_), _) => prodex_observability::ProviderResultClass::TransportError,
-        (Ok(_), Some(ProviderErrorClass::Quota | ProviderErrorClass::RateLimit)) => {
+    let result_ok = result.is_ok();
+    let status = result.as_ref().ok().map_or(0, |response| response.status());
+    let result = match provider_precommit_metric_class(
+        result_ok,
+        status,
+        fallback_class.map(|class| class as i64),
+    )
+    .expect("Mojo provider precommit metric policy returned invalid output")
+    {
+        ProviderPrecommitMetricClass::Success => prodex_observability::ProviderResultClass::Success,
+        ProviderPrecommitMetricClass::ProviderError => {
+            prodex_observability::ProviderResultClass::ProviderError
+        }
+        ProviderPrecommitMetricClass::RateLimited => {
             prodex_observability::ProviderResultClass::RateLimited
         }
-        (Ok(_), Some(ProviderErrorClass::Transient)) => {
+        ProviderPrecommitMetricClass::Overloaded => {
             prodex_observability::ProviderResultClass::Overloaded
         }
-        (Ok(response), _) => runtime_local_rewrite_provider_result_class(response.status()),
+        ProviderPrecommitMetricClass::TransportError => {
+            prodex_observability::ProviderResultClass::TransportError
+        }
     };
     crate::record_runtime_provider_metric(
         provider,
         result,
         duration.as_millis().try_into().unwrap_or(u64::MAX),
     );
-}
-
-pub(super) fn runtime_local_rewrite_provider_result_class(
-    status: u16,
-) -> prodex_observability::ProviderResultClass {
-    match status {
-        200..=399 => prodex_observability::ProviderResultClass::Success,
-        503 => prodex_observability::ProviderResultClass::Overloaded,
-        _ => prodex_observability::ProviderResultClass::ProviderError,
-    }
 }
 
 pub(super) fn runtime_local_rewrite_provider_fallback_class(
@@ -121,24 +169,20 @@ fn runtime_local_rewrite_buffered_fallback_class(
     parts: &RuntimeHeapTrimmedBufferedResponseParts,
     provider: RuntimeProviderBridgeKind,
 ) -> Option<ProviderErrorClass> {
-    if parts.status < 400 {
-        return None;
-    }
     let class = runtime_provider_error_class(provider, parts.status, &parts.body);
-    match class {
-        ProviderErrorClass::Quota | ProviderErrorClass::Transient => Some(class),
-        ProviderErrorClass::RateLimit
-            if std::str::from_utf8(&parts.body).is_ok_and(|body| {
-                ascii_casefold_contains(body, "rate_limit_exceeded")
-                    .expect("Mojo provider rate-limit body comparison failed")
-                    || ascii_casefold_contains(body, "rate_limit_exceeded_error")
-                        .expect("Mojo provider rate-limit body comparison failed")
-            }) =>
-        {
-            Some(class)
-        }
-        _ => None,
-    }
+    let explicit_rate_limit_marker = std::str::from_utf8(&parts.body).is_ok_and(|body| {
+        ascii_casefold_contains(body, "rate_limit_exceeded")
+            .expect("Mojo provider rate-limit body comparison failed")
+            || ascii_casefold_contains(body, "rate_limit_exceeded_error")
+                .expect("Mojo provider rate-limit body comparison failed")
+    });
+    provider_precommit_buffered_fallback_class(
+        parts.status,
+        class as i64,
+        explicit_rate_limit_marker,
+    )
+    .expect("Mojo buffered provider fallback policy returned invalid output")
+    .map(runtime_provider_error_class_from_tag)
 }
 
 fn runtime_local_rewrite_live_fallback_class(
@@ -156,38 +200,22 @@ fn runtime_local_rewrite_live_fallback_class(
     } else {
         crate::runtime_proxy::inspect_runtime_sse_buffer(&live.prefix)
     };
-    match progress {
+    let progress = match progress {
         runtime_proxy_crate::RuntimeSseInspectionProgress::QuotaBlocked => {
-            let class = runtime_provider_error_class(provider, live.status, &live.prefix);
-            Some(
-                matches!(
-                    class,
-                    ProviderErrorClass::Quota
-                        | ProviderErrorClass::RateLimit
-                        | ProviderErrorClass::Transient
-                )
-                .then_some(class)
-                .unwrap_or(ProviderErrorClass::Quota),
-            )
+            ProviderPrecommitLiveProgress::QuotaBlocked
         }
         runtime_proxy_crate::RuntimeSseInspectionProgress::RateLimited { .. } => {
-            Some(ProviderErrorClass::RateLimit)
+            ProviderPrecommitLiveProgress::RateLimited
         }
         runtime_proxy_crate::RuntimeSseInspectionProgress::Overloaded => {
-            let class = runtime_provider_error_class(provider, live.status, &live.prefix);
-            Some(
-                matches!(
-                    class,
-                    ProviderErrorClass::Quota
-                        | ProviderErrorClass::RateLimit
-                        | ProviderErrorClass::Transient
-                )
-                .then_some(class)
-                .unwrap_or(ProviderErrorClass::Transient),
-            )
+            ProviderPrecommitLiveProgress::Overloaded
         }
-        _ => None,
-    }
+        _ => ProviderPrecommitLiveProgress::Other,
+    };
+    let class = runtime_provider_error_class(provider, live.status, &live.prefix);
+    provider_precommit_live_fallback_class(progress, class as i64)
+        .expect("Mojo live provider fallback policy returned invalid output")
+        .map(runtime_provider_error_class_from_tag)
 }
 
 pub(super) fn runtime_local_rewrite_precommit_live_provider_response(
@@ -312,53 +340,63 @@ fn runtime_local_rewrite_should_prefetch_provider_response(
     provider: RuntimeProviderBridgeKind,
     responses_route: bool,
 ) -> bool {
-    !live.native_anthropic_messages
-        && matches!(
-            provider,
-            RuntimeProviderBridgeKind::Anthropic
-                | RuntimeProviderBridgeKind::DeepSeek
-                | RuntimeProviderBridgeKind::Gemini
-        )
-        && responses_route
-        && (200..300).contains(&live.status)
-        && live
-            .headers
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| {
-                ascii_casefold_contains(value, "text/event-stream")
-                    .expect("Mojo provider SSE content-type comparison failed")
-            })
-        && live.prefix.is_empty()
+    let content_type_event_stream = live
+        .headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            ascii_casefold_contains(value, "text/event-stream")
+                .expect("Mojo provider SSE content-type comparison failed")
+        });
+    provider_precommit_should_prefetch(
+        runtime_provider_bridge_kind_tag(provider),
+        live.native_anthropic_messages,
+        responses_route,
+        live.status,
+        content_type_event_stream,
+        live.prefix.is_empty(),
+    )
+    .expect("Mojo provider prefetch policy returned invalid output")
 }
 
 fn runtime_local_rewrite_sse_event_progress(
     event: runtime_proxy_crate::RuntimeParsedSseEvent,
 ) -> Option<runtime_proxy_crate::RuntimeSseInspectionProgress> {
-    if event.quota_blocked {
-        return Some(runtime_proxy_crate::RuntimeSseInspectionProgress::QuotaBlocked);
-    }
-    if event.rate_limited {
-        return Some(
+    let hold_event = event
+        .event_type
+        .as_deref()
+        .is_some_and(runtime_proxy_crate::runtime_proxy_precommit_hold_event_kind);
+    match provider_precommit_sse_action(
+        event.quota_blocked,
+        event.rate_limited,
+        event.overloaded,
+        event.previous_response_not_found,
+        hold_event,
+    )
+    .expect("Mojo provider SSE progress policy returned invalid output")
+    {
+        ProviderPrecommitSseAction::None => None,
+        ProviderPrecommitSseAction::QuotaBlocked => {
+            Some(runtime_proxy_crate::RuntimeSseInspectionProgress::QuotaBlocked)
+        }
+        ProviderPrecommitSseAction::RateLimited => Some(
             runtime_proxy_crate::RuntimeSseInspectionProgress::RateLimited {
                 retry_after: event.retry_after,
             },
-        );
+        ),
+        ProviderPrecommitSseAction::Overloaded => {
+            Some(runtime_proxy_crate::RuntimeSseInspectionProgress::Overloaded)
+        }
+        ProviderPrecommitSseAction::PreviousResponseNotFound => {
+            Some(runtime_proxy_crate::RuntimeSseInspectionProgress::PreviousResponseNotFound)
+        }
+        ProviderPrecommitSseAction::Commit => {
+            Some(runtime_proxy_crate::RuntimeSseInspectionProgress::Commit {
+                response_ids: event.response_ids,
+                turn_state: event.turn_state,
+            })
+        }
     }
-    if event.overloaded {
-        return Some(runtime_proxy_crate::RuntimeSseInspectionProgress::Overloaded);
-    }
-    if event.previous_response_not_found {
-        return Some(runtime_proxy_crate::RuntimeSseInspectionProgress::PreviousResponseNotFound);
-    }
-    (!event
-        .event_type
-        .as_deref()
-        .is_some_and(runtime_proxy_crate::runtime_proxy_precommit_hold_event_kind))
-    .then_some(runtime_proxy_crate::RuntimeSseInspectionProgress::Commit {
-        response_ids: event.response_ids,
-        turn_state: event.turn_state,
-    })
 }
 
 fn runtime_local_rewrite_sse_chunk_progress(

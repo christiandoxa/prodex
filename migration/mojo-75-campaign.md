@@ -3877,3 +3877,27 @@ the strengthened no-fallback guard. The canonical broad report at this
 checkpoint counts **71,653 reachable Mojo LOC** and **200,310 Rust production
 LOC**, totaling **271,963 LOC**: **26.34659861819439% Mojo**. The 75% broad
 target remains in progress.
+
+## Provider precommit and credential-retry policy hard replacement
+
+Provider precommit decision matrices now run through the existing
+`provider_constraints.mojo` owner. Mojo owns provider health actions, provider
+metric result classes, buffered and live fallback eligibility/class selection,
+SSE prefetch eligibility, parsed-SSE progress actions, and the shared
+credential-rotation retry budget/class policy used by OpenAI. Rust retains HTTP
+and stream I/O, content-type/body acquisition, parsed SSE dynamic payload
+materialization, provider-error classification calls, and execution of the
+selected health/metric side effects. `ProviderErrorClass` is now explicitly
+`repr(i64)` so its existing 0..5 ABI order remains stable. The former Rust
+precommit decision matrices and OpenAI class/remaining-attempt retry match were
+deleted; no Rust semantic fallback remains for those migrated decisions.
+
+Focused validation passes the standalone `provider_constraints.mojo` build,
+the real-Mojo provider scalar/precommit adapter test, `prodex-app --lib` check,
+the focused OpenAI Mojo-backed credential-retry test, the generic-429
+non-retry regression, Clippy with warnings denied for `prodex-mojo-core`,
+`prodex-provider-core`, and `prodex-app`, `git diff --check`, and the expanded
+no-fallback guard. The canonical broad report at this checkpoint counts
+**71,813 reachable Mojo LOC** and **200,545 Rust production LOC**, totaling
+**272,358 LOC**: **26.367134433356096% Mojo**. The 75% broad target remains in
+progress.

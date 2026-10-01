@@ -4,7 +4,9 @@ use super::local_rewrite::{
     RuntimeLocalRewriteProviderOptions, RuntimeLocalRewriteProxyShared,
 };
 use super::local_rewrite_anthropic::send_runtime_anthropic_upstream_request;
-use super::local_rewrite_application_data_plane::RuntimeGatewayApplicationProviderDispatch;
+use super::local_rewrite_application_data_plane::{
+    RuntimeGatewayApplicationProviderDispatch, runtime_gateway_application_provider_retry_precommit,
+};
 use super::local_rewrite_copilot::{
     RuntimeCopilotBindingRecorder, RuntimeCopilotRequestContext,
     send_runtime_copilot_upstream_request,
@@ -30,6 +32,7 @@ use prodex_mojo_core::rich::ascii_casefold_contains;
 use prodex_provider_core::{
     ProviderEndpoint, ProviderErrorClass, ProviderId, RuntimeProviderBindingIdentity,
 };
+use prodex_provider_spi::ProviderRetryCause;
 use prodex_state::ResponseProfileBinding;
 use runtime_proxy_crate::{runtime_proxy_log_field, runtime_proxy_structured_log_message};
 use serde_json::Value;
@@ -929,16 +932,14 @@ fn runtime_local_rewrite_openai_error_can_retry(
         parts.status,
         &parts.body,
     );
-    !hard_binding
-        && (parts.status != 429 || runtime_local_rewrite_retryable_429_body(&parts.body))
-        && matches!(
+    (parts.status != 429 || runtime_local_rewrite_retryable_429_body(&parts.body))
+        && !hard_binding
+        && runtime_gateway_application_provider_retry_precommit(
+            ProviderRetryCause::RotateCredential,
             class,
-            ProviderErrorClass::Auth
-                | ProviderErrorClass::RateLimit
-                | ProviderErrorClass::Quota
-                | ProviderErrorClass::Transient
+            attempt_index,
+            attempt_count,
         )
-        && attempt_index + 1 < attempt_count
 }
 
 fn runtime_local_rewrite_openai_response(
@@ -1220,6 +1221,7 @@ mod tests {
         RuntimeLocalRewriteAsyncResponse, RuntimeLocalRewriteBindingContext,
         RuntimeLocalRewriteContinuationReader, RuntimeLocalRewriteLiveResponse,
         RuntimeLocalRewriteNativeFirstEvent, RuntimeLocalRewriteSsePrefetch,
+        runtime_local_rewrite_openai_error_can_retry,
         runtime_local_rewrite_precommit_native_first_event,
         runtime_local_rewrite_retryable_429_body,
     };
@@ -1602,6 +1604,52 @@ mod tests {
         ));
         assert!(runtime_local_rewrite_retryable_429_body(
             br#"{"error":{"code":"insufficient_quota"}}"#
+        ));
+    }
+
+    #[test]
+    fn openai_error_retry_uses_mojo_provider_retry_policy() {
+        let parts = |status, body: &[u8]| crate::RuntimeHeapTrimmedBufferedResponseParts {
+            status,
+            headers: Vec::new(),
+            body: body.to_vec().into(),
+        };
+
+        assert!(runtime_local_rewrite_openai_error_can_retry(
+            &parts(401, br#"{"error":{"code":"invalid_api_key"}}"#),
+            false,
+            0,
+            2,
+        ));
+        assert!(runtime_local_rewrite_openai_error_can_retry(
+            &parts(503, b"temporarily unavailable"),
+            false,
+            0,
+            2,
+        ));
+        assert!(runtime_local_rewrite_openai_error_can_retry(
+            &parts(429, br#"{"error":{"code":"rate_limit_exceeded"}}"#),
+            false,
+            0,
+            2,
+        ));
+        assert!(!runtime_local_rewrite_openai_error_can_retry(
+            &parts(429, b"too many requests"),
+            false,
+            0,
+            2,
+        ));
+        assert!(!runtime_local_rewrite_openai_error_can_retry(
+            &parts(401, br#"{"error":{"code":"invalid_api_key"}}"#),
+            true,
+            0,
+            2,
+        ));
+        assert!(!runtime_local_rewrite_openai_error_can_retry(
+            &parts(503, b"temporarily unavailable"),
+            false,
+            1,
+            2,
         ));
     }
 

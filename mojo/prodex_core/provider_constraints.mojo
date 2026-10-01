@@ -59,6 +59,187 @@ comptime PROVIDER_REASONING_EFFORT_NONE: Int64 = 0
 comptime PROVIDER_REASONING_EFFORT_MINIMAL: Int64 = 1
 comptime PROVIDER_REASONING_EFFORT_UNKNOWN: Int64 = 8
 
+
+comptime PROVIDER_PRECOMMIT_ABI_VERSION: Int64 = 1
+comptime PROVIDER_PRECOMMIT_STATUS_OK: Int64 = 0
+comptime PROVIDER_PRECOMMIT_STATUS_INVALID: Int64 = 1
+comptime PROVIDER_PRECOMMIT_STATUS_ABI: Int64 = 4
+
+comptime PROVIDER_PRECOMMIT_HEALTH_NONE: Int64 = 0
+comptime PROVIDER_PRECOMMIT_HEALTH_TRANSPORT_FAILURE: Int64 = 1
+comptime PROVIDER_PRECOMMIT_HEALTH_OVERLOAD: Int64 = 2
+comptime PROVIDER_PRECOMMIT_HEALTH_COMMIT: Int64 = 3
+
+comptime PROVIDER_PRECOMMIT_METRIC_SUCCESS: Int64 = 0
+comptime PROVIDER_PRECOMMIT_METRIC_PROVIDER_ERROR: Int64 = 1
+comptime PROVIDER_PRECOMMIT_METRIC_RATE_LIMITED: Int64 = 2
+comptime PROVIDER_PRECOMMIT_METRIC_OVERLOADED: Int64 = 3
+comptime PROVIDER_PRECOMMIT_METRIC_TRANSPORT_ERROR: Int64 = 4
+
+comptime PROVIDER_PRECOMMIT_SSE_NONE: Int64 = 0
+comptime PROVIDER_PRECOMMIT_SSE_QUOTA: Int64 = 1
+comptime PROVIDER_PRECOMMIT_SSE_RATE_LIMIT: Int64 = 2
+comptime PROVIDER_PRECOMMIT_SSE_OVERLOADED: Int64 = 3
+comptime PROVIDER_PRECOMMIT_SSE_PREVIOUS_RESPONSE_NOT_FOUND: Int64 = 4
+comptime PROVIDER_PRECOMMIT_SSE_COMMIT: Int64 = 5
+
+comptime PROVIDER_PRECOMMIT_OP_BUFFERED_FALLBACK: Int64 = 0
+comptime PROVIDER_PRECOMMIT_OP_LIVE_FALLBACK: Int64 = 1
+comptime PROVIDER_PRECOMMIT_OP_PREFETCH: Int64 = 2
+comptime PROVIDER_PRECOMMIT_OP_SSE_PROGRESS: Int64 = 3
+comptime PROVIDER_PRECOMMIT_OP_HEALTH_ACTION: Int64 = 4
+comptime PROVIDER_PRECOMMIT_OP_METRIC_CLASS: Int64 = 5
+
+
+def provider_precommit_valid_error_class(value: Int64) -> Bool:
+    return value >= PROVIDER_ERROR_AUTH and value <= PROVIDER_ERROR_OTHER
+
+
+def provider_precommit_retry_fallback_class(value: Int64) -> Bool:
+    return (
+        value == PROVIDER_ERROR_QUOTA
+        or value == PROVIDER_ERROR_RATE_LIMIT
+        or value == PROVIDER_ERROR_TRANSIENT
+    )
+
+
+@export("prodex_provider_precommit_policy_v1")
+def prodex_provider_precommit_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    a: Int64,
+    b: Int64,
+    c: Int64,
+    d: Int64,
+    e: Int64,
+    f: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_PRECOMMIT_ABI_VERSION:
+        return PROVIDER_PRECOMMIT_STATUS_ABI
+    if (
+        operation < PROVIDER_PRECOMMIT_OP_BUFFERED_FALLBACK
+        or operation > PROVIDER_PRECOMMIT_OP_METRIC_CLASS
+        or output_address == 0
+    ):
+        return PROVIDER_PRECOMMIT_STATUS_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+
+    if operation == PROVIDER_PRECOMMIT_OP_BUFFERED_FALLBACK:
+        if (
+            a < 0
+            or a > 65535
+            or not provider_precommit_valid_error_class(b)
+            or (c != 0 and c != 1)
+        ):
+            return PROVIDER_PRECOMMIT_STATUS_INVALID
+        output[] = -1
+        if a < 400:
+            return PROVIDER_PRECOMMIT_STATUS_OK
+        if b == PROVIDER_ERROR_QUOTA or b == PROVIDER_ERROR_TRANSIENT:
+            output[] = b
+        elif b == PROVIDER_ERROR_RATE_LIMIT and c == 1:
+            output[] = b
+        return PROVIDER_PRECOMMIT_STATUS_OK
+
+    if operation == PROVIDER_PRECOMMIT_OP_LIVE_FALLBACK:
+        if a < 0 or a > 3 or not provider_precommit_valid_error_class(b):
+            return PROVIDER_PRECOMMIT_STATUS_INVALID
+        output[] = -1
+        if a == 0:
+            output[] = b if provider_precommit_retry_fallback_class(b) else PROVIDER_ERROR_QUOTA
+        elif a == 1:
+            output[] = PROVIDER_ERROR_RATE_LIMIT
+        elif a == 2:
+            output[] = b if provider_precommit_retry_fallback_class(b) else PROVIDER_ERROR_TRANSIENT
+        return PROVIDER_PRECOMMIT_STATUS_OK
+
+    if operation == PROVIDER_PRECOMMIT_OP_PREFETCH:
+        if (
+            a < 0
+            or a > 5
+            or (b != 0 and b != 1)
+            or (c != 0 and c != 1)
+            or d < 0
+            or d > 65535
+            or (e != 0 and e != 1)
+            or (f != 0 and f != 1)
+        ):
+            return PROVIDER_PRECOMMIT_STATUS_INVALID
+        var provider_supported = a == 0 or a == 3 or a == 4
+        output[] = Int64(
+            b == 0
+            and provider_supported
+            and c == 1
+            and d >= 200
+            and d < 300
+            and e == 1
+            and f == 1
+        )
+        return PROVIDER_PRECOMMIT_STATUS_OK
+
+    if operation == PROVIDER_PRECOMMIT_OP_SSE_PROGRESS:
+        if a < 0 or a > 31:
+            return PROVIDER_PRECOMMIT_STATUS_INVALID
+        if (a & 1) == 1:
+            output[] = PROVIDER_PRECOMMIT_SSE_QUOTA
+        elif (a & 2) == 2:
+            output[] = PROVIDER_PRECOMMIT_SSE_RATE_LIMIT
+        elif (a & 4) == 4:
+            output[] = PROVIDER_PRECOMMIT_SSE_OVERLOADED
+        elif (a & 8) == 8:
+            output[] = PROVIDER_PRECOMMIT_SSE_PREVIOUS_RESPONSE_NOT_FOUND
+        elif (a & 16) == 16:
+            output[] = PROVIDER_PRECOMMIT_SSE_NONE
+        else:
+            output[] = PROVIDER_PRECOMMIT_SSE_COMMIT
+        return PROVIDER_PRECOMMIT_STATUS_OK
+
+    if operation == PROVIDER_PRECOMMIT_OP_HEALTH_ACTION:
+        if (
+            (a != 0 and a != 1)
+            or b < 0
+            or b > 65535
+            or c < -1
+            or c > PROVIDER_ERROR_OTHER
+        ):
+            return PROVIDER_PRECOMMIT_STATUS_INVALID
+        if a == 0:
+            output[] = PROVIDER_PRECOMMIT_HEALTH_TRANSPORT_FAILURE
+        elif c == PROVIDER_ERROR_TRANSIENT or b == 503:
+            output[] = PROVIDER_PRECOMMIT_HEALTH_OVERLOAD
+        elif b >= 200 and b < 400 and c == -1:
+            output[] = PROVIDER_PRECOMMIT_HEALTH_COMMIT
+        else:
+            output[] = PROVIDER_PRECOMMIT_HEALTH_NONE
+        return PROVIDER_PRECOMMIT_STATUS_OK
+
+    if (
+        (a != 0 and a != 1)
+        or b < 0
+        or b > 65535
+        or c < -1
+        or c > PROVIDER_ERROR_OTHER
+    ):
+        return PROVIDER_PRECOMMIT_STATUS_INVALID
+    if a == 0:
+        output[] = PROVIDER_PRECOMMIT_METRIC_TRANSPORT_ERROR
+    elif c == PROVIDER_ERROR_QUOTA or c == PROVIDER_ERROR_RATE_LIMIT:
+        output[] = PROVIDER_PRECOMMIT_METRIC_RATE_LIMITED
+    elif c == PROVIDER_ERROR_TRANSIENT:
+        output[] = PROVIDER_PRECOMMIT_METRIC_OVERLOADED
+    elif b >= 200 and b <= 399:
+        output[] = PROVIDER_PRECOMMIT_METRIC_SUCCESS
+    elif b == 503:
+        output[] = PROVIDER_PRECOMMIT_METRIC_OVERLOADED
+    else:
+        output[] = PROVIDER_PRECOMMIT_METRIC_PROVIDER_ERROR
+    return PROVIDER_PRECOMMIT_STATUS_OK
+
+
 comptime PROVIDER_SCALAR_POLICY_ABI_VERSION: Int64 = 1
 comptime PROVIDER_SCALAR_POLICY_REASONING_EFFORT: Int64 = 0
 comptime PROVIDER_SCALAR_POLICY_COPILOT_PROMPT_LIMIT: Int64 = 1

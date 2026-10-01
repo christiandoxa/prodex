@@ -93,6 +93,8 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime_decisions.rs",
   "crates/prodex-mojo-core/tests/profile_health.rs",
   "crates/prodex-mojo-core/src/provider_constraints.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
   "crates/prodex-mojo-core/src/policy.rs",
   "crates/prodex-mojo-core/src/context.rs",
   "crates/prodex-mojo-core/src/rich.rs",
@@ -761,6 +763,9 @@ const KIRO_RESPONSE_HELPER_OPERATIONS = [
 const DEEPSEEK_STRICT_TOOLS_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs";
 const DEEPSEEK_STRICT_SCHEMA_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_tools/strict_schema.rs";
 const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
+const PROVIDER_CONSTRAINTS_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints.rs";
+const PROVIDER_PRECOMMIT_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs";
+const LOCAL_REWRITE_UPSTREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
 const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
@@ -1951,6 +1956,62 @@ export function findViolations(files) {
     return mojoOwned && !oldMapper && !/#\[\s*cfg\s*\(/u.test(contents)
       ? [] : [`${filePath}: reasoning must use Mojo without Rust copies or cfg routing`];
   });
+  const providerPrecommitPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PROVIDER_CONSTRAINTS_ADAPTER_FILE) {
+      return contents.includes("prodex_provider_precommit_policy_v1(")
+        ? []
+        : [filePath + ": provider precommit adapter must retain Mojo ABI"];
+    }
+    if (filePath === PROVIDER_PRECOMMIT_FILE) {
+      const required = [
+        "provider_precommit_health_action(",
+        "provider_precommit_metric_class(",
+        "provider_precommit_buffered_fallback_class(",
+        "provider_precommit_live_fallback_class(",
+        "provider_precommit_should_prefetch(",
+        "provider_precommit_sse_action(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": provider precommit migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      for (const retired of [
+        "fallback_class == Some(ProviderErrorClass::Transient)",
+        "match (result, fallback_class)",
+        "if event.quota_blocked {",
+        "!live.native_anthropic_messages",
+      ]) {
+        if (production.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust provider precommit policy semantics");
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === LOCAL_REWRITE_UPSTREAM_FILE) {
+      const body = contents.match(/\bfn\s+runtime_local_rewrite_openai_error_can_retry\([^]*?^\}/mu)?.[0];
+      const violations = body?.includes("runtime_gateway_application_provider_retry_precommit(")
+        ? []
+        : [filePath + ": OpenAI credential retry must retain Mojo-backed provider retry policy"];
+      if (
+        body?.includes("attempt_index + 1 < attempt_count")
+        || body?.includes("ProviderErrorClass::Auth")
+        || body?.includes("ProviderErrorClass::Quota")
+        || body?.includes("ProviderErrorClass::RateLimit")
+        || body?.includes("ProviderErrorClass::Transient")
+      ) {
+        violations.push(filePath + ": contains restored Rust OpenAI retry eligibility matrix");
+      }
+      return violations;
+    }
+    if (filePath === PROVIDER_ERROR_FILE) {
+      const enumDecl = contents.match(/#\[repr\(i64\)\][^]*?pub enum ProviderErrorClass\s*\{/u)?.[0];
+      return enumDecl
+        ? []
+        : [filePath + ": ProviderErrorClass must remain ABI-stable for Mojo policy tags"];
+    }
+    return [];
+  });
   const providerErrorMemberViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== PROVIDER_ERROR_FILE) return [];
     const body = contents.match(/\bpub fn provider_error_rejects_request_member\([^]*?^\}/mu)?.[0];
@@ -2621,7 +2682,7 @@ export function findViolations(files) {
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
     ...deepseekReasoningViolations,
-    ...providerErrorMemberViolations,
+    ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,

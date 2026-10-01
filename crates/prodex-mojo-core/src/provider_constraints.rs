@@ -77,6 +77,41 @@ mod scalar_policy_tests {
         assert_eq!(provider_retry_transition(0, 1, 2, 0, 2, true).unwrap(), 2);
         assert_eq!(provider_retry_transition(3, 1, 2, 1, 2, true).unwrap(), 0);
         assert_eq!(provider_retry_transition(4, 0, 2, 0, 2, false).unwrap(), 0);
+        assert_eq!(
+            provider_precommit_buffered_fallback_class(429, 2, false).unwrap(),
+            None
+        );
+        assert_eq!(
+            provider_precommit_buffered_fallback_class(429, 2, true).unwrap(),
+            Some(2)
+        );
+        assert_eq!(
+            provider_precommit_live_fallback_class(ProviderPrecommitLiveProgress::QuotaBlocked, 5,)
+                .unwrap(),
+            Some(1)
+        );
+        assert!(provider_precommit_should_prefetch(4, false, true, 200, true, true).unwrap());
+        assert!(!provider_precommit_should_prefetch(1, false, true, 200, true, true).unwrap());
+        assert_eq!(
+            provider_precommit_sse_action(false, false, false, false, true).unwrap(),
+            ProviderPrecommitSseAction::None
+        );
+        assert_eq!(
+            provider_precommit_sse_action(false, false, false, false, false).unwrap(),
+            ProviderPrecommitSseAction::Commit
+        );
+        assert_eq!(
+            provider_precommit_health_action(false, 0, None).unwrap(),
+            ProviderPrecommitHealthAction::TransportFailure
+        );
+        assert_eq!(
+            provider_precommit_health_action(true, 503, None).unwrap(),
+            ProviderPrecommitHealthAction::Overload
+        );
+        assert_eq!(
+            provider_precommit_metric_class(true, 429, Some(2)).unwrap(),
+            ProviderPrecommitMetricClass::RateLimited
+        );
     }
 }
 
@@ -87,6 +122,52 @@ pub struct ProviderRetryScalarPlan {
     /// 0 allowed, 1 committed, 2 budget exhausted, 3 not retryable.
     pub decision: i64,
     pub remaining_precommit_retries: u8,
+}
+
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProviderPrecommitOperation {
+    BufferedFallback = 0,
+    LiveFallback = 1,
+    Prefetch = 2,
+    SseProgress = 3,
+    HealthAction = 4,
+    MetricClass = 5,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderPrecommitLiveProgress {
+    QuotaBlocked,
+    RateLimited,
+    Overloaded,
+    Other,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderPrecommitSseAction {
+    None,
+    QuotaBlocked,
+    RateLimited,
+    Overloaded,
+    PreviousResponseNotFound,
+    Commit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderPrecommitHealthAction {
+    None,
+    TransportFailure,
+    Overload,
+    Commit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderPrecommitMetricClass {
+    Success,
+    ProviderError,
+    RateLimited,
+    Overloaded,
+    TransportError,
 }
 
 unsafe extern "C" {
@@ -106,6 +187,17 @@ unsafe extern "C" {
         cause: i64,
         error_class: i64,
         attempted_precommit_retries: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_provider_precommit_policy_v1(
+        abi_version: i64,
+        operation: i64,
+        a: i64,
+        b: i64,
+        c: i64,
+        d: i64,
+        e: i64,
+        f: i64,
         output_address: u64,
     ) -> i64;
 }
@@ -176,6 +268,177 @@ pub fn provider_retry_plan(
         remaining_precommit_retries: u8::try_from(output[1])
             .map_err(|_| crate::MojoError::InvalidOutput)?,
     })
+}
+
+fn provider_precommit_policy(
+    operation: ProviderPrecommitOperation,
+    values: [i64; 6],
+) -> Result<i64, crate::MojoError> {
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_provider_precommit_policy_v1(
+            PROVIDER_RETRY_ABI_VERSION,
+            operation as i64,
+            values[0],
+            values[1],
+            values[2],
+            values[3],
+            values[4],
+            values[5],
+            (&mut output as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => Ok(output),
+        1 => Err(crate::MojoError::InvalidInput),
+        4 => Err(crate::MojoError::AbiMismatch),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn provider_precommit_buffered_fallback_class(
+    status: u16,
+    error_class: i64,
+    explicit_rate_limit_marker: bool,
+) -> Result<Option<i64>, crate::MojoError> {
+    let value = provider_precommit_policy(
+        ProviderPrecommitOperation::BufferedFallback,
+        [
+            i64::from(status),
+            error_class,
+            i64::from(explicit_rate_limit_marker),
+            0,
+            0,
+            0,
+        ],
+    )?;
+    match value {
+        -1 => Ok(None),
+        0..=5 => Ok(Some(value)),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn provider_precommit_live_fallback_class(
+    progress: ProviderPrecommitLiveProgress,
+    error_class: i64,
+) -> Result<Option<i64>, crate::MojoError> {
+    let progress = match progress {
+        ProviderPrecommitLiveProgress::QuotaBlocked => 0,
+        ProviderPrecommitLiveProgress::RateLimited => 1,
+        ProviderPrecommitLiveProgress::Overloaded => 2,
+        ProviderPrecommitLiveProgress::Other => 3,
+    };
+    let value = provider_precommit_policy(
+        ProviderPrecommitOperation::LiveFallback,
+        [progress, error_class, 0, 0, 0, 0],
+    )?;
+    match value {
+        -1 => Ok(None),
+        0..=5 => Ok(Some(value)),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn provider_precommit_should_prefetch(
+    provider: i64,
+    native_anthropic_messages: bool,
+    responses_route: bool,
+    status: u16,
+    content_type_event_stream: bool,
+    prefix_empty: bool,
+) -> Result<bool, crate::MojoError> {
+    match provider_precommit_policy(
+        ProviderPrecommitOperation::Prefetch,
+        [
+            provider,
+            i64::from(native_anthropic_messages),
+            i64::from(responses_route),
+            i64::from(status),
+            i64::from(content_type_event_stream),
+            i64::from(prefix_empty),
+        ],
+    )? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn provider_precommit_sse_action(
+    quota_blocked: bool,
+    rate_limited: bool,
+    overloaded: bool,
+    previous_response_not_found: bool,
+    hold_event: bool,
+) -> Result<ProviderPrecommitSseAction, crate::MojoError> {
+    let flags = i64::from(quota_blocked)
+        | (i64::from(rate_limited) << 1)
+        | (i64::from(overloaded) << 2)
+        | (i64::from(previous_response_not_found) << 3)
+        | (i64::from(hold_event) << 4);
+    match provider_precommit_policy(
+        ProviderPrecommitOperation::SseProgress,
+        [flags, 0, 0, 0, 0, 0],
+    )? {
+        0 => Ok(ProviderPrecommitSseAction::None),
+        1 => Ok(ProviderPrecommitSseAction::QuotaBlocked),
+        2 => Ok(ProviderPrecommitSseAction::RateLimited),
+        3 => Ok(ProviderPrecommitSseAction::Overloaded),
+        4 => Ok(ProviderPrecommitSseAction::PreviousResponseNotFound),
+        5 => Ok(ProviderPrecommitSseAction::Commit),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn provider_precommit_health_action(
+    result_ok: bool,
+    status: u16,
+    fallback_class: Option<i64>,
+) -> Result<ProviderPrecommitHealthAction, crate::MojoError> {
+    match provider_precommit_policy(
+        ProviderPrecommitOperation::HealthAction,
+        [
+            i64::from(result_ok),
+            i64::from(status),
+            fallback_class.unwrap_or(-1),
+            0,
+            0,
+            0,
+        ],
+    )? {
+        0 => Ok(ProviderPrecommitHealthAction::None),
+        1 => Ok(ProviderPrecommitHealthAction::TransportFailure),
+        2 => Ok(ProviderPrecommitHealthAction::Overload),
+        3 => Ok(ProviderPrecommitHealthAction::Commit),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn provider_precommit_metric_class(
+    result_ok: bool,
+    status: u16,
+    fallback_class: Option<i64>,
+) -> Result<ProviderPrecommitMetricClass, crate::MojoError> {
+    match provider_precommit_policy(
+        ProviderPrecommitOperation::MetricClass,
+        [
+            i64::from(result_ok),
+            i64::from(status),
+            fallback_class.unwrap_or(-1),
+            0,
+            0,
+            0,
+        ],
+    )? {
+        0 => Ok(ProviderPrecommitMetricClass::Success),
+        1 => Ok(ProviderPrecommitMetricClass::ProviderError),
+        2 => Ok(ProviderPrecommitMetricClass::RateLimited),
+        3 => Ok(ProviderPrecommitMetricClass::Overloaded),
+        4 => Ok(ProviderPrecommitMetricClass::TransportError),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
 }
 
 const PROVIDER_SCALAR_POLICY_ABI_VERSION: i64 = 1;
