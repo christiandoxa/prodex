@@ -2020,6 +2020,17 @@ export function findViolations(files) {
       ) {
         violations.push(filePath + ": contains restored Rust OpenAI retry eligibility matrix");
       }
+      const nativeFirstBody = contents.match(/\bpub\(super\) fn\s+runtime_local_rewrite_precommit_native_first_event\([^]*?^\}/mu)?.[0];
+      if (!nativeFirstBody?.includes("provider_precommit_native_first_should_prefetch(")) {
+        violations.push(filePath + ": native-first SSE prefetch eligibility must retain Mojo provider policy");
+      }
+      if (
+        nativeFirstBody?.includes("!live.native_anthropic_messages")
+        || nativeFirstBody?.includes("(200..300).contains(&live.status)")
+        || nativeFirstBody?.includes("!live.prefix.is_empty()")
+      ) {
+        violations.push(filePath + ": contains restored Rust native-first SSE prefetch eligibility policy");
+      }
       const previousBody = contents.match(/\bpub\(super\) fn\s+runtime_local_rewrite_previous_response_id\([^]*?^\}/mu)?.[0];
       if (!previousBody?.includes("runtime_request_previous_response_id_from_bytes(")) {
         violations.push(filePath + ": local rewrite previous-response extraction must retain canonical Mojo-backed request metadata helper");

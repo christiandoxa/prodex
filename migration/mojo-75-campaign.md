@@ -3940,3 +3940,22 @@ runtime-proxy request-metadata test, Clippy with warnings denied for
 canonical broad report at this checkpoint counts **71,824 reachable Mojo LOC**
 and **200,519 Rust production LOC**, totaling **272,343 LOC**:
 **26.372625696272713% Mojo**. The 75% broad target remains in progress.
+
+## Native-first SSE prefetch eligibility hard replacement
+
+Native-first SSE prefetch eligibility now runs through the existing
+`provider_constraints.mojo` precommit owner. Mojo decides whether native
+Anthropic-message mode, the HTTP status, SSE content type, and empty-prefix
+state permit first-event prefetch. Rust retains header acquisition, semaphore
+ownership, deadlines, stream reads, backlog preservation, and execution of the
+prefetch/commit decision. The previous compound Rust eligibility condition was
+deleted; no Rust semantic fallback remains for the migrated prefetch gate.
+
+Focused validation passes the standalone `provider_constraints.mojo` build,
+the real-Mojo provider scalar/precommit adapter test, all 4 active native-first
+event consumer tests in `prodex-app`, Clippy with warnings denied for
+`prodex-mojo-core` and `prodex-app`, `git diff --check`, and the strengthened
+no-fallback guard. The canonical broad report at this checkpoint counts
+**71,842 reachable Mojo LOC** and **200,546 Rust production LOC**, totaling
+**272,388 LOC**: **26.374877013671675% Mojo**. The 75% broad target remains in
+progress.

@@ -89,6 +89,7 @@ comptime PROVIDER_PRECOMMIT_OP_PREFETCH: Int64 = 2
 comptime PROVIDER_PRECOMMIT_OP_SSE_PROGRESS: Int64 = 3
 comptime PROVIDER_PRECOMMIT_OP_HEALTH_ACTION: Int64 = 4
 comptime PROVIDER_PRECOMMIT_OP_METRIC_CLASS: Int64 = 5
+comptime PROVIDER_PRECOMMIT_OP_NATIVE_FIRST_PREFETCH: Int64 = 6
 
 
 def provider_precommit_valid_error_class(value: Int64) -> Bool:
@@ -119,7 +120,7 @@ def prodex_provider_precommit_policy_v1(
         return PROVIDER_PRECOMMIT_STATUS_ABI
     if (
         operation < PROVIDER_PRECOMMIT_OP_BUFFERED_FALLBACK
-        or operation > PROVIDER_PRECOMMIT_OP_METRIC_CLASS
+        or operation > PROVIDER_PRECOMMIT_OP_NATIVE_FIRST_PREFETCH
         or output_address == 0
     ):
         return PROVIDER_PRECOMMIT_STATUS_INVALID
@@ -196,6 +197,24 @@ def prodex_provider_precommit_policy_v1(
             output[] = PROVIDER_PRECOMMIT_SSE_NONE
         else:
             output[] = PROVIDER_PRECOMMIT_SSE_COMMIT
+        return PROVIDER_PRECOMMIT_STATUS_OK
+
+    if operation == PROVIDER_PRECOMMIT_OP_NATIVE_FIRST_PREFETCH:
+        if (
+            (a != 0 and a != 1)
+            or b < 0
+            or b > 65535
+            or (c != 0 and c != 1)
+            or (d != 0 and d != 1)
+        ):
+            return PROVIDER_PRECOMMIT_STATUS_INVALID
+        output[] = Int64(
+            a == 1
+            and b >= 200
+            and b < 300
+            and c == 1
+            and d == 1
+        )
         return PROVIDER_PRECOMMIT_STATUS_OK
 
     if operation == PROVIDER_PRECOMMIT_OP_HEALTH_ACTION:
