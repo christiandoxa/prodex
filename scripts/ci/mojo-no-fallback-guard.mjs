@@ -710,6 +710,7 @@ const SUPER_EXPOSE_RICH_FILE = "crates/prodex-mojo-core/src/rich/super_expose.rs
 const LOG_TRANSCRIPT_FILE = "crates/prodex-app/src/app_commands/log_transcript.rs";
 const LOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/log.rs";
 const LOG_STREAM_FILE = "crates/prodex-app/src/app_commands/log_stream.rs";
+const LOG_EVENT_SOURCE_FILE = "crates/prodex-app/src/app_commands/log_event_source.rs";
 const OBSERVABILITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/observability.rs";
 const GEMINI_SCHEMA_FILE = "crates/prodex-provider-core/src/translators/gemini/request/schema.rs";
 const GEMINI_TOOLS_FILE = "crates/prodex-provider-core/src/translators/gemini/request/tools.rs";
@@ -2374,6 +2375,16 @@ export function findViolations(files) {
     return violations;
   });
   const operationalDetailSpecViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === LOG_EVENT_SOURCE_FILE) {
+      const violations = contents.includes("operational_event_source_label(")
+        ? []
+        : [filePath + ": operational event source rendering must retain Mojo-owned source labels"];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (production.includes("const SOURCES:")) {
+        violations.push(filePath + ": contains restored Rust operational event source label table");
+      }
+      return violations;
+    }
     if (filePath === LOG_STREAM_FILE) {
       const violations = contents.includes("operational_detail_spec(")
         ? []
@@ -2388,9 +2399,13 @@ export function findViolations(files) {
       return violations;
     }
     if (filePath === OBSERVABILITY_ADAPTER_FILE) {
-      return contents.includes("prodex_mojo_operational_detail_spec_v1(")
-        ? []
-        : [filePath + ": observability adapter must retain operational detail spec Mojo ABI"];
+      const required = [
+        "prodex_mojo_operational_detail_spec_v1(",
+        "prodex_mojo_operational_event_source_label_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": observability adapter must retain Mojo ABI " + call);
     }
     return [];
   });

@@ -103,6 +103,13 @@ unsafe extern "C" {
         source: u64,
         interesting: u64,
     ) -> i64;
+    fn prodex_mojo_operational_event_source_label_v1(
+        abi_version: i64,
+        source: i64,
+        output: u64,
+        output_capacity: i64,
+        output_length: u64,
+    ) -> i64;
     fn prodex_mojo_operational_event_detail_plan_v1(
         abi_version: i64,
         source_address: u64,
@@ -192,6 +199,62 @@ pub fn operational_event_plan(
         source,
         interesting: interesting == 1,
     })
+}
+
+fn load_operational_event_source_label(source: i64) -> Result<Option<String>, MojoError> {
+    if !(OPERATIONAL_EVENT_SOURCE_NONE..=OPERATIONAL_EVENT_SOURCE_EVENT).contains(&source) {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut output = [0_u8; OBSERVABILITY_LABEL_MAX_BYTES];
+    let mut output_length = -2_i64;
+    let status = unsafe {
+        prodex_mojo_operational_event_source_label_v1(
+            OBSERVABILITY_LABEL_ABI_VERSION,
+            source,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut output_length as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    if output_length == -1 {
+        return Ok(None);
+    }
+    let output_length = usize::try_from(output_length).map_err(|_| MojoError::InvalidOutput)?;
+    if output_length > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..output_length].to_vec())
+        .map(Some)
+        .map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn operational_event_source_label(source: i64) -> Result<Option<&'static str>, MojoError> {
+    use std::sync::OnceLock;
+
+    static LABELS: OnceLock<Result<Vec<Option<String>>, MojoError>> = OnceLock::new();
+
+    let source = usize::try_from(source)
+        .ok()
+        .filter(|source| *source <= OPERATIONAL_EVENT_SOURCE_EVENT as usize)
+        .ok_or(MojoError::InvalidInput)?;
+    match LABELS.get_or_init(|| {
+        (OPERATIONAL_EVENT_SOURCE_NONE..=OPERATIONAL_EVENT_SOURCE_EVENT)
+            .map(load_operational_event_source_label)
+            .collect()
+    }) {
+        Ok(labels) => Ok(labels
+            .get(source)
+            .ok_or(MojoError::InvalidOutput)?
+            .as_deref()),
+        Err(error) => Err(*error),
+    }
 }
 
 fn load_operational_detail_spec(detail: i64) -> Result<OperationalDetailSpec, MojoError> {
@@ -473,6 +536,18 @@ mod tests {
         assert_eq!(label(-1, 0), Err(MojoError::InvalidInput));
         assert_eq!(label(0, -1), Err(MojoError::InvalidInput));
         assert!(label(10_000, 0).is_err());
+    }
+
+    #[test]
+    fn operational_event_source_labels_are_mojo_owned() {
+        assert_eq!(operational_event_source_label(0).unwrap(), None);
+        assert_eq!(operational_event_source_label(1).unwrap(), Some("request"));
+        assert_eq!(operational_event_source_label(2).unwrap(), Some("mcp"));
+        assert_eq!(operational_event_source_label(19).unwrap(), Some("event"));
+        assert_eq!(
+            operational_event_source_label(20),
+            Err(MojoError::InvalidInput)
+        );
     }
 
     #[test]

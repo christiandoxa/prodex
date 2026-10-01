@@ -3109,6 +3109,80 @@ def prodex_mojo_operational_event_plan_v1(
         source[] = OPERATIONAL_EVENT_SOURCE_ERROR
     return OBSERVABILITY_STATUS_OK
 
+@export("prodex_mojo_operational_event_source_label_v1")
+def prodex_mojo_operational_event_source_label_v1(
+    abi_version: Int64,
+    source: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    output_length_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OBSERVABILITY_LABEL_ABI_VERSION:
+        return OBSERVABILITY_STATUS_ABI
+    if (
+        source < OPERATIONAL_EVENT_SOURCE_NONE
+        or source > OPERATIONAL_EVENT_SOURCE_EVENT
+        or output_address == 0
+        or output_capacity < 0
+        or output_length_address == 0
+    ):
+        return OBSERVABILITY_STATUS_INVALID
+
+    var output_length = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_length_address)
+    )
+    if source == OPERATIONAL_EVENT_SOURCE_NONE:
+        output_length[] = -1
+        return OBSERVABILITY_STATUS_OK
+
+    var label = StringSlice("")
+    if source == OPERATIONAL_EVENT_SOURCE_REQUEST:
+        label = StringSlice("request")
+    elif source == OPERATIONAL_EVENT_SOURCE_MCP:
+        label = StringSlice("mcp")
+    elif source == OPERATIONAL_EVENT_SOURCE_AGENT:
+        label = StringSlice("agent")
+    elif source == OPERATIONAL_EVENT_SOURCE_ROUTE:
+        label = StringSlice("route")
+    elif source == OPERATIONAL_EVENT_SOURCE_QUOTA:
+        label = StringSlice("quota")
+    elif source == OPERATIONAL_EVENT_SOURCE_RETRY:
+        label = StringSlice("retry")
+    elif source == OPERATIONAL_EVENT_SOURCE_BACKOFF:
+        label = StringSlice("backoff")
+    elif source == OPERATIONAL_EVENT_SOURCE_HEALTH:
+        label = StringSlice("health")
+    elif source == OPERATIONAL_EVENT_SOURCE_ERROR:
+        label = StringSlice("error")
+    elif source == OPERATIONAL_EVENT_SOURCE_MODEL:
+        label = StringSlice("model")
+    elif source == OPERATIONAL_EVENT_SOURCE_UPSTREAM:
+        label = StringSlice("upstream")
+    elif source == OPERATIONAL_EVENT_SOURCE_STREAM:
+        label = StringSlice("stream")
+    elif source == OPERATIONAL_EVENT_SOURCE_RESPONSE:
+        label = StringSlice("response")
+    elif source == OPERATIONAL_EVENT_SOURCE_TERMINAL:
+        label = StringSlice("terminal")
+    elif source == OPERATIONAL_EVENT_SOURCE_TOOL:
+        label = StringSlice("tool")
+    elif source == OPERATIONAL_EVENT_SOURCE_LOAD:
+        label = StringSlice("load")
+    elif source == OPERATIONAL_EVENT_SOURCE_SMART:
+        label = StringSlice("smart")
+    elif source == OPERATIONAL_EVENT_SOURCE_COMPACT:
+        label = StringSlice("compact")
+    elif source == OPERATIONAL_EVENT_SOURCE_EVENT:
+        label = StringSlice("event")
+    else:
+        return OBSERVABILITY_STATUS_INVALID
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    return observability_copy_label(label, output, output_capacity, output_length)
+
+
 comptime OPERATIONAL_DETAIL_PROFILE: Int64 = 0
 comptime OPERATIONAL_DETAIL_ROUTE: Int64 = 1
 comptime OPERATIONAL_DETAIL_PROVIDER: Int64 = 2
