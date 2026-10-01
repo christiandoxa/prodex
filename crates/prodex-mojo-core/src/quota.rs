@@ -736,6 +736,48 @@ unsafe extern "C" {
         main_written_address: u64,
         ready_address: u64,
     ) -> i64;
+    fn prodex_quota_gemini_bucket_label_v1(
+        abi_version: i64,
+        model_address: u64,
+        model_length: i64,
+        model_present: i64,
+        token_address: u64,
+        token_length: i64,
+        token_present: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_quota_gemini_bucket_summary_v1(
+        abi_version: i64,
+        label_address: u64,
+        label_length: i64,
+        remaining_present: i64,
+        remaining: i64,
+        total_present: i64,
+        total: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_quota_gemini_display_v1(
+        abi_version: i64,
+        remaining_address: u64,
+        remaining_present_address: u64,
+        percent_address: u64,
+        percent_present_address: u64,
+        exhausted_address: u64,
+        count: i64,
+        status_output_address: u64,
+        status_output_capacity: i64,
+        status_written_address: u64,
+        main_output_address: u64,
+        main_output_capacity: i64,
+        main_written_address: u64,
+        ready_address: u64,
+        min_percent_address: u64,
+        min_percent_present_address: u64,
+    ) -> i64;
     fn prodex_quota_report_sort_next_v1(abi_version: i64, sort: i64) -> i64;
 }
 
@@ -1141,6 +1183,146 @@ pub fn quota_copilot_display(
         ready,
         status,
         main,
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GeminiQuotaDisplay {
+    pub ready: bool,
+    pub status: String,
+    pub main: String,
+    pub remaining_percent: Option<i64>,
+}
+
+fn decode_quota_text(output: &[u8], written: i64) -> Result<String, crate::MojoError> {
+    let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| crate::MojoError::InvalidOutput)
+}
+
+pub fn quota_gemini_bucket_label(
+    model_id: Option<&str>,
+    token_type: Option<&str>,
+) -> Result<String, crate::MojoError> {
+    let (model_address, model_length) = quota_text_address(model_id);
+    let (token_address, token_length) = quota_text_address(token_type);
+    if model_length == i64::MAX || token_length == i64::MAX {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let capacity = model_id
+        .map(str::len)
+        .unwrap_or_default()
+        .max(token_type.map(str::len).unwrap_or_default())
+        .max(6);
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_quota_gemini_bucket_label_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            model_address,
+            model_length,
+            i64::from(model_id.is_some()),
+            token_address,
+            token_length,
+            i64::from(token_type.is_some()),
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    decode_quota_text(&output, written)
+}
+
+pub fn quota_gemini_bucket_summary(
+    label: &str,
+    numeric: GeminiBucketNumericOutput,
+) -> Result<String, crate::MojoError> {
+    let capacity = label
+        .len()
+        .checked_add(64)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    let mut output = vec![0_u8; capacity.max(1)];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_quota_gemini_bucket_summary_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            label.as_ptr() as usize as u64,
+            i64::try_from(label.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::from(numeric.remaining.is_some()),
+            numeric.remaining.unwrap_or_default(),
+            i64::from(numeric.total.is_some()),
+            numeric.total.unwrap_or_default(),
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    decode_quota_text(&output, written)
+}
+
+pub fn quota_gemini_display(
+    numeric: &[GeminiBucketNumericOutput],
+) -> Result<GeminiQuotaDisplay, crate::MojoError> {
+    let mut remaining = Vec::with_capacity(numeric.len());
+    let mut remaining_present = Vec::with_capacity(numeric.len());
+    let mut percent = Vec::with_capacity(numeric.len());
+    let mut percent_present = Vec::with_capacity(numeric.len());
+    let mut exhausted = Vec::with_capacity(numeric.len());
+    for value in numeric {
+        remaining.push(value.remaining.unwrap_or_default());
+        remaining_present.push(i64::from(value.remaining.is_some()));
+        percent.push(value.remaining_percent.unwrap_or_default());
+        percent_present.push(i64::from(value.remaining_percent.is_some()));
+        exhausted.push(i64::from(value.exhausted));
+    }
+
+    let mut status_output = [0_u8; 16];
+    let mut status_written = -1_i64;
+    let mut main_output = [0_u8; 128];
+    let mut main_written = -1_i64;
+    let mut ready = -1_i64;
+    let mut min_percent = 0_i64;
+    let mut min_percent_present = -1_i64;
+    let status = unsafe {
+        prodex_quota_gemini_display_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            remaining.as_ptr() as usize as u64,
+            remaining_present.as_ptr() as usize as u64,
+            percent.as_ptr() as usize as u64,
+            percent_present.as_ptr() as usize as u64,
+            exhausted.as_ptr() as usize as u64,
+            i64::try_from(numeric.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            status_output.as_mut_ptr() as usize as u64,
+            i64::try_from(status_output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut status_written as *mut i64) as usize as u64,
+            main_output.as_mut_ptr() as usize as u64,
+            i64::try_from(main_output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut main_written as *mut i64) as usize as u64,
+            (&mut ready as *mut i64) as usize as u64,
+            (&mut min_percent as *mut i64) as usize as u64,
+            (&mut min_percent_present as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    let ready = match ready {
+        0 => false,
+        1 => true,
+        _ => return Err(crate::MojoError::InvalidOutput),
+    };
+    let remaining_percent = match min_percent_present {
+        0 => None,
+        1 => Some(min_percent),
+        _ => return Err(crate::MojoError::InvalidOutput),
+    };
+    Ok(GeminiQuotaDisplay {
+        ready,
+        status: decode_quota_text(&status_output, status_written)?,
+        main: decode_quota_text(&main_output, main_written)?,
+        remaining_percent,
     })
 }
 

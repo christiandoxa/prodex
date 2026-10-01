@@ -711,6 +711,7 @@ const QUOTA_MODELS_FILE = "crates/prodex-quota/src/models.rs";
 const QUOTA_AUTH_FILE = "crates/prodex-quota/src/auth.rs";
 const QUOTA_TIME_FILE = "crates/prodex-quota/src/render/time.rs";
 const QUOTA_COPILOT_FILE = "crates/prodex-quota/src/render/copilot.rs";
+const QUOTA_GEMINI_DISPLAY_FILE = "crates/prodex-quota/src/render/gemini.rs";
 const QUOTA_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
@@ -2285,6 +2286,31 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === QUOTA_GEMINI_DISPLAY_FILE) {
+      const required = [
+        "quota_gemini_bucket_label(",
+        "quota_gemini_display(",
+        "quota_gemini_bucket_summary(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": Gemini quota display migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      for (const retired of [
+        "fn gemini_blocked_buckets(",
+        '.strip_prefix("models/")',
+        ".map(str::to_ascii_lowercase)",
+        '"gemini quota unknown"',
+        'format!("{label} {remaining}/{total}")',
+        ".filter_map(|numeric| numeric.remaining_percent)",
+      ]) {
+        if (production.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust Gemini quota display policy");
+          break;
+        }
+      }
+      return violations;
+    }
     if (filePath === QUOTA_COPILOT_FILE) {
       const required = [
         "quota_copilot_feature_key(",
@@ -2324,6 +2350,9 @@ export function findViolations(files) {
         "prodex_quota_window_label_plan_v1(",
         "prodex_quota_copilot_feature_key_v1(",
         "prodex_quota_copilot_display_v1(",
+        "prodex_quota_gemini_bucket_label_v1(",
+        "prodex_quota_gemini_bucket_summary_v1(",
+        "prodex_quota_gemini_display_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
