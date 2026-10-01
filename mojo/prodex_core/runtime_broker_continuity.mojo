@@ -715,3 +715,101 @@ def prodex_runtime_broker_parse_version_v1(
     output[unsafe_offset=0] = version_start
     output[unsafe_offset=1] = version_end
     return 1
+
+
+def broker_duration_less(
+    left_seconds: UInt64,
+    left_nanoseconds: UInt64,
+    right_seconds: UInt64,
+    right_nanoseconds: UInt64,
+) -> Bool:
+    return (
+        left_seconds < right_seconds
+        or (
+            left_seconds == right_seconds
+            and left_nanoseconds < right_nanoseconds
+        )
+    )
+
+
+@export("prodex_runtime_broker_log_cache_relation_v1")
+def prodex_runtime_broker_log_cache_relation_v1(
+    abi_version: Int64,
+    current_len: UInt64,
+    current_modified_seconds: UInt64,
+    current_modified_nanoseconds: UInt64,
+    previous_present: Int64,
+    previous_len: UInt64,
+    previous_modified_seconds: UInt64,
+    previous_modified_nanoseconds: UInt64,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or (previous_present != 0 and previous_present != 1)
+        or current_modified_nanoseconds >= UInt64(1_000_000_000)
+        or previous_modified_nanoseconds >= UInt64(1_000_000_000)
+    ):
+        return BROKER_CONTINUITY_INVALID
+    if previous_present == 0:
+        return 0
+
+    var modified_equal = (
+        current_modified_seconds == previous_modified_seconds
+        and current_modified_nanoseconds == previous_modified_nanoseconds
+    )
+    if current_len == previous_len and modified_equal:
+        return 1
+
+    var modified_before = broker_duration_less(
+        current_modified_seconds,
+        current_modified_nanoseconds,
+        previous_modified_seconds,
+        previous_modified_nanoseconds,
+    )
+    if current_len < previous_len or modified_before:
+        return 3
+
+    if current_len > previous_len:
+        return 2
+
+    return 0
+
+
+@export("prodex_runtime_broker_lru_evict_index_v1")
+def prodex_runtime_broker_lru_evict_index_v1(
+    abi_version: Int64,
+    touches_address: UInt,
+    count: Int64,
+    keep_index: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or count < 0
+        or count > 1_000_000
+        or (count > 0 and touches_address == 0)
+        or keep_index < -1
+        or keep_index >= count
+    ):
+        return BROKER_CONTINUITY_INVALID
+    if count == 0:
+        return -2
+
+    var touches = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(touches_address)
+    )
+    var selected: Int64 = -1
+    var selected_touch: UInt64 = 0
+    for index in range(count):
+        if index == keep_index:
+            continue
+        var touch = touches[unsafe_offset=index]
+        if selected < 0 or touch < selected_touch:
+            selected = index
+            selected_touch = touch
+
+    if selected >= 0:
+        return selected
+
+    # Preserve the Rust fallback that may evict the kept entry when it is the
+    # only entry left above a pathological limit.
+    return 0

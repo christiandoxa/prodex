@@ -61,6 +61,7 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/lib.rs",
   "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
   "crates/prodex-runtime-broker/src/continuity.rs",
+  "crates/prodex-runtime-broker-log/src/lib.rs",
   "crates/prodex-mojo-core/src/state_policy.rs",
   "crates/prodex-state/src/provider_capabilities.rs",
   "crates/prodex-state/src/lib.rs",
@@ -666,6 +667,7 @@ const RUNTIME_STATE_BACKGROUND_FILE = "crates/prodex-runtime-state/src/backgroun
 const RUNTIME_STATE_QUOTA_FILE = "crates/prodex-runtime-state/src/quota.rs";
 const RUNTIME_PROXY_ROOT_FILE = "crates/prodex-runtime-proxy/src/lib.rs";
 const BROKER_CONTINUITY_FILE = "crates/prodex-runtime-broker/src/continuity.rs";
+const BROKER_LOG_CACHE_FILE = "crates/prodex-runtime-broker-log/src/lib.rs";
 const BROKER_VERSION_GUARD_FILE = "crates/prodex-runtime-broker/src/version_guard.rs";
 const CODEX_CONFIG_FILE = "crates/prodex-codex-config/src/lib.rs";
 const STATE_FILE = "crates/prodex-state/src/lib.rs";
@@ -1361,6 +1363,8 @@ export function findViolations(files) {
         "prodex_runtime_broker_identity_policy_v1(",
         "prodex_runtime_broker_guard_plan_v1(",
         "prodex_runtime_broker_parse_version_v1(",
+        "prodex_runtime_broker_log_cache_relation_v1(",
+        "prodex_runtime_broker_lru_evict_index_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
@@ -1382,6 +1386,25 @@ export function findViolations(files) {
       .map((call) => `${filePath}: broker continuity migration must retain Mojo call ${call}`);
     if (/\bfn\s+(?:runtime_broker_continuation_status_last_event_at|runtime_broker_continuity_failure_event|runtime_broker_continuity_failure_reason|runtime_broker_known_continuity_failure_event|runtime_broker_parse_json_string|runtime_broker_log_field_value|runtime_broker_skip_log_whitespace|runtime_broker_skip_log_field_value|runtime_broker_parse_log_field_value)\s*\(/u.test(contents)) {
       violations.push(`${filePath}: contains retired Rust broker continuity parsing/policy semantics`);
+    }
+    return violations;
+  });
+  const brokerLogCacheViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== BROKER_LOG_CACHE_FILE) return [];
+    const required = [
+      "log_fingerprint_relation(",
+      "lru_evict_index(",
+      "continuity_event_kind(",
+    ];
+    const violations = required
+      .filter((call) => !contents.includes(call))
+      .map((call) => filePath + ": broker-log cache hard replacement must retain Mojo call " + call);
+    if (
+      contents.includes("current.len < previous.len || current.modified_at < previous.modified_at")
+      || contents.includes(".min_by_key(|(_, entry)| entry.last_used_at)")
+      || contents.includes('"chain_retried_owner" | "chain_dead_upstream_confirmed" | "stale_continuation"')
+    ) {
+      violations.push(filePath + ": contains restored Rust broker-log cache semantics");
     }
     return violations;
   });
@@ -2282,7 +2305,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...logThroughputViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...featureOffViolations, ...logThroughputViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,

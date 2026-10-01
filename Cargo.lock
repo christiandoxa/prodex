@@ -2796,6 +2796,7 @@ dependencies = [
 name = "prodex-runtime-broker-log"
 version = "0.434.3"
 dependencies = [
+ "prodex-mojo-core",
  "prodex-runtime-broker",
 ]
 

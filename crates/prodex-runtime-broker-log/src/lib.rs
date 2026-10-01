@@ -1,3 +1,7 @@
+use prodex_mojo_core::runtime_broker_continuity::{
+    BrokerLogFingerprintRelation, ContinuityEvent, continuity_event_kind, log_fingerprint_relation,
+    lru_evict_index,
+};
 use prodex_runtime_broker::{
     RuntimeBrokerContinuityFailureReasonMetrics,
     runtime_broker_continuity_failure_reason_metrics_from_log_bytes,
@@ -67,7 +71,10 @@ impl RuntimeBrokerContinuityFailureReasonCache {
         let cached = self
             .entries
             .get_mut(log_path)
-            .filter(|entry| entry.fingerprint == *fingerprint)
+            .filter(|entry| {
+                runtime_log_fingerprint_relation(fingerprint, Some(&entry.fingerprint))
+                    == BrokerLogFingerprintRelation::Exact
+            })
             .map(|entry| {
                 entry.last_used_at = touched_at;
                 entry.metrics.clone()
@@ -98,15 +105,18 @@ impl RuntimeBrokerContinuityFailureReasonCache {
             },
         );
         while self.entries.len() > self.limit {
-            let Some(oldest_path) = self
+            let paths = self.entries.keys().cloned().collect::<Vec<_>>();
+            let touches = self
                 .entries
-                .iter()
-                .min_by_key(|(_, entry)| entry.last_used_at)
-                .map(|(path, _)| path.clone())
+                .values()
+                .map(|entry| entry.last_used_at)
+                .collect::<Vec<_>>();
+            let Some(index) = lru_evict_index(&touches, None)
+                .expect("Mojo runtime-broker LRU policy returned invalid output")
             else {
                 break;
             };
-            self.entries.remove(&oldest_path);
+            self.entries.remove(&paths[index]);
         }
     }
 
@@ -157,6 +167,25 @@ fn runtime_log_fingerprint(metadata: &fs::Metadata) -> Option<RuntimeLogFingerpr
         len: metadata.len(),
         modified_at,
     })
+}
+
+fn runtime_log_fingerprint_relation(
+    current: &RuntimeLogFingerprint,
+    previous: Option<&RuntimeLogFingerprint>,
+) -> BrokerLogFingerprintRelation {
+    log_fingerprint_relation(
+        current.len,
+        current.modified_at.as_secs(),
+        current.modified_at.subsec_nanos(),
+        previous.map(|fingerprint| {
+            (
+                fingerprint.len,
+                fingerprint.modified_at.as_secs(),
+                fingerprint.modified_at.subsec_nanos(),
+            )
+        }),
+    )
+    .expect("Mojo runtime-broker cache relation returned invalid output")
 }
 
 fn runtime_broker_continuity_failure_reason_metrics_from_log_range(
@@ -239,8 +268,8 @@ pub fn runtime_broker_cached_continuity_failure_reason_metrics(
             return metrics;
         }
         cache.entries.get(log_path).cloned().filter(|entry| {
-            entry.fingerprint.len < fingerprint.len
-                && entry.fingerprint.modified_at <= fingerprint.modified_at
+            runtime_log_fingerprint_relation(fingerprint, Some(&entry.fingerprint))
+                == BrokerLogFingerprintRelation::Append
         })
     } else {
         None
@@ -345,25 +374,23 @@ fn increment_runtime_proxy_reason_metric(map: &mut BTreeMap<String, usize>, reas
 
 fn record_runtime_proxy_reason_metric(
     metrics: &mut RuntimeBrokerContinuityFailureReasonMetrics,
-    event: &str,
+    event: ContinuityEvent,
     reason: &str,
-) -> bool {
+) {
     match event {
-        "chain_retried_owner" => {
+        ContinuityEvent::ChainRetriedOwner => {
             increment_runtime_proxy_reason_metric(&mut metrics.chain_retried_owner, reason);
         }
-        "chain_dead_upstream_confirmed" => {
+        ContinuityEvent::ChainDeadUpstreamConfirmed => {
             increment_runtime_proxy_reason_metric(
                 &mut metrics.chain_dead_upstream_confirmed,
                 reason,
             );
         }
-        "stale_continuation" => {
+        ContinuityEvent::StaleContinuation => {
             increment_runtime_proxy_reason_metric(&mut metrics.stale_continuation, reason);
         }
-        _ => return false,
     }
-    true
 }
 
 impl RuntimeProxyContinuityFailureReasonMetricsStore {
@@ -382,12 +409,10 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
         current: Option<&RuntimeLogFingerprint>,
         previous: Option<&RuntimeLogFingerprint>,
     ) -> bool {
-        match (current, previous) {
-            (Some(current), Some(previous)) => {
-                current.len < previous.len || current.modified_at < previous.modified_at
-            }
-            _ => false,
-        }
+        current.is_some_and(|current| {
+            runtime_log_fingerprint_relation(current, previous)
+                == BrokerLogFingerprintRelation::Rotated
+        })
     }
 
     fn new_entry(
@@ -410,21 +435,20 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
         while self.entries.len()
             > DEFAULT_RUNTIME_PROXY_CONTINUITY_FAILURE_REASON_METRICS_STORE_LIMIT
         {
-            let oldest_path = self
+            let paths = self.entries.keys().cloned().collect::<Vec<_>>();
+            let touches = self
                 .entries
-                .iter()
-                .filter(|(path, _)| Some(path.as_path()) != keep_log_path)
-                .min_by_key(|(_, entry)| entry.last_used_at)
-                .or_else(|| {
-                    self.entries
-                        .iter()
-                        .min_by_key(|(_, entry)| entry.last_used_at)
-                })
-                .map(|(path, _)| path.clone());
-            let Some(oldest_path) = oldest_path else {
+                .values()
+                .map(|entry| entry.last_used_at)
+                .collect::<Vec<_>>();
+            let keep_index =
+                keep_log_path.and_then(|keep| paths.iter().position(|path| path.as_path() == keep));
+            let Some(index) = lru_evict_index(&touches, keep_index)
+                .expect("Mojo runtime-broker LRU policy returned invalid output")
+            else {
                 break;
             };
-            self.entries.remove(&oldest_path);
+            self.entries.remove(&paths[index]);
         }
     }
 
@@ -432,7 +456,7 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
         &mut self,
         log_path: &Path,
         current_fingerprint: Option<RuntimeLogFingerprint>,
-        event: &str,
+        event: ContinuityEvent,
         reason: &str,
     ) {
         let touched_at = self.touch();
@@ -453,9 +477,7 @@ impl RuntimeProxyContinuityFailureReasonMetricsStore {
             if current_fingerprint.is_some() {
                 entry.last_observed_fingerprint = current_fingerprint;
             }
-            if !record_runtime_proxy_reason_metric(&mut entry.live_metrics, event, reason) {
-                return;
-            }
+            record_runtime_proxy_reason_metric(&mut entry.live_metrics, event, reason);
         }
         self.enforce_limit(Some(log_path));
     }
@@ -545,13 +567,11 @@ pub fn runtime_proxy_record_continuity_failure_reason_for_log_path(
     event: &str,
     reason: &str,
 ) {
-    let supported = matches!(
-        event,
-        "chain_retried_owner" | "chain_dead_upstream_confirmed" | "stale_continuation"
-    );
-    if !supported {
+    let Some(event) = continuity_event_kind(event)
+        .expect("Mojo runtime-broker event policy returned invalid output")
+    else {
         return;
-    }
+    };
     let current_fingerprint =
         RuntimeProxyContinuityFailureReasonMetricsStore::current_fingerprint(log_path);
     runtime_proxy_continuity_failure_reason_metrics_store()
