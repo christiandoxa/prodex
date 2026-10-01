@@ -915,3 +915,116 @@ def prodex_external_catalog_model_find_exact_v1(
 
 
     return -1
+
+
+@export("prodex_deepseek_catalog_model_count_v1")
+def prodex_deepseek_catalog_model_count_v1(
+    abi_version: Int64,
+) abi("C") -> Int64:
+    return 7 if abi_version == SUPER_PROVIDER_CONFIG_ABI_VERSION else -2
+
+
+@export("prodex_deepseek_catalog_model_at_v1")
+def prodex_deepseek_catalog_model_at_v1(
+    abi_version: Int64,
+    index: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    records_address: UInt,
+    record_count: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SUPER_PROVIDER_CONFIG_ABI_VERSION
+        or index < 0
+        or index >= 7
+        or output_address == 0
+        or output_capacity < 1
+        or records_address == 0
+        or record_count < EXTERNAL_CATALOG_RECORDS
+        or written_address == 0
+    ):
+        return SUPER_PROVIDER_CONFIG_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var records = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(records_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var ok = False
+    if index == 0:
+        ok = config_put_external_catalog_model[
+            "auto",
+            "DeepSeek Auto",
+            "Prodex DeepSeek fallback chain routed through current DeepSeek models.",
+        ](output, output_capacity, records, written)
+    elif index == 1:
+        ok = config_put_external_catalog_model[
+            "pro",
+            "DeepSeek Pro",
+            "Prodex DeepSeek Pro alias routed through DeepSeek V4 Pro.",
+        ](output, output_capacity, records, written)
+    elif index == 2:
+        ok = config_put_external_catalog_model[
+            "flash",
+            "DeepSeek Flash",
+            "Prodex DeepSeek Flash alias routed through DeepSeek V4 Flash.",
+        ](output, output_capacity, records, written)
+    elif index == 3:
+        ok = config_put_external_catalog_model[
+            "deepseek-v4-pro",
+            "DeepSeek V4 Pro",
+            "DeepSeek V4 Pro routed through the Prodex Responses adapter.",
+        ](output, output_capacity, records, written)
+    elif index == 4:
+        ok = config_put_external_catalog_model[
+            "deepseek-v4-flash",
+            "DeepSeek V4 Flash",
+            "DeepSeek V4 Flash routed through the Prodex Responses adapter.",
+        ](output, output_capacity, records, written)
+    elif index == 5:
+        ok = config_put_external_catalog_model[
+            "deepseek-chat",
+            "DeepSeek Chat",
+            "DeepSeek chat compatibility model routed through the Prodex Responses adapter.",
+        ](output, output_capacity, records, written)
+    else:
+        ok = config_put_external_catalog_model[
+            "deepseek-reasoner",
+            "DeepSeek Reasoner",
+            "DeepSeek reasoner compatibility model routed through the Prodex Responses adapter.",
+        ](output, output_capacity, records, written)
+    return SUPER_PROVIDER_CONFIG_OK if ok else SUPER_PROVIDER_CONFIG_CAPACITY
+
+
+@export("prodex_deepseek_catalog_model_find_v1")
+def prodex_deepseek_catalog_model_find_v1(
+    abi_version: Int64,
+    address: UInt,
+    length: Int64,
+) abi("C") -> Int64:
+    if abi_version != SUPER_PROVIDER_CONFIG_ABI_VERSION or not config_valid_view(address, length):
+        return -2
+    var view = config_view(address, length)
+    var bounds = rich_trim_bounds(view)
+    if bounds[1] <= bounds[0]:
+        return -1
+    if config_range_equals["auto"](view, bounds[0], bounds[1]):
+        return 0
+    if config_range_equals["pro"](view, bounds[0], bounds[1]):
+        return 1
+    if config_range_equals["flash"](view, bounds[0], bounds[1]):
+        return 2
+    if config_range_equals["deepseek-v4-pro"](view, bounds[0], bounds[1]):
+        return 3
+    if config_range_equals["deepseek-v4-flash"](view, bounds[0], bounds[1]):
+        return 4
+    if config_range_equals["deepseek-chat"](view, bounds[0], bounds[1]):
+        return 5
+    if config_range_equals["deepseek-reasoner"](view, bounds[0], bounds[1]):
+        return 6
+    return -1

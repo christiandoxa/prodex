@@ -112,6 +112,20 @@ unsafe extern "C" {
         length: i64,
     ) -> i64;
 
+    fn prodex_deepseek_catalog_model_count_v1(abi_version: i64) -> i64;
+
+    fn prodex_deepseek_catalog_model_at_v1(
+        abi_version: i64,
+        index: i64,
+        output_address: u64,
+        output_capacity: i64,
+        records_address: u64,
+        record_count: i64,
+        written_address: u64,
+    ) -> i64;
+
+    fn prodex_deepseek_catalog_model_find_v1(abi_version: i64, address: u64, length: i64) -> i64;
+
     fn prodex_runtime_bool_token_v1(abi_version: i64, address: u64, length: i64) -> i64;
 
     fn prodex_runtime_ci_truth_token_v1(abi_version: i64, address: u64, length: i64) -> i64;
@@ -342,6 +356,68 @@ pub fn external_catalog_model_metadata(
     external_catalog_model_find_exact(provider, model)?
         .map(|index| external_catalog_static_model(provider, index))
         .transpose()
+}
+
+pub fn deepseek_catalog_static_model_count() -> Result<usize, MojoError> {
+    let count = unsafe { prodex_deepseek_catalog_model_count_v1(ABI_VERSION) };
+    usize::try_from(count).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn deepseek_catalog_static_model(
+    index: usize,
+) -> Result<ExternalCatalogStaticModel, MojoError> {
+    const RECORDS: usize = 3;
+    const OUTPUT_CAPACITY: usize = 1024;
+    let mut output = vec![0_u8; OUTPUT_CAPACITY];
+    let mut records = [-1_i64; RECORDS * 2];
+    let mut written = -1_i64;
+    status(unsafe {
+        prodex_deepseek_catalog_model_at_v1(
+            ABI_VERSION,
+            i64::try_from(index).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            records.as_mut_ptr() as usize as u64,
+            i64::try_from(RECORDS).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    })?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    Ok(ExternalCatalogStaticModel {
+        slug: external_catalog_record(&output, &records[0..2])?,
+        display_name: external_catalog_record(&output, &records[2..4])?,
+        description: external_catalog_record(&output, &records[4..6])?,
+    })
+}
+
+pub fn deepseek_catalog_static_models() -> Result<Vec<ExternalCatalogStaticModel>, MojoError> {
+    let count = deepseek_catalog_static_model_count()?;
+    (0..count).map(deepseek_catalog_static_model).collect()
+}
+
+pub fn deepseek_catalog_model_metadata(
+    model: &str,
+) -> Result<Option<ExternalCatalogStaticModel>, MojoError> {
+    let index = unsafe {
+        prodex_deepseek_catalog_model_find_v1(
+            ABI_VERSION,
+            model.as_ptr() as usize as u64,
+            signed_len(model)?,
+        )
+    };
+    match index {
+        -1 => Ok(None),
+        -2 => Err(MojoError::InvalidInput),
+        value if value >= 0 => deepseek_catalog_static_model(
+            usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?,
+        )
+        .map(Some),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn runtime_model_provider_class(
@@ -577,6 +653,16 @@ mod tests {
             )
             .unwrap()
             .is_none()
+        );
+        assert_eq!(deepseek_catalog_static_model_count().unwrap(), 7);
+        let deepseek = deepseek_catalog_model_metadata(" DEEPSEEK-V4-PRO ")
+            .unwrap()
+            .unwrap();
+        assert_eq!(deepseek.slug, "deepseek-v4-pro");
+        assert_eq!(deepseek.display_name, "DeepSeek V4 Pro");
+        assert_eq!(
+            deepseek_catalog_static_models().unwrap()[6].slug,
+            "deepseek-reasoner"
         );
         assert_eq!(
             profile_import_source_class("CLAUDE").unwrap(),

@@ -3752,3 +3752,24 @@ prodex-terminal-ui, git diff --check, and the strengthened no-fallback guard.
 The canonical broad report at this checkpoint counts **70,639 reachable Mojo
 LOC** and **199,872 Rust production LOC**, totaling **270,511 LOC**:
 **26.113170998591553% Mojo**. The 75% broad target remains in progress.
+
+## DeepSeek static catalog hard replacement
+
+Static DeepSeek model catalog metadata now lives in `super_provider_config.mojo`.
+Mojo owns the canonical ordered seven-model table, indexed materialization, and
+trimmed ASCII-casefold exact lookup for `auto`, `pro`, `flash`, the DeepSeek V4
+variants, and the compatibility `deepseek-chat`/`deepseek-reasoner` entries.
+Rust retains launch-model composition, typed metadata materialization, URL/JSON
+and transport concerns, and user-facing fallback formatting for unknown dynamic
+model ids. The previous Rust `DEEPSEEK_CATALOG_MODELS` table and Rust-side table
+lookup were deleted; no Rust semantic fallback remains for the migrated static
+catalog decisions.
+
+Focused validation passes the real-Mojo `super_provider_config` test, Clippy
+with warnings denied for `prodex-mojo-core`, `git diff --check`, and the expanded
+no-fallback guard. A full `cargo check -p prodex-app` was also attempted but
+exceeded the 120-second local connector window without emitting a compile
+failure, so this checkpoint does not wait on that lane. The canonical broad
+report at this checkpoint counts **70,743 reachable Mojo LOC** and **199,898
+Rust production LOC**, totaling **270,641 LOC**: **26.139055058176698% Mojo**.
+The 75% broad target remains in progress.

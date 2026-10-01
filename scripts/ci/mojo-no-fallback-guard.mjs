@@ -12,6 +12,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/log_throughput_policy.rs",
   "crates/prodex-runtime-broker/src/version_guard.rs",
   "crates/prodex-mojo-core/src/super_provider_config.rs",
+  "crates/prodex-app/src/runtime_deepseek_config.rs",
   "crates/prodex-cli/src/runtime_args.rs",
   "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
   "crates/prodex-app/src/app_commands/log_transcript.rs",
@@ -2338,6 +2339,36 @@ export function findViolations(files) {
     }
     return [];
   });
+  const deepseekCatalogPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_deepseek_config.rs") {
+      const required = [
+        "deepseek_catalog_static_models(",
+        "mojo_deepseek_catalog_model_metadata(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": DeepSeek static catalog hard replacement must retain " + call);
+      if (
+        contents.includes("DEEPSEEK_CATALOG_MODELS")
+        || contents.includes("CatalogModel {")
+        || contents.includes("resolve_catalog_model(&catalog, model)")
+      ) {
+        violations.push(filePath + ": contains restored Rust DeepSeek static-catalog semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/super_provider_config.rs") {
+      const required = [
+        "prodex_deepseek_catalog_model_count_v1(",
+        "prodex_deepseek_catalog_model_at_v1(",
+        "prodex_deepseek_catalog_model_find_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": DeepSeek static-catalog ABI adapter must retain " + call);
+    }
+    return [];
+  });
   const replacedClassifierViolations = files.flatMap(([filePath, contents]) => {
     const forbidden = new Map([
       ["crates/prodex-domain/src/governance/inspection.rs", /\bfn\s+minimum_classification_rust\s*\(|\.any\(\|finding\|\s*classification\s*<\s*finding\.kind\.minimum_classification\(\)\)/u],
@@ -2409,7 +2440,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...featureOffViolations, ...logThroughputViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...logThroughputViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
