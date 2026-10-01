@@ -301,17 +301,18 @@ impl RuntimeProxyCookieChange {
         secure_origin: bool,
         now: SystemTime,
     ) -> Option<Self> {
+        use prodex_mojo_core::runtime_cookie_policy::CookieAttributePlan;
+
         let mut parts = header.split(';');
         let first = parts.next()?.trim();
-        let (name, value) = first.split_once('=')?;
-        let name = name.trim();
-        let value = value.trim();
-        if !runtime_proxy_cookie_name_is_safe(name)
-            || !runtime_proxy_cookie_value_is_safe(value)
-            || value.len() > RUNTIME_PROXY_COOKIE_MAX_VALUE_BYTES
-        {
-            return None;
-        }
+        let pair = prodex_mojo_core::runtime_cookie_policy::set_cookie_pair(
+            first,
+            RUNTIME_PROXY_COOKIE_MAX_NAME_BYTES,
+            RUNTIME_PROXY_COOKIE_MAX_VALUE_BYTES,
+        )
+        .expect("Mojo Set-Cookie pair policy returned invalid output")?;
+        let name = &first[pair.name];
+        let value = &first[pair.value];
 
         let mut path = default_path.to_string();
         let mut secure = false;
@@ -319,15 +320,36 @@ impl RuntimeProxyCookieChange {
         let mut delete = false;
         let mut max_age_seen = false;
         for attr in parts {
-            runtime_proxy_cookie_apply_attribute(
-                attr.trim(),
-                &mut path,
-                &mut secure,
-                &mut expires_at,
-                &mut delete,
-                &mut max_age_seen,
-                now,
-            );
+            let attr = attr.trim();
+            match prodex_mojo_core::runtime_cookie_policy::attribute_plan(
+                attr,
+                RUNTIME_PROXY_COOKIE_MAX_PATH_BYTES,
+                max_age_seen,
+            )
+            .expect("Mojo cookie attribute policy returned invalid output")
+            {
+                CookieAttributePlan::Ignore => {}
+                CookieAttributePlan::Secure => secure = true,
+                CookieAttributePlan::Path(range) => path = attr[range].to_string(),
+                CookieAttributePlan::MaxAge(seconds) => {
+                    max_age_seen = true;
+                    delete = seconds <= 0;
+                    expires_at = if seconds <= 0 {
+                        None
+                    } else {
+                        Some(
+                            now.checked_add(Duration::from_secs(seconds as u64))
+                                .unwrap_or(now),
+                        )
+                    };
+                }
+                CookieAttributePlan::Expires(range) => {
+                    if let Some(expires) = runtime_proxy_cookie_parse_expires(&attr[range]) {
+                        delete = expires <= now;
+                        expires_at = (!delete).then_some(expires);
+                    }
+                }
+            }
         }
 
         if secure && !secure_origin {
@@ -352,129 +374,41 @@ impl RuntimeProxyCookieChange {
     }
 }
 
-fn runtime_proxy_cookie_apply_attribute(
-    attr: &str,
-    path: &mut String,
-    secure: &mut bool,
-    expires_at: &mut Option<SystemTime>,
-    delete: &mut bool,
-    max_age_seen: &mut bool,
-    now: SystemTime,
-) {
-    if ascii_casefold_equal_exact(attr, "secure")
-        .expect("Mojo cookie Secure attribute comparison failed")
-    {
-        *secure = true;
-        return;
-    }
-    let Some((name, value)) = attr.split_once('=') else {
-        return;
-    };
-    let value = value.trim();
-    if ascii_casefold_equal_exact(name.trim(), "path")
-        .expect("Mojo cookie Path attribute comparison failed")
-    {
-        if value.starts_with('/')
-            && !value.contains(['\r', '\n'])
-            && value.len() <= RUNTIME_PROXY_COOKIE_MAX_PATH_BYTES
-        {
-            *path = value.to_string();
-        }
-        return;
-    }
-    if ascii_casefold_equal_exact(name.trim(), "max-age")
-        .expect("Mojo cookie Max-Age attribute comparison failed")
-    {
-        runtime_proxy_cookie_apply_max_age(value, expires_at, delete, max_age_seen, now);
-        return;
-    }
-    if !*max_age_seen
-        && ascii_casefold_equal_exact(name.trim(), "expires")
-            .expect("Mojo cookie Expires attribute comparison failed")
-        && let Some(expires) = runtime_proxy_cookie_parse_expires(value)
-    {
-        *delete = expires <= now;
-        *expires_at = (!*delete).then_some(expires);
-    }
-}
-
-fn runtime_proxy_cookie_apply_max_age(
-    value: &str,
-    expires_at: &mut Option<SystemTime>,
-    delete: &mut bool,
-    max_age_seen: &mut bool,
-    now: SystemTime,
-) {
-    let digits = value.strip_prefix('-').unwrap_or(value);
-    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
-        return;
-    }
-    let Ok(seconds) = value.parse::<i64>() else {
-        return;
-    };
-    *max_age_seen = true;
-    *delete = seconds <= 0;
-    if seconds <= 0 {
-        *expires_at = None;
-        return;
-    }
-    *expires_at = Some(
-        now.checked_add(Duration::from_secs(seconds as u64))
-            .unwrap_or(now),
-    );
-}
-
 fn runtime_proxy_cookie_host_from_reqwest_url(url: &reqwest::Url) -> Option<String> {
-    url.host_str()
-        .map(str::trim)
-        .filter(|host| !host.is_empty())
-        .map(|host| host.trim_matches('.').to_ascii_lowercase())
+    url.host_str().and_then(|host| {
+        prodex_mojo_core::runtime_cookie_policy::normalize_host(host)
+            .expect("Mojo cookie host-normalization policy returned invalid output")
+    })
 }
 
 fn runtime_proxy_cookie_url_is_secure(scheme: &str) -> bool {
-    matches!(scheme, "https" | "wss")
+    prodex_mojo_core::runtime_cookie_policy::scheme_is_secure(scheme)
+        .expect("Mojo cookie scheme policy returned invalid output")
 }
 
 fn runtime_proxy_cookie_default_path(path: &str) -> String {
-    if !path.starts_with('/') {
-        return "/".to_string();
+    use prodex_mojo_core::runtime_cookie_policy::CookieDefaultPathPlan;
+
+    match prodex_mojo_core::runtime_cookie_policy::default_path_plan(path)
+        .expect("Mojo cookie default-path policy returned invalid output")
+    {
+        CookieDefaultPathPlan::Root => "/".to_string(),
+        CookieDefaultPathPlan::Prefix(end) => path[..end].to_string(),
     }
-    let Some(index) = path.rfind('/') else {
-        return "/".to_string();
-    };
-    if index == 0 {
-        return "/".to_string();
-    }
-    path[..index].to_string()
 }
 
 fn runtime_proxy_cookie_name_from_pair(pair: &str) -> Option<&str> {
-    let (name, _) = pair.split_once('=')?;
-    let name = name.trim();
-    runtime_proxy_cookie_name_is_safe(name).then_some(name)
-}
-
-fn runtime_proxy_cookie_name_is_safe(name: &str) -> bool {
-    !name.is_empty()
-        && name.len() <= RUNTIME_PROXY_COOKIE_MAX_NAME_BYTES
-        && name
-            .bytes()
-            .all(|byte| matches!(byte, b'!' | b'#'..=b'\'' | b'*'..=b'+' | b'-'..=b'.' | b'0'..=b'9' | b'A'..=b'Z' | b'^'..=b'z' | b'|' | b'~'))
-}
-
-fn runtime_proxy_cookie_value_is_safe(value: &str) -> bool {
-    value
-        .bytes()
-        .all(|byte| matches!(byte, 0x21 | 0x23..=0x2b | 0x2d..=0x3a | 0x3c..=0x5b | 0x5d..=0x7e))
+    let range = prodex_mojo_core::runtime_cookie_policy::caller_cookie_name(
+        pair,
+        RUNTIME_PROXY_COOKIE_MAX_NAME_BYTES,
+    )
+    .expect("Mojo caller-cookie pair policy returned invalid output")?;
+    Some(&pair[range])
 }
 
 fn runtime_proxy_cookie_path_matches(request_path: &str, cookie_path: &str) -> bool {
-    if cookie_path == "/" || request_path == cookie_path {
-        return true;
-    }
-    request_path
-        .strip_prefix(cookie_path)
-        .is_some_and(|suffix| cookie_path.ends_with('/') || suffix.starts_with('/'))
+    prodex_mojo_core::runtime_cookie_policy::path_matches(request_path, cookie_path)
+        .expect("Mojo cookie path-match policy returned invalid output")
 }
 
 fn runtime_proxy_cookie_parse_expires(value: &str) -> Option<SystemTime> {

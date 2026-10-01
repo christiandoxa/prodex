@@ -3645,3 +3645,23 @@ and a dedicated no-fallback regression rule. The canonical broad report counts
 **69,216 reachable Mojo LOC** and **199,403 Rust production LOC**, totaling
 **268,619 LOC**: **25.76735078307938% Mojo**. The 75% broad target remains in
 progress.
+
+## Runtime cookie parsing hard replacement
+
+Runtime-proxy cookie syntax and matching policy now runs through
+`runtime_cookie_policy.mojo`. Mojo owns bounded Set-Cookie and caller-cookie
+pair validation, cookie-name/value byte safety, Secure/Path/Max-Age/Expires
+attribute classification, signed Max-Age parsing and precedence, default-path
+planning, request-path matching, secure-scheme classification, and normalized
+host materialization. Rust retains header segment acquisition, `chrono` RFC2822
+Expires parsing, URL/transport ownership, timestamps, jar mutation, and final
+header rendering. The replaced Rust split/byte-validator/Max-Age/default-path/
+path-match/host-normalization implementations were deleted; no semantic Rust
+fallback remains.
+
+Focused validation passes the standalone Mojo build, the real-Mojo adapter test,
+all 12 `prodex-runtime-cookies` tests, Clippy with warnings denied for the
+adapter and consumer, `git diff --check`, and a dedicated no-fallback rule. The
+canonical broad report at this checkpoint counts **69,648 reachable Mojo LOC**
+and **199,578 Rust production LOC**, totaling **269,226 LOC**:
+**25.8697154063872% Mojo**. The 75% broad target remains in progress.
