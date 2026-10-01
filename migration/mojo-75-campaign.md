@@ -3794,3 +3794,25 @@ expanded no-fallback guard. The canonical broad report at this checkpoint
 counts **70,824 reachable Mojo LOC** and **200,012 Rust production LOC**,
 totaling **270,836 LOC**: **26.150142521673633% Mojo**. The 75% broad target
 remains in progress.
+
+## Runtime overlay argv policy hard replacement
+
+Runtime overlay CLI scanning and projection now run through
+`runtime_overlay_policy.mojo`. Mojo owns overlay config-assignment extraction
+for split and inline `-c`/`--config` forms, workspace-trust config selection,
+`--remote`/`--no-daemon` transport flag classification, and fresh-Super
+projection of config, feature, approval-bypass, and retained CLI arguments.
+Rust retains TOML parsing/recursive merge/rendering, filesystem reads and
+writes, `OsString` materialization, launch process ownership, and dynamic
+feature/config value formatting. The previous Rust argv scanners and fresh
+projection match loop were deleted; no Rust semantic fallback remains for the
+migrated decisions.
+
+Focused validation passes the standalone Mojo build, the real-Mojo
+`runtime_overlay_policy` adapter test, the workspace-trust consumer test, two
+`local_super` tests, two `private_companion` tests, the explicit-remote
+transport test, and the hook-trust overlay test. Clippy with warnings denied for
+`prodex-mojo-core`, `git diff --check`, and the expanded no-fallback guard also
+pass. The canonical broad report at this checkpoint counts **71,154 reachable
+Mojo LOC** and **200,195 Rust production LOC**, totaling **271,349 LOC**:
+**26.222318858739115% Mojo**. The 75% broad target remains in progress.

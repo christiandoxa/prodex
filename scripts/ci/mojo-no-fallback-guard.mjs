@@ -19,6 +19,8 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
   "crates/prodex-cli/src/sub_agent.rs",
   "crates/prodex-app/src/runtime_tools/sub_agents.rs",
+  "crates/prodex-mojo-core/src/runtime_overlay_policy.rs",
+  "crates/prodex-app/src/runtime_tools/overlay.rs",
   "crates/prodex-mojo-core/src/rich/super_expose.rs",
   "crates/prodex-app/src/super_expose/protocol/tool_contract.rs",
   "crates/prodex-app/src/super_expose/protocol/validation.rs",
@@ -688,6 +690,8 @@ const EXTERNAL_PROVIDER_CONFIG_FILE = "crates/prodex-app/src/runtime_external_pr
 const SUB_AGENT_POLICY_FILE = "crates/prodex-cli/src/sub_agent.rs";
 const SUB_AGENT_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy.rs";
 const SUB_AGENT_CHILD_FILE = "crates/prodex-app/src/runtime_tools/sub_agents.rs";
+const RUNTIME_OVERLAY_POLICY_FILE = "crates/prodex-app/src/runtime_tools/overlay.rs";
+const RUNTIME_OVERLAY_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_overlay_policy.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
 const DOCTOR_CARGO_FILE = "crates/prodex-runtime-doctor/Cargo.toml";
 const RUNTIME_PROXY_CARGO_FILE = "crates/prodex-runtime-proxy/Cargo.toml";
@@ -1668,6 +1672,44 @@ export function findViolations(files) {
     }
     return [];
   });
+  const runtimeOverlayPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_OVERLAY_POLICY_FILE) {
+      const required = [
+        "mojo_overlay_config_assignments(",
+        "mojo_workspace_trust_indices(",
+        "mojo_overlay_transport_flags(",
+        "mojo_fresh_projection(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime-overlay migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      for (const retired of [
+        'if matches!(arg, "-c" | "--config")',
+        'arg == "--remote" || arg.starts_with("--remote=")',
+        "match argument.as_ref()",
+        'value.trim_start().starts_with("projects=")',
+      ]) {
+        if (production.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust runtime-overlay argv scanning semantics");
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === RUNTIME_OVERLAY_POLICY_ADAPTER_FILE) {
+      const required = [
+        "prodex_runtime_overlay_config_assignments_v1(",
+        "prodex_runtime_overlay_workspace_trust_indices_v1(",
+        "prodex_runtime_overlay_transport_flags_v1(",
+        "prodex_runtime_overlay_fresh_projection_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime-overlay policy adapter must retain Mojo ABI call " + call);
+    }
+    return [];
+  });
   const cliRuntimeFeatureViolations = files
     .filter(([filePath, contents]) => filePath === CLI_RUNTIME_FEATURE_FILE &&
       /\bfn\s+(?:rust_plan|rollout_budget_reminders|to_codex_config_args_rust|mojo_feature_plan_matches_rust_oracle_for_seeded_inputs)\s*\(/u.test(contents))
@@ -2484,7 +2526,7 @@ export function findViolations(files) {
     ...quotaModelPolicyViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
-    ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...cliRuntimeFeatureViolations,
+    ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
