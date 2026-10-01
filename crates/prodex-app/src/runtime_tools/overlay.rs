@@ -7,6 +7,12 @@ use super::{
 };
 use crate::app_commands::runtime_launch::goal_resume::add_runtime_goal_session_tracking;
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::runtime_overlay_policy::{
+    FreshProjectionAction, OverlayConfigAssignmentViolation,
+    config_assignments as mojo_overlay_config_assignments,
+    fresh_projection as mojo_fresh_projection, transport_flags as mojo_overlay_transport_flags,
+    workspace_trust_indices as mojo_workspace_trust_indices,
+};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -130,34 +136,19 @@ fn configure_overlay_codex_home(
         .with_context(|| format!("failed to write {}", config_path.display()))
 }
 
-fn overlay_config_assignments(args: &[std::ffi::OsString]) -> Result<Vec<&str>> {
-    let mut assignments = Vec::new();
-    let mut index = 0;
-    while index < args.len() {
-        let Some(arg) = args[index].to_str() else {
-            index += 1;
-            continue;
-        };
-        if matches!(arg, "-c" | "--config") {
-            let value = args
-                .get(index + 1)
-                .context("Codex overlay config flag is missing its value")?
-                .to_str()
-                .context("Codex overlay config override must be UTF-8")?;
-            assignments.push(value);
-            index += 2;
-            continue;
+fn overlay_config_assignments(args: &[std::ffi::OsString]) -> Result<Vec<String>> {
+    let arguments = args.iter().map(|arg| arg.to_str()).collect::<Vec<_>>();
+    match mojo_overlay_config_assignments(&arguments)
+        .expect("Mojo overlay config-assignment scanner returned invalid output")
+    {
+        Ok(assignments) => Ok(assignments),
+        Err(OverlayConfigAssignmentViolation::MissingValue) => {
+            bail!("Codex overlay config flag is missing its value")
         }
-        if let Some(value) = arg.strip_prefix("--config=") {
-            assignments.push(value);
-        } else if let Some(value) = arg.strip_prefix("-c")
-            && !value.is_empty()
-        {
-            assignments.push(value);
+        Err(OverlayConfigAssignmentViolation::ValueNotUtf8) => {
+            bail!("Codex overlay config override must be UTF-8")
         }
-        index += 1;
     }
-    Ok(assignments)
 }
 
 fn merge_overlay_toml(target: &mut toml::Value, patch: toml::Value) {
@@ -176,67 +167,46 @@ fn merge_overlay_toml(target: &mut toml::Value, patch: toml::Value) {
     }
 }
 
+fn runtime_overlay_transport_flags(
+    args: &[std::ffi::OsString],
+) -> prodex_mojo_core::runtime_overlay_policy::OverlayTransportFlags {
+    let lossy = args
+        .iter()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>();
+    let arguments = lossy
+        .iter()
+        .map(|arg| Some(arg.as_ref()))
+        .collect::<Vec<_>>();
+    mojo_overlay_transport_flags(&arguments)
+        .expect("Mojo runtime-overlay transport scanner returned invalid output")
+}
+
 fn codex_remote_requested(args: &[std::ffi::OsString]) -> bool {
-    args.iter().any(|arg| {
-        let arg = arg.to_string_lossy();
-        arg == "--remote" || arg.starts_with("--remote=")
-    })
+    runtime_overlay_transport_flags(args).remote
 }
 
 fn codex_no_daemon_requested(args: &[std::ffi::OsString]) -> bool {
-    args.iter().any(|arg| arg == "--no-daemon")
+    runtime_overlay_transport_flags(args).no_daemon
 }
 
 fn project_super_workspace_trust(
     codex_home: &Path,
     codex_args: &[std::ffi::OsString],
 ) -> Result<()> {
-    let mut trust_args = Vec::new();
-    let mut index = 0;
-    while index < codex_args.len() {
-        let Some(arg) = codex_args[index].to_str() else {
-            index += 1;
-            continue;
-        };
-        match arg {
-            "-c" | "--config" => {
-                if let Some(value) = codex_args.get(index + 1)
-                    && value
-                        .to_str()
-                        .is_some_and(|value| value.trim_start().starts_with("projects="))
-                {
-                    trust_args.extend([codex_args[index].clone(), value.clone()]);
-                }
-                index += 2;
-                continue;
-            }
-            value if value.starts_with("--config=") => {
-                if value
-                    .trim_start_matches("--config=")
-                    .trim_start()
-                    .starts_with("projects=")
-                {
-                    trust_args.push(codex_args[index].clone());
-                }
-            }
-            value
-                if value.starts_with("-c")
-                    && value.len() > 2
-                    && value
-                        .trim_start_matches("-c")
-                        .trim_start_matches('=')
-                        .trim_start()
-                        .starts_with("projects=") =>
-            {
-                trust_args.push(codex_args[index].clone());
-            }
-            _ => {}
-        }
-        index += 1;
-    }
-    if trust_args.is_empty() {
+    let arguments = codex_args
+        .iter()
+        .map(|arg| arg.to_str())
+        .collect::<Vec<_>>();
+    let indices = mojo_workspace_trust_indices(&arguments)
+        .expect("Mojo workspace-trust argv scanner returned invalid output");
+    if indices.is_empty() {
         return Ok(());
     }
+    let trust_args = indices
+        .into_iter()
+        .map(|index| codex_args[index].clone())
+        .collect::<Vec<_>>();
     configure_overlay_codex_home(codex_home, &trust_args, false)
 }
 
@@ -330,51 +300,37 @@ fn project_fresh_super_config(
     overlay_home: &Path,
     runtime_args: &mut Vec<std::ffi::OsString>,
 ) -> Result<()> {
+    let lossy = runtime_args
+        .iter()
+        .map(|arg| arg.to_string_lossy())
+        .collect::<Vec<_>>();
+    let arguments = lossy
+        .iter()
+        .map(|arg| Some(arg.as_ref()))
+        .collect::<Vec<_>>();
+    let plan = mojo_fresh_projection(&arguments)
+        .expect("Mojo fresh-Super overlay projection returned invalid output");
     let mut projected_args = Vec::with_capacity(runtime_args.len());
     let mut config_args = Vec::new();
-    let mut index = 0;
-    while index < runtime_args.len() {
-        let argument = runtime_args[index].to_string_lossy();
-        match argument.as_ref() {
-            "-c" | "--config" => {
-                if let Some(value) = runtime_args.get(index + 1) {
-                    config_args.extend([runtime_args[index].clone(), value.clone()]);
-                    index += 2;
-                    continue;
-                }
-            }
-            "--enable" | "--disable" => {
-                if let Some(feature) = runtime_args.get(index + 1) {
-                    config_args.extend([
-                        std::ffi::OsString::from("-c"),
-                        std::ffi::OsString::from(format!(
-                            "features.{}={}",
-                            feature.to_string_lossy(),
-                            argument == "--enable"
-                        )),
-                    ]);
-                    index += 2;
-                    continue;
-                }
-            }
-            "--dangerously-bypass-hook-trust" => {
+
+    for action in plan {
+        match action {
+            FreshProjectionAction::Keep(index) => {
                 projected_args.push(runtime_args[index].clone());
-                index += 1;
-                continue;
             }
-            "--dangerously-bypass-approvals-and-sandbox" => {
-                index += 1;
-                continue;
-            }
-            value if value.starts_with("--config=") || value.starts_with("-c") => {
+            FreshProjectionAction::ConfigArg(index) => {
                 config_args.push(runtime_args[index].clone());
-                index += 1;
-                continue;
             }
-            _ => {}
+            FreshProjectionAction::Feature { index, enabled } => {
+                config_args.extend([
+                    std::ffi::OsString::from("-c"),
+                    std::ffi::OsString::from(format!(
+                        "features.{}={enabled}",
+                        runtime_args[index].to_string_lossy(),
+                    )),
+                ]);
+            }
         }
-        projected_args.push(runtime_args[index].clone());
-        index += 1;
     }
     if crate::codex_cli_config_override_value(runtime_args, "disable_paste_burst").is_none() {
         config_args.extend([

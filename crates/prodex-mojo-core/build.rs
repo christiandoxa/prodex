@@ -480,6 +480,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/runtime_proxy_request.mojo");
         sources.push("../../mojo/prodex_core/state_policy.mojo");
         sources.push("../../mojo/prodex_core/codex_config.mojo");
+        sources.push("../../mojo/prodex_core/runtime_overlay_policy.mojo");
         sources.push("../../mojo/prodex_core/redaction.mojo");
         sources.push("../../mojo/prodex_core/context.mojo");
         sources.push("../../mojo/prodex_core/context_text.mojo");
