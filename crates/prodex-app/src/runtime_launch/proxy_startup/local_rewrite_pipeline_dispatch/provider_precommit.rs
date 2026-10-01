@@ -31,17 +31,6 @@ use prodex_provider_core::ProviderErrorClass;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-fn runtime_provider_bridge_kind_tag(provider: RuntimeProviderBridgeKind) -> i64 {
-    match provider {
-        RuntimeProviderBridgeKind::Anthropic => 0,
-        RuntimeProviderBridgeKind::Copilot => 1,
-        RuntimeProviderBridgeKind::OpenAiResponses => 2,
-        RuntimeProviderBridgeKind::DeepSeek => 3,
-        RuntimeProviderBridgeKind::Gemini => 4,
-        RuntimeProviderBridgeKind::Kiro => 5,
-    }
-}
-
 fn runtime_provider_error_class_from_tag(tag: i64) -> ProviderErrorClass {
     match tag {
         0 => ProviderErrorClass::Auth,
@@ -349,7 +338,7 @@ fn runtime_local_rewrite_should_prefetch_provider_response(
                 .expect("Mojo provider SSE content-type comparison failed")
         });
     provider_precommit_should_prefetch(
-        runtime_provider_bridge_kind_tag(provider),
+        provider as i64,
         live.native_anthropic_messages,
         responses_route,
         live.status,

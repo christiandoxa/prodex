@@ -94,6 +94,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/tests/profile_health.rs",
   "crates/prodex-mojo-core/src/provider_constraints.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/error_class.rs",
   "crates/prodex-mojo-core/src/policy.rs",
@@ -766,6 +767,7 @@ const DEEPSEEK_STRICT_SCHEMA_FILE = "crates/prodex-provider-core/src/deepseek_br
 const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
 const PROVIDER_CONSTRAINTS_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints.rs";
 const PROVIDER_PRECOMMIT_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs";
+const PROVIDER_BRIDGE_METADATA_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs";
 const LOCAL_REWRITE_UPSTREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs";
 const NATIVE_FIRST_ERROR_CLASS_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/error_class.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
@@ -1974,6 +1976,53 @@ export function findViolations(files) {
     }
     return violations;
   });
+  const providerBridgeMetadataViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PROVIDER_BRIDGE_METADATA_FILE) {
+      const required = [
+        "provider_bridge_rate_limit_header_prefix(",
+        "provider_bridge_rate_limit_header_label(",
+        "provider_bridge_chat_compatible_adapter_label(",
+        "provider_bridge_function_tool_name_max_bytes(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": provider bridge metadata migration must retain Mojo call " + call);
+      if (!/#\[repr\(i64\)\][^]*?enum RuntimeProviderBridgeKind/u.test(contents)) {
+        violations.push(filePath + ": RuntimeProviderBridgeKind must remain repr(i64) for Mojo ABI tags");
+      }
+      for (const name of [
+        "rate_limit_header_prefix",
+        "rate_limit_header_label",
+        "chat_compatible_adapter_label",
+        "function_tool_name_max_bytes",
+      ]) {
+        const body = contents.match(new RegExp("\\bfn\\s+" + name + "\\(self\\)[^]*?^\\s*\\}", "mu"))?.[0];
+        if (body?.includes("match self")) {
+          violations.push(filePath + ": contains restored Rust provider bridge metadata table in " + name);
+        }
+      }
+      return violations;
+    }
+    if (filePath === PROVIDER_CONSTRAINTS_ADAPTER_FILE) {
+      const required = [
+        "prodex_provider_bridge_label_v1(",
+        "prodex_provider_bridge_function_tool_name_max_bytes_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": provider bridge metadata adapter must retain Mojo ABI " + call);
+    }
+    if (filePath === PROVIDER_PRECOMMIT_FILE) {
+      const violations = contents.includes("provider as i64")
+        ? []
+        : [filePath + ": provider precommit must use stable RuntimeProviderBridgeKind ABI tag"];
+      if (contents.includes("fn runtime_provider_bridge_kind_tag(")) {
+        violations.push(filePath + ": contains restored Rust provider bridge tag mapper");
+      }
+      return violations;
+    }
+    return [];
+  });
   const providerPrecommitPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === PROVIDER_CONSTRAINTS_ADAPTER_FILE) {
       return contents.includes("prodex_provider_precommit_policy_v1(")
@@ -2722,7 +2771,7 @@ export function findViolations(files) {
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
     ...deepseekReasoningViolations,
-    ...nativeFirstErrorClassViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
+    ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
