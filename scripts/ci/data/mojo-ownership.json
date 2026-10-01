@@ -2676,11 +2676,11 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "name": "runtime_repo_module_like",
-      "mojo_entry": "prodex_runtime_repo_module_like_v1",
-      "consumer_marker": "prodex_mojo_core::runtime_repo_map::repo_module_like",
+      "mojo_entry": "prodex_runtime_repo_symbol_kind_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_repo_map::repo_symbol_kind",
       "rust_owner_before": "repo-map module-like declaration classification over source excerpts",
       "rust_test_oracle": "deleted; direct ABI fixtures cover comments/decorators, Rust visibility prefixes, JS export/class syntax, async functions and Unicode whitespace",
-      "rust_adapter_scope": "repo-map entry-kind DTO mapping remains Rust"
+      "rust_adapter_scope": "repo-map entry-kind DTO mapping remains Rust; module-like classification is consumed through the consolidated symbol-kind ABI"
     },
     {
       "domain": "smart-context/repo-map",

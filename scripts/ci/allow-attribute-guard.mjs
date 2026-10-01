@@ -10,7 +10,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "unused_imports": 0,
   "clippy::large_enum_variant": 9,
   "clippy::result_large_err": 2,
-  "clippy::too_many_arguments": 22,
+  "clippy::too_many_arguments": 24,
   "clippy::type_complexity": 1,
 });
 
@@ -49,6 +49,10 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/http.rs|fn runtime_apply_external_http_redaction(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/http.rs|pub(crate) fn apply_runtime_presidio_redaction_to_request_with_rules(",
   "clippy::too_many_arguments|crates/prodex-app/src/runtime_proxy/presidio/websocket.rs|pub(crate) fn apply_runtime_presidio_redaction_to_websocket_text_with_rules<'a>(",
+  // ponytail: Gemini completion guardrail mirrors the fixed Mojo scalar ABI; group inputs only if the ABI or caller topology changes.
+  "clippy::too_many_arguments|crates/prodex-mojo-core/src/rich/gemini_sse_state.rs|pub fn plan_gemini_completion_guardrail(",
+  // ponytail: profile health scoring mirrors the fixed Mojo scalar ABI; introduce an input DTO if the bridge gains another caller shape.
+  "clippy::too_many_arguments|crates/prodex-mojo-core/src/runtime/profile_health.rs|pub fn profile_health_score(",
   // ponytail: keep the Mojo ABI adapter explicit; use an input struct only if another caller appears.
   "clippy::too_many_arguments|crates/prodex-mojo-core/src/runtime/quota_decisions.rs|pub fn precommit_budget_plan(",
   // ponytail: keep the Mojo quota snapshot ABI scalar layout explicit; group it only if another non-ABI caller appears.

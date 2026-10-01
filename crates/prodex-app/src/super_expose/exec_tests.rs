@@ -86,11 +86,7 @@ fn validated_optional_command_alias_executes_with_capability_environment() {
     assert_eq!(result["success"], true);
     assert_eq!(result["optional_tool"], "rtk");
     assert_eq!(result["available_optional_tools"], json!(["rtk"]));
-    let stdout = result["stdout"].as_str().unwrap().replace(
-        "
-", "
-",
-    );
+    let stdout = result["stdout"].as_str().unwrap().replace("\r\n", "\n");
     assert!(stdout.contains("alias-ok"));
     assert!(stdout.contains("rtk"));
 }

@@ -5,7 +5,6 @@ const MAX_INPUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_OUTPUT_BYTES: usize = 512;
 
 unsafe extern "C" {
-    fn prodex_runtime_repo_module_like_v1(abi_version: i64, address: u64, length: i64) -> i64;
     fn prodex_runtime_repo_chunk_plan_v1(
         abi_version: i64,
         current_count: i64,
@@ -195,22 +194,6 @@ pub fn repo_entry_should_replace(
     }
 }
 
-pub fn repo_module_like(text: &str) -> Result<bool, MojoError> {
-    let result = unsafe {
-        prodex_runtime_repo_module_like_v1(
-            ABI_VERSION,
-            text.as_ptr() as usize as u64,
-            input_len(text)?,
-        )
-    };
-    match result {
-        0 => Ok(false),
-        1 => Ok(true),
-        -1 => Err(MojoError::InvalidInput),
-        _ => Err(MojoError::InvalidOutput),
-    }
-}
-
 pub fn repo_module_from_path(path: &str) -> Result<Option<String>, MojoError> {
     let mut output = vec![0_u8; MAX_OUTPUT_BYTES];
     let mut written = 0_i64;
@@ -250,18 +233,6 @@ mod tests {
 
     #[test]
     fn repo_map_kernel_matches_module_helpers() {
-        for (text, expected) in [
-            ("#[cfg(test)]\npub mod alpha {", true),
-            ("// comment\n export default class Widget {", true),
-            ("\u{3000}# comment\n\u{2003}pub(super) mod beta;", true),
-            ("@decorator\nasync fn run() {}", false),
-            ("pub async fn run() {}", false),
-            ("pub fn run() {}", false),
-            ("\n\r\nclass Widget:", true),
-        ] {
-            assert_eq!(repo_module_like(text).unwrap(), expected, "{text:?}");
-        }
-
         assert_eq!(
             repo_chunk_plan(0, 4, 10, 10, true).unwrap(),
             RepoChunkPlan::Accept
