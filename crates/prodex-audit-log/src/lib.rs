@@ -203,12 +203,12 @@ impl UsageLedgerMetadata {
         email: Option<&str>,
     ) -> Self {
         Self {
-            profile_name: profile_name
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(|value| value.chars().take(100).collect()),
-            account_hint: redacted_account_hint(account_id),
-            email_domain: email_domain(email),
+            profile_name: prodex_mojo_core::audit_log_policy::profile_name(profile_name)
+                .expect("Mojo audit profile-name policy returned invalid output"),
+            account_hint: prodex_mojo_core::audit_log_policy::account_hint(account_id)
+                .expect("Mojo audit account-hint policy returned invalid output"),
+            email_domain: prodex_mojo_core::audit_log_policy::email_domain(email)
+                .expect("Mojo audit email-domain policy returned invalid output"),
         }
     }
 }
@@ -667,28 +667,6 @@ fn truncate_audit_details(value: &str, max_chars: usize) -> String {
 fn normalize_usage_token(value: &str, fallback: &str, max_chars: usize) -> String {
     prodex_mojo_core::audit_log_policy::normalize_usage_token(value, fallback, max_chars)
         .expect("Mojo audit usage-token policy returned invalid output")
-}
-
-fn redacted_account_hint(account_id: Option<&str>) -> Option<String> {
-    let account_id = account_id
-        .map(str::trim)
-        .filter(|value| !value.is_empty())?;
-    let suffix = account_id
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<String>();
-    Some(format!("...{suffix}"))
-}
-
-fn email_domain(email: Option<&str>) -> Option<String> {
-    let email = email.map(str::trim).filter(|value| !value.is_empty())?;
-    let (_, domain) = email.rsplit_once('@')?;
-    let domain = domain.trim().to_ascii_lowercase();
-    (!domain.is_empty()).then_some(domain.chars().take(100).collect())
 }
 
 fn floor_epoch(value: i64, unit: i64) -> i64 {

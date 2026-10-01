@@ -4144,3 +4144,23 @@ strengthened no-fallback guard. The canonical broad report at this checkpoint
 counts **73,267 reachable Mojo LOC** and **201,306 Rust production LOC**,
 totaling **274,573 LOC**: **26.683978395545083% Mojo**. The 75% broad target
 remains in progress.
+
+## Audit ledger metadata redaction hard replacement
+
+Usage-ledger metadata text policy now runs through `audit_log_policy.mojo`.
+Mojo owns Unicode whitespace trimming and 100-codepoint bounding for profile
+names, account-id redaction to a `...` plus last-four-codepoint hint, and email
+domain extraction using the final `@`, Unicode trimming, ASCII lowercasing, and
+100-codepoint bounding. Rust retains optional-field ownership, Serde ledger
+serialization, checksum/file I/O, and stores only the Mojo-produced redacted
+metadata. The previous Rust profile `chars().take(100)`, reverse suffix
+collection, and `rsplit_once('@')` domain transform were deleted; no Rust
+semantic fallback remains for the migrated metadata policy.
+
+Focused validation passes the standalone `audit_log_policy.mojo` build, the
+real-Mojo metadata adapter tests including Unicode cases, all 17
+`prodex-audit-log` tests, Clippy with warnings denied for `prodex-mojo-core` and
+`prodex-audit-log`, `git diff --check`, and the strengthened no-fallback guard.
+The canonical broad report at this checkpoint counts **73,463 reachable Mojo
+LOC** and **201,357 Rust production LOC**, totaling **274,820 LOC**:
+**26.73131504257332% Mojo**. The 75% broad target remains in progress.

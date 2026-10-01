@@ -905,6 +905,9 @@ export function findViolations(files) {
         "prodex_mojo_core::audit_log_policy::format_query(",
         "prodex_mojo_core::audit_log_policy::format_search_scope(",
         "prodex_mojo_core::audit_log_policy::truncate_text(",
+        "prodex_mojo_core::audit_log_policy::profile_name(",
+        "prodex_mojo_core::audit_log_policy::account_hint(",
+        "prodex_mojo_core::audit_log_policy::email_domain(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -918,8 +921,11 @@ export function findViolations(files) {
         || contents.includes('parts.push(format!("component={component}"))')
         || contents.includes('"searched {} of {} bytes (byte range {}..{})"')
         || contents.includes("chars.by_ref().take(max_chars)")
+        || contents.includes(".chars().rev().take(4)")
+        || contents.includes(".rsplit_once('@')")
+        || contents.includes(".chars().take(100).collect()")
       ) {
-        violations.push(filePath + ": contains restored Rust audit query/display semantics");
+        violations.push(filePath + ": contains restored Rust audit query/display/metadata semantics");
       }
       return violations;
     }
@@ -934,6 +940,9 @@ export function findViolations(files) {
         "prodex_audit_query_format_v1(",
         "prodex_audit_search_scope_format_v1(",
         "prodex_audit_truncate_text_v1(",
+        "prodex_audit_profile_name_v1(",
+        "prodex_audit_account_hint_v1(",
+        "prodex_audit_email_domain_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))

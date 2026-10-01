@@ -133,6 +133,36 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_audit_profile_name_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        input_present: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+        present_address: u64,
+    ) -> i64;
+    fn prodex_audit_account_hint_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        input_present: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+        present_address: u64,
+    ) -> i64;
+    fn prodex_audit_email_domain_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        input_present: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+        present_address: u64,
+    ) -> i64;
 }
 
 fn status(value: i64) -> Result<(), MojoError> {
@@ -423,6 +453,52 @@ pub fn truncate_text(value: &str, max_chars: usize) -> Result<String, MojoError>
     decode_text(&output, written)
 }
 
+type AuditMetadataPolicyFn = unsafe extern "C" fn(i64, u64, i64, i64, u64, i64, u64, u64) -> i64;
+
+fn metadata_text(
+    policy: AuditMetadataPolicyFn,
+    value: Option<&str>,
+) -> Result<Option<String>, MojoError> {
+    let (address, length, present) = optional_text_parts(value)?;
+    let capacity = value
+        .map(str::len)
+        .unwrap_or_default()
+        .saturating_add(3)
+        .max(1);
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let mut output_present = -1_i64;
+    status(unsafe {
+        policy(
+            ABI_VERSION,
+            address,
+            length,
+            present,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+            (&mut output_present as *mut i64) as usize as u64,
+        )
+    })?;
+    match output_present {
+        0 => Ok(None),
+        1 => decode_text(&output, written).map(Some),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn profile_name(value: Option<&str>) -> Result<Option<String>, MojoError> {
+    metadata_text(prodex_audit_profile_name_v1, value)
+}
+
+pub fn account_hint(value: Option<&str>) -> Result<Option<String>, MojoError> {
+    metadata_text(prodex_audit_account_hint_v1, value)
+}
+
+pub fn email_domain(value: Option<&str>) -> Result<Option<String>, MojoError> {
+    metadata_text(prodex_audit_email_domain_v1, value)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -505,5 +581,27 @@ mod tests {
         );
         assert_eq!(truncate_text("αβγδε", 3).unwrap(), "αβγ...");
         assert_eq!(truncate_text("αβγ", 3).unwrap(), "αβγ");
+        assert_eq!(
+            profile_name(Some("  Team β  ")).unwrap(),
+            Some("Team β".to_string())
+        );
+        assert_eq!(profile_name(Some("   ")).unwrap(), None);
+        assert_eq!(
+            account_hint(Some(" demo-account-1234 ")).unwrap(),
+            Some("...1234".to_string())
+        );
+        assert_eq!(
+            account_hint(Some("🙂αβγδε")).unwrap(),
+            Some("...βγδε".to_string())
+        );
+        assert_eq!(
+            email_domain(Some(" Example@Sub.DOMAIN.TEST ")).unwrap(),
+            Some("sub.domain.test".to_string())
+        );
+        assert_eq!(
+            email_domain(Some("local@ignored@Example.COM")).unwrap(),
+            Some("example.com".to_string())
+        );
+        assert_eq!(email_domain(Some("missing-at")).unwrap(), None);
     }
 }
