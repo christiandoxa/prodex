@@ -3901,3 +3901,24 @@ no-fallback guard. The canonical broad report at this checkpoint counts
 **71,813 reachable Mojo LOC** and **200,545 Rust production LOC**, totaling
 **272,358 LOC**: **26.367134433356096% Mojo**. The 75% broad target remains in
 progress.
+
+## Native-first provider error-code classification hard replacement
+
+Native-first SSE provider error codes now reuse the canonical
+`provider_error.mojo` classifier. Rust retains SSE `data:` extraction, UTF-8 and
+Serde JSON parsing, error-object field acquisition, and conversion of the Mojo-
+backed provider classification into the local optional retry signal. The former
+Rust match table for rate-limit, overload, not-found, authentication, and quota
+error-code aliases was deleted. The canonical provider classifier was extended
+with the native-first aliases (`rate_limit_error`, `not_found_error`,
+`overloaded_error`, and `server_is_overloaded`), so there is no Rust semantic
+fallback for the migrated code classification.
+
+Focused validation passes the standalone `provider_error.mojo` build, the
+provider-core Mojo classifier regression test, all 4 active native-first event
+consumer tests in `prodex-app`, Clippy with warnings denied for
+`prodex-provider-core` and `prodex-app`, `git diff --check`, and the strengthened
+no-fallback guard. The canonical broad report at this checkpoint counts
+**71,824 reachable Mojo LOC** and **200,528 Rust production LOC**, totaling
+**272,352 LOC**: **26.37175420044648% Mojo**. The 75% broad target remains in
+progress.

@@ -463,7 +463,8 @@ def prodex_provider_error_classify_v1(
     elif (
         code_present == 1
         and (
-            provider_error_equals_ci(code_address, code_length, StringSlice("rate_limit_exceeded"))
+            provider_error_equals_ci(code_address, code_length, StringSlice("rate_limit_error"))
+            or provider_error_equals_ci(code_address, code_length, StringSlice("rate_limit_exceeded"))
             or provider_error_equals_ci(code_address, code_length, StringSlice("rate_limit_exceeded_error"))
             or provider_error_equals_ci(code_address, code_length, StringSlice("slow_down"))
         )
@@ -474,7 +475,10 @@ def prodex_provider_error_classify_v1(
         (status_present == 1 and status == 404)
         or (
             code_present == 1
-            and provider_error_equals_ci(code_address, code_length, StringSlice("model_not_supported"))
+            and (
+                provider_error_equals_ci(code_address, code_length, StringSlice("not_found_error"))
+                or provider_error_equals_ci(code_address, code_length, StringSlice("model_not_supported"))
+            )
         )
         or (
             text_present == 1
@@ -486,6 +490,13 @@ def prodex_provider_error_classify_v1(
         (
             status_present == 1
             and (status == 500 or status == 502 or status == 503 or status == 504)
+        )
+        or (
+            code_present == 1
+            and (
+                provider_error_equals_ci(code_address, code_length, StringSlice("overloaded_error"))
+                or provider_error_equals_ci(code_address, code_length, StringSlice("server_is_overloaded"))
+            )
         )
         or (
             text_present == 1
