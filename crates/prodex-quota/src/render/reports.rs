@@ -336,43 +336,71 @@ pub fn sorted_quota_report_indexes_by(
     reports: &[QuotaReport],
     sort: QuotaReportSort,
 ) -> Vec<usize> {
+    let records = reports
+        .iter()
+        .map(quota_report_sort_record)
+        .collect::<Vec<_>>();
     let mut indexes = (0..reports.len()).collect::<Vec<_>>();
     indexes.sort_by(|&left, &right| {
-        compare_quota_reports(&reports[left], &reports[right], sort)
+        compare_quota_report_sort_records(&records[left], &records[right], sort)
             .then_with(|| reports[left].name.cmp(&reports[right].name))
     });
     indexes
 }
 
-fn compare_quota_reports(
-    left: &QuotaReport,
-    right: &QuotaReport,
-    sort: QuotaReportSort,
-) -> Ordering {
-    match sort {
-        QuotaReportSort::Current => (!left.active)
-            .cmp(&(!right.active))
-            .then_with(|| quota_status_rank(left).cmp(&quota_status_rank(right))),
-        QuotaReportSort::Remaining => quota_status_rank(left)
-            .cmp(&quota_status_rank(right))
-            .then_with(|| quota_reset_epoch(left).cmp(&quota_reset_epoch(right))),
-        QuotaReportSort::Profile => compare_text(&left.name, &right.name),
-        QuotaReportSort::Auth => compare_text(&left.auth.label, &right.auth.label),
-        QuotaReportSort::Account => compare_text(
-            &quota_report_view_data(left).account,
-            &quota_report_view_data(right).account,
-        ),
-        QuotaReportSort::Plan => compare_text(
-            &quota_report_view_data(left).plan,
-            &quota_report_view_data(right).plan,
-        ),
+#[derive(Debug)]
+struct QuotaReportSortRecord {
+    active: bool,
+    status_rank: i64,
+    reset_epoch: i64,
+    profile: String,
+    auth: String,
+    account: String,
+    plan: String,
+}
+
+fn quota_report_sort_record(report: &QuotaReport) -> QuotaReportSortRecord {
+    let view = quota_report_view_data(report);
+    QuotaReportSortRecord {
+        active: report.active,
+        status_rank: i64::try_from(quota_status_rank(report)).expect("quota rank fits i64"),
+        reset_epoch: quota_reset_epoch(report),
+        profile: report.name.clone(),
+        auth: report.auth.label.clone(),
+        account: view.account,
+        plan: view.plan,
     }
 }
 
-fn compare_text(left: &str, right: &str) -> Ordering {
-    left.trim()
-        .to_ascii_lowercase()
-        .cmp(&right.trim().to_ascii_lowercase())
+fn compare_quota_report_sort_records(
+    left: &QuotaReportSortRecord,
+    right: &QuotaReportSortRecord,
+    sort: QuotaReportSort,
+) -> Ordering {
+    match prodex_mojo_core::quota::quota_report_compare(
+        sort as i64,
+        left.active,
+        right.active,
+        left.status_rank,
+        right.status_rank,
+        left.reset_epoch,
+        right.reset_epoch,
+        &left.profile,
+        &right.profile,
+        &left.auth,
+        &right.auth,
+        &left.account,
+        &right.account,
+        &left.plan,
+        &right.plan,
+    )
+    .expect("Mojo quota report comparator returned invalid output")
+    {
+        -1 => Ordering::Less,
+        0 => Ordering::Equal,
+        1 => Ordering::Greater,
+        _ => unreachable!("validated Mojo quota report ordering"),
+    }
 }
 
 fn quota_status_rank(report: &QuotaReport) -> usize {

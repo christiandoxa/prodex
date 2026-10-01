@@ -6,6 +6,38 @@ fn quota_model_policy_kernel_preserves_expected_contracts() {
     assert_eq!(plan_capacity_pressure_scale_bps(" Pro-20x "), Ok(2_000));
     assert_eq!(scale_quota_pressure_for_plan(-10, 5_000), Ok(-5));
     assert_eq!(quota_report_sort_next(5), Ok(0));
+    assert_eq!(
+        quota_report_compare(0, true, false, 1, 0, 0, 0, "", "", "", "", "", "", "", "",).unwrap(),
+        -1
+    );
+    assert_eq!(
+        quota_report_compare(
+            1, false, false, 0, 0, 10, 20, "", "", "", "", "", "", "", "",
+        )
+        .unwrap(),
+        -1
+    );
+    assert_eq!(
+        quota_report_compare(
+            2, false, false, 0, 0, 0, 0, " Beta ", "alpha", "", "", "", "", "", "",
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        quota_report_compare(
+            3, false, false, 0, 0, 0, 0, "", "", " ZZZ ", "aaa", "", "", "", "",
+        )
+        .unwrap(),
+        1
+    );
+    assert_eq!(
+        quota_report_compare(
+            4, false, false, 0, 0, 0, 0, "", "", "", "", " ALPHA ", "alpha", "", "",
+        )
+        .unwrap(),
+        0
+    );
     assert_eq!(quota_report_sort_label(0), Ok("current"));
     assert_eq!(quota_report_sort_label(5), Ok("plan"));
     assert_eq!(

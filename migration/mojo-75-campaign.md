@@ -4060,3 +4060,24 @@ strengthened no-fallback guard. The canonical broad report at this checkpoint
 counts **72,506 reachable Mojo LOC** and **200,864 Rust production LOC**,
 totaling **273,370 LOC**: **26.52302739876358% Mojo**. The 75% broad target
 remains in progress.
+
+## Quota report sorting policy hard replacement
+
+Quota report ordering now runs through `quota.mojo`. Mojo owns the Current,
+Remaining, Profile, Auth, Account, and Plan sort-mode selection, active/status
+rank ordering, reset-epoch ordering, Unicode-whitespace trimming plus ASCII
+case-folded text comparison, and final comparator result. Rust precomputes one
+typed sort record per report from provider-specific readiness/reset and view
+data, then delegates every pairwise sort decision to Mojo; the stable name
+tie-break remains Rust collection behavior. The previous Rust `match sort` and
+`compare_text()` implementation were deleted; no Rust semantic fallback remains
+for the migrated comparator.
+
+Focused validation passes the standalone `quota.mojo` build, the real-Mojo
+quota comparator adapter tests, the selected-column sort regression, the
+current-sort blocked-window regression, Clippy with warnings denied for
+`prodex-mojo-core` and `prodex-quota`, `git diff --check`, and the strengthened
+no-fallback guard. The canonical broad report at this checkpoint counts
+**72,623 reachable Mojo LOC** and **200,969 Rust production LOC**, totaling
+**273,592 LOC**: **26.54427030030118% Mojo**. The 75% broad target remains in
+progress.
