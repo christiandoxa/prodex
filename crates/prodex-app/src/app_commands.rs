@@ -30,6 +30,7 @@ mod status;
 #[path = "app_commands/sub_agent_catalog_tests.rs"]
 mod sub_agent_catalog_tests;
 mod super_config;
+mod super_expose_config;
 mod super_main_prompt;
 mod super_prompt;
 
@@ -55,6 +56,7 @@ pub(crate) use self::session::*;
 pub(crate) use self::shared::*;
 pub(crate) use self::status::*;
 pub(crate) use self::super_config::ResolvedMainAgentConfig;
+pub(crate) use self::super_expose_config::resolve_super_expose_launch_configuration;
 
 pub(super) fn handle_super(mut args: SuperArgs) -> Result<()> {
     args.validate_urls().map_err(anyhow::Error::msg)?;
