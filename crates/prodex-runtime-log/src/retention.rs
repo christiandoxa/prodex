@@ -153,10 +153,8 @@ pub(super) fn runtime_log_recording_enabled() -> bool {
     std::env::var(RUNTIME_LOG_RECORD_ENV)
         .ok()
         .is_some_and(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "1" | "true" | "yes" | "on"
-            )
+            prodex_mojo_core::runtime::runtime_log_recording_enabled_value(&value)
+                .expect("Mojo runtime-log recording policy returned invalid output")
         })
 }
 

@@ -10,8 +10,9 @@ pub use tuning::{
     RuntimeClockSourceClass, RuntimeLogFormatClass, RuntimeProxyPresetClass,
     RuntimeTuningCapacityDefaults, RuntimeTuningDefaults, RuntimeTuningProxyPresetDefaults,
     RuntimeWebSearchModeClass, runtime_clock_source_class, runtime_log_format_class,
-    runtime_model_provider_is_openai, runtime_proxy_preset_class, runtime_tuning_capacity_defaults,
-    runtime_tuning_defaults, runtime_tuning_proxy_preset_defaults, runtime_web_search_mode_class,
+    runtime_log_recording_enabled_value, runtime_model_provider_is_openai,
+    runtime_proxy_preset_class, runtime_tuning_capacity_defaults, runtime_tuning_defaults,
+    runtime_tuning_proxy_preset_defaults, runtime_web_search_mode_class,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
