@@ -985,16 +985,7 @@ fn runtime_local_rewrite_live_result(
 }
 
 pub(super) fn runtime_local_rewrite_previous_response_id(body: &[u8]) -> Option<String> {
-    serde_json::from_slice::<Value>(body)
-        .ok()
-        .and_then(|value| {
-            value
-                .get("previous_response_id")
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string)
-        })
+    runtime_proxy_crate::runtime_request_previous_response_id_from_bytes(body)
 }
 
 pub(super) fn runtime_local_rewrite_binding_context(
@@ -1223,7 +1214,7 @@ mod tests {
         RuntimeLocalRewriteNativeFirstEvent, RuntimeLocalRewriteSsePrefetch,
         runtime_local_rewrite_openai_error_can_retry,
         runtime_local_rewrite_precommit_native_first_event,
-        runtime_local_rewrite_retryable_429_body,
+        runtime_local_rewrite_previous_response_id, runtime_local_rewrite_retryable_429_body,
     };
     use prodex_provider_core::{
         ProviderEndpoint, ProviderErrorClass, ProviderId, ProviderTransformInput,
@@ -1605,6 +1596,25 @@ mod tests {
         assert!(runtime_local_rewrite_retryable_429_body(
             br#"{"error":{"code":"insufficient_quota"}}"#
         ));
+    }
+
+    #[test]
+    fn previous_response_id_uses_canonical_mojo_request_semantics() {
+        assert_eq!(
+            runtime_local_rewrite_previous_response_id(
+                br#"{"previous_response_id":"  resp_local_1  "}"#,
+            )
+            .as_deref(),
+            Some("resp_local_1")
+        );
+        assert_eq!(
+            runtime_local_rewrite_previous_response_id(br#"{"previous_response_id":" \t \n "}"#,),
+            None
+        );
+        assert_eq!(
+            runtime_local_rewrite_previous_response_id(br#"{"previous_response_id":7}"#),
+            None
+        );
     }
 
     #[test]
