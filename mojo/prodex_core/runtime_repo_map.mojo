@@ -115,17 +115,6 @@ def repo_module_like(source: Pointer[mut=False, UInt8, _], length: Int64) -> Boo
         line_start = line_end + 1
     return False
 
-@export("prodex_runtime_repo_module_like_v1")
-def prodex_runtime_repo_module_like_v1(
-    abi_version: Int64, address: UInt, length: Int64
-) abi("C") -> Int64:
-    if abi_version != REPO_MAP_ABI_VERSION or length < 0 or length > REPO_MAP_MAX_INPUT_BYTES:
-        return -1
-    if length > 0 and address == 0:
-        return -1
-    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](unsafe_from_address=Int(address))
-    return Int64(repo_module_like(source, length))
-
 def repo_module_from_path(
     source: Pointer[mut=False, UInt8, _],
     length: Int64,
