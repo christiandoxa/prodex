@@ -250,32 +250,11 @@ fn quota_report_view_data(report: &QuotaReport) -> QuotaReportViewData {
 }
 
 fn quota_report_workspace_label(report: &QuotaReport) -> Option<String> {
-    report
-        .workspace_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            report
-                .workspace_id
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(short_workspace_id)
-        })
-}
-
-fn short_workspace_id(value: &str) -> String {
-    let chars = value.chars().collect::<Vec<_>>();
-    if chars.len() <= 24 {
-        return value.to_string();
-    }
-    format!(
-        "{}...{}",
-        chars.iter().take(12).collect::<String>(),
-        chars.iter().skip(chars.len() - 6).collect::<String>()
+    prodex_mojo_core::quota::quota_workspace_label(
+        report.workspace_name.as_deref(),
+        report.workspace_id.as_deref(),
     )
+    .expect("Mojo quota workspace label policy returned invalid output")
 }
 
 pub fn format_openai_additional_limit_summaries(usage: &UsageResponse) -> Vec<String> {

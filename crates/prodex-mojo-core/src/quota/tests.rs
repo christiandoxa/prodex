@@ -59,6 +59,22 @@ fn quota_model_policy_kernel_preserves_expected_contracts() {
         Ok("monthly".to_string())
     );
     assert_eq!(quota_window_label(Some(42)), Ok("42s".to_string()));
+    assert_eq!(
+        quota_workspace_label(Some("  Personal  "), Some("ignored")).unwrap(),
+        Some("Personal".to_string())
+    );
+    assert_eq!(
+        quota_workspace_label(None, Some("abcdefghijklmnopqrstuvwxy123456")).unwrap(),
+        Some("abcdefghijkl...123456".to_string())
+    );
+    assert_eq!(
+        quota_workspace_label(None, Some("αβγδεζηθικλμνξοπρστυφχψω123456")).unwrap(),
+        Some("αβγδεζηθικλμ...123456".to_string())
+    );
+    assert_eq!(
+        quota_workspace_label(Some("   "), Some(" short-id ")).unwrap(),
+        Some("short-id".to_string())
+    );
     assert_eq!(quota_copilot_feature_key(0), Ok("chat"));
     assert_eq!(quota_copilot_feature_key(1), Ok("completions"));
     assert_eq!(

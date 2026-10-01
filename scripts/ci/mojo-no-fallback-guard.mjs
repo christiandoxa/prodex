@@ -2341,11 +2341,16 @@ export function findViolations(files) {
       const violations = body?.includes("prodex_mojo_core::quota::quota_report_compare(")
         ? []
         : [filePath + ": quota report sorting must retain Mojo comparator"];
+      if (!contents.includes("prodex_mojo_core::quota::quota_workspace_label(")) {
+        violations.push(filePath + ": quota workspace labels must retain Mojo policy");
+      }
       const production = contents.split("#[cfg(test)]", 1)[0];
       if (
         /\bfn\s+compare_text\s*\(/u.test(production)
         || body?.includes("match sort")
         || body?.includes("to_ascii_lowercase()")
+        || production.includes("fn short_workspace_id(")
+        || production.includes(".chars().collect::<Vec<_>>()")
       ) {
         violations.push(filePath + ": contains restored Rust quota report comparator semantics");
       }
@@ -2371,6 +2376,7 @@ export function findViolations(files) {
         "prodex_quota_gemini_bucket_summary_v1(",
         "prodex_quota_gemini_display_v1(",
         "prodex_quota_report_compare_v1(",
+        "prodex_quota_workspace_label_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))

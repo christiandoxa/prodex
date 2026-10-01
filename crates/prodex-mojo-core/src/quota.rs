@@ -711,6 +711,19 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_quota_workspace_label_v1(
+        abi_version: i64,
+        name_address: u64,
+        name_length: i64,
+        name_present: i64,
+        id_address: u64,
+        id_length: i64,
+        id_present: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+        present_address: u64,
+    ) -> i64;
     fn prodex_quota_copilot_feature_key_v1(
         abi_version: i64,
         index: i64,
@@ -1110,6 +1123,58 @@ pub fn quota_window_label(seconds: Option<i64>) -> Result<String, crate::MojoErr
         return Err(crate::MojoError::InvalidOutput);
     }
     String::from_utf8(output[..written].to_vec()).map_err(|_| crate::MojoError::InvalidOutput)
+}
+
+pub fn quota_workspace_label(
+    workspace_name: Option<&str>,
+    workspace_id: Option<&str>,
+) -> Result<Option<String>, crate::MojoError> {
+    let parts = |value: Option<&str>| -> Result<(u64, i64, i64), crate::MojoError> {
+        match value {
+            Some(value) => Ok((
+                value.as_ptr() as usize as u64,
+                i64::try_from(value.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+                1,
+            )),
+            None => Ok((0, 0, 0)),
+        }
+    };
+    let (name_address, name_length, name_present) = parts(workspace_name)?;
+    let (id_address, id_length, id_present) = parts(workspace_id)?;
+    let capacity = workspace_name
+        .map(str::len)
+        .unwrap_or_default()
+        .max(
+            workspace_id
+                .map(str::len)
+                .unwrap_or_default()
+                .saturating_add(3),
+        )
+        .max(1);
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let mut present = -1_i64;
+    let status = unsafe {
+        prodex_quota_workspace_label_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            name_address,
+            name_length,
+            name_present,
+            id_address,
+            id_length,
+            id_present,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+            (&mut present as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    match present {
+        0 => Ok(None),
+        1 => decode_quota_text(&output, written).map(Some),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

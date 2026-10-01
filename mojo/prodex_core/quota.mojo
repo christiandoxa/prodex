@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_trim_bounds, rich_view_prefix, rich_view_valid
+from rich_text import rich_codepoint_width, rich_trim_bounds, rich_view_prefix, rich_view_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
 
 comptime INT64_MAX: Int64 = 9223372036854775807
@@ -1183,6 +1183,127 @@ def quota_display_put_view(
         if not quota_display_put_byte(writer, source[unsafe_offset=index]):
             return False
     return True
+
+
+def quota_display_put_range(
+    writer: Pointer[mut=True, QuotaDisplayWriter, _],
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    if start < 0 or end < start or end > Int64(view.len):
+        return False
+    var source = rich_view_ptr(view)
+    for index in range(start, end):
+        if not quota_display_put_byte(writer, source[unsafe_offset=index]):
+            return False
+    return True
+
+
+@export("prodex_quota_workspace_label_v1")
+def prodex_quota_workspace_label_v1(
+    abi_version: Int64,
+    name_address: UInt,
+    name_length: Int64,
+    name_present: Int64,
+    id_address: UInt,
+    id_length: Int64,
+    id_present: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    present_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if (
+        name_length < 0
+        or id_length < 0
+        or (name_present != 0 and name_present != 1)
+        or (id_present != 0 and id_present != 1)
+        or (name_present == 1 and name_length > 0 and name_address == 0)
+        or (id_present == 1 and id_length > 0 and id_address == 0)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+        or present_address == 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var writer = QuotaDisplayWriter(output, output_capacity, 0)
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var present = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(present_address)
+    )
+    written[] = 0
+    present[] = 0
+
+    if name_present == 1:
+        var name = quota_model_policy_view(name_address, name_length)
+        if not rich_view_valid(name, name_length):
+            return QUOTA_MODEL_POLICY_INVALID
+        var bounds = rich_trim_bounds(name)
+        if bounds[1] > bounds[0]:
+            if not quota_display_put_range(
+                Pointer(to=writer), name, bounds[0], bounds[1]
+            ):
+                return QUOTA_MODEL_POLICY_CAPACITY
+            written[] = writer.written
+            present[] = 1
+            return QUOTA_MODEL_POLICY_OK
+
+    if id_present == 0:
+        return QUOTA_MODEL_POLICY_OK
+    var identifier = quota_model_policy_view(id_address, id_length)
+    if not rich_view_valid(identifier, id_length):
+        return QUOTA_MODEL_POLICY_INVALID
+    var bounds = rich_trim_bounds(identifier)
+    if bounds[1] <= bounds[0]:
+        return QUOTA_MODEL_POLICY_OK
+
+    var source = rich_view_ptr(identifier)
+    var cursor = bounds[0]
+    var codepoints: Int64 = 0
+    while cursor < bounds[1]:
+        cursor += rich_codepoint_width(source[unsafe_offset=cursor])
+        codepoints += 1
+
+    if codepoints <= 24:
+        if not quota_display_put_range(
+            Pointer(to=writer), identifier, bounds[0], bounds[1]
+        ):
+            return QUOTA_MODEL_POLICY_CAPACITY
+    else:
+        cursor = bounds[0]
+        var index: Int64 = 0
+        var first_end = bounds[0]
+        var tail_start = bounds[1]
+        while cursor < bounds[1]:
+            if index == 12:
+                first_end = cursor
+            if index == codepoints - 6:
+                tail_start = cursor
+            cursor += rich_codepoint_width(source[unsafe_offset=cursor])
+            index += 1
+        if not quota_display_put_range(
+            Pointer(to=writer), identifier, bounds[0], first_end
+        ):
+            return QUOTA_MODEL_POLICY_CAPACITY
+        if not quota_display_put_literal(Pointer(to=writer), StringSlice("...")):
+            return QUOTA_MODEL_POLICY_CAPACITY
+        if not quota_display_put_range(
+            Pointer(to=writer), identifier, tail_start, bounds[1]
+        ):
+            return QUOTA_MODEL_POLICY_CAPACITY
+
+    written[] = writer.written
+    present[] = 1
+    return QUOTA_MODEL_POLICY_OK
 
 
 def quota_display_put_u64(
