@@ -10,6 +10,7 @@ const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failur
 const PROMOTED_FILES = [
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
   "crates/prodex-mojo-core/src/log_throughput_policy.rs",
+  "crates/prodex-runtime-log/src/retention.rs",
   "crates/prodex-runtime-broker/src/version_guard.rs",
   "crates/prodex-mojo-core/src/super_provider_config.rs",
   "crates/prodex-app/src/runtime_deepseek_config.rs",
@@ -681,6 +682,7 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
 const RUNTIME_STATE_BACKGROUND_FILE = "crates/prodex-runtime-state/src/background.rs";
+const RUNTIME_LOG_RETENTION_FILE = "crates/prodex-runtime-log/src/retention.rs";
 const RUNTIME_STATE_QUOTA_FILE = "crates/prodex-runtime-state/src/quota.rs";
 const RUNTIME_PROXY_ROOT_FILE = "crates/prodex-runtime-proxy/src/lib.rs";
 const BROKER_CONTINUITY_FILE = "crates/prodex-runtime-broker/src/continuity.rs";
@@ -1366,6 +1368,16 @@ export function findViolations(files) {
     return violations;
   });
   const logThroughputViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_LOG_RETENTION_FILE) {
+      const violations = contents.includes("mojo_retention::bounded_text_policy_value(")
+        ? []
+        : [filePath + ": runtime-log environment numeric policy must retain Mojo text parser"];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (production.includes(".parse::<u64>()")) {
+        violations.push(filePath + ": contains restored Rust runtime-log environment numeric parser");
+      }
+      return violations;
+    }
     if (filePath === "crates/prodex-app/src/app_commands/log_throughput_state.rs") {
       const required = [
         "prodex_mojo_core::log_throughput_policy::sample_plan(",
@@ -1390,6 +1402,7 @@ export function findViolations(files) {
         "prodex_log_throughput_sample_plan_v1(",
         "prodex_log_throughput_completed_rate_v1(",
         "prodex_log_throughput_stream_rate_v1(",
+        "prodex_log_retention_policy_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))

@@ -71,6 +71,7 @@ const RETENTION_BOUNDED_VALUE: i64 = 1;
 const RETENTION_ROTATION: i64 = 2;
 const RETENTION_EXPIRED: i64 = 3;
 const RETENTION_OVER_BUDGET: i64 = 4;
+const RETENTION_BOUNDED_TEXT: i64 = 5;
 
 fn retention_call(operation: i64, input: [u64; 6]) -> Result<[u64; 4], MojoError> {
     let mut output = [0_u64; 4];
@@ -88,6 +89,26 @@ fn retention_call(operation: i64, input: [u64; 6]) -> Result<[u64; 4], MojoError
         )
     })?;
     Ok(output)
+}
+
+pub fn bounded_text_policy_value(
+    value: Option<&str>,
+    default: u64,
+    min: u64,
+    max: u64,
+) -> Result<u64, MojoError> {
+    let (address, length, present) = match value {
+        Some(value) => (
+            value.as_ptr() as usize as u64,
+            u64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            1_u64,
+        ),
+        None => (0, 0, 0),
+    };
+    Ok(retention_call(
+        RETENTION_BOUNDED_TEXT,
+        [address, length, present, default, min, max],
+    )?[0])
 }
 
 pub fn bounded_policy_value(
@@ -301,6 +322,22 @@ mod tests {
         assert_eq!(stream_rate(100, 3000, 200, 1000).unwrap(), None);
         assert_eq!(bounded_policy_value(Some(9), 5, 1, 8).unwrap(), 5);
         assert_eq!(bounded_policy_value(Some(7), 5, 1, 8).unwrap(), 7);
+        assert_eq!(bounded_text_policy_value(None, 5, 1, 8).unwrap(), 5);
+        assert_eq!(bounded_text_policy_value(Some("7"), 5, 1, 8).unwrap(), 7);
+        assert_eq!(bounded_text_policy_value(Some("+7"), 5, 1, 8).unwrap(), 7);
+        assert_eq!(bounded_text_policy_value(Some(" 7"), 5, 1, 8).unwrap(), 5);
+        assert_eq!(bounded_text_policy_value(Some("7 "), 5, 1, 8).unwrap(), 5);
+        assert_eq!(bounded_text_policy_value(Some("-1"), 5, 1, 8).unwrap(), 5);
+        assert_eq!(bounded_text_policy_value(Some(""), 5, 1, 8).unwrap(), 5);
+        assert_eq!(bounded_text_policy_value(Some("09"), 5, 1, 10).unwrap(), 9);
+        assert_eq!(
+            bounded_text_policy_value(Some("18446744073709551615"), 5, 1, u64::MAX).unwrap(),
+            u64::MAX
+        );
+        assert_eq!(
+            bounded_text_policy_value(Some("18446744073709551616"), 5, 1, u64::MAX).unwrap(),
+            5
+        );
         assert_eq!(
             log_rotation_plan(10, 5, 12).unwrap(),
             LogRotationPlan {

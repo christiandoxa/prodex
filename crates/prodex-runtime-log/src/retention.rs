@@ -722,19 +722,15 @@ fn remove_runtime_log_file(
 }
 
 fn bounded_environment_u64(name: &str, default: u64, min: u64, max: u64) -> u64 {
-    let parsed = std::env::var(name)
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok());
-    mojo_retention::bounded_policy_value(parsed, default, min, max)
+    let raw = std::env::var(name).ok();
+    mojo_retention::bounded_text_policy_value(raw.as_deref(), default, min, max)
         .expect("Mojo runtime-log environment bound policy returned invalid output")
 }
 
 fn bounded_environment_usize(name: &str, default: usize, min: usize, max: usize) -> usize {
-    let parsed = std::env::var(name)
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok());
-    mojo_retention::bounded_policy_value(
-        parsed,
+    let raw = std::env::var(name).ok();
+    mojo_retention::bounded_text_policy_value(
+        raw.as_deref(),
         u64::try_from(default).expect("runtime-log default fits u64"),
         u64::try_from(min).expect("runtime-log min fits u64"),
         u64::try_from(max).expect("runtime-log max fits u64"),
@@ -746,11 +742,9 @@ fn bounded_environment_usize(name: &str, default: usize, min: usize, max: usize)
 }
 
 fn bounded_environment_i64(name: &str, default: i64, min: i64, max: i64) -> i64 {
-    let parsed = std::env::var(name)
-        .ok()
-        .and_then(|value| value.parse::<u64>().ok());
-    mojo_retention::bounded_policy_value(
-        parsed,
+    let raw = std::env::var(name).ok();
+    mojo_retention::bounded_text_policy_value(
+        raw.as_deref(),
         u64::try_from(default).expect("runtime-log default age fits u64"),
         u64::try_from(min).expect("runtime-log min age fits u64"),
         u64::try_from(max).expect("runtime-log max age fits u64"),
