@@ -3979,24 +3979,3 @@ metadata consumer test, Clippy with warnings denied for `prodex-mojo-core` and
 canonical broad report at this checkpoint counts **71,942 reachable Mojo LOC**
 and **200,620 Rust production LOC**, totaling **272,562 LOC**:
 **26.394728538827863% Mojo**. The 75% broad target remains in progress.
-
-## Provider bridge metadata hard replacement
-
-Provider bridge static metadata now lives in the existing
-`provider_constraints.mojo` owner. Mojo owns per-provider rate-limit header
-prefixes and display labels, chat-compatible adapter labels, and function-tool
-name byte limits for Anthropic, Copilot, OpenAI Responses, DeepSeek, Gemini, and
-Kiro. `RuntimeProviderBridgeKind` is now `repr(i64)` so the existing provider
-order is the stable ABI tag; the previous Rust tag mapper and four Rust match
-tables were deleted. Rust retains provider enum ownership and dynamic request,
-header, validation, and transport execution; no Rust semantic fallback remains
-for the migrated metadata.
-
-Focused validation passes the standalone `provider_constraints.mojo` build,
-the real-Mojo provider scalar/bridge-metadata adapter test, the focused provider
-bridge metadata consumer test, the Gemini 128-byte function-name regression,
-Clippy with warnings denied for `prodex-mojo-core` and `prodex-app`,
-`git diff --check`, and the strengthened no-fallback guard. The canonical broad
-report at this checkpoint counts **71,942 reachable Mojo LOC** and **200,620
-Rust production LOC**, totaling **272,562 LOC**: **26.394728538827863% Mojo**.
-The 75% broad target remains in progress.
