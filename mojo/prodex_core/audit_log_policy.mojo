@@ -617,3 +617,216 @@ def prodex_audit_truncate_text_v1(
     )
     written[] = required
     return AUDIT_LOG_POLICY_OK
+
+
+@export("prodex_audit_profile_name_v1")
+def prodex_audit_profile_name_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    input_present: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    present_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != AUDIT_LOG_POLICY_ABI_VERSION:
+        return AUDIT_LOG_POLICY_ABI
+    if (
+        input_length < 0
+        or input_length > AUDIT_LOG_POLICY_MAX_TEXT_BYTES
+        or (input_present != 0 and input_present != 1)
+        or (input_present == 1 and input_length > 0 and input_address == 0)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+        or present_address == 0
+    ):
+        return AUDIT_LOG_POLICY_INVALID
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var present = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(present_address)
+    )
+    written[] = 0
+    present[] = 0
+    if input_present == 0:
+        return AUDIT_LOG_POLICY_OK
+
+    var input = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(input, AUDIT_LOG_POLICY_MAX_TEXT_BYTES):
+        return AUDIT_LOG_POLICY_INVALID
+    var bounds = rich_trim_bounds(input)
+    if bounds[1] <= bounds[0]:
+        return AUDIT_LOG_POLICY_OK
+
+    var source = rich_view_ptr(input)
+    var cursor = bounds[0]
+    var count: Int64 = 0
+    while cursor < bounds[1] and count < 100:
+        cursor += rich_codepoint_width(source[unsafe_offset=cursor])
+        count += 1
+    var length = cursor - bounds[0]
+    if length > output_capacity:
+        return AUDIT_LOG_POLICY_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(length):
+        output[unsafe_offset=index] = source[unsafe_offset=bounds[0] + index]
+    written[] = length
+    present[] = 1
+    return AUDIT_LOG_POLICY_OK
+
+
+@export("prodex_audit_account_hint_v1")
+def prodex_audit_account_hint_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    input_present: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    present_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != AUDIT_LOG_POLICY_ABI_VERSION:
+        return AUDIT_LOG_POLICY_ABI
+    if (
+        input_length < 0
+        or input_length > AUDIT_LOG_POLICY_MAX_TEXT_BYTES
+        or (input_present != 0 and input_present != 1)
+        or (input_present == 1 and input_length > 0 and input_address == 0)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+        or present_address == 0
+    ):
+        return AUDIT_LOG_POLICY_INVALID
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var present = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(present_address)
+    )
+    written[] = 0
+    present[] = 0
+    if input_present == 0:
+        return AUDIT_LOG_POLICY_OK
+
+    var input = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(input, AUDIT_LOG_POLICY_MAX_TEXT_BYTES):
+        return AUDIT_LOG_POLICY_INVALID
+    var bounds = rich_trim_bounds(input)
+    if bounds[1] <= bounds[0]:
+        return AUDIT_LOG_POLICY_OK
+
+    var source = rich_view_ptr(input)
+    var cursor = bounds[0]
+    var count: Int64 = 0
+    while cursor < bounds[1]:
+        cursor += rich_codepoint_width(source[unsafe_offset=cursor])
+        count += 1
+    var suffix_index = max(Int64(0), count - 4)
+    cursor = bounds[0]
+    var index: Int64 = 0
+    while index < suffix_index:
+        cursor += rich_codepoint_width(source[unsafe_offset=cursor])
+        index += 1
+
+    var suffix_bytes = bounds[1] - cursor
+    if suffix_bytes + 3 > output_capacity:
+        return AUDIT_LOG_POLICY_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = UInt8(46)
+    output[unsafe_offset=1] = UInt8(46)
+    output[unsafe_offset=2] = UInt8(46)
+    for offset in range(suffix_bytes):
+        output[unsafe_offset=offset + 3] = source[unsafe_offset=cursor + offset]
+    written[] = suffix_bytes + 3
+    present[] = 1
+    return AUDIT_LOG_POLICY_OK
+
+
+@export("prodex_audit_email_domain_v1")
+def prodex_audit_email_domain_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    input_present: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    present_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != AUDIT_LOG_POLICY_ABI_VERSION:
+        return AUDIT_LOG_POLICY_ABI
+    if (
+        input_length < 0
+        or input_length > AUDIT_LOG_POLICY_MAX_TEXT_BYTES
+        or (input_present != 0 and input_present != 1)
+        or (input_present == 1 and input_length > 0 and input_address == 0)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+        or present_address == 0
+    ):
+        return AUDIT_LOG_POLICY_INVALID
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var present = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(present_address)
+    )
+    written[] = 0
+    present[] = 0
+    if input_present == 0:
+        return AUDIT_LOG_POLICY_OK
+
+    var input = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(input, AUDIT_LOG_POLICY_MAX_TEXT_BYTES):
+        return AUDIT_LOG_POLICY_INVALID
+    var bounds = rich_trim_bounds(input)
+    if bounds[1] <= bounds[0]:
+        return AUDIT_LOG_POLICY_OK
+
+    var source = rich_view_ptr(input)
+    var at: Int64 = -1
+    for index in range(bounds[0], bounds[1]):
+        if source[unsafe_offset=index] == 64:
+            at = index
+    if at < 0:
+        return AUDIT_LOG_POLICY_OK
+
+    var domain = ProdexRichStringView(
+        UInt(Int(input.ptr) + Int(at + 1)),
+        UInt(bounds[1] - (at + 1)),
+    )
+    var domain_bounds = rich_trim_bounds(domain)
+    if domain_bounds[1] <= domain_bounds[0]:
+        return AUDIT_LOG_POLICY_OK
+    var domain_ptr = rich_view_ptr(domain)
+    var cursor = domain_bounds[0]
+    var count: Int64 = 0
+    var output_length: Int64 = 0
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    while cursor < domain_bounds[1] and count < 100:
+        var width = rich_codepoint_width(domain_ptr[unsafe_offset=cursor])
+        if output_length + width > output_capacity:
+            return AUDIT_LOG_POLICY_INVALID
+        for byte_index in range(width):
+            var byte = domain_ptr[unsafe_offset=cursor + byte_index]
+            if byte_index == 0 and byte >= 65 and byte <= 90:
+                byte += 32
+            output[unsafe_offset=output_length + byte_index] = byte
+        output_length += width
+        cursor += width
+        count += 1
+    written[] = output_length
+    present[] = 1
+    return AUDIT_LOG_POLICY_OK
