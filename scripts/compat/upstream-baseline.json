@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.159.2 release",
+      "baseline_source": "openai/codex rust-v0.159.3 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -838,6 +838,25 @@
             "codex_utils_process::background_command",
             "StdioPolicy::Inherit",
             "Command::new(&program)"
+          ]
+        },
+        {
+          "path": "codex-rs/tui/src/security_setup.rs",
+          "reason": "Codex 0.159.3 security reminders must stay bound to the locally authenticated ChatGPT identity and Codex-owned ChatGPT bootstrap origin; Prodex model-proxy routing must not replace this account/read path.",
+          "required_contains": [
+            "Optional account-security reminders for the local, ChatGPT-authenticated CLI.",
+            "config.model_provider_id != \"openai\" || server.uses_remote_workspace()",
+            "ClientRequest::GetAuthStatus",
+            "GetAuthStatusParams",
+            "!matches!(auth, CodexAuth::Chatgpt(_)) || auth.is_fedramp_account()",
+            "status.auth_method != Some(AuthMode::Chatgpt)",
+            "status.auth_token.as_deref() != Some(saved_token.as_str())",
+            "RouteAwareClientPool::new_without_redirects",
+            "{}/wham/security-setup",
+            "config.chatgpt_base_url.trim_end_matches('/')",
+            "auth_provider_from_auth(&auth).to_auth_headers()",
+            "url.host_str() == Some(\"chatgpt.com\")",
+            "Duration::from_secs(3)"
           ]
         }
       ],
@@ -1835,9 +1854,28 @@
             "StdioPolicy::Inherit",
             "Command::new(&program)"
           ]
+        },
+        {
+          "id": "tui.security-setup-auth-boundary",
+          "kind": "authenticated_auxiliary_request",
+          "file": "codex-rs/tui/src/security_setup.rs",
+          "reason": "The optional 0.159.3 account-security notice must verify app-server and saved ChatGPT auth identity, use the Codex-owned ChatGPT bootstrap base URL without redirects, and accept only https://chatgpt.com action URLs.",
+          "file_contains_all": [
+            "config.model_provider_id != \"openai\" || server.uses_remote_workspace()",
+            "ClientRequest::GetAuthStatus",
+            "!matches!(auth, CodexAuth::Chatgpt(_)) || auth.is_fedramp_account()",
+            "status.auth_method != Some(AuthMode::Chatgpt)",
+            "status.auth_token.as_deref() != Some(saved_token.as_str())",
+            "RouteAwareClientPool::new_without_redirects",
+            "{}/wham/security-setup",
+            "config.chatgpt_base_url.trim_end_matches('/')",
+            "auth_provider_from_auth(&auth).to_auth_headers()",
+            "url.host_str() == Some(\"chatgpt.com\")",
+            "Duration::from_secs(3)"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.159.2",
+      "tested_codex_release": "rust-v0.159.3",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -2124,6 +2162,21 @@
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.159.2, track the upstream Windows console-suppression process helper and redirected-shell call site, preserve the existing GPT-6.1 Sol context policy, and keep all transport/auth/quota/session/protocol boundaries unchanged.",
           "compatibility_evidence": "Exact 0.159.1 and 0.159.2 tagged source archives, release/tag metadata, official Linux musl CLI and app-server asset checksum/version verification, zero-miss baseline replay plus new process markers, isolated app-server initialize, and baseline guards are recorded in migration/codex-rust-v0.159.2-audit.md."
+        },
+        {
+          "from": "rust-v0.159.2",
+          "to": "rust-v0.159.3",
+          "upstream_commit": "01fc69f4026735edfdf6789820549727a4867b11",
+          "upstream_tag_object": "8e46774a94a745ffdf676bd7a8aa36466bbd4f99",
+          "upstream_release_date": "2026-09-30T22:57:34Z",
+          "tree_comparison": "exact tagged source archives; 24 changed files, 833 additions, 5 deletions",
+          "runtime_changes": [
+            "Local ChatGPT-authenticated TUI sessions may prefetch an optional /wham/security-setup notice with a three-second timeout after confirming the connected app-server auth mode and token match the saved local ChatGPT credential; remote workspaces, non-OpenAI providers, and FedRAMP accounts skip the fetch.",
+            "The reminder request uses the configured Codex-owned chatgpt_base_url with the saved ChatGPT auth headers, disables redirects, sends no reminder analytics, revalidates identity after the fetch, and only accepts action URLs on https://chatgpt.com without userinfo or a custom port.",
+            "Responses HTTP/WebSocket transport, GPT-6.1 Sol model metadata, provider authentication for model traffic, quota/error classification, project trust, session persistence, compaction, and app-server protocol contracts retain the 0.159.2 compatibility markers."
+          ],
+          "prodex_action": "Advance the tested Codex baseline to 0.159.3, keep chatgpt_base_url Codex-owned and HTTPS so the new security-setup account/read request stays outside the Prodex model proxy, and guard the upstream auth-identity and action-URL validation contract without changing runtime routing.",
+          "compatibility_evidence": "Exact 0.159.2 and 0.159.3 tagged source archives, release/tag metadata, 511 existing critical-file markers replayed with zero misses, official Linux musl CLI and app-server checksum/version verification, isolated app-server initialize, runtime-launch bootstrap-preservation tests, and baseline guards are recorded in migration/codex-rust-v0.159.3-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -2146,16 +2199,16 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.159.2",
-      "name": "0.159.2",
-      "published_at": "2026-09-29T23:57:16Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.159.2",
+      "tag_name": "rust-v0.159.3",
+      "name": "0.159.3",
+      "published_at": "2026-09-30T22:57:34Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.159.3",
       "body_head": [
-        "## Bug Fixes",
-        "- Suppressed console windows flashing on Windows when Codex launches background processes and sandboxed commands. (#49385)",
+        "## New Features",
+        "- Eligible local sessions signed in with ChatGPT can now show optional reminders to complete account security setup. (#49744)",
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.159.1...rust-v0.159.2",
-        "- #49385 [0.159] Backport Windows console suppression for 0.159.2 @andrewgu-oai"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.159.2...rust-v0.159.3",
+        "- #49744 [0.159] Backport account security setup reminders for 0.159.3 @andrewgu-oai"
       ]
     }
   },

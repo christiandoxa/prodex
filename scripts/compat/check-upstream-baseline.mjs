@@ -58,6 +58,7 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/app-server/src/request_serialization.rs",
   "codex-rs/utils/process/src/lib.rs",
   "codex-rs/core/src/spawn.rs",
+  "codex-rs/tui/src/security_setup.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -661,6 +662,21 @@ const REQUIRED_FILE_CONTAINS = {
     "codex_utils_process::background_command",
     "StdioPolicy::Inherit",
     "Command::new(&program)",
+  ],
+  "codex-rs/tui/src/security_setup.rs": [
+    "Optional account-security reminders for the local, ChatGPT-authenticated CLI.",
+    "config.model_provider_id != \"openai\" || server.uses_remote_workspace()",
+    "ClientRequest::GetAuthStatus",
+    "GetAuthStatusParams",
+    "!matches!(auth, CodexAuth::Chatgpt(_)) || auth.is_fedramp_account()",
+    "status.auth_method != Some(AuthMode::Chatgpt)",
+    "status.auth_token.as_deref() != Some(saved_token.as_str())",
+    "RouteAwareClientPool::new_without_redirects",
+    "{}/wham/security-setup",
+    "config.chatgpt_base_url.trim_end_matches('/')",
+    "auth_provider_from_auth(&auth).to_auth_headers()",
+    "url.host_str() == Some(\"chatgpt.com\")",
+    "Duration::from_secs(3)",
   ],
 };
 
@@ -1495,6 +1511,24 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "codex_utils_process::background_command",
       "StdioPolicy::Inherit",
       "Command::new(&program)",
+    ],
+  },
+  {
+    id: "tui.security-setup-auth-boundary",
+    kind: "authenticated_auxiliary_request",
+    file: "codex-rs/tui/src/security_setup.rs",
+    file_contains_all: [
+      "config.model_provider_id != \"openai\" || server.uses_remote_workspace()",
+      "ClientRequest::GetAuthStatus",
+      "!matches!(auth, CodexAuth::Chatgpt(_)) || auth.is_fedramp_account()",
+      "status.auth_method != Some(AuthMode::Chatgpt)",
+      "status.auth_token.as_deref() != Some(saved_token.as_str())",
+      "RouteAwareClientPool::new_without_redirects",
+      "{}/wham/security-setup",
+      "config.chatgpt_base_url.trim_end_matches('/')",
+      "auth_provider_from_auth(&auth).to_auth_headers()",
+      "url.host_str() == Some(\"chatgpt.com\")",
+      "Duration::from_secs(3)",
     ],
   },
 ];
