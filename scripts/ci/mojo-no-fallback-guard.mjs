@@ -25,6 +25,8 @@ const PROMOTED_FILES = [
   "crates/prodex-audit-log/src/lib.rs",
   "crates/prodex-core/src/lib.rs",
   "crates/prodex-mcp-stdio/src/lib.rs",
+  "crates/prodex-update-notice/src/lib.rs",
+  "crates/prodex-mojo-core/src/update_notice_policy.rs",
   "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
   "crates/prodex-mcp-stdio/src/lib.rs",
   "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
@@ -934,6 +936,31 @@ export function findViolations(files) {
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": MCP framing ABI adapter must retain " + call);
+    }
+    return [];
+  });
+  const updateNoticeMigrationViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-update-notice/src/lib.rs") {
+      const required = [
+        "update_notice_policy::should_emit_notice(",
+        "update_notice_policy::install_channel(",
+        "update_notice_policy::cache_is_fresh(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": update-notice hard replacement must retain " + call);
+      if (
+        /replace\('\\\\',\s*"\/"\)/u.test(contents)
+        || /normalized_path\.contains/u.test(contents)
+        || /now\.saturating_sub\(cached_checked_at\)/u.test(contents)
+      ) {
+        violations.push(filePath + ": contains restored Rust update-notice semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/update_notice_policy.rs" &&
+        !contents.includes("prodex_update_notice_policy_v1(")) {
+      return [filePath + ": update-notice ABI adapter must retain prodex_update_notice_policy_v1("];
     }
     return [];
   });
@@ -2152,6 +2179,7 @@ export function findViolations(files) {
     ...auditUsageViolations,
     ...coreFilePolicyViolations,
     ...mcpStdioPolicyViolations,
+    ...updateNoticeMigrationViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
     ...kiroChatResponseViolations,

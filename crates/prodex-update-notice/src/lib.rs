@@ -89,12 +89,26 @@ pub fn show_update_notice_if_available(command: &Commands) -> Result<()> {
 }
 
 pub fn should_emit_update_notice(command: &Commands) -> bool {
-    match command {
-        Commands::Doctor(args) => !args.json && args.bundle.is_none(),
-        Commands::Update(_) => false,
-        Commands::Quota(args) => !args.raw,
-        _ => true,
-    }
+    use prodex_mojo_core::update_notice_policy::UpdateNoticeCommandClass;
+
+    let (class, doctor_json, doctor_bundle_present, quota_raw) = match command {
+        Commands::Doctor(args) => (
+            UpdateNoticeCommandClass::Doctor,
+            args.json,
+            args.bundle.is_some(),
+            false,
+        ),
+        Commands::Update(_) => (UpdateNoticeCommandClass::Update, false, false, false),
+        Commands::Quota(args) => (UpdateNoticeCommandClass::Quota, false, false, args.raw),
+        _ => (UpdateNoticeCommandClass::Other, false, false, false),
+    };
+    prodex_mojo_core::update_notice_policy::should_emit_notice(
+        class,
+        doctor_json,
+        doctor_bundle_present,
+        quota_raw,
+    )
+    .expect("Mojo update-notice command policy returned invalid output")
 }
 
 pub fn current_prodex_version() -> &'static str {
@@ -116,24 +130,19 @@ pub fn prodex_install_channel(
     npm_package_name: Option<&str>,
     executable_path: Option<&Path>,
 ) -> ProdexInstallChannel {
-    if npm_package_name == Some("@christiandoxa/prodex") {
-        return ProdexInstallChannel::Npm;
-    }
+    use prodex_mojo_core::update_notice_policy::UpdateInstallChannelClass;
 
-    let normalized_path = executable_path
-        .map(|path| path.to_string_lossy().replace('\\', "/"))
-        .unwrap_or_default();
-    if normalized_path.contains("/node_modules/@christiandoxa/prodex-")
-        || normalized_path.contains("/node_modules/@christiandoxa/prodex/")
+    let executable_path = executable_path.map(Path::to_string_lossy);
+    match prodex_mojo_core::update_notice_policy::install_channel(
+        npm_package_name,
+        executable_path.as_deref(),
+    )
+    .expect("Mojo update-notice install-channel policy returned invalid output")
     {
-        return ProdexInstallChannel::Npm;
+        UpdateInstallChannelClass::Standalone => ProdexInstallChannel::Standalone,
+        UpdateInstallChannelClass::Npm => ProdexInstallChannel::Npm,
+        UpdateInstallChannelClass::Cargo => ProdexInstallChannel::Cargo,
     }
-    if normalized_path.ends_with("/.cargo/bin/prodex")
-        || normalized_path.ends_with("/.cargo/bin/prodex.exe")
-    {
-        return ProdexInstallChannel::Cargo;
-    }
-    ProdexInstallChannel::Standalone
 }
 
 pub fn current_prodex_install_warning() -> Option<&'static str> {
@@ -262,9 +271,13 @@ pub fn should_use_cached_update_version(
     current_version: &str,
     now: i64,
 ) -> bool {
-    cached_source == current_source
-        && now.saturating_sub(cached_checked_at)
-            < update_check_cache_ttl_seconds(cached_latest_version, current_version)
+    prodex_mojo_core::update_notice_policy::cache_is_fresh(
+        cached_source == current_source,
+        now,
+        cached_checked_at,
+        update_check_cache_ttl_seconds(cached_latest_version, current_version),
+    )
+    .expect("Mojo update-notice cache policy returned invalid output")
 }
 
 pub fn update_check_cache_ttl_seconds(cached_latest_version: &str, current_version: &str) -> i64 {

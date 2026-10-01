@@ -3006,6 +3006,7 @@ dependencies = [
  "libc",
  "prodex-cli",
  "prodex-core",
+ "prodex-mojo-core",
  "prodex-terminal-ui",
  "reqwest",
  "semver",
