@@ -1895,6 +1895,134 @@ def prodex_quota_auth_filter_matches_v1(
     return 1
 
 
+def quota_report_compare_text(
+    left: ProdexRichStringView,
+    right: ProdexRichStringView,
+) -> Int64:
+    var left_bounds = rich_trim_bounds(left)
+    var right_bounds = rich_trim_bounds(right)
+    var left_length = left_bounds[1] - left_bounds[0]
+    var right_length = right_bounds[1] - right_bounds[0]
+    var left_ptr = rich_view_ptr(left)
+    var right_ptr = rich_view_ptr(right)
+    var common = min(left_length, right_length)
+    for index in range(common):
+        var left_byte = quota_model_policy_ascii_lower(
+            left_ptr[unsafe_offset=left_bounds[0] + index]
+        )
+        var right_byte = quota_model_policy_ascii_lower(
+            right_ptr[unsafe_offset=right_bounds[0] + index]
+        )
+        if left_byte < right_byte:
+            return -1
+        if left_byte > right_byte:
+            return 1
+    if left_length < right_length:
+        return -1
+    if left_length > right_length:
+        return 1
+    return 0
+
+
+def quota_report_compare_i64(left: Int64, right: Int64) -> Int64:
+    if left < right:
+        return -1
+    if left > right:
+        return 1
+    return 0
+
+
+@export("prodex_quota_report_compare_v1")
+def prodex_quota_report_compare_v1(
+    abi_version: Int64,
+    sort: Int64,
+    left_active: Int64,
+    right_active: Int64,
+    left_status_rank: Int64,
+    right_status_rank: Int64,
+    left_reset_epoch: Int64,
+    right_reset_epoch: Int64,
+    left_profile_address: UInt,
+    left_profile_length: Int64,
+    right_profile_address: UInt,
+    right_profile_length: Int64,
+    left_auth_address: UInt,
+    left_auth_length: Int64,
+    right_auth_address: UInt,
+    right_auth_length: Int64,
+    left_account_address: UInt,
+    left_account_length: Int64,
+    right_account_address: UInt,
+    right_account_length: Int64,
+    left_plan_address: UInt,
+    left_plan_length: Int64,
+    right_plan_address: UInt,
+    right_plan_length: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != QUOTA_MODEL_POLICY_ABI_VERSION
+        or sort < 0
+        or sort > 5
+        or (left_active != 0 and left_active != 1)
+        or (right_active != 0 and right_active != 1)
+        or left_status_rank < 0
+        or right_status_rank < 0
+    ):
+        return -2
+
+    if sort == 0:
+        var active_order = quota_report_compare_i64(
+            1 - left_active, 1 - right_active
+        )
+        if active_order != 0:
+            return active_order
+        return quota_report_compare_i64(left_status_rank, right_status_rank)
+
+    if sort == 1:
+        var rank_order = quota_report_compare_i64(
+            left_status_rank, right_status_rank
+        )
+        if rank_order != 0:
+            return rank_order
+        return quota_report_compare_i64(left_reset_epoch, right_reset_epoch)
+
+    var left_address = left_profile_address
+    var left_length = left_profile_length
+    var right_address = right_profile_address
+    var right_length = right_profile_length
+    if sort == 3:
+        left_address = left_auth_address
+        left_length = left_auth_length
+        right_address = right_auth_address
+        right_length = right_auth_length
+    elif sort == 4:
+        left_address = left_account_address
+        left_length = left_account_length
+        right_address = right_account_address
+        right_length = right_account_length
+    elif sort == 5:
+        left_address = left_plan_address
+        left_length = left_plan_length
+        right_address = right_plan_address
+        right_length = right_plan_length
+
+    if (
+        left_length < 0
+        or right_length < 0
+        or (left_length > 0 and left_address == 0)
+        or (right_length > 0 and right_address == 0)
+    ):
+        return -2
+    var left_text = quota_model_policy_view(left_address, left_length)
+    var right_text = quota_model_policy_view(right_address, right_length)
+    if (
+        not rich_view_valid(left_text, left_length)
+        or not rich_view_valid(right_text, right_length)
+    ):
+        return -2
+    return quota_report_compare_text(left_text, right_text)
+
+
 @export("prodex_quota_report_sort_next_v1")
 def prodex_quota_report_sort_next_v1(
     abi_version: Int64, sort: Int64

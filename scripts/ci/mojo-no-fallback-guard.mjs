@@ -110,6 +110,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/rich/routing.rs",
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-quota/src/render/gemini.rs",
+  "crates/prodex-quota/src/render/reports.rs",
   "crates/prodex-quota/src/capacity.rs",
   "crates/prodex-quota/src/render/windows.rs",
   "crates/prodex-quota/src/render/model_capacity.rs",
@@ -712,6 +713,7 @@ const QUOTA_AUTH_FILE = "crates/prodex-quota/src/auth.rs";
 const QUOTA_TIME_FILE = "crates/prodex-quota/src/render/time.rs";
 const QUOTA_COPILOT_FILE = "crates/prodex-quota/src/render/copilot.rs";
 const QUOTA_GEMINI_DISPLAY_FILE = "crates/prodex-quota/src/render/gemini.rs";
+const QUOTA_REPORTS_FILE = "crates/prodex-quota/src/render/reports.rs";
 const QUOTA_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
@@ -2334,6 +2336,21 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === QUOTA_REPORTS_FILE) {
+      const body = contents.match(/\bfn\s+compare_quota_report_sort_records\([^]*?^\}/mu)?.[0];
+      const violations = body?.includes("prodex_mojo_core::quota::quota_report_compare(")
+        ? []
+        : [filePath + ": quota report sorting must retain Mojo comparator"];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /\bfn\s+compare_text\s*\(/u.test(production)
+        || body?.includes("match sort")
+        || body?.includes("to_ascii_lowercase()")
+      ) {
+        violations.push(filePath + ": contains restored Rust quota report comparator semantics");
+      }
+      return violations;
+    }
     if (filePath === QUOTA_AUTH_FILE) {
       const violations = contents.includes("quota_usage_auth_sync_source_label(")
         ? []
@@ -2353,6 +2370,7 @@ export function findViolations(files) {
         "prodex_quota_gemini_bucket_label_v1(",
         "prodex_quota_gemini_bucket_summary_v1(",
         "prodex_quota_gemini_display_v1(",
+        "prodex_quota_report_compare_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
