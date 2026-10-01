@@ -9,6 +9,18 @@ const TUNING_WORKERS: i64 = 4;
 const TUNING_BUDGETS: i64 = 5;
 const TUNING_TRANSPORT: i64 = 6;
 const POOL_REMAINING: i64 = 7;
+const PROCESS_SUMMARY: i64 = 8;
+const LOAD_SUMMARY: i64 = 9;
+const TOKEN_USAGE: i64 = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InfoTokenUsageProfile<'a> {
+    pub profile: &'a str,
+    pub input_tokens: u64,
+    pub cached_input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_tokens: u64,
+}
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -88,6 +100,87 @@ fn render(
         return Err(MojoError::InvalidOutput);
     }
     String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn format_process_summary(
+    total_count: usize,
+    runtime_count: usize,
+    max_visible_processes: usize,
+    processes: &[String],
+) -> Result<String, MojoError> {
+    let texts = processes.iter().map(String::as_str).collect::<Vec<_>>();
+    render(
+        PROCESS_SUMMARY,
+        &[],
+        &[
+            u64::try_from(total_count).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(runtime_count).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(max_visible_processes).map_err(|_| MojoError::InvalidInput)?,
+        ],
+        &texts,
+        0,
+    )
+}
+
+pub fn format_load_summary(
+    log_count: usize,
+    active_inflight_units: usize,
+    recent_selection_events: usize,
+    recent_first_timestamp: Option<i64>,
+    recent_last_timestamp: Option<i64>,
+    runtime_process_count: usize,
+    recent_load_window_seconds: i64,
+) -> Result<String, MojoError> {
+    let timestamps_present = recent_first_timestamp.is_some() && recent_last_timestamp.is_some();
+    render(
+        LOAD_SUMMARY,
+        &[
+            recent_first_timestamp.unwrap_or_default(),
+            recent_last_timestamp.unwrap_or_default(),
+            recent_load_window_seconds,
+        ],
+        &[
+            u64::try_from(log_count).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(active_inflight_units).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(recent_selection_events).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(runtime_process_count).map_err(|_| MojoError::InvalidInput)?,
+        ],
+        &[],
+        u64::from(timestamps_present),
+    )
+}
+
+pub fn format_token_usage_summary(
+    event_count: usize,
+    log_count: usize,
+    total: [u64; 4],
+    profiles: &[InfoTokenUsageProfile<'_>],
+) -> Result<String, MojoError> {
+    if profiles.len() > 4 {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut unsigned = Vec::with_capacity(6 + profiles.len() * 4);
+    unsigned.extend_from_slice(&[
+        u64::try_from(event_count).map_err(|_| MojoError::InvalidInput)?,
+        u64::try_from(log_count).map_err(|_| MojoError::InvalidInput)?,
+        total[0],
+        total[1],
+        total[2],
+        total[3],
+    ]);
+    for profile in profiles {
+        unsigned.extend_from_slice(&[
+            profile.input_tokens,
+            profile.cached_input_tokens,
+            profile.output_tokens,
+            profile.reasoning_tokens,
+        ]);
+    }
+    let texts = profiles
+        .iter()
+        .map(|profile| profile.profile)
+        .collect::<Vec<_>>();
+    render(TOKEN_USAGE, &[], &unsigned, &texts, 0)
 }
 
 pub fn format_relative_duration(seconds: i64) -> Result<String, MojoError> {
@@ -191,6 +284,39 @@ mod tests {
         assert_eq!(
             format_runtime_tuning_transport([1, 2, 3, 4, 5, 6, 7, 8, 9]).unwrap(),
             "http-connect=1ms, stream-idle=2ms, sse-lookahead=3ms; ws-connect=4ms, ws-progress=5ms, ws-happy=6ms, ws-stale-reuse=7ms; inflight soft/hard=8/9"
+        );
+        assert_eq!(
+            format_process_summary(
+                7,
+                2,
+                6,
+                &["10/run", "11/run", "12/run", "13/run", "14/run", "15/run"]
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap(),
+            "Yes (7 total, 2 runtime; processes: 10/run, 11/run, 12/run, 13/run, 14/run, 15/run (+1 more))"
+        );
+        assert_eq!(
+            format_load_summary(2, 3, 4, Some(100), Some(3_760), 1, 1_800).unwrap(),
+            "4 selection event(s) over 1h 1m; inflight units 3; 2 active runtime log(s)"
+        );
+        assert_eq!(
+            format_token_usage_summary(
+                2,
+                3,
+                [110, 25, 44, 9],
+                &[InfoTokenUsageProfile {
+                    profile: "main",
+                    input_tokens: 100,
+                    cached_input_tokens: 25,
+                    output_tokens: 40,
+                    reasoning_tokens: 8,
+                }],
+            )
+            .unwrap(),
+            "2 event(s), logs=3: input=110, cached_input=25, output=44, reasoning=9; by profile: main:100 in/25 cached/40 out/8 reasoning"
         );
     }
 }

@@ -17,6 +17,9 @@ comptime INFO_RENDER_TUNING_WORKERS: Int64 = 4
 comptime INFO_RENDER_TUNING_BUDGETS: Int64 = 5
 comptime INFO_RENDER_TUNING_TRANSPORT: Int64 = 6
 comptime INFO_RENDER_POOL_REMAINING: Int64 = 7
+comptime INFO_RENDER_PROCESS_SUMMARY: Int64 = 8
+comptime INFO_RENDER_LOAD_SUMMARY: Int64 = 9
+comptime INFO_RENDER_TOKEN_USAGE: Int64 = 10
 
 @fieldwise_init
 struct InfoRenderWriter(Copyable):
@@ -133,36 +136,9 @@ def info_render_relative_duration(
     writer: Pointer[mut=True, InfoRenderWriter, _],
     signed_address: UInt,
 ) -> Bool:
-    var seconds = max(info_signed(signed_address, 1, 0), Int64(0))
-    if seconds == 0:
-        return info_put_literal(writer, StringSlice("now"))
-
-    var days = seconds // 86_400
-    var hours = (seconds % 86_400) // 3_600
-    var minutes = (seconds % 3_600) // 60
-    if days > 0:
-        if not info_put_i64(writer, days) or not info_put_byte(writer, UInt8(100)):
-            return False
-        if hours > 0:
-            return (
-                info_put_byte(writer, UInt8(32))
-                and info_put_i64(writer, hours)
-                and info_put_byte(writer, UInt8(104))
-            )
-        return True
-    if hours > 0:
-        if not info_put_i64(writer, hours) or not info_put_byte(writer, UInt8(104)):
-            return False
-        if minutes > 0:
-            return (
-                info_put_byte(writer, UInt8(32))
-                and info_put_i64(writer, minutes)
-                and info_put_byte(writer, UInt8(109))
-            )
-        return True
-    if minutes > 0:
-        return info_put_i64(writer, minutes) and info_put_byte(writer, UInt8(109))
-    return info_put_literal(writer, StringSlice("<1m"))
+    return info_render_relative_duration_value(
+        writer, info_signed(signed_address, 1, 0)
+    )
 
 
 def info_render_quota_data(
@@ -306,6 +282,201 @@ def info_render_tuning_transport(
     )
 
 
+def info_render_process_summary(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+    text_address: UInt,
+    text_count: Int64,
+) -> Bool:
+    var total = info_unsigned(unsigned_address, 3, 0)
+    if total == 0:
+        return info_put_literal(writer, StringSlice("No"))
+    var runtime = info_unsigned(unsigned_address, 3, 1)
+    var max_visible = info_unsigned(unsigned_address, 3, 2)
+    if not (
+        info_put_literal(writer, StringSlice("Yes ("))
+        and info_put_u64(writer, total)
+        and info_put_literal(writer, StringSlice(" total, "))
+        and info_put_u64(writer, runtime)
+        and info_put_literal(writer, StringSlice(" runtime; processes: "))
+    ):
+        return False
+    for index in range(text_count):
+        if index > 0 and not info_put_literal(writer, StringSlice(", ")):
+            return False
+        if not info_put_view(writer, info_text(text_address, text_count, index)):
+            return False
+    var remaining = total - min(total, max_visible)
+    if remaining > 0:
+        if not (
+            info_put_literal(writer, StringSlice(" (+"))
+            and info_put_u64(writer, remaining)
+            and info_put_literal(writer, StringSlice(" more)"))
+        ):
+            return False
+    return info_put_byte(writer, UInt8(41))
+
+
+def info_saturating_sub_i64(left: Int64, right: Int64) -> Int64:
+    if right > 0 and left < -9_223_372_036_854_775_808 + right:
+        return -9_223_372_036_854_775_808
+    if right < 0 and left > 9_223_372_036_854_775_807 + right:
+        return 9_223_372_036_854_775_807
+    return left - right
+
+
+def info_render_load_summary(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    signed_address: UInt,
+    unsigned_address: UInt,
+    presence: UInt64,
+) -> Bool:
+    var log_count = info_unsigned(unsigned_address, 4, 0)
+    var inflight = info_unsigned(unsigned_address, 4, 1)
+    var selections = info_unsigned(unsigned_address, 4, 2)
+    var runtime_processes = info_unsigned(unsigned_address, 4, 3)
+    if runtime_processes == 0:
+        return info_put_literal(writer, StringSlice("No active prodex runtime detected"))
+    if log_count == 0:
+        return info_put_literal(
+            writer,
+            StringSlice("Runtime process detected, but no matching runtime log was found"),
+        )
+    if selections == 0:
+        return (
+            info_put_u64(writer, log_count)
+            and info_put_literal(
+                writer,
+                StringSlice(
+                    " active runtime log(s); no selection activity observed in the sampled window; inflight units "
+                ),
+            )
+            and info_put_u64(writer, inflight)
+        )
+    if selections == 1:
+        return (
+            info_put_literal(writer, StringSlice("1 selection event observed in the sampled window; inflight units "))
+            and info_put_u64(writer, inflight)
+            and info_put_literal(writer, StringSlice("; "))
+            and info_put_u64(writer, log_count)
+            and info_put_literal(writer, StringSlice(" active runtime log(s)"))
+        )
+
+    if not (
+        info_put_u64(writer, selections)
+        and info_put_literal(writer, StringSlice(" selection event(s) over "))
+    ):
+        return False
+    if presence & UInt64(1) != 0:
+        var span = info_saturating_sub_i64(
+            info_signed(signed_address, 3, 1),
+            info_signed(signed_address, 3, 0),
+        )
+        if not info_render_relative_duration_value(writer, span):
+            return False
+    else:
+        var window_minutes = info_signed(signed_address, 3, 2) // 60
+        if not (
+            info_put_i64(writer, window_minutes)
+            and info_put_byte(writer, UInt8(109))
+        ):
+            return False
+    return (
+        info_put_literal(writer, StringSlice("; inflight units "))
+        and info_put_u64(writer, inflight)
+        and info_put_literal(writer, StringSlice("; "))
+        and info_put_u64(writer, log_count)
+        and info_put_literal(writer, StringSlice(" active runtime log(s)"))
+    )
+
+
+def info_render_relative_duration_value(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    seconds_value: Int64,
+) -> Bool:
+    var seconds = max(seconds_value, Int64(0))
+    if seconds == 0:
+        return info_put_literal(writer, StringSlice("now"))
+    var days = seconds // 86_400
+    var hours = (seconds % 86_400) // 3_600
+    var minutes = (seconds % 3_600) // 60
+    if days > 0:
+        if not info_put_i64(writer, days) or not info_put_byte(writer, UInt8(100)):
+            return False
+        if hours > 0:
+            return (
+                info_put_byte(writer, UInt8(32))
+                and info_put_i64(writer, hours)
+                and info_put_byte(writer, UInt8(104))
+            )
+        return True
+    if hours > 0:
+        if not info_put_i64(writer, hours) or not info_put_byte(writer, UInt8(104)):
+            return False
+        if minutes > 0:
+            return (
+                info_put_byte(writer, UInt8(32))
+                and info_put_i64(writer, minutes)
+                and info_put_byte(writer, UInt8(109))
+            )
+        return True
+    if minutes > 0:
+        return info_put_i64(writer, minutes) and info_put_byte(writer, UInt8(109))
+    return info_put_literal(writer, StringSlice("<1m"))
+
+
+def info_render_token_usage(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+    text_address: UInt,
+    text_count: Int64,
+) -> Bool:
+    var events = info_unsigned(unsigned_address, 6, 0)
+    var logs = info_unsigned(unsigned_address, 6, 1)
+    if events == 0:
+        return (
+            info_put_literal(writer, StringSlice("No token_usage events found in "))
+            and info_put_u64(writer, logs)
+            and info_put_literal(writer, StringSlice(" recent runtime log(s)"))
+        )
+    if not (
+        info_put_u64(writer, events)
+        and info_put_literal(writer, StringSlice(" event(s), logs="))
+        and info_put_u64(writer, logs)
+        and info_put_literal(writer, StringSlice(": input="))
+        and info_put_u64(writer, info_unsigned(unsigned_address, 6, 2))
+        and info_put_literal(writer, StringSlice(", cached_input="))
+        and info_put_u64(writer, info_unsigned(unsigned_address, 6, 3))
+        and info_put_literal(writer, StringSlice(", output="))
+        and info_put_u64(writer, info_unsigned(unsigned_address, 6, 4))
+        and info_put_literal(writer, StringSlice(", reasoning="))
+        and info_put_u64(writer, info_unsigned(unsigned_address, 6, 5))
+    ):
+        return False
+    if text_count == 0:
+        return True
+    if not info_put_literal(writer, StringSlice("; by profile: ")):
+        return False
+    for index in range(text_count):
+        if index > 0 and not info_put_literal(writer, StringSlice("; ")):
+            return False
+        var base = Int64(6) + index * Int64(4)
+        if not (
+            info_put_view(writer, info_text(text_address, text_count, index))
+            and info_put_byte(writer, UInt8(58))
+            and info_put_u64(writer, info_unsigned(unsigned_address, 6 + text_count * 4, base))
+            and info_put_literal(writer, StringSlice(" in/"))
+            and info_put_u64(writer, info_unsigned(unsigned_address, 6 + text_count * 4, base + 1))
+            and info_put_literal(writer, StringSlice(" cached/"))
+            and info_put_u64(writer, info_unsigned(unsigned_address, 6 + text_count * 4, base + 2))
+            and info_put_literal(writer, StringSlice(" out/"))
+            and info_put_u64(writer, info_unsigned(unsigned_address, 6 + text_count * 4, base + 3))
+            and info_put_literal(writer, StringSlice(" reasoning"))
+        ):
+            return False
+    return True
+
+
 def info_render_pool_remaining(
     writer: Pointer[mut=True, InfoRenderWriter, _],
     signed_address: UInt,
@@ -349,7 +520,7 @@ def prodex_terminal_info_render_v1(
     if (
         abi_version != INFO_RENDER_ABI_VERSION
         or operation < INFO_RENDER_RELATIVE_DURATION
-        or operation > INFO_RENDER_POOL_REMAINING
+        or operation > INFO_RENDER_TOKEN_USAGE
         or signed_count < 0
         or unsigned_count < 0
         or text_count < 0
@@ -380,10 +551,19 @@ def prodex_terminal_info_render_v1(
         required_unsigned = 10
     elif operation == INFO_RENDER_TUNING_TRANSPORT:
         required_unsigned = 9
-    else:
+    elif operation == INFO_RENDER_POOL_REMAINING:
         required_signed = 1
         required_unsigned = 1
         required_text = 1
+    elif operation == INFO_RENDER_PROCESS_SUMMARY:
+        required_unsigned = 3
+    elif operation == INFO_RENDER_LOAD_SUMMARY:
+        required_signed = 3
+        required_unsigned = 4
+    else:
+        required_unsigned = 6
+        if text_count > 4 or unsigned_count < 6 + text_count * 4:
+            return INFO_RENDER_INVALID
     if (
         signed_count < required_signed
         or unsigned_count < required_unsigned
@@ -415,13 +595,25 @@ def prodex_terminal_info_render_v1(
         ok = info_render_tuning_budgets(Pointer(to=writer), unsigned_address)
     elif operation == INFO_RENDER_TUNING_TRANSPORT:
         ok = info_render_tuning_transport(Pointer(to=writer), unsigned_address)
-    else:
+    elif operation == INFO_RENDER_POOL_REMAINING:
         ok = info_render_pool_remaining(
             Pointer(to=writer),
             signed_address,
             unsigned_address,
             text_address,
             presence,
+        )
+    elif operation == INFO_RENDER_PROCESS_SUMMARY:
+        ok = info_render_process_summary(
+            Pointer(to=writer), unsigned_address, text_address, text_count
+        )
+    elif operation == INFO_RENDER_LOAD_SUMMARY:
+        ok = info_render_load_summary(
+            Pointer(to=writer), signed_address, unsigned_address, presence
+        )
+    else:
+        ok = info_render_token_usage(
+            Pointer(to=writer), unsigned_address, text_address, text_count
         )
 
     var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
