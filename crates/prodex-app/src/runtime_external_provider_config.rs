@@ -11,9 +11,9 @@ use prodex_cli::{
     SUPER_KIRO_DEFAULT_AUTO_COMPACT_LIMIT, SUPER_KIRO_DEFAULT_CONTEXT_WINDOW,
     SUPER_KIRO_DEFAULT_MODEL, super_copilot_prompt_token_limit_for_model,
 };
-use prodex_mojo_core::rich::{CatalogModel, resolve_catalog_model_exact};
 use prodex_mojo_core::super_provider_config::{
-    RuntimeModelProviderClass, runtime_model_provider_class,
+    ExternalCatalogProviderClass, ExternalCatalogStaticModel, RuntimeModelProviderClass,
+    external_catalog_model_metadata, external_catalog_static_models, runtime_model_provider_class,
 };
 use prodex_provider_core::ProviderId;
 use serde_json::json;
@@ -255,211 +255,30 @@ impl ExternalCatalogProvider {
         }
     }
 
-    fn models(self) -> &'static [(&'static str, &'static str, &'static str)] {
+    fn policy_class(self) -> ExternalCatalogProviderClass {
         match self {
-            Self::Anthropic => &[
-                (
-                    "auto",
-                    "Claude Auto",
-                    "Anthropic auto model routed through the Prodex Responses adapter.",
-                ),
-                (
-                    "opus",
-                    "Claude Opus",
-                    "Claude Opus alias routed through the Prodex Responses adapter.",
-                ),
-                (
-                    "sonnet",
-                    "Claude Sonnet",
-                    "Claude Sonnet alias routed through the Prodex Responses adapter.",
-                ),
-                (
-                    "haiku",
-                    "Claude Haiku",
-                    "Claude Haiku alias routed through the Prodex Responses adapter.",
-                ),
-                (
-                    "claude-opus-4-8",
-                    "Claude Opus 4.8",
-                    "Claude Opus 4.8 routed through the Prodex Responses adapter.",
-                ),
-                (
-                    "claude-sonnet-4-6",
-                    "Claude Sonnet 4.6",
-                    "Claude Sonnet 4.6 routed through the Prodex Responses adapter.",
-                ),
-                (
-                    "claude-haiku-4-5",
-                    "Claude Haiku 4.5",
-                    "Claude Haiku 4.5 routed through the Prodex Responses adapter.",
-                ),
-                (
-                    "claude-opus-4-6",
-                    "Claude Opus 4.6",
-                    "Claude Opus 4.6 routed through the Prodex Responses adapter.",
-                ),
-                (
-                    "claude-opus-4-20250514",
-                    "Claude Opus 4",
-                    "Claude Opus 4 routed through the Prodex Responses adapter.",
-                ),
-            ],
-            Self::Copilot => &[
-                (
-                    "auto",
-                    "GitHub Copilot Auto",
-                    "GitHub Copilot auto model routed through the Prodex Responses adapter.",
-                ),
-                (
-                    "codex",
-                    "GitHub Copilot Codex",
-                    "GitHub Copilot Codex alias routed through the Prodex Responses adapter.",
-                ),
-                (
-                    "gpt-5.3-codex",
-                    "GPT-5.3 Codex",
-                    "GPT-5.3 Codex routed through GitHub Copilot.",
-                ),
-                (
-                    "gpt-5.5",
-                    "GPT-5.5",
-                    "GPT-5.5 routed through GitHub Copilot.",
-                ),
-                (
-                    "gpt-5.4",
-                    "GPT-5.4",
-                    "GPT-5.4 routed through GitHub Copilot.",
-                ),
-                (
-                    "gpt-5.4-mini",
-                    "GPT-5.4 Mini",
-                    "GPT-5.4 Mini routed through GitHub Copilot.",
-                ),
-                (
-                    "gpt-5.4-nano",
-                    "GPT-5.4 Nano",
-                    "GPT-5.4 Nano routed through GitHub Copilot.",
-                ),
-                (
-                    "gpt-5-mini",
-                    "GPT-5 Mini",
-                    "GPT-5 Mini routed through GitHub Copilot.",
-                ),
-                (
-                    "claude-sonnet-4-6",
-                    "Claude Sonnet 4.6",
-                    "Claude Sonnet 4.6 routed through GitHub Copilot.",
-                ),
-                (
-                    "claude-opus-4-8",
-                    "Claude Opus 4.8",
-                    "Claude Opus 4.8 routed through GitHub Copilot.",
-                ),
-                (
-                    "claude-opus-4-7",
-                    "Claude Opus 4.7",
-                    "Claude Opus 4.7 routed through GitHub Copilot.",
-                ),
-                (
-                    "claude-opus-4-6-fast",
-                    "Claude Opus 4.6 Fast",
-                    "Claude Opus 4.6 Fast routed through GitHub Copilot.",
-                ),
-                (
-                    "claude-opus-4-6",
-                    "Claude Opus 4.6",
-                    "Claude Opus 4.6 routed through GitHub Copilot.",
-                ),
-                (
-                    "claude-opus-4-5",
-                    "Claude Opus 4.5",
-                    "Claude Opus 4.5 routed through GitHub Copilot.",
-                ),
-                (
-                    "claude-fable-5",
-                    "Claude Fable 5",
-                    "Claude Fable 5 routed through GitHub Copilot.",
-                ),
-                (
-                    "claude-sonnet-4-5",
-                    "Claude Sonnet 4.5",
-                    "Claude Sonnet 4.5 routed through GitHub Copilot.",
-                ),
-                (
-                    "claude-haiku-4-5",
-                    "Claude Haiku 4.5",
-                    "Claude Haiku 4.5 routed through GitHub Copilot.",
-                ),
-                (
-                    "gemini-3.1-pro-preview",
-                    "Gemini 3.1 Pro Preview",
-                    "Gemini 3.1 Pro Preview routed through GitHub Copilot.",
-                ),
-                (
-                    "gemini-2.5-pro",
-                    "Gemini 2.5 Pro",
-                    "Gemini 2.5 Pro routed through GitHub Copilot.",
-                ),
-                (
-                    "gemini-3-flash",
-                    "Gemini 3 Flash",
-                    "Gemini 3 Flash routed through GitHub Copilot.",
-                ),
-                (
-                    "gemini-3.5-flash",
-                    "Gemini 3.5 Flash",
-                    "Gemini 3.5 Flash routed through GitHub Copilot.",
-                ),
-                (
-                    "mai-code-1-flash",
-                    "MAI-Code-1-Flash",
-                    "MAI-Code-1-Flash routed through GitHub Copilot.",
-                ),
-                (
-                    "raptor-mini",
-                    "Raptor Mini",
-                    "Raptor Mini routed through GitHub Copilot.",
-                ),
-                (
-                    "gpt-5.1-codex",
-                    "GPT-5.1 Codex",
-                    "Legacy GPT-5.1 Codex entry kept for GitHub Copilot compatibility.",
-                ),
-            ],
-            Self::Kiro => &[
-                (
-                    "auto",
-                    "Kiro Auto",
-                    "Kiro selects the model for the task using the imported account catalog.",
-                ),
-                (
-                    "gpt-5.6-luna",
-                    "GPT-5.6 Luna",
-                    "GPT-5.6 Luna model exposed through Kiro CLI.",
-                ),
-            ],
+            Self::Anthropic => ExternalCatalogProviderClass::Anthropic,
+            Self::Copilot => ExternalCatalogProviderClass::Copilot,
+            Self::Kiro => ExternalCatalogProviderClass::Kiro,
         }
     }
 
-    fn model_metadata(self, model: &str) -> (&str, &'static str) {
-        let models = self.models();
-        let catalog = models
-            .iter()
-            .map(|(slug, _, _)| CatalogModel {
-                id: slug,
-                aliases: &[],
-            })
-            .collect::<Vec<_>>();
-        resolve_catalog_model_exact(&catalog, model)
+    fn models(self) -> Vec<ExternalCatalogStaticModel> {
+        external_catalog_static_models(self.policy_class())
+            .expect("Mojo external-provider catalog enumeration failed")
+    }
+
+    fn model_metadata(self, model: &str) -> (String, String) {
+        external_catalog_model_metadata(self.policy_class(), model)
             .expect("Mojo external-provider metadata lookup failed")
-            .map(|index| {
-                let (_, display_name, description) = models[index];
-                (display_name, description)
+            .map(|entry| (entry.display_name, entry.description))
+            .unwrap_or_else(|| {
+                (
+                    model.to_string(),
+                    "External provider model routed through the Prodex Responses adapter."
+                        .to_string(),
+                )
             })
-            .unwrap_or((
-                model,
-                "External provider model routed through the Prodex Responses adapter.",
-            ))
     }
 }
 

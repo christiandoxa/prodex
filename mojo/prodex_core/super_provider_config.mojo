@@ -583,3 +583,335 @@ def prodex_super_provider_config_v1(
             return SUPER_PROVIDER_CONFIG_CAPACITY
         config_end_record(records, index, written)
     return SUPER_PROVIDER_CONFIG_OK
+comptime EXTERNAL_CATALOG_RECORDS: Int64 = 3
+
+
+def config_put_external_catalog_model[slug: StaticString, display: StaticString, description: StaticString](
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    records: Pointer[mut=True, Int64, _],
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    config_begin_record(records, 0, written)
+    if not config_put_literal[slug](output, capacity, written):
+        return False
+    config_end_record(records, 0, written)
+    config_begin_record(records, 1, written)
+    if not config_put_literal[display](output, capacity, written):
+        return False
+    config_end_record(records, 1, written)
+    config_begin_record(records, 2, written)
+    if not config_put_literal[description](output, capacity, written):
+        return False
+    config_end_record(records, 2, written)
+    return True
+
+
+@export("prodex_external_catalog_model_count_v1")
+def prodex_external_catalog_model_count_v1(abi_version: Int64, provider: Int64) abi("C") -> Int64:
+    if abi_version != SUPER_PROVIDER_CONFIG_ABI_VERSION:
+        return -2
+    if provider == 0:
+        return 9
+    if provider == 1:
+        return 24
+    if provider == 2:
+        return 2
+    return -2
+
+
+@export("prodex_external_catalog_model_at_v1")
+def prodex_external_catalog_model_at_v1(
+    abi_version: Int64,
+    provider: Int64,
+    index: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    records_address: UInt,
+    record_count: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SUPER_PROVIDER_CONFIG_ABI_VERSION
+        or provider < 0
+        or provider > 2
+        or index < 0
+        or output_address == 0
+        or output_capacity < 1
+        or records_address == 0
+        or record_count < EXTERNAL_CATALOG_RECORDS
+        or written_address == 0
+    ):
+        return SUPER_PROVIDER_CONFIG_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var records = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(records_address))
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))
+    written[] = 0
+    var ok = False
+
+
+    if provider == 0 and index == 0:
+        ok = config_put_external_catalog_model["auto", "Claude Auto", "Anthropic auto model routed through the Prodex Responses adapter."](output, output_capacity, records, written)
+
+    elif provider == 0 and index == 1:
+        ok = config_put_external_catalog_model["opus", "Claude Opus", "Claude Opus alias routed through the Prodex Responses adapter."](output, output_capacity, records, written)
+
+    elif provider == 0 and index == 2:
+        ok = config_put_external_catalog_model["sonnet", "Claude Sonnet", "Claude Sonnet alias routed through the Prodex Responses adapter."](output, output_capacity, records, written)
+
+    elif provider == 0 and index == 3:
+        ok = config_put_external_catalog_model["haiku", "Claude Haiku", "Claude Haiku alias routed through the Prodex Responses adapter."](output, output_capacity, records, written)
+
+    elif provider == 0 and index == 4:
+        ok = config_put_external_catalog_model["claude-opus-4-8", "Claude Opus 4.8", "Claude Opus 4.8 routed through the Prodex Responses adapter."](output, output_capacity, records, written)
+
+    elif provider == 0 and index == 5:
+        ok = config_put_external_catalog_model["claude-sonnet-4-6", "Claude Sonnet 4.6", "Claude Sonnet 4.6 routed through the Prodex Responses adapter."](output, output_capacity, records, written)
+
+    elif provider == 0 and index == 6:
+        ok = config_put_external_catalog_model["claude-haiku-4-5", "Claude Haiku 4.5", "Claude Haiku 4.5 routed through the Prodex Responses adapter."](output, output_capacity, records, written)
+
+    elif provider == 0 and index == 7:
+        ok = config_put_external_catalog_model["claude-opus-4-6", "Claude Opus 4.6", "Claude Opus 4.6 routed through the Prodex Responses adapter."](output, output_capacity, records, written)
+
+    elif provider == 0 and index == 8:
+        ok = config_put_external_catalog_model["claude-opus-4-20250514", "Claude Opus 4", "Claude Opus 4 routed through the Prodex Responses adapter."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 0:
+        ok = config_put_external_catalog_model["auto", "GitHub Copilot Auto", "GitHub Copilot auto model routed through the Prodex Responses adapter."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 1:
+        ok = config_put_external_catalog_model["codex", "GitHub Copilot Codex", "GitHub Copilot Codex alias routed through the Prodex Responses adapter."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 2:
+        ok = config_put_external_catalog_model["gpt-5.3-codex", "GPT-5.3 Codex", "GPT-5.3 Codex routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 3:
+        ok = config_put_external_catalog_model["gpt-5.5", "GPT-5.5", "GPT-5.5 routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 4:
+        ok = config_put_external_catalog_model["gpt-5.4", "GPT-5.4", "GPT-5.4 routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 5:
+        ok = config_put_external_catalog_model["gpt-5.4-mini", "GPT-5.4 Mini", "GPT-5.4 Mini routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 6:
+        ok = config_put_external_catalog_model["gpt-5.4-nano", "GPT-5.4 Nano", "GPT-5.4 Nano routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 7:
+        ok = config_put_external_catalog_model["gpt-5-mini", "GPT-5 Mini", "GPT-5 Mini routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 8:
+        ok = config_put_external_catalog_model["claude-sonnet-4-6", "Claude Sonnet 4.6", "Claude Sonnet 4.6 routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 9:
+        ok = config_put_external_catalog_model["claude-opus-4-8", "Claude Opus 4.8", "Claude Opus 4.8 routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 10:
+        ok = config_put_external_catalog_model["claude-opus-4-7", "Claude Opus 4.7", "Claude Opus 4.7 routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 11:
+        ok = config_put_external_catalog_model["claude-opus-4-6-fast", "Claude Opus 4.6 Fast", "Claude Opus 4.6 Fast routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 12:
+        ok = config_put_external_catalog_model["claude-opus-4-6", "Claude Opus 4.6", "Claude Opus 4.6 routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 13:
+        ok = config_put_external_catalog_model["claude-opus-4-5", "Claude Opus 4.5", "Claude Opus 4.5 routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 14:
+        ok = config_put_external_catalog_model["claude-fable-5", "Claude Fable 5", "Claude Fable 5 routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 15:
+        ok = config_put_external_catalog_model["claude-sonnet-4-5", "Claude Sonnet 4.5", "Claude Sonnet 4.5 routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 16:
+        ok = config_put_external_catalog_model["claude-haiku-4-5", "Claude Haiku 4.5", "Claude Haiku 4.5 routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 17:
+        ok = config_put_external_catalog_model["gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview", "Gemini 3.1 Pro Preview routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 18:
+        ok = config_put_external_catalog_model["gemini-2.5-pro", "Gemini 2.5 Pro", "Gemini 2.5 Pro routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 19:
+        ok = config_put_external_catalog_model["gemini-3-flash", "Gemini 3 Flash", "Gemini 3 Flash routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 20:
+        ok = config_put_external_catalog_model["gemini-3.5-flash", "Gemini 3.5 Flash", "Gemini 3.5 Flash routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 21:
+        ok = config_put_external_catalog_model["mai-code-1-flash", "MAI-Code-1-Flash", "MAI-Code-1-Flash routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 22:
+        ok = config_put_external_catalog_model["raptor-mini", "Raptor Mini", "Raptor Mini routed through GitHub Copilot."](output, output_capacity, records, written)
+
+    elif provider == 1 and index == 23:
+        ok = config_put_external_catalog_model["gpt-5.1-codex", "GPT-5.1 Codex", "Legacy GPT-5.1 Codex entry kept for GitHub Copilot compatibility."](output, output_capacity, records, written)
+
+    elif provider == 2 and index == 0:
+        ok = config_put_external_catalog_model["auto", "Kiro Auto", "Kiro selects the model for the task using the imported account catalog."](output, output_capacity, records, written)
+
+    elif provider == 2 and index == 1:
+        ok = config_put_external_catalog_model["gpt-5.6-luna", "GPT-5.6 Luna", "GPT-5.6 Luna model exposed through Kiro CLI."](output, output_capacity, records, written)
+
+    else:
+        return SUPER_PROVIDER_CONFIG_INVALID
+    return SUPER_PROVIDER_CONFIG_OK if ok else SUPER_PROVIDER_CONFIG_CAPACITY
+
+
+@export("prodex_external_catalog_model_find_exact_v1")
+def prodex_external_catalog_model_find_exact_v1(
+    abi_version: Int64, provider: Int64, address: UInt, length: Int64
+) abi("C") -> Int64:
+    if (
+        abi_version != SUPER_PROVIDER_CONFIG_ABI_VERSION
+        or provider < 0
+        or provider > 2
+        or not config_valid_view(address, length)
+    ):
+        return -2
+    var view = config_view(address, length)
+
+
+    if provider == 0 and config_range_equals["auto"](view, 0, length):
+        return 0
+
+
+    elif provider == 0 and config_range_equals["opus"](view, 0, length):
+        return 1
+
+
+    elif provider == 0 and config_range_equals["sonnet"](view, 0, length):
+        return 2
+
+
+    elif provider == 0 and config_range_equals["haiku"](view, 0, length):
+        return 3
+
+
+    elif provider == 0 and config_range_equals["claude-opus-4-8"](view, 0, length):
+        return 4
+
+
+    elif provider == 0 and config_range_equals["claude-sonnet-4-6"](view, 0, length):
+        return 5
+
+
+    elif provider == 0 and config_range_equals["claude-haiku-4-5"](view, 0, length):
+        return 6
+
+
+    elif provider == 0 and config_range_equals["claude-opus-4-6"](view, 0, length):
+        return 7
+
+
+    elif provider == 0 and config_range_equals["claude-opus-4-20250514"](view, 0, length):
+        return 8
+
+
+    elif provider == 1 and config_range_equals["auto"](view, 0, length):
+        return 0
+
+
+    elif provider == 1 and config_range_equals["codex"](view, 0, length):
+        return 1
+
+
+    elif provider == 1 and config_range_equals["gpt-5.3-codex"](view, 0, length):
+        return 2
+
+
+    elif provider == 1 and config_range_equals["gpt-5.5"](view, 0, length):
+        return 3
+
+
+    elif provider == 1 and config_range_equals["gpt-5.4"](view, 0, length):
+        return 4
+
+
+    elif provider == 1 and config_range_equals["gpt-5.4-mini"](view, 0, length):
+        return 5
+
+
+    elif provider == 1 and config_range_equals["gpt-5.4-nano"](view, 0, length):
+        return 6
+
+
+    elif provider == 1 and config_range_equals["gpt-5-mini"](view, 0, length):
+        return 7
+
+
+    elif provider == 1 and config_range_equals["claude-sonnet-4-6"](view, 0, length):
+        return 8
+
+
+    elif provider == 1 and config_range_equals["claude-opus-4-8"](view, 0, length):
+        return 9
+
+
+    elif provider == 1 and config_range_equals["claude-opus-4-7"](view, 0, length):
+        return 10
+
+
+    elif provider == 1 and config_range_equals["claude-opus-4-6-fast"](view, 0, length):
+        return 11
+
+
+    elif provider == 1 and config_range_equals["claude-opus-4-6"](view, 0, length):
+        return 12
+
+
+    elif provider == 1 and config_range_equals["claude-opus-4-5"](view, 0, length):
+        return 13
+
+
+    elif provider == 1 and config_range_equals["claude-fable-5"](view, 0, length):
+        return 14
+
+
+    elif provider == 1 and config_range_equals["claude-sonnet-4-5"](view, 0, length):
+        return 15
+
+
+    elif provider == 1 and config_range_equals["claude-haiku-4-5"](view, 0, length):
+        return 16
+
+
+    elif provider == 1 and config_range_equals["gemini-3.1-pro-preview"](view, 0, length):
+        return 17
+
+
+    elif provider == 1 and config_range_equals["gemini-2.5-pro"](view, 0, length):
+        return 18
+
+
+    elif provider == 1 and config_range_equals["gemini-3-flash"](view, 0, length):
+        return 19
+
+
+    elif provider == 1 and config_range_equals["gemini-3.5-flash"](view, 0, length):
+        return 20
+
+
+    elif provider == 1 and config_range_equals["mai-code-1-flash"](view, 0, length):
+        return 21
+
+
+    elif provider == 1 and config_range_equals["raptor-mini"](view, 0, length):
+        return 22
+
+
+    elif provider == 1 and config_range_equals["gpt-5.1-codex"](view, 0, length):
+        return 23
+
+
+    elif provider == 2 and config_range_equals["auto"](view, 0, length):
+        return 0
+
+
+    elif provider == 2 and config_range_equals["gpt-5.6-luna"](view, 0, length):
+        return 1
+
+
+    return -1
