@@ -11,6 +11,7 @@ comptime RUNTIME_SCALAR_CONFIG_PROXY_PRESET: Int64 = 1
 comptime RUNTIME_SCALAR_CONFIG_WEB_SEARCH: Int64 = 2
 comptime RUNTIME_SCALAR_CONFIG_CLOCK_SOURCE: Int64 = 3
 comptime RUNTIME_SCALAR_CONFIG_OPENAI_PROVIDER: Int64 = 4
+comptime RUNTIME_SCALAR_CONFIG_LOG_RECORDING: Int64 = 5
 comptime RUNTIME_SCALAR_CONFIG_MAX_BYTES: Int64 = 9_223_372_036_854_775_807
 
 
@@ -48,7 +49,7 @@ def prodex_runtime_scalar_config_policy_v1(
         return -3
     if (
         operation < RUNTIME_SCALAR_CONFIG_LOG_FORMAT
-        or operation > RUNTIME_SCALAR_CONFIG_OPENAI_PROVIDER
+        or operation > RUNTIME_SCALAR_CONFIG_LOG_RECORDING
         or length < 0
         or length > RUNTIME_SCALAR_CONFIG_MAX_BYTES
         or (length > 0 and address == 0)
@@ -100,7 +101,15 @@ def prodex_runtime_scalar_config_policy_v1(
             return 1
         return -1
 
-    return Int64(runtime_scalar_range_equals["openai"](view, 0, length))
+    if operation == RUNTIME_SCALAR_CONFIG_OPENAI_PROVIDER:
+        return Int64(runtime_scalar_range_equals["openai"](view, 0, length))
+
+    return Int64(
+        runtime_scalar_range_equals["1"](view, bounds[0], bounds[1])
+        or runtime_scalar_range_equals["true"](view, bounds[0], bounds[1])
+        or runtime_scalar_range_equals["yes"](view, bounds[0], bounds[1])
+        or runtime_scalar_range_equals["on"](view, bounds[0], bounds[1])
+    )
 
 
 def runtime_tuning_saturating_add(left: Int64, right: Int64) -> Int64:

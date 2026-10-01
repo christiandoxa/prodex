@@ -3541,3 +3541,18 @@ and the Mojo authority, no-fallback, ownership, and production-share guards. The
 canonical broad report counts **65,244 Mojo LOC** and **195,169 Rust production LOC**,
 totaling **260,413 LOC**: **25.054048761006555% Mojo**. The 75% broad project target
 remains in progress.
+
+## Runtime-log recording policy hard replacement
+
+`PRODEX_RUNTIME_LOG_RECORD` token classification now runs through the existing
+`runtime_tuning.mojo` scalar-config ABI. Mojo owns Unicode-whitespace trimming,
+ASCII-casefold matching, and the exact enabled aliases `1`, `true`, `yes`, and
+`on`. `prodex-runtime-log` retains environment acquisition only; the previous
+Rust lowercase/match table was deleted and no Rust semantic fallback remains.
+
+Focused validation passes the real-Mojo scalar-config test, the complete
+`prodex-runtime-log` library suite (17 tests), `cargo check`, formatting,
+`git diff --check`, and the Mojo no-fallback/ownership/production-share guards.
+The canonical broad report at this checkpoint counts **68,286 reachable Mojo
+LOC** and **198,888 Rust production LOC**, totaling **267,174 LOC**:
+**25.558624716476903% Mojo**. The 75% broad target remains in progress.

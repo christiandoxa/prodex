@@ -4,6 +4,7 @@ const RUNTIME_SCALAR_CONFIG_PROXY_PRESET: i64 = 1;
 const RUNTIME_SCALAR_CONFIG_WEB_SEARCH: i64 = 2;
 const RUNTIME_SCALAR_CONFIG_CLOCK_SOURCE: i64 = 3;
 const RUNTIME_SCALAR_CONFIG_OPENAI_PROVIDER: i64 = 4;
+const RUNTIME_SCALAR_CONFIG_LOG_RECORDING: i64 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeLogFormatClass {
@@ -145,6 +146,14 @@ fn runtime_scalar_config_policy(operation: i64, value: &str) -> Result<i64, crat
         -3 => Err(crate::MojoError::AbiMismatch),
         -2 => Err(crate::MojoError::InvalidInput),
         value => Ok(value),
+    }
+}
+
+pub fn runtime_log_recording_enabled_value(value: &str) -> Result<bool, crate::MojoError> {
+    match runtime_scalar_config_policy(RUNTIME_SCALAR_CONFIG_LOG_RECORDING, value)? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
     }
 }
 
@@ -390,5 +399,17 @@ mod scalar_config_tests {
         assert_eq!(runtime_clock_source_class(" external ").unwrap(), None);
         assert!(runtime_model_provider_is_openai("OPENAI").unwrap());
         assert!(!runtime_model_provider_is_openai(" openai ").unwrap());
+        for enabled in ["1", "TRUE", " yes ", "On"] {
+            assert!(
+                runtime_log_recording_enabled_value(enabled).unwrap(),
+                "{enabled}"
+            );
+        }
+        for disabled in ["", "0", "false", "off", "enabled", " yes please "] {
+            assert!(
+                !runtime_log_recording_enabled_value(disabled).unwrap(),
+                "{disabled}"
+            );
+        }
     }
 }
