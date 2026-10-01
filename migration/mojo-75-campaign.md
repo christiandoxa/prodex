@@ -4122,3 +4122,25 @@ and the strengthened no-fallback guard. The canonical broad report at this
 checkpoint counts **72,922 reachable Mojo LOC** and **201,113 Rust production
 LOC**, totaling **274,035 LOC**: **26.610469465579214% Mojo**. The 75% broad
 target remains in progress.
+
+## Audit query and display policy hard replacement
+
+Audit query/display policy now runs through the existing
+`audit_log_policy.mojo` owner. Mojo owns query filter-presence detection, exact
+component/action/outcome matching, canonical filter-string rendering, bounded
+search-scope rendering including saturating byte-range end calculation, and
+Unicode-codepoint-safe detail truncation with ellipsis. Rust retains file
+scanning/locking, path ownership, Serde JSON parsing/serialization, checksum
+validation, and human output assembly around the Mojo-produced fragments. The
+previous Rust filter conjunction, query formatter, search-scope formatter, and
+`chars().take()` truncation implementation were deleted; no Rust semantic
+fallback remains for the migrated query/display decisions.
+
+Focused validation passes the standalone `audit_log_policy.mojo` build, the
+real-Mojo audit policy adapter test including query/scope/Unicode truncation
+contracts, all 17 `prodex-audit-log` tests, Clippy with warnings denied for
+`prodex-mojo-core` and `prodex-audit-log`, `git diff --check`, and the
+strengthened no-fallback guard. The canonical broad report at this checkpoint
+counts **73,267 reachable Mojo LOC** and **201,306 Rust production LOC**,
+totaling **274,573 LOC**: **26.683978395545083% Mojo**. The 75% broad target
+remains in progress.
