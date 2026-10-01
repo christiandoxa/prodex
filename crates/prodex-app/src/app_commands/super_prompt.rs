@@ -32,6 +32,15 @@ pub(super) fn prompt_super_main_agent_configuration(
     prompt_super_main_agent_configuration_with_options(args, locked_provider, false)
 }
 
+pub(super) fn prompt_super_expose_main_agent_configuration(
+    args: &SuperArgs,
+    locked_provider: Option<prodex_provider_core::ProviderId>,
+) -> Result<ResolvedMainAgentConfig> {
+    // Expose is a long-lived launch boundary. Resolve and freeze the complete
+    // main-agent selection once so every later prodex_super_start inherits it.
+    prompt_super_main_agent_configuration_with_options(args, locked_provider, true)
+}
+
 fn prompt_super_main_agent_configuration_with_options(
     args: &SuperArgs,
     locked_provider: Option<prodex_provider_core::ProviderId>,

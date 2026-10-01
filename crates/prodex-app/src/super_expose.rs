@@ -169,6 +169,11 @@ fn prepare_super_expose(expose: &mut SuperExposeArgs) -> Result<(Option<String>,
         .super_args
         .validate_urls()
         .map_err(anyhow::Error::msg)?;
+    crate::app_commands::resolve_super_expose_launch_configuration(&mut expose.super_args)?;
+    expose
+        .super_args
+        .validate_urls()
+        .map_err(anyhow::Error::msg)?;
 
     let listen: SocketAddr = expose
         .listen
