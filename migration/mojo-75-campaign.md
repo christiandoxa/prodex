@@ -3574,3 +3574,20 @@ no-fallback guard including a new audit-usage regression rule. The canonical
 broad report at this checkpoint counts **68,496 reachable Mojo LOC** and
 **199,090 Rust production LOC**, totaling **267,586 LOC**:
 **25.59775175083898% Mojo**. The 75% broad target remains in progress.
+
+## Core temp and broker filename policy hard replacement
+
+Foundational temp-file and runtime-broker filename semantics now run through
+`core_file_policy.mojo`. Mojo owns root-temp ownership and PID parsing, stale
+root-temp removal eligibility, runtime-log filename ownership, login-temp
+ownership, runtime-broker artifact key slicing, and lease PID parsing. `prodex-core`
+keeps only filesystem/path boundaries plus checked conversion of Mojo slice
+ranges back into borrowed Rust strings. The previous Rust prefix/suffix/split
+parsers and stale-removal predicate were deleted; no Rust fallback remains.
+
+Focused validation passes the real-Mojo core-file policy test, all 11
+`prodex-core` tests, clippy with warnings denied, `git diff --check`, and the
+Mojo no-fallback guard with a dedicated regression rule. The canonical broad
+report at this checkpoint counts **68,679 reachable Mojo LOC** and **199,191
+Rust production LOC**, totaling **267,870 LOC**: **25.63892933139209% Mojo**.
+The 75% broad target remains in progress.

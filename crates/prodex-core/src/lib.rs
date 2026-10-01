@@ -311,19 +311,13 @@ pub fn unique_root_temp_file_path(
 }
 
 pub fn owned_root_temp_file_name(name: &str) -> bool {
-    name.starts_with("state.json.")
-        || name.starts_with("runtime-")
-        || name.starts_with("update-check.json.")
+    prodex_mojo_core::core_file_policy::owned_root_temp_file_name(name)
+        .expect("Mojo root-temp ownership policy returned invalid output")
 }
 
 pub fn root_temp_file_pid(name: &str) -> Option<u32> {
-    let stem = name.strip_suffix(".tmp")?;
-    let mut parts = stem.rsplitn(4, '.');
-    let _sequence = parts.next()?;
-    let _nanos = parts.next()?;
-    let pid = parts.next()?;
-    let _base_name = parts.next()?;
-    pid.parse::<u32>().ok()
+    prodex_mojo_core::core_file_policy::root_temp_file_pid(name)
+        .expect("Mojo root-temp pid policy returned invalid output")
 }
 
 pub fn should_remove_stale_root_temp_file(
@@ -332,13 +326,18 @@ pub fn should_remove_stale_root_temp_file(
     oldest_allowed_epoch_seconds: i64,
     pid_alive: bool,
 ) -> bool {
-    !pid_alive
-        && (modified_epoch_seconds < oldest_allowed_epoch_seconds
-            || root_temp_file_pid(name).is_some())
+    prodex_mojo_core::core_file_policy::stale_root_temp_file_should_remove(
+        name,
+        modified_epoch_seconds,
+        oldest_allowed_epoch_seconds,
+        pid_alive,
+    )
+    .expect("Mojo stale root-temp policy returned invalid output")
 }
 
 pub fn runtime_proxy_log_file_name_is_owned(name: &str, prefix: &str) -> bool {
-    name.starts_with(prefix) && name.ends_with(".log")
+    prodex_mojo_core::core_file_policy::runtime_proxy_log_file_name_is_owned(name, prefix)
+        .expect("Mojo runtime-log filename policy returned invalid output")
 }
 
 #[cfg(test)]
@@ -370,41 +369,20 @@ pub fn select_newest_modified_path(paths: Vec<(u128, PathBuf)>) -> Option<PathBu
 }
 
 pub fn login_temp_dir_name_is_owned(name: &str) -> bool {
-    name.starts_with(".login-")
+    prodex_mojo_core::core_file_policy::login_temp_dir_name_is_owned(name)
+        .expect("Mojo login-temp ownership policy returned invalid output")
 }
 
 pub fn runtime_broker_artifact_key(name: &str, is_dir: bool) -> Option<&str> {
-    if let Some(key) = name
-        .strip_prefix("runtime-broker-")
-        .and_then(|suffix| suffix.strip_suffix(".json"))
-    {
-        return Some(key);
-    }
-    if let Some(key) = name
-        .strip_prefix("runtime-broker-")
-        .and_then(|suffix| suffix.strip_suffix(".json.last-good"))
-    {
-        return Some(key);
-    }
-    if let Some(key) = name
-        .strip_prefix("runtime-broker-")
-        .and_then(|suffix| suffix.strip_suffix(".capability"))
-    {
-        return Some(key);
-    }
-    if is_dir {
-        return name
-            .strip_prefix("runtime-broker-")
-            .and_then(|suffix| suffix.strip_suffix("-leases"));
-    }
-    None
+    let (start, end) =
+        prodex_mojo_core::core_file_policy::runtime_broker_artifact_key_range(name, is_dir)
+            .expect("Mojo runtime-broker artifact policy returned invalid output")?;
+    name.get(start..end)
 }
 
 pub fn runtime_broker_lease_pid(file_name: &str) -> Option<u32> {
-    file_name
-        .split('-')
-        .next()
-        .and_then(|value| value.parse::<u32>().ok())
+    prodex_mojo_core::core_file_policy::runtime_broker_lease_pid(file_name)
+        .expect("Mojo runtime-broker lease pid policy returned invalid output")
 }
 
 pub fn format_binary_resolution(binary: &OsString) -> String {
