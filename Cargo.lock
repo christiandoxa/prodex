@@ -2663,6 +2663,7 @@ name = "prodex-mcp-stdio"
 version = "0.434.3"
 dependencies = [
  "anyhow",
+ "prodex-mojo-core",
  "serde_json",
 ]
 

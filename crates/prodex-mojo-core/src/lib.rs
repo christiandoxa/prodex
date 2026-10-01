@@ -112,6 +112,8 @@ pub mod gemini_tooling_policy;
 pub mod log;
 #[cfg(feature = "mojo-runtime")]
 pub mod log_throughput_policy;
+#[cfg(feature = "mojo-runtime")]
+pub mod mcp_stdio_policy;
 #[cfg(feature = "mojo-observability")]
 pub mod observability;
 #[cfg(feature = "mojo-runtime")]

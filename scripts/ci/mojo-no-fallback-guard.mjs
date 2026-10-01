@@ -24,6 +24,10 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/usage.rs",
   "crates/prodex-audit-log/src/lib.rs",
   "crates/prodex-core/src/lib.rs",
+  "crates/prodex-mcp-stdio/src/lib.rs",
+  "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
+  "crates/prodex-mcp-stdio/src/lib.rs",
+  "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
   "crates/prodex-mojo-core/src/core_file_policy.rs",
   "crates/prodex-core/src/lib.rs",
   "crates/prodex-mojo-core/src/core_file_policy.rs",
@@ -901,6 +905,35 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-mojo-core/src/core_file_policy.rs" &&
         !contents.includes("prodex_core_file_policy_v1(")) {
       return [filePath + ": core file-policy ABI adapter must retain prodex_core_file_policy_v1("];
+    }
+    return [];
+  });
+  const mcpStdioPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-mcp-stdio/src/lib.rs") {
+      const required = [
+        "mcp_stdio_policy::header_is_content_length(",
+        "mcp_stdio_policy::parse_content_length(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": MCP framing hard replacement must retain " + call);
+      if (
+        /to_ascii_lowercase\(\)\.starts_with\("content-length:"\)/u.test(contents)
+        || /split_once\(':'\)/u.test(contents)
+        || /parse::<usize>\(\)/u.test(contents)
+      ) {
+        violations.push(filePath + ": contains restored Rust MCP Content-Length semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/mcp_stdio_policy.rs") {
+      const required = [
+        "prodex_mcp_header_is_content_length_v1(",
+        "prodex_mcp_content_length_parse_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": MCP framing ABI adapter must retain " + call);
     }
     return [];
   });
@@ -2118,6 +2151,7 @@ export function findViolations(files) {
     ...providerUsageViolations,
     ...auditUsageViolations,
     ...coreFilePolicyViolations,
+    ...mcpStdioPolicyViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
     ...kiroChatResponseViolations,

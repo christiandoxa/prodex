@@ -22,7 +22,9 @@ pub fn read_mcp_message<R: BufRead>(reader: &mut R) -> Result<Option<(Value, Mcp
     let Some(first) = read_mcp_first_line(reader, &mut framing_bytes)? else {
         return Ok(None);
     };
-    if first.to_ascii_lowercase().starts_with("content-length:") {
+    if prodex_mojo_core::mcp_stdio_policy::header_is_content_length(&first, false)
+        .expect("Mojo MCP header policy returned invalid output")
+    {
         let content_length = parse_content_length(&first)?;
         if content_length > MCP_MESSAGE_MAX_BYTES {
             anyhow::bail!(
@@ -36,7 +38,9 @@ pub fn read_mcp_message<R: BufRead>(reader: &mut R) -> Result<Option<(Value, Mcp
             if trimmed.is_empty() {
                 break;
             }
-            if trimmed.to_ascii_lowercase().starts_with("content-length:") {
+            if prodex_mojo_core::mcp_stdio_policy::header_is_content_length(&header, true)
+                .expect("Mojo MCP header policy returned invalid output")
+            {
                 anyhow::bail!("duplicate MCP Content-Length header");
             }
         }
@@ -193,13 +197,21 @@ fn read_limited_line<R: BufRead>(reader: &mut R, limit: usize) -> io::Result<Opt
 }
 
 pub fn parse_content_length(line: &str) -> Result<usize> {
-    let (_, value) = line
-        .split_once(':')
-        .ok_or_else(|| anyhow::anyhow!("invalid Content-Length header"))?;
-    value
-        .trim()
-        .parse::<usize>()
-        .context("invalid Content-Length value")
+    use prodex_mojo_core::mcp_stdio_policy::McpContentLengthParse;
+
+    match prodex_mojo_core::mcp_stdio_policy::parse_content_length(line)
+        .expect("Mojo MCP Content-Length policy returned invalid output")
+    {
+        McpContentLengthParse::Value(value) => {
+            usize::try_from(value).context("invalid Content-Length value")
+        }
+        McpContentLengthParse::MissingHeaderSeparator => {
+            anyhow::bail!("invalid Content-Length header")
+        }
+        McpContentLengthParse::InvalidValue => {
+            anyhow::bail!("invalid Content-Length value")
+        }
+    }
 }
 
 pub fn write_mcp_message<W: Write>(
