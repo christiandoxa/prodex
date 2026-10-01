@@ -4000,3 +4000,23 @@ for `prodex-provider-core`, `prodex-mojo-core`, and `prodex-app`,
 report at this checkpoint counts **71,963 reachable Mojo LOC** and **200,647
 Rust production LOC**, totaling **272,610 LOC**: **26.397784380616997% Mojo**.
 The 75% broad target remains in progress.
+
+## Runtime-log environment numeric policy hard replacement
+
+Runtime-log numeric environment parsing now runs through the existing
+`log_throughput_policy.mojo` retention owner. Mojo owns Rust-compatible unsigned
+decimal parsing for retention env values, including optional leading `+`,
+leading-zero acceptance, whitespace/sign rejection, overflow detection,
+min/max admission, and fallback-to-default behavior. Rust retains `std::env`
+lookup, target integer type conversion, filesystem locking/I/O, and retention
+execution. The three Rust `parse::<u64>()` environment parsers were deleted; no
+Rust semantic fallback remains for the migrated numeric policy.
+
+Focused validation passes the standalone `log_throughput_policy.mojo` build,
+the real-Mojo retention/throughput adapter test including exact parser edge
+cases, all 17 `prodex-runtime-log` tests, Clippy with warnings denied for
+`prodex-mojo-core` and `prodex-runtime-log`, `git diff --check`, and the
+strengthened no-fallback guard. The canonical broad report at this checkpoint
+counts **72,001 reachable Mojo LOC** and **200,661 Rust production LOC**,
+totaling **272,662 LOC**: **26.40668666700897% Mojo**. The 75% broad target
+remains in progress.

@@ -125,7 +125,35 @@ comptime LOG_RETENTION_POLICY_BOUNDED_VALUE: Int64 = 1
 comptime LOG_RETENTION_POLICY_ROTATION: Int64 = 2
 comptime LOG_RETENTION_POLICY_EXPIRED: Int64 = 3
 comptime LOG_RETENTION_POLICY_OVER_BUDGET: Int64 = 4
+comptime LOG_RETENTION_POLICY_BOUNDED_TEXT: Int64 = 5
 comptime LOG_RETENTION_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
+
+
+def log_retention_parse_u64_text(
+    address: UInt64,
+    length: UInt64,
+) -> Tuple[Bool, UInt64]:
+    if length == 0 or length > UInt64(0x7FFF_FFFF_FFFF_FFFF) or address == 0:
+        return (False, UInt64(0))
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    var index: UInt64 = 0
+    if source[unsafe_offset=0] == 43:
+        index = 1
+        if index == length:
+            return (False, UInt64(0))
+    var value: UInt64 = 0
+    while index < length:
+        var byte = source[unsafe_offset=Int(index)]
+        if byte < 48 or byte > 57:
+            return (False, UInt64(0))
+        var digit = UInt64(byte - 48)
+        if value > (LOG_RETENTION_UINT64_MAX - digit) // 10:
+            return (False, UInt64(0))
+        value = value * 10 + digit
+        index += 1
+    return (True, value)
 
 
 @export("prodex_log_retention_policy_v1")
@@ -193,6 +221,20 @@ def prodex_log_retention_policy_v1(
         output[unsafe_offset=1] = UInt64(
             not within_budget and input4 == 0 and input5 == 1
         )
+        return LOG_THROUGHPUT_OK
+
+    if operation == LOG_RETENTION_POLICY_BOUNDED_TEXT:
+        # input0 address, input1 length, input2 present, input3 default, input4 min, input5 max
+        if input2 > 1 or input4 > input5:
+            return LOG_THROUGHPUT_INVALID
+        if input2 == 0:
+            output[unsafe_offset=0] = input3
+            return LOG_THROUGHPUT_OK
+        var parsed = log_retention_parse_u64_text(input0, input1)
+        if parsed[0] and parsed[1] >= input4 and parsed[1] <= input5:
+            output[unsafe_offset=0] = parsed[1]
+        else:
+            output[unsafe_offset=0] = input3
         return LOG_THROUGHPUT_OK
 
     return LOG_THROUGHPUT_INVALID
