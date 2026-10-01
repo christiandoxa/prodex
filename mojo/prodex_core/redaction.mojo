@@ -211,6 +211,7 @@ def reaction_key_sensitive_ptr(
         or reaction_normalized_key_matches(source, length, StringSlice("proxyauthorization"))
         or reaction_normalized_key_suffix(source, length, StringSlice("token"))
         or reaction_normalized_key_contains(source, length, StringSlice("apikey"))
+        or reaction_normalized_key_contains(source, length, StringSlice("privatekey"))
         or reaction_normalized_key_contains(source, length, StringSlice("secret"))
         or reaction_normalized_key_contains(source, length, StringSlice("password"))
         or reaction_normalized_key_contains(source, length, StringSlice("cookie"))
