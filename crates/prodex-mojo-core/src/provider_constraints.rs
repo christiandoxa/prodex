@@ -92,6 +92,9 @@ mod scalar_policy_tests {
         );
         assert!(provider_precommit_should_prefetch(4, false, true, 200, true, true).unwrap());
         assert!(!provider_precommit_should_prefetch(1, false, true, 200, true, true).unwrap());
+        assert!(provider_precommit_native_first_should_prefetch(true, 200, true, true).unwrap());
+        assert!(!provider_precommit_native_first_should_prefetch(false, 200, true, true).unwrap());
+        assert!(!provider_precommit_native_first_should_prefetch(true, 400, true, true).unwrap());
         assert_eq!(
             provider_precommit_sse_action(false, false, false, false, true).unwrap(),
             ProviderPrecommitSseAction::None
@@ -133,6 +136,7 @@ enum ProviderPrecommitOperation {
     SseProgress = 3,
     HealthAction = 4,
     MetricClass = 5,
+    NativeFirstPrefetch = 6,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -358,6 +362,29 @@ pub fn provider_precommit_should_prefetch(
             i64::from(status),
             i64::from(content_type_event_stream),
             i64::from(prefix_empty),
+        ],
+    )? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn provider_precommit_native_first_should_prefetch(
+    native_anthropic_messages: bool,
+    status: u16,
+    content_type_event_stream: bool,
+    prefix_empty: bool,
+) -> Result<bool, crate::MojoError> {
+    match provider_precommit_policy(
+        ProviderPrecommitOperation::NativeFirstPrefetch,
+        [
+            i64::from(native_anthropic_messages),
+            i64::from(status),
+            i64::from(content_type_event_stream),
+            i64::from(prefix_empty),
+            0,
+            0,
         ],
     )? {
         0 => Ok(false),

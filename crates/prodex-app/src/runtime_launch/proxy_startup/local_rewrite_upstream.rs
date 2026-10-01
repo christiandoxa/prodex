@@ -283,17 +283,21 @@ pub(super) fn runtime_local_rewrite_precommit_native_first_event(
     lookahead_timeout_ms: u64,
     prefetch_slots: &Arc<tokio::sync::Semaphore>,
 ) -> Result<RuntimeLocalRewriteNativeFirstEvent> {
-    if !live.native_anthropic_messages
-        || !(200..300).contains(&live.status)
-        || !live.prefix.is_empty()
-        || !live
-            .headers
-            .get(reqwest::header::CONTENT_TYPE)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| {
-                ascii_casefold_contains(value, "text/event-stream")
-                    .expect("Mojo upstream SSE content-type comparison failed")
-            })
+    let content_type_event_stream = live
+        .headers
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| {
+            ascii_casefold_contains(value, "text/event-stream")
+                .expect("Mojo upstream SSE content-type comparison failed")
+        });
+    if !prodex_mojo_core::provider_constraints::provider_precommit_native_first_should_prefetch(
+        live.native_anthropic_messages,
+        live.status,
+        content_type_event_stream,
+        live.prefix.is_empty(),
+    )
+    .expect("Mojo native-first prefetch policy returned invalid output")
     {
         return Ok(RuntimeLocalRewriteNativeFirstEvent::Commit);
     }
