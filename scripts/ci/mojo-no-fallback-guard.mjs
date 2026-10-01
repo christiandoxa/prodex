@@ -27,6 +27,8 @@ const PROMOTED_FILES = [
   "crates/prodex-mcp-stdio/src/lib.rs",
   "crates/prodex-update-notice/src/lib.rs",
   "crates/prodex-shared-codex-fs/src/image_attachments.rs",
+  "crates/prodex-runtime-cookies/src/lib.rs",
+  "crates/prodex-mojo-core/src/runtime_cookie_policy.rs",
   "crates/prodex-mojo-core/src/shared_attachment_policy.rs",
   "crates/prodex-mojo-core/src/update_notice_policy.rs",
   "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
@@ -992,6 +994,82 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-mojo-core/src/shared_attachment_policy.rs" &&
         !contents.includes("prodex_shared_attachment_policy_v1(")) {
       return [filePath + ": shared attachment ABI adapter must retain prodex_shared_attachment_policy_v1("];
+    }
+    return [];
+  });
+  const runtimeCookieMigrationViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-cookies/src/lib.rs") {
+      const required = [
+        "runtime_cookie_policy::set_cookie_pair(",
+        "runtime_cookie_policy::caller_cookie_name(",
+        "runtime_cookie_policy::attribute_plan(",
+        "runtime_cookie_policy::default_path_plan(",
+        "runtime_cookie_policy::path_matches(",
+        "runtime_cookie_policy::scheme_is_secure(",
+        "runtime_cookie_policy::normalize_host(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime-cookie hard replacement must retain " + call);
+      if (
+        /fn\s+runtime_proxy_cookie_(?:apply_max_age|name_is_safe|value_is_safe)\s*\(/u.test(contents)
+        || /host\.trim_matches\('\.'\)\.to_ascii_lowercase\(\)/u.test(contents)
+        || /request_path\s*\.strip_prefix\(cookie_path\)/u.test(contents)
+      ) {
+        violations.push(filePath + ": contains restored Rust runtime-cookie text semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_cookie_policy.rs") {
+      const required = [
+        "prodex_runtime_cookie_pair_plan_v1(",
+        "prodex_runtime_cookie_attribute_plan_v1(",
+        "prodex_runtime_cookie_default_path_v1(",
+        "prodex_runtime_cookie_path_matches_v1(",
+        "prodex_runtime_cookie_scheme_secure_v1(",
+        "prodex_runtime_cookie_host_normalize_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime-cookie ABI adapter must retain " + call);
+    }
+    return [];
+  });
+  const runtimeCookiePolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-cookies/src/lib.rs") {
+      const required = [
+        "runtime_cookie_policy::set_cookie_pair(",
+        "runtime_cookie_policy::attribute_plan(",
+        "runtime_cookie_policy::normalize_host(",
+        "runtime_cookie_policy::scheme_is_secure(",
+        "runtime_cookie_policy::default_path_plan(",
+        "runtime_cookie_policy::caller_cookie_name(",
+        "runtime_cookie_policy::path_matches(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime-cookie hard replacement must retain " + call);
+      if (
+        /fn\s+runtime_proxy_cookie_(?:apply_attribute|apply_max_age|name_is_safe|value_is_safe)\s*\(/u.test(contents)
+        || /strip_prefix\('-'\)\.unwrap_or/u.test(contents)
+        || /trim_matches\('\.'\)\.to_ascii_lowercase/u.test(contents)
+      ) {
+        violations.push(filePath + ": contains restored Rust runtime-cookie semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_cookie_policy.rs") {
+      const required = [
+        "prodex_runtime_cookie_pair_plan_v1(",
+        "prodex_runtime_cookie_attribute_plan_v1(",
+        "prodex_runtime_cookie_default_path_v1(",
+        "prodex_runtime_cookie_path_matches_v1(",
+        "prodex_runtime_cookie_scheme_secure_v1(",
+        "prodex_runtime_cookie_host_normalize_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime-cookie ABI adapter must retain " + call);
     }
     return [];
   });
@@ -2210,8 +2288,10 @@ export function findViolations(files) {
     ...auditUsageViolations,
     ...coreFilePolicyViolations,
     ...mcpStdioPolicyViolations,
+    ...runtimeCookiePolicyViolations,
     ...updateNoticeMigrationViolations,
     ...sharedAttachmentMigrationViolations,
+    ...runtimeCookieMigrationViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
     ...kiroChatResponseViolations,
