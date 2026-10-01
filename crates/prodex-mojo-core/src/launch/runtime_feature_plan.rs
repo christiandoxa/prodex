@@ -91,87 +91,6 @@ fn decode_optional_bool(tag: i64) -> Result<Option<bool>, MojoError> {
     }
 }
 
-fn expected_current_time_enabled(input: &RuntimeFeatureConfigInput<'_>) -> bool {
-    input.current_time_reminder
-        || input.current_time_reminder_interval.is_some()
-        || input.current_time_clock_source.is_some()
-}
-
-fn expected_proxy_setting(input: &RuntimeFeatureConfigInput<'_>) -> Option<bool> {
-    if input.respect_system_proxy {
-        Some(true)
-    } else if input.no_respect_system_proxy {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-fn weight_selection_matches(enabled: bool, rollout_enabled: bool, configured: bool) -> bool {
-    !enabled || (rollout_enabled && configured)
-}
-
-fn validate_plan_shape(
-    input: &RuntimeFeatureConfigInput<'_>,
-    plan: &RuntimeFeatureConfigPlan,
-) -> Result<(), MojoError> {
-    let checks = [
-        plan.web_search_mode == input.web_search_mode,
-        plan.rollout_budget_enabled == input.rollout_budget_limit.is_some_and(|limit| limit > 1),
-        weight_selection_matches(
-            plan.rollout_budget_sampling_weight,
-            plan.rollout_budget_enabled,
-            input.rollout_budget_sampling_weight.is_some(),
-        ),
-        weight_selection_matches(
-            plan.rollout_budget_prefill_weight,
-            plan.rollout_budget_enabled,
-            input.rollout_budget_prefill_weight.is_some(),
-        ),
-        plan.current_time_reminder_enabled == expected_current_time_enabled(input),
-        plan.current_time_reminder_interval
-            == input
-                .current_time_reminder_interval
-                .is_some_and(|interval| interval > 0),
-        plan.current_time_clock_source == input.current_time_clock_source,
-        plan.respect_system_proxy == expected_proxy_setting(input),
-        plan.rollout_budget_enabled == !plan.rollout_budget_reminders.is_empty(),
-    ];
-    checks
-        .into_iter()
-        .all(|matches| matches)
-        .then_some(())
-        .ok_or(MojoError::InvalidOutput)
-}
-
-fn validate_reminders(
-    input: &RuntimeFeatureConfigInput<'_>,
-    plan: &RuntimeFeatureConfigPlan,
-) -> Result<(), MojoError> {
-    let Some(limit) = input
-        .rollout_budget_limit
-        .filter(|_| plan.rollout_budget_enabled)
-    else {
-        return plan
-            .rollout_budget_reminders
-            .is_empty()
-            .then_some(())
-            .ok_or(MojoError::InvalidOutput);
-    };
-
-    let each_is_bounded = plan
-        .rollout_budget_reminders
-        .iter()
-        .all(|reminder| *reminder > 0 && *reminder < limit);
-    let strictly_descending = plan
-        .rollout_budget_reminders
-        .windows(2)
-        .all(|pair| pair[0] > pair[1]);
-    (each_is_bounded && strictly_descending)
-        .then_some(())
-        .ok_or(MojoError::InvalidOutput)
-}
-
 /// Plan Codex runtime-feature overrides using the versioned Mojo kernel.
 pub fn plan_runtime_feature_config(
     input: RuntimeFeatureConfigInput<'_>,
@@ -242,7 +161,5 @@ pub fn plan_runtime_feature_config(
         current_time_clock_source: decode_clock_source(output[7])?,
         respect_system_proxy: decode_optional_bool(output[8])?,
     };
-    validate_plan_shape(&input, &plan)?;
-    validate_reminders(&input, &plan)?;
     Ok(plan)
 }

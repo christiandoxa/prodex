@@ -2,8 +2,8 @@ use clap::{Args, ValueEnum};
 use std::{error::Error, ffi::OsString, fmt};
 
 use prodex_mojo_core::launch::{
-    RuntimeFeatureClockSource, RuntimeFeatureConfigInput, RuntimeFeatureConfigPlan,
-    RuntimeFeatureWebSearchMode, plan_runtime_feature_config,
+    RuntimeFeatureClockSource, RuntimeFeatureConfigInput, RuntimeFeatureWebSearchMode,
+    plan_runtime_feature_config,
 };
 
 #[derive(Args, Debug, Clone, Default)]
@@ -73,39 +73,12 @@ impl fmt::Display for RuntimeFeaturePlanError {
 
 impl Error for RuntimeFeaturePlanError {}
 
-#[derive(Debug, PartialEq)]
-struct FeaturePlan {
-    web_search: Option<CodexWebSearchMode>,
-    rollout_budget: Option<RolloutBudgetPlan>,
-    current_time_reminder_enabled: bool,
-    current_time_reminder_interval: Option<u64>,
-    current_time_clock_source: Option<CodexCurrentTimeClockSource>,
-    respect_system_proxy: Option<bool>,
-}
-
-#[derive(Debug, PartialEq)]
-struct RolloutBudgetPlan {
-    limit: u64,
-    reminders: Vec<u64>,
-    sampling_weight: Option<f64>,
-    prefill_weight: Option<f64>,
-}
-
 fn mojo_web_search_mode(mode: Option<CodexWebSearchMode>) -> Option<RuntimeFeatureWebSearchMode> {
     mode.map(|mode| match mode {
         CodexWebSearchMode::Disabled => RuntimeFeatureWebSearchMode::Disabled,
         CodexWebSearchMode::Cached => RuntimeFeatureWebSearchMode::Cached,
         CodexWebSearchMode::Indexed => RuntimeFeatureWebSearchMode::Indexed,
         CodexWebSearchMode::Live => RuntimeFeatureWebSearchMode::Live,
-    })
-}
-
-fn codex_web_search_mode(mode: Option<RuntimeFeatureWebSearchMode>) -> Option<CodexWebSearchMode> {
-    mode.map(|mode| match mode {
-        RuntimeFeatureWebSearchMode::Disabled => CodexWebSearchMode::Disabled,
-        RuntimeFeatureWebSearchMode::Cached => CodexWebSearchMode::Cached,
-        RuntimeFeatureWebSearchMode::Indexed => CodexWebSearchMode::Indexed,
-        RuntimeFeatureWebSearchMode::Live => CodexWebSearchMode::Live,
     })
 }
 
@@ -118,70 +91,24 @@ fn mojo_clock_source(
     })
 }
 
-fn codex_clock_source(
-    source: Option<RuntimeFeatureClockSource>,
-) -> Option<CodexCurrentTimeClockSource> {
-    source.map(|source| match source {
-        RuntimeFeatureClockSource::System => CodexCurrentTimeClockSource::System,
-        RuntimeFeatureClockSource::External => CodexCurrentTimeClockSource::External,
-    })
+fn runtime_web_search_config_value(mode: RuntimeFeatureWebSearchMode) -> &'static str {
+    match mode {
+        RuntimeFeatureWebSearchMode::Disabled => "disabled",
+        RuntimeFeatureWebSearchMode::Cached => "cached",
+        RuntimeFeatureWebSearchMode::Indexed => "indexed",
+        RuntimeFeatureWebSearchMode::Live => "live",
+    }
 }
 
-fn enabled_weight(
-    enabled: bool,
-    value: Option<f64>,
-) -> Result<Option<f64>, RuntimeFeaturePlanError> {
-    if !enabled {
-        return Ok(None);
+fn runtime_clock_source_config_value(source: RuntimeFeatureClockSource) -> &'static str {
+    match source {
+        RuntimeFeatureClockSource::System => "system",
+        RuntimeFeatureClockSource::External => "external",
     }
-    value.map(Some).ok_or(RuntimeFeaturePlanError)
-}
-
-fn rollout_budget_from_mojo(
-    args: &CodexRuntimeFeatureArgs,
-    plan: &RuntimeFeatureConfigPlan,
-) -> Result<Option<RolloutBudgetPlan>, RuntimeFeaturePlanError> {
-    if !plan.rollout_budget_enabled {
-        let disabled_outputs_are_empty = plan.rollout_budget_reminders.is_empty()
-            && !plan.rollout_budget_sampling_weight
-            && !plan.rollout_budget_prefill_weight;
-        return disabled_outputs_are_empty
-            .then_some(None)
-            .ok_or(RuntimeFeaturePlanError);
-    }
-
-    Ok(Some(RolloutBudgetPlan {
-        limit: args.rollout_budget_tokens.ok_or(RuntimeFeaturePlanError)?,
-        reminders: plan.rollout_budget_reminders.clone(),
-        sampling_weight: enabled_weight(
-            plan.rollout_budget_sampling_weight,
-            args.rollout_budget_sampling_weight,
-        )?,
-        prefill_weight: enabled_weight(
-            plan.rollout_budget_prefill_weight,
-            args.rollout_budget_prefill_weight,
-        )?,
-    }))
-}
-
-fn current_time_interval_from_mojo(
-    args: &CodexRuntimeFeatureArgs,
-    plan: &RuntimeFeatureConfigPlan,
-) -> Result<Option<u64>, RuntimeFeaturePlanError> {
-    if !plan.current_time_reminder_interval {
-        return Ok(None);
-    }
-    args.current_time_reminder_interval
-        .map(Some)
-        .ok_or(RuntimeFeaturePlanError)
 }
 
 impl CodexRuntimeFeatureArgs {
     pub fn to_codex_config_args(&self) -> Result<Vec<OsString>, RuntimeFeaturePlanError> {
-        self.mojo_plan().map(render_plan)
-    }
-
-    fn mojo_plan(&self) -> Result<FeaturePlan, RuntimeFeaturePlanError> {
         let plan = plan_runtime_feature_config(RuntimeFeatureConfigInput {
             web_search_mode: mojo_web_search_mode(self.web_search),
             rollout_budget_limit: self.rollout_budget_tokens,
@@ -196,96 +123,75 @@ impl CodexRuntimeFeatureArgs {
         })
         .map_err(|_| RuntimeFeaturePlanError)?;
 
-        Ok(FeaturePlan {
-            web_search: codex_web_search_mode(plan.web_search_mode),
-            rollout_budget: rollout_budget_from_mojo(self, &plan)?,
-            current_time_reminder_enabled: plan.current_time_reminder_enabled,
-            current_time_reminder_interval: current_time_interval_from_mojo(self, &plan)?,
-            current_time_clock_source: codex_clock_source(plan.current_time_clock_source),
-            respect_system_proxy: plan.respect_system_proxy,
-        })
-    }
-}
-
-fn render_plan(plan: FeaturePlan) -> Vec<OsString> {
-    let mut overrides = Vec::new();
-    if let Some(mode) = plan.web_search {
-        overrides.push(format!(
-            "web_search={}",
-            toml_string_literal(mode.config_value())
-        ));
-    }
-    if let Some(budget) = plan.rollout_budget {
-        overrides.extend([
-            "features.rollout_budget.enabled=true".to_string(),
-            format!("features.rollout_budget.limit_tokens={}", budget.limit),
-            format!(
-                "features.rollout_budget.reminder_at_remaining_tokens=[{}]",
-                budget
-                    .reminders
-                    .iter()
-                    .map(u64::to_string)
-                    .collect::<Vec<_>>()
-                    .join(",")
-            ),
-        ]);
-        if let Some(weight) = budget.sampling_weight {
+        let mut overrides = Vec::new();
+        if let Some(mode) = plan.web_search_mode {
             overrides.push(format!(
-                "features.rollout_budget.sampling_token_weight={weight}"
+                "web_search={}",
+                toml_string_literal(runtime_web_search_config_value(mode))
             ));
         }
-        if let Some(weight) = budget.prefill_weight {
+        if plan.rollout_budget_enabled {
+            let limit = self.rollout_budget_tokens.ok_or(RuntimeFeaturePlanError)?;
+            overrides.extend([
+                "features.rollout_budget.enabled=true".to_string(),
+                format!("features.rollout_budget.limit_tokens={limit}"),
+                format!(
+                    "features.rollout_budget.reminder_at_remaining_tokens=[{}]",
+                    plan.rollout_budget_reminders
+                        .iter()
+                        .map(u64::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                ),
+            ]);
+            if plan.rollout_budget_sampling_weight {
+                let weight = self
+                    .rollout_budget_sampling_weight
+                    .ok_or(RuntimeFeaturePlanError)?;
+                overrides.push(format!(
+                    "features.rollout_budget.sampling_token_weight={weight}"
+                ));
+            }
+            if plan.rollout_budget_prefill_weight {
+                let weight = self
+                    .rollout_budget_prefill_weight
+                    .ok_or(RuntimeFeaturePlanError)?;
+                overrides.push(format!(
+                    "features.rollout_budget.prefill_token_weight={weight}"
+                ));
+            }
+        }
+
+        if plan.current_time_reminder_enabled {
+            overrides.push("features.current_time_reminder.enabled=true".to_string());
+            if plan.current_time_reminder_interval {
+                let interval = self
+                    .current_time_reminder_interval
+                    .ok_or(RuntimeFeaturePlanError)?;
+                overrides.push(format!(
+                    "features.current_time_reminder.reminder_interval_model_requests={interval}"
+                ));
+            }
+            if let Some(source) = plan.current_time_clock_source {
+                overrides.push(format!(
+                    "features.current_time_reminder.clock_source={}",
+                    toml_string_literal(runtime_clock_source_config_value(source))
+                ));
+            }
+        }
+
+        if let Some(respect_system_proxy) = plan.respect_system_proxy {
             overrides.push(format!(
-                "features.rollout_budget.prefill_token_weight={weight}"
+                "features.respect_system_proxy={respect_system_proxy}"
             ));
         }
-    }
 
-    if plan.current_time_reminder_enabled {
-        overrides.push("features.current_time_reminder.enabled=true".to_string());
-        if let Some(interval) = plan.current_time_reminder_interval {
-            overrides.push(format!(
-                "features.current_time_reminder.reminder_interval_model_requests={interval}"
-            ));
+        let mut args = Vec::with_capacity(overrides.len() * 2);
+        for override_entry in overrides {
+            args.push(OsString::from("-c"));
+            args.push(OsString::from(override_entry));
         }
-        if let Some(source) = plan.current_time_clock_source {
-            overrides.push(format!(
-                "features.current_time_reminder.clock_source={}",
-                toml_string_literal(source.config_value())
-            ));
-        }
-    }
-
-    if let Some(respect_system_proxy) = plan.respect_system_proxy {
-        overrides.push(format!(
-            "features.respect_system_proxy={respect_system_proxy}"
-        ));
-    }
-    let mut args = Vec::with_capacity(overrides.len() * 2);
-    for override_entry in overrides {
-        args.push(OsString::from("-c"));
-        args.push(OsString::from(override_entry));
-    }
-    args
-}
-
-impl CodexWebSearchMode {
-    fn config_value(self) -> &'static str {
-        match self {
-            Self::Disabled => "disabled",
-            Self::Cached => "cached",
-            Self::Indexed => "indexed",
-            Self::Live => "live",
-        }
-    }
-}
-
-impl CodexCurrentTimeClockSource {
-    fn config_value(self) -> &'static str {
-        match self {
-            Self::System => "system",
-            Self::External => "external",
-        }
+        Ok(args)
     }
 }
 
