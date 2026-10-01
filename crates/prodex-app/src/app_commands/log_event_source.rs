@@ -9,28 +9,6 @@ pub(super) fn operational_event_plan(
     event: &str,
     fields: &BTreeMap<String, String>,
 ) -> anyhow::Result<OperationalEventPlan> {
-    const SOURCES: [Option<&str>; 20] = [
-        None,
-        Some("request"),
-        Some("mcp"),
-        Some("agent"),
-        Some("route"),
-        Some("quota"),
-        Some("retry"),
-        Some("backoff"),
-        Some("health"),
-        Some("error"),
-        Some("model"),
-        Some("upstream"),
-        Some("stream"),
-        Some("response"),
-        Some("terminal"),
-        Some("tool"),
-        Some("load"),
-        Some("smart"),
-        Some("compact"),
-        Some("event"),
-    ];
     let value = prodex_mojo_core::observability::operational_event_plan(
         event,
         fields.get("tool_surface").map(String::as_str),
@@ -39,11 +17,10 @@ pub(super) fn operational_event_plan(
         fields.get("decision").map(String::as_str),
     )
     .map_err(|error| anyhow::anyhow!("Mojo operational event plan failed: {error:?}"))?;
-    let source = usize::try_from(value.source)
-        .ok()
-        .and_then(|index| SOURCES.get(index))
-        .copied()
-        .flatten();
+    let source = prodex_mojo_core::observability::operational_event_source_label(value.source)
+        .map_err(|error| {
+            anyhow::anyhow!("Mojo operational event source label failed: {error:?}")
+        })?;
     Ok(OperationalEventPlan {
         source,
         interesting: value.interesting,

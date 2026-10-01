@@ -3838,3 +3838,22 @@ warnings denied for the `mojo-observability` adapter surface, `git diff
 this checkpoint counts **71,454 reachable Mojo LOC** and **200,172 Rust
 production LOC**, totaling **271,626 LOC**: **26.30602372379669% Mojo**. The
 75% broad target remains in progress.
+
+## Operational event source-label hard replacement
+
+Operational event source labels now live with their existing classification in
+`observability_labels.mojo`. Mojo maps the source ids produced by the event
+classifier to the canonical request/MCP/agent/route/quota/retry/backoff/health/
+error/model/upstream/stream/response/terminal/tool/load/smart/compact/event
+labels, including the no-source case. Rust retains BTreeMap field acquisition,
+typed plan materialization, and caller error plumbing only. The previous Rust
+20-entry `SOURCES` table was deleted; no Rust semantic fallback remains for the
+migrated source-label mapping.
+
+Focused validation passes the standalone Mojo build, the real-Mojo source-label
+adapter test, the representative `prodex-app` operational-event source consumer
+test, Clippy with warnings denied for both affected library crates,
+`git diff --check`, and the strengthened no-fallback guard. The canonical broad
+report at this checkpoint counts **71,522 reachable Mojo LOC** and **200,207
+Rust production LOC**, totaling **271,729 LOC**: **26.32107724975987% Mojo**.
+The 75% broad target remains in progress.
