@@ -11,6 +11,7 @@ name = "prodex_runtime_broker_log"
 path = "src/lib.rs"
 
 [dependencies]
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
 prodex_runtime_broker = { workspace = true }
 
 [lints]

@@ -3665,3 +3665,21 @@ adapter and consumer, `git diff --check`, and a dedicated no-fallback rule. The
 canonical broad report at this checkpoint counts **69,648 reachable Mojo LOC**
 and **199,578 Rust production LOC**, totaling **269,226 LOC**:
 **25.8697154063872% Mojo**. The 75% broad target remains in progress.
+
+## Runtime broker-log cache policy hard replacement
+
+Runtime broker-log cache relation and eviction semantics now reuse the existing
+`runtime_broker_continuity.mojo` owner. Mojo owns exact/append/rotated
+fingerprint classification, monotonic timestamp ordering, LRU victim selection
+with keep-entry preference, and continuity event-string classification. Rust
+retains filesystem metadata acquisition, `Mutex`/`BTreeMap` ownership, bounded
+log reads, metric map mutation, and path materialization. The duplicated Rust
+fingerprint predicates, two `min_by_key` LRU selectors, and event-string match
+table were deleted; no Rust semantic fallback remains.
+
+Focused validation passes the real-Mojo continuity smoke, all 5
+`prodex-runtime-broker-log` tests, Clippy with warnings denied for both affected
+crates, `git diff --check`, and the expanded no-fallback guard. The canonical
+broad report at this checkpoint counts **69,729 reachable Mojo LOC** and
+**199,676 Rust production LOC**, totaling **269,405 LOC**:
+**25.882593121879697% Mojo**. The 75% broad target remains in progress.
