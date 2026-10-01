@@ -1,19 +1,19 @@
 {
   "schema_version": 1,
-  "audited_at": "2026-09-25T05:27:18Z",
-  "release": "0.432.0",
+  "audited_at": "2026-10-01T03:04:05.320348Z",
+  "release": "0.434.3",
   "tools": [
     {
       "id": "caveman",
       "repository": "https://github.com/JuliusBrussee/caveman",
-      "latest_stable": "2.7.0",
-      "release": "v2.7.0",
-      "tag_object": "e6c5e68b0064758b8106b83df41cf3829dde3216",
-      "commit": "8b0c1d3699b8d83e87fe4605b378da20c41555e0",
-      "git_tree": "4e8aa5e191457ba9ebd34b4a7eee6a7bd246ccff",
-      "source_archive_sha256": "0f8b833ef65be67b565573d075264b7acab645e80241cfdae016421211d41147",
-      "prodex_tree_sha256": "09127915a13a493146ed0392b6895bbbd5f620d276dda9f4e68a6722f96df950",
-      "license": "MIT",
+      "latest_stable": "3.0.0",
+      "release": "v3.0.0",
+      "tag_object": "c5f0137cbc12b2a06d4ae113c2ce36222b690f89",
+      "commit": "b33a39554ed06cbc7d7d3198ff90c171e8043b69",
+      "git_tree": "8935a19149638894ea45fbdbf01062bc25e37594",
+      "source_archive_sha256": "6d7064c3cd3744bb67d997aa1f9d738fd367ada3bac80beeef37e0726e3d3a00",
+      "prodex_tree_sha256": "a297ba8affb43a79db0b0ffe2a0874d3a1351877cc1894ef449fa8d289bdbccf",
+      "license": "Apache-2.0",
       "runtime": "Node.js >=18; externally managed immutable checkout",
       "platforms": [
         "linux",
@@ -21,7 +21,7 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "v2.7.0 is the latest stable release; the exact commit, Git tree, source archive, and complete Prodex tree digest were revalidated from a clean tagged checkout. Prodex 0.430.3 also accepts the legacy manifest digest while always recomputing and enforcing this corrected tree digest."
+      "notes": "v3.0.0 is the latest stable release; the exact annotated tag, commit, Git tree, source archive, required plugin/skill files, and complete Prodex tree digest were revalidated from the tagged source. Upstream documents CLI and agent-hook telemetry as enabled by default, while the skill-only integration sends no telemetry. Prodex retains the vetted 2.7.0 legacy-manifest compatibility path."
     },
     {
       "id": "rtk",
