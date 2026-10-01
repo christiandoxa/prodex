@@ -15,6 +15,7 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 prodex_cli = { workspace = true }
 prodex_core = { workspace = true }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
 reqwest = { workspace = true, features = ["blocking", "json", "rustls", "system-proxy", "socks"] }
 serde = { workspace = true }
 serde_json = { workspace = true }

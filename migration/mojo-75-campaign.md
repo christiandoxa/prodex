@@ -3609,3 +3609,20 @@ the Mojo no-fallback guard with a dedicated regression rule. The canonical
 broad report at this checkpoint counts **68,820 reachable Mojo LOC** and
 **199,268 Rust production LOC**, totaling **268,088 LOC**:
 **25.67067530064755% Mojo**. The 75% broad target remains in progress.
+
+## Update-notice install and cache policy hard replacement
+
+Update-notice deterministic policy now runs through `update_notice_policy.mojo`.
+Mojo owns npm/Cargo/standalone install-channel classification with slash/backslash
+path equivalence, command-level notice emission policy, and saturating cache-age
+freshness checks. Rust retains environment/path acquisition, command enum tagging,
+SemVer parsing/comparison through the mature `semver` dependency, HTTP, files,
+and user-facing rendering. The previous Rust path normalization/substring table,
+notice gating match, and cache-age predicate were deleted with no Rust fallback.
+
+Focused validation passes the real-Mojo policy test, all 11
+`prodex-update-notice` tests including the existing Windows-path fixture, Clippy
+with warnings denied, `git diff --check`, and the dedicated Mojo no-fallback
+rule. The canonical broad report at this checkpoint counts **68,957 reachable
+Mojo LOC** and **199,417 Rust production LOC**, totaling **268,374 LOC**:
+**25.69436681645763% Mojo**. The 75% broad target remains in progress.
