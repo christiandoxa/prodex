@@ -1904,6 +1904,12 @@ export function findViolations(files) {
         "info_render::format_runtime_tuning_transport(",
         "info_render::format_pool_remaining(",
         "info_render::format_relative_duration(",
+        "info_render::format_process_summary(",
+        "info_render::format_load_summary(",
+        "info_render::format_token_usage_summary(",
+        "info_render::format_process_summary(",
+        "info_render::format_load_summary(",
+        "info_render::format_token_usage_summary(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -1915,6 +1921,12 @@ export function findViolations(files) {
         || production.includes('format!("http-connect=')
         || production.includes("let seconds = seconds.max(0)")
         || production.includes("quota-compatible profile(s): live=")
+        || production.includes("No active prodex runtime detected")
+        || production.includes("No token_usage events found in")
+        || production.includes("Yes ({total_count} total")
+        || production.includes("No active prodex runtime detected")
+        || production.includes("No token_usage events found in")
+        || production.includes("Yes ({total_count} total")
       ) {
         violations.push(filePath + ": contains restored Rust terminal info rendering semantics");
       }

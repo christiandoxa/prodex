@@ -99,24 +99,18 @@ where
     I: IntoIterator<Item = T>,
     T: Display,
 {
-    if total_count == 0 {
-        return "No".to_string();
-    }
-
-    let process_list = processes
+    let processes = processes
         .into_iter()
         .take(max_visible_processes)
         .map(|process| process.to_string())
-        .collect::<Vec<_>>()
-        .join(", ");
-    let remaining = total_count.saturating_sub(max_visible_processes);
-    let extra = if remaining > 0 {
-        format!(" (+{remaining} more)")
-    } else {
-        String::new()
-    };
-
-    format!("Yes ({total_count} total, {runtime_count} runtime; processes: {process_list}{extra})")
+        .collect::<Vec<_>>();
+    prodex_mojo_core::info_render::format_process_summary(
+        total_count,
+        runtime_count,
+        max_visible_processes,
+        &processes,
+    )
+    .expect("Mojo info process-summary renderer returned invalid output")
 }
 
 pub fn format_info_load_summary_display(
@@ -124,38 +118,16 @@ pub fn format_info_load_summary_display(
     runtime_process_count: usize,
     recent_load_window_seconds: i64,
 ) -> String {
-    if runtime_process_count == 0 {
-        return "No active prodex runtime detected".to_string();
-    }
-    if summary.log_count == 0 {
-        return "Runtime process detected, but no matching runtime log was found".to_string();
-    }
-    if summary.recent_selection_events == 0 {
-        return format!(
-            "{} active runtime log(s); no selection activity observed in the sampled window; inflight units {}",
-            summary.log_count, summary.active_inflight_units
-        );
-    }
-    if summary.recent_selection_events == 1 {
-        return format!(
-            "1 selection event observed in the sampled window; inflight units {}; {} active runtime log(s)",
-            summary.active_inflight_units, summary.log_count
-        );
-    }
-
-    let activity_span = summary
-        .recent_first_timestamp
-        .zip(summary.recent_last_timestamp)
-        .map(|(start, end)| format_relative_duration(end.saturating_sub(start)))
-        .unwrap_or_else(|| format!("{}m", recent_load_window_seconds / 60));
-
-    format!(
-        "{} selection event(s) over {}; inflight units {}; {} active runtime log(s)",
-        summary.recent_selection_events,
-        activity_span,
+    prodex_mojo_core::info_render::format_load_summary(
+        summary.log_count,
         summary.active_inflight_units,
-        summary.log_count
+        summary.recent_selection_events,
+        summary.recent_first_timestamp,
+        summary.recent_last_timestamp,
+        runtime_process_count,
+        recent_load_window_seconds,
     )
+    .expect("Mojo info load-summary renderer returned invalid output")
 }
 
 pub fn format_info_quota_data_summary_display(
@@ -179,41 +151,31 @@ pub fn format_info_token_usage_summary_display<'a>(
     total: TokenUsageCounts,
     by_profile: impl IntoIterator<Item = TokenUsageProfileDisplay<'a>>,
 ) -> String {
-    if event_count == 0 {
-        return format!("No token_usage events found in {log_count} recent runtime log(s)");
-    }
-
-    let top_profiles = by_profile
+    let profiles = by_profile
         .into_iter()
         .take(4)
-        .map(|entry| {
-            format!(
-                "{}:{} in/{} cached/{} out/{} reasoning",
-                entry.profile,
-                entry.total.input_tokens,
-                entry.total.cached_input_tokens,
-                entry.total.output_tokens,
-                entry.total.reasoning_tokens
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    let suffix = if top_profiles.is_empty() {
-        String::new()
-    } else {
-        format!("; by profile: {top_profiles}")
-    };
-
-    format!(
-        "{} event(s), logs={}: input={}, cached_input={}, output={}, reasoning={}{}",
+        .map(
+            |entry| prodex_mojo_core::info_render::InfoTokenUsageProfile {
+                profile: entry.profile,
+                input_tokens: entry.total.input_tokens,
+                cached_input_tokens: entry.total.cached_input_tokens,
+                output_tokens: entry.total.output_tokens,
+                reasoning_tokens: entry.total.reasoning_tokens,
+            },
+        )
+        .collect::<Vec<_>>();
+    prodex_mojo_core::info_render::format_token_usage_summary(
         event_count,
         log_count,
-        total.input_tokens,
-        total.cached_input_tokens,
-        total.output_tokens,
-        total.reasoning_tokens,
-        suffix
+        [
+            total.input_tokens,
+            total.cached_input_tokens,
+            total.output_tokens,
+            total.reasoning_tokens,
+        ],
+        &profiles,
     )
+    .expect("Mojo info token-usage renderer returned invalid output")
 }
 
 pub fn format_runtime_policy_summary_display(path: Option<&str>, version: Option<u32>) -> String {

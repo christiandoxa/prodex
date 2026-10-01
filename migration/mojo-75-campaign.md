@@ -3737,3 +3737,18 @@ prodex-terminal-ui, git diff --check, and the dedicated no-fallback guard. The
 canonical broad report at this checkpoint counts **70,457 reachable Mojo LOC**
 and **199,816 Rust production LOC**, totaling **270,273 LOC**:
 **26.06882670485028% Mojo**. The 75% broad target remains in progress.
+
+## Terminal process, load, and token-usage rendering hard replacement
+
+The existing terminal info Mojo owner now also handles process summaries,
+runtime-load summaries, and token-usage summaries including bounded per-profile
+detail rendering. Rust retains arbitrary Display-to-string materialization and
+typed DTO construction only. The previous Rust branch logic and formatting
+templates for these summaries were deleted; no Rust fallback remains.
+
+Focused validation passes the expanded real-Mojo info-render test, all 22
+prodex-terminal-ui tests, Clippy with warnings denied for prodex-mojo-core and
+prodex-terminal-ui, git diff --check, and the strengthened no-fallback guard.
+The canonical broad report at this checkpoint counts **70,639 reachable Mojo
+LOC** and **199,872 Rust production LOC**, totaling **270,511 LOC**:
+**26.113170998591553% Mojo**. The 75% broad target remains in progress.
