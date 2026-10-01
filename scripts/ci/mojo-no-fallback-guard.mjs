@@ -900,6 +900,11 @@ export function findViolations(files) {
         "prodex_mojo_core::audit_log_policy::normalized_total_tokens(",
         "prodex_mojo_core::audit_log_policy::summarize_usage(",
         "prodex_mojo_core::audit_log_policy::budget_flags(",
+        "prodex_mojo_core::audit_log_policy::query_has_filters(",
+        "prodex_mojo_core::audit_log_policy::query_matches(",
+        "prodex_mojo_core::audit_log_policy::format_query(",
+        "prodex_mojo_core::audit_log_policy::format_search_scope(",
+        "prodex_mojo_core::audit_log_policy::truncate_text(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -908,8 +913,13 @@ export function findViolations(files) {
         /summary\.(?:requests|total_tokens|cost_micros)\s*>=/u.test(contents)
         || /self\.input_tokens\s*\.saturating_add/u.test(contents)
         || /\.chars\(\)[^;]{0,300}ch\.is_ascii_alphanumeric/u.test(contents)
+        || contents.includes("self.component.is_some() || self.action.is_some()")
+        || contents.includes(".is_none_or(|component| event.component == component)")
+        || contents.includes('parts.push(format!("component={component}"))')
+        || contents.includes('"searched {} of {} bytes (byte range {}..{})"')
+        || contents.includes("chars.by_ref().take(max_chars)")
       ) {
-        violations.push(filePath + ": contains restored Rust audit-usage semantics");
+        violations.push(filePath + ": contains restored Rust audit query/display semantics");
       }
       return violations;
     }
@@ -919,6 +929,11 @@ export function findViolations(files) {
         "prodex_audit_usage_total_v1(",
         "prodex_audit_usage_summary_v1(",
         "prodex_audit_budget_flags_v1(",
+        "prodex_audit_query_has_filters_v1(",
+        "prodex_audit_query_matches_v1(",
+        "prodex_audit_query_format_v1(",
+        "prodex_audit_search_scope_format_v1(",
+        "prodex_audit_truncate_text_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))

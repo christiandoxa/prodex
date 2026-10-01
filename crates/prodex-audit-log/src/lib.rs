@@ -49,7 +49,12 @@ pub struct AuditLogQuery {
 
 impl AuditLogQuery {
     pub fn has_filters(&self) -> bool {
-        self.component.is_some() || self.action.is_some() || self.outcome.is_some()
+        prodex_mojo_core::audit_log_policy::query_has_filters(
+            self.component.as_deref(),
+            self.action.as_deref(),
+            self.outcome.as_deref(),
+        )
+        .expect("Mojo audit query filter-presence policy returned invalid output")
     }
 }
 
@@ -607,34 +612,26 @@ pub fn render_audit_events_human_with_scope(
 }
 
 pub fn format_audit_search_scope(scope: &AuditLogSearchScope) -> String {
-    let search_end_byte = scope.search_start_byte.saturating_add(scope.searched_bytes);
-    let mut rendered = format!(
-        "searched {} of {} bytes (byte range {}..{})",
-        scope.searched_bytes, scope.log_size_bytes, scope.search_start_byte, search_end_byte
-    );
-    if scope.limited {
-        rendered.push_str(&format!(
-            " limited to last {} bytes",
-            scope.read_limit_bytes
-        ));
-    }
-    rendered
+    prodex_mojo_core::audit_log_policy::format_search_scope(
+        scope.searched_bytes,
+        scope.log_size_bytes,
+        scope.search_start_byte,
+        scope.read_limit_bytes,
+        scope.limited,
+    )
+    .expect("Mojo audit search-scope formatter returned invalid output")
 }
 
 fn audit_log_query_matches(query: &AuditLogQuery, event: &AuditLogEventRecord) -> bool {
-    let component_matches = query
-        .component
-        .as_deref()
-        .is_none_or(|component| event.component == component);
-    let action_matches = query
-        .action
-        .as_deref()
-        .is_none_or(|action| event.action == action);
-    let outcome_matches = query
-        .outcome
-        .as_deref()
-        .is_none_or(|outcome| event.outcome == outcome);
-    component_matches && action_matches && outcome_matches
+    prodex_mojo_core::audit_log_policy::query_matches(
+        query.component.as_deref(),
+        query.action.as_deref(),
+        query.outcome.as_deref(),
+        &event.component,
+        &event.action,
+        &event.outcome,
+    )
+    .expect("Mojo audit query matcher returned invalid output")
 }
 
 pub fn render_audit_events_human(
@@ -646,21 +643,12 @@ pub fn render_audit_events_human(
 }
 
 pub fn format_audit_query(query: &AuditLogQuery) -> String {
-    let mut parts = Vec::new();
-    if let Some(component) = query.component.as_deref() {
-        parts.push(format!("component={component}"));
-    }
-    if let Some(action) = query.action.as_deref() {
-        parts.push(format!("action={action}"));
-    }
-    if let Some(outcome) = query.outcome.as_deref() {
-        parts.push(format!("outcome={outcome}"));
-    }
-    if parts.is_empty() {
-        "none".to_string()
-    } else {
-        parts.join(" ")
-    }
+    prodex_mojo_core::audit_log_policy::format_query(
+        query.component.as_deref(),
+        query.action.as_deref(),
+        query.outcome.as_deref(),
+    )
+    .expect("Mojo audit query formatter returned invalid output")
 }
 
 fn summarize_audit_details(details: &Value) -> String {
@@ -672,13 +660,8 @@ fn summarize_audit_details(details: &Value) -> String {
 }
 
 fn truncate_audit_details(value: &str, max_chars: usize) -> String {
-    let mut chars = value.chars();
-    let truncated = chars.by_ref().take(max_chars).collect::<String>();
-    if chars.next().is_some() {
-        format!("{truncated}...")
-    } else {
-        truncated
-    }
+    prodex_mojo_core::audit_log_policy::truncate_text(value, max_chars)
+        .expect("Mojo audit detail truncation policy returned invalid output")
 }
 
 fn normalize_usage_token(value: &str, fallback: &str, max_chars: usize) -> String {
