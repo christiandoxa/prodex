@@ -9,10 +9,12 @@ use prodex_cli::{
     SUPER_DEEPSEEK_DEFAULT_MODEL,
 };
 use prodex_mojo_core::{
-    rich::{CatalogModel, merge_catalog_ids, resolve_catalog_model},
+    rich::merge_catalog_ids,
     super_provider_config::{
-        RuntimeDeepSeekWebSearchToken, RuntimeModelProviderClass, runtime_bool_token,
-        runtime_deepseek_web_search_token, runtime_model_provider_class,
+        RuntimeDeepSeekWebSearchToken, RuntimeModelProviderClass,
+        deepseek_catalog_model_metadata as mojo_deepseek_catalog_model_metadata,
+        deepseek_catalog_static_models, runtime_bool_token, runtime_deepseek_web_search_token,
+        runtime_model_provider_class,
     },
 };
 use serde_json::json;
@@ -22,43 +24,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const DEEPSEEK_MODEL_CATALOG_FILE: &str = "prodex-deepseek-model-catalog.json";
-const DEEPSEEK_CATALOG_MODELS: &[(&str, &str, &str)] = &[
-    (
-        "auto",
-        "DeepSeek Auto",
-        "Prodex DeepSeek fallback chain routed through current DeepSeek models.",
-    ),
-    (
-        "pro",
-        "DeepSeek Pro",
-        "Prodex DeepSeek Pro alias routed through DeepSeek V4 Pro.",
-    ),
-    (
-        "flash",
-        "DeepSeek Flash",
-        "Prodex DeepSeek Flash alias routed through DeepSeek V4 Flash.",
-    ),
-    (
-        "deepseek-v4-pro",
-        "DeepSeek V4 Pro",
-        "DeepSeek V4 Pro routed through the Prodex Responses adapter.",
-    ),
-    (
-        "deepseek-v4-flash",
-        "DeepSeek V4 Flash",
-        "DeepSeek V4 Flash routed through the Prodex Responses adapter.",
-    ),
-    (
-        "deepseek-chat",
-        "DeepSeek Chat",
-        "DeepSeek chat compatibility model routed through the Prodex Responses adapter.",
-    ),
-    (
-        "deepseek-reasoner",
-        "DeepSeek Reasoner",
-        "DeepSeek reasoner compatibility model routed through the Prodex Responses adapter.",
-    ),
-];
 const DEEPSEEK_BASE_INSTRUCTIONS: &str = r#"You are Codex, a coding agent. You and the user share the same workspace.
 
 Focus on the user's software task. Inspect the codebase before changing behavior, make narrow edits, preserve user changes, and verify with relevant tests or commands when feasible.
@@ -312,8 +277,10 @@ fn deepseek_catalog_models(
     context_window: u64,
     auto_compact_token_limit: u64,
 ) -> Vec<serde_json::Value> {
+    let static_models =
+        deepseek_catalog_static_models().expect("Mojo DeepSeek static catalog enumeration failed");
     let candidates = std::iter::once(launch_model)
-        .chain(DEEPSEEK_CATALOG_MODELS.iter().map(|(slug, _, _)| *slug))
+        .chain(static_models.iter().map(|model| model.slug.as_str()))
         .collect::<Vec<_>>();
     let accepted = merge_catalog_ids(&[], &candidates)
         .expect("Mojo DeepSeek catalog dedup returned an invalid structured result");
@@ -325,8 +292,8 @@ fn deepseek_catalog_models(
         let (display_name, description) = deepseek_catalog_model_metadata(slug);
         models.push(deepseek_catalog_model(
             slug,
-            display_name,
-            description,
+            &display_name,
+            &description,
             priority,
             context_window,
             auto_compact_token_limit,
@@ -336,24 +303,16 @@ fn deepseek_catalog_models(
     models
 }
 
-fn deepseek_catalog_model_metadata(model: &str) -> (&str, &'static str) {
-    let catalog = DEEPSEEK_CATALOG_MODELS
-        .iter()
-        .map(|(slug, _, _)| CatalogModel {
-            id: slug,
-            aliases: &[],
+fn deepseek_catalog_model_metadata(model: &str) -> (String, String) {
+    mojo_deepseek_catalog_model_metadata(model)
+        .expect("Mojo DeepSeek catalog lookup returned invalid output")
+        .map(|entry| (entry.display_name, entry.description))
+        .unwrap_or_else(|| {
+            (
+                model.to_string(),
+                "DeepSeek model routed through the Prodex Responses adapter.".to_string(),
+            )
         })
-        .collect::<Vec<_>>();
-    resolve_catalog_model(&catalog, model)
-        .expect("Mojo DeepSeek catalog lookup returned an invalid structured result")
-        .map(|index| {
-            let (_, display_name, description) = DEEPSEEK_CATALOG_MODELS[index];
-            (display_name, description)
-        })
-        .unwrap_or((
-            model,
-            "DeepSeek model routed through the Prodex Responses adapter.",
-        ))
 }
 
 fn deepseek_catalog_model(
