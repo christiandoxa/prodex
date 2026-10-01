@@ -2,6 +2,7 @@ mod body;
 use self::body::provider_error_codes;
 use crate::mojo_json::Document;
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderErrorClass {
     Auth,
