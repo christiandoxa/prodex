@@ -624,6 +624,10 @@ pub fn pressure_band(five_hour_status: i64, weekly_status: i64) -> i64 {
 }
 
 const QUOTA_MODEL_POLICY_ABI_VERSION: i64 = 1;
+const QUOTA_DISPLAY_LABEL_MAX_BYTES: usize = 64;
+const QUOTA_DISPLAY_LABEL_SORT: i64 = 0;
+const QUOTA_DISPLAY_LABEL_BLOCKED_STATUS: i64 = 1;
+const QUOTA_DISPLAY_LABEL_AUTH_SYNC_SOURCE: i64 = 2;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuotaAuthFilterPlan {
@@ -689,6 +693,23 @@ unsafe extern "C" {
         auth_address: u64,
         auth_length: i64,
         quota_compatible: i64,
+    ) -> i64;
+    fn prodex_quota_display_label_v1(
+        abi_version: i64,
+        label_kind: i64,
+        value: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_quota_window_label_plan_v1(
+        abi_version: i64,
+        seconds_present: i64,
+        seconds: i64,
+        kind_address: u64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
     ) -> i64;
     fn prodex_quota_report_sort_next_v1(abi_version: i64, sort: i64) -> i64;
 }
@@ -881,6 +902,121 @@ pub fn quota_auth_filter_matches(
         1 => Ok(true),
         _ => Err(crate::MojoError::InvalidOutput),
     }
+}
+
+fn load_quota_display_label(kind: i64, value: i64) -> Result<String, crate::MojoError> {
+    let mut output = [0_u8; QUOTA_DISPLAY_LABEL_MAX_BYTES];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_quota_display_label_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            kind,
+            value,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| crate::MojoError::InvalidOutput)
+}
+
+pub fn quota_report_sort_label(sort: i64) -> Result<&'static str, crate::MojoError> {
+    use std::sync::OnceLock;
+
+    static LABELS: OnceLock<Result<Vec<String>, crate::MojoError>> = OnceLock::new();
+    let sort = usize::try_from(sort)
+        .ok()
+        .filter(|sort| *sort < 6)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    match LABELS.get_or_init(|| {
+        (0_i64..6)
+            .map(|value| load_quota_display_label(QUOTA_DISPLAY_LABEL_SORT, value))
+            .collect()
+    }) {
+        Ok(labels) => labels
+            .get(sort)
+            .map(String::as_str)
+            .ok_or(crate::MojoError::InvalidOutput),
+        Err(error) => Err(*error),
+    }
+}
+
+pub fn quota_blocked_status_label(kind: i64) -> Result<&'static str, crate::MojoError> {
+    use std::sync::OnceLock;
+
+    static LABELS: OnceLock<Result<Vec<String>, crate::MojoError>> = OnceLock::new();
+    let kind = usize::try_from(kind)
+        .ok()
+        .filter(|kind| *kind <= QUOTA_BLOCKED_KIND_FIVE_HOUR as usize)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    match LABELS.get_or_init(|| {
+        (QUOTA_BLOCKED_KIND_NONE..=QUOTA_BLOCKED_KIND_FIVE_HOUR)
+            .map(|value| load_quota_display_label(QUOTA_DISPLAY_LABEL_BLOCKED_STATUS, value))
+            .collect()
+    }) {
+        Ok(labels) => labels
+            .get(kind)
+            .map(String::as_str)
+            .ok_or(crate::MojoError::InvalidOutput),
+        Err(error) => Err(*error),
+    }
+}
+
+pub fn quota_usage_auth_sync_source_label(source: i64) -> Result<&'static str, crate::MojoError> {
+    use std::sync::OnceLock;
+
+    static LABELS: OnceLock<Result<Vec<String>, crate::MojoError>> = OnceLock::new();
+    let source = usize::try_from(source)
+        .ok()
+        .filter(|source| *source < 2)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    match LABELS.get_or_init(|| {
+        (0_i64..2)
+            .map(|value| load_quota_display_label(QUOTA_DISPLAY_LABEL_AUTH_SYNC_SOURCE, value))
+            .collect()
+    }) {
+        Ok(labels) => labels
+            .get(source)
+            .map(String::as_str)
+            .ok_or(crate::MojoError::InvalidOutput),
+        Err(error) => Err(*error),
+    }
+}
+
+pub fn quota_window_label(seconds: Option<i64>) -> Result<String, crate::MojoError> {
+    let mut output = [0_u8; QUOTA_DISPLAY_LABEL_MAX_BYTES];
+    let mut written = -1_i64;
+    let mut kind = -1_i64;
+    let status = unsafe {
+        prodex_quota_window_label_plan_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            i64::from(seconds.is_some()),
+            seconds.unwrap_or_default(),
+            (&mut kind as *mut i64) as usize as u64,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    if kind == 4 {
+        return seconds
+            .map(|seconds| format!("{seconds}s"))
+            .ok_or(crate::MojoError::InvalidOutput);
+    }
+    if !(0..=3).contains(&kind) {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| crate::MojoError::InvalidOutput)
 }
 
 pub fn quota_report_sort_next(sort: i64) -> Result<i64, crate::MojoError> {

@@ -3857,3 +3857,23 @@ test, Clippy with warnings denied for both affected library crates,
 report at this checkpoint counts **71,522 reachable Mojo LOC** and **200,207
 Rust production LOC**, totaling **271,729 LOC**: **26.32107724975987% Mojo**.
 The 75% broad target remains in progress.
+
+## Quota display policy hard replacement
+
+Quota display policy now runs through `quota.mojo`. Mojo owns report-sort
+labels, standard quota-window classification and labels for 5h/weekly/monthly
+windows, blocked quota status labels, and usage-auth sync source labels. Rust
+retains enum/tag materialization, dynamic fallback rendering for arbitrary
+`<seconds>s` windows, chrono timestamp formatting, Serde/BTreeMap ownership,
+and terminal/report composition. The previous Rust sort-label match, window
+threshold ranges, blocked-status match, and auth-sync source-label match were
+deleted; no Rust semantic fallback remains for the migrated display decisions.
+
+Focused validation passes the standalone Mojo quota build, the real-Mojo
+quota-model policy adapter test, focused `prodex-quota` tests for standard
+window labels, blocked OpenAI quota labels, and auth-sync source labels, Clippy
+with warnings denied for both affected library crates, `git diff --check`, and
+the strengthened no-fallback guard. The canonical broad report at this
+checkpoint counts **71,653 reachable Mojo LOC** and **200,310 Rust production
+LOC**, totaling **271,963 LOC**: **26.34659861819439% Mojo**. The 75% broad
+target remains in progress.

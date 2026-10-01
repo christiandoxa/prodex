@@ -6,6 +6,27 @@ fn quota_model_policy_kernel_preserves_expected_contracts() {
     assert_eq!(plan_capacity_pressure_scale_bps(" Pro-20x "), Ok(2_000));
     assert_eq!(scale_quota_pressure_for_plan(-10, 5_000), Ok(-5));
     assert_eq!(quota_report_sort_next(5), Ok(0));
+    assert_eq!(quota_report_sort_label(0), Ok("current"));
+    assert_eq!(quota_report_sort_label(5), Ok("plan"));
+    assert_eq!(
+        quota_blocked_status_label(QUOTA_BLOCKED_KIND_NONE),
+        Ok("Unavailable")
+    );
+    assert_eq!(
+        quota_blocked_status_label(QUOTA_BLOCKED_KIND_FIVE_HOUR),
+        Ok("Blocked 5h")
+    );
+    assert_eq!(quota_usage_auth_sync_source_label(0), Ok("reloaded"));
+    assert_eq!(quota_usage_auth_sync_source_label(1), Ok("refreshed"));
+    assert_eq!(quota_window_label(None), Ok("usage".to_string()));
+    assert_eq!(quota_window_label(Some(17_700)), Ok("5h".to_string()));
+    assert_eq!(quota_window_label(Some(18_300)), Ok("5h".to_string()));
+    assert_eq!(quota_window_label(Some(601_200)), Ok("weekly".to_string()));
+    assert_eq!(
+        quota_window_label(Some(2_678_400)),
+        Ok("monthly".to_string())
+    );
+    assert_eq!(quota_window_label(Some(42)), Ok("42s".to_string()));
     assert_eq!(
         quota_auth_summary_kind(Some(" Bedrock_API-Key "), false, false, false).unwrap(),
         QuotaAuthSummaryKind::BedrockApiKey

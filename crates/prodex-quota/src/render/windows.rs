@@ -506,12 +506,9 @@ pub fn format_blocked_quota_status(blocked: &[BlockedLimit]) -> String {
         })
         .max()
         .unwrap_or(prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_NONE);
-    match kind {
-        prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_FIVE_HOUR => "Blocked 5h".to_string(),
-        prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_WEEKLY => "Blocked weekly".to_string(),
-        prodex_mojo_core::quota::QUOTA_BLOCKED_KIND_EXHAUSTED => "Blocked".to_string(),
-        _ => "Unavailable".to_string(),
-    }
+    prodex_mojo_core::quota::quota_blocked_status_label(kind)
+        .expect("Mojo blocked quota status label returned invalid output")
+        .to_string()
 }
 
 pub fn format_quota_error_status(error: &str) -> String {

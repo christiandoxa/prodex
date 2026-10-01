@@ -2,6 +2,18 @@ use super::*;
 use base64::Engine as _;
 
 #[test]
+fn usage_auth_sync_source_labels_use_mojo_policy() {
+    assert_eq!(
+        usage_auth_sync_source_label(UsageAuthSyncSource::Reloaded),
+        "reloaded"
+    );
+    assert_eq!(
+        usage_auth_sync_source_label(UsageAuthSyncSource::Refreshed),
+        "refreshed"
+    );
+}
+
+#[test]
 fn auth_summary_detects_chatgpt_token() {
     let summary = auth_summary_from_auth_text(r#"{"tokens":{"access_token":" token "}}"#);
     assert_eq!(summary.label, "chatgpt");
