@@ -3721,3 +3721,19 @@ git diff --check, and the dedicated no-fallback guard. The canonical broad
 report for this checkpoint counts **70,075 reachable Mojo LOC** and **199,710
 Rust production LOC**, totaling **269,785 LOC**: **25.97438701187983% Mojo**.
 The 75% broad target remains in progress.
+
+## Terminal info summary rendering hard replacement
+
+Deterministic terminal info summaries now render through info_render.mojo. Mojo
+owns relative-duration text, quota-data summaries, runtime policy/log summaries,
+runtime-tuning worker/budget/transport summaries, and pool-remaining text. Rust
+retains the typed display DTOs, terminal/Ratatui I/O, and higher-level runway or
+token-usage composition. The replaced Rust formatting branches and format
+templates were deleted; no Rust semantic fallback remains.
+
+Focused validation passes the real-Mojo info-render test, all 22
+prodex-terminal-ui tests, Clippy with warnings denied for prodex-mojo-core and
+prodex-terminal-ui, git diff --check, and the dedicated no-fallback guard. The
+canonical broad report at this checkpoint counts **70,457 reachable Mojo LOC**
+and **199,816 Rust production LOC**, totaling **270,273 LOC**:
+**26.06882670485028% Mojo**. The 75% broad target remains in progress.

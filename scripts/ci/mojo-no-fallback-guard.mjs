@@ -102,6 +102,8 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/render/model_capacity.rs",
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-app/src/app_commands/status.rs",
+  "crates/prodex-terminal-ui/src/info.rs",
+  "crates/prodex-mojo-core/src/info_render.rs",
   "crates/prodex-app/src/runtime_external_provider_config.rs",
   "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
   "crates/prodex-app/src/super_expose/protocol.rs",
@@ -1891,6 +1893,39 @@ export function findViolations(files) {
     }
     return [];
   });
+  const infoRenderViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-terminal-ui/src/info.rs") {
+      const required = [
+        "info_render::format_quota_data_summary(",
+        "info_render::format_runtime_policy_summary(",
+        "info_render::format_runtime_logs_summary(",
+        "info_render::format_runtime_tuning_workers(",
+        "info_render::format_runtime_tuning_budgets(",
+        "info_render::format_runtime_tuning_transport(",
+        "info_render::format_pool_remaining(",
+        "info_render::format_relative_duration(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": terminal info hard replacement must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        production.includes('format!("workers proxy=')
+        || production.includes('format!("precommit=')
+        || production.includes('format!("http-connect=')
+        || production.includes("let seconds = seconds.max(0)")
+        || production.includes("quota-compatible profile(s): live=")
+      ) {
+        violations.push(filePath + ": contains restored Rust terminal info rendering semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/info_render.rs" &&
+        !contents.includes("prodex_terminal_info_render_v1(")) {
+      return [filePath + ": terminal info ABI adapter must retain prodex_terminal_info_render_v1("];
+    }
+    return [];
+  });
   const doctorMarkerViolations = files
     .filter(([filePath, contents]) => filePath === RUNTIME_DOCTOR_MARKERS_FILE &&
       (!contents.includes("runtime_doctor_marker_known(") ||
@@ -2390,7 +2425,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...doctorMarkerViolations, ...statusSummaryViolations,
+    ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,

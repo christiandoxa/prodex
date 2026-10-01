@@ -1,5 +1,9 @@
 use std::fmt::Display;
 
+fn display_usize(value: usize) -> u64 {
+    u64::try_from(value).expect("display count fits u64")
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct InfoLoadSummaryDisplay {
     pub log_count: usize,
@@ -160,13 +164,13 @@ pub fn format_info_quota_data_summary_display(
     snapshot_profiles: usize,
     unavailable_profiles: usize,
 ) -> String {
-    if quota_compatible_profiles == 0 {
-        return "No quota-compatible profiles".to_string();
-    }
-
-    format!(
-        "{quota_compatible_profiles} quota-compatible profile(s): live={live_profiles}, snapshot={snapshot_profiles}, unavailable={unavailable_profiles}"
-    )
+    prodex_mojo_core::info_render::format_quota_data_summary([
+        display_usize(quota_compatible_profiles),
+        display_usize(live_profiles),
+        display_usize(snapshot_profiles),
+        display_usize(unavailable_profiles),
+    ])
+    .expect("Mojo info quota-data renderer returned invalid output")
 }
 
 pub fn format_info_token_usage_summary_display<'a>(
@@ -213,56 +217,55 @@ pub fn format_info_token_usage_summary_display<'a>(
 }
 
 pub fn format_runtime_policy_summary_display(path: Option<&str>, version: Option<u32>) -> String {
-    path.zip(version)
-        .map(|(path, version)| format!("{path} (v{version})"))
-        .unwrap_or_else(|| "disabled".to_string())
+    prodex_mojo_core::info_render::format_runtime_policy_summary(path, version)
+        .expect("Mojo runtime-policy summary renderer returned invalid output")
 }
 
 pub fn format_runtime_logs_summary_display(directory: &str, format: &str) -> String {
-    format!("{directory} ({format})")
+    prodex_mojo_core::info_render::format_runtime_logs_summary(directory, format)
+        .expect("Mojo runtime-log summary renderer returned invalid output")
 }
 
 pub fn format_runtime_tuning_workers_display(snapshot: RuntimeTuningWorkersDisplay) -> String {
-    format!(
-        "workers proxy={}, long-lived={}, async={}, probe-refresh={}; active={}, queue={}; lanes responses={}, compact={}, websocket={}, standard={}; ws-connect workers={}, queue={}, overflow={}; ws-dns workers={}, queue={}, overflow={}",
-        snapshot.worker_count,
-        snapshot.long_lived_worker_count,
-        snapshot.async_worker_count,
-        snapshot.probe_refresh_worker_count,
-        snapshot.active_request_limit,
-        snapshot.long_lived_queue_capacity,
-        snapshot.lane_responses,
-        snapshot.lane_compact,
-        snapshot.lane_websocket,
-        snapshot.lane_standard,
-        snapshot.websocket_connect_worker_count,
-        snapshot.websocket_connect_queue_capacity,
-        snapshot.websocket_connect_overflow_capacity,
-        snapshot.websocket_dns_worker_count,
-        snapshot.websocket_dns_queue_capacity,
-        snapshot.websocket_dns_overflow_capacity
-    )
+    prodex_mojo_core::info_render::format_runtime_tuning_workers([
+        display_usize(snapshot.worker_count),
+        display_usize(snapshot.long_lived_worker_count),
+        display_usize(snapshot.async_worker_count),
+        display_usize(snapshot.probe_refresh_worker_count),
+        display_usize(snapshot.active_request_limit),
+        display_usize(snapshot.long_lived_queue_capacity),
+        display_usize(snapshot.lane_responses),
+        display_usize(snapshot.lane_compact),
+        display_usize(snapshot.lane_websocket),
+        display_usize(snapshot.lane_standard),
+        display_usize(snapshot.websocket_connect_worker_count),
+        display_usize(snapshot.websocket_connect_queue_capacity),
+        display_usize(snapshot.websocket_connect_overflow_capacity),
+        display_usize(snapshot.websocket_dns_worker_count),
+        display_usize(snapshot.websocket_dns_queue_capacity),
+        display_usize(snapshot.websocket_dns_overflow_capacity),
+    ])
+    .expect("Mojo runtime-tuning worker renderer returned invalid output")
 }
 
 pub fn format_runtime_tuning_budgets_display(snapshot: RuntimeTuningBudgetsDisplay) -> String {
-    format!(
-        "precommit={}x/{}ms, pressure-precommit={}x/{}ms, continuation={}x/{}ms; admission={}ms, pressure-admission={}ms, long-lived={}ms, pressure-long-lived={}ms",
-        snapshot.precommit_attempt_limit,
+    prodex_mojo_core::info_render::format_runtime_tuning_budgets([
+        display_usize(snapshot.precommit_attempt_limit),
         snapshot.precommit_budget_ms,
-        snapshot.pressure_precommit_attempt_limit,
+        display_usize(snapshot.pressure_precommit_attempt_limit),
         snapshot.pressure_precommit_budget_ms,
-        snapshot.continuation_precommit_attempt_limit,
+        display_usize(snapshot.continuation_precommit_attempt_limit),
         snapshot.continuation_precommit_budget_ms,
         snapshot.admission_wait_budget_ms,
         snapshot.pressure_admission_wait_budget_ms,
         snapshot.long_lived_queue_wait_budget_ms,
-        snapshot.pressure_long_lived_queue_wait_budget_ms
-    )
+        snapshot.pressure_long_lived_queue_wait_budget_ms,
+    ])
+    .expect("Mojo runtime-tuning budget renderer returned invalid output")
 }
 
 pub fn format_runtime_tuning_transport_display(snapshot: RuntimeTuningTransportDisplay) -> String {
-    format!(
-        "http-connect={}ms, stream-idle={}ms, sse-lookahead={}ms; ws-connect={}ms, ws-progress={}ms, ws-happy={}ms, ws-stale-reuse={}ms; inflight soft/hard={}/{}",
+    prodex_mojo_core::info_render::format_runtime_tuning_transport([
         snapshot.http_connect_timeout_ms,
         snapshot.stream_idle_timeout_ms,
         snapshot.sse_lookahead_timeout_ms,
@@ -270,9 +273,10 @@ pub fn format_runtime_tuning_transport_display(snapshot: RuntimeTuningTransportD
         snapshot.websocket_precommit_progress_timeout_ms,
         snapshot.websocket_happy_eyeballs_delay_ms,
         snapshot.websocket_previous_response_reuse_stale_ms,
-        snapshot.profile_inflight_soft_limit,
-        snapshot.profile_inflight_hard_limit
-    )
+        display_usize(snapshot.profile_inflight_soft_limit),
+        display_usize(snapshot.profile_inflight_hard_limit),
+    ])
+    .expect("Mojo runtime-tuning transport renderer returned invalid output")
 }
 
 pub fn format_info_pool_remaining_display(
@@ -280,15 +284,12 @@ pub fn format_info_pool_remaining_display(
     profiles_with_data: usize,
     earliest_reset_text: Option<&str>,
 ) -> String {
-    if profiles_with_data == 0 {
-        return "Unavailable".to_string();
-    }
-
-    let mut value = format!("{total_remaining}% across {profiles_with_data} profile(s)");
-    if let Some(reset_text) = earliest_reset_text {
-        value.push_str(&format!("; earliest reset {reset_text}"));
-    }
-    value
+    prodex_mojo_core::info_render::format_pool_remaining(
+        total_remaining,
+        profiles_with_data,
+        earliest_reset_text,
+    )
+    .expect("Mojo info pool-remaining renderer returned invalid output")
 }
 
 pub fn format_info_runway_display(
@@ -335,30 +336,6 @@ pub fn format_info_runway_display(
 }
 
 pub fn format_relative_duration(seconds: i64) -> String {
-    let seconds = seconds.max(0);
-    if seconds == 0 {
-        return "now".to_string();
-    }
-
-    let days = seconds / 86_400;
-    let hours = (seconds % 86_400) / 3_600;
-    let minutes = (seconds % 3_600) / 60;
-
-    if days > 0 {
-        if hours > 0 {
-            format!("{days}d {hours}h")
-        } else {
-            format!("{days}d")
-        }
-    } else if hours > 0 {
-        if minutes > 0 {
-            format!("{hours}h {minutes}m")
-        } else {
-            format!("{hours}h")
-        }
-    } else if minutes > 0 {
-        format!("{minutes}m")
-    } else {
-        "<1m".to_string()
-    }
+    prodex_mojo_core::info_render::format_relative_duration(seconds)
+        .expect("Mojo relative-duration renderer returned invalid output")
 }
