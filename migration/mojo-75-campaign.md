@@ -3979,3 +3979,24 @@ metadata consumer test, Clippy with warnings denied for `prodex-mojo-core` and
 canonical broad report at this checkpoint counts **71,942 reachable Mojo LOC**
 and **200,620 Rust production LOC**, totaling **272,562 LOC**:
 **26.394728538827863% Mojo**. The 75% broad target remains in progress.
+
+## Provider native-passthrough policy hard replacement
+
+Provider bridge native-passthrough admission now runs through
+`provider_constraints.mojo`. Mojo owns the unknown-route default, the OpenAI
+Responses bridge exception, Models and Responses Compact exclusions, and the
+final Native/Passthrough capability admission. `ProviderCapabilityStatus` is
+now `repr(i64)` so the existing capability order is a stable ABI tag. Rust
+retains route parsing/materialization, provider registry capability lookup, and
+execution of the selected adapter path. The previous compound Rust passthrough
+decision tree was deleted; no Rust semantic fallback remains for the migrated
+admission policy.
+
+Focused validation passes the standalone `provider_constraints.mojo` build,
+the real-Mojo provider scalar/native-passthrough adapter test, the existing
+provider native-passthrough matrix consumer test, Clippy with warnings denied
+for `prodex-provider-core`, `prodex-mojo-core`, and `prodex-app`,
+`git diff --check`, and the strengthened no-fallback guard. The canonical broad
+report at this checkpoint counts **71,963 reachable Mojo LOC** and **200,647
+Rust production LOC**, totaling **272,610 LOC**: **26.397784380616997% Mojo**.
+The 75% broad target remains in progress.

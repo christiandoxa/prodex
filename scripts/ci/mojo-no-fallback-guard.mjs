@@ -95,6 +95,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/provider_constraints.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/error_class.rs",
   "crates/prodex-mojo-core/src/policy.rs",
@@ -768,6 +769,7 @@ const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
 const PROVIDER_CONSTRAINTS_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints.rs";
 const PROVIDER_PRECOMMIT_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs";
 const PROVIDER_BRIDGE_METADATA_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs";
+const PROVIDER_BRIDGE_ROUTING_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs";
 const LOCAL_REWRITE_UPSTREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs";
 const NATIVE_FIRST_ERROR_CLASS_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/error_class.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
@@ -2007,10 +2009,26 @@ export function findViolations(files) {
       const required = [
         "prodex_provider_bridge_label_v1(",
         "prodex_provider_bridge_function_tool_name_max_bytes_v1(",
+        "prodex_provider_bridge_native_passthrough_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": provider bridge metadata adapter must retain Mojo ABI " + call);
+    }
+    if (filePath === PROVIDER_BRIDGE_ROUTING_FILE) {
+      const body = contents.match(/\bfn\s+runtime_provider_native_passthrough\([^]*?^\}/mu)?.[0];
+      const violations = body?.includes("provider_bridge_native_passthrough(")
+        ? []
+        : [filePath + ": provider native-passthrough policy must retain Mojo decision"];
+      if (
+        body?.includes("RuntimeProviderBridgeKind::OpenAiResponses")
+        || body?.includes("ProviderCapabilityStatus::Native")
+        || body?.includes("ProviderCapabilityStatus::Passthrough")
+        || body?.includes("ResponsesCompact")
+      ) {
+        violations.push(filePath + ": contains restored Rust provider native-passthrough decision matrix");
+      }
+      return violations;
     }
     if (filePath === PROVIDER_PRECOMMIT_FILE) {
       const violations = contents.includes("provider as i64")

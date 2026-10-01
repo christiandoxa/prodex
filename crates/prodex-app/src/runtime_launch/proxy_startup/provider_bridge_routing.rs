@@ -3,10 +3,10 @@ use super::super::provider_models::{
 };
 use super::{RuntimeProviderBridgeKind, runtime_provider_label};
 use crate::RuntimeHeapTrimmedBufferedResponseParts;
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
-use prodex_provider_core::{
-    ProviderCapabilityStatus, ProviderEndpoint, provider_adapter, provider_model_fallback_chain,
+use prodex_mojo_core::{
+    provider_constraints::provider_bridge_native_passthrough, rich::ascii_casefold_equal_exact,
 };
+use prodex_provider_core::{ProviderEndpoint, provider_adapter, provider_model_fallback_chain};
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
@@ -15,28 +15,17 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_native_passthro
     kind: RuntimeProviderBridgeKind,
     path_and_query: &str,
 ) -> bool {
-    let Some(route) = runtime_provider_route_kind(path_and_query) else {
-        return true;
+    let route = runtime_provider_route_kind(path_and_query);
+    let (route_kind, capability_status) = match route {
+        Some(route) => (
+            runtime_provider_route_kind_tag(route),
+            provider_adapter(kind.provider_id())
+                .capability_status(runtime_provider_route_endpoint(route)) as i64,
+        ),
+        None => (-1, -1),
     };
-    if matches!(kind, RuntimeProviderBridgeKind::OpenAiResponses)
-        && !matches!(route, RuntimeProviderRouteKind::ResponsesCompact)
-    {
-        return true;
-    }
-    if matches!(
-        route,
-        RuntimeProviderRouteKind::ModelsList | RuntimeProviderRouteKind::ModelsSingle(_)
-    ) {
-        return false;
-    }
-    let endpoint = runtime_provider_route_endpoint(route);
-    if matches!(endpoint, ProviderEndpoint::ResponsesCompact) {
-        return false;
-    }
-    matches!(
-        provider_adapter(kind.provider_id()).capability_status(endpoint),
-        ProviderCapabilityStatus::Native | ProviderCapabilityStatus::Passthrough
-    )
+    provider_bridge_native_passthrough(kind as i64, route_kind, capability_status)
+        .expect("Mojo provider native-passthrough policy returned invalid output")
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_models_buffered_response(
@@ -172,6 +161,18 @@ pub(in crate::runtime_launch::proxy_startup) enum RuntimeProviderRouteKind<'a> {
     Embeddings,
     ModelsList,
     ModelsSingle(&'a str),
+}
+
+fn runtime_provider_route_kind_tag(route: RuntimeProviderRouteKind<'_>) -> i64 {
+    match route {
+        RuntimeProviderRouteKind::Responses => 0,
+        RuntimeProviderRouteKind::ResponsesCompact => 1,
+        RuntimeProviderRouteKind::ChatCompletions => 2,
+        RuntimeProviderRouteKind::Messages => 3,
+        RuntimeProviderRouteKind::Embeddings => 4,
+        RuntimeProviderRouteKind::ModelsList => 5,
+        RuntimeProviderRouteKind::ModelsSingle(_) => 6,
+    }
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_provider_route_endpoint(
