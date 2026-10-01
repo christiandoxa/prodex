@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
 serde_json = { workspace = true }
 
 [lints]

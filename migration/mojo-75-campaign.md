@@ -3591,3 +3591,21 @@ Mojo no-fallback guard with a dedicated regression rule. The canonical broad
 report at this checkpoint counts **68,679 reachable Mojo LOC** and **199,191
 Rust production LOC**, totaling **267,870 LOC**: **25.63892933139209% Mojo**.
 The 75% broad target remains in progress.
+
+## MCP Content-Length framing policy hard replacement
+
+MCP stdio Content-Length semantics now run through `mcp_stdio_policy.mojo`.
+Mojo owns case-insensitive Content-Length header recognition (including the
+trimmed continuation-header path) and bounded decimal Content-Length parsing,
+including optional leading `+`, Unicode surrounding whitespace, overflow, and
+missing-separator classification. Rust retains streaming `BufRead`, bounded
+buffer acquisition, JSON serde, and wire writes only. The former Rust
+lowercase-prefix checks plus `split_once`/`parse::<usize>` semantic parser were
+deleted and no Rust fallback remains.
+
+Focused validation passes the real-Mojo MCP policy test, all 16
+`prodex-mcp-stdio` tests, clippy with warnings denied, `git diff --check`, and
+the Mojo no-fallback guard with a dedicated regression rule. The canonical
+broad report at this checkpoint counts **68,820 reachable Mojo LOC** and
+**199,268 Rust production LOC**, totaling **268,088 LOC**:
+**25.67067530064755% Mojo**. The 75% broad target remains in progress.
