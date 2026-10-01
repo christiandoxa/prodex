@@ -711,6 +711,31 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_quota_copilot_feature_key_v1(
+        abi_version: i64,
+        index: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_quota_copilot_display_v1(
+        abi_version: i64,
+        chat_remaining_present: i64,
+        chat_remaining: i64,
+        chat_total_present: i64,
+        chat_total: i64,
+        completions_remaining_present: i64,
+        completions_remaining: i64,
+        completions_total_present: i64,
+        completions_total: i64,
+        status_output_address: u64,
+        status_output_capacity: i64,
+        status_written_address: u64,
+        main_output_address: u64,
+        main_output_capacity: i64,
+        main_written_address: u64,
+        ready_address: u64,
+    ) -> i64;
     fn prodex_quota_report_sort_next_v1(abi_version: i64, sort: i64) -> i64;
 }
 
@@ -1017,6 +1042,106 @@ pub fn quota_window_label(seconds: Option<i64>) -> Result<String, crate::MojoErr
         return Err(crate::MojoError::InvalidOutput);
     }
     String::from_utf8(output[..written].to_vec()).map_err(|_| crate::MojoError::InvalidOutput)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopilotQuotaDisplay {
+    pub ready: bool,
+    pub status: String,
+    pub main: String,
+}
+
+fn load_copilot_feature_key(index: i64) -> Result<String, crate::MojoError> {
+    let mut output = [0_u8; 32];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_quota_copilot_feature_key_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            index,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| crate::MojoError::InvalidOutput)
+}
+
+pub fn quota_copilot_feature_key(index: usize) -> Result<&'static str, crate::MojoError> {
+    use std::sync::OnceLock;
+
+    static KEYS: OnceLock<Result<Vec<String>, crate::MojoError>> = OnceLock::new();
+    if index >= 2 {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    match KEYS.get_or_init(|| (0_i64..2).map(load_copilot_feature_key).collect()) {
+        Ok(keys) => keys
+            .get(index)
+            .map(String::as_str)
+            .ok_or(crate::MojoError::InvalidOutput),
+        Err(error) => Err(*error),
+    }
+}
+
+pub fn quota_copilot_display(
+    chat_remaining: Option<i64>,
+    chat_total: Option<i64>,
+    completions_remaining: Option<i64>,
+    completions_total: Option<i64>,
+) -> Result<CopilotQuotaDisplay, crate::MojoError> {
+    const STATUS_CAPACITY: usize = 16;
+    const MAIN_CAPACITY: usize = 128;
+    let mut status_output = [0_u8; STATUS_CAPACITY];
+    let mut status_written = -1_i64;
+    let mut main_output = [0_u8; MAIN_CAPACITY];
+    let mut main_written = -1_i64;
+    let mut ready = -1_i64;
+    let status = unsafe {
+        prodex_quota_copilot_display_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            i64::from(chat_remaining.is_some()),
+            chat_remaining.unwrap_or_default(),
+            i64::from(chat_total.is_some()),
+            chat_total.unwrap_or_default(),
+            i64::from(completions_remaining.is_some()),
+            completions_remaining.unwrap_or_default(),
+            i64::from(completions_total.is_some()),
+            completions_total.unwrap_or_default(),
+            status_output.as_mut_ptr() as usize as u64,
+            i64::try_from(status_output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut status_written as *mut i64) as usize as u64,
+            main_output.as_mut_ptr() as usize as u64,
+            i64::try_from(main_output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut main_written as *mut i64) as usize as u64,
+            (&mut ready as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    let ready = match ready {
+        0 => false,
+        1 => true,
+        _ => return Err(crate::MojoError::InvalidOutput),
+    };
+    let status_written =
+        usize::try_from(status_written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    let main_written =
+        usize::try_from(main_written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if status_written > status_output.len() || main_written > main_output.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    let status = String::from_utf8(status_output[..status_written].to_vec())
+        .map_err(|_| crate::MojoError::InvalidOutput)?;
+    let main = String::from_utf8(main_output[..main_written].to_vec())
+        .map_err(|_| crate::MojoError::InvalidOutput)?;
+    Ok(CopilotQuotaDisplay {
+        ready,
+        status,
+        main,
+    })
 }
 
 pub fn quota_report_sort_next(sort: i64) -> Result<i64, crate::MojoError> {

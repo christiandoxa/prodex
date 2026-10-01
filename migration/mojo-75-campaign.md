@@ -4020,3 +4020,23 @@ strengthened no-fallback guard. The canonical broad report at this checkpoint
 counts **72,001 reachable Mojo LOC** and **200,661 Rust production LOC**,
 totaling **272,662 LOC**: **26.40668666700897% Mojo**. The 75% broad target
 remains in progress.
+
+## Copilot quota display hard replacement
+
+Copilot quota feature selection and rendering now run through `quota.mojo`.
+Mojo owns the ordered feature keys (`chat`, `completions`), readiness/blocking
+policy, status text, and complete `Main` quota rendering including optional
+totals, separators, negative values, and the empty `-` state. Rust retains
+BTreeMap ownership and lookup for the Mojo-selected keys, chrono reset-date
+parsing, report/panel composition, and provider data acquisition. The previous
+Rust feature-label table, blocked-feature planner, Ready/Blocked branch, and
+main quota formatting pipeline were deleted; no Rust semantic fallback remains
+for the migrated Copilot display policy.
+
+Focused validation passes the standalone `quota.mojo` build, the real-Mojo
+Copilot feature/display adapter tests, all 82 `prodex-quota` tests, Clippy with
+warnings denied for `prodex-mojo-core` and `prodex-quota`, `git diff --check`,
+and the strengthened no-fallback guard. The canonical broad report at this
+checkpoint counts **72,202 reachable Mojo LOC** and **200,762 Rust production
+LOC**, totaling **272,964 LOC**: **26.45110710569892% Mojo**. The 75% broad
+target remains in progress.
