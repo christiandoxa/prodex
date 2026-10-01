@@ -4081,3 +4081,24 @@ no-fallback guard. The canonical broad report at this checkpoint counts
 **72,623 reachable Mojo LOC** and **200,969 Rust production LOC**, totaling
 **273,592 LOC**: **26.54427030030118% Mojo**. The 75% broad target remains in
 progress.
+
+## Quota workspace label policy hard replacement
+
+Quota workspace label selection and shortening now run through `quota.mojo`.
+Mojo owns workspace-name precedence, Rust-compatible Unicode whitespace
+trimming, blank rejection, and Unicode-codepoint-safe workspace-id shortening
+to 12 leading characters plus `...` plus 6 trailing characters when the
+trimmed id exceeds 24 characters. Rust retains optional string ownership and
+report composition only. The previous Rust trim/filter chain,
+`short_workspace_id()`, `chars()` collection, and slicing formatter were
+deleted; no Rust semantic fallback remains for the migrated workspace-label
+policy.
+
+Focused validation passes the standalone `quota.mojo` build, the real-Mojo
+workspace-label adapter tests including Unicode trimming/truncation, the two
+focused workspace report regressions, Clippy with warnings denied for
+`prodex-mojo-core` and `prodex-quota`, `git diff --check`, and the strengthened
+no-fallback guard. The canonical broad report at this checkpoint counts
+**72,733 reachable Mojo LOC** and **201,013 Rust production LOC**, totaling
+**273,746 LOC**: **26.569520650530052% Mojo**. The 75% broad target remains in
+progress.
