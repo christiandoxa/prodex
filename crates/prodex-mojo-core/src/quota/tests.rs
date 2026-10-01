@@ -54,6 +54,51 @@ fn quota_model_policy_kernel_preserves_expected_contracts() {
         }
     );
     assert_eq!(
+        quota_gemini_bucket_label(Some(" models/gemini-3.5-flash "), Some("IGNORED")).unwrap(),
+        "gemini-3.5-flash"
+    );
+    assert_eq!(
+        quota_gemini_bucket_label(None, Some(" TEXT ")).unwrap(),
+        "text"
+    );
+    assert_eq!(quota_gemini_bucket_label(None, None).unwrap(), "gemini");
+    let gemini_numeric = [
+        GeminiBucketNumericOutput {
+            remaining: Some(50),
+            total: Some(100),
+            remaining_percent: Some(50),
+            exhausted: false,
+        },
+        GeminiBucketNumericOutput {
+            remaining: Some(25),
+            total: None,
+            remaining_percent: Some(25),
+            exhausted: false,
+        },
+    ];
+    assert_eq!(
+        quota_gemini_bucket_summary("gemini-a", gemini_numeric[0]).unwrap(),
+        "gemini-a 50/100"
+    );
+    assert_eq!(
+        quota_gemini_display(&gemini_numeric).unwrap(),
+        GeminiQuotaDisplay {
+            ready: true,
+            status: "Ready".to_string(),
+            main: "gemini 25% (2 buckets)".to_string(),
+            remaining_percent: Some(25),
+        }
+    );
+    assert_eq!(
+        quota_gemini_display(&[]).unwrap(),
+        GeminiQuotaDisplay {
+            ready: false,
+            status: "Unknown".to_string(),
+            main: "-".to_string(),
+            remaining_percent: None,
+        }
+    );
+    assert_eq!(
         quota_auth_summary_kind(Some(" Bedrock_API-Key "), false, false, false).unwrap(),
         QuotaAuthSummaryKind::BedrockApiKey
     );

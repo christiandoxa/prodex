@@ -4040,3 +4040,23 @@ and the strengthened no-fallback guard. The canonical broad report at this
 checkpoint counts **72,202 reachable Mojo LOC** and **200,762 Rust production
 LOC**, totaling **272,964 LOC**: **26.45110710569892% Mojo**. The 75% broad
 target remains in progress.
+
+## Gemini quota display hard replacement
+
+Gemini quota display policy now runs through `quota.mojo`. Mojo owns bucket
+label selection from model/token metadata, `models/` stripping, token-type
+ASCII lowercasing, bucket summary rendering, exhausted/readiness aggregation,
+minimum remaining-percent selection, status text, and complete main quota
+rendering for percent, raw-amount, unknown, and empty states. Rust retains
+provider JSON/Serde ownership, RFC3339 reset parsing via chrono, batch ABI
+chunking, and report/panel composition. The previous Rust Gemini label,
+blocked-bucket, summary, min-percent, status, and main-rendering branches were
+deleted; no Rust semantic fallback remains for the migrated display policy.
+
+Focused validation passes the standalone `quota.mojo` build, the real-Mojo
+Gemini display adapter tests, all 82 `prodex-quota` tests, Clippy with warnings
+denied for `prodex-mojo-core` and `prodex-quota`, `git diff --check`, and the
+strengthened no-fallback guard. The canonical broad report at this checkpoint
+counts **72,506 reachable Mojo LOC** and **200,864 Rust production LOC**,
+totaling **273,370 LOC**: **26.52302739876358% Mojo**. The 75% broad target
+remains in progress.

@@ -1,12 +1,5 @@
 use super::*;
-
-#[derive(Debug, Clone, Copy)]
-struct GeminiBucketNumeric {
-    remaining: Option<i64>,
-    total: Option<i64>,
-    remaining_percent: Option<i64>,
-    exhausted: bool,
-}
+use prodex_mojo_core::quota::GeminiBucketNumericOutput;
 
 fn gemini_numeric_input(
     bucket: &GeminiQuotaBucket,
@@ -25,7 +18,7 @@ fn gemini_numeric_input(
     }
 }
 
-fn gemini_numeric_batch(buckets: &[GeminiQuotaBucket]) -> Vec<GeminiBucketNumeric> {
+fn gemini_numeric_batch(buckets: &[GeminiQuotaBucket]) -> Vec<GeminiBucketNumericOutput> {
     // ponytail: 1,024-row ABI batches; raise only with a versioned ABI/capacity review.
     buckets
         .chunks(prodex_mojo_core::quota::QUOTA_GEMINI_BUCKET_BATCH_MAX_COUNT)
@@ -33,66 +26,34 @@ fn gemini_numeric_batch(buckets: &[GeminiQuotaBucket]) -> Vec<GeminiBucketNumeri
             let inputs = batch.iter().map(gemini_numeric_input).collect::<Vec<_>>();
             crate::mojo::gemini_bucket_numeric_batch(&inputs)
                 .unwrap_or_else(|error| panic!("Mojo Gemini quota numeric batch failed: {error:?}"))
-                .into_iter()
-                .map(|output| GeminiBucketNumeric {
-                    remaining: output.remaining,
-                    total: output.total,
-                    remaining_percent: output.remaining_percent,
-                    exhausted: output.exhausted,
-                })
         })
         .collect()
 }
 
 fn gemini_bucket_label(bucket: &GeminiQuotaBucket) -> String {
-    bucket
-        .model_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(|value| value.strip_prefix("models/").unwrap_or(value).to_string())
-        .or_else(|| {
-            bucket
-                .token_type
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_ascii_lowercase)
-        })
-        .unwrap_or_else(|| "gemini".to_string())
+    prodex_mojo_core::quota::quota_gemini_bucket_label(
+        bucket.model_id.as_deref(),
+        bucket.token_type.as_deref(),
+    )
+    .expect("Mojo Gemini bucket label policy returned invalid output")
+}
+
+fn gemini_display(info: &GeminiQuotaInfo) -> prodex_mojo_core::quota::GeminiQuotaDisplay {
+    let numeric = gemini_numeric_batch(&info.buckets);
+    prodex_mojo_core::quota::quota_gemini_display(&numeric)
+        .expect("Mojo Gemini quota display policy returned invalid output")
 }
 
 pub(super) fn gemini_main_remaining_percent(info: &GeminiQuotaInfo) -> Option<i64> {
-    gemini_numeric_batch(&info.buckets)
-        .iter()
-        .filter_map(|numeric| numeric.remaining_percent)
-        .min()
-}
-
-fn gemini_blocked_buckets(info: &GeminiQuotaInfo) -> Vec<String> {
-    let numeric = gemini_numeric_batch(&info.buckets);
-    info.buckets
-        .iter()
-        .zip(numeric)
-        .filter(|(_, numeric)| numeric.exhausted)
-        .map(|(bucket, _)| format!("{} exhausted", gemini_bucket_label(bucket)))
-        .collect()
+    gemini_display(info).remaining_percent
 }
 
 pub fn gemini_quota_is_ready(info: &GeminiQuotaInfo) -> bool {
-    !info.buckets.is_empty() && gemini_blocked_buckets(info).is_empty()
+    gemini_display(info).ready
 }
 
 pub fn format_gemini_quota_status(info: &GeminiQuotaInfo) -> String {
-    if info.buckets.is_empty() {
-        return "Unknown".to_string();
-    }
-    let blocked = gemini_blocked_buckets(info);
-    if blocked.is_empty() {
-        "Ready".to_string()
-    } else {
-        "Blocked".to_string()
-    }
+    gemini_display(info).status
 }
 
 pub(super) fn format_gemini_bucket_summaries(info: &GeminiQuotaInfo) -> Vec<String> {
@@ -101,51 +62,14 @@ pub(super) fn format_gemini_bucket_summaries(info: &GeminiQuotaInfo) -> Vec<Stri
         .zip(&info.buckets)
         .map(|(numeric, bucket)| {
             let label = gemini_bucket_label(bucket);
-            format_gemini_bucket_summary_with_numeric(&label, numeric)
+            prodex_mojo_core::quota::quota_gemini_bucket_summary(&label, numeric)
+                .expect("Mojo Gemini bucket summary policy returned invalid output")
         })
         .collect()
 }
 
-fn format_gemini_bucket_summary_with_numeric(label: &str, numeric: GeminiBucketNumeric) -> String {
-    match numeric.remaining {
-        Some(remaining) => match numeric.total {
-            Some(total) => format!("{label} {remaining}/{total}"),
-            None => format!("{label} {remaining}"),
-        },
-        None => format!("{label} quota unknown"),
-    }
-}
-
 pub fn format_gemini_main_quota(info: &GeminiQuotaInfo) -> String {
-    if info.buckets.is_empty() {
-        return "-".to_string();
-    }
-    let numeric = gemini_numeric_batch(&info.buckets);
-    if let Some(percent) = numeric
-        .iter()
-        .filter_map(|numeric| numeric.remaining_percent)
-        .min()
-    {
-        let bucket_count = info.buckets.len();
-        return if bucket_count == 1 {
-            format!("gemini {percent}%")
-        } else {
-            format!("gemini {percent}% ({bucket_count} buckets)")
-        };
-    }
-
-    let known_amounts = numeric
-        .iter()
-        .filter_map(|numeric| numeric.remaining)
-        .collect::<Vec<_>>();
-    if known_amounts.is_empty() {
-        "gemini quota unknown".to_string()
-    } else {
-        format!(
-            "gemini {}",
-            known_amounts.iter().copied().min().unwrap_or(0)
-        )
-    }
+    gemini_display(info).main
 }
 
 pub(super) fn gemini_reset_epoch(info: &GeminiQuotaInfo) -> Option<i64> {
