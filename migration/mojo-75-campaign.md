@@ -3922,3 +3922,21 @@ no-fallback guard. The canonical broad report at this checkpoint counts
 **71,824 reachable Mojo LOC** and **200,528 Rust production LOC**, totaling
 **272,352 LOC**: **26.37175420044648% Mojo**. The 75% broad target remains in
 progress.
+
+## Local-rewrite previous-response metadata hard replacement
+
+Local-rewrite continuation lookup now reuses the canonical runtime request
+metadata path. `runtime_local_rewrite_previous_response_id()` delegates to
+`prodex-runtime-proxy::runtime_request_previous_response_id_from_bytes()`, whose
+field selection, nonblank validation, and trimming are owned by
+`runtime_proxy_request.mojo`. Rust retains JSON decoding into the canonical
+request metadata bridge and the surrounding binding/state lookup. The duplicate
+local Serde field lookup and trim/filter chain were deleted; no local Rust
+semantic fallback remains for `previous_response_id` extraction.
+
+Focused validation passes the local-rewrite wrapper regression, the canonical
+runtime-proxy request-metadata test, Clippy with warnings denied for
+`prodex-app`, `git diff --check`, and the strengthened no-fallback guard. The
+canonical broad report at this checkpoint counts **71,824 reachable Mojo LOC**
+and **200,519 Rust production LOC**, totaling **272,343 LOC**:
+**26.372625696272713% Mojo**. The 75% broad target remains in progress.

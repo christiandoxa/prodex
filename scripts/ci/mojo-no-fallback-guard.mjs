@@ -2020,6 +2020,17 @@ export function findViolations(files) {
       ) {
         violations.push(filePath + ": contains restored Rust OpenAI retry eligibility matrix");
       }
+      const previousBody = contents.match(/\bpub\(super\) fn\s+runtime_local_rewrite_previous_response_id\([^]*?^\}/mu)?.[0];
+      if (!previousBody?.includes("runtime_request_previous_response_id_from_bytes(")) {
+        violations.push(filePath + ": local rewrite previous-response extraction must retain canonical Mojo-backed request metadata helper");
+      }
+      if (
+        previousBody?.includes("serde_json::from_slice")
+        || previousBody?.includes('.get("previous_response_id")')
+        || previousBody?.includes(".map(str::trim)")
+      ) {
+        violations.push(filePath + ": contains restored Rust previous_response_id parsing semantics");
+      }
       return violations;
     }
     if (filePath === PROVIDER_ERROR_FILE) {
