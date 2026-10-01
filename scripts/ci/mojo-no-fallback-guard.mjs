@@ -23,6 +23,10 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/provider_usage.rs",
   "crates/prodex-provider-core/src/usage.rs",
   "crates/prodex-audit-log/src/lib.rs",
+  "crates/prodex-core/src/lib.rs",
+  "crates/prodex-mojo-core/src/core_file_policy.rs",
+  "crates/prodex-core/src/lib.rs",
+  "crates/prodex-mojo-core/src/core_file_policy.rs",
   "crates/prodex-mojo-core/src/audit_log_policy.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace.rs",
   "crates/prodex-mojo-core/src/runtime_route_reason.rs",
@@ -867,6 +871,36 @@ export function findViolations(files) {
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": audit usage ABI adapter must retain " + call);
+    }
+    return [];
+  });
+  const coreFilePolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-core/src/lib.rs") {
+      const required = [
+        "core_file_policy::owned_root_temp_file_name(",
+        "core_file_policy::root_temp_file_pid(",
+        "core_file_policy::stale_root_temp_file_should_remove(",
+        "core_file_policy::runtime_proxy_log_file_name_is_owned(",
+        "core_file_policy::login_temp_dir_name_is_owned(",
+        "core_file_policy::runtime_broker_artifact_key_range(",
+        "core_file_policy::runtime_broker_lease_pid(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": core file-policy hard replacement must retain " + call);
+      if (
+        /name\.starts_with\("state\.json\."\)/u.test(contents)
+        || /name\.strip_suffix\("\.tmp"\)/u.test(contents)
+        || /strip_prefix\("runtime-broker-"\)/u.test(contents)
+        || /file_name\s*\.split\('-'\)/u.test(contents)
+      ) {
+        violations.push(filePath + ": contains restored Rust core file-policy semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/core_file_policy.rs" &&
+        !contents.includes("prodex_core_file_policy_v1(")) {
+      return [filePath + ": core file-policy ABI adapter must retain prodex_core_file_policy_v1("];
     }
     return [];
   });
@@ -2083,6 +2117,7 @@ export function findViolations(files) {
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
+    ...coreFilePolicyViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
     ...kiroChatResponseViolations,
