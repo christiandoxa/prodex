@@ -81,6 +81,7 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/models.rs",
   "crates/prodex-quota/src/auth.rs",
   "crates/prodex-quota/src/render/time.rs",
+  "crates/prodex-quota/src/render/copilot.rs",
   "crates/prodex-profile-identity/src/lib.rs",
   "crates/prodex-mojo-core/src/profile_identity.rs",
   "crates/prodex-domain/src/governance/inspection.rs",
@@ -709,6 +710,7 @@ const RUNTIME_TUNING_CARGO_FILE = "crates/prodex-runtime-tuning/Cargo.toml";
 const QUOTA_MODELS_FILE = "crates/prodex-quota/src/models.rs";
 const QUOTA_AUTH_FILE = "crates/prodex-quota/src/auth.rs";
 const QUOTA_TIME_FILE = "crates/prodex-quota/src/render/time.rs";
+const QUOTA_COPILOT_FILE = "crates/prodex-quota/src/render/copilot.rs";
 const QUOTA_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
@@ -2283,6 +2285,29 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === QUOTA_COPILOT_FILE) {
+      const required = [
+        "quota_copilot_feature_key(",
+        "quota_copilot_display(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": Copilot quota display migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      for (const retired of [
+        "fn copilot_quota_feature_labels(",
+        "fn copilot_blocked_features(",
+        '[("chat", "chat"), ("completions", "comp")]',
+        'parts.join(" | ")',
+        "if blocked.is_empty()",
+      ]) {
+        if (production.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust Copilot quota display policy");
+          break;
+        }
+      }
+      return violations;
+    }
     if (filePath === QUOTA_AUTH_FILE) {
       const violations = contents.includes("quota_usage_auth_sync_source_label(")
         ? []
@@ -2297,6 +2322,8 @@ export function findViolations(files) {
       const required = [
         "prodex_quota_display_label_v1(",
         "prodex_quota_window_label_plan_v1(",
+        "prodex_quota_copilot_feature_key_v1(",
+        "prodex_quota_copilot_display_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))

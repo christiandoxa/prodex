@@ -1,59 +1,39 @@
 use super::*;
 
-fn copilot_quota_feature_labels() -> [(&'static str, &'static str); 2] {
-    [("chat", "chat"), ("completions", "comp")]
-}
-
-fn copilot_remaining_quota(info: &CopilotQuotaInfo, feature: &str) -> Option<i64> {
-    info.limited_user_quotas
+fn copilot_feature_values(info: &CopilotQuotaInfo, index: usize) -> (Option<i64>, Option<i64>) {
+    let feature = prodex_mojo_core::quota::quota_copilot_feature_key(index)
+        .expect("Mojo Copilot quota feature key returned invalid output");
+    let remaining = info
+        .limited_user_quotas
         .get(feature)
         .copied()
-        .or_else(|| info.monthly_quotas.get(feature).copied())
+        .or_else(|| info.monthly_quotas.get(feature).copied());
+    let total = info.monthly_quotas.get(feature).copied();
+    (remaining, total)
 }
 
-fn copilot_total_quota(info: &CopilotQuotaInfo, feature: &str) -> Option<i64> {
-    info.monthly_quotas.get(feature).copied()
-}
-
-fn copilot_blocked_features(info: &CopilotQuotaInfo) -> Vec<String> {
-    [("chat", "chat"), ("completions", "completions")]
-        .into_iter()
-        .filter_map(|(feature, label)| {
-            (copilot_remaining_quota(info, feature).unwrap_or(1) <= 0).then_some(label.to_string())
-        })
-        .collect()
+fn copilot_display(info: &CopilotQuotaInfo) -> prodex_mojo_core::quota::CopilotQuotaDisplay {
+    let (chat_remaining, chat_total) = copilot_feature_values(info, 0);
+    let (completions_remaining, completions_total) = copilot_feature_values(info, 1);
+    prodex_mojo_core::quota::quota_copilot_display(
+        chat_remaining,
+        chat_total,
+        completions_remaining,
+        completions_total,
+    )
+    .expect("Mojo Copilot quota display policy returned invalid output")
 }
 
 pub fn copilot_quota_is_ready(info: &CopilotQuotaInfo) -> bool {
-    copilot_blocked_features(info).is_empty()
+    copilot_display(info).ready
 }
 
 pub fn format_copilot_quota_status(info: &CopilotQuotaInfo) -> String {
-    let blocked = copilot_blocked_features(info);
-    if blocked.is_empty() {
-        "Ready".to_string()
-    } else {
-        "Blocked".to_string()
-    }
+    copilot_display(info).status
 }
 
 pub fn format_copilot_main_quota(info: &CopilotQuotaInfo) -> String {
-    let parts = copilot_quota_feature_labels()
-        .into_iter()
-        .filter_map(|(feature, label)| {
-            let remaining = copilot_remaining_quota(info, feature)?;
-            Some(match copilot_total_quota(info, feature) {
-                Some(total) => format!("{label} {remaining}/{total}"),
-                None => format!("{label} {remaining}"),
-            })
-        })
-        .collect::<Vec<_>>();
-
-    if parts.is_empty() {
-        "-".to_string()
-    } else {
-        parts.join(" | ")
-    }
+    copilot_display(info).main
 }
 
 pub(super) fn copilot_reset_epoch(info: &CopilotQuotaInfo) -> Option<i64> {

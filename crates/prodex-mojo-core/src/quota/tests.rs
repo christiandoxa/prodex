@@ -27,6 +27,32 @@ fn quota_model_policy_kernel_preserves_expected_contracts() {
         Ok("monthly".to_string())
     );
     assert_eq!(quota_window_label(Some(42)), Ok("42s".to_string()));
+    assert_eq!(quota_copilot_feature_key(0), Ok("chat"));
+    assert_eq!(quota_copilot_feature_key(1), Ok("completions"));
+    assert_eq!(
+        quota_copilot_display(Some(450), Some(500), Some(4_000), Some(4_000)).unwrap(),
+        CopilotQuotaDisplay {
+            ready: true,
+            status: "Ready".to_string(),
+            main: "chat 450/500 | comp 4000/4000".to_string(),
+        }
+    );
+    assert_eq!(
+        quota_copilot_display(Some(0), Some(500), None, None).unwrap(),
+        CopilotQuotaDisplay {
+            ready: false,
+            status: "Blocked".to_string(),
+            main: "chat 0/500".to_string(),
+        }
+    );
+    assert_eq!(
+        quota_copilot_display(None, None, None, None).unwrap(),
+        CopilotQuotaDisplay {
+            ready: true,
+            status: "Ready".to_string(),
+            main: "-".to_string(),
+        }
+    );
     assert_eq!(
         quota_auth_summary_kind(Some(" Bedrock_API-Key "), false, false, false).unwrap(),
         QuotaAuthSummaryKind::BedrockApiKey

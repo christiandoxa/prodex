@@ -1144,6 +1144,231 @@ def prodex_quota_window_label_plan_v1(
     return QUOTA_MODEL_POLICY_OK
 
 
+
+@fieldwise_init
+struct QuotaCopilotWriter(Copyable):
+    var output: Pointer[mut=True, UInt8, MutUntrackedOrigin]
+    var capacity: Int64
+    var written: Int64
+
+
+def quota_copilot_put_byte(
+    writer: Pointer[mut=True, QuotaCopilotWriter, _],
+    byte: UInt8,
+) -> Bool:
+    if writer[].written < 0 or writer[].written >= writer[].capacity:
+        return False
+    writer[].output[unsafe_offset=writer[].written] = byte
+    writer[].written += 1
+    return True
+
+
+def quota_copilot_put_literal(
+    writer: Pointer[mut=True, QuotaCopilotWriter, _],
+    value: StringSlice,
+) -> Bool:
+    var source = value.unsafe_ptr()
+    for index in range(Int64(value.byte_length())):
+        if not quota_copilot_put_byte(writer, source[unsafe_offset=index]):
+            return False
+    return True
+
+
+def quota_copilot_put_u64(
+    writer: Pointer[mut=True, QuotaCopilotWriter, _],
+    value: UInt64,
+) -> Bool:
+    if value == 0:
+        return quota_copilot_put_byte(writer, UInt8(48))
+    var divisor: UInt64 = 1
+    while value / divisor >= UInt64(10):
+        divisor *= UInt64(10)
+    var remaining = value
+    while divisor > 0:
+        if not quota_copilot_put_byte(
+            writer, UInt8(remaining / divisor) + UInt8(48)
+        ):
+            return False
+        remaining %= divisor
+        divisor //= UInt64(10)
+    return True
+
+
+def quota_copilot_put_i64(
+    writer: Pointer[mut=True, QuotaCopilotWriter, _],
+    value: Int64,
+) -> Bool:
+    if value >= 0:
+        return quota_copilot_put_u64(writer, UInt64(value))
+    if not quota_copilot_put_byte(writer, UInt8(45)):
+        return False
+    var magnitude = (
+        UInt64(9_223_372_036_854_775_808)
+        if value == -9_223_372_036_854_775_808
+        else UInt64(-value)
+    )
+    return quota_copilot_put_u64(writer, magnitude)
+
+
+def quota_copilot_write_feature(
+    writer: Pointer[mut=True, QuotaCopilotWriter, _],
+    label: StringSlice,
+    remaining_present: Int64,
+    remaining: Int64,
+    total_present: Int64,
+    total: Int64,
+) -> Bool:
+    if remaining_present == 0:
+        return True
+    if not quota_copilot_put_literal(writer, label):
+        return False
+    if not quota_copilot_put_byte(writer, UInt8(32)):
+        return False
+    if not quota_copilot_put_i64(writer, remaining):
+        return False
+    if total_present == 1:
+        if not quota_copilot_put_byte(writer, UInt8(47)):
+            return False
+        if not quota_copilot_put_i64(writer, total):
+            return False
+    return True
+
+
+@export("prodex_quota_copilot_feature_key_v1")
+def prodex_quota_copilot_feature_key_v1(
+    abi_version: Int64,
+    index: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if index == 0:
+        return quota_model_policy_copy_label(
+            StringSlice("chat"),
+            output_address,
+            output_capacity,
+            written_address,
+        )
+    if index == 1:
+        return quota_model_policy_copy_label(
+            StringSlice("completions"),
+            output_address,
+            output_capacity,
+            written_address,
+        )
+    return QUOTA_MODEL_POLICY_INVALID
+
+
+@export("prodex_quota_copilot_display_v1")
+def prodex_quota_copilot_display_v1(
+    abi_version: Int64,
+    chat_remaining_present: Int64,
+    chat_remaining: Int64,
+    chat_total_present: Int64,
+    chat_total: Int64,
+    completions_remaining_present: Int64,
+    completions_remaining: Int64,
+    completions_total_present: Int64,
+    completions_total: Int64,
+    status_output_address: UInt,
+    status_output_capacity: Int64,
+    status_written_address: UInt,
+    main_output_address: UInt,
+    main_output_capacity: Int64,
+    main_written_address: UInt,
+    ready_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if (
+        (chat_remaining_present != 0 and chat_remaining_present != 1)
+        or (chat_total_present != 0 and chat_total_present != 1)
+        or (
+            completions_remaining_present != 0
+            and completions_remaining_present != 1
+        )
+        or (completions_total_present != 0 and completions_total_present != 1)
+        or status_output_address == 0
+        or status_output_capacity < 0
+        or status_written_address == 0
+        or main_output_address == 0
+        or main_output_capacity < 0
+        or main_written_address == 0
+        or ready_address == 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+
+    var ready = not (
+        (chat_remaining_present == 1 and chat_remaining <= 0)
+        or (
+            completions_remaining_present == 1
+            and completions_remaining <= 0
+        )
+    )
+    var ready_output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(ready_address)
+    )
+    ready_output[] = Int64(ready)
+
+    var status = StringSlice("Ready") if ready else StringSlice("Blocked")
+    var status_code = quota_model_policy_copy_label(
+        status,
+        status_output_address,
+        status_output_capacity,
+        status_written_address,
+    )
+    if status_code != QUOTA_MODEL_POLICY_OK:
+        return status_code
+
+    var main_output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(main_output_address)
+    )
+    var writer = QuotaCopilotWriter(
+        main_output,
+        main_output_capacity,
+        0,
+    )
+    var any = False
+    if chat_remaining_present == 1:
+        if not quota_copilot_write_feature(
+            Pointer(to=writer),
+            StringSlice("chat"),
+            chat_remaining_present,
+            chat_remaining,
+            chat_total_present,
+            chat_total,
+        ):
+            return QUOTA_MODEL_POLICY_CAPACITY
+        any = True
+    if completions_remaining_present == 1:
+        if any:
+            if not quota_copilot_put_literal(
+                Pointer(to=writer), StringSlice(" | ")
+            ):
+                return QUOTA_MODEL_POLICY_CAPACITY
+        if not quota_copilot_write_feature(
+            Pointer(to=writer),
+            StringSlice("comp"),
+            completions_remaining_present,
+            completions_remaining,
+            completions_total_present,
+            completions_total,
+        ):
+            return QUOTA_MODEL_POLICY_CAPACITY
+        any = True
+    if not any:
+        if not quota_copilot_put_literal(Pointer(to=writer), StringSlice("-")):
+            return QUOTA_MODEL_POLICY_CAPACITY
+
+    var main_written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(main_written_address)
+    )
+    main_written[] = writer.written
+    return QUOTA_MODEL_POLICY_OK
+
+
 @export("prodex_quota_plan_capacity_pressure_scale_bps_v1")
 def prodex_quota_plan_capacity_pressure_scale_bps_v1(
     abi_version: Int64,
