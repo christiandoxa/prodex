@@ -110,24 +110,6 @@ pub(super) fn collect_quota_pool_aggregate(reports: &[QuotaReport]) -> QuotaPool
     aggregate
 }
 
-fn copilot_main_remaining_percent(info: &CopilotQuotaInfo) -> Option<i64> {
-    ["chat", "completions"]
-        .into_iter()
-        .filter_map(|feature| {
-            let total = info.monthly_quotas.get(feature).copied()?;
-            (total > 0).then(|| {
-                let remaining = info
-                    .limited_user_quotas
-                    .get(feature)
-                    .copied()
-                    .or_else(|| info.monthly_quotas.get(feature).copied())
-                    .unwrap_or(0);
-                super::round_quota_float(remaining as f64 / total as f64 * 100.0)
-            })
-        })
-        .min()
-}
-
 fn provider_quota_snapshot_is_available(snapshot: &ProviderQuotaSnapshot) -> bool {
     match snapshot {
         ProviderQuotaSnapshot::OpenAi(usage) => openai_quota_has_ready_limit(usage),
@@ -225,21 +207,14 @@ fn format_ready_pool_remaining(
     five_hour_profiles: usize,
     weekly_profiles: usize,
 ) -> String {
-    if ready_profiles == 0 {
-        return "Unavailable".to_string();
-    }
-
-    let mut windows = Vec::new();
-    if five_hour_profiles > 0 {
-        windows.push(format!("5h {five_hour_remaining}%"));
-    }
-    if weekly_profiles > 0 {
-        windows.push(format!("weekly {weekly_remaining}%"));
-    }
-    format!(
-        "{} across {ready_profiles} ready profile(s)",
-        windows.join(" | ")
+    prodex_mojo_core::quota::quota_ready_pool_remaining(
+        five_hour_remaining,
+        weekly_remaining,
+        ready_profiles,
+        five_hour_profiles,
+        weekly_profiles,
     )
+    .expect("Mojo ready quota-pool rendering returned invalid output")
 }
 
 pub fn format_info_pool_remaining(
@@ -247,16 +222,11 @@ pub fn format_info_pool_remaining(
     profiles_with_data: usize,
     earliest_reset_at: Option<i64>,
 ) -> String {
-    if profiles_with_data == 0 {
-        return "Unavailable".to_string();
-    }
-
-    let mut value = format!("{total_remaining}% across {profiles_with_data} profile(s)");
-    if let Some(reset_at) = earliest_reset_at {
-        value.push_str(&format!(
-            "; earliest reset {}",
-            format_precise_reset_time(Some(reset_at))
-        ));
-    }
-    value
+    let reset = earliest_reset_at.map(|reset_at| format_precise_reset_time(Some(reset_at)));
+    prodex_mojo_core::quota::quota_info_pool_remaining(
+        total_remaining,
+        profiles_with_data,
+        reset.as_deref(),
+    )
+    .expect("Mojo quota-pool remaining rendering returned invalid output")
 }

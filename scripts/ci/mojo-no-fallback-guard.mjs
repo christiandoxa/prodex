@@ -2317,6 +2317,7 @@ export function findViolations(files) {
       const required = [
         "quota_copilot_feature_key(",
         "quota_copilot_display(",
+        "quota_copilot_main_remaining_percent(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -2356,6 +2357,29 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === QUOTA_POOL_FILE) {
+      const required = [
+        "prodex_mojo_core::quota::quota_ready_pool_remaining(",
+        "prodex_mojo_core::quota::quota_info_pool_remaining(",
+        "copilot_main_remaining_percent(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": quota-pool display migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      for (const retired of [
+        '["chat", "completions"]',
+        'return "Unavailable".to_string()',
+        'windows.join(" | ")',
+        'format!("{total_remaining}% across {profiles_with_data} profile(s)")',
+      ]) {
+        if (production.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust quota-pool display policy");
+          break;
+        }
+      }
+      return violations;
+    }
     if (filePath === QUOTA_AUTH_FILE) {
       const violations = contents.includes("quota_usage_auth_sync_source_label(")
         ? []
@@ -2372,6 +2396,9 @@ export function findViolations(files) {
         "prodex_quota_window_label_plan_v1(",
         "prodex_quota_copilot_feature_key_v1(",
         "prodex_quota_copilot_display_v1(",
+        "prodex_quota_copilot_main_remaining_percent_v1(",
+        "prodex_quota_ready_pool_remaining_v1(",
+        "prodex_quota_info_pool_remaining_v1(",
         "prodex_quota_gemini_bucket_label_v1(",
         "prodex_quota_gemini_bucket_summary_v1(",
         "prodex_quota_gemini_display_v1(",

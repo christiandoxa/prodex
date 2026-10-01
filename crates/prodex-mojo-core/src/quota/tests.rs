@@ -102,6 +102,31 @@ fn quota_model_policy_kernel_preserves_expected_contracts() {
         }
     );
     assert_eq!(
+        quota_copilot_main_remaining_percent(Some(450), Some(500), Some(4_000), Some(4_000))
+            .unwrap(),
+        Some(90)
+    );
+    assert_eq!(
+        quota_copilot_main_remaining_percent(None, None, None, None).unwrap(),
+        None
+    );
+    assert_eq!(
+        quota_ready_pool_remaining(80, 95, 1, 1, 1).unwrap(),
+        "5h 80% | weekly 95% across 1 ready profile(s)"
+    );
+    assert_eq!(
+        quota_ready_pool_remaining(0, 0, 0, 0, 0).unwrap(),
+        "Unavailable"
+    );
+    assert_eq!(
+        quota_info_pool_remaining(90, 1, Some("2026-05-09 00:00:00")).unwrap(),
+        "90% across 1 profile(s); earliest reset 2026-05-09 00:00:00"
+    );
+    assert_eq!(
+        quota_info_pool_remaining(0, 0, None).unwrap(),
+        "Unavailable"
+    );
+    assert_eq!(
         quota_gemini_bucket_label(Some(" models/gemini-3.5-flash "), Some("IGNORED")).unwrap(),
         "gemini-3.5-flash"
     );

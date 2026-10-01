@@ -4102,3 +4102,23 @@ no-fallback guard. The canonical broad report at this checkpoint counts
 **72,733 reachable Mojo LOC** and **201,013 Rust production LOC**, totaling
 **273,746 LOC**: **26.569520650530052% Mojo**. The 75% broad target remains in
 progress.
+
+## Quota pool display policy hard replacement
+
+Quota-pool display policy now runs through `quota.mojo`. Mojo owns Copilot main
+remaining-percent selection across chat/completions totals, ready-pool summary
+rendering, generic remaining-pool rendering, `Unavailable` behavior, window
+separator/label formatting, profile-count text, and earliest-reset suffix
+composition. Rust retains BTreeMap lookup of provider quota values, chrono reset
+timestamp formatting, aggregate DTO ownership, and report field assembly. The
+previous Rust Copilot percent calculation, ready-pool formatter, generic pool
+formatter, and now-unused float-rounding wrapper were deleted; no Rust semantic
+fallback remains for the migrated pool display policy.
+
+Focused validation passes the standalone `quota.mojo` build, the real-Mojo
+Copilot/pool display adapter tests, all 82 `prodex-quota` tests, Clippy with
+warnings denied for `prodex-mojo-core` and `prodex-quota`, `git diff --check`,
+and the strengthened no-fallback guard. The canonical broad report at this
+checkpoint counts **72,922 reachable Mojo LOC** and **201,113 Rust production
+LOC**, totaling **274,035 LOC**: **26.610469465579214% Mojo**. The 75% broad
+target remains in progress.

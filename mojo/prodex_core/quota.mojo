@@ -1501,6 +1501,211 @@ def prodex_quota_copilot_display_v1(
     return QUOTA_MODEL_POLICY_OK
 
 
+@export("prodex_quota_copilot_main_remaining_percent_v1")
+def prodex_quota_copilot_main_remaining_percent_v1(
+    abi_version: Int64,
+    chat_remaining_present: Int64,
+    chat_remaining: Int64,
+    chat_total_present: Int64,
+    chat_total: Int64,
+    completions_remaining_present: Int64,
+    completions_remaining: Int64,
+    completions_total_present: Int64,
+    completions_total: Int64,
+    percent_address: UInt,
+    percent_present_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if (
+        (chat_remaining_present != 0 and chat_remaining_present != 1)
+        or (chat_total_present != 0 and chat_total_present != 1)
+        or (
+            completions_remaining_present != 0
+            and completions_remaining_present != 1
+        )
+        or (completions_total_present != 0 and completions_total_present != 1)
+        or percent_address == 0
+        or percent_present_address == 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+
+    var percent = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(percent_address)
+    )
+    var present = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(percent_present_address)
+    )
+    percent[] = 0
+    present[] = 0
+
+    if chat_total_present == 1 and chat_total > 0:
+        var remaining = (
+            chat_remaining if chat_remaining_present == 1 else chat_total
+        )
+        percent[] = prodex_quota_round_f64(
+            Float64(remaining) / Float64(chat_total) * 100.0
+        )
+        present[] = 1
+
+    if completions_total_present == 1 and completions_total > 0:
+        var remaining = (
+            completions_remaining
+            if completions_remaining_present == 1
+            else completions_total
+        )
+        var value = prodex_quota_round_f64(
+            Float64(remaining) / Float64(completions_total) * 100.0
+        )
+        if present[] == 0 or value < percent[]:
+            percent[] = value
+            present[] = 1
+    return QUOTA_MODEL_POLICY_OK
+
+
+@export("prodex_quota_ready_pool_remaining_v1")
+def prodex_quota_ready_pool_remaining_v1(
+    abi_version: Int64,
+    five_hour_remaining: Int64,
+    weekly_remaining: Int64,
+    ready_profiles: Int64,
+    five_hour_profiles: Int64,
+    weekly_profiles: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if (
+        ready_profiles < 0
+        or five_hour_profiles < 0
+        or weekly_profiles < 0
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+    if ready_profiles == 0:
+        return quota_model_policy_copy_label(
+            StringSlice("Unavailable"),
+            output_address,
+            output_capacity,
+            written_address,
+        )
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var writer = QuotaDisplayWriter(output, output_capacity, 0)
+    var any = False
+    if five_hour_profiles > 0:
+        if (
+            not quota_display_put_literal(Pointer(to=writer), StringSlice("5h "))
+            or not quota_display_put_i64(
+                Pointer(to=writer), five_hour_remaining
+            )
+            or not quota_display_put_byte(Pointer(to=writer), UInt8(37))
+        ):
+            return QUOTA_MODEL_POLICY_CAPACITY
+        any = True
+    if weekly_profiles > 0:
+        if any and not quota_display_put_literal(
+            Pointer(to=writer), StringSlice(" | ")
+        ):
+            return QUOTA_MODEL_POLICY_CAPACITY
+        if (
+            not quota_display_put_literal(
+                Pointer(to=writer), StringSlice("weekly ")
+            )
+            or not quota_display_put_i64(Pointer(to=writer), weekly_remaining)
+            or not quota_display_put_byte(Pointer(to=writer), UInt8(37))
+        ):
+            return QUOTA_MODEL_POLICY_CAPACITY
+    if (
+        not quota_display_put_literal(
+            Pointer(to=writer), StringSlice(" across ")
+        )
+        or not quota_display_put_i64(Pointer(to=writer), ready_profiles)
+        or not quota_display_put_literal(
+            Pointer(to=writer), StringSlice(" ready profile(s)")
+        )
+    ):
+        return QUOTA_MODEL_POLICY_CAPACITY
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = writer.written
+    return QUOTA_MODEL_POLICY_OK
+
+
+@export("prodex_quota_info_pool_remaining_v1")
+def prodex_quota_info_pool_remaining_v1(
+    abi_version: Int64,
+    total_remaining: Int64,
+    profiles_with_data: Int64,
+    reset_address: UInt,
+    reset_length: Int64,
+    reset_present: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if (
+        profiles_with_data < 0
+        or reset_length < 0
+        or (reset_present != 0 and reset_present != 1)
+        or (reset_present == 1 and reset_length > 0 and reset_address == 0)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+    if profiles_with_data == 0:
+        return quota_model_policy_copy_label(
+            StringSlice("Unavailable"),
+            output_address,
+            output_capacity,
+            written_address,
+        )
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var writer = QuotaDisplayWriter(output, output_capacity, 0)
+    if (
+        not quota_display_put_i64(Pointer(to=writer), total_remaining)
+        or not quota_display_put_literal(
+            Pointer(to=writer), StringSlice("% across ")
+        )
+        or not quota_display_put_i64(Pointer(to=writer), profiles_with_data)
+        or not quota_display_put_literal(
+            Pointer(to=writer), StringSlice(" profile(s)")
+        )
+    ):
+        return QUOTA_MODEL_POLICY_CAPACITY
+
+    if reset_present == 1:
+        var reset = quota_model_policy_view(reset_address, reset_length)
+        if not rich_view_valid(reset, reset_length):
+            return QUOTA_MODEL_POLICY_INVALID
+        if (
+            not quota_display_put_literal(
+                Pointer(to=writer), StringSlice("; earliest reset ")
+            )
+            or not quota_display_put_view(Pointer(to=writer), reset)
+        ):
+            return QUOTA_MODEL_POLICY_CAPACITY
+
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = writer.written
+    return QUOTA_MODEL_POLICY_OK
+
+
 def quota_gemini_copy_label(
     model_address: UInt,
     model_length: Int64,

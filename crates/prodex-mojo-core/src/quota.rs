@@ -749,6 +749,41 @@ unsafe extern "C" {
         main_written_address: u64,
         ready_address: u64,
     ) -> i64;
+    fn prodex_quota_copilot_main_remaining_percent_v1(
+        abi_version: i64,
+        chat_remaining_present: i64,
+        chat_remaining: i64,
+        chat_total_present: i64,
+        chat_total: i64,
+        completions_remaining_present: i64,
+        completions_remaining: i64,
+        completions_total_present: i64,
+        completions_total: i64,
+        percent_address: u64,
+        percent_present_address: u64,
+    ) -> i64;
+    fn prodex_quota_ready_pool_remaining_v1(
+        abi_version: i64,
+        five_hour_remaining: i64,
+        weekly_remaining: i64,
+        ready_profiles: i64,
+        five_hour_profiles: i64,
+        weekly_profiles: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_quota_info_pool_remaining_v1(
+        abi_version: i64,
+        total_remaining: i64,
+        profiles_with_data: i64,
+        reset_address: u64,
+        reset_length: i64,
+        reset_present: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_quota_gemini_bucket_label_v1(
         abi_version: i64,
         model_address: u64,
@@ -1275,6 +1310,96 @@ pub fn quota_copilot_display(
         status,
         main,
     })
+}
+
+pub fn quota_copilot_main_remaining_percent(
+    chat_remaining: Option<i64>,
+    chat_total: Option<i64>,
+    completions_remaining: Option<i64>,
+    completions_total: Option<i64>,
+) -> Result<Option<i64>, crate::MojoError> {
+    let mut percent = 0_i64;
+    let mut present = -1_i64;
+    let status = unsafe {
+        prodex_quota_copilot_main_remaining_percent_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            i64::from(chat_remaining.is_some()),
+            chat_remaining.unwrap_or_default(),
+            i64::from(chat_total.is_some()),
+            chat_total.unwrap_or_default(),
+            i64::from(completions_remaining.is_some()),
+            completions_remaining.unwrap_or_default(),
+            i64::from(completions_total.is_some()),
+            completions_total.unwrap_or_default(),
+            (&mut percent as *mut i64) as usize as u64,
+            (&mut present as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    match present {
+        0 => Ok(None),
+        1 => Ok(Some(percent)),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+pub fn quota_ready_pool_remaining(
+    five_hour_remaining: i64,
+    weekly_remaining: i64,
+    ready_profiles: usize,
+    five_hour_profiles: usize,
+    weekly_profiles: usize,
+) -> Result<String, crate::MojoError> {
+    let mut output = [0_u8; 160];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_quota_ready_pool_remaining_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            five_hour_remaining,
+            weekly_remaining,
+            i64::try_from(ready_profiles).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::try_from(five_hour_profiles).map_err(|_| crate::MojoError::InvalidInput)?,
+            i64::try_from(weekly_profiles).map_err(|_| crate::MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    decode_quota_text(&output, written)
+}
+
+pub fn quota_info_pool_remaining(
+    total_remaining: i64,
+    profiles_with_data: usize,
+    reset: Option<&str>,
+) -> Result<String, crate::MojoError> {
+    let (reset_address, reset_length) = quota_text_address(reset);
+    if reset_length == i64::MAX {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let capacity = reset
+        .map(str::len)
+        .unwrap_or_default()
+        .saturating_add(128)
+        .max(1);
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_quota_info_pool_remaining_v1(
+            QUOTA_MODEL_POLICY_ABI_VERSION,
+            total_remaining,
+            i64::try_from(profiles_with_data).map_err(|_| crate::MojoError::InvalidInput)?,
+            reset_address,
+            reset_length,
+            i64::from(reset.is_some()),
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    quota_model_policy_status(status)?;
+    decode_quota_text(&output, written)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

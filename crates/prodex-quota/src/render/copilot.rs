@@ -24,6 +24,18 @@ fn copilot_display(info: &CopilotQuotaInfo) -> prodex_mojo_core::quota::CopilotQ
     .expect("Mojo Copilot quota display policy returned invalid output")
 }
 
+pub(super) fn copilot_main_remaining_percent(info: &CopilotQuotaInfo) -> Option<i64> {
+    let (chat_remaining, chat_total) = copilot_feature_values(info, 0);
+    let (completions_remaining, completions_total) = copilot_feature_values(info, 1);
+    prodex_mojo_core::quota::quota_copilot_main_remaining_percent(
+        chat_remaining,
+        chat_total,
+        completions_remaining,
+        completions_total,
+    )
+    .expect("Mojo Copilot main quota percent policy returned invalid output")
+}
+
 pub fn copilot_quota_is_ready(info: &CopilotQuotaInfo) -> bool {
     copilot_display(info).ready
 }
