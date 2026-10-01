@@ -12,6 +12,7 @@ use crate::app_commands::log_upstream_payload::UpstreamPayloadEvent;
 use crate::app_commands::log_upstream_payload::parse_runtime_log_line;
 use crate::reports::{InfoTokenUsageEvent, info_token_usage_event_from_line};
 use anyhow::{Context, Result};
+use prodex_mojo_core::observability::{OperationalDetailFormat, operational_detail_spec};
 use std::collections::BTreeMap;
 use std::io::{self, Write};
 use std::path::Path;
@@ -312,110 +313,6 @@ fn short_request_id(request: u64) -> String {
     format!("r{:04x}", request & 0xffff)
 }
 
-#[derive(Clone, Copy)]
-enum OperationalDetailFormat {
-    Plain,
-    Percent,
-    Endpoint,
-}
-
-const OPERATIONAL_DETAIL_SPECS: [(&str, &str, OperationalDetailFormat); 62] = [
-    ("profile", "profile", OperationalDetailFormat::Plain),
-    ("route", "route", OperationalDetailFormat::Plain),
-    ("provider", "provider", OperationalDetailFormat::Plain),
-    ("model", "model", OperationalDetailFormat::Plain),
-    ("from_model", "from", OperationalDetailFormat::Plain),
-    ("to_model", "to", OperationalDetailFormat::Plain),
-    ("effort", "effort", OperationalDetailFormat::Plain),
-    ("transport", "transport", OperationalDetailFormat::Plain),
-    ("method", "method", OperationalDetailFormat::Plain),
-    ("command", "command", OperationalDetailFormat::Plain),
-    ("cwd", "cwd", OperationalDetailFormat::Plain),
-    ("arg_count", "args", OperationalDetailFormat::Plain),
-    ("env_count", "env", OperationalDetailFormat::Plain),
-    ("stdin_bytes", "stdin_bytes", OperationalDetailFormat::Plain),
-    ("timeout_ms", "timeout_ms", OperationalDetailFormat::Plain),
-    ("path", "path", OperationalDetailFormat::Endpoint),
-    ("url", "path", OperationalDetailFormat::Endpoint),
-    ("tool_surface", "tools", OperationalDetailFormat::Plain),
-    (
-        "continuation",
-        "continuation",
-        OperationalDetailFormat::Plain,
-    ),
-    ("status", "status", OperationalDetailFormat::Plain),
-    ("class", "class", OperationalDetailFormat::Plain),
-    ("event_type", "event", OperationalDetailFormat::Plain),
-    ("state", "state", OperationalDetailFormat::Plain),
-    ("code", "code", OperationalDetailFormat::Plain),
-    ("reason", "reason", OperationalDetailFormat::Plain),
-    ("elapsed_ms", "latency_ms", OperationalDetailFormat::Plain),
-    ("duration_ms", "duration_ms", OperationalDetailFormat::Plain),
-    ("exit_code", "exit", OperationalDetailFormat::Plain),
-    ("exit_status", "exit", OperationalDetailFormat::Plain),
-    ("outcome", "outcome", OperationalDetailFormat::Plain),
-    ("active", "active", OperationalDetailFormat::Plain),
-    ("limit", "limit", OperationalDetailFormat::Plain),
-    ("count", "count", OperationalDetailFormat::Plain),
-    ("dropped", "dropped", OperationalDetailFormat::Plain),
-    ("quota_band", "band", OperationalDetailFormat::Plain),
-    (
-        "five_hour_remaining",
-        "5h",
-        OperationalDetailFormat::Percent,
-    ),
-    ("weekly_remaining", "week", OperationalDetailFormat::Percent),
-    ("until", "until", OperationalDetailFormat::Plain),
-    ("attempt", "attempt", OperationalDetailFormat::Plain),
-    ("retry_index", "retry", OperationalDetailFormat::Plain),
-    ("seconds", "backoff_s", OperationalDetailFormat::Plain),
-    ("score", "score", OperationalDetailFormat::Plain),
-    ("delta", "delta", OperationalDetailFormat::Plain),
-    ("chunks", "chunks", OperationalDetailFormat::Plain),
-    ("bytes", "bytes", OperationalDetailFormat::Plain),
-    ("elapsed_ms", "ttft_ms", OperationalDetailFormat::Plain),
-    ("decision", "decision", OperationalDetailFormat::Plain),
-    ("tier", "tier", OperationalDetailFormat::Plain),
-    ("rewrite_kind", "rewrite", OperationalDetailFormat::Plain),
-    (
-        "tokens_before",
-        "tokens_before",
-        OperationalDetailFormat::Plain,
-    ),
-    (
-        "tokens_after",
-        "tokens_after",
-        OperationalDetailFormat::Plain,
-    ),
-    (
-        "body_bytes_saved",
-        "bytes_saved",
-        OperationalDetailFormat::Plain,
-    ),
-    (
-        "rewrite_ratio_percent",
-        "rewrite",
-        OperationalDetailFormat::Percent,
-    ),
-    (
-        "tool_outputs_condensed",
-        "tools_condensed",
-        OperationalDetailFormat::Plain,
-    ),
-    (
-        "rehydrated_refs",
-        "rehydrated",
-        OperationalDetailFormat::Plain,
-    ),
-    ("pressure_band", "pressure", OperationalDetailFormat::Plain),
-    ("self_check", "check", OperationalDetailFormat::Plain),
-    ("exit", "exit", OperationalDetailFormat::Plain),
-    ("attempts", "attempts", OperationalDetailFormat::Plain),
-    ("lane", "lane", OperationalDetailFormat::Plain),
-    ("hard_limit", "limit", OperationalDetailFormat::Plain),
-    ("stage", "stage", OperationalDetailFormat::Plain),
-];
-
 fn operational_event_summary(
     event: &str,
     source: &str,
@@ -428,17 +325,17 @@ fn operational_event_summary(
     .unwrap_or_else(|error| panic!("Mojo operational detail plan failed: {error:?}"));
     let mut details = Vec::new();
     for detail in plan {
-        let (key, label, format) = OPERATIONAL_DETAIL_SPECS
-            .get(usize::try_from(detail).expect("validated Mojo detail index"))
-            .copied()
-            .expect("validated Mojo operational detail");
-        match format {
-            OperationalDetailFormat::Plain => add_log_detail(&mut details, fields, key, label),
+        let spec = operational_detail_spec(detail)
+            .unwrap_or_else(|error| panic!("Mojo operational detail spec failed: {error:?}"));
+        match spec.format {
+            OperationalDetailFormat::Plain => {
+                add_log_detail(&mut details, fields, &spec.key, &spec.label)
+            }
             OperationalDetailFormat::Percent => {
-                add_log_percent_detail(&mut details, fields, key, label)
+                add_log_percent_detail(&mut details, fields, &spec.key, &spec.label)
             }
             OperationalDetailFormat::Endpoint => {
-                add_log_endpoint_detail(&mut details, fields, key, label)
+                add_log_endpoint_detail(&mut details, fields, &spec.key, &spec.label)
             }
         }
     }

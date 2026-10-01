@@ -3816,3 +3816,25 @@ transport test, and the hook-trust overlay test. Clippy with warnings denied for
 pass. The canonical broad report at this checkpoint counts **71,154 reachable
 Mojo LOC** and **200,195 Rust production LOC**, totaling **271,349 LOC**:
 **26.222318858739115% Mojo**. The 75% broad target remains in progress.
+
+## Operational log detail metadata hard replacement
+
+Operational log detail metadata now lives with its existing ordering policy in
+`observability_labels.mojo`. Mojo owns all 62 detail IDs plus each detail's
+field key, rendered label, and plain/percent/endpoint format classification.
+The Rust log-stream consumer no longer carries the duplicate
+`OPERATIONAL_DETAIL_SPECS` table or its local format enum; it requests typed
+metadata from `prodex-mojo-core` and retains only field lookup, redaction,
+endpoint URL parsing, Unicode-safe bounding, and final string rendering. The
+adapter caches the immutable 62-entry Mojo result after first load so the hot
+log path does not cross the FFI once per detail on every event. No Rust semantic
+fallback remains for operational detail metadata.
+
+Focused validation passes the standalone `observability_labels.mojo` build,
+the real-Mojo 62-entry adapter test, the `prodex-app`
+`operational_event_summary_uses_mojo_detail_plan` consumer test, Clippy with
+warnings denied for the `mojo-observability` adapter surface, `git diff
+--check`, and the expanded no-fallback guard. The canonical broad report at
+this checkpoint counts **71,454 reachable Mojo LOC** and **200,172 Rust
+production LOC**, totaling **271,626 LOC**: **26.30602372379669% Mojo**. The
+75% broad target remains in progress.

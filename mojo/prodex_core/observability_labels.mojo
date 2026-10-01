@@ -3174,6 +3174,312 @@ comptime OPERATIONAL_DETAIL_STAGE: Int64 = 61
 comptime OPERATIONAL_DETAIL_MAX_COUNT: Int64 = 64
 
 
+@export("prodex_mojo_operational_detail_spec_v1")
+def prodex_mojo_operational_detail_spec_v1(
+    abi_version: Int64,
+    detail: Int64,
+    key_output_address: UInt,
+    key_output_capacity: Int64,
+    key_output_length_address: UInt,
+    label_output_address: UInt,
+    label_output_capacity: Int64,
+    label_output_length_address: UInt,
+    format_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OBSERVABILITY_LABEL_ABI_VERSION:
+        return OBSERVABILITY_STATUS_ABI
+    if (
+        detail < 0
+        or detail > OPERATIONAL_DETAIL_STAGE
+        or key_output_address == 0
+        or key_output_length_address == 0
+        or label_output_address == 0
+        or label_output_length_address == 0
+        or format_address == 0
+        or key_output_capacity < 0
+        or label_output_capacity < 0
+    ):
+        return OBSERVABILITY_STATUS_INVALID
+
+    var key = StringSlice("")
+    var label = StringSlice("")
+    var format = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(format_address)
+    )
+    if detail == 0:
+        key = StringSlice("profile")
+        label = StringSlice("profile")
+        format[] = 0
+    elif detail == 1:
+        key = StringSlice("route")
+        label = StringSlice("route")
+        format[] = 0
+    elif detail == 2:
+        key = StringSlice("provider")
+        label = StringSlice("provider")
+        format[] = 0
+    elif detail == 3:
+        key = StringSlice("model")
+        label = StringSlice("model")
+        format[] = 0
+    elif detail == 4:
+        key = StringSlice("from_model")
+        label = StringSlice("from")
+        format[] = 0
+    elif detail == 5:
+        key = StringSlice("to_model")
+        label = StringSlice("to")
+        format[] = 0
+    elif detail == 6:
+        key = StringSlice("effort")
+        label = StringSlice("effort")
+        format[] = 0
+    elif detail == 7:
+        key = StringSlice("transport")
+        label = StringSlice("transport")
+        format[] = 0
+    elif detail == 8:
+        key = StringSlice("method")
+        label = StringSlice("method")
+        format[] = 0
+    elif detail == 9:
+        key = StringSlice("command")
+        label = StringSlice("command")
+        format[] = 0
+    elif detail == 10:
+        key = StringSlice("cwd")
+        label = StringSlice("cwd")
+        format[] = 0
+    elif detail == 11:
+        key = StringSlice("arg_count")
+        label = StringSlice("args")
+        format[] = 0
+    elif detail == 12:
+        key = StringSlice("env_count")
+        label = StringSlice("env")
+        format[] = 0
+    elif detail == 13:
+        key = StringSlice("stdin_bytes")
+        label = StringSlice("stdin_bytes")
+        format[] = 0
+    elif detail == 14:
+        key = StringSlice("timeout_ms")
+        label = StringSlice("timeout_ms")
+        format[] = 0
+    elif detail == 15:
+        key = StringSlice("path")
+        label = StringSlice("path")
+        format[] = 2
+    elif detail == 16:
+        key = StringSlice("url")
+        label = StringSlice("path")
+        format[] = 2
+    elif detail == 17:
+        key = StringSlice("tool_surface")
+        label = StringSlice("tools")
+        format[] = 0
+    elif detail == 18:
+        key = StringSlice("continuation")
+        label = StringSlice("continuation")
+        format[] = 0
+    elif detail == 19:
+        key = StringSlice("status")
+        label = StringSlice("status")
+        format[] = 0
+    elif detail == 20:
+        key = StringSlice("class")
+        label = StringSlice("class")
+        format[] = 0
+    elif detail == 21:
+        key = StringSlice("event_type")
+        label = StringSlice("event")
+        format[] = 0
+    elif detail == 22:
+        key = StringSlice("state")
+        label = StringSlice("state")
+        format[] = 0
+    elif detail == 23:
+        key = StringSlice("code")
+        label = StringSlice("code")
+        format[] = 0
+    elif detail == 24:
+        key = StringSlice("reason")
+        label = StringSlice("reason")
+        format[] = 0
+    elif detail == 25:
+        key = StringSlice("elapsed_ms")
+        label = StringSlice("latency_ms")
+        format[] = 0
+    elif detail == 26:
+        key = StringSlice("duration_ms")
+        label = StringSlice("duration_ms")
+        format[] = 0
+    elif detail == 27:
+        key = StringSlice("exit_code")
+        label = StringSlice("exit")
+        format[] = 0
+    elif detail == 28:
+        key = StringSlice("exit_status")
+        label = StringSlice("exit")
+        format[] = 0
+    elif detail == 29:
+        key = StringSlice("outcome")
+        label = StringSlice("outcome")
+        format[] = 0
+    elif detail == 30:
+        key = StringSlice("active")
+        label = StringSlice("active")
+        format[] = 0
+    elif detail == 31:
+        key = StringSlice("limit")
+        label = StringSlice("limit")
+        format[] = 0
+    elif detail == 32:
+        key = StringSlice("count")
+        label = StringSlice("count")
+        format[] = 0
+    elif detail == 33:
+        key = StringSlice("dropped")
+        label = StringSlice("dropped")
+        format[] = 0
+    elif detail == 34:
+        key = StringSlice("quota_band")
+        label = StringSlice("band")
+        format[] = 0
+    elif detail == 35:
+        key = StringSlice("five_hour_remaining")
+        label = StringSlice("5h")
+        format[] = 1
+    elif detail == 36:
+        key = StringSlice("weekly_remaining")
+        label = StringSlice("week")
+        format[] = 1
+    elif detail == 37:
+        key = StringSlice("until")
+        label = StringSlice("until")
+        format[] = 0
+    elif detail == 38:
+        key = StringSlice("attempt")
+        label = StringSlice("attempt")
+        format[] = 0
+    elif detail == 39:
+        key = StringSlice("retry_index")
+        label = StringSlice("retry")
+        format[] = 0
+    elif detail == 40:
+        key = StringSlice("seconds")
+        label = StringSlice("backoff_s")
+        format[] = 0
+    elif detail == 41:
+        key = StringSlice("score")
+        label = StringSlice("score")
+        format[] = 0
+    elif detail == 42:
+        key = StringSlice("delta")
+        label = StringSlice("delta")
+        format[] = 0
+    elif detail == 43:
+        key = StringSlice("chunks")
+        label = StringSlice("chunks")
+        format[] = 0
+    elif detail == 44:
+        key = StringSlice("bytes")
+        label = StringSlice("bytes")
+        format[] = 0
+    elif detail == 45:
+        key = StringSlice("elapsed_ms")
+        label = StringSlice("ttft_ms")
+        format[] = 0
+    elif detail == 46:
+        key = StringSlice("decision")
+        label = StringSlice("decision")
+        format[] = 0
+    elif detail == 47:
+        key = StringSlice("tier")
+        label = StringSlice("tier")
+        format[] = 0
+    elif detail == 48:
+        key = StringSlice("rewrite_kind")
+        label = StringSlice("rewrite")
+        format[] = 0
+    elif detail == 49:
+        key = StringSlice("tokens_before")
+        label = StringSlice("tokens_before")
+        format[] = 0
+    elif detail == 50:
+        key = StringSlice("tokens_after")
+        label = StringSlice("tokens_after")
+        format[] = 0
+    elif detail == 51:
+        key = StringSlice("body_bytes_saved")
+        label = StringSlice("bytes_saved")
+        format[] = 0
+    elif detail == 52:
+        key = StringSlice("rewrite_ratio_percent")
+        label = StringSlice("rewrite")
+        format[] = 1
+    elif detail == 53:
+        key = StringSlice("tool_outputs_condensed")
+        label = StringSlice("tools_condensed")
+        format[] = 0
+    elif detail == 54:
+        key = StringSlice("rehydrated_refs")
+        label = StringSlice("rehydrated")
+        format[] = 0
+    elif detail == 55:
+        key = StringSlice("pressure_band")
+        label = StringSlice("pressure")
+        format[] = 0
+    elif detail == 56:
+        key = StringSlice("self_check")
+        label = StringSlice("check")
+        format[] = 0
+    elif detail == 57:
+        key = StringSlice("exit")
+        label = StringSlice("exit")
+        format[] = 0
+    elif detail == 58:
+        key = StringSlice("attempts")
+        label = StringSlice("attempts")
+        format[] = 0
+    elif detail == 59:
+        key = StringSlice("lane")
+        label = StringSlice("lane")
+        format[] = 0
+    elif detail == 60:
+        key = StringSlice("hard_limit")
+        label = StringSlice("limit")
+        format[] = 0
+    elif detail == 61:
+        key = StringSlice("stage")
+        label = StringSlice("stage")
+        format[] = 0
+    else:
+        return OBSERVABILITY_STATUS_INVALID
+
+    var key_output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(key_output_address)
+    )
+    var key_output_length = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(key_output_length_address)
+    )
+    var status = observability_copy_label(
+        key, key_output, key_output_capacity, key_output_length
+    )
+    if status != OBSERVABILITY_STATUS_OK:
+        return status
+
+    var label_output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(label_output_address)
+    )
+    var label_output_length = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(label_output_length_address)
+    )
+    return observability_copy_label(
+        label, label_output, label_output_capacity, label_output_length
+    )
+
+
 def operational_detail_push(
     output: Pointer[mut=True, Int64, _],
     capacity: Int64,

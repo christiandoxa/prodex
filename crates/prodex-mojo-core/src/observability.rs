@@ -38,6 +38,20 @@ pub struct OperationalEventPlan {
     pub interesting: bool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OperationalDetailFormat {
+    Plain,
+    Percent,
+    Endpoint,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OperationalDetailSpec {
+    pub key: String,
+    pub label: String,
+    pub format: OperationalDetailFormat,
+}
+
 unsafe extern "C" {
     fn prodex_mojo_observability_label_v1(
         abi_version: i64,
@@ -97,6 +111,17 @@ unsafe extern "C" {
         output_address: u64,
         output_capacity: i64,
         output_count_address: u64,
+    ) -> i64;
+    fn prodex_mojo_operational_detail_spec_v1(
+        abi_version: i64,
+        detail: i64,
+        key_output_address: u64,
+        key_output_capacity: i64,
+        key_output_length_address: u64,
+        label_output_address: u64,
+        label_output_capacity: i64,
+        label_output_length_address: u64,
+        format_address: u64,
     ) -> i64;
 }
 
@@ -167,6 +192,68 @@ pub fn operational_event_plan(
         source,
         interesting: interesting == 1,
     })
+}
+
+fn load_operational_detail_spec(detail: i64) -> Result<OperationalDetailSpec, MojoError> {
+    if !(0..=61).contains(&detail) {
+        return Err(MojoError::InvalidInput);
+    }
+    let mut key = [0_u8; OBSERVABILITY_LABEL_MAX_BYTES];
+    let mut key_length = -1_i64;
+    let mut label = [0_u8; OBSERVABILITY_LABEL_MAX_BYTES];
+    let mut label_length = -1_i64;
+    let mut format = -1_i64;
+    let status = unsafe {
+        prodex_mojo_operational_detail_spec_v1(
+            OBSERVABILITY_LABEL_ABI_VERSION,
+            detail,
+            key.as_mut_ptr() as usize as u64,
+            i64::try_from(key.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut key_length as *mut i64) as usize as u64,
+            label.as_mut_ptr() as usize as u64,
+            i64::try_from(label.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut label_length as *mut i64) as usize as u64,
+            (&mut format as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let key_length = usize::try_from(key_length).map_err(|_| MojoError::InvalidOutput)?;
+    let label_length = usize::try_from(label_length).map_err(|_| MojoError::InvalidOutput)?;
+    if key_length > key.len() || label_length > label.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let key =
+        String::from_utf8(key[..key_length].to_vec()).map_err(|_| MojoError::InvalidOutput)?;
+    let label =
+        String::from_utf8(label[..label_length].to_vec()).map_err(|_| MojoError::InvalidOutput)?;
+    let format = match format {
+        0 => OperationalDetailFormat::Plain,
+        1 => OperationalDetailFormat::Percent,
+        2 => OperationalDetailFormat::Endpoint,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(OperationalDetailSpec { key, label, format })
+}
+
+pub fn operational_detail_spec(detail: i64) -> Result<&'static OperationalDetailSpec, MojoError> {
+    use std::sync::OnceLock;
+
+    static SPECS: OnceLock<Result<Vec<OperationalDetailSpec>, MojoError>> = OnceLock::new();
+
+    let detail = usize::try_from(detail)
+        .ok()
+        .filter(|detail| *detail < 62)
+        .ok_or(MojoError::InvalidInput)?;
+    match SPECS.get_or_init(|| (0_i64..62).map(load_operational_detail_spec).collect()) {
+        Ok(specs) => specs.get(detail).ok_or(MojoError::InvalidOutput),
+        Err(error) => Err(*error),
+    }
 }
 
 pub fn operational_event_detail_plan(
@@ -386,6 +473,25 @@ mod tests {
         assert_eq!(label(-1, 0), Err(MojoError::InvalidInput));
         assert_eq!(label(0, -1), Err(MojoError::InvalidInput));
         assert!(label(10_000, 0).is_err());
+    }
+
+    #[test]
+    fn operational_detail_specs_are_mojo_owned() {
+        let specs = (0..62)
+            .map(operational_detail_spec)
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(specs.len(), 62);
+        assert_eq!(specs[0].key, "profile");
+        assert_eq!(specs[0].label, "profile");
+        assert_eq!(specs[0].format, OperationalDetailFormat::Plain);
+        assert_eq!(specs[35].key, "five_hour_remaining");
+        assert_eq!(specs[35].label, "5h");
+        assert_eq!(specs[35].format, OperationalDetailFormat::Percent);
+        assert_eq!(specs[15].key, "path");
+        assert_eq!(specs[15].label, "path");
+        assert_eq!(specs[15].format, OperationalDetailFormat::Endpoint);
+        assert_eq!(operational_detail_spec(62), Err(MojoError::InvalidInput));
     }
 
     #[test]
