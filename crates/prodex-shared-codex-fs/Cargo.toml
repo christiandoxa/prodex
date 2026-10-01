@@ -15,6 +15,7 @@ anyhow = { workspace = true }
 chrono = { workspace = true }
 filetime = { workspace = true }
 prodex_core = { workspace = true }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
 prodex_session_store = { workspace = true }
 rusqlite = { workspace = true }
 serde = { workspace = true }

@@ -2959,6 +2959,7 @@ dependencies = [
  "chrono",
  "filetime",
  "prodex-core",
+ "prodex-mojo-core",
  "prodex-session-store",
  "rusqlite",
  "serde",

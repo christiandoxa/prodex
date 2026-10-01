@@ -26,6 +26,8 @@ const PROMOTED_FILES = [
   "crates/prodex-core/src/lib.rs",
   "crates/prodex-mcp-stdio/src/lib.rs",
   "crates/prodex-update-notice/src/lib.rs",
+  "crates/prodex-shared-codex-fs/src/image_attachments.rs",
+  "crates/prodex-mojo-core/src/shared_attachment_policy.rs",
   "crates/prodex-mojo-core/src/update_notice_policy.rs",
   "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
   "crates/prodex-mcp-stdio/src/lib.rs",
@@ -961,6 +963,35 @@ export function findViolations(files) {
     if (filePath === "crates/prodex-mojo-core/src/update_notice_policy.rs" &&
         !contents.includes("prodex_update_notice_policy_v1(")) {
       return [filePath + ": update-notice ABI adapter must retain prodex_update_notice_policy_v1("];
+    }
+    return [];
+  });
+  const sharedAttachmentMigrationViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-shared-codex-fs/src/image_attachments.rs") {
+      const required = [
+        "shared_attachment_policy::image_tag_path_range(",
+        "shared_attachment_policy::next_clipboard_path(",
+        "shared_attachment_policy::next_attachment_path(",
+        "shared_attachment_policy::clipboard_file_name(",
+        "shared_attachment_policy::persistable_attachment_file_name(",
+        "shared_attachment_policy::rollout_file_name(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": shared attachment hard replacement must retain " + call);
+      if (
+        /fn\s+image_tag_path_attr\s*\(/u.test(contents)
+        || /fn\s+codex_session_path_continues\s*\(/u.test(contents)
+        || /fn\s+is_codex_session_path_byte\s*\(/u.test(contents)
+        || /CODEX_ATTACHMENT_PATH_MARKERS/u.test(contents)
+      ) {
+        violations.push(filePath + ": contains restored Rust shared-attachment scanner semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/shared_attachment_policy.rs" &&
+        !contents.includes("prodex_shared_attachment_policy_v1(")) {
+      return [filePath + ": shared attachment ABI adapter must retain prodex_shared_attachment_policy_v1("];
     }
     return [];
   });
@@ -2180,6 +2211,7 @@ export function findViolations(files) {
     ...coreFilePolicyViolations,
     ...mcpStdioPolicyViolations,
     ...updateNoticeMigrationViolations,
+    ...sharedAttachmentMigrationViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
     ...kiroChatResponseViolations,
