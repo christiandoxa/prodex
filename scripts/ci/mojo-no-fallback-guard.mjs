@@ -95,6 +95,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/provider_constraints.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/error_class.rs",
   "crates/prodex-mojo-core/src/policy.rs",
   "crates/prodex-mojo-core/src/context.rs",
   "crates/prodex-mojo-core/src/rich.rs",
@@ -766,6 +767,7 @@ const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
 const PROVIDER_CONSTRAINTS_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints.rs";
 const PROVIDER_PRECOMMIT_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs";
 const LOCAL_REWRITE_UPSTREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs";
+const NATIVE_FIRST_ERROR_CLASS_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/error_class.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
 const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
@@ -1956,6 +1958,22 @@ export function findViolations(files) {
     return mojoOwned && !oldMapper && !/#\[\s*cfg\s*\(/u.test(contents)
       ? [] : [`${filePath}: reasoning must use Mojo without Rust copies or cfg routing`];
   });
+  const nativeFirstErrorClassViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== NATIVE_FIRST_ERROR_CLASS_FILE) return [];
+    const violations = contents.includes("classify_provider_error(")
+      ? []
+      : [filePath + ": native first-event error classification must retain canonical Mojo-backed provider classifier"];
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    if (
+      production.includes("match code.as_deref()")
+      || production.includes('"rate_limit_error" | "rate_limit_exceeded"')
+      || production.includes('"overloaded_error" | "server_is_overloaded"')
+      || production.includes('"not_found_error" | "model_not_supported"')
+    ) {
+      violations.push(filePath + ": contains restored Rust native SSE error-code classification table");
+    }
+    return violations;
+  });
   const providerPrecommitPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === PROVIDER_CONSTRAINTS_ADAPTER_FILE) {
       return contents.includes("prodex_provider_precommit_policy_v1(")
@@ -2682,7 +2700,7 @@ export function findViolations(files) {
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
     ...deepseekReasoningViolations,
-    ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
+    ...nativeFirstErrorClassViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
