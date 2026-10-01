@@ -3556,3 +3556,21 @@ Focused validation passes the real-Mojo scalar-config test, the complete
 The canonical broad report at this checkpoint counts **68,286 reachable Mojo
 LOC** and **198,888 Rust production LOC**, totaling **267,174 LOC**:
 **25.558624716476903% Mojo**. The 75% broad target remains in progress.
+
+## Audit usage-ledger policy hard replacement
+
+Usage-ledger deterministic policy is now Mojo-owned through
+`audit_log_policy.mojo`. The migrated kernel owns usage-token normalization,
+implicit total-token saturation, inclusive time-window aggregation, and
+request/token/cost budget-limit classification. `prodex-audit-log` retains
+Serde/file boundaries, calendar month-boundary acquisition, DTO packing, and
+human-readable reason formatting only. The previous Rust normalization loop,
+saturating aggregation loop, and threshold comparisons were deleted; there is
+no feature-off or runtime Rust fallback.
+
+Focused validation passes the real-Mojo policy test, all 17 `prodex-audit-log`
+tests, clippy with warnings denied for both affected crates, and the Mojo
+no-fallback guard including a new audit-usage regression rule. The canonical
+broad report at this checkpoint counts **68,496 reachable Mojo LOC** and
+**199,090 Rust production LOC**, totaling **267,586 LOC**:
+**25.59775175083898% Mojo**. The 75% broad target remains in progress.

@@ -22,6 +22,8 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/super_expose/protocol/validation.rs",
   "crates/prodex-mojo-core/src/provider_usage.rs",
   "crates/prodex-provider-core/src/usage.rs",
+  "crates/prodex-audit-log/src/lib.rs",
+  "crates/prodex-mojo-core/src/audit_log_policy.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace.rs",
   "crates/prodex-mojo-core/src/runtime_route_reason.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
@@ -832,6 +834,39 @@ export function findViolations(files) {
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": provider usage ABI adapter must retain " + call);
+    }
+    return [];
+  });
+  const auditUsageViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-audit-log/src/lib.rs") {
+      const required = [
+        "prodex_mojo_core::audit_log_policy::normalize_usage_token(",
+        "prodex_mojo_core::audit_log_policy::normalized_total_tokens(",
+        "prodex_mojo_core::audit_log_policy::summarize_usage(",
+        "prodex_mojo_core::audit_log_policy::budget_flags(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": audit usage hard replacement must retain " + call);
+      if (
+        /summary\.(?:requests|total_tokens|cost_micros)\s*>=/u.test(contents)
+        || /self\.input_tokens\s*\.saturating_add/u.test(contents)
+        || /\.chars\(\)[^;]{0,300}ch\.is_ascii_alphanumeric/u.test(contents)
+      ) {
+        violations.push(filePath + ": contains restored Rust audit-usage semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/audit_log_policy.rs") {
+      const required = [
+        "prodex_audit_usage_token_normalize_v1(",
+        "prodex_audit_usage_total_v1(",
+        "prodex_audit_usage_summary_v1(",
+        "prodex_audit_budget_flags_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": audit usage ABI adapter must retain " + call);
     }
     return [];
   });
@@ -2047,6 +2082,7 @@ export function findViolations(files) {
   return [...markerViolations, ...featureOffViolations, ...logThroughputViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
+    ...auditUsageViolations,
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
     ...kiroChatResponseViolations,

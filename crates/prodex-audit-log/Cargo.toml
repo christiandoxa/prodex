@@ -13,6 +13,7 @@ path = "src/lib.rs"
 [dependencies]
 anyhow = { workspace = true }
 chrono = { workspace = true }
+prodex_mojo_core = { workspace = true, features = ["mojo-runtime"] }
 redaction = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

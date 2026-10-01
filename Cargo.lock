@@ -2581,6 +2581,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "libc",
+ "prodex-mojo-core",
  "prodex-redaction",
  "serde",
  "serde_json",

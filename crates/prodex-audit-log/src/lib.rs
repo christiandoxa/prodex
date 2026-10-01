@@ -254,12 +254,13 @@ impl UsageLedgerRow {
             .request_id
             .map(|value| normalize_usage_token(&value, "", 128))
             .filter(|value| !value.is_empty());
-        if self.total_tokens == 0 {
-            self.total_tokens = self
-                .input_tokens
-                .saturating_add(self.output_tokens)
-                .saturating_add(self.reasoning_tokens);
-        }
+        self.total_tokens = prodex_mojo_core::audit_log_policy::normalized_total_tokens(
+            self.total_tokens,
+            self.input_tokens,
+            self.output_tokens,
+            self.reasoning_tokens,
+        )
+        .expect("Mojo audit usage total policy returned invalid output");
         self
     }
 }
@@ -407,28 +408,34 @@ pub fn summarize_usage_for_window(
     now_epoch: i64,
 ) -> UsageLedgerSummary {
     let since_epoch = window.start_epoch(now_epoch);
-    let mut summary = UsageLedgerSummary {
+    let mojo_rows = rows
+        .iter()
+        .map(
+            |row| prodex_mojo_core::audit_log_policy::AuditUsageRowInput {
+                recorded_at_epoch: row.recorded_at_epoch,
+                input_tokens: row.input_tokens,
+                output_tokens: row.output_tokens,
+                cached_input_tokens: row.cached_input_tokens,
+                reasoning_tokens: row.reasoning_tokens,
+                total_tokens: row.total_tokens,
+                cost_micros: row.cost_micros,
+            },
+        )
+        .collect::<Vec<_>>();
+    let summary =
+        prodex_mojo_core::audit_log_policy::summarize_usage(&mojo_rows, since_epoch, now_epoch)
+            .expect("Mojo audit usage summary policy returned invalid output");
+    UsageLedgerSummary {
         since_epoch,
         until_epoch: now_epoch,
-        ..UsageLedgerSummary::default()
-    };
-    for row in rows {
-        if row.recorded_at_epoch < since_epoch || row.recorded_at_epoch > now_epoch {
-            continue;
-        }
-        summary.requests = summary.requests.saturating_add(1);
-        summary.input_tokens = summary.input_tokens.saturating_add(row.input_tokens);
-        summary.output_tokens = summary.output_tokens.saturating_add(row.output_tokens);
-        summary.cached_input_tokens = summary
-            .cached_input_tokens
-            .saturating_add(row.cached_input_tokens);
-        summary.reasoning_tokens = summary
-            .reasoning_tokens
-            .saturating_add(row.reasoning_tokens);
-        summary.total_tokens = summary.total_tokens.saturating_add(row.total_tokens);
-        summary.cost_micros = summary.cost_micros.saturating_add(row.cost_micros);
+        requests: summary.requests,
+        input_tokens: summary.input_tokens,
+        output_tokens: summary.output_tokens,
+        cached_input_tokens: summary.cached_input_tokens,
+        reasoning_tokens: summary.reasoning_tokens,
+        total_tokens: summary.total_tokens,
+        cost_micros: summary.cost_micros,
     }
-    summary
 }
 
 pub fn evaluate_budget_limit(
@@ -437,31 +444,51 @@ pub fn evaluate_budget_limit(
     now_epoch: i64,
 ) -> BudgetEvaluation {
     let summary = summarize_usage_for_window(rows, limit.window, now_epoch);
+    let flags = prodex_mojo_core::audit_log_policy::budget_flags(
+        prodex_mojo_core::audit_log_policy::AuditUsageSummary {
+            requests: summary.requests,
+            input_tokens: summary.input_tokens,
+            output_tokens: summary.output_tokens,
+            cached_input_tokens: summary.cached_input_tokens,
+            reasoning_tokens: summary.reasoning_tokens,
+            total_tokens: summary.total_tokens,
+            cost_micros: summary.cost_micros,
+        },
+        limit.max_requests,
+        limit.max_tokens,
+        limit.max_cost_micros,
+    )
+    .expect("Mojo audit budget policy returned invalid output");
+
     let mut reasons = Vec::new();
-    if let Some(max_requests) = limit.max_requests
-        && summary.requests >= max_requests
-    {
+    if flags.request_limit_reached {
+        let max_requests = limit
+            .max_requests
+            .expect("Mojo request-limit flag requires a configured limit");
         reasons.push(format!(
             "request limit reached ({}/{})",
             summary.requests, max_requests
         ));
     }
-    if let Some(max_tokens) = limit.max_tokens
-        && summary.total_tokens >= max_tokens
-    {
+    if flags.token_limit_reached {
+        let max_tokens = limit
+            .max_tokens
+            .expect("Mojo token-limit flag requires a configured limit");
         reasons.push(format!(
-            "token limit reached ({}/{})",
+            "token budget reached ({}/{})",
             summary.total_tokens, max_tokens
         ));
     }
-    if let Some(max_cost_micros) = limit.max_cost_micros
-        && summary.cost_micros >= max_cost_micros
-    {
+    if flags.cost_limit_reached {
+        let max_cost_micros = limit
+            .max_cost_micros
+            .expect("Mojo cost-limit flag requires a configured limit");
         reasons.push(format!(
             "cost limit reached ({}/{})",
             summary.cost_micros, max_cost_micros
         ));
     }
+
     BudgetEvaluation {
         key: normalize_usage_token(&limit.key, "global", 100),
         window: limit.window,
@@ -655,25 +682,8 @@ fn truncate_audit_details(value: &str, max_chars: usize) -> String {
 }
 
 fn normalize_usage_token(value: &str, fallback: &str, max_chars: usize) -> String {
-    let normalized = value
-        .trim()
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | ':' | '/') {
-                ch.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .take(max_chars)
-        .collect::<String>()
-        .trim_matches('-')
-        .to_string();
-    if normalized.is_empty() {
-        fallback.to_string()
-    } else {
-        normalized
-    }
+    prodex_mojo_core::audit_log_policy::normalize_usage_token(value, fallback, max_chars)
+        .expect("Mojo audit usage-token policy returned invalid output")
 }
 
 fn redacted_account_hint(account_id: Option<&str>) -> Option<String> {
