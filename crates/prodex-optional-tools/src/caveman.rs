@@ -8,7 +8,8 @@ use crate::tree::{read_bounded_file, tree_sha256};
 use crate::{
     CAVEMAN_LATEST_STABLE_COMMIT, CAVEMAN_LATEST_STABLE_REFERENCE,
     CAVEMAN_LATEST_STABLE_TREE_SHA256, CAVEMAN_LEGACY_MANIFEST_TREE_SHA256,
-    CAVEMAN_MINIMUM_SUPPORTED_VERSION,
+    CAVEMAN_MINIMUM_SUPPORTED_VERSION, CAVEMAN_PREVIOUS_STABLE_COMMIT,
+    CAVEMAN_PREVIOUS_STABLE_REFERENCE, CAVEMAN_PREVIOUS_STABLE_TREE_SHA256,
 };
 use anyhow::{Context, Result, bail, ensure};
 use semver::Version;
@@ -129,6 +130,20 @@ fn valid_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn previous_stable_legacy_manifest_supported(
+    manifest: &CavemanInstallManifest,
+    actual_digest: &str,
+) -> bool {
+    manifest.version == CAVEMAN_PREVIOUS_STABLE_REFERENCE
+        && manifest.commit == CAVEMAN_PREVIOUS_STABLE_COMMIT
+        && actual_digest == CAVEMAN_PREVIOUS_STABLE_TREE_SHA256
+        && crate::optional_tools::manifest_tree_sha256_supported(
+            &manifest.tree_sha256,
+            CAVEMAN_PREVIOUS_STABLE_TREE_SHA256,
+            CAVEMAN_LEGACY_MANIFEST_TREE_SHA256,
+        )
+}
+
 fn validate_caveman_install(allowed_root: &Path, candidate: &Path) -> Result<ResolvedTool> {
     let candidate_metadata = fs::symlink_metadata(candidate)
         .with_context(|| format!("failed to inspect {}", candidate.display()))?;
@@ -200,17 +215,14 @@ fn validate_caveman_install(allowed_root: &Path, candidate: &Path) -> Result<Res
             "Caveman latest-stable commit does not match release-qualified metadata"
         );
         ensure!(
-            crate::optional_tools::manifest_tree_sha256_supported(
-                &manifest.tree_sha256,
-                CAVEMAN_LATEST_STABLE_TREE_SHA256,
-                CAVEMAN_LEGACY_MANIFEST_TREE_SHA256,
-            ),
+            manifest.tree_sha256 == CAVEMAN_LATEST_STABLE_TREE_SHA256,
             "Caveman latest-stable manifest tree digest does not match release-qualified metadata"
         );
         ensure!(
             actual_digest == CAVEMAN_LATEST_STABLE_TREE_SHA256,
             "Caveman tree digest mismatch: expected {CAVEMAN_LATEST_STABLE_TREE_SHA256}, got {actual_digest}"
         );
+    } else if previous_stable_legacy_manifest_supported(&manifest, &actual_digest) {
     } else {
         ensure!(
             actual_digest == manifest.tree_sha256,
@@ -277,6 +289,29 @@ mod tests {
             first
         );
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn previous_stable_legacy_manifest_requires_vetted_identity_and_tree() {
+        let manifest = CavemanInstallManifest {
+            schema_version: 1,
+            id: "caveman".to_string(),
+            version: CAVEMAN_PREVIOUS_STABLE_REFERENCE.to_string(),
+            source: CAVEMAN_SOURCE.to_string(),
+            commit: CAVEMAN_PREVIOUS_STABLE_COMMIT.to_string(),
+            tree_sha256: CAVEMAN_LEGACY_MANIFEST_TREE_SHA256.to_string(),
+        };
+        assert!(previous_stable_legacy_manifest_supported(
+            &manifest,
+            CAVEMAN_PREVIOUS_STABLE_TREE_SHA256
+        ));
+
+        let mut wrong_commit = manifest;
+        wrong_commit.commit = "0123456789abcdef0123456789abcdef01234567".to_string();
+        assert!(!previous_stable_legacy_manifest_supported(
+            &wrong_commit,
+            CAVEMAN_PREVIOUS_STABLE_TREE_SHA256
+        ));
     }
 
     #[test]

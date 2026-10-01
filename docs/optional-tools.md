@@ -49,17 +49,17 @@ Prodex launches never run this online check or update an external tool. Runtime 
 
 Caveman is not embedded in Prodex. Runtime accepts stable Caveman 2.3.1 or newer from a validated managed version directory. The table below records the current latest-stable release-qualified reference:
 
-| Field | 0.431.5 qualified reference |
+| Field | 0.434.3 qualified reference |
 | --- | --- |
-| Version | `2.7.0` |
+| Version | `3.0.0` |
 | Source | `https://github.com/JuliusBrussee/caveman` |
-| Commit | `8b0c1d3699b8d83e87fe4605b378da20c41555e0` |
-| Prodex tree SHA-256 | `09127915a13a493146ed0392b6895bbbd5f620d276dda9f4e68a6722f96df950` |
+| Commit | `b33a39554ed06cbc7d7d3198ff90c171e8043b69` |
+| Prodex tree SHA-256 | `a297ba8affb43a79db0b0ffe2a0874d3a1351877cc1894ef449fa8d289bdbccf` |
 
 For the current release-qualified reference, the managed path is:
 
 ```text
-<managed-root>/caveman/2.7.0/
+<managed-root>/caveman/3.0.0/
 ```
 
 The directory must contain the upstream `AGENTS.md`,
@@ -70,10 +70,10 @@ manifest as `prodex-tool.json`:
 {
   "schema_version": 1,
   "id": "caveman",
-  "version": "2.7.0",
+  "version": "3.0.0",
   "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "8b0c1d3699b8d83e87fe4605b378da20c41555e0",
-  "tree_sha256": "09127915a13a493146ed0392b6895bbbd5f620d276dda9f4e68a6722f96df950"
+  "commit": "b33a39554ed06cbc7d7d3198ff90c171e8043b69",
+  "tree_sha256": "a297ba8affb43a79db0b0ffe2a0874d3a1351877cc1894ef449fa8d289bdbccf"
 }
 ```
 
@@ -84,10 +84,16 @@ finished tree. Standalone optimizer and Claude-plugin command paths are retired;
 Unversioned managed directories are rejected. Prodex chooses the newest stable version directory at or above 2.3.1. A newer stable release is accepted when the official source, manifest schema, required files, commit shape, and recomputed tree digest are self-consistent; the current latest-stable reference keeps the stronger audited commit/tree check.
 
 Prodex recomputes the complete tree digest before activation and treats that
-recomputed digest as authoritative. Prodex 0.430.3 also accepts the legacy
-prodex-tool.json digest written by earlier installers for the current release-qualified version and commit, so a clean official checkout is not rejected solely
-because its manifest was generated with stale digest metadata. The actual tree
-must still match the current vetted digest above.
+recomputed digest as authoritative. The current 3.0.0 reference requires its
+exact audited manifest digest. For backward compatibility, a vetted 2.7.0
+checkout at commit `8b0c1d3699b8d83e87fe4605b378da20c41555e0` still accepts the
+legacy manifest digest written by earlier installers, while its actual tree
+must match `09127915a13a493146ed0392b6895bbbd5f620d276dda9f4e68a6722f96df950`.
+
+Caveman 3.0.0 documents telemetry as enabled by default for its CLI and agent
+hooks; its skill-only integration sends no telemetry. Users of the CLI or
+Claude plugin hooks can use Caveman's documented `caveman telemetry off` or
+`DO_NOT_TRACK=1` controls when telemetry is not desired.
 
 ## Ponytail
 
