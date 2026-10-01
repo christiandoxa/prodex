@@ -107,7 +107,7 @@ fn quota_remaining_and_rounding_match_expected_boundaries() {
         (f64::INFINITY, i64::MAX),
         (f64::NEG_INFINITY, i64::MIN),
     ] {
-        assert_eq!(round_quota_float(value), expected);
+        assert_eq!(prodex_mojo_core::quota::round_f64(value), expected);
     }
 }
 

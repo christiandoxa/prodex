@@ -23,10 +23,6 @@ mod reports;
 mod time;
 mod windows;
 
-fn round_quota_float(value: f64) -> i64 {
-    crate::mojo::round_f64(value)
-}
-
 pub use copilot::*;
 pub use gemini::*;
 pub use model_capacity::*;
