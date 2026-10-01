@@ -996,6 +996,154 @@ def quota_plan_type_matches(
     return target_index == Int64(literal.byte_length())
 
 
+
+comptime QUOTA_DISPLAY_LABEL_SORT: Int64 = 0
+comptime QUOTA_DISPLAY_LABEL_BLOCKED_STATUS: Int64 = 1
+comptime QUOTA_DISPLAY_LABEL_AUTH_SYNC_SOURCE: Int64 = 2
+
+comptime QUOTA_WINDOW_LABEL_USAGE: Int64 = 0
+comptime QUOTA_WINDOW_LABEL_FIVE_HOUR: Int64 = 1
+comptime QUOTA_WINDOW_LABEL_WEEKLY: Int64 = 2
+comptime QUOTA_WINDOW_LABEL_MONTHLY: Int64 = 3
+comptime QUOTA_WINDOW_LABEL_SECONDS: Int64 = 4
+
+
+def quota_model_policy_copy_label(
+    label: StringSlice,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) -> Int64:
+    if (
+        output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+    var length = Int64(label.byte_length())
+    if length > output_capacity:
+        return QUOTA_MODEL_POLICY_CAPACITY
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var source = label.unsafe_ptr()
+    for index in range(length):
+        output[unsafe_offset=index] = source[unsafe_offset=index]
+    written[] = length
+    return QUOTA_MODEL_POLICY_OK
+
+
+@export("prodex_quota_display_label_v1")
+def prodex_quota_display_label_v1(
+    abi_version: Int64,
+    label_kind: Int64,
+    value: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+
+    var label = StringSlice("")
+    if label_kind == QUOTA_DISPLAY_LABEL_SORT:
+        if value == 0:
+            label = StringSlice("current")
+        elif value == 1:
+            label = StringSlice("remaining")
+        elif value == 2:
+            label = StringSlice("profile")
+        elif value == 3:
+            label = StringSlice("auth")
+        elif value == 4:
+            label = StringSlice("account")
+        elif value == 5:
+            label = StringSlice("plan")
+        else:
+            return QUOTA_MODEL_POLICY_INVALID
+    elif label_kind == QUOTA_DISPLAY_LABEL_BLOCKED_STATUS:
+        if value == QUOTA_BLOCKED_KIND_NONE:
+            label = StringSlice("Unavailable")
+        elif value == QUOTA_BLOCKED_KIND_EXHAUSTED:
+            label = StringSlice("Blocked")
+        elif value == QUOTA_BLOCKED_KIND_WEEKLY:
+            label = StringSlice("Blocked weekly")
+        elif value == QUOTA_BLOCKED_KIND_FIVE_HOUR:
+            label = StringSlice("Blocked 5h")
+        else:
+            return QUOTA_MODEL_POLICY_INVALID
+    elif label_kind == QUOTA_DISPLAY_LABEL_AUTH_SYNC_SOURCE:
+        if value == 0:
+            label = StringSlice("reloaded")
+        elif value == 1:
+            label = StringSlice("refreshed")
+        else:
+            return QUOTA_MODEL_POLICY_INVALID
+    else:
+        return QUOTA_MODEL_POLICY_INVALID
+
+    return quota_model_policy_copy_label(
+        label, output_address, output_capacity, written_address
+    )
+
+
+@export("prodex_quota_window_label_plan_v1")
+def prodex_quota_window_label_plan_v1(
+    abi_version: Int64,
+    seconds_present: Int64,
+    seconds: Int64,
+    kind_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != QUOTA_MODEL_POLICY_ABI_VERSION:
+        return QUOTA_MODEL_POLICY_ABI
+    if (
+        (seconds_present != 0 and seconds_present != 1)
+        or kind_address == 0
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+    ):
+        return QUOTA_MODEL_POLICY_INVALID
+
+    var kind = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(kind_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+
+    if seconds_present == 0:
+        kind[] = QUOTA_WINDOW_LABEL_USAGE
+        return quota_model_policy_copy_label(
+            StringSlice("usage"), output_address, output_capacity, written_address
+        )
+    if seconds >= 17_700 and seconds <= 18_300:
+        kind[] = QUOTA_WINDOW_LABEL_FIVE_HOUR
+        return quota_model_policy_copy_label(
+            StringSlice("5h"), output_address, output_capacity, written_address
+        )
+    if seconds >= 601_200 and seconds <= 608_400:
+        kind[] = QUOTA_WINDOW_LABEL_WEEKLY
+        return quota_model_policy_copy_label(
+            StringSlice("weekly"), output_address, output_capacity, written_address
+        )
+    if seconds >= 2_505_600 and seconds <= 2_678_400:
+        kind[] = QUOTA_WINDOW_LABEL_MONTHLY
+        return quota_model_policy_copy_label(
+            StringSlice("monthly"), output_address, output_capacity, written_address
+        )
+
+    kind[] = QUOTA_WINDOW_LABEL_SECONDS
+    written[] = 0
+    return QUOTA_MODEL_POLICY_OK
+
+
 @export("prodex_quota_plan_capacity_pressure_scale_bps_v1")
 def prodex_quota_plan_capacity_pressure_scale_bps_v1(
     abi_version: Int64,

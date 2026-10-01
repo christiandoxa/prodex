@@ -133,14 +133,8 @@ impl QuotaReportSort {
     }
 
     pub fn label(self) -> &'static str {
-        match self {
-            Self::Current => "current",
-            Self::Remaining => "remaining",
-            Self::Profile => "profile",
-            Self::Auth => "auth",
-            Self::Account => "account",
-            Self::Plan => "plan",
-        }
+        prodex_mojo_core::quota::quota_report_sort_label(self as i64)
+            .expect("Mojo quota report sort label returned invalid output")
     }
 }
 
@@ -231,6 +225,7 @@ impl Drop for UsageAuth {
 
 impl ZeroizeOnDrop for UsageAuth {}
 
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UsageAuthSyncSource {
     Reloaded,

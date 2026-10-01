@@ -211,10 +211,8 @@ pub fn usage_auth_needs_proactive_refresh_with_policy(
 }
 
 pub fn usage_auth_sync_source_label(source: UsageAuthSyncSource) -> &'static str {
-    match source {
-        UsageAuthSyncSource::Reloaded => "reloaded",
-        UsageAuthSyncSource::Refreshed => "refreshed",
-    }
+    prodex_mojo_core::quota::quota_usage_auth_sync_source_label(source as i64)
+        .expect("Mojo quota auth-sync source label returned invalid output")
 }
 
 pub fn usage_auth_changed(expected_current: Option<&UsageAuth>, candidate: &UsageAuth) -> bool {

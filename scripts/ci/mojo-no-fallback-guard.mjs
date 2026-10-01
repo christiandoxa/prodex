@@ -78,6 +78,8 @@ const PROMOTED_FILES = [
   "crates/prodex-redaction/src/lib.rs",
   "crates/prodex-mojo-core/src/redaction.rs",
   "crates/prodex-quota/src/models.rs",
+  "crates/prodex-quota/src/auth.rs",
+  "crates/prodex-quota/src/render/time.rs",
   "crates/prodex-profile-identity/src/lib.rs",
   "crates/prodex-mojo-core/src/profile_identity.rs",
   "crates/prodex-domain/src/governance/inspection.rs",
@@ -698,6 +700,9 @@ const DOCTOR_CARGO_FILE = "crates/prodex-runtime-doctor/Cargo.toml";
 const RUNTIME_PROXY_CARGO_FILE = "crates/prodex-runtime-proxy/Cargo.toml";
 const RUNTIME_TUNING_CARGO_FILE = "crates/prodex-runtime-tuning/Cargo.toml";
 const QUOTA_MODELS_FILE = "crates/prodex-quota/src/models.rs";
+const QUOTA_AUTH_FILE = "crates/prodex-quota/src/auth.rs";
+const QUOTA_TIME_FILE = "crates/prodex-quota/src/render/time.rs";
+const QUOTA_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
@@ -1198,14 +1203,20 @@ export function findViolations(files) {
     if (filePath !== QUOTA_MODELS_FILE) return [];
     const required = [
       "prodex_mojo_core::quota::quota_report_sort_next(",
+      "prodex_mojo_core::quota::quota_report_sort_label(",
       "prodex_mojo_core::quota::quota_auth_filter_parse(",
       "prodex_mojo_core::quota::quota_auth_filter_matches(",
       "prodex_mojo_core::quota::plan_capacity_pressure_scale_bps(",
       "prodex_mojo_core::quota::scale_quota_pressure_for_plan(",
     ];
-    return required
+    const violations = required
       .filter((call) => !contents.includes(call))
       .map((call) => filePath + ": quota model policy must retain Mojo call " + call);
+    const labelBody = contents.match(/pub fn label\(self\)\s*->\s*&'static str\s*\{[^]*?^\s*\}/mu)?.[0];
+    if (labelBody?.includes("match self")) {
+      violations.push(filePath + ": contains restored Rust quota report sort label mapping");
+    }
+    return violations;
   });
   const quotaPlannerViolations = files
     .filter(([filePath, contents]) => filePath === RUNTIME_QUOTA_FILE &&
@@ -2076,9 +2087,48 @@ export function findViolations(files) {
     }
     return [];
   });
+  const quotaDisplayPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === QUOTA_TIME_FILE) {
+      const violations = contents.includes("prodex_mojo_core::quota::quota_window_label(")
+        ? []
+        : [filePath + ": quota window labels must retain Mojo planner"];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        production.includes("17_700..=18_300")
+        || production.includes("601_200..=608_400")
+        || production.includes("2_505_600..=2_678_400")
+      ) {
+        violations.push(filePath + ": contains restored Rust quota window threshold policy");
+      }
+      return violations;
+    }
+    if (filePath === QUOTA_AUTH_FILE) {
+      const violations = contents.includes("quota_usage_auth_sync_source_label(")
+        ? []
+        : [filePath + ": auth-sync source labels must retain Mojo mapping"];
+      const body = contents.match(/\bpub fn usage_auth_sync_source_label\([^]*?^\}/mu)?.[0];
+      if (body?.includes("UsageAuthSyncSource::Reloaded") || body?.includes('"reloaded"')) {
+        violations.push(filePath + ": contains restored Rust auth-sync source label mapping");
+      }
+      return violations;
+    }
+    if (filePath === QUOTA_ADAPTER_FILE) {
+      const required = [
+        "prodex_quota_display_label_v1(",
+        "prodex_quota_window_label_plan_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": quota display-policy adapter must retain Mojo ABI " + call);
+    }
+    return [];
+  });
   const quotaWindowViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== QUOTA_WINDOWS_FILE) return [];
     const violations = [];
+    if (!contents.includes("prodex_mojo_core::quota::quota_blocked_status_label(")) {
+      violations.push(filePath + ": blocked quota status rendering must retain Mojo-owned label mapping");
+    }
     if (/\bfn\s+quota_error_summary_(?:basic|transport|auth|response)\s*\(/u.test(contents)) {
       violations.push(`${filePath}: contains a Rust quota error classifier`);
     }
@@ -2562,7 +2612,7 @@ export function findViolations(files) {
     ...kiroResponseHelperViolations,
     ...kiroAcpViolations,
     ...deepseekStrictSchemaViolations,
-    ...quotaModelPolicyViolations, ...quotaPlannerViolations,
+    ...quotaModelPolicyViolations, ...quotaDisplayPolicyViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
     ...anthropicEnvelopeViolations, ...anthropicRequestViolations,
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
