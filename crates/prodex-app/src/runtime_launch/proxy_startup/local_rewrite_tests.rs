@@ -9,6 +9,7 @@ use std::fs;
 use std::path::Path;
 use std::time::Duration;
 mod deepseek;
+mod deepseek_history;
 mod model_memory;
 mod provider_routes;
 mod support;

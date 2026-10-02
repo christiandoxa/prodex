@@ -2,8 +2,6 @@
 
 use std::collections::BTreeSet;
 
-use super::super::deepseek_provider_core_json_string;
-
 pub fn deepseek_provider_core_chat_role(role: &str) -> &str {
     match role {
         "assistant" | "system" | "tool" => role,
@@ -25,41 +23,35 @@ pub fn deepseek_provider_core_history_has_system_message(
 pub fn deepseek_provider_core_first_function_call_output_call_id(
     value: &serde_json::Value,
 ) -> Option<String> {
-    value
-        .get("input")?
-        .as_array()?
-        .iter()
-        .filter_map(serde_json::Value::as_object)
-        .find_map(|object| {
-            matches!(
-                object.get("type").and_then(serde_json::Value::as_str),
-                Some(
-                    "function_call_output"
-                        | "custom_tool_call_output"
-                        | "mcp_call_output"
-                        | "mcp_tool_result",
-                )
-            )
-            .then(|| deepseek_provider_core_json_string(object, &["call_id", "tool_call_id", "id"]))
-            .flatten()
-        })
-        .filter(|call_id| !call_id.trim().is_empty())
+    let input_value = value.get("input")?;
+    let input_json = serde_json::to_string(input_value).ok()?;
+    let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+        prodex_mojo_core::rich::DeepSeekKernelOperation::ResponsesHistoryCallId,
+    );
+    input.input = Some(&input_json);
+    let output = prodex_mojo_core::rich::deepseek_kernel(input).ok()?;
+    serde_json::from_slice(&output).ok().flatten()
 }
 
 pub fn deepseek_provider_core_history_has_tool_call(
     history: &[serde_json::Value],
     call_id: &str,
 ) -> bool {
-    history.iter().any(|message| {
-        message
-            .get("tool_calls")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|tool_calls| {
-                tool_calls.iter().any(|tool_call| {
-                    tool_call.get("id").and_then(serde_json::Value::as_str) == Some(call_id)
-                })
-            })
-    })
+    let Ok(call_id_json) = serde_json::to_string(call_id) else {
+        return false;
+    };
+    let Ok(history_json) = serde_json::to_string(history) else {
+        return false;
+    };
+    let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+        prodex_mojo_core::rich::DeepSeekKernelOperation::ResponsesHistoryContainsCallId,
+    );
+    input.call_id = Some(&call_id_json);
+    input.messages = Some(&history_json);
+    prodex_mojo_core::rich::deepseek_kernel(input)
+        .ok()
+        .and_then(|output| serde_json::from_slice::<bool>(&output).ok())
+        .unwrap_or(false)
 }
 
 pub fn deepseek_provider_core_tool_call_ids(history: &[serde_json::Value]) -> BTreeSet<String> {

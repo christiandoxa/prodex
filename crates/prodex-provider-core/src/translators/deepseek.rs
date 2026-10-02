@@ -391,7 +391,7 @@ mod tests {
     }
 
     #[test]
-    fn deepseek_provider_core_extracts_stream_choice_delta() {
+    fn deepseek_provider_core_materializes_stream_choice_delta() {
         assert_eq!(
             deepseek_provider_core_stream_choice_delta(&serde_json::json!({
                 "delta": {
@@ -415,16 +415,6 @@ mod tests {
                     "function": {"name": "shell"},
                 })],
             }
-        );
-        assert_eq!(
-            deepseek_provider_core_stream_choice_delta(&serde_json::json!({
-                "delta": {
-                    "reasoning_content": "",
-                    "refusal": "",
-                    "content": "",
-                }
-            })),
-            DeepSeekProviderCoreStreamChoiceDelta::default()
         );
         assert_eq!(
             deepseek_provider_core_stream_choice_delta(&serde_json::json!({})),

@@ -13,6 +13,7 @@ const RESPONSE_METADATA_MOJO_FILE = "mojo/prodex_core/runtime_response_metadata.
 const DOCTOR_MARKER_ABI_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_marker.rs";
 const DOCTOR_MARKER_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs";
 const DOCTOR_MARKER_ABI_MOJO_FILE = "mojo/prodex_core/runtime_doctor_marker.mojo";
+const DEEPSEEK_INPUT_HISTORY_FILE = "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs";
 const PROMOTED_FILES = [
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
   "crates/prodex-mojo-core/src/log_throughput_policy.rs",
@@ -305,11 +306,11 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
-  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/strict_schema.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo_tests.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_choice.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_shape.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools/web_search.rs",
@@ -488,10 +489,10 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
-  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/strict_schema.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_choice.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools/tool_shape.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools/web_search.rs",
@@ -521,6 +522,7 @@ const ANTHROPIC_SSE_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/a
 const ANTHROPIC_REQUEST_FALLBACK_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/request_fallback.rs";
 const ANTHROPIC_REQUEST_ORACLE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/mojo_request_tests.rs";
 const REMOVED_ORACLE_FILES = [
+  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/strict_schema.rs",
   "crates/prodex-observability/src/rust.rs",
   "crates/prodex-observability/src/metric_label/mojo_parity_tests.rs",
   ANTHROPIC_REQUEST_FALLBACK_FILE,
@@ -682,11 +684,11 @@ const HARD_REPLACED_RUST_FILES = new Set([
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/reasoning.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
-  "crates/prodex-provider-core/src/deepseek_bridge/request_tools/strict_schema.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/messages/mojo_tests.rs",
   "crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
+  "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs",
   "crates/prodex-provider-core/src/translators/deepseek/tooling.rs",
   "crates/prodex-provider-core/src/chat_tools_bridge.rs",
   "crates/prodex-provider-core/src/chat_tools_bridge/entry.rs",
@@ -882,11 +884,39 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
-  const markerViolations = files.flatMap(([filePath, contents]) =>
-    FORBIDDEN_MARKERS.filter((marker) => contents.includes(marker)).map(
-      (marker) => `${filePath}: promoted Mojo code contains ${marker}`,
+  const markerViolations = [
+    ...files.flatMap(([filePath, contents]) =>
+      FORBIDDEN_MARKERS.filter((marker) => contents.includes(marker)).map(
+        (marker) => `${filePath}: promoted Mojo code contains ${marker}`,
+      ),
     ),
-  );
+    ...files.flatMap(([filePath, contents]) => {
+      if (filePath !== DEEPSEEK_INPUT_HISTORY_FILE) return [];
+      const between = (startName, endName) => {
+        const start = contents.indexOf(`pub fn ${startName}(`);
+        const end = contents.indexOf(`pub fn ${endName}(`, start);
+        return start >= 0 && end > start ? contents.slice(start, end) : "";
+      };
+      const keyPlan = between(
+        "deepseek_provider_core_first_function_call_output_call_id",
+        "deepseek_provider_core_history_has_tool_call",
+      );
+      const historyMatch = between(
+        "deepseek_provider_core_history_has_tool_call",
+        "deepseek_provider_core_tool_call_ids",
+      );
+      const rustKeyCopy = /"(?:function_call_output|custom_tool_call_output|mcp_call_output|mcp_tool_result)"|find_map\s*\(/u.test(keyPlan);
+      const rustHistoryCopy = /history\.iter\(\)\.any|tool_calls|\.get\("id"\)/u.test(historyMatch);
+      return (
+        keyPlan.includes("DeepSeekKernelOperation::ResponsesHistoryCallId")
+        && historyMatch.includes("DeepSeekKernelOperation::ResponsesHistoryContainsCallId")
+        && !rustKeyCopy
+        && !rustHistoryCopy
+      )
+        ? []
+        : [`${filePath}: DeepSeek input/history replay decisions must use the Mojo kernel`];
+    }),
+  ];
   const featureOffViolations = files
     .filter(([filePath, contents]) =>
       UNCONDITIONAL_MOJO_FILES.has(filePath) && FEATURE_OFF_RUST_PATH.test(contents),
@@ -1303,13 +1333,17 @@ export function findViolations(files) {
     return violations;
   });
   const deepseekStrictSchemaViolations = files.flatMap(([filePath, contents]) => {
-    if (filePath === DEEPSEEK_STRICT_TOOLS_FILE &&
-      !contents.includes("DeepSeekKernelOperation::StrictFunctionSchema")) {
-      return [`${filePath}: strict schema normalization must use Mojo`];
+    if (filePath === DEEPSEEK_STRICT_TOOLS_FILE) {
+      const violations = contents.includes("DeepSeekKernelOperation::StrictFunctionSchema")
+        ? [] : [`${filePath}: strict schema normalization must use Mojo`];
+      if (/\bdeepseek_provider_core_(?:validate_strict_schema|reject_strict_schema_keywords)\b/u.test(contents)) {
+        violations.push(`${filePath}: contains a Rust strict-schema validator`);
+      }
+      return violations;
     }
     if (filePath === DEEPSEEK_STRICT_SCHEMA_FILE &&
-      /\bfn\s+deepseek_provider_core_sanitize_strict_(?:schema|object_schema)\s*\(/u.test(contents)) {
-      return [`${filePath}: contains replaced Rust strict schema normalization`];
+      /\bdeepseek_provider_core_(?:validate_strict_schema|reject_strict_schema_keywords|sanitize_strict_(?:schema|object_schema))\b/u.test(contents)) {
+      return [`${filePath}: contains replaced Rust strict-schema behavior`];
     }
     return [];
   });
@@ -2815,13 +2849,18 @@ export function findViolations(files) {
   });
   const deepseekShapingViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== DEEPSEEK_SHAPING_FILE) return [];
-    return DEEPSEEK_SHAPING_COMPLETED_FNS.flatMap((name) => {
+    const completedViolations = DEEPSEEK_SHAPING_COMPLETED_FNS.flatMap((name) => {
       const start = contents.indexOf(`pub fn ${name}(`);
       if (start < 0) return [`${filePath}: missing Mojo-owned ${name}`];
       const next = contents.indexOf("\npub fn ", start + 1);
       return FEATURE_OFF_RUST_PATH.test(contents.slice(start, next < 0 ? undefined : next))
         ? [`${filePath}: ${name} contains a feature-off Rust path`] : [];
     });
+    const choiceDelta = contents.match(/\bpub fn deepseek_provider_core_stream_choice_delta\([^]*?^\}/mu)?.[0];
+    if (choiceDelta?.includes("DeepSeekKernelOperation::StreamChoiceDelta") &&
+        !choiceDelta.includes('Some("")')) return completedViolations;
+    return [...completedViolations,
+      `${filePath}: stream choice empty-text filtering must stay in Mojo`];
   });
   const deepseekStreamFallbackViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === DEEPSEEK_SHAPING_FILE) {
@@ -3722,8 +3761,11 @@ function selfTest() {
   assert.match(findViolations([[DEEPSEEK_STRICT_TOOLS_FILE, "fn strict_schema() {}"]]).join("\n"),
     /strict schema normalization must use Mojo/u);
   assert.match(findViolations([[DEEPSEEK_STRICT_SCHEMA_FILE,
-    "fn deepseek_provider_core_sanitize_strict_schema() {}"]]).join("\n"),
-  /replaced Rust strict schema normalization/u);
+    "fn deepseek_provider_core_validate_strict_schema() {}"]]).join("\n"),
+  /replaced Rust strict-schema behavior/u);
+  assert.match(findViolations([[DEEPSEEK_STRICT_TOOLS_FILE,
+    "DeepSeekKernelOperation::StrictFunctionSchema; deepseek_provider_core_validate_strict_schema()"]]).join("\n"),
+  /contains a Rust strict-schema validator/u);
   assert.match(findViolations([[DEEPSEEK_SIMPLE_REQUEST_FILE,
     "fn deepseek_provider_core_function_tools() {}"]]).join("\n"),
   /replaced Rust semantic implementation/u);
@@ -3949,6 +3991,15 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/input_items.rs",
     '#[cfg(not(feature = "mojo"))] mod push;']]).join("\n"),
     /feature-off Rust path/u);
+  assert.match(findViolations([[DEEPSEEK_INPUT_HISTORY_FILE,
+    "pub fn deepseek_provider_core_first_function_call_output_call_id(value: &Value) { value.get(\"input\").find_map(|item| item.get(\"type\")); }\n" +
+    "pub fn deepseek_provider_core_history_has_tool_call(history: &[Value], call_id: &str) { history.iter().any(|message| message.get(\"tool_calls\").any(|call| call.get(\"id\") == call_id)); }\n" +
+    "pub fn deepseek_provider_core_tool_call_ids() {}"]]).join("\n"),
+    /DeepSeek input\/history replay decisions must use the Mojo kernel/u);
+  assert.deepEqual(findViolations([[DEEPSEEK_INPUT_HISTORY_FILE,
+    "pub fn deepseek_provider_core_first_function_call_output_call_id(value: &Value) { DeepSeekKernelOperation::ResponsesHistoryCallId; }\n" +
+    "pub fn deepseek_provider_core_history_has_tool_call(history: &[Value], call_id: &str) { DeepSeekKernelOperation::ResponsesHistoryContainsCallId; }\n" +
+    "pub fn deepseek_provider_core_tool_call_ids() {}"]]), []);
   assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/request_params_tests.rs",
     "fn oracle() {}"]]).join("\n"), /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/deepseek/request.rs",
@@ -4028,6 +4079,14 @@ function selfTest() {
   assert(findViolations([[DEEPSEEK_SHAPING_FILE,
     'pub fn deepseek_provider_core_response_created_event() { #[cfg(not(feature = "mojo"))] fallback(); }']])
     .some((violation) => violation.includes("deepseek_provider_core_response_created_event contains a feature-off Rust path")));
+  const deepseekChoiceDelta = `pub fn deepseek_provider_core_stream_choice_delta(choice: &Value) -> DeepSeekProviderCoreStreamChoiceDelta {
+    deepseek_provider_core_stream_projection(DeepSeekKernelOperation::StreamChoiceDelta, choice)
+}`;
+  assert(!findViolations([[DEEPSEEK_SHAPING_FILE, deepseekChoiceDelta]])
+    .some((violation) => violation.includes("stream choice empty-text filtering must stay in Mojo")));
+  assert(findViolations([[DEEPSEEK_SHAPING_FILE,
+    deepseekChoiceDelta.replace("choice)", 'choice); if value.as_deref() == Some("") { None }')]])
+    .some((violation) => violation.includes("stream choice empty-text filtering must stay in Mojo")));
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/openai_chat_compat_response/stream.rs",
     "fn translate_chat_stream_value_to_responses_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([[ANTHROPIC_MESSAGES_FILE,

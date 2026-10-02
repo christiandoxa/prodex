@@ -48,6 +48,8 @@ pub enum DeepSeekKernelOperation {
     RawBridgeInputItem = 39,
     ResponseToolCallItem = 40,
     RawCommonRequestPlan = 41,
+    ResponsesHistoryCallId = 42,
+    ResponsesHistoryContainsCallId = 43,
 }
 
 #[repr(i64)]
@@ -230,7 +232,7 @@ unsafe extern "C" {
 pub const DEEPSEEK_KERNEL_MAX_BYTES: usize = 4 * 1024 * 1024;
 /// Maximum aggregate input size for bounded large DeepSeek response operations.
 pub const DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES: usize = 16 * 1024 * 1024;
-const DEEPSEEK_KERNEL_ABI_VERSION: i64 = 2;
+const DEEPSEEK_KERNEL_ABI_VERSION: i64 = 3;
 
 fn kernel_view(value: Option<&str>) -> RichStringView {
     value.map(view).unwrap_or_default()
@@ -279,6 +281,8 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::RawBridgeInputItem => 39,
         DeepSeekKernelOperation::ResponseToolCallItem => 40,
         DeepSeekKernelOperation::RawCommonRequestPlan => 41,
+        DeepSeekKernelOperation::ResponsesHistoryCallId => 42,
+        DeepSeekKernelOperation::ResponsesHistoryContainsCallId => 43,
     }
 }
 
@@ -323,6 +327,12 @@ fn kernel_output_capacity(
     if operation == DeepSeekKernelOperation::UserId {
         return Ok(512 + 2);
     }
+    if operation == DeepSeekKernelOperation::ResponsesHistoryCallId {
+        return Ok(input_bytes.max(4));
+    }
+    if operation == DeepSeekKernelOperation::ResponsesHistoryContainsCallId {
+        return Ok(8);
+    }
     let multiplier = match operation {
         DeepSeekKernelOperation::ResponseToolCallItem
         | DeepSeekKernelOperation::BufferedResponse => 6,
@@ -337,7 +347,11 @@ fn kernel_output_capacity(
 fn kernel_input_limit(operation: DeepSeekKernelOperation) -> usize {
     match operation {
         DeepSeekKernelOperation::ResponseToolCallItem
-        | DeepSeekKernelOperation::BufferedResponse => DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES,
+        | DeepSeekKernelOperation::BufferedResponse
+        | DeepSeekKernelOperation::ResponsesHistoryCallId
+        | DeepSeekKernelOperation::ResponsesHistoryContainsCallId => {
+            DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES
+        }
         _ => DEEPSEEK_KERNEL_MAX_BYTES,
     }
 }

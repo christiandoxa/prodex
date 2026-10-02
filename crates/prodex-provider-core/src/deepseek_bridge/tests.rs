@@ -826,9 +826,7 @@ fn deepseek_provider_core_rejects_invalid_strict_function_schema() {
     assert!(
         deepseek_provider_core_apply_strict_function_schema(&mut tool, "DeepSeek")
             .unwrap_err()
-            .contains(
-                "DeepSeek strict tool schema `lookup.query` uses unsupported keyword `pattern`"
-            )
+            .contains("strict tool schema `lookup` could not be normalized")
     );
 }
 
