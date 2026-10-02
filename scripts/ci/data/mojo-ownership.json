@@ -3772,7 +3772,8 @@
       "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
       "consumer": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
       "production_consumers": [
-        "crates/prodex-app/src/runtime_tools/sub_agents.rs"
+        "crates/prodex-app/src/runtime_tools/sub_agents.rs",
+        "crates/prodex-cli/src/runtime_args/super_validation.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/src/sub_agent_policy.rs",
       "rust_state_after": "adapter-only",
@@ -3785,9 +3786,9 @@
         "provider_url_policy": 4
       },
       "consumer_marker": "provider_url_violation",
-      "rust_owner_before": "Local sub-agent providers require a URL while non-Local providers reject a URL, duplicated in launch resolution and child launcher validation",
+      "rust_owner_before": "Local sub-agent providers require a URL while non-Local providers reject a URL, duplicated in launch resolution, CLI validation, and child launcher validation",
       "rust_test_oracle": "deleted; direct Mojo policy plus local-provider resolver and child-config tests cover both violation directions and valid combinations",
-      "rust_adapter_scope": "ProviderId::Local and Option URL presence acquisition plus stable caller-specific error text and URL syntax validation"
+      "rust_adapter_scope": "ProviderId::Local and Option URL presence acquisition; app and CLI callers map violations to stable caller-specific error text; URL syntax validation remains in Rust"
     },
     {
       "domain": "app/sub-agent",

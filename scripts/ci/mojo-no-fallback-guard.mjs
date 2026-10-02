@@ -27,6 +27,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
   "crates/prodex-mojo-core/src/sub_agent_policy/rendering.rs",
   "crates/prodex-cli/src/sub_agent.rs",
+  "crates/prodex-cli/src/runtime_args/super_validation.rs",
   "crates/prodex-app/src/runtime_tools/sub_agents.rs",
   "crates/prodex-app/src/runtime_tools/sub_agent_rendering.rs",
   "crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs",
@@ -736,6 +737,7 @@ const SUPER_PROVIDER_CONFIG_FILE = "crates/prodex-cli/src/runtime_args.rs";
 const SUPER_PROVIDER_CONFIG_ADAPTER_FILE = "crates/prodex-mojo-core/src/super_provider_config.rs";
 const EXTERNAL_PROVIDER_CONFIG_FILE = "crates/prodex-app/src/runtime_external_provider_config.rs";
 const SUB_AGENT_POLICY_FILE = "crates/prodex-cli/src/sub_agent.rs";
+const SUB_AGENT_CLI_VALIDATION_FILE = "crates/prodex-cli/src/runtime_args/super_validation.rs";
 const SUB_AGENT_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy.rs";
 const SUB_AGENT_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy/rendering.rs";
 const SUB_AGENT_CHILD_FILE = "crates/prodex-app/src/runtime_tools/sub_agents.rs";
@@ -1833,6 +1835,20 @@ export function findViolations(files) {
     return [];
   });
   const subAgentPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SUB_AGENT_CLI_VALIDATION_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = "prodex_mojo_core::sub_agent_policy::provider_url_violation(";
+      const violations = production.includes(required)
+        ? [] : [filePath + ": sub-agent provider URL validation must call Mojo provider URL policy"];
+      const retired = [
+        "args.sub_agent_url.is_some() && provider != ProviderId::Local",
+        "args.sub_agent && provider == ProviderId::Local && args.sub_agent_url.is_none()",
+      ];
+      if (retired.some((predicate) => production.includes(predicate))) {
+        violations.push(filePath + ": contains restored Rust sub-agent provider URL predicates");
+      }
+      return violations;
+    }
     if (filePath === SUB_AGENT_POLICY_FILE) {
       const required = [
         "prodex_mojo_core::sub_agent_policy::parse_concurrency(",
@@ -3762,6 +3778,20 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-context/src/critical_signal/rust_oracle.rs",
     "fn count_critical_signals() {}"]])[0], /Rust fallback or oracle/u);
   const subAgentRendering = (contents) => findViolations([[SUB_AGENT_RENDERING_FILE, contents]]);
+  const subAgentValidation = (contents) => findViolations([[SUB_AGENT_CLI_VALIDATION_FILE, contents]]);
+  assert.deepEqual(subAgentValidation(
+    "prodex_mojo_core::sub_agent_policy::provider_url_violation(local, url_present);",
+  ), []);
+  assert.match(subAgentValidation("fn validate_sub_agent_flags() {} ").join("\n"),
+    /must call Mojo provider URL policy/u);
+  for (const predicate of [
+    "args.sub_agent_url.is_some() && provider != ProviderId::Local",
+    "args.sub_agent && provider == ProviderId::Local && args.sub_agent_url.is_none()",
+  ]) {
+    assert.match(subAgentValidation(
+      "prodex_mojo_core::sub_agent_policy::provider_url_violation(local, url_present);\n" + predicate,
+    ).join("\n"), /restored Rust sub-agent provider URL predicates/u);
+  }
   assert.deepEqual(subAgentRendering(`
     prodex_mojo_core::sub_agent_policy::render_overlay(&input);
     prodex_mojo_core::sub_agent_policy::render_enabled_dry_run_report(&input);
