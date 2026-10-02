@@ -159,7 +159,8 @@ def prodex_runtime_openai_scalar_policy_v1(
         ):
             return 1
         return Int64(
-            config_range_equals["gpt-6.1-sol"](view, bounds[0], bounds[1])
+            config_range_equals["gpt-6-astra"](view, bounds[0], bounds[1])
+            or config_range_equals["gpt-6.1-sol"](view, bounds[0], bounds[1])
             or config_range_equals["gpt-6-sol"](view, bounds[0], bounds[1])
             or config_range_equals["gpt-6-luna"](view, bounds[0], bounds[1])
             or config_range_equals["codex-auto-review"](view, bounds[0], bounds[1])
@@ -168,6 +169,7 @@ def prodex_runtime_openai_scalar_policy_v1(
         config_range_equals["gpt-5.6-sol"](view, bounds[0], bounds[1])
         or config_range_equals["gpt-5.6-terra"](view, bounds[0], bounds[1])
         or config_range_equals["gpt-5.6-luna"](view, bounds[0], bounds[1])
+        or config_range_equals["gpt-6-astra"](view, bounds[0], bounds[1])
         or config_range_equals["gpt-6.1-sol"](view, bounds[0], bounds[1])
         or config_range_equals["gpt-6-sol"](view, bounds[0], bounds[1])
         or config_range_equals["gpt-6-luna"](view, bounds[0], bounds[1])

@@ -46,12 +46,14 @@ fn model_choices_keep_order_and_deduplicate_aliases_and_unicode_custom_ids() {
     assert_eq!(choices.first(), Some(&ProviderModelChoice::ProviderDefault));
     assert_eq!(
         choices[1],
-        ProviderModelChoice::Model("gpt-5.6-sol".to_string())
+        ProviderModelChoice::Model("gpt-6-astra".to_string())
     );
     assert_eq!(
         choices[3],
-        ProviderModelChoice::Model("gpt-5.6-luna".to_string())
+        ProviderModelChoice::Model("gpt-6-luna".to_string())
     );
+    assert!(choices.contains(&ProviderModelChoice::Model("gpt-5.6-sol".to_string())));
+    assert!(choices.contains(&ProviderModelChoice::Model("gpt-5.6-luna".to_string())));
     assert_eq!(choices.last(), Some(&ProviderModelChoice::Custom));
     assert_eq!(count("gpt-5.6-sol"), 1);
     assert_eq!(count("gpt-5.6-luna"), 1);
@@ -95,7 +97,7 @@ fn reasoning_resolves_long_unicode_model_ids_and_rejects_unicode_effort() {
     let resolution =
         provider_model_reasoning_resolution(ProviderId::OpenAi, Some(&query), Some("MAX")).unwrap();
 
-    assert_eq!(resolution.model_index, Some(2));
+    assert_eq!(resolution.model_index, Some(6));
     assert_eq!(
         resolution.default_reasoning_effort,
         Some(ProviderReasoningEffort::Medium)

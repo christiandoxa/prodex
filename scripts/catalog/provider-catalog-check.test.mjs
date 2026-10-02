@@ -28,9 +28,17 @@ test("provider catalog reports non-zero model and provider counts", () => {
   const catalog = JSON.parse(
     readFileSync(resolve(root, "crates/prodex-provider-core/catalog/models.json"), "utf8"),
   );
-  for (const [id, effort] of [["gpt-5.6-sol", "ultra"], ["gpt-5.6-terra", "ultra"], ["gpt-5.6-luna", "max"]]) {
+  for (const [id, effort] of [
+    ["gpt-6-astra", "max"],
+    ["gpt-6.1-sol", "max"],
+    ["gpt-6-luna", "none"],
+    ["gpt-6-sol", "none"],
+    ["gpt-5.6-sol", "ultra"],
+    ["gpt-5.6-terra", "ultra"],
+    ["gpt-5.6-luna", "max"],
+  ]) {
     const model = catalog.find((entry) => entry.provider === "openai" && entry.id === id);
-    assert.ok(model?.supported_reasoning_efforts.includes(effort));
+    assert.ok(model?.supported_reasoning_efforts.includes(effort), `${id} missing ${effort}`);
   }
 });
 

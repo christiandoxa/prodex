@@ -43,7 +43,7 @@ mod tests {
     fn provider_canonical_model_uses_fallback_head() {
         assert_eq!(
             provider_canonical_model(ProviderId::Copilot, "codex"),
-            "gpt-5.3-codex"
+            "gpt-6-astra"
         );
         assert_eq!(
             provider_canonical_model(ProviderId::OpenAi, "custom-model"),

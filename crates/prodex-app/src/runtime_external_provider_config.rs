@@ -12,10 +12,11 @@ use prodex_cli::{
     SUPER_KIRO_DEFAULT_MODEL, super_copilot_prompt_token_limit_for_model,
 };
 use prodex_mojo_core::super_provider_config::{
-    ExternalCatalogProviderClass, ExternalCatalogStaticModel, RuntimeModelProviderClass,
-    external_catalog_model_metadata, external_catalog_static_models, runtime_model_provider_class,
+    RuntimeModelProviderClass, runtime_model_provider_class,
 };
-use prodex_provider_core::ProviderId;
+use prodex_provider_core::{
+    ProviderCatalogEntry, ProviderId, provider_catalog_entries_for, provider_catalog_entry,
+};
 use serde_json::json;
 use std::ffi::OsString;
 use std::fs;
@@ -255,23 +256,18 @@ impl ExternalCatalogProvider {
         }
     }
 
-    fn policy_class(self) -> ExternalCatalogProviderClass {
-        match self {
-            Self::Anthropic => ExternalCatalogProviderClass::Anthropic,
-            Self::Copilot => ExternalCatalogProviderClass::Copilot,
-            Self::Kiro => ExternalCatalogProviderClass::Kiro,
-        }
+    fn static_model_context_window(self, model: &str) -> Option<u64> {
+        provider_catalog_entry(self.provider_id(), model)
+            .and_then(|entry| entry.context_window_tokens)
     }
 
-    fn models(self) -> Vec<ExternalCatalogStaticModel> {
-        external_catalog_static_models(self.policy_class())
-            .expect("Mojo external-provider catalog enumeration failed")
+    fn models(self) -> Vec<&'static ProviderCatalogEntry> {
+        provider_catalog_entries_for(self.provider_id())
     }
 
     fn model_metadata(self, model: &str) -> (String, String) {
-        external_catalog_model_metadata(self.policy_class(), model)
-            .expect("Mojo external-provider metadata lookup failed")
-            .map(|entry| (entry.display_name, entry.description))
+        provider_catalog_entry(self.provider_id(), model)
+            .map(|entry| (entry.display_name.clone(), entry.description.clone()))
             .unwrap_or_else(|| {
                 (
                     model.to_string(),
@@ -297,18 +293,18 @@ mod tests {
     }
 
     #[test]
-    fn external_provider_model_metadata_uses_exact_mojo_identity() {
+    fn external_provider_model_metadata_uses_canonical_provider_catalog() {
         assert_eq!(
             ExternalCatalogProvider::Copilot
-                .model_metadata("GPT-5.1-CODEX")
+                .model_metadata("GPT-6.1-SOL")
                 .0,
-            "GPT-5.1 Codex"
+            "GPT-6.1 Sol"
         );
         assert_eq!(
             ExternalCatalogProvider::Copilot
-                .model_metadata(" GPT-5.1-CODEX ")
+                .model_metadata(" GPT-6.1-SOL ")
                 .0,
-            " GPT-5.1-CODEX "
+            "GPT-6.1 Sol"
         );
         assert_eq!(
             ExternalCatalogProvider::Kiro
@@ -338,6 +334,23 @@ mod tests {
         assert_eq!(catalog["models"][0]["slug"], "claude-sonnet-4-6");
         assert_eq!(catalog["models"][0]["supports_search_tool"], true);
         assert_eq!(catalog["models"][0]["input_modalities"][1], "image");
+    }
+
+    #[test]
+    fn external_copilot_static_catalog_reuses_latest_canonical_provider_models() {
+        let models = ExternalCatalogProvider::Copilot.models();
+        let ids = models
+            .iter()
+            .map(|model| model.id.as_str())
+            .collect::<Vec<_>>();
+        for model in ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-sol"] {
+            assert!(
+                ids.contains(&model),
+                "missing canonical Copilot model {model}"
+            );
+        }
+        assert!(!ids.contains(&"gpt-5.1-codex"));
+        assert!(!ids.contains(&"gemini-3.1-pro-preview"));
     }
 
     #[test]
