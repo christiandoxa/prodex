@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.159.3 release",
+      "baseline_source": "openai/codex rust-v0.160.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -857,6 +857,82 @@
             "auth_provider_from_auth(&auth).to_auth_headers()",
             "url.host_str() == Some(\"chatgpt.com\")",
             "Duration::from_secs(3)"
+          ]
+        },
+        {
+          "path": "codex-rs/models-manager/src/manager.rs",
+          "reason": "Codex 0.160.0 explicit provider catalogs must be authoritative: bundled fallback is suppressed and failed refreshes clear provider catalog state instead of reviving stale entries.",
+          "required_contains": [
+            "Only explicit catalogs serialize refresh and suppress bundled fallback.",
+            "Self::ExplicitProvider(_) => None",
+            "pub fn with_provider_catalog(mut self) -> Self",
+            "self.remote_models.get_mut().models.clear();",
+            "matches!(&self.catalog_source, CatalogSource::ExplicitProvider(_))",
+            "current.models.clear();",
+            "if !remote_only && let Some(mut models) = self.catalog_source.fallback_models()"
+          ]
+        },
+        {
+          "path": "codex-rs/tui/src/app_server_session/provider_selection.rs",
+          "reason": "Codex 0.160.0 TUI thread start/resume/fork history must preserve explicit or managed provider selection and otherwise resolve the effective provider for the target workspace.",
+          "required_contains": [
+            "Provider request overrides honor managed requirements over explicit invocation choices.",
+            "required_model_provider()",
+            ".or_else(|| explicit_provider(config))",
+            "pub(crate) async fn history_model_provider",
+            "read_effective_config_if_supported",
+            ".model_provider",
+            "unwrap_or_else(|| \"openai\".to_string())"
+          ]
+        },
+        {
+          "path": "codex-rs/tui/src/projectless.rs",
+          "reason": "Codex 0.160.0 projectless local sessions may adopt workspace defaults only when discovery, trust, managed policy, workspace roots, environments, and explicit overrides allow it.",
+          "required_contains": [
+            "Select desktop-like execution defaults for positively discovered local projectless folders.",
+            "config.config_layer_stack.is_projectless()",
+            "config.active_project.trust_level.is_some()",
+            "config.workspace_roots.len() != 1",
+            "config.workspace_roots.first() != Some(&config.cwd)",
+            "has_only_local_environments(environments)",
+            "PermissionProfile::workspace_write()",
+            "set_permission_profile_from_session_snapshot"
+          ]
+        },
+        {
+          "path": "codex-rs/tui/src/resume_permissions.rs",
+          "reason": "Codex 0.160.0 resume/fork permission restoration must distinguish direct launch choices from omitted choices so saved destination-task permissions can be restored.",
+          "required_contains": [
+            "Omitted choices let app-server restore the destination task's saved settings.",
+            "ConfigLayerSource::SessionFlags",
+            "overrides.approval_policy.is_some() || has(\"approval_policy\")",
+            "overrides.approvals_reviewer.is_some() || has(\"approvals_reviewer\")",
+            "overrides.permission_profile.is_some()",
+            "workspace_roots: overrides.cwd.is_some()",
+            "has(\"sandbox_workspace_write.writable_roots\")"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/session/environment.rs",
+          "reason": "Codex 0.160.0 child sessions inheriting a pending environment must follow the original owner’s first configuration or failure without overwriting a child configuration that already won.",
+          "required_contains": [
+            "follow_inherited_environment_configurations",
+            "starting.owner_configuration()",
+            "ConfigUpdateSource::Inherited",
+            "no one will retry this child's one-time update",
+            "!inherited || matches!(environment.config, EnvironmentConfigState::Pending)",
+            "if inherited && matches!(environments, (None, None))"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/agent/control/spawn.rs",
+          "reason": "Codex 0.160.0 subagent spawn/resume must carry inherited pending environment snapshots into the child session.",
+          "required_contains": [
+            "inherited_environments_for_source",
+            "let inherited_environments = self",
+            "environment_selections: None",
+            "inherited_environments,",
+            "resume_thread_with_history_with_source"
           ]
         }
       ],
@@ -1873,9 +1949,97 @@
             "url.host_str() == Some(\"chatgpt.com\")",
             "Duration::from_secs(3)"
           ]
+        },
+        {
+          "id": "models.explicit-provider-catalog-authoritative",
+          "kind": "provider_catalog",
+          "file": "codex-rs/models-manager/src/manager.rs",
+          "reason": "Explicit provider model catalogs must suppress bundled fallback and clear stale state on refresh failure.",
+          "file_contains_all": [
+            "Only explicit catalogs serialize refresh and suppress bundled fallback.",
+            "Self::ExplicitProvider(_) => None",
+            "pub fn with_provider_catalog(mut self) -> Self",
+            "self.remote_models.get_mut().models.clear();",
+            "matches!(&self.catalog_source, CatalogSource::ExplicitProvider(_))",
+            "current.models.clear();",
+            "if !remote_only && let Some(mut models) = self.catalog_source.fallback_models()"
+          ]
+        },
+        {
+          "id": "tui.provider-selection-history-defaults",
+          "kind": "provider_selection",
+          "file": "codex-rs/tui/src/app_server_session/provider_selection.rs",
+          "reason": "Thread creation/history lookup must retain explicit managed provider selection and workspace-effective fallback.",
+          "file_contains_all": [
+            "Provider request overrides honor managed requirements over explicit invocation choices.",
+            "required_model_provider()",
+            ".or_else(|| explicit_provider(config))",
+            "pub(crate) async fn history_model_provider",
+            "read_effective_config_if_supported",
+            ".model_provider",
+            "unwrap_or_else(|| \"openai\".to_string())"
+          ]
+        },
+        {
+          "id": "tui.projectless-workspace-defaults",
+          "kind": "permission_defaults",
+          "file": "codex-rs/tui/src/projectless.rs",
+          "reason": "Projectless sessions may apply workspace defaults only under the upstream eligibility and trust constraints.",
+          "file_contains_all": [
+            "Select desktop-like execution defaults for positively discovered local projectless folders.",
+            "config.config_layer_stack.is_projectless()",
+            "config.active_project.trust_level.is_some()",
+            "config.workspace_roots.len() != 1",
+            "config.workspace_roots.first() != Some(&config.cwd)",
+            "has_only_local_environments(environments)",
+            "PermissionProfile::workspace_write()",
+            "set_permission_profile_from_session_snapshot"
+          ]
+        },
+        {
+          "id": "tui.resume-saved-permissions",
+          "kind": "permission_restore",
+          "file": "codex-rs/tui/src/resume_permissions.rs",
+          "reason": "Omitted resume/fork choices must allow app-server to restore destination task permissions.",
+          "file_contains_all": [
+            "Omitted choices let app-server restore the destination task's saved settings.",
+            "ConfigLayerSource::SessionFlags",
+            "overrides.approval_policy.is_some() || has(\"approval_policy\")",
+            "overrides.approvals_reviewer.is_some() || has(\"approvals_reviewer\")",
+            "overrides.permission_profile.is_some()",
+            "workspace_roots: overrides.cwd.is_some()",
+            "has(\"sandbox_workspace_write.writable_roots\")"
+          ]
+        },
+        {
+          "id": "core.subagent-pending-environment-inheritance",
+          "kind": "environment_inheritance",
+          "file": "codex-rs/core/src/session/environment.rs",
+          "reason": "Pending subagent environments must inherit the owner’s first ready/failure result without overwriting a child winner.",
+          "file_contains_all": [
+            "follow_inherited_environment_configurations",
+            "starting.owner_configuration()",
+            "ConfigUpdateSource::Inherited",
+            "no one will retry this child's one-time update",
+            "!inherited || matches!(environment.config, EnvironmentConfigState::Pending)",
+            "if inherited && matches!(environments, (None, None))"
+          ]
+        },
+        {
+          "id": "core.subagent-spawn-inherited-environments",
+          "kind": "environment_inheritance",
+          "file": "codex-rs/core/src/agent/control/spawn.rs",
+          "reason": "Spawn/resume must pass inherited environment snapshots into subagent sessions.",
+          "file_contains_all": [
+            "inherited_environments_for_source",
+            "let inherited_environments = self",
+            "environment_selections: None",
+            "inherited_environments,",
+            "resume_thread_with_history_with_source"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.159.3",
+      "tested_codex_release": "rust-v0.160.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -2177,6 +2341,23 @@
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.159.3, keep chatgpt_base_url Codex-owned and HTTPS so the new security-setup account/read request stays outside the Prodex model proxy, and guard the upstream auth-identity and action-URL validation contract without changing runtime routing.",
           "compatibility_evidence": "Exact 0.159.2 and 0.159.3 tagged source archives, release/tag metadata, 511 existing critical-file markers replayed with zero misses, official Linux musl CLI and app-server checksum/version verification, isolated app-server initialize, runtime-launch bootstrap-preservation tests, and baseline guards are recorded in migration/codex-rust-v0.159.3-audit.md."
+        },
+        {
+          "from": "rust-v0.159.3",
+          "to": "rust-v0.160.0",
+          "upstream_commit": "a956835d020762cb2b570053af06f643a11c0ecc",
+          "upstream_tag_object": "79b1b666f2e8551f8abbbca34957227f67f3f553",
+          "upstream_release_date": "2026-10-01T20:19:13Z",
+          "tree_comparison": "exact tagged source archives; 362 changed files, 14664 additions, 2380 deletions",
+          "runtime_changes": [
+            "Explicit provider model catalogs are authoritative: provider-catalog managers suppress bundled fallback and clear stale catalog state after failed refreshes.",
+            "TUI thread start/resume/fork/history preserves explicit or managed model-provider selection and resolves workspace-effective defaults when invocation choices are omitted.",
+            "Eligible local projectless sessions may apply workspace-write defaults, while resume/fork distinguishes direct permission overrides from omitted choices so saved destination permissions can be restored.",
+            "Subagents retain pending environment selections and follow the owner environment's first configuration or preparation failure without overwriting a child-side configuration that already won.",
+            "The existing 0.159.3 account-security reminder identity/origin boundary, Responses HTTP/WebSocket routing, quota/error/session/protocol markers, and background-process protections remain present."
+          ],
+          "prodex_action": "Advance the tested Codex baseline to 0.160.0 without changing Prodex model transport. Guard authoritative provider catalogs, provider/history restoration, projectless workspace defaults, saved permission restoration, and pending subagent environment inheritance while retaining the 0.159.3 authenticated security-reminder boundary.",
+          "compatibility_evidence": "Exact 0.159.3 and 0.160.0 tagged source archives, 0.160.0 release/tag metadata, full critical/semantic marker replay with zero misses, official Linux musl CLI and app-server checksum/version verification, and isolated app-server initialize are recorded in migration/codex-rust-v0.160.0-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -2199,16 +2380,23 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.159.3",
-      "name": "0.159.3",
-      "published_at": "2026-09-30T22:57:34Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.159.3",
+      "tag_name": "rust-v0.160.0",
+      "name": "0.160.0",
+      "published_at": "2026-10-01T20:19:13Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.160.0",
       "body_head": [
         "## New Features",
-        "- Eligible local sessions signed in with ChatGPT can now show optional reminders to complete account security setup. (#49744)",
+        "- Browse older tasks in the agent command center with a keyboard-accessible “Show more” action. (#49106)",
+        "- Select transcript text and paste with middle-click in fullscreen mode on supported local Linux X11 terminals. (#49112)",
+        "- Start sessions outside a project with workspace defaults when policy permits, and restore saved permissions when resuming. (#49160)",
+        "- Added opt-in Guardian review capabilities to retrieve earlier user instructions and include context from agent handoffs. (#49036, #49057)",
+        "## Bug Fixes",
+        "- Unsent queued messages now resume after reconnection once uncertain submissions are resolved, avoiding duplicate sends. (#49105)",
+        "- The terminal UI now preserves server provider, reasoning-summary, and verbosity settings and shows the correct sessions in resume and fork history. (#49144, #49161, #49171)",
+        "- Subagents now retain environments that are still starting and receive their configuration or preparation failure. (#49075)",
+        "- Explicit provider model catalogs no longer include unsupported bundled models or reuse stale entries after refresh failures. (#49135)",
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.159.2...rust-v0.159.3",
-        "- #49744 [0.159] Backport account security setup reminders for 0.159.3 @andrewgu-oai"
+        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.159.0...rust-v0.160.0"
       ]
     }
   },
