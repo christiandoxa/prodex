@@ -7,6 +7,7 @@ from rich_text import (
     rich_view_valid,
     rich_views_equal,
     rich_view_ptr,
+    rich_view_matches_literal,
 )
 from rich_types import ProdexRichStringView
 
@@ -20,6 +21,160 @@ comptime SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_WINDOW: UInt64 = 1
 comptime SMART_CONTEXT_ACCOUNTING_RISK_ZERO_WINDOW: UInt64 = 2
 comptime SMART_CONTEXT_ACCOUNTING_RISK_RESERVED_OUTPUT: UInt64 = 4
 comptime SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_INPUT: UInt64 = 8
+comptime SMART_CONTEXT_DUPLICATE_SCAN_MAX_CANDIDATES: Int64 = 256
+comptime SMART_CONTEXT_DUPLICATE_PLAN_MAX_CANDIDATES: Int64 = 50000
+comptime SMART_CONTEXT_DUPLICATE_DIGEST_BYTES: Int64 = 68
+comptime SMART_CONTEXT_DUPLICATE_MIN_TEXT_BYTES: UInt = 1024
+comptime SMART_CONTEXT_DUPLICATE_PLAN_REWRITE: Int64 = 0
+comptime SMART_CONTEXT_DUPLICATE_PLAN_PROBE: Int64 = 1
+
+@fieldwise_init
+struct SmartContextDuplicateTextCandidate(Copyable):
+    var digest: ProdexRichStringView
+    var text: ProdexRichStringView
+    var role: ProdexRichStringView
+    var input_index: Int64
+
+def smart_context_duplicate_candidate_eligible(
+    candidate: SmartContextDuplicateTextCandidate,
+) -> Bool:
+    return candidate.text.len >= SMART_CONTEXT_DUPLICATE_MIN_TEXT_BYTES and not (
+        rich_view_matches_literal["system"](candidate.role, False)
+        or rich_view_matches_literal["developer"](candidate.role, False)
+    )
+
+def smart_context_duplicate_digest_valid(view: ProdexRichStringView) -> Bool:
+    if view.len != UInt(SMART_CONTEXT_DUPLICATE_DIGEST_BYTES) or view.ptr == 0:
+        return False
+    var source = rich_view_ptr(view)
+    if source[unsafe_offset=0] != 115 or source[unsafe_offset=1] != 99 or source[unsafe_offset=2] != 50 or source[unsafe_offset=3] != 58:
+        return False
+    for index in range(Int64(4), SMART_CONTEXT_DUPLICATE_DIGEST_BYTES):
+        var byte = source[unsafe_offset=index]
+        if not (byte >= 48 and byte <= 57 or byte >= 97 and byte <= 102):
+            return False
+    return True
+
+def smart_context_duplicate_digest_bucket(view: ProdexRichStringView) -> UInt64:
+    var source = rich_view_ptr(view)
+    var hash: UInt64 = 0
+    for index in range(Int64(4), Int64(20)):
+        var byte = source[unsafe_offset=index]
+        var digit = UInt64(byte - 48) if byte <= 57 else UInt64(byte - 87)
+        hash = hash * 16 + digit
+    return hash
+
+def smart_context_duplicate_text_bucket(view: ProdexRichStringView) -> UInt64:
+    var source = rich_view_ptr(view)
+    var hash: UInt64 = 14695981039346656037
+    for index in range(Int64(view.len)):
+        hash = (hash ^ UInt64(source[unsafe_offset=index])) * 1099511628211
+    return hash
+
+def smart_context_duplicate_text_plan_kernel(
+    candidates_address: UInt,
+    replacement_sources_address: UInt,
+    bucket_slots_address: UInt,
+    bucket_slot_count: Int64,
+    duplicate_count_address: UInt,
+    candidate_limit_exceeded_address: UInt,
+    count: Int64,
+    mode: Int64,
+) raises -> Int64:
+    if count < 0 or not (mode == SMART_CONTEXT_DUPLICATE_PLAN_REWRITE or mode == SMART_CONTEXT_DUPLICATE_PLAN_PROBE):
+        return 1
+    if count > 0 and (candidates_address == 0 or replacement_sources_address == 0):
+        return 1
+    if duplicate_count_address == 0 or candidate_limit_exceeded_address == 0:
+        return 1
+
+    var candidates = Pointer[mut=False, SmartContextDuplicateTextCandidate, ImmUntrackedOrigin](unsafe_from_address=Int(candidates_address))
+    var replacement_sources = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(replacement_sources_address))
+    var duplicate_count = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(duplicate_count_address))
+    var candidate_limit_exceeded = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(candidate_limit_exceeded_address))
+    duplicate_count[] = 0
+    candidate_limit_exceeded[] = 0
+    if count > SMART_CONTEXT_DUPLICATE_PLAN_MAX_CANDIDATES:
+        return 1
+    if bucket_slot_count <= count or bucket_slots_address == 0:
+        return 1
+    for index in range(count):
+        replacement_sources[unsafe_offset=index] = -1
+    var bucket_slots = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(bucket_slots_address))
+    for index in range(bucket_slot_count):
+        bucket_slots[unsafe_offset=index] = -1
+
+    var probe_candidate_count: Int64 = 0
+    for index in range(count):
+        var candidate = candidates[unsafe_offset=index].copy()
+        if (
+            candidate.input_index < 0
+            or not rich_view_valid(candidate.text, 2147483647)
+            or not rich_view_valid(candidate.role, 2147483647)
+        ):
+            return 1
+        if not smart_context_duplicate_candidate_eligible(candidate):
+            continue
+        if mode == SMART_CONTEXT_DUPLICATE_PLAN_PROBE:
+            probe_candidate_count += 1
+            if probe_candidate_count > SMART_CONTEXT_DUPLICATE_SCAN_MAX_CANDIDATES:
+                candidate_limit_exceeded[] = 1
+                return 0
+        elif not smart_context_duplicate_digest_valid(candidate.digest):
+            return 1
+        var bucket = (
+            smart_context_duplicate_text_bucket(candidate.text)
+            if mode == SMART_CONTEXT_DUPLICATE_PLAN_PROBE
+            else smart_context_duplicate_digest_bucket(candidate.digest)
+        )
+        var slot = Int64(bucket % UInt64(bucket_slot_count))
+        var probes: Int64 = 0
+        var stored = False
+        while probes < bucket_slot_count:
+            var previous_index = bucket_slots[unsafe_offset=slot]
+            if previous_index < 0:
+                bucket_slots[unsafe_offset=slot] = index
+                stored = True
+                break
+            var previous = candidates[unsafe_offset=previous_index].copy()
+            var candidate_matches = rich_views_equal(candidate.text, previous.text)
+            if candidate_matches:
+                if candidate.input_index != previous.input_index:
+                    replacement_sources[unsafe_offset=index] = previous.input_index
+                    duplicate_count[] += 1
+                break
+            slot += 1
+            if slot == bucket_slot_count:
+                slot = 0
+            probes += 1
+        if not stored and probes == bucket_slot_count:
+            return 1
+    return 0
+
+@export("prodex_smart_context_duplicate_text_plan_v1")
+def prodex_smart_context_duplicate_text_plan_v1(
+    candidates_address: UInt,
+    replacement_sources_address: UInt,
+    bucket_slots_address: UInt,
+    bucket_slot_count: Int64,
+    duplicate_count_address: UInt,
+    candidate_limit_exceeded_address: UInt,
+    count: Int64,
+    mode: Int64,
+) abi("C") -> Int64:
+    try:
+        return smart_context_duplicate_text_plan_kernel(
+            candidates_address,
+            replacement_sources_address,
+            bucket_slots_address,
+            bucket_slot_count,
+            duplicate_count_address,
+            candidate_limit_exceeded_address,
+            count,
+            mode,
+        )
+    except:
+        return 1
 
 def smart_context_saturating_add(left: UInt64, right: UInt64) -> UInt64:
     if left > UINT64_MAX - right:
