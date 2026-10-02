@@ -3132,9 +3132,10 @@ function selfTest() {
       /feature-off Rust path/u);
   }
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
-    "fn quota_error_summary_basic(lower: &str) {}"]])[0], /Rust quota error classifier/u);
+    "prodex_mojo_core::quota::quota_blocked_status_label(0);\nfn quota_error_summary_basic(lower: &str) {}"]]).join("\n"),
+    /Rust quota error classifier/u);
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
-    'fn format_blocked_quota_status() {\n    #[cfg(not(feature = "mojo"))] rust();\n}']]).join("\n"),
+    'prodex_mojo_core::quota::quota_blocked_status_label(0);\nfn format_blocked_quota_status() {\n    #[cfg(not(feature = "mojo"))] rust();\n}']]).join("\n"),
     /feature-off Rust classifier/u);
   assert.match(findViolations([["crates/prodex-quota/src/capacity.rs",
     '#[cfg(not(feature = "mojo"))] fn old_capacity() {}']]).join("\n"),
@@ -3311,11 +3312,11 @@ function selfTest() {
     /model matcher must use the Mojo catalog kernel/u);
   assert.match(findViolations([[
     "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
-    "fn external_catalog_model_indices_rust() {}",
-  ]])[0], /Rust semantic oracle or copy/u);
+    "let static_models = provider.models();\nfn external_catalog_model_indices_rust() {}",
+  ]]).join("\n"), /Rust semantic oracle or copy/u);
   assert.match(findViolations([[
     "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
-    "pub(super) fn external_catalog_model_indices(ids: &[&str]) -> Vec<usize> { ids.iter().map(|id| id.to_ascii_lowercase()).collect() }",
+    "let static_models = provider.models();\npub(super) fn external_catalog_model_indices(ids: &[&str]) -> Vec<usize> { ids.iter().map(|id| id.to_ascii_lowercase()).collect() }",
   ]]).join("\n"), /catalog dedup must use Mojo/u);
   assert.match(findViolations([[PROMPT_CACHE_SELECTION_FILE,
     '#[path = "selection_prompt_cache_rust.rs"] mod prompt_cache;']]).join("\n"),
@@ -3349,7 +3350,7 @@ function selfTest() {
     'pub fn provider_error_rejects_request_member() { false }']]).join("\n"),
   /request-member rejection must use Mojo/u);
   assert.deepEqual(findViolations([[PROVIDER_ERROR_FILE,
-    'pub fn provider_error_rejects_request_member() {\n  prodex_mojo_core::json::provider_error_rejects_member(nodes, raw, member);\n}']]), []);
+    '#[repr(i64)]\npub enum ProviderErrorClass { Other }\npub fn provider_error_rejects_request_member() {\n  prodex_mojo_core::json::provider_error_rejects_member(nodes, raw, member);\n}']]), []);
   assert.match(findViolations([["crates/prodex-runtime-tuning/src/capacity.rs",
     "fn runtime_proxy_worker_count_default_rust() {}"]])[0], /Rust semantic oracle or copy/u);
   assert.match(findViolations([["crates/prodex-runtime-tuning/src/lib.rs",

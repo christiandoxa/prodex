@@ -10,7 +10,7 @@ export const ALLOW_ATTRIBUTE_CAPS = Object.freeze({
   "unused_imports": 0,
   "clippy::large_enum_variant": 9,
   "clippy::result_large_err": 2,
-  "clippy::too_many_arguments": 24,
+  "clippy::too_many_arguments": 26,
   "clippy::type_complexity": 1,
 });
 
@@ -63,6 +63,10 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   "clippy::too_many_arguments|crates/prodex-runtime-proxy/src/selection_policy.rs|fn runtime_quota_selection_policy_code(",
   // ponytail: preserve the runtime call shape; group these inputs if a second caller appears.
   "clippy::too_many_arguments|crates/prodex-runtime-proxy/src/selection_policy/mojo.rs|pub(super) fn allows_direct_current_profile_fallback(",
+  // ponytail: provider precommit eligibility mirrors the fixed Mojo scalar ABI; group inputs only if a second non-ABI caller appears.
+  "clippy::too_many_arguments|crates/prodex-mojo-core/src/provider_constraints.rs|pub fn provider_precommit_should_prefetch(",
+  // ponytail: quota report comparison forwards six sort modes and precomputed columns through one fixed Mojo ABI.
+  "clippy::too_many_arguments|crates/prodex-mojo-core/src/quota.rs|pub fn quota_report_compare(",
   // ponytail: immutable live-reload inputs stay explicit; add a watcher context when another consumer appears.
   "clippy::type_complexity|crates/prodex-bench-support/src/lib.rs|pub fn run_runtime_proxy_hot_path_case_suite<",
 ]);

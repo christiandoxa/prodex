@@ -46,8 +46,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-    "maxLines": 1921,
-    "reason": "Upstream transport remains capped at the current audited release size after provider policy migrations and response-path extraction; this patch only ratchets the stale cap to the measured production LOC."
+    "maxLines": 1983,
+    "reason": "Upstream transport remains one audited I/O boundary after native-first prefetch, retry, and request-metadata policy migrations; 0.435.0 ratchets this cap to the measured production LOC without restoring policy fallbacks."
   },
   {
     "file": "crates/prodex-app/src/runtime_proxy/presidio/tests.rs",
@@ -56,8 +56,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
-    "maxLines": 1446,
-    "reason": "Typed sub-agent launch policy remains one audited boundary; this patch only ratchets the stale cap to the current measured production LOC after the Mojo launch-policy migration, without adding new fallback semantics."
+    "maxLines": 1499,
+    "reason": "Typed sub-agent launch/process orchestration remains one audited I/O boundary after Mojo argv, reasoning, and environment-policy migrations; 0.435.0 ratchets to measured production LOC without restoring Rust policy ownership."
   },
   {
     "file": "crates/prodex-app/tests/src/runtime_proxy/smart_context/prepare.rs",
@@ -66,8 +66,8 @@
   },
   {
     "file": "crates/prodex-mojo-core/src/quota.rs",
-    "maxLines": 895,
-    "reason": "Mojo quota ABI adapters and typed result reconstruction remain colocated in one production boundary after hard-replacement migration; exact cap ratchets the audited 0.433.0 size until the adapter splits by quota policy family."
+    "maxLines": 1609,
+    "reason": "Quota.rs is the typed Rust ABI/materialization boundary for the expanded Mojo quota policy families shipped through 0.435.0; this exact cap records current production LOC pending a post-release adapter split, without adding fallback semantics."
   },
   {
     "file": "crates/prodex-runtime-state/tests/src/lib.rs",
