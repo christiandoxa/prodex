@@ -256,7 +256,36 @@ const _: () = {
     assert!(std::mem::offset_of!(RuntimeStringView, len) == 8);
 };
 
+pub fn candidate_skip_reason_kind(skip_reason: i64) -> Result<Option<u8>, crate::MojoError> {
+    if !(RUNTIME_CANDIDATE_SKIP_NONE..=RUNTIME_CANDIDATE_SKIP_EXCLUDED).contains(&skip_reason) {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let kind = unsafe { prodex_runtime_candidate_skip_reason_kind_v1(skip_reason) };
+    match kind {
+        -1 => Ok(None),
+        -2 => Err(crate::MojoError::InvalidInput),
+        kind => u8::try_from(kind)
+            .ok()
+            .filter(|kind| *kind <= 33)
+            .map(Some)
+            .ok_or(crate::MojoError::InvalidOutput),
+    }
+}
+
 pub fn candidate_plan_self_test() -> bool {
+    if candidate_skip_reason_kind(RUNTIME_CANDIDATE_SKIP_NONE) != Ok(None)
+        || candidate_skip_reason_kind(RUNTIME_CANDIDATE_SKIP_AUTH_FAILURE) != Ok(Some(0))
+        || candidate_skip_reason_kind(RUNTIME_CANDIDATE_SKIP_SELECTION_BACKOFF) != Ok(Some(1))
+        || candidate_skip_reason_kind(RUNTIME_CANDIDATE_SKIP_QUOTA_EXHAUSTED) != Ok(Some(13))
+        || candidate_skip_reason_kind(RUNTIME_CANDIDATE_SKIP_INFLIGHT) != Ok(Some(15))
+        || candidate_skip_reason_kind(RUNTIME_CANDIDATE_SKIP_EXCLUDED) != Ok(Some(19))
+        || !matches!(
+            candidate_skip_reason_kind(RUNTIME_CANDIDATE_SKIP_QUOTA_CRITICAL_FLOOR),
+            Err(crate::MojoError::InvalidInput)
+        )
+    {
+        return false;
+    }
     let mut fields = vec![0_i64; RUNTIME_CANDIDATE_PLAN_FIELD_COUNT * 2];
     fields[1] = 1;
     fields[RUNTIME_CANDIDATE_PLAN_FIELD_COUNT + 16] = 1;
@@ -391,6 +420,7 @@ unsafe extern "C" {
         absolute_safety_floor_tokens: *mut u64,
         estimator_confidence: *mut i64,
     ) -> i64;
+    fn prodex_runtime_candidate_skip_reason_kind_v1(skip_reason: i64) -> i64;
     fn prodex_runtime_candidate_plan_batch_v2(
         fields: *const i64,
         excluded: *const i64,

@@ -132,32 +132,17 @@ pub(crate) struct RuntimeResponsePlannedCandidate {
     pub(crate) backoff_sort_key: (usize, i64, i64, i64),
     pub(crate) quota_source: RuntimeQuotaSource,
     pub(crate) quota_summary: RuntimeQuotaSummary,
-    pub(crate) inflight_soft_limited: bool,
-    pub(crate) availability: runtime_proxy_crate::RuntimeProfileAvailabilityState,
+    pub(crate) ready_skip_reason: Option<&'static str>,
+    pub(crate) fallback_skip_reason: Option<&'static str>,
 }
 
 impl RuntimeResponsePlannedCandidate {
     pub(crate) fn ready_skip_reason(&self) -> Option<&'static str> {
-        self.availability.skip_reason().or_else(|| {
-            self.inflight_soft_limited.then_some(
-                runtime_proxy_crate::RuntimeRouteDecisionReasonKind::ProfileInflightSoftLimit
-                    .as_str(),
-            )
-        })
+        self.ready_skip_reason
     }
 
     pub(crate) fn fallback_skip_reason(&self) -> Option<&'static str> {
-        match self.availability {
-            runtime_proxy_crate::RuntimeProfileAvailabilityState::AuthInvalid => {
-                Some("auth_failure_backoff")
-            }
-            runtime_proxy_crate::RuntimeProfileAvailabilityState::QuotaExhausted => {
-                Some("quota_exhausted_before_send")
-            }
-            runtime_proxy_crate::RuntimeProfileAvailabilityState::Ready
-            | runtime_proxy_crate::RuntimeProfileAvailabilityState::TransientBackoff
-            | runtime_proxy_crate::RuntimeProfileAvailabilityState::Unknown => None,
-        }
+        self.fallback_skip_reason
     }
 }
 
@@ -364,8 +349,8 @@ fn runtime_response_planned_candidate_from_proxy(
         health_sort_key: candidate.health_sort_key,
         backoff_sort_key: candidate.backoff_sort_key,
         quota_source: prodex_runtime_quota::runtime_quota_source_from_proxy(candidate.quota_source),
-        inflight_soft_limited: candidate.inflight_soft_limited,
-        availability: candidate.availability,
+        ready_skip_reason: candidate.ready_skip_reason,
+        fallback_skip_reason: candidate.fallback_skip_reason,
     }
 }
 

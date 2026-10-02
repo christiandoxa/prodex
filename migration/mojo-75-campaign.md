@@ -4498,3 +4498,30 @@ The canonical broad report at this checkpoint counts **75,472 reachable Mojo
 LOC** and **201,807 Rust production LOC**, totaling **277,279 LOC**:
 **27.218794066626035% Mojo**. The release floor and ownership non-regression
 checks pass; the 75% broad project target remains in progress.
+
+## Candidate skip-reason hard replacement
+
+Ready/fallback candidate skip reasons and candidate quota-guard reason labels now
+come directly from the existing `candidate_decision.mojo` plan. The
+kernel already produced stable skip-reason tags; a new checked Mojo mapping
+converts those tags to canonical route-reason kinds, and Rust materializes the
+corresponding label through `runtime_route_reason.mojo`. The runtime
+proxy now stores the Mojo-produced ready/fallback reasons instead of recomputing
+them from availability and inflight state.
+
+The duplicate Rust `RuntimeProfileAvailabilityState::skip_reason()`
+policy, quota-guard literal mapper, runtime-proxy ready/fallback branches, and
+the second app-level copy of those branches were deleted. `prodex-app`
+only carries the already-produced reason values from
+`prodex-runtime-proxy`; no Rust semantic fallback remains for this
+selection explanation policy.
+
+Focused validation passes 17 runtime-proxy selection-plan tests, 2 app
+candidate-plan tests, Clippy with warnings denied for `prodex-mojo-core`,
+`prodex-runtime-proxy`, and `prodex-app`, the Mojo authority
+and no-fallback guards, and `git diff --check`.
+
+The canonical broad report at this checkpoint counts **75,486 reachable Mojo
+LOC** and **201,807 Rust production LOC**, totaling **277,293 LOC**:
+**27.22246865229198% Mojo**. The release floor and ownership non-regression
+checks pass; the 75% broad project target remains in progress.

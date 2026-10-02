@@ -2512,6 +2512,43 @@ export function findViolations(files) {
     }
     return [];
   });
+  const candidateSkipReasonViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-proxy/src/selection_plan.rs") {
+      const required = [
+        "candidate_skip_reason_kind(tag)",
+        "decision.ready_skip_reason",
+        "decision.fallback_skip_reason",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": candidate skip reasons must retain Mojo-produced mapping " + call);
+      if (
+        contents.includes("impl RuntimeProfileAvailabilityState")
+        || contents.includes('Some("auth_failure_backoff")')
+        || contents.includes('Some("quota_exhausted_before_send")')
+        || contents.includes("mojo_candidate_quota_guard_reason")
+      ) {
+        violations.push(filePath + ": contains restored Rust candidate skip-reason semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-app/src/runtime_proxy/selection_plan.rs") {
+      if (
+        !contents.includes("ready_skip_reason: candidate.ready_skip_reason")
+        || !contents.includes("fallback_skip_reason: candidate.fallback_skip_reason")
+      ) {
+        return [filePath + ": app candidate plan must carry Mojo-produced skip reasons"];
+      }
+      if (
+        contents.includes("self.availability.skip_reason()")
+        || contents.includes('Some("auth_failure_backoff")')
+        || contents.includes('Some("quota_exhausted_before_send")')
+      ) {
+        return [filePath + ": contains restored app-side candidate skip-reason semantics"];
+      }
+    }
+    return [];
+  });
   const infoRenderViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-terminal-ui/src/info.rs") {
       const required = [
@@ -3286,7 +3323,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...previousResponseOutcomeLabelViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
+    ...previousResponseOutcomeLabelViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,

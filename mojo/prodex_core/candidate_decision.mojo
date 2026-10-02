@@ -24,6 +24,23 @@ comptime RUNTIME_CANDIDATE_SKIP_INFLIGHT: Int64 = 5
 comptime RUNTIME_CANDIDATE_SKIP_EXCLUDED: Int64 = 6
 
 
+@export("prodex_runtime_candidate_skip_reason_kind_v1")
+def prodex_runtime_candidate_skip_reason_kind_v1(skip_reason: Int64) abi("C") -> Int64:
+    if skip_reason == RUNTIME_CANDIDATE_SKIP_NONE:
+        return -1
+    if skip_reason == RUNTIME_CANDIDATE_SKIP_AUTH_FAILURE:
+        return 0  # auth_failure_backoff
+    if skip_reason == RUNTIME_CANDIDATE_SKIP_SELECTION_BACKOFF:
+        return 1  # selection_backoff
+    if skip_reason == RUNTIME_CANDIDATE_SKIP_QUOTA_EXHAUSTED:
+        return 13  # quota_exhausted_before_send
+    if skip_reason == RUNTIME_CANDIDATE_SKIP_INFLIGHT:
+        return 15  # profile_inflight_soft_limit
+    if skip_reason == RUNTIME_CANDIDATE_SKIP_EXCLUDED:
+        return 19  # excluded
+    return -2
+
+
 def runtime_candidate_field(
     fields: Pointer[mut=False, Int64, _], index: Int64, field: Int64
 ) -> Int64:

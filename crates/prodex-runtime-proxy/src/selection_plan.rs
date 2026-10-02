@@ -40,16 +40,6 @@ pub enum RuntimeProfileAvailabilityState {
     Unknown,
 }
 
-impl RuntimeProfileAvailabilityState {
-    pub fn skip_reason(self) -> Option<&'static str> {
-        match self {
-            Self::Ready | Self::Unknown => None,
-            Self::QuotaExhausted => Some("quota_exhausted_before_send"),
-            Self::TransientBackoff => Some("selection_backoff"),
-            Self::AuthInvalid => Some("auth_failure_backoff"),
-        }
-    }
-}
 #[derive(Debug, Clone)]
 pub struct RuntimeResponseCandidatePlanInput {
     pub name: String,
@@ -109,6 +99,8 @@ pub struct RuntimeResponsePlannedCandidate {
     pub quota_summary: RuntimeSelectionQuotaSummary,
     pub auth_failure_active: bool,
     pub quota_guard_reason: Option<&'static str>,
+    pub ready_skip_reason: Option<&'static str>,
+    pub fallback_skip_reason: Option<&'static str>,
     pub inflight_soft_limited: bool,
     pub provider_priority: usize,
     pub quota_sort_key: RuntimeResponseQuotaPressureSortKey,
@@ -120,20 +112,11 @@ pub struct RuntimeResponsePlannedCandidate {
 
 impl RuntimeResponsePlannedCandidate {
     pub fn ready_skip_reason(&self) -> Option<&'static str> {
-        self.availability.skip_reason().or_else(|| {
-            self.inflight_soft_limited
-                .then_some(RuntimeRouteDecisionReasonKind::ProfileInflightSoftLimit.as_str())
-        })
+        self.ready_skip_reason
     }
 
     pub fn fallback_skip_reason(&self) -> Option<&'static str> {
-        match self.availability {
-            RuntimeProfileAvailabilityState::AuthInvalid => Some("auth_failure_backoff"),
-            RuntimeProfileAvailabilityState::QuotaExhausted => Some("quota_exhausted_before_send"),
-            RuntimeProfileAvailabilityState::Ready
-            | RuntimeProfileAvailabilityState::TransientBackoff
-            | RuntimeProfileAvailabilityState::Unknown => None,
-        }
+        self.fallback_skip_reason
     }
 }
 
@@ -367,14 +350,13 @@ fn mojo_candidate_availability(tag: i64) -> RuntimeProfileAvailabilityState {
     }
 }
 
-fn mojo_candidate_quota_guard_reason(tag: i64) -> Option<&'static str> {
-    match tag {
-        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_SKIP_NONE => None,
-        prodex_mojo_core::runtime::RUNTIME_CANDIDATE_SKIP_QUOTA_EXHAUSTED => {
-            Some("quota_exhausted_before_send")
-        }
-        _ => panic!("validated Mojo candidate quota tag is out of range"),
-    }
+fn mojo_candidate_skip_reason(tag: i64) -> Option<&'static str> {
+    let kind = prodex_mojo_core::runtime::candidate_skip_reason_kind(tag)
+        .expect("Mojo candidate skip-reason mapping returned an invalid result")?;
+    Some(
+        prodex_mojo_core::runtime_route_reason::label(kind)
+            .expect("Mojo candidate route-reason label returned invalid output"),
+    )
 }
 
 pub fn build_runtime_response_candidate_execution_plan(
@@ -396,7 +378,9 @@ pub fn build_runtime_response_candidate_execution_plan(
             let decision = mojo_decisions
                 .next()
                 .expect("Mojo candidate decision count matches inputs");
-            let quota_guard_reason = mojo_candidate_quota_guard_reason(decision.quota_guard_reason);
+            let quota_guard_reason = mojo_candidate_skip_reason(decision.quota_guard_reason);
+            let ready_skip_reason = mojo_candidate_skip_reason(decision.ready_skip_reason);
+            let fallback_skip_reason = mojo_candidate_skip_reason(decision.fallback_skip_reason);
             let availability = mojo_candidate_availability(decision.availability);
             RuntimeResponsePlannedCandidate {
                 name: candidate.name.clone(),
@@ -409,6 +393,8 @@ pub fn build_runtime_response_candidate_execution_plan(
                 quota_summary: candidate.quota_summary,
                 auth_failure_active: candidate.auth_failure_active,
                 quota_guard_reason,
+                ready_skip_reason,
+                fallback_skip_reason,
                 inflight_soft_limited: decision.inflight_soft_limited,
                 provider_priority: candidate.provider_priority,
                 quota_sort_key: candidate.quota_sort_key,
