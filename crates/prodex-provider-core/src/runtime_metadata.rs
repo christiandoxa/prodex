@@ -186,6 +186,14 @@ mod tests {
             Some(272_000)
         );
         assert_eq!(
+            copilot_prompt_token_limit_for_model("gpt-5.6-sol"),
+            Some(272_000)
+        );
+        assert_eq!(
+            copilot_prompt_token_limit_for_model("gpt-5.6-terra"),
+            Some(272_000)
+        );
+        assert_eq!(
             copilot_prompt_token_limit_for_model("gpt-5.4"),
             Some(922_000)
         );

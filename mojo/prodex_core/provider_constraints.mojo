@@ -542,6 +542,8 @@ def prodex_provider_scalar_policy_v1(
     if (
         provider_scalar_range_equals["auto"](view, bounds[0], bounds[1])
         or provider_scalar_range_equals["codex"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["gpt-5.6-sol"](view, bounds[0], bounds[1])
+        or provider_scalar_range_equals["gpt-5.6-terra"](view, bounds[0], bounds[1])
         or provider_scalar_range_equals["gpt-5.3-codex"](view, bounds[0], bounds[1])
         or provider_scalar_range_equals["gpt-5.1-codex"](view, bounds[0], bounds[1])
         or provider_scalar_range_equals["gpt-5.1-codex-max"](view, bounds[0], bounds[1])
