@@ -4264,3 +4264,26 @@ guard. After rebasing onto the released `0.435.1` catalog state, the canonical
 broad report counts **73,750 reachable Mojo LOC** and **201,367 Rust production
 LOC**, totaling **275,117 LOC**: **26.8067767531632% Mojo**. The 75% broad
 target remains in progress.
+
+## Websocket proxy string policy hard replacement
+
+Websocket proxy string and NO_PROXY policy now lives in
+`websocket_proxy_policy.mojo`. Mojo owns default port selection from the
+websocket/HTTP scheme, Unicode-whitespace trimming and scheme-prefix insertion
+for proxy URL candidates, NO_PROXY comma scanning, IPv4/hostname and bracketed
+IPv6 host/port parsing with Rust-compatible unsigned-port semantics, exact and
+domain-suffix matching, bracket normalization, and websocket authority
+rendering. Rust retains socket address interleaving, URL/network parsing,
+Basic-auth encoding, HTTP CONNECT I/O, and typed materialization. The previous
+Rust trim/split/port parser, host matcher, normalization, and authority/URL
+formatting branches were deleted; no Rust semantic fallback remains for the
+migrated websocket proxy decisions.
+
+Focused validation passes the standalone `websocket_proxy_policy.mojo`
+build, the real-Mojo adapter contract test, all 10 focused
+`prodex-runtime-proxy` websocket proxy regressions, Clippy with warnings denied
+for `prodex-mojo-core` and `prodex-runtime-proxy`, `git diff --check`, and
+the strengthened no-fallback guard. The canonical broad report at this
+checkpoint counts **74,170 reachable Mojo LOC** and **201,548 Rust production
+LOC**, totaling **275,718 LOC**: **26.900673876932228% Mojo**. The 75% broad
+target remains in progress.

@@ -96,6 +96,8 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime_decisions.rs",
   "crates/prodex-mojo-core/tests/profile_health.rs",
   "crates/prodex-mojo-core/src/provider_constraints.rs",
+  "crates/prodex-mojo-core/src/websocket_proxy_policy.rs",
+  "crates/prodex-runtime-proxy/src/websocket_proxy.rs",
   "crates/prodex-provider-core/src/surface.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs",
@@ -777,6 +779,8 @@ const DEEPSEEK_STRICT_SCHEMA_FILE = "crates/prodex-provider-core/src/deepseek_br
 const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
 const PROVIDER_SURFACE_FILE = "crates/prodex-provider-core/src/surface.rs";
 const PROVIDER_CONSTRAINTS_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints.rs";
+const WEBSOCKET_PROXY_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/websocket_proxy_policy.rs";
+const WEBSOCKET_PROXY_POLICY_FILE = "crates/prodex-runtime-proxy/src/websocket_proxy.rs";
 const PROVIDER_PRECOMMIT_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs";
 const PROVIDER_BRIDGE_METADATA_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs";
 const PROVIDER_BRIDGE_ROUTING_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs";
@@ -2133,6 +2137,53 @@ export function findViolations(files) {
     }
     return [];
   });
+  const websocketProxyPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === WEBSOCKET_PROXY_POLICY_FILE) {
+      const required = [
+        "mojo_websocket_proxy::default_port(",
+        "mojo_websocket_proxy::proxy_url_candidate(",
+        "mojo_websocket_proxy::value_matches(",
+        "mojo_websocket_proxy::pattern_matches(",
+        "mojo_websocket_proxy::pattern_host_port(",
+        "mojo_websocket_proxy::normalize_host(",
+        "mojo_websocket_proxy::authority(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": websocket proxy migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      for (const retired of [
+        '.trim_matches(|ch| ch == \'[\' || ch == \']\')',
+        "pattern.matches(':').count()",
+        'format!("http://{trimmed}")',
+        'format!("[{host}]:{port}")',
+        ".split(',')",
+        "ascii_casefold_ends_with(",
+        "ascii_casefold_equal_exact(",
+      ]) {
+        if (production.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust websocket proxy string/NO_PROXY policy");
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === WEBSOCKET_PROXY_POLICY_ADAPTER_FILE) {
+      const required = [
+        "prodex_websocket_proxy_default_port_v1(",
+        "prodex_websocket_proxy_url_candidate_v1(",
+        "prodex_websocket_proxy_pattern_plan_v1(",
+        "prodex_websocket_proxy_pattern_matches_v1(",
+        "prodex_websocket_proxy_value_matches_v1(",
+        "prodex_websocket_proxy_normalize_host_v1(",
+        "prodex_websocket_proxy_authority_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": websocket proxy adapter must retain Mojo ABI " + call);
+    }
+    return [];
+  });
   const providerPrecommitPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === PROVIDER_CONSTRAINTS_ADAPTER_FILE) {
       return contents.includes("prodex_provider_precommit_policy_v1(")
@@ -2983,7 +3034,7 @@ export function findViolations(files) {
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
     ...deepseekReasoningViolations,
-    ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
+    ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
