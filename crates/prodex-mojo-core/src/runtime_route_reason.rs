@@ -17,6 +17,13 @@ unsafe extern "C" {
         stage_address: u64,
     ) -> i64;
     fn prodex_runtime_route_reason_stage_v1(abi_version: i64, kind: i64) -> i64;
+    fn prodex_runtime_route_reason_label_v1(
+        abi_version: i64,
+        kind: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_runtime_route_reason_unknown_span_v1(
         abi_version: i64,
         address: u64,
@@ -71,6 +78,48 @@ pub fn stage(kind: u8) -> Result<u8, MojoError> {
     (stage <= 10)
         .then_some(stage)
         .ok_or(MojoError::InvalidOutput)
+}
+
+fn load_label(kind: i64) -> Result<String, MojoError> {
+    let mut output = [0_u8; 64];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_runtime_route_reason_label_v1(
+            ABI_VERSION,
+            kind,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        -2 => return Err(MojoError::InvalidInput),
+        -3 => return Err(MojoError::Capacity),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn label(kind: u8) -> Result<&'static str, MojoError> {
+    use std::sync::OnceLock;
+
+    static LABELS: OnceLock<Result<Vec<String>, MojoError>> = OnceLock::new();
+    let index = usize::from(kind);
+    if index > 33 {
+        return Err(MojoError::InvalidInput);
+    }
+    match LABELS.get_or_init(|| (0_i64..34).map(load_label).collect()) {
+        Ok(labels) => labels
+            .get(index)
+            .map(String::as_str)
+            .ok_or(MojoError::InvalidOutput),
+        Err(error) => Err(*error),
+    }
 }
 
 pub fn safe_identifier(value: &str) -> Result<(&str, bool), MojoError> {
@@ -143,6 +192,13 @@ mod tests {
         );
         assert_eq!(normalize_unknown("not safe / secret").unwrap(), None);
         assert_eq!(stage(25).unwrap(), 1);
+        assert_eq!(label(0).unwrap(), "auth_failure_backoff");
+        assert_eq!(label(33).unwrap(), "output_limit_clamped");
+        assert_eq!(label(34), Err(MojoError::InvalidInput));
+        for kind in 0_u8..34 {
+            let value = label(kind).unwrap();
+            assert_eq!(lookup(value).unwrap().kind, Some(kind));
+        }
         assert_eq!(safe_identifier("  model-x  ").unwrap(), ("model-x", false));
         let long = format!("{}é", "a".repeat(95));
         let (safe, truncated) = safe_identifier(&long).unwrap();

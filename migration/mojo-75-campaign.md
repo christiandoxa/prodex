@@ -4473,3 +4473,28 @@ combined checkpoint counts **75,310 reachable Mojo LOC** and **201,796 Rust
 production LOC**, totaling **277,106 LOC**: **27.177325644338268% Mojo**. The
 release floor and ownership non-regression checks pass; the 75% broad project
 target remains in progress.
+
+## Route-reason label hard replacement
+
+Canonical runtime route-decision reason labels now come from
+`runtime_route_reason.mojo`. Mojo owns the 34 kind-to-label mappings,
+and the same catalog is reused by exact label lookup so forward and reverse
+mapping have one semantic owner. Rust keeps the public enum, validated tag
+reconstruction, Serde integration, and `&'static str` materialization
+through a cached Mojo adapter. The previous 34-entry Rust
+`RuntimeRouteDecisionReasonKind::as_str()` match table was deleted with
+no Rust fallback.
+
+Focused validation passes the direct Mojo route-reason round-trip test across
+all 34 labels, the runtime-proxy fixed label/stage caller regression, Clippy
+with warnings denied for `prodex-mojo-core` and
+`prodex-runtime-proxy`, the Mojo authority and no-fallback guards,
+and `git diff --check`. Development validation caught two Mojo
+`StringSlice` origin-typing errors in the initial helper design; the
+final implementation avoids origin-dependent returns and keeps one internal
+catalog used for both comparison and copying.
+
+The canonical broad report at this checkpoint counts **75,472 reachable Mojo
+LOC** and **201,807 Rust production LOC**, totaling **277,279 LOC**:
+**27.218794066626035% Mojo**. The release floor and ownership non-regression
+checks pass; the 75% broad project target remains in progress.
