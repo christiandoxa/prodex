@@ -4709,3 +4709,22 @@ self-test and check, and `git diff --check`. The production-share check reports
 **78,012 reachable Mojo LOC** and **202,533 Rust production LOC**, or **27.81%
 Mojo**. The 7% release floor and ownership non-regression pass; the 75% project
 target remains unmet.
+
+## Sub-agent provider URL policy
+
+CLI validation now calls the existing v1 `sub_agent_policy` operation for the
+local-provider/URL-presence decision. Rust retains provider identity and URL
+acquisition, URL syntax validation, and the existing CLI error text. The
+no-fallback guard requires this Mojo call and rejects the removed Rust
+predicates. Existing caller coverage checks both violation directions, keeps
+top-level `--url` separate, and accepts a valid local sub-agent URL.
+
+Validation passes: the focused CLI boundary test, the direct Mojo contract
+test with all features, ownership and production-share checks, and the
+no-fallback guard self-test and check. The canonical production-share report
+shows 27.8052% Mojo; the 7% release floor and ownership non-regression pass,
+while the 75% project target remains unmet. Formatting and diff hygiene are
+checked for this checkpoint. `npm run test:changed` passes churn hygiene, then
+stops at the existing size guard with seven violations and 34 near-limit files
+against a budget of 32; changed-test selection does not run. No guard was
+weakened.

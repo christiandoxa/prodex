@@ -77,11 +77,19 @@ pub(super) fn validate_sub_agent_flags(args: &SuperArgs) -> Result<(), String> {
         return Err("--sub-agent-model must be nonempty".to_string());
     }
     let provider = args.sub_agent_provider.unwrap_or(ProviderId::OpenAi);
-    if args.sub_agent_url.is_some() && provider != ProviderId::Local {
-        return Err("--sub-agent-url requires --sub-agent-provider local".to_string());
-    }
-    if args.sub_agent && provider == ProviderId::Local && args.sub_agent_url.is_none() {
-        return Err("local sub-agent provider requires --sub-agent-url".to_string());
+    match prodex_mojo_core::sub_agent_policy::provider_url_violation(
+        provider == ProviderId::Local,
+        args.sub_agent_url.is_some(),
+    )
+    .map_err(|_| "sub-agent provider URL policy failed".to_string())?
+    {
+        None => {}
+        Some(prodex_mojo_core::sub_agent_policy::ProviderUrlViolation::LocalRequiresUrl) => {
+            return Err("local sub-agent provider requires --sub-agent-url".to_string());
+        }
+        Some(prodex_mojo_core::sub_agent_policy::ProviderUrlViolation::NonLocalRejectsUrl) => {
+            return Err("--sub-agent-url requires --sub-agent-provider local".to_string());
+        }
     }
     Ok(())
 }
