@@ -164,6 +164,31 @@ test("registry fetch retries transient failures once and fails permanent errors 
   assert.equal(calls, 1);
 });
 
+test("GitHub API auth is scoped to api.github.com only", async () => {
+  const requests = [];
+  const fetchImpl = async (url, options) => {
+    requests.push({ url, headers: options.headers });
+    return { ok: true, json: async () => ({ ok: true }) };
+  };
+
+  await fetchJson("https://api.github.com/repos/example/tool/releases", {
+    fetchImpl,
+    githubToken: "release-token",
+  });
+  await fetchJson("https://registry.npmjs.org/example/latest", {
+    fetchImpl,
+    githubToken: "release-token",
+  });
+  await fetchJson("https://pypi.org/pypi/example/json", {
+    fetchImpl,
+    githubToken: "release-token",
+  });
+
+  assert.equal(requests[0].headers.authorization, "Bearer release-token");
+  assert.equal(requests[1].headers.authorization, undefined);
+  assert.equal(requests[2].headers.authorization, undefined);
+});
+
 test("bad release SHA and checkpoint are rejected before checking", () => {
   assert.throws(
     () => parseArgs(["node", "checker", "--release-sha", "not-a-sha"]),

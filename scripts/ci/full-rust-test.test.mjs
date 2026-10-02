@@ -119,8 +119,8 @@ test("push CI omits redundant optional-tool freshness lane", () => {
 
   assert.doesNotMatch(ci, /\n  optional-tools-freshness:\n/);
   assert.doesNotMatch(ci, /\n      - optional-tools-freshness\n/);
-  assert.match(release, /Verify optional-tool freshness at release cut/);
-  assert.match(release, /optional-tools-freshness\.mjs/);
+  assert.match(release, /Verify optional-tool freshness at release cut[\s\S]*?GH_TOKEN:\s*\$\{\{ github\.token \}\}[\s\S]*?optional-tools-freshness\.mjs/);
+  assert.match(release, /Wait for the absolute publication target and revalidate[\s\S]*?GH_TOKEN:\s*\$\{\{ github\.token \}\}[\s\S]*?--checkpoint P/);
 });
 
 test("fresh benchmark compiles required Mojo runtime with the pinned toolchain", () => {
