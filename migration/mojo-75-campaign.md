@@ -4204,3 +4204,23 @@ real-Mojo budget-window adapter tests including negative/extreme epochs, all 18
 The canonical broad report at this checkpoint counts **73,593 reachable Mojo
 LOC** and **201,422 Rust production LOC**, totaling **275,015 LOC**:
 **26.759631292838574% Mojo**. The 75% broad target remains in progress.
+
+## Sub-agent reasoning compatibility hard replacement
+
+Sub-agent explicit reasoning-effort compatibility now reuses the canonical
+provider model reasoning resolver backed by Mojo `rich_catalog` policy. The app
+passes the resolved/unknown model plus requested effort to
+`provider_model_reasoning_resolution()` and only translates its typed
+unsupported-effort result into the existing user-facing error. Unknown dynamic
+models remain accepted, while catalogued models retain their scoped supported
+effort contract. The previous Rust eight-way `SubAgentReasoningEffort` to
+`ProviderReasoningEffort` mapper and `supported.contains()` compatibility branch
+were deleted; no duplicate Rust semantic fallback remains.
+
+Focused validation passes 3 active `prodex-app` resolver regressions including
+unsupported catalogued and accepted dynamic models, the provider-core canonical
+reasoning-resolution regression, Clippy with warnings denied for `prodex-app`,
+`git diff --check`, and the strengthened no-fallback guard. The canonical broad
+report at this checkpoint counts **73,593 reachable Mojo LOC** and **201,419
+Rust production LOC**, totaling **275,012 LOC**: **26.759923203351125% Mojo**.
+The 75% broad target remains in progress.
