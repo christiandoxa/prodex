@@ -4672,3 +4672,26 @@ Validation passes: direct real-Mojo response and ordering tests, all 374
 `prodex-provider-core` tests, 51 Gemini SSE app tests, workspace Clippy,
 formatting, and the Mojo authority/no-fallback guards. The 75% target remains
 in progress.
+
+## Sub-agent overlay and dry-run rendering hard replacement
+
+The sub-agent overlay instructions and enabled/disabled dry-run reports now
+render through a versioned v1 `sub_agent_policy` Mojo ABI. Rust retains model
+and session-ID redaction, Markdown-safe display preparation, platform shell
+quoting, and filesystem writes. The Rust text templates are removed, and
+renderer errors propagate without a text fallback.
+
+Validation passes: the direct real-Mojo ABI output and edge test, 17 app tests
+matching `overlay_`, 11 app tests matching `dry_run_`, workspace Clippy with
+warnings denied, `cargo fmt --all -- --check`, `npm run docs`, and the Mojo
+no-fallback guard self-test and check. The canonical production-share check
+reports **78,012 reachable Mojo LOC** and **202,546 Rust production LOC**, or
+**27.81% Mojo**. The 7% release floor and ownership non-regression pass; the
+75% project target remains unmet.
+
+`npm run test:changed` passes churn hygiene, then stops at the repository-wide
+size guard before changed-test execution. It reports seven existing violations,
+including `prodex-mojo-core/src/log.rs` (989 lines against 850),
+`prodex-mojo-core/src/provider_constraints.rs` (870 against 850),
+`prodex-runtime-proxy/tests/src/error_policy.rs` (864 against 860), and 34
+near-limit files against a budget of 32. No size guard was weakened.
