@@ -4245,3 +4245,22 @@ warnings denied for `prodex-mojo-core`, `prodex-provider-core`, and
 canonical broad report at this checkpoint counts **73,642 reachable Mojo LOC**
 and **201,444 Rust production LOC**, totaling **275,086 LOC**:
 **26.77053721381677% Mojo**. The 75% broad target remains in progress.
+
+## Provider surface label policy hard replacement
+
+Canonical provider surface labels now live in `provider_constraints.mojo`.
+Mojo owns `ProviderId`, `ProviderWireFormat`, `ProviderEndpoint`, and
+`ProviderCapabilityStatus` label tables behind stable `repr(i64)` ABI tags.
+Rust keeps the public enums and typed call sites but no longer owns the
+string-selection matches for provider ids, wire formats, endpoints, or
+capability statuses. The previous four Rust label match tables were deleted; no
+Rust semantic fallback remains for the migrated provider-surface metadata.
+
+Focused validation passes the standalone `provider_constraints.mojo` build,
+the real-Mojo provider scalar/surface-label adapter test, the provider-core
+surface regression, Clippy with warnings denied for `prodex-mojo-core` and
+`prodex-provider-core`, `git diff --check`, and the strengthened no-fallback
+guard. After rebasing onto the released `0.435.1` catalog state, the canonical
+broad report counts **73,750 reachable Mojo LOC** and **201,367 Rust production
+LOC**, totaling **275,117 LOC**: **26.8067767531632% Mojo**. The 75% broad
+target remains in progress.
