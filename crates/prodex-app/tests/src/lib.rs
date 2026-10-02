@@ -20,11 +20,11 @@ fn provider_default_efforts_follow_catalog_for_every_provider() {
     assert_eq!(
         canonical_sub_agent_efforts(ProviderId::Copilot, None),
         [
-            SubAgentReasoningEffort::None,
             SubAgentReasoningEffort::Low,
             SubAgentReasoningEffort::Medium,
             SubAgentReasoningEffort::High,
             SubAgentReasoningEffort::XHigh,
+            SubAgentReasoningEffort::Max,
         ]
     );
     assert_eq!(
