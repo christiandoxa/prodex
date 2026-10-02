@@ -4,6 +4,11 @@ mod response_metadata;
 pub use self::response_metadata::{
     JsonStringSpan, RuntimeResponseMetadataPlan, runtime_response_metadata,
 };
+mod session_report;
+pub use self::session_report::{
+    SessionReportOrderKey, SessionReportUpdatePlan, session_report_order,
+    session_report_timestamp_sort_key, session_report_update_plan,
+};
 
 use crate::MojoError;
 

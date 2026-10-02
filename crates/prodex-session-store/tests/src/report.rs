@@ -46,10 +46,26 @@ fn remembers_the_latest_turn_model_and_reasoning_effort() {
 
 #[test]
 fn sorting_is_stable_for_equal_timestamps() {
+    let mut path_b = SessionReport::from_path(Path::new("/tmp/b.jsonl"), 10);
+    path_b.thread_name = Some("path-b".to_string());
+    let mut id_a_path_b = SessionReport::from_path(Path::new("/tmp/other.jsonl"), 10);
+    id_a_path_b.id = "a".to_string();
+    id_a_path_b.path = "/tmp/b".to_string();
+    id_a_path_b.thread_name = Some("id-a-path-b".to_string());
+    let mut id_a_path_a_first = SessionReport::from_path(Path::new("/tmp/first.jsonl"), 10);
+    id_a_path_a_first.id = "a".to_string();
+    id_a_path_a_first.path = "/tmp/a".to_string();
+    id_a_path_a_first.thread_name = Some("first-equal-key".to_string());
+    let mut id_a_path_a_second = id_a_path_a_first.clone();
+    id_a_path_a_second.thread_name = Some("second-equal-key".to_string());
+    let mut newest = SessionReport::from_path(Path::new("/tmp/new.jsonl"), 20);
+    newest.thread_name = Some("newest".to_string());
     let mut reports = [
-        SessionReport::from_path(Path::new("/tmp/b.jsonl"), 10),
-        SessionReport::from_path(Path::new("/tmp/a.jsonl"), 10),
-        SessionReport::from_path(Path::new("/tmp/new.jsonl"), 20),
+        path_b,
+        id_a_path_b,
+        id_a_path_a_first,
+        id_a_path_a_second,
+        newest,
     ];
 
     sort_session_reports(&mut reports);
@@ -59,8 +75,90 @@ fn sorting_is_stable_for_equal_timestamps() {
             .iter()
             .map(|report| report.id.as_str())
             .collect::<Vec<_>>(),
-        ["new", "a", "b"]
+        ["new", "a", "a", "a", "b"]
     );
+    assert_eq!(
+        reports
+            .iter()
+            .map(|report| report.thread_name.as_deref().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "newest",
+            "first-equal-key",
+            "second-equal-key",
+            "id-a-path-b",
+            "path-b",
+        ]
+    );
+}
+
+#[test]
+fn metadata_updates_and_numeric_timestamp_fallback_follow_mojo_plan() {
+    let mut report = SessionReport::from_path(Path::new("/tmp/original.jsonl"), 7);
+    apply_session_json_line(
+        &mut report,
+        r#"{"type":"response_item","payload":{"id":"ignored"}}"#,
+    );
+    assert_eq!(report.id, "original");
+
+    for (line, expected_epoch) in [
+        (
+            r#"{"updated_at":101,"ts":102,"timestamp":103,"payload":{"updated_at":104,"ts":105,"timestamp":106}}"#,
+            101,
+        ),
+        (
+            r#"{"updated_at":1.5,"ts":102,"timestamp":103,"payload":{"updated_at":104,"ts":105,"timestamp":106}}"#,
+            102,
+        ),
+        (
+            r#"{"updated_at":1.5,"ts":"ignored","timestamp":103,"payload":{"updated_at":104,"ts":105,"timestamp":106}}"#,
+            103,
+        ),
+        (
+            r#"{"updated_at":null,"ts":null,"timestamp":null,"payload":{"updated_at":104,"ts":105,"timestamp":106}}"#,
+            104,
+        ),
+        (
+            r#"{"updated_at":null,"ts":null,"timestamp":null,"payload":{"updated_at":1.5,"ts":105,"timestamp":106}}"#,
+            105,
+        ),
+        (
+            r#"{"updated_at":null,"ts":null,"timestamp":null,"payload":{"updated_at":1.5,"ts":null,"timestamp":106}}"#,
+            106,
+        ),
+    ] {
+        apply_session_json_line(&mut report, line);
+        assert_eq!(report.updated_sort_key, expected_epoch, "{line}");
+        assert_eq!(
+            report.updated_at.as_deref(),
+            Some(format_epoch(expected_epoch).as_str()),
+            "{line}"
+        );
+    }
+
+    apply_session_json_line(&mut report, r#"{"payload":{"id":"allowed-without-type"}}"#);
+    assert_eq!(report.id, "allowed-without-type");
+}
+
+#[test]
+fn invalid_string_timestamp_keeps_sort_key_and_blocks_numeric_fallback() {
+    let mut report = SessionReport::from_path(Path::new("/tmp/timestamp.jsonl"), 7);
+    apply_session_json_line(
+        &mut report,
+        r#"{"updated_at":"1970-01-01T01:00:00+01:00","ts":88}"#,
+    );
+    assert_eq!(report.updated_sort_key, 0);
+
+    apply_session_json_line(
+        &mut report,
+        r#"{"updated_at":" 1970-01-01T00:00:01Z ","ts":88}"#,
+    );
+    assert_eq!(report.updated_sort_key, 1);
+    assert_eq!(report.updated_at.as_deref(), Some("1970-01-01T00:00:01Z"));
+
+    apply_session_json_line(&mut report, r#"{"updated_at":"not-a-timestamp","ts":99}"#);
+    assert_eq!(report.updated_sort_key, 1);
+    assert_eq!(report.updated_at.as_deref(), Some("not-a-timestamp"));
 }
 
 #[test]
