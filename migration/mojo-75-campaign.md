@@ -4224,3 +4224,24 @@ reasoning-resolution regression, Clippy with warnings denied for `prodex-app`,
 report at this checkpoint counts **73,593 reachable Mojo LOC** and **201,419
 Rust production LOC**, totaling **275,012 LOC**: **26.759923203351125% Mojo**.
 The 75% broad target remains in progress.
+
+## Provider reasoning-effort label hard replacement
+
+Canonical provider reasoning-effort labels now live in
+`provider_constraints.mojo` beside the existing effort classifier. The Mojo
+policy maps stable 0..8 effort tags to `none`/`minimal`/`low`/`medium`/`high`/
+`xhigh`/`max`/`ultra` or no label for `Unknown`. `ProviderReasoningEffort` is now
+`repr(i64)` and exposes the Mojo-owned label through a safe adapter. Provider
+catalog reasoning and sub-agent effort suggestions reuse that label, with the
+sub-agent side parsing it through its existing Mojo-owned effort parser. The
+previous provider-core label match and app-level nine-way provider→sub-agent
+effort mapping were deleted; no duplicate Rust semantic mapping remains.
+
+Focused validation passes the standalone `provider_constraints.mojo` build,
+the real-Mojo scalar/label adapter test, provider-core effort parsing and model
+reasoning regressions, the sub-agent effort suggestion regression, Clippy with
+warnings denied for `prodex-mojo-core`, `prodex-provider-core`, and
+`prodex-app`, `git diff --check`, and the strengthened no-fallback guard. The
+canonical broad report at this checkpoint counts **73,642 reachable Mojo LOC**
+and **201,444 Rust production LOC**, totaling **275,086 LOC**:
+**26.77053721381677% Mojo**. The 75% broad target remains in progress.

@@ -41,6 +41,10 @@ mod scalar_policy_tests {
             provider_reasoning_effort_class("unknown-effort").unwrap(),
             ProviderReasoningEffortClass::Unknown
         );
+        assert_eq!(provider_reasoning_effort_label(0).unwrap(), Some("none"));
+        assert_eq!(provider_reasoning_effort_label(5).unwrap(), Some("xhigh"));
+        assert_eq!(provider_reasoning_effort_label(7).unwrap(), Some("ultra"));
+        assert_eq!(provider_reasoning_effort_label(8).unwrap(), None);
         assert_eq!(
             provider_copilot_prompt_token_limit("GPT-5.3-CODEX").unwrap(),
             Some(272_000)
@@ -644,6 +648,13 @@ pub enum ProviderReasoningEffortClass {
 }
 
 unsafe extern "C" {
+    fn prodex_provider_reasoning_effort_label_v1(
+        abi_version: i64,
+        effort: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_provider_scalar_policy_v1(
         abi_version: i64,
         operation: i64,
@@ -666,6 +677,60 @@ fn provider_scalar_policy(operation: i64, value: &str) -> Result<i64, crate::Moj
         -3 => Err(crate::MojoError::AbiMismatch),
         -2 => Err(crate::MojoError::InvalidInput),
         value => Ok(value),
+    }
+}
+
+fn load_provider_reasoning_effort_label(effort: i64) -> Result<Option<String>, crate::MojoError> {
+    let mut output = [0_u8; 16];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_provider_reasoning_effort_label_v1(
+            PROVIDER_SCALAR_POLICY_ABI_VERSION,
+            effort,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        -4 => return Err(crate::MojoError::AbiMismatch),
+        -2 => return Err(crate::MojoError::Capacity),
+        -1 => return Err(crate::MojoError::InvalidInput),
+        _ => return Err(crate::MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    if written == 0 {
+        return Ok(None);
+    }
+    String::from_utf8(output[..written].to_vec())
+        .map(Some)
+        .map_err(|_| crate::MojoError::InvalidOutput)
+}
+
+pub fn provider_reasoning_effort_label(
+    effort: i64,
+) -> Result<Option<&'static str>, crate::MojoError> {
+    use std::sync::OnceLock;
+
+    static LABELS: OnceLock<Result<Vec<Option<String>>, crate::MojoError>> = OnceLock::new();
+    let effort_index = usize::try_from(effort)
+        .ok()
+        .filter(|value| *value <= 8)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    match LABELS.get_or_init(|| {
+        (0_i64..=8)
+            .map(load_provider_reasoning_effort_label)
+            .collect()
+    }) {
+        Ok(labels) => Ok(labels
+            .get(effort_index)
+            .ok_or(crate::MojoError::InvalidOutput)?
+            .as_deref()),
+        Err(error) => Err(*error),
     }
 }
 

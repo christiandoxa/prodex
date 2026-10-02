@@ -323,33 +323,7 @@ pub(crate) fn canonical_sub_agent_efforts(
     resolution
         .supported_reasoning_efforts
         .iter()
-        .filter_map(|effort| match effort {
-            prodex_provider_core::ProviderReasoningEffort::None => {
-                Some(SubAgentReasoningEffort::None)
-            }
-            prodex_provider_core::ProviderReasoningEffort::Minimal => {
-                Some(SubAgentReasoningEffort::Minimal)
-            }
-            prodex_provider_core::ProviderReasoningEffort::Low => {
-                Some(SubAgentReasoningEffort::Low)
-            }
-            prodex_provider_core::ProviderReasoningEffort::Medium => {
-                Some(SubAgentReasoningEffort::Medium)
-            }
-            prodex_provider_core::ProviderReasoningEffort::High => {
-                Some(SubAgentReasoningEffort::High)
-            }
-            prodex_provider_core::ProviderReasoningEffort::XHigh => {
-                Some(SubAgentReasoningEffort::XHigh)
-            }
-            prodex_provider_core::ProviderReasoningEffort::Max => {
-                Some(SubAgentReasoningEffort::Max)
-            }
-            prodex_provider_core::ProviderReasoningEffort::Ultra => {
-                Some(SubAgentReasoningEffort::Ultra)
-            }
-            prodex_provider_core::ProviderReasoningEffort::Unknown => None,
-        })
+        .filter_map(|effort| effort.label()?.parse::<SubAgentReasoningEffort>().ok())
         .collect()
 }
 

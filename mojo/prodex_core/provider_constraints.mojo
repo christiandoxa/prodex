@@ -398,6 +398,60 @@ def prodex_provider_precommit_policy_v1(
     return PROVIDER_PRECOMMIT_STATUS_OK
 
 
+@export("prodex_provider_reasoning_effort_label_v1")
+def prodex_provider_reasoning_effort_label_v1(
+    abi_version: Int64,
+    effort: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -4
+    if (
+        effort < PROVIDER_REASONING_EFFORT_NONE
+        or effort > PROVIDER_REASONING_EFFORT_UNKNOWN
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+    ):
+        return -1
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if effort == PROVIDER_REASONING_EFFORT_UNKNOWN:
+        return 0
+
+    var label = StringSlice("none")
+    if effort == 1:
+        label = StringSlice("minimal")
+    elif effort == 2:
+        label = StringSlice("low")
+    elif effort == 3:
+        label = StringSlice("medium")
+    elif effort == 4:
+        label = StringSlice("high")
+    elif effort == 5:
+        label = StringSlice("xhigh")
+    elif effort == 6:
+        label = StringSlice("max")
+    elif effort == 7:
+        label = StringSlice("ultra")
+
+    var length = Int64(label.byte_length())
+    if length > output_capacity:
+        return -2
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var source = label.unsafe_ptr()
+    for index in range(length):
+        output[unsafe_offset=index] = source[unsafe_offset=index]
+    written[] = length
+    return 0
+
+
 comptime PROVIDER_SCALAR_POLICY_ABI_VERSION: Int64 = 1
 comptime PROVIDER_SCALAR_POLICY_REASONING_EFFORT: Int64 = 0
 comptime PROVIDER_SCALAR_POLICY_COPILOT_PROMPT_LIMIT: Int64 = 1

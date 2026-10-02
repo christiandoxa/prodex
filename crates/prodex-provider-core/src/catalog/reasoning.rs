@@ -40,17 +40,7 @@ pub(crate) struct ProviderReasoningPlan {
 }
 
 pub(crate) fn reasoning_effort_label(effort: ProviderReasoningEffort) -> Option<&'static str> {
-    Some(match effort {
-        ProviderReasoningEffort::None => "none",
-        ProviderReasoningEffort::Minimal => "minimal",
-        ProviderReasoningEffort::Low => "low",
-        ProviderReasoningEffort::Medium => "medium",
-        ProviderReasoningEffort::High => "high",
-        ProviderReasoningEffort::XHigh => "xhigh",
-        ProviderReasoningEffort::Max => "max",
-        ProviderReasoningEffort::Ultra => "ultra",
-        ProviderReasoningEffort::Unknown => return None,
-    })
+    effort.label()
 }
 
 pub(crate) fn reasoning_catalog_data(
