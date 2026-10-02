@@ -138,10 +138,7 @@ pub fn runtime_quota_window_summary_from_usage_snapshot_at(
 }
 
 pub fn runtime_quota_window_usable_for_auto_rotate(status: RuntimeQuotaWindowStatus) -> bool {
-    matches!(
-        status,
-        RuntimeQuotaWindowStatus::Ready
-            | RuntimeQuotaWindowStatus::Thin
-            | RuntimeQuotaWindowStatus::Critical
+    runtime_proxy::runtime_quota_window_usable_for_auto_rotate(
+        runtime_quota_window_status_to_proxy(status),
     )
 }

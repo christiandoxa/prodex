@@ -7,6 +7,12 @@ import { repoRoot } from "../npm/common.mjs";
 
 const PRECOMMIT_BUDGET_FILE = "crates/prodex-runtime-proxy/src/failure_response.rs";
 const PRECOMMIT_BUDGET_TEST_FILE = "crates/prodex-runtime-proxy/tests/src/failure_response.rs";
+const RESPONSE_METADATA_FILE = "crates/prodex-runtime-proxy/src/payload_detection/response_metadata.rs";
+const RESPONSE_METADATA_ADAPTER_FILE = "crates/prodex-mojo-core/src/json.rs";
+const RESPONSE_METADATA_MOJO_FILE = "mojo/prodex_core/runtime_response_metadata.mojo";
+const DOCTOR_MARKER_ABI_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_marker.rs";
+const DOCTOR_MARKER_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs";
+const DOCTOR_MARKER_ABI_MOJO_FILE = "mojo/prodex_core/runtime_doctor_marker.mojo";
 const PROMOTED_FILES = [
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
   "crates/prodex-mojo-core/src/log_throughput_policy.rs",
@@ -55,7 +61,15 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
+  "crates/prodex-app/src/runtime_proxy/smart_context/rewrite_validation.rs",
+  "crates/prodex-mojo-core/src/runtime_decisions/smart_context_policy.rs",
+  "mojo/prodex_core/smart_context.mojo",
   "crates/prodex-mojo-core/src/json.rs",
+  RESPONSE_METADATA_FILE,
+  RESPONSE_METADATA_MOJO_FILE,
+  DOCTOR_MARKER_ABI_ADAPTER_FILE,
+  DOCTOR_MARKER_ABI_TEST_FILE,
+  DOCTOR_MARKER_ABI_MOJO_FILE,
   "crates/prodex-session-store/src/session_selector.rs",
   "crates/prodex-session-store/src/report.rs",
   "crates/prodex-mojo-core/src/runtime_lineage.rs",
@@ -95,6 +109,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime/auto_redeem.rs",
   "crates/prodex-mojo-core/src/runtime_decisions.rs",
   "crates/prodex-mojo-core/tests/profile_health.rs",
+  "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs",
   "crates/prodex-mojo-core/src/provider_constraints.rs",
   "crates/prodex-mojo-core/src/websocket_proxy_policy.rs",
   "crates/prodex-mojo-core/src/transport_failure_policy.rs",
@@ -801,6 +816,9 @@ const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_p
 const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
 const FINGERPRINT_ARTIFACTS_FILE = "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs";
 const SMART_CONTEXT_CORE_FILE = "crates/prodex-runtime-proxy/src/smart_context/core.rs";
+const SMART_CONTEXT_DUPLICATE_VALIDATION_FILE = "crates/prodex-app/src/runtime_proxy/smart_context/rewrite_validation.rs";
+const SMART_CONTEXT_DUPLICATE_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_decisions/smart_context_policy.rs";
+const SMART_CONTEXT_DUPLICATE_MOJO_FILE = "mojo/prodex_core/smart_context.mojo";
 const ADAPTIVE_BUDGET_FILE = "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs";
 const DEEPSEEK_SHAPING_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs";
 const DEEPSEEK_STREAM_RESPONSE_VALUES_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/response_values.rs";
@@ -813,6 +831,7 @@ const DEEPSEEK_STREAM_PROMOTED_OPERATIONS = [
   "DeepSeekKernelOperation::StreamResponseMetadata",
 ];
 const RUNTIME_DOCTOR_MARKERS_FILE = "crates/prodex-runtime-doctor/src/markers.rs";
+const RUNTIME_DOCTOR_FAILURE_CLASS_FILE = "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs";
 const CHAT_TOOLS_BRIDGE_FILE = "crates/prodex-provider-core/src/chat_tools_bridge.rs";
 const CHAT_TOOLS_MOJO_FILE = "crates/prodex-provider-core/src/chat_tools_bridge/mojo.rs";
 const DEEPSEEK_SHAPING_COMPLETED_FNS = [
@@ -2681,6 +2700,56 @@ export function findViolations(files) {
       (!contents.includes("runtime_doctor_marker_known(") ||
         /\b(?:runtime_doctor_marker_registry|RuntimeDoctorMarker|RUNTIME_DOCTOR_MARKERS)\b/u.test(contents)))
     .map(([filePath]) => `${filePath}: marker recognition must use the Mojo classifier`);
+  const doctorFailureClassViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== RUNTIME_DOCTOR_FAILURE_CLASS_FILE) return [];
+    const body = contents.match(/\bfn\s+runtime_doctor_failure_class_counts\s*\([^]*?^\}/mu)?.[0];
+    const markerLiteral = /"(?:runtime_proxy_[a-z0-9_]+|profile_[a-z0-9_]+|websocket_[a-z0-9_]+|compact_[a-z0-9_]+|local_rewrite_[a-z0-9_]+|previous_response_[a-z0-9_]+|chain_[a-z0-9_]+|stale_continuation|state_save_[a-z0-9_]+|continuation_journal_[a-z0-9_]+|upstream_[a-z0-9_]+|stream_read_error|local_writer_error|selection_skip_sync_probe|local_selection_blocked|quota_blocked|quota_critical_floor_before_send|responses_pre_send_skip)"/u;
+    return body?.includes("runtime_doctor_marker_semantics(") && !markerLiteral.test(body)
+      ? []
+      : [`${filePath}: failure-class counts must use Mojo tags without Rust marker lists`];
+  });
+  const responseMetadataViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RESPONSE_METADATA_FILE) {
+      const body = contents.match(/\bfn\s+runtime_response_metadata_from_value\s*\([^]*?^\}/mu)?.[0];
+      const rustSemantics = /\bfn\s+(?:extract_runtime_token_usage_candidate|runtime_token_usage_from_usage_value|extract_runtime_turn_state_from_header_entry|extract_runtime_turn_state_header_value|push_runtime_response_id)\s*\(/u;
+      return body?.includes("prodex_mojo_core::json::runtime_response_metadata(") &&
+          !rustSemantics.test(contents)
+        ? []
+        : [`${filePath}: response metadata decisions must use the Mojo plan without Rust copies`];
+    }
+    if (filePath === RESPONSE_METADATA_ADAPTER_FILE &&
+        !contents.includes("prodex_runtime_response_metadata_v1(")) {
+      return [`${filePath}: response metadata adapter must call its versioned Mojo ABI`];
+    }
+    if (filePath === RESPONSE_METADATA_MOJO_FILE &&
+        (!contents.includes('@export("prodex_runtime_response_metadata_v1")') ||
+          !contents.includes("runtime_response_metadata_token_usage(tree)"))) {
+      return [`${filePath}: response metadata production owner must retain its ABI and usage planner`];
+    }
+    return [];
+  });
+  const doctorMarkerAbiViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === DOCTOR_MARKER_ABI_ADAPTER_FILE) {
+      return contents.includes("prodex_mojo_runtime_doctor_marker_semantics_v2(") &&
+          contents.includes("RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: i64 = 2") &&
+          !contents.includes("prodex_mojo_runtime_doctor_marker_semantics_v1(")
+        ? []
+        : [`${filePath}: four-slot marker semantics must use the version-2 ABI`];
+    }
+    if (filePath === DOCTOR_MARKER_ABI_MOJO_FILE &&
+        (!contents.includes('@export("prodex_mojo_runtime_doctor_marker_semantics_v2")') ||
+          !contents.includes("RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: Int64 = 2") ||
+          !contents.includes("output[unsafe_offset=3] = runtime_doctor_marker_failure_class(marker)") ||
+          contents.includes("prodex_mojo_runtime_doctor_marker_semantics_v1"))) {
+      return [`${filePath}: four-slot marker output must be exported under the version-2 ABI`];
+    }
+    if (filePath === DOCTOR_MARKER_ABI_TEST_FILE &&
+        (!contents.includes("prodex_mojo_runtime_doctor_marker_semantics_v2(") ||
+          !contents.includes("output[3]"))) {
+      return [`${filePath}: marker ABI tests must exercise version 2 and its fourth slot`];
+    }
+    return [];
+  });
   const statusSummaryViolations = files
     .filter(([filePath, contents]) => filePath === STATUS_SUMMARY_FILE &&
       !contents.includes("status_quota_summary_batch(&inputs)"))
@@ -3165,6 +3234,45 @@ export function findViolations(files) {
     }
     return [];
   });
+  const smartContextDuplicateTextViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SMART_CONTEXT_DUPLICATE_VALIDATION_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)",
+        "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Probe)",
+      ];
+      const violations = required
+        .filter((call) => !production.includes(call))
+        .map((call) => filePath + ": duplicate-text path must use Mojo planner " + call);
+      for (const restored of [
+        "fn runtime_smart_context_value_has_duplicate_text",
+        "fn runtime_smart_context_dedupe_value_text",
+        "BTreeMap::<String, usize>",
+        "BTreeMap::<String, Vec<(usize, &str)>>",
+        "seen.entry(&hash)",
+      ]) {
+        if (production.includes(restored)) {
+          violations.push(filePath + ": contains restored Rust duplicate-text decision logic " + restored);
+          break;
+        }
+      }
+      return violations;
+    }
+    if (filePath === SMART_CONTEXT_DUPLICATE_ADAPTER_FILE) {
+      return contents.includes("fn prodex_smart_context_duplicate_text_plan_v1(")
+        ? [] : [filePath + ": duplicate-text adapter must retain the Mojo planner ABI"];
+    }
+    if (filePath === SMART_CONTEXT_DUPLICATE_MOJO_FILE) {
+      const required = [
+        '@export("prodex_smart_context_duplicate_text_plan_v1")',
+        "def smart_context_duplicate_text_plan_kernel(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": duplicate-text decision must remain Mojo-owned " + call);
+    }
+    return [];
+  });
   const runtimeRepoMapViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-app/src/runtime_state_shared/line_index.rs") return [];
     const required = [
@@ -3385,8 +3493,8 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
-    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
+    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
+    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,
@@ -3499,6 +3607,27 @@ function selfTest() {
     /adaptive budget must use the Mojo plan/u);
   assert.deepEqual(findViolations([[ADAPTIVE_BUDGET_FILE,
     "prodex_mojo_core::runtime::smart_context_adaptive_budget_plan()"]]), []);
+  const duplicateTextPlannerCalls = [
+    "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)",
+    "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Probe)",
+  ].join("; ");
+  assert.deepEqual(findViolations([[SMART_CONTEXT_DUPLICATE_VALIDATION_FILE,
+    duplicateTextPlannerCalls]]), []);
+  assert.match(findViolations([[SMART_CONTEXT_DUPLICATE_VALIDATION_FILE,
+    duplicateTextPlannerCalls + "; fn runtime_smart_context_value_has_duplicate_text() {}"]]).join("\n"),
+  /restored Rust duplicate-text decision logic/u);
+  assert.match(findViolations([[SMART_CONTEXT_DUPLICATE_VALIDATION_FILE,
+    duplicateTextPlannerCalls.replace("SmartContextDuplicateTextMode::Probe", "RustProbe")]]).join("\n"),
+  /duplicate-text path must use Mojo planner/u);
+  assert.match(findViolations([[SMART_CONTEXT_DUPLICATE_ADAPTER_FILE,
+    "fn adapter() {}"]]).join("\n"), /duplicate-text adapter must retain/u);
+  assert.deepEqual(findViolations([[SMART_CONTEXT_DUPLICATE_ADAPTER_FILE,
+    "fn prodex_smart_context_duplicate_text_plan_v1() {}"]]), []);
+  assert.deepEqual(findViolations([[SMART_CONTEXT_DUPLICATE_MOJO_FILE,
+    '@export("prodex_smart_context_duplicate_text_plan_v1") def smart_context_duplicate_text_plan_kernel() {}']]), []);
+  assert.match(findViolations([[SMART_CONTEXT_DUPLICATE_MOJO_FILE,
+    "def smart_context_duplicate_text_plan_kernel() {}"]]).join("\n"),
+  /duplicate-text decision must remain Mojo-owned/u);
   assert.match(findViolations([[DEEPSEEK_SIMPLE_REQUEST_FILE,
     "fn deepseek_provider_core_simple_request() {}"]]).join("\n"),
   /DeepSeek simple-request eligibility must use Mojo/u);
@@ -3695,6 +3824,25 @@ function selfTest() {
   assert.match(findViolations([[RUNTIME_DOCTOR_MARKERS_FILE,
     "macro_rules! runtime_doctor_marker_registry {}"]]).join("\n"),
   /marker recognition must use the Mojo classifier/u);
+  assert.deepEqual(findViolations([[RUNTIME_DOCTOR_FAILURE_CLASS_FILE,
+    "fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) {\n  prodex_mojo_core::rich::runtime_doctor_marker_semantics(marker);\n}"]]), []);
+  assert.match(findViolations([[RUNTIME_DOCTOR_FAILURE_CLASS_FILE,
+    "fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) {\n  let classes = [(\"admission\", \"runtime_proxy_queue_overloaded\")];\n  prodex_mojo_core::rich::runtime_doctor_marker_semantics(marker);\n}"]]).join("\n"),
+  /failure-class counts must use Mojo tags without Rust marker lists/u);
+  assert.deepEqual(findViolations([[RESPONSE_METADATA_FILE,
+    "fn runtime_response_metadata_from_value(value: &Value) -> Plan {\n  prodex_mojo_core::json::runtime_response_metadata(&nodes, &number_texts)\n}"]]), []);
+  assert.match(findViolations([[RESPONSE_METADATA_FILE,
+    "fn runtime_response_metadata_from_value(value: &Value) -> Plan {\n  extract_runtime_token_usage_candidate(value)\n}"]]).join("\n"),
+  /response metadata decisions must use the Mojo plan without Rust copies/u);
+  assert.match(findViolations([[DOCTOR_MARKER_ABI_ADAPTER_FILE,
+    "const RUNTIME_DOCTOR_MARKER_ABI_VERSION: i64 = 1; fn prodex_mojo_runtime_doctor_marker_semantics_v1() {}"]]).join("\n"),
+  /four-slot marker semantics must use the version-2 ABI/u);
+  assert.match(findViolations([[DOCTOR_MARKER_ABI_MOJO_FILE,
+    "@export(\"prodex_mojo_runtime_doctor_marker_semantics_v1\") fn old() {}"]]).join("\n"),
+  /four-slot marker output must be exported under the version-2 ABI/u);
+  assert.match(findViolations([[DOCTOR_MARKER_ABI_TEST_FILE,
+    "fn test() { prodex_mojo_runtime_doctor_marker_semantics_v1(); }"]]).join("\n"),
+  /marker ABI tests must exercise version 2 and its fourth slot/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/chat_tools_bridge/tools.rs",
     "fn provider_core_chat_tools_from_responses_request() {}"]]).join("\n"),
   /Rust fallback or oracle/u);

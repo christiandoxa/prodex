@@ -95,6 +95,19 @@ fn quota_summary_for_route_matches_usage_windows() {
 }
 
 #[test]
+fn auto_rotate_window_usability_uses_runtime_proxy_quota_policy() {
+    for (status, usable) in [
+        (RuntimeQuotaWindowStatus::Ready, true),
+        (RuntimeQuotaWindowStatus::Thin, true),
+        (RuntimeQuotaWindowStatus::Critical, true),
+        (RuntimeQuotaWindowStatus::Exhausted, false),
+        (RuntimeQuotaWindowStatus::Unknown, false),
+    ] {
+        assert_eq!(runtime_quota_window_usable_for_auto_rotate(status), usable);
+    }
+}
+
+#[test]
 fn blocked_quota_window_does_not_produce_runtime_observation() {
     let now = 10_000;
 
