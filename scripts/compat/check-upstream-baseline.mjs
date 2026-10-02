@@ -59,6 +59,12 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/utils/process/src/lib.rs",
   "codex-rs/core/src/spawn.rs",
   "codex-rs/tui/src/security_setup.rs",
+  "codex-rs/models-manager/src/manager.rs",
+  "codex-rs/tui/src/app_server_session/provider_selection.rs",
+  "codex-rs/tui/src/projectless.rs",
+  "codex-rs/tui/src/resume_permissions.rs",
+  "codex-rs/core/src/session/environment.rs",
+  "codex-rs/core/src/agent/control/spawn.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -678,6 +684,59 @@ const REQUIRED_FILE_CONTAINS = {
     "url.host_str() == Some(\"chatgpt.com\")",
     "Duration::from_secs(3)",
   ],
+  "codex-rs/models-manager/src/manager.rs": [
+    "Only explicit catalogs serialize refresh and suppress bundled fallback.",
+    "Self::ExplicitProvider(_) => None",
+    "pub fn with_provider_catalog(mut self) -> Self",
+    "self.remote_models.get_mut().models.clear();",
+    "matches!(&self.catalog_source, CatalogSource::ExplicitProvider(_))",
+    "current.models.clear();",
+    "if !remote_only && let Some(mut models) = self.catalog_source.fallback_models()",
+  ],
+  "codex-rs/tui/src/app_server_session/provider_selection.rs": [
+    "Provider request overrides honor managed requirements over explicit invocation choices.",
+    "required_model_provider()",
+    ".or_else(|| explicit_provider(config))",
+    "pub(crate) async fn history_model_provider",
+    "read_effective_config_if_supported",
+    ".model_provider",
+    "unwrap_or_else(|| \"openai\".to_string())",
+  ],
+  "codex-rs/tui/src/projectless.rs": [
+    "Select desktop-like execution defaults for positively discovered local projectless folders.",
+    "config.config_layer_stack.is_projectless()",
+    "config.active_project.trust_level.is_some()",
+    "config.workspace_roots.len() != 1",
+    "config.workspace_roots.first() != Some(&config.cwd)",
+    "has_only_local_environments(environments)",
+    "PermissionProfile::workspace_write()",
+    "set_permission_profile_from_session_snapshot",
+  ],
+  "codex-rs/tui/src/resume_permissions.rs": [
+    "Omitted choices let app-server restore the destination task's saved settings.",
+    "ConfigLayerSource::SessionFlags",
+    "overrides.approval_policy.is_some() || has(\"approval_policy\")",
+    "overrides.approvals_reviewer.is_some() || has(\"approvals_reviewer\")",
+    "overrides.permission_profile.is_some()",
+    "workspace_roots: overrides.cwd.is_some()",
+    "has(\"sandbox_workspace_write.writable_roots\")",
+  ],
+  "codex-rs/core/src/session/environment.rs": [
+    "follow_inherited_environment_configurations",
+    "starting.owner_configuration()",
+    "ConfigUpdateSource::Inherited",
+    "no one will retry this child's one-time update",
+    "!inherited || matches!(environment.config, EnvironmentConfigState::Pending)",
+    "if inherited && matches!(environments, (None, None))",
+  ],
+  "codex-rs/core/src/agent/control/spawn.rs": [
+    "inherited_environments_for_source",
+    "let inherited_environments = self",
+    "environment_selections: None",
+    "inherited_environments,",
+    "resume_thread_with_history_with_source",
+  ],
+
 };
 
 const REQUIRED_EXPECTED_HEADERS = [
@@ -1531,6 +1590,89 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "Duration::from_secs(3)",
     ],
   },
+  {
+    id: "models.explicit-provider-catalog-authoritative",
+    kind: "provider_catalog",
+    file: "codex-rs/models-manager/src/manager.rs",
+    file_contains_all: [
+      "Only explicit catalogs serialize refresh and suppress bundled fallback.",
+      "Self::ExplicitProvider(_) => None",
+      "pub fn with_provider_catalog(mut self) -> Self",
+      "self.remote_models.get_mut().models.clear();",
+      "matches!(&self.catalog_source, CatalogSource::ExplicitProvider(_))",
+      "current.models.clear();",
+      "if !remote_only && let Some(mut models) = self.catalog_source.fallback_models()",
+    ],
+  },
+  {
+    id: "tui.provider-selection-history-defaults",
+    kind: "provider_selection",
+    file: "codex-rs/tui/src/app_server_session/provider_selection.rs",
+    file_contains_all: [
+      "Provider request overrides honor managed requirements over explicit invocation choices.",
+      "required_model_provider()",
+      ".or_else(|| explicit_provider(config))",
+      "pub(crate) async fn history_model_provider",
+      "read_effective_config_if_supported",
+      ".model_provider",
+      "unwrap_or_else(|| \"openai\".to_string())",
+    ],
+  },
+  {
+    id: "tui.projectless-workspace-defaults",
+    kind: "permission_defaults",
+    file: "codex-rs/tui/src/projectless.rs",
+    file_contains_all: [
+      "Select desktop-like execution defaults for positively discovered local projectless folders.",
+      "config.config_layer_stack.is_projectless()",
+      "config.active_project.trust_level.is_some()",
+      "config.workspace_roots.len() != 1",
+      "config.workspace_roots.first() != Some(&config.cwd)",
+      "has_only_local_environments(environments)",
+      "PermissionProfile::workspace_write()",
+      "set_permission_profile_from_session_snapshot",
+    ],
+  },
+  {
+    id: "tui.resume-saved-permissions",
+    kind: "permission_restore",
+    file: "codex-rs/tui/src/resume_permissions.rs",
+    file_contains_all: [
+      "Omitted choices let app-server restore the destination task's saved settings.",
+      "ConfigLayerSource::SessionFlags",
+      "overrides.approval_policy.is_some() || has(\"approval_policy\")",
+      "overrides.approvals_reviewer.is_some() || has(\"approvals_reviewer\")",
+      "overrides.permission_profile.is_some()",
+      "workspace_roots: overrides.cwd.is_some()",
+      "has(\"sandbox_workspace_write.writable_roots\")",
+    ],
+  },
+  {
+    id: "core.subagent-pending-environment-inheritance",
+    kind: "environment_inheritance",
+    file: "codex-rs/core/src/session/environment.rs",
+    file_contains_all: [
+      "follow_inherited_environment_configurations",
+      "starting.owner_configuration()",
+      "ConfigUpdateSource::Inherited",
+      "no one will retry this child's one-time update",
+      "!inherited || matches!(environment.config, EnvironmentConfigState::Pending)",
+      "if inherited && matches!(environments, (None, None))",
+    ],
+  },
+  {
+    id: "core.subagent-spawn-inherited-environments",
+    kind: "environment_inheritance",
+    file: "codex-rs/core/src/agent/control/spawn.rs",
+    file_contains_all: [
+      "inherited_environments_for_source",
+      "let inherited_environments = self",
+      "environment_selections: None",
+      "inherited_environments,",
+      "resume_thread_with_history_with_source",
+    ],
+  },
+
 ];
 
 const SEMANTIC_LIST_FIELDS = [
