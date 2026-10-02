@@ -1,5 +1,10 @@
 //! Typed, borrowed JSON-tree ABI for complete semantic transforms. JSON wire
 //! parsing and compatibility serialization remain outside the Mojo bridge.
+mod response_metadata;
+pub use self::response_metadata::{
+    JsonStringSpan, RuntimeResponseMetadataPlan, runtime_response_metadata,
+};
+
 use crate::MojoError;
 
 /// Maximum UTF-8 byte length accepted for a provider error body or member.
@@ -156,6 +161,14 @@ unsafe extern "C" {
         raw_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_runtime_response_metadata_v1(
+        abi_version: i64,
+        nodes_address: u64,
+        nodes_count: i64,
+        raw_address: u64,
+        raw_length: i64,
+        output_address: u64,
+    ) -> i64;
     fn prodex_session_report_metadata_v1(
         abi_version: i64,
         nodes_address: u64,
@@ -186,31 +199,54 @@ fn status(code: i64) -> Result<(), MojoError> {
     }
 }
 
-fn ffi_nodes(nodes: &[JsonNode<'_>], raw: &str) -> Result<Vec<NodeFfi>, MojoError> {
+fn ffi_nodes_with_text(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+    text_overrides: Option<&[Option<String>]>,
+) -> Result<Vec<NodeFfi>, MojoError> {
     if nodes.is_empty() || nodes.len() > i64::MAX as usize / 80 {
+        return Err(MojoError::InvalidInput);
+    }
+    if text_overrides.is_some_and(|overrides| overrides.len() != nodes.len()) {
+        return Err(MojoError::InvalidInput);
+    }
+    if text_overrides.is_some_and(|overrides| {
+        overrides
+            .iter()
+            .zip(nodes)
+            .any(|(text, node)| text.is_some() && !matches!(node.kind, JsonKind::Number))
+    }) {
         return Err(MojoError::InvalidInput);
     }
     nodes
         .iter()
-        .map(|node| {
+        .enumerate()
+        .map(|(index, node)| {
             let end = node
                 .raw_start
                 .checked_add(node.raw_length)
                 .ok_or(MojoError::InvalidInput)?;
             raw.get(node.raw_start..end)
                 .ok_or(MojoError::InvalidInput)?;
+            let text = text_overrides
+                .and_then(|overrides| overrides[index].as_deref())
+                .unwrap_or(node.text);
             Ok(NodeFfi {
                 kind: node.kind as i64,
                 first_child: optional_index(node.first_child, nodes.len())?,
                 next_sibling: optional_index(node.next_sibling, nodes.len())?,
                 parent: optional_index(node.parent, nodes.len())?,
                 key: node.key.into(),
-                text: node.text.into(),
+                text: text.into(),
                 raw_start: signed(node.raw_start)?,
                 raw_length: signed(node.raw_length)?,
             })
         })
         .collect()
+}
+
+fn ffi_nodes(nodes: &[JsonNode<'_>], raw: &str) -> Result<Vec<NodeFfi>, MojoError> {
+    ffi_nodes_with_text(nodes, raw, None)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

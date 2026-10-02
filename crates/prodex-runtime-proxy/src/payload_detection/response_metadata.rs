@@ -1,5 +1,5 @@
-use super::json_utils::{runtime_json_find, runtime_json_string, runtime_json_u64_at};
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+use prodex_mojo_core::json::JsonStringSpan;
+use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RuntimeTokenUsage {
@@ -9,207 +9,130 @@ pub struct RuntimeTokenUsage {
     pub reasoning_tokens: u64,
 }
 
+struct RuntimeResponseMetadata {
+    response_ids: Vec<String>,
+    turn_state: Option<String>,
+    headers_turn_state: Option<String>,
+    token_usage: Option<RuntimeTokenUsage>,
+    event_type: Option<String>,
+}
+
 pub fn extract_runtime_response_ids_from_payload(payload: &str) -> Vec<String> {
-    serde_json::from_str::<serde_json::Value>(payload)
+    serde_json::from_str::<Value>(payload)
         .ok()
-        .map(|value| extract_runtime_response_ids_from_value(&value))
+        .map(|value| runtime_response_metadata_from_value(&value).response_ids)
         .unwrap_or_default()
 }
 
 pub fn extract_runtime_response_ids_from_body_bytes(body: &[u8]) -> Vec<String> {
-    serde_json::from_slice::<serde_json::Value>(body)
+    serde_json::from_slice::<Value>(body)
         .ok()
-        .map(|value| extract_runtime_response_ids_from_value(&value))
+        .map(|value| runtime_response_metadata_from_value(&value).response_ids)
         .unwrap_or_default()
 }
 
 pub fn extract_runtime_turn_state_from_body_bytes(body: &[u8]) -> Option<String> {
-    serde_json::from_slice::<serde_json::Value>(body)
+    serde_json::from_slice::<Value>(body)
         .ok()
-        .and_then(|value| extract_runtime_turn_state_from_value(&value))
+        .and_then(|value| runtime_response_metadata_from_value(&value).turn_state)
 }
 
 pub fn extract_runtime_token_usage_from_body_bytes(body: &[u8]) -> Option<RuntimeTokenUsage> {
-    serde_json::from_slice::<serde_json::Value>(body)
+    serde_json::from_slice::<Value>(body)
         .ok()
-        .and_then(|value| extract_runtime_token_usage_from_value(&value))
+        .and_then(|value| runtime_response_metadata_from_value(&value).token_usage)
 }
 
-pub fn push_runtime_response_id(response_ids: &mut Vec<String>, id: Option<&str>) {
-    if let Some(id) = id
-        && !response_ids.iter().any(|existing| existing == id)
-    {
-        response_ids.push(id.to_string());
-    }
+pub fn extract_runtime_response_ids_from_value(value: &Value) -> Vec<String> {
+    runtime_response_metadata_from_value(value).response_ids
 }
 
-pub fn extract_runtime_response_ids_from_value(value: &serde_json::Value) -> Vec<String> {
-    let mut response_ids = Vec::new();
-
-    push_runtime_response_id(
-        &mut response_ids,
-        value
-            .get("response")
-            .and_then(|response| response.get("id"))
-            .and_then(serde_json::Value::as_str),
-    );
-    push_runtime_response_id(
-        &mut response_ids,
-        value.get("response_id").and_then(serde_json::Value::as_str),
-    );
-
-    if value
-        .get("object")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|object| object == "response" || object.ends_with(".response"))
-    {
-        push_runtime_response_id(
-            &mut response_ids,
-            value.get("id").and_then(serde_json::Value::as_str),
-        );
-    }
-
-    response_ids
+pub fn extract_runtime_turn_state_from_value(value: &Value) -> Option<String> {
+    runtime_response_metadata_from_value(value).turn_state
 }
 
-pub fn extract_runtime_turn_state_from_value(value: &serde_json::Value) -> Option<String> {
-    value
-        .get("response")
-        .and_then(|response| response.get("headers"))
-        .and_then(extract_runtime_turn_state_from_headers_value)
-        .or_else(|| {
-            value
-                .get("headers")
-                .and_then(extract_runtime_turn_state_from_headers_value)
+pub fn extract_runtime_token_usage_from_value(value: &Value) -> Option<RuntimeTokenUsage> {
+    runtime_response_metadata_from_value(value).token_usage
+}
+
+pub fn extract_runtime_turn_state_from_headers_value(value: &Value) -> Option<String> {
+    runtime_response_metadata_from_value(value).headers_turn_state
+}
+
+pub fn runtime_response_event_type_from_value(value: &Value) -> Option<String> {
+    runtime_response_metadata_from_value(value).event_type
+}
+
+fn runtime_response_metadata_from_value(value: &Value) -> RuntimeResponseMetadata {
+    let nodes = crate::runtime_request_json_nodes(value);
+    let mut number_texts = Vec::new();
+    runtime_response_metadata_number_texts(value, &mut number_texts);
+
+    let plan = prodex_mojo_core::json::runtime_response_metadata(&nodes, &number_texts)
+        .expect("Mojo response metadata returned invalid output");
+    let string = |span: Option<JsonStringSpan>| {
+        span.map(|span| {
+            let end = span.start + span.length;
+            nodes[span.node]
+                .text
+                .get(span.start..end)
+                .expect("Mojo response metadata returned an invalid string span")
+                .to_string()
         })
-        .or_else(|| {
-            value
-                .get("response")
-                .and_then(|response| response.get("turn_state"))
-                .and_then(runtime_json_string)
-        })
-        .or_else(|| {
-            value
-                .get("response")
-                .and_then(|response| response.get("turnState"))
-                .and_then(runtime_json_string)
-        })
-        .or_else(|| value.get("turn_state").and_then(runtime_json_string))
-        .or_else(|| value.get("turnState").and_then(runtime_json_string))
-}
-
-pub fn extract_runtime_token_usage_from_value(
-    value: &serde_json::Value,
-) -> Option<RuntimeTokenUsage> {
-    runtime_json_find(value, extract_runtime_token_usage_candidate)
-}
-
-fn extract_runtime_token_usage_candidate(value: &serde_json::Value) -> Option<RuntimeTokenUsage> {
-    match value {
-        serde_json::Value::Object(map) => {
-            if let Some(usage) = map.get("usage")
-                && let Some(token_usage) = runtime_token_usage_from_usage_value(usage)
-            {
-                return Some(token_usage);
-            }
-            runtime_token_usage_from_usage_value(value)
+    };
+    let response_ids = plan
+        .response_ids
+        .into_iter()
+        .flatten()
+        .map(|index| nodes[index].text.to_string())
+        .collect();
+    let token_usage = plan.token_usage_present.then(|| {
+        let token_count = |slot: usize| {
+            plan.token_usage_nodes[slot]
+                .map(|index| {
+                    let text = number_texts[index].as_deref().unwrap_or(nodes[index].text);
+                    runtime_response_metadata_u64(text)
+                })
+                .unwrap_or_default()
+        };
+        RuntimeTokenUsage {
+            input_tokens: token_count(0),
+            cached_input_tokens: token_count(1),
+            output_tokens: token_count(2),
+            reasoning_tokens: token_count(3),
         }
-        _ => None,
+    });
+
+    RuntimeResponseMetadata {
+        response_ids,
+        turn_state: string(plan.turn_state),
+        headers_turn_state: string(plan.headers_turn_state),
+        token_usage,
+        event_type: string(plan.event_type),
     }
 }
 
-fn runtime_token_usage_from_usage_value(value: &serde_json::Value) -> Option<RuntimeTokenUsage> {
-    let input_tokens = runtime_json_u64_at(value, &["input_tokens"])
-        .or_else(|| runtime_json_u64_at(value, &["prompt_tokens"]));
-    let cached_input_tokens = runtime_json_u64_at(value, &["cached_input_tokens"])
-        .or_else(|| runtime_json_u64_at(value, &["input_tokens_details", "cached_tokens"]))
-        .or_else(|| runtime_json_u64_at(value, &["input_tokens_details", "cached_input_tokens"]))
-        .or_else(|| runtime_json_u64_at(value, &["prompt_tokens_details", "cached_tokens"]));
-    let output_tokens = runtime_json_u64_at(value, &["output_tokens"])
-        .or_else(|| runtime_json_u64_at(value, &["completion_tokens"]));
-    let reasoning_tokens = runtime_json_u64_at(value, &["reasoning_tokens"])
-        .or_else(|| runtime_json_u64_at(value, &["output_tokens_details", "reasoning_tokens"]))
-        .or_else(|| runtime_json_u64_at(value, &["completion_tokens_details", "reasoning_tokens"]));
-
-    if input_tokens.is_none()
-        && cached_input_tokens.is_none()
-        && output_tokens.is_none()
-        && reasoning_tokens.is_none()
-    {
-        return None;
+fn runtime_response_metadata_u64(text: &str) -> u64 {
+    if text == "-0" {
+        return 0;
     }
-
-    Some(RuntimeTokenUsage {
-        input_tokens: input_tokens.unwrap_or_default(),
-        cached_input_tokens: cached_input_tokens.unwrap_or_default(),
-        output_tokens: output_tokens.unwrap_or_default(),
-        reasoning_tokens: reasoning_tokens.unwrap_or_default(),
-    })
+    text.parse()
+        .expect("Mojo response metadata selected an invalid unsigned integer")
 }
 
-pub fn extract_runtime_turn_state_from_headers_value(value: &serde_json::Value) -> Option<String> {
+fn runtime_response_metadata_number_texts(value: &Value, number_texts: &mut Vec<Option<String>>) {
+    number_texts.push(value.as_number().map(ToString::to_string));
     match value {
-        serde_json::Value::Object(headers) => headers.iter().find_map(|(name, value)| {
-            if ascii_casefold_equal_exact(name, "x-codex-turn-state")
-                .expect("Mojo turn-state header comparison failed")
-            {
-                extract_runtime_turn_state_header_value(value)
-            } else {
-                None
+        Value::Array(values) => {
+            for value in values {
+                runtime_response_metadata_number_texts(value, number_texts);
             }
-        }),
-        serde_json::Value::Array(headers) => headers
-            .iter()
-            .find_map(extract_runtime_turn_state_from_header_entry),
-        _ => None,
-    }
-}
-
-fn extract_runtime_turn_state_from_header_entry(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::Array(items) => {
-            let name = items.first()?.as_str()?;
-            if !ascii_casefold_equal_exact(name, "x-codex-turn-state")
-                .expect("Mojo turn-state header comparison failed")
-            {
-                return None;
+        }
+        Value::Object(map) => {
+            for value in map.values() {
+                runtime_response_metadata_number_texts(value, number_texts);
             }
-            items
-                .get(1)
-                .and_then(extract_runtime_turn_state_header_value)
         }
-        serde_json::Value::Object(entry) => {
-            let name = entry
-                .get("name")
-                .or_else(|| entry.get("key"))
-                .and_then(serde_json::Value::as_str)?;
-            if !ascii_casefold_equal_exact(name, "x-codex-turn-state")
-                .expect("Mojo turn-state header comparison failed")
-            {
-                return None;
-            }
-            entry
-                .get("value")
-                .or_else(|| entry.get("values"))
-                .and_then(extract_runtime_turn_state_header_value)
-        }
-        _ => None,
+        _ => {}
     }
-}
-
-fn extract_runtime_turn_state_header_value(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(value) => {
-            let value = value.trim();
-            (!value.is_empty()).then(|| value.to_string())
-        }
-        serde_json::Value::Array(items) => items
-            .iter()
-            .find_map(extract_runtime_turn_state_header_value),
-        _ => None,
-    }
-}
-
-pub fn runtime_response_event_type_from_value(value: &serde_json::Value) -> Option<String> {
-    value.get("type").and_then(runtime_json_string)
 }
