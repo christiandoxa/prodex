@@ -20,6 +20,15 @@ comptime INFO_RENDER_POOL_REMAINING: Int64 = 7
 comptime INFO_RENDER_PROCESS_SUMMARY: Int64 = 8
 comptime INFO_RENDER_LOAD_SUMMARY: Int64 = 9
 comptime INFO_RENDER_TOKEN_USAGE: Int64 = 10
+comptime INFO_RENDER_RUNTIME_LAUNCH_SELECTION: Int64 = 11
+comptime INFO_RENDER_RUNTIME_LAUNCH_WARNING: Int64 = 12
+comptime INFO_RENDER_RUNTIME_PROVIDER_DIRECT: Int64 = 13
+comptime INFO_RENDER_RUNTIME_QUOTA_HINT: Int64 = 14
+
+comptime INFO_RUNTIME_LAUNCH_STATUS_NONE: UInt64 = 0
+comptime INFO_RUNTIME_LAUNCH_STATUS_READY: UInt64 = 1
+comptime INFO_RUNTIME_LAUNCH_STATUS_BLOCKED: UInt64 = 2
+comptime INFO_RUNTIME_LAUNCH_STATUS_PROBE_FAILED: UInt64 = 3
 
 @fieldwise_init
 struct InfoRenderWriter(Copyable):
@@ -502,6 +511,117 @@ def info_render_pool_remaining(
     return True
 
 
+def info_render_runtime_launch_selection(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    text_address: UInt,
+    status: UInt64,
+) -> Bool:
+    var initial_profile = info_text(text_address, 4, 0)
+    var candidate_name = info_text(text_address, 4, 1)
+    var quota_summary = info_text(text_address, 4, 2)
+    if status == INFO_RUNTIME_LAUNCH_STATUS_BLOCKED:
+        return (
+            info_put_literal(writer, StringSlice("Auto-rotating to profile '"))
+            and info_put_view(writer, candidate_name)
+            and info_put_literal(
+                writer,
+                StringSlice("' using quota-pressure scoring ("),
+            )
+            and info_put_view(writer, quota_summary)
+            and info_put_literal(writer, StringSlice(")."))
+        )
+    if status == INFO_RUNTIME_LAUNCH_STATUS_READY:
+        return (
+            info_put_literal(writer, StringSlice("Auto-selecting profile '"))
+            and info_put_view(writer, candidate_name)
+            and info_put_literal(writer, StringSlice("' over active profile '"))
+            and info_put_view(writer, initial_profile)
+            and info_put_literal(
+                writer,
+                StringSlice("' using quota-pressure scoring ("),
+            )
+            and info_put_view(writer, quota_summary)
+            and info_put_literal(writer, StringSlice(")."))
+        )
+    if status == INFO_RUNTIME_LAUNCH_STATUS_PROBE_FAILED:
+        return (
+            info_put_literal(writer, StringSlice("Using ready profile '"))
+            and info_put_view(writer, candidate_name)
+            and info_put_literal(
+                writer,
+                StringSlice("' after quota preflight failed ("),
+            )
+            and info_put_view(writer, quota_summary)
+            and info_put_byte(writer, UInt8(41))
+        )
+    return (
+        info_put_literal(writer, StringSlice("Using profile '"))
+        and info_put_view(writer, candidate_name)
+        and info_put_literal(writer, StringSlice("' ("))
+        and info_put_view(writer, quota_summary)
+        and info_put_byte(writer, UInt8(41))
+    )
+
+
+def info_render_runtime_launch_warning(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    text_address: UInt,
+    status: UInt64,
+) -> Bool:
+    if status == INFO_RUNTIME_LAUNCH_STATUS_BLOCKED:
+        return (
+            info_put_literal(writer, StringSlice("Quota preflight blocked profile '"))
+            and info_put_view(writer, info_text(text_address, 4, 0))
+            and info_put_literal(writer, StringSlice("': "))
+            and info_put_view(writer, info_text(text_address, 4, 3))
+        )
+    if status == INFO_RUNTIME_LAUNCH_STATUS_PROBE_FAILED:
+        return (
+            info_put_literal(
+                writer,
+                StringSlice("Warning: quota preflight failed for '"),
+            )
+            and info_put_view(writer, info_text(text_address, 4, 0))
+            and info_put_literal(writer, StringSlice("': "))
+            and info_put_view(writer, info_text(text_address, 4, 3))
+        )
+    return True
+
+
+def info_render_runtime_provider_direct(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    text_address: UInt,
+) -> Bool:
+    return (
+        info_put_literal(writer, StringSlice("Detected model_provider '"))
+        and info_put_view(writer, info_text(text_address, 2, 0))
+        and info_put_literal(writer, StringSlice("' from "))
+        and info_put_view(writer, info_text(text_address, 2, 1))
+        and info_put_literal(
+            writer,
+            StringSlice(
+                ". Launching directly without prodex quota preflight or auto-rotate proxy."
+            ),
+        )
+    )
+
+
+def info_render_runtime_quota_hint(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    text_address: UInt,
+) -> Bool:
+    return (
+        info_put_literal(writer, StringSlice("Inspect with `prodex quota --profile "))
+        and info_put_view(writer, info_text(text_address, 1, 0))
+        and info_put_literal(
+            writer,
+            StringSlice(
+                "` or bypass with `prodex run --skip-quota-check`."
+            ),
+        )
+    )
+
+
 @export("prodex_terminal_info_render_v1")
 def prodex_terminal_info_render_v1(
     abi_version: Int64,
@@ -520,7 +640,7 @@ def prodex_terminal_info_render_v1(
     if (
         abi_version != INFO_RENDER_ABI_VERSION
         or operation < INFO_RENDER_RELATIVE_DURATION
-        or operation > INFO_RENDER_TOKEN_USAGE
+        or operation > INFO_RENDER_RUNTIME_QUOTA_HINT
         or signed_count < 0
         or unsigned_count < 0
         or text_count < 0
@@ -560,6 +680,17 @@ def prodex_terminal_info_render_v1(
     elif operation == INFO_RENDER_LOAD_SUMMARY:
         required_signed = 3
         required_unsigned = 4
+    elif (
+        operation == INFO_RENDER_RUNTIME_LAUNCH_SELECTION
+        or operation == INFO_RENDER_RUNTIME_LAUNCH_WARNING
+    ):
+        required_text = 4
+        if presence > INFO_RUNTIME_LAUNCH_STATUS_PROBE_FAILED:
+            return INFO_RENDER_INVALID
+    elif operation == INFO_RENDER_RUNTIME_PROVIDER_DIRECT:
+        required_text = 2
+    elif operation == INFO_RENDER_RUNTIME_QUOTA_HINT:
+        required_text = 1
     else:
         required_unsigned = 6
         if text_count > 4 or unsigned_count < 6 + text_count * 4:
@@ -611,6 +742,18 @@ def prodex_terminal_info_render_v1(
         ok = info_render_load_summary(
             Pointer(to=writer), signed_address, unsigned_address, presence
         )
+    elif operation == INFO_RENDER_RUNTIME_LAUNCH_SELECTION:
+        ok = info_render_runtime_launch_selection(
+            Pointer(to=writer), text_address, presence
+        )
+    elif operation == INFO_RENDER_RUNTIME_LAUNCH_WARNING:
+        ok = info_render_runtime_launch_warning(
+            Pointer(to=writer), text_address, presence
+        )
+    elif operation == INFO_RENDER_RUNTIME_PROVIDER_DIRECT:
+        ok = info_render_runtime_provider_direct(Pointer(to=writer), text_address)
+    elif operation == INFO_RENDER_RUNTIME_QUOTA_HINT:
+        ok = info_render_runtime_quota_hint(Pointer(to=writer), text_address)
     else:
         ok = info_render_token_usage(
             Pointer(to=writer), unsigned_address, text_address, text_count

@@ -123,6 +123,7 @@ const PROMOTED_FILES = [
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-app/src/app_commands/status.rs",
   "crates/prodex-terminal-ui/src/info.rs",
+  "crates/prodex-terminal-ui/src/runtime_launch.rs",
   "crates/prodex-mojo-core/src/info_render.rs",
   "crates/prodex-app/src/runtime_external_provider_config.rs",
   "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
@@ -2368,6 +2369,26 @@ export function findViolations(files) {
         || production.includes("Yes ({total_count} total")
       ) {
         violations.push(filePath + ": contains restored Rust terminal info rendering semantics");
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-terminal-ui/src/runtime_launch.rs") {
+      const required = [
+        "info_render::format_runtime_launch_scored_candidate(",
+        "info_render::format_runtime_provider_direct_launch_message(",
+        "info_render::format_runtime_launch_quota_inspect_hint(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime-launch hard replacement must retain Mojo call " + call);
+      if (
+        contents.includes("Auto-rotating to profile")
+        || contents.includes("Auto-selecting profile")
+        || contents.includes("Quota preflight blocked profile")
+        || contents.includes("Detected model_provider")
+        || contents.includes("Inspect with")
+      ) {
+        violations.push(filePath + ": contains restored Rust runtime-launch rendering semantics");
       }
       return violations;
     }
