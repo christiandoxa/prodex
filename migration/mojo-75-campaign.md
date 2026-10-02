@@ -4384,3 +4384,33 @@ The canonical broad report at this checkpoint counts **74,626 reachable Mojo
 LOC** and **201,652 Rust production LOC**, totaling **276,278 LOC**:
 **27.011198864911428% Mojo**. The release floor and ownership non-regression
 checks pass; the 75% broad project target remains in progress.
+
+## Previous-response log-render hard replacement
+
+The five previous-response production log formatters now assemble their output
+in `log_semantics.mojo`. Mojo owns the request/session prefix variants,
+transport/route inclusion, event text, blocked-vs-allowed fresh-fallback event,
+profile/retry/detail placement, and optional `via` suffix. Rust retains
+only typed field preparation and materialization that is not a competing
+semantic renderer: `Option<&str>` debug materialization for the existing
+`replay_turn_state` field and decimal materialization of the existing
+`u128` delay value.
+
+The previous Rust prefix/suffix helpers and string templates were deleted.
+`prodex-mojo-core::log` exposes one typed render input over the new
+Mojo ABI, and `prodex-runtime-proxy` enables the existing routing
+feature required by that log adapter. The no-fallback guard rejects restoring
+the deleted Rust message semantics.
+
+Focused validation passes both existing previous-response log suites against the
+real Mojo renderer, Clippy with warnings denied for `prodex-mojo-core`
+and `prodex-runtime-proxy`, the Mojo authority and no-fallback guards,
+and `git diff --check`. Development validation caught and fixed a Mojo
+`UInt`/`UInt64` comparison mismatch, the missing
+`mojo-routing` dependency feature, and an over-wide Rust adapter
+signature before this checkpoint was accepted.
+
+The canonical broad report at this checkpoint counts **74,955 reachable Mojo
+LOC** and **201,753 Rust production LOC**, totaling **276,708 LOC**:
+**27.088121774578255% Mojo**. The release floor and ownership non-regression
+checks pass; the 75% broad project target remains in progress.
