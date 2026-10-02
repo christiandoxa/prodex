@@ -5089,6 +5089,21 @@
           "end": 28
         }
       }
+    },
+    {
+      "file": "crates/prodex-quota/src/render.rs",
+      "symbol": "round_quota_float",
+      "operation": "quota_aggregation_kernel",
+      "previous_responsibility": "Rust wrapper for quota percentage float rounding after quota display aggregation",
+      "final_state": "deleted",
+      "cleanup_loc": 3,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 27,
+          "end": 29
+        }
+      }
     }
   ],
   "deleted_authoritative_operations": [
