@@ -93,6 +93,10 @@ fn openai_main_picker_reads_the_active_models_cache() {
     assert_eq!(
         models,
         [
+            "gpt-6-astra",
+            "gpt-6.1-sol",
+            "gpt-6-luna",
+            "gpt-6-sol",
             "gpt-5.4",
             "gpt-5.4-mini",
             "gpt-5.3-codex",
