@@ -2,6 +2,94 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.435.1 - 2026-10-02
+
+### Docs
+
+- Add 0.435.1 release notes (`9c6bc5d`)
+
+### Misc
+
+- Retain active Copilot GPT-5.6 models (`b2e0611`)
+- Sync latest provider models (`e6965ee`)
+# Prodex 0.435.1
+
+## New Features
+
+- No new user-facing features; 0.435.1 is a provider-catalog synchronization hotfix.
+
+## Bug Fixes
+
+### Provider model catalog synchronization
+
+- Refresh the canonical OpenAI model catalog with GPT-6 Astra, GPT-6.1 Sol,
+  GPT-6 Luna, and GPT-6 Sol ahead of the retained GPT-5.x compatibility
+  entries.
+- Move generic OpenAI aliases such as `default`, `best`, `sol`, and
+  `luna` to the newest matching model generation instead of GPT-5.6-era
+  entries.
+- Refresh Anthropic fallback metadata with Claude Opus 5.5, Claude Sonnet 5.5,
+  and Claude Fable 5.1.
+- Refresh Gemini fallback metadata with Gemini 3.8 Flash, 3.7 Flash, 3.6 Flash,
+  and 3.5 Flash Lite, while removing the shut-down Gemini 3 Pro Preview from
+  the canonical picker.
+- Refresh the GitHub Copilot static fallback catalog with current GPT-6,
+  retained GPT-5.6 Sol/Terra/Luna, Claude 5.x, and Gemini 3.6/3.7/3.8
+  families and remove retired fallback entries such as GPT-5.1-Codex,
+  MAI-Code-1-Flash, Raptor Mini, and retired Gemini/Claude variants.
+- Update provider fallback chains so Copilot and Gemini retries no longer fall
+  back through retired model IDs.
+
+### Main and sub-agent model pickers
+
+- Keep one canonical provider-core static catalog for the main picker,
+  sub-agent picker, and generated external-provider model catalogs.
+- Continue merging provider/account-specific dynamic catalogs on top of the
+  canonical fallback, so newly enabled Copilot, Gemini, Kiro, DeepSeek, local,
+  and OpenAI account models remain visible without replacing the built-in
+  latest-model set.
+- Ensure partial or stale OpenAI `models_cache.json` data cannot hide GPT-6
+  Astra, GPT-6.1 Sol, GPT-6 Luna, or GPT-6 Sol from either picker.
+- Route external Anthropic/Copilot/Kiro catalog generation through the same
+  provider-core source of truth instead of the older duplicate static table.
+
+### GPT-6 runtime metadata
+
+- Treat GPT-6 Astra as a large-context / prefer-max-context OpenAI model.
+- Add GPT-6 Astra to Smart Context's conservative GPT-6 operational window.
+- Preserve provider-specific Copilot prompt limits when known, then fall back
+  to the canonical provider model context window for newly introduced models.
+
+## Compatibility Notes
+
+- Codex compatibility remains qualified against rust-v0.160.0.
+- Provider/account-specific dynamic catalogs remain authoritative additions to
+  the canonical fallback catalog; model availability can still vary by account
+  plan, organization policy, region, and provider rollout.
+- Kiro keeps its minimal built-in fallback catalog and continues to merge the
+  imported account catalog rather than assuming unsupported static model IDs.
+
+## Verification
+
+- Provider catalog validator passes with 82 canonical models across 7
+  providers and no duplicate ID/alias issues.
+- All 358 `prodex-provider-core` library tests and 7 companion tests pass.
+- Focused main-picker, sub-agent-picker, external-catalog, and OpenAI
+  large-context regressions pass.
+- Standalone Mojo builds for the provider fallback and Super provider policy
+  kernels pass.
+- Clippy passes with warnings denied for the affected provider-core and
+  prodex-app libraries.
+- Mojo no-fallback, Rust allow-attribute, and size guards pass.
+
+## Changelog
+
+- Synchronize model discovery, picker ordering, fallback policy, and external
+  provider catalogs with current provider model families.
+- Release the provider catalog hotfix as Prodex 0.435.1.
+
+Full Changelog: [0.435.0...0.435.1](https://github.com/christiandoxa/prodex/compare/0.435.0...0.435.1)
+
 ## 0.435.0 - 2026-10-02
 
 ### CLI
@@ -17,77 +105,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 ### Misc
 
 - Align Codex 0.160.0 (`b3ae01d`)
-# Prodex 0.435.0
-
-## New Features
-
-### Codex 0.160.0 Compatibility
-
-- Advance the audited Codex compatibility target to rust-v0.160.0.
-- Preserve Prodex model transport while accommodating Codex's authoritative
-  explicit-provider catalogs, provider/history restoration, projectless
-  workspace defaults, saved permission restoration, and pending subagent
-  environment inheritance.
-- Keep the existing Codex 0.159.3 account-security reminder identity/origin
-  boundary intact: account/read bootstrap traffic remains Codex-owned while
-  model traffic continues through the governed Prodex provider path.
-- Add release-qualified guards for the new 0.160.0 invariants so future upstream
-  changes cannot silently reintroduce bundled provider models, stale catalog
-  entries, provider-history loss, unsafe projectless defaults, or pending
-  environment loss.
-
-### Runtime and Mojo Ownership
-
-- Add the interactive prodex s expose configuration prompt introduced after
-  0.434.3.
-- Continue the production Rust-to-Mojo hard-replacement campaign across runtime
-  policy, audit/query/ledger policy, provider metadata/precommit decisions,
-  terminal info rendering, quota rendering/sorting/pool aggregation, runtime-log
-  policy, shared attachments/history, MCP framing, update notices, and external
-  provider catalogs.
-- Remove the corresponding Rust fallback semantics and strengthen no-fallback
-  guards for migrated policy surfaces.
-
-## Bug Fixes
-
-- Guard Codex 0.160.0 explicit-provider catalogs so bundled fallback models and
-  stale cache entries cannot silently reappear in the audited upstream contract.
-- Preserve provider/history resolution and saved permission restoration semantics
-  for resume/fork flows when callers omit explicit overrides.
-- Preserve pending subagent environment inheritance so the child receives the
-  owner's first ready/failure result without overwriting a child-side winner.
-
-## Compatibility Notes
-
-- Codex 0.160.0 is a divergent release relative to the previous Prodex target:
-  the exact 0.159.3-to-0.160.0 tree comparison contains 362 changed files,
-  14,664 additions, and 2,380 deletions.
-- Prodex still accepts compatible Codex 0.153.2+ binaries when required
-  app-server capabilities are present; rust-v0.160.0 is the release-qualified
-  audited reference for 0.435.0.
-- The minimum Codex version is unchanged.
-
-## Verification
-
-- Complete Codex compatibility replay: 61 critical files / 564 required source
-  markers and 64 semantic checks / 414 semantic source markers, with zero Codex
-  diffs against the exact rust-v0.160.0 release.
-- Official 0.160.0 Linux musl CLI and app-server release assets match GitHub's
-  published SHA-256 digests; the extracted CLI reports codex-cli 0.160.0.
-- Isolated official 0.160.0 app-server initialize with experimentalApi=true
-  succeeds on Linux under a synthetic Codex home.
-- Exact tagged source archives verify 362 changed files, 14,664 additions, and
-  2,380 deletions from the Prodex 0.159.3 compatibility target.
-- Focused compatibility guards and existing runtime/provider/session policies
-  remain intact without a model-routing change.
-
-## Changelog
-
-- Align the audited Codex baseline with rust-v0.160.0.
-- Release the post-0.434.3 runtime, Mojo ownership, provider, quota, audit, and
-  s expose improvements as Prodex 0.435.0.
-
-Full Changelog: [0.434.3...0.435.0](https://github.com/christiandoxa/prodex/compare/0.434.3...0.435.0)
 
 ## 0.434.3 - 2026-10-01
 
