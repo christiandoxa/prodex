@@ -26,15 +26,12 @@ impl DataClassification {
     }
 
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Public => "public",
-            Self::Internal => "internal",
-            Self::Confidential => "confidential",
-            Self::Restricted => "restricted",
-        }
+        prodex_mojo_core::policy::governance_classification_label(self as u8)
+            .expect("Mojo governance classification label returned invalid output")
     }
 }
 
+#[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InspectionCoverage {
@@ -45,19 +42,19 @@ pub enum InspectionCoverage {
 
 impl InspectionCoverage {
     pub fn combine(self, other: Self) -> Self {
-        match (self, other) {
-            (Self::Full, Self::Full) => Self::Full,
-            (Self::Unsupported, Self::Unsupported) => Self::Unsupported,
-            _ => Self::Partial,
+        match prodex_mojo_core::policy::governance_coverage_combine(self as u8, other as u8)
+            .expect("Mojo governance coverage combine returned invalid output")
+        {
+            0 => Self::Full,
+            1 => Self::Partial,
+            2 => Self::Unsupported,
+            _ => unreachable!("validated Mojo governance coverage tag"),
         }
     }
 
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Full => "full",
-            Self::Partial => "partial",
-            Self::Unsupported => "unsupported",
-        }
+        prodex_mojo_core::policy::governance_coverage_label(self as u8)
+            .expect("Mojo governance coverage label returned invalid output")
     }
 }
 
@@ -139,9 +136,8 @@ impl ContentLocation {
         end_byte: usize,
     ) -> Result<Self, InspectionModelError> {
         let field_path = field_path.into();
-        if field_path.is_empty()
-            || field_path.len() > MAX_CONTENT_LOCATION_PATH_BYTES
-            || !field_path.bytes().all(content_location_path_byte)
+        if !prodex_mojo_core::policy::governance_content_location_path_valid(&field_path)
+            .expect("Mojo governance content-location validation returned invalid output")
         {
             return Err(InspectionModelError::InvalidLocation);
         }
@@ -166,10 +162,6 @@ impl ContentLocation {
     pub fn byte_range(&self) -> std::ops::Range<usize> {
         self.start_byte as usize..self.end_byte as usize
     }
-}
-
-fn content_location_path_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'$' | b'.' | b'_' | b'-' | b'*' | b'[' | b']')
 }
 
 macro_rules! inspection_token {
@@ -207,11 +199,8 @@ inspection_token!(InspectionTag);
 inspection_token!(InspectionReasonCode);
 
 fn inspection_token_is_valid(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= MAX_INSPECTION_TOKEN_BYTES
-        && value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b':' | b'/')
-        })
+    prodex_mojo_core::policy::governance_inspection_token_valid(value)
+        .expect("Mojo governance inspection-token validation returned invalid output")
 }
 
 #[derive(Clone, PartialEq, Eq, Serialize)]
@@ -283,14 +272,13 @@ impl InspectionLimits {
         max_tags: usize,
         max_reason_codes: usize,
     ) -> Result<Self, InspectionModelError> {
-        if max_detectors == 0
-            || max_detectors > MAX_INSPECTION_DETECTORS
-            || max_findings == 0
-            || max_findings > MAX_INSPECTION_FINDINGS
-            || max_tags == 0
-            || max_tags > MAX_INSPECTION_TAGS
-            || max_reason_codes == 0
-            || max_reason_codes > MAX_INSPECTION_REASON_CODES
+        if !prodex_mojo_core::policy::governance_inspection_limits_valid(
+            max_detectors,
+            max_findings,
+            max_tags,
+            max_reason_codes,
+        )
+        .expect("Mojo governance inspection-limits validation returned invalid output")
         {
             return Err(InspectionModelError::InvalidLimits);
         }

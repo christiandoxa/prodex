@@ -114,3 +114,31 @@ fn finding_minimum_classifications_follow_the_mojo_policy() {
         assert_eq!(kind.minimum_classification(), expected, "kind={kind:?}");
     }
 }
+
+#[test]
+fn governance_labels_and_validation_boundaries_stay_stable() {
+    assert_eq!(DataClassification::Public.as_str(), "public");
+    assert_eq!(DataClassification::Restricted.as_str(), "restricted");
+    assert_eq!(InspectionCoverage::Full.as_str(), "full");
+    assert_eq!(InspectionCoverage::Unsupported.as_str(), "unsupported");
+
+    assert!(ContentLocation::new("$.input[0].content", 0, 1).is_ok());
+    assert_eq!(
+        ContentLocation::new("$.bad value", 0, 1),
+        Err(InspectionModelError::InvalidLocation)
+    );
+    assert_eq!(
+        ContentLocation::new("", 0, 1),
+        Err(InspectionModelError::InvalidLocation)
+    );
+    assert!(DetectorId::new("detector.v1:local/foo").is_ok());
+    assert_eq!(
+        DetectorId::new("detector secret"),
+        Err(InspectionModelError::InvalidToken)
+    );
+    assert!(InspectionLimits::new(8, 256, 32, 32).is_ok());
+    assert_eq!(
+        InspectionLimits::new(9, 256, 32, 32),
+        Err(InspectionModelError::InvalidLimits)
+    );
+}
