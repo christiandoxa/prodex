@@ -4588,3 +4588,38 @@ The canonical broad report for this checkpoint counts **75,662 reachable Mojo
 LOC** and **201,958 Rust production LOC**, totaling **277,620 LOC**:
 **27.253800158490023% Mojo**. The release floor and ownership non-regression
 checks pass; the 75% broad project target remains in progress.
+
+## Smart Context, response metadata, doctor, and quota hard replacements
+
+Smart Context duplicate-text planning now runs through the existing Mojo owner.
+Rewrite mode uses digest buckets and confirms exact text equality before
+replacing a duplicate, so a digest collision cannot discard distinct content.
+Probe mode retains its bounded candidate limit. Rust keeps Serde traversal,
+SHA-256 acquisition, and applying the returned index plan.
+
+Runtime response metadata extraction now uses a checked Mojo JSON-tree plan for
+response IDs, turn-state headers, event type, and token-usage fields. Rust keeps
+Serde tree acquisition, number-text preservation, and typed DTO materialization.
+The adapter and tests live in a private `json` submodule to stay below the
+production size guard's cohesion threshold.
+
+Runtime Doctor marker semantics now include a versioned ABI v2 failure-class
+result. Mojo owns the marker-to-class mapping; Rust validates and materializes
+the returned class. Quota auto-rotate eligibility now delegates to the existing
+runtime-proxy Mojo planner instead of a second Rust status match.
+
+Focused real-Mojo and caller validation passes: 116 `prodex-mojo-core` tests,
+8 Smart Context planner cases, 1 Smart Context app caller case, 358
+`prodex-runtime-proxy` tests, 28 `prodex-runtime-quota` tests, 39
+`prodex-runtime-doctor` tests, and 1 response-metadata ABI test. The focused
+Clippy run with warnings denied, Mojo authority and no-fallback guards,
+`cargo fmt --check`, and `git diff --check` pass. The canonical production-share
+check passes at **76,652 reachable Mojo LOC** and **202,361 Rust production
+LOC**, or **27.47% Mojo**; the 75% project target remains unmet.
+
+The size guard still reports existing files from the checkpoint base:
+`prodex-mojo-core/src/log.rs` (989 lines),
+`prodex-mojo-core/src/provider_constraints.rs` (869 lines),
+`prodex-runtime-proxy/tests/src/error_policy.rs` (864 lines), and 33 near-limit
+production files against the budget of 32. This checkpoint does not relax that
+guard.

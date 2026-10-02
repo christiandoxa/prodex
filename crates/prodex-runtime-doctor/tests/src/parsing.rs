@@ -381,3 +381,46 @@ fn runtime_doctor_marker_classification_matches_fixed_values_at_log_boundary() {
         .expect("selection marker belongs to the expected catalog") += 1;
     assert_eq!(summary.marker_counts, expected);
 }
+
+#[test]
+fn runtime_doctor_failure_class_counts_preserve_categories_and_totals() {
+    let log = br#"{"event":"runtime_proxy_queue_overloaded"}
+{"event":"runtime_proxy_queue_overloaded"}
+{"event":"profile_inflight_saturated"}
+{"event":"profile_auth_recovery_failed"}
+{"event":"local_rewrite_provider_auth_failure"}
+{"event":"previous_response_not_found"}
+{"event":"chain_retried_owner"}
+{"event":"state_save_error"}
+{"event":"continuation_journal_queue_backpressure"}
+{"event":"profile_retry_backoff"}
+{"event":"quota_blocked"}
+{"event":"responses_pre_send_skip","fields":{"reason":"quota_critical_floor_before_send"}}
+{"event":"upstream_connect_timeout"}
+{"event":"stream_read_error"}
+{"event":"selection_pick"}
+"#;
+
+    let summary = summarize_runtime_log_tail(log);
+
+    assert_eq!(
+        summary.failure_class_counts,
+        std::collections::BTreeMap::from([
+            ("admission".to_string(), 3),
+            ("auth".to_string(), 2),
+            ("continuation".to_string(), 2),
+            ("persistence".to_string(), 2),
+            ("quota".to_string(), 4),
+            ("transport".to_string(), 2),
+        ])
+    );
+    assert_eq!(
+        summary
+            .marker_counts
+            .get("quota_critical_floor_before_send"),
+        Some(&1)
+    );
+
+    let empty = summarize_runtime_log_tail(br#"{"event":"selection_pick"}"#);
+    assert!(empty.failure_class_counts.is_empty());
+}

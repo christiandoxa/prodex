@@ -2,11 +2,12 @@ use super::{ensure_rich_abi, mojo_mut_pointer_address, mojo_pointer_address, vie
 use crate::MojoError;
 
 const RUNTIME_DOCTOR_MARKER_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: i64 = 2;
 
 unsafe extern "C" {
     fn prodex_mojo_runtime_doctor_marker_known_v1(abi_version: i64, marker: u64, known: u64)
     -> i64;
-    fn prodex_mojo_runtime_doctor_marker_semantics_v1(
+    fn prodex_mojo_runtime_doctor_marker_semantics_v2(
         abi_version: i64,
         marker: u64,
         output: u64,
@@ -42,11 +43,20 @@ pub const RUNTIME_DOCTOR_MARKER_ROUTE_TRANSPORT_HEALTH: i64 = 5;
 pub const RUNTIME_DOCTOR_MARKER_ROUTE_TRANSPORT_FAILURE: i64 = 6;
 pub const RUNTIME_DOCTOR_MARKER_ROUTE_QUOTA: i64 = 7;
 
+pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_NONE: i64 = 0;
+pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_ADMISSION: i64 = 1;
+pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_AUTH: i64 = 2;
+pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_CONTINUATION: i64 = 3;
+pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_PERSISTENCE: i64 = 4;
+pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_QUOTA: i64 = 5;
+pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_TRANSPORT: i64 = 6;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeDoctorMarkerSemantics {
     pub timeline_phase: i64,
     pub selection_bucket: i64,
     pub route_action: i64,
+    pub failure_class: i64,
 }
 
 pub fn runtime_doctor_marker_semantics(
@@ -54,10 +64,10 @@ pub fn runtime_doctor_marker_semantics(
 ) -> Result<RuntimeDoctorMarkerSemantics, MojoError> {
     ensure_rich_abi()?;
     let marker = view(marker);
-    let mut output = [0_i64; 3];
+    let mut output = [0_i64; 4];
     let status = unsafe {
-        prodex_mojo_runtime_doctor_marker_semantics_v1(
-            RUNTIME_DOCTOR_MARKER_ABI_VERSION,
+        prodex_mojo_runtime_doctor_marker_semantics_v2(
+            RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION,
             mojo_pointer_address(&marker),
             mojo_mut_pointer_address(output.as_mut_ptr()),
         )
@@ -72,6 +82,7 @@ pub fn runtime_doctor_marker_semantics(
     if !(0..=RUNTIME_DOCTOR_MARKER_PHASE_FAIL).contains(&output[0])
         || !(0..=RUNTIME_DOCTOR_MARKER_SELECTION_BLOCKED).contains(&output[1])
         || !(0..=RUNTIME_DOCTOR_MARKER_ROUTE_QUOTA).contains(&output[2])
+        || !(0..=RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_TRANSPORT).contains(&output[3])
     {
         return Err(MojoError::InvalidOutput);
     }
@@ -79,6 +90,7 @@ pub fn runtime_doctor_marker_semantics(
         timeline_phase: output[0],
         selection_bucket: output[1],
         route_action: output[2],
+        failure_class: output[3],
     })
 }
 
