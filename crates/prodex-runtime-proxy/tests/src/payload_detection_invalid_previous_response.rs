@@ -249,3 +249,88 @@ fn response_ids_from_payload_matches_body_bytes_and_ignores_invalid_json() {
     );
     assert!(extract_runtime_response_ids_from_payload("{").is_empty());
 }
+
+#[test]
+fn response_metadata_callers_keep_precedence_aliases_and_trimmed_values() {
+    let value = serde_json::json!({
+        "type": " response.completed ",
+        "object": "response",
+        "id": "resp-meta",
+        "response_id": "resp-meta",
+        "response": {
+            "id": "resp-meta",
+            "headers": [["X-CODEX-TURN-STATE", ["  ", " turn-meta "]]],
+            "turn_state": "fallback-turn",
+            "usage": {
+                "input_tokens": "invalid",
+                "prompt_tokens": 20,
+                "cached_input_tokens": -1,
+                "input_tokens_details": {
+                    "cached_tokens": 3,
+                    "cached_input_tokens": 2
+                },
+                "output_tokens": null,
+                "completion_tokens": 7,
+                "reasoning_tokens": -1,
+                "output_tokens_details": {"reasoning_tokens": 4},
+                "usage_metadata": {"output_tokens": 999}
+            }
+        }
+    });
+    let body = value.to_string();
+
+    assert_eq!(
+        extract_runtime_response_ids_from_value(&value),
+        vec!["resp-meta".to_string()]
+    );
+    assert_eq!(
+        extract_runtime_response_ids_from_body_bytes(body.as_bytes()),
+        vec!["resp-meta".to_string()]
+    );
+    assert_eq!(
+        extract_runtime_response_ids_from_payload(&body),
+        vec!["resp-meta".to_string()]
+    );
+    assert_eq!(
+        extract_runtime_turn_state_from_value(&value).as_deref(),
+        Some("turn-meta")
+    );
+    assert_eq!(
+        extract_runtime_turn_state_from_body_bytes(body.as_bytes()).as_deref(),
+        Some("turn-meta")
+    );
+    assert_eq!(
+        extract_runtime_turn_state_from_headers_value(&value["response"]["headers"]).as_deref(),
+        Some("turn-meta")
+    );
+    assert_eq!(
+        runtime_response_event_type_from_value(&value).as_deref(),
+        Some("response.completed")
+    );
+    let usage = Some(RuntimeTokenUsage {
+        input_tokens: 20,
+        cached_input_tokens: 3,
+        output_tokens: 7,
+        reasoning_tokens: 4,
+    });
+    assert_eq!(extract_runtime_token_usage_from_value(&value), usage);
+    assert_eq!(
+        extract_runtime_token_usage_from_body_bytes(body.as_bytes()),
+        usage
+    );
+}
+
+#[test]
+fn response_metadata_body_callers_ignore_invalid_json_and_keep_usage_scan_cap() {
+    let invalid = b"{";
+    assert!(extract_runtime_response_ids_from_body_bytes(invalid).is_empty());
+    assert_eq!(extract_runtime_turn_state_from_body_bytes(invalid), None);
+    assert_eq!(extract_runtime_token_usage_from_body_bytes(invalid), None);
+
+    let mut values = vec![serde_json::Value::Null; 2_047];
+    values.push(serde_json::json!({"usage": {"input_tokens": 1}}));
+    assert_eq!(
+        extract_runtime_token_usage_from_value(&serde_json::Value::Array(values)),
+        None
+    );
+}

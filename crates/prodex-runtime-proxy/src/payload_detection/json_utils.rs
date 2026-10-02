@@ -30,27 +30,3 @@ where
 
     None
 }
-
-pub(super) fn runtime_json_u64_at(value: &serde_json::Value, path: &[&str]) -> Option<u64> {
-    let mut current = value;
-    for key in path {
-        current = current.get(*key)?;
-    }
-    runtime_json_u64(current)
-}
-
-fn runtime_json_u64(value: &serde_json::Value) -> Option<u64> {
-    value.as_u64().or_else(|| {
-        value
-            .as_i64()
-            .and_then(|value| (value >= 0).then_some(value as u64))
-    })
-}
-
-pub(super) fn runtime_json_string(value: &serde_json::Value) -> Option<String> {
-    value
-        .as_str()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
-}
