@@ -66,11 +66,11 @@ impl ProviderImplementationDescriptor {
         self.registration.provider
     }
 
-    pub const fn canonical_label(&self) -> &'static str {
+    pub fn canonical_label(&self) -> &'static str {
         self.registration.provider.label()
     }
 
-    pub const fn display_name(&self) -> &'static str {
+    pub fn display_name(&self) -> &'static str {
         match self.registration.runtime_metadata {
             Some(metadata) => metadata.display_name,
             None if matches!(self.registration.provider, ProviderId::OpenAi) => "OpenAI",

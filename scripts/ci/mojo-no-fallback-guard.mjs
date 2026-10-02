@@ -96,6 +96,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime_decisions.rs",
   "crates/prodex-mojo-core/tests/profile_health.rs",
   "crates/prodex-mojo-core/src/provider_constraints.rs",
+  "crates/prodex-provider-core/src/surface.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs",
@@ -774,6 +775,7 @@ const KIRO_RESPONSE_HELPER_OPERATIONS = [
 const DEEPSEEK_STRICT_TOOLS_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs";
 const DEEPSEEK_STRICT_SCHEMA_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_tools/strict_schema.rs";
 const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
+const PROVIDER_SURFACE_FILE = "crates/prodex-provider-core/src/surface.rs";
 const PROVIDER_CONSTRAINTS_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints.rs";
 const PROVIDER_PRECOMMIT_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs";
 const PROVIDER_BRIDGE_METADATA_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs";
@@ -2072,12 +2074,34 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === PROVIDER_SURFACE_FILE) {
+      const required = [
+        "provider_constraints::provider_id_label(",
+        "provider_constraints::provider_wire_format_label(",
+        "provider_constraints::provider_endpoint_label(",
+        "provider_constraints::provider_capability_status_label(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": provider surface labels must retain Mojo call " + call);
+      for (const name of ["ProviderId", "ProviderWireFormat", "ProviderEndpoint", "ProviderCapabilityStatus"]) {
+        if (!new RegExp("#\\[repr\\(i64\\)\\](?:\\s*#\\[[^\\n]+\\])*\\s*pub\\s+enum\\s+" + name, "u").test(contents)) {
+          violations.push(filePath + ": " + name + " must remain repr(i64) for Mojo surface label ABI");
+        }
+      }
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (/pub (?:const )?fn label\(self\)[^]*?match self/u.test(production)) {
+        violations.push(filePath + ": contains restored Rust provider surface label table");
+      }
+      return violations;
+    }
     if (filePath === PROVIDER_CONSTRAINTS_ADAPTER_FILE) {
       const required = [
         "prodex_provider_bridge_label_v1(",
         "prodex_provider_bridge_function_tool_name_max_bytes_v1(",
         "prodex_provider_bridge_native_passthrough_v1(",
         "prodex_provider_reasoning_effort_label_v1(",
+        "prodex_provider_surface_label_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
