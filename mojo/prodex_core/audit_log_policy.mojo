@@ -242,6 +242,109 @@ def prodex_audit_budget_flags_v1(
     return AUDIT_LOG_POLICY_OK
 
 
+def audit_budget_reason(
+    writer: Pointer[mut=True, AuditPolicyWriter, _],
+    label: StringSlice,
+    current: UInt64,
+    maximum: UInt64,
+) -> Bool:
+    return (
+        audit_policy_put_literal(writer, label)
+        and audit_policy_put_literal(writer, StringSlice(" ("))
+        and audit_policy_put_u64(writer, current)
+        and audit_policy_put_byte(writer, UInt8(47))
+        and audit_policy_put_u64(writer, maximum)
+        and audit_policy_put_byte(writer, UInt8(41))
+    )
+
+
+@export("prodex_audit_budget_evaluation_v1")
+def prodex_audit_budget_evaluation_v1(
+    abi_version: Int64,
+    requests: UInt64,
+    total_tokens: UInt64,
+    cost_micros: UInt64,
+    max_requests_present: Int64,
+    max_requests: UInt64,
+    max_tokens_present: Int64,
+    max_tokens: UInt64,
+    max_cost_present: Int64,
+    max_cost_micros: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+    lengths_address: UInt,
+    allowed_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != AUDIT_LOG_POLICY_ABI_VERSION:
+        return AUDIT_LOG_POLICY_ABI
+    if (
+        (max_requests_present != 0 and max_requests_present != 1)
+        or (max_tokens_present != 0 and max_tokens_present != 1)
+        or (max_cost_present != 0 and max_cost_present != 1)
+        or output_address == 0
+        or output_capacity < 0
+        or lengths_address == 0
+        or allowed_address == 0
+    ):
+        return AUDIT_LOG_POLICY_INVALID
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var lengths = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(lengths_address)
+    )
+    for index in range(4):
+        lengths[unsafe_offset=index] = 0
+    var allowed = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(allowed_address)
+    )
+    allowed[] = 1
+
+    var writer = AuditPolicyWriter(output, output_capacity, 0)
+    var count: Int64 = 0
+
+    if max_requests_present == 1 and requests >= max_requests:
+        var start = writer.written
+        if not audit_budget_reason(
+            Pointer(to=writer),
+            StringSlice("request limit reached"),
+            requests,
+            max_requests,
+        ):
+            return AUDIT_LOG_POLICY_INVALID
+        count += 1
+        lengths[unsafe_offset=count] = writer.written - start
+
+    if max_tokens_present == 1 and total_tokens >= max_tokens:
+        var start = writer.written
+        if not audit_budget_reason(
+            Pointer(to=writer),
+            StringSlice("token limit reached"),
+            total_tokens,
+            max_tokens,
+        ):
+            return AUDIT_LOG_POLICY_INVALID
+        count += 1
+        lengths[unsafe_offset=count] = writer.written - start
+
+    if max_cost_present == 1 and cost_micros >= max_cost_micros:
+        var start = writer.written
+        if not audit_budget_reason(
+            Pointer(to=writer),
+            StringSlice("cost limit reached"),
+            cost_micros,
+            max_cost_micros,
+        ):
+            return AUDIT_LOG_POLICY_INVALID
+        count += 1
+        lengths[unsafe_offset=count] = writer.written - start
+
+    lengths[unsafe_offset=0] = count
+    allowed[] = Int64(count == 0)
+    return AUDIT_LOG_POLICY_OK
+
+
 def audit_policy_view_equals(left: ProdexRichStringView, right: ProdexRichStringView) -> Bool:
     if left.len != right.len:
         return False

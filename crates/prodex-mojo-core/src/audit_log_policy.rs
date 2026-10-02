@@ -32,6 +32,12 @@ pub struct AuditBudgetFlags {
     pub cost_limit_reached: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditBudgetEvaluationPlan {
+    pub allowed: bool,
+    pub reasons: Vec<String>,
+}
+
 unsafe extern "C" {
     fn prodex_audit_usage_token_normalize_v1(
         abi_version: i64,
@@ -73,6 +79,22 @@ unsafe extern "C" {
         max_cost_present: i64,
         max_cost_micros: u64,
         output_address: u64,
+    ) -> i64;
+    fn prodex_audit_budget_evaluation_v1(
+        abi_version: i64,
+        requests: u64,
+        total_tokens: u64,
+        cost_micros: u64,
+        max_requests_present: i64,
+        max_requests: u64,
+        max_tokens_present: i64,
+        max_tokens: u64,
+        max_cost_present: i64,
+        max_cost_micros: u64,
+        output_address: u64,
+        output_capacity: i64,
+        lengths_address: u64,
+        allowed_address: u64,
     ) -> i64;
     fn prodex_audit_query_has_filters_v1(
         abi_version: i64,
@@ -293,6 +315,57 @@ pub fn budget_flags(
         token_limit_reached: flags & 2 != 0,
         cost_limit_reached: flags & 4 != 0,
     })
+}
+
+pub fn budget_evaluation(
+    summary: AuditUsageSummary,
+    max_requests: Option<u64>,
+    max_tokens: Option<u64>,
+    max_cost_micros: Option<u64>,
+) -> Result<AuditBudgetEvaluationPlan, MojoError> {
+    let mut output = [0_u8; 256];
+    let mut lengths = [0_i64; 4];
+    let mut allowed = -1_i64;
+    status(unsafe {
+        prodex_audit_budget_evaluation_v1(
+            ABI_VERSION,
+            summary.requests,
+            summary.total_tokens,
+            summary.cost_micros,
+            i64::from(max_requests.is_some()),
+            max_requests.unwrap_or_default(),
+            i64::from(max_tokens.is_some()),
+            max_tokens.unwrap_or_default(),
+            i64::from(max_cost_micros.is_some()),
+            max_cost_micros.unwrap_or_default(),
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            lengths.as_mut_ptr() as usize as u64,
+            (&mut allowed as *mut i64) as usize as u64,
+        )
+    })?;
+    let count = usize::try_from(lengths[0]).map_err(|_| MojoError::InvalidOutput)?;
+    if count > 3 {
+        return Err(MojoError::InvalidOutput);
+    }
+    let allowed = match allowed {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    if allowed != (count == 0) {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut cursor = 0_usize;
+    let mut reasons = Vec::with_capacity(count);
+    for length in lengths.iter().skip(1).take(count) {
+        let length = usize::try_from(*length).map_err(|_| MojoError::InvalidOutput)?;
+        let end = cursor.checked_add(length).ok_or(MojoError::InvalidOutput)?;
+        let bytes = output.get(cursor..end).ok_or(MojoError::InvalidOutput)?;
+        reasons.push(String::from_utf8(bytes.to_vec()).map_err(|_| MojoError::InvalidOutput)?);
+        cursor = end;
+    }
+    Ok(AuditBudgetEvaluationPlan { allowed, reasons })
 }
 
 fn optional_text_parts(value: Option<&str>) -> Result<(u64, i64, i64), MojoError> {
@@ -554,6 +627,34 @@ mod tests {
                 request_limit_reached: true,
                 token_limit_reached: true,
                 cost_limit_reached: false,
+            }
+        );
+        assert_eq!(
+            budget_evaluation(summary, Some(2), Some(u64::MAX), None).unwrap(),
+            AuditBudgetEvaluationPlan {
+                allowed: false,
+                reasons: vec![
+                    "request limit reached (2/2)".to_string(),
+                    format!("token limit reached ({}/{})", u64::MAX, u64::MAX),
+                ],
+            }
+        );
+        assert_eq!(
+            budget_evaluation(
+                AuditUsageSummary {
+                    requests: 1,
+                    total_tokens: 2,
+                    cost_micros: 3,
+                    ..AuditUsageSummary::default()
+                },
+                Some(9),
+                Some(9),
+                Some(9),
+            )
+            .unwrap(),
+            AuditBudgetEvaluationPlan {
+                allowed: true,
+                reasons: Vec::new(),
             }
         );
         assert!(query_has_filters(Some("profile"), None, None).unwrap());

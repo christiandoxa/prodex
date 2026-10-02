@@ -899,7 +899,7 @@ export function findViolations(files) {
         "prodex_mojo_core::audit_log_policy::normalize_usage_token(",
         "prodex_mojo_core::audit_log_policy::normalized_total_tokens(",
         "prodex_mojo_core::audit_log_policy::summarize_usage(",
-        "prodex_mojo_core::audit_log_policy::budget_flags(",
+        "prodex_mojo_core::audit_log_policy::budget_evaluation(",
         "prodex_mojo_core::audit_log_policy::query_has_filters(",
         "prodex_mojo_core::audit_log_policy::query_matches(",
         "prodex_mojo_core::audit_log_policy::format_query(",
@@ -924,6 +924,9 @@ export function findViolations(files) {
         || contents.includes(".chars().rev().take(4)")
         || contents.includes(".rsplit_once('@')")
         || contents.includes(".chars().take(100).collect()")
+        || contents.includes('reasons.push(format!("request limit reached')
+        || contents.includes('reasons.push(format!("token limit reached')
+        || contents.includes('reasons.push(format!("cost limit reached')
       ) {
         violations.push(filePath + ": contains restored Rust audit query/display/metadata semantics");
       }
@@ -935,6 +938,7 @@ export function findViolations(files) {
         "prodex_audit_usage_total_v1(",
         "prodex_audit_usage_summary_v1(",
         "prodex_audit_budget_flags_v1(",
+        "prodex_audit_budget_evaluation_v1(",
         "prodex_audit_query_has_filters_v1(",
         "prodex_audit_query_matches_v1(",
         "prodex_audit_query_format_v1(",

@@ -4164,3 +4164,22 @@ real-Mojo metadata adapter tests including Unicode cases, all 17
 The canonical broad report at this checkpoint counts **73,463 reachable Mojo
 LOC** and **201,357 Rust production LOC**, totaling **274,820 LOC**:
 **26.73131504257332% Mojo**. The 75% broad target remains in progress.
+
+## Audit budget evaluation reason policy hard replacement
+
+Budget evaluation result policy now runs through `audit_log_policy.mojo`. Mojo
+owns request/token/cost threshold evaluation, allowed/blocked state, ordered
+reason selection, and exact reason rendering including current/max counters.
+Rust retains selected-window summary materialization, configured limit DTOs,
+key normalization, and serialization/API ownership, then only decodes the
+Mojo-produced `allowed` flag and reason strings. The previous Rust flag branches
+and `format!` reason pipeline were deleted; no Rust semantic fallback remains
+for the migrated budget-evaluation decisions.
+
+Focused validation passes the standalone `audit_log_policy.mojo` build, the
+real-Mojo audit budget adapter tests, all 17 `prodex-audit-log` tests, Clippy
+with warnings denied for `prodex-mojo-core` and `prodex-audit-log`,
+`git diff --check`, and the strengthened no-fallback guard. The canonical broad
+report at this checkpoint counts **73,555 reachable Mojo LOC** and **201,399
+Rust production LOC**, totaling **274,954 LOC**: **26.751747565047243% Mojo**.
+The 75% broad target remains in progress.
