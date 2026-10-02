@@ -1,6 +1,27 @@
 #![cfg(feature = "mojo-runtime")]
 
-use prodex_mojo_core::runtime::{ProfileHealthScoreInput, profile_health_sort_key_batch};
+use prodex_mojo_core::runtime::{
+    ProfileHealthScoreInput, profile_circuit_half_open_seconds, profile_health_sort_key_batch,
+};
+
+#[test]
+fn half_open_circuit_timing_abi_caps_mojo_policy_boundaries() {
+    for (score, base, maximum, expected) in [
+        (0, 5, 60, 5),
+        (4, 5, 60, 5),
+        (5, 5, 60, 10),
+        (7, 5, 60, 40),
+        (u32::MAX, 10, 60, 60),
+    ] {
+        assert_eq!(
+            profile_circuit_half_open_seconds(score, 4, base, maximum)
+                .expect("valid half-open circuit input"),
+            expected,
+            "score={score}"
+        );
+    }
+    assert!(profile_circuit_half_open_seconds(0, 4, 5, -1).is_err());
+}
 
 #[test]
 fn profile_health_batch_matches_boundary_expectations() {
