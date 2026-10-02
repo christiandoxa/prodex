@@ -39,7 +39,7 @@ fn copilot_provider_core_rewrites_request_to_canonical_model() {
     );
     let value: Value = serde_json::from_slice(&rewritten).unwrap();
 
-    assert_eq!(value["model"], "gpt-5.3-codex");
+    assert_eq!(value["model"], "gpt-6-astra");
 }
 
 #[test]

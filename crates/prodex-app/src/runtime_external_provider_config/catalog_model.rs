@@ -114,7 +114,8 @@ pub(super) fn external_catalog_models(
     let mut models = Vec::with_capacity(static_models.len() + dynamic_models.len() + 1);
     let launch_model_context_window = external_dynamic_catalog_model(&dynamic_models, launch_model)
         .and_then(|model| model.context_window)
-        .or_else(|| provider.model_prompt_token_limit(launch_model));
+        .or_else(|| provider.model_prompt_token_limit(launch_model))
+        .or_else(|| provider.static_model_context_window(launch_model));
     let default_compact_limit = auto_compact_token_limit;
     let candidates = std::iter::once((launch_model, launch_model_context_window))
         .chain(dynamic_models.iter().map(|model| {
@@ -127,8 +128,10 @@ pub(super) fn external_catalog_models(
         }))
         .chain(static_models.iter().map(|model| {
             (
-                model.slug.as_str(),
-                provider.model_prompt_token_limit(&model.slug),
+                model.id.as_str(),
+                provider
+                    .model_prompt_token_limit(&model.id)
+                    .or(model.context_window_tokens),
             )
         }))
         .collect::<Vec<_>>();

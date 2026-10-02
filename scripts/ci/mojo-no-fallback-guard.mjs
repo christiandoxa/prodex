@@ -1674,27 +1674,27 @@ export function findViolations(files) {
   const externalProviderCatalogViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === EXTERNAL_PROVIDER_CONFIG_FILE) {
       const required = [
-        "external_catalog_static_models(",
-        "external_catalog_model_metadata(",
+        "provider_catalog_entries_for(",
+        "provider_catalog_entry(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
-        .map((call) => filePath + ": external-provider catalog migration must retain Mojo call " + call);
-      if (
-        /fn\s+models\(self\)\s*->\s*&'static\s*\[/u.test(contents)
-        || /Self::Anthropic\s*=>\s*&\[/u.test(contents)
-        || /Self::Copilot\s*=>\s*&\[/u.test(contents)
-        || /Self::Kiro\s*=>\s*&\[/u.test(contents)
-        || /resolve_catalog_model_exact\(&catalog,\s*model\)/u.test(contents)
-      ) {
-        violations.push(filePath + ": contains restored Rust external-provider static catalog semantics");
+        .map((call) => filePath + ": external-provider catalog must reuse canonical provider-core source " + call);
+      for (const retired of [
+        "external_catalog_static_models(",
+        "external_catalog_model_metadata(",
+        "ExternalCatalogProviderClass",
+      ]) {
+        if (contents.includes(retired)) {
+          violations.push(filePath + ": production external-provider catalog must not use the duplicate Mojo static table");
+          break;
+        }
       }
       return violations;
     }
     if (filePath === "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs") {
       return contents.includes("let static_models = provider.models();")
-        ? []
-        : [filePath + ": external-provider catalog builder must consume Mojo-owned static models"];
+        ? [] : [filePath + ": external-provider catalog builder must consume canonical static models"];
     }
     return [];
   });

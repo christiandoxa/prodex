@@ -295,44 +295,52 @@ mod tests {
     }
 
     #[test]
-    fn openai_picker_uses_catalog_order_and_gpt_5_6_efforts() {
+    fn openai_picker_starts_with_latest_gpt_6_family_and_preserves_legacy_models() {
         let choices = resolve_provider_model_choices(
             ProviderId::OpenAi,
             &["profile-model".to_string(), "gpt-5.6-luna".to_string()],
             Some("current-model"),
         );
         assert_eq!(choices[0], ProviderModelChoice::ProviderDefault);
-        assert_eq!(
-            choices[1],
-            ProviderModelChoice::Model("gpt-5.6-sol".to_string())
-        );
-        assert_eq!(
-            choices[2],
-            ProviderModelChoice::Model("gpt-5.6-terra".to_string())
-        );
-        assert_eq!(
-            choices[3],
-            ProviderModelChoice::Model("gpt-5.6-luna".to_string())
-        );
+        for (index, model) in ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-luna", "gpt-6-sol"]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(
+                choices[index + 1],
+                ProviderModelChoice::Model(model.to_string())
+            );
+        }
+        assert!(choices.contains(&ProviderModelChoice::Model("gpt-5.6-luna".to_string())));
         assert!(choices.contains(&ProviderModelChoice::Model("profile-model".to_string())));
         assert!(choices.contains(&ProviderModelChoice::Model("current-model".to_string())));
         assert_eq!(choices.last(), Some(&ProviderModelChoice::Custom));
-        for model in ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"] {
-            let entry = provider_catalog_entry(ProviderId::OpenAi, model).unwrap();
-            assert!(
-                entry
-                    .supported_reasoning_efforts
-                    .as_ref()
-                    .is_some_and(|efforts| efforts.contains(&ProviderReasoningEffort::Ultra))
-                    || model == "gpt-5.6-luna"
-            );
-        }
-        let luna = provider_catalog_entry(ProviderId::OpenAi, "gpt-5.6-luna").unwrap();
-        assert_eq!(luna.context_window_tokens, Some(872_000));
+
+        let astra = provider_catalog_entry(ProviderId::OpenAi, "gpt-6-astra").unwrap();
+        assert_eq!(astra.context_window_tokens, Some(1_050_000));
+        assert_eq!(astra.max_output_tokens, Some(128_000));
+        assert_eq!(
+            astra.default_reasoning_effort,
+            Some(ProviderReasoningEffort::Medium)
+        );
+        assert!(
+            !astra
+                .supported_reasoning_efforts
+                .as_ref()
+                .unwrap()
+                .contains(&ProviderReasoningEffort::None)
+        );
+
+        let sol = provider_catalog_entry(ProviderId::OpenAi, " SOL ").unwrap();
+        assert_eq!(sol.id, "gpt-6.1-sol");
+        assert_eq!(sol.context_window_tokens, Some(1_050_000));
+
+        let luna = provider_catalog_entry(ProviderId::OpenAi, "luna").unwrap();
+        assert_eq!(luna.id, "gpt-6-luna");
         assert!(
             luna.supported_reasoning_efforts
                 .as_ref()
-                .is_some_and(|efforts| efforts.contains(&ProviderReasoningEffort::Max))
+                .is_some_and(|efforts| efforts.contains(&ProviderReasoningEffort::None))
         );
     }
 

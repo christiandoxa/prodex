@@ -162,19 +162,19 @@ fn transform_result_exposes_explicit_status_outcome() {
 fn fallback_chain_preserves_existing_gemini_aliases() {
     assert_eq!(
         provider_model_fallback_chain(ProviderId::Gemini, "flash")[0],
-        "gemini-3-flash-preview"
+        "gemini-3.8-flash"
     );
     assert_eq!(
         provider_model_fallback_chain(ProviderId::Anthropic, "opus"),
-        vec!["claude-opus-4-8", "claude-sonnet-4-6"]
+        vec!["claude-opus-5-5", "claude-sonnet-5-5"]
     );
     assert_eq!(
         provider_model_fallback_chain(ProviderId::Copilot, "codex"),
-        vec!["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]
+        vec!["gpt-6-astra", "gpt-6.1-sol", "gpt-5.3-codex"]
     );
     assert_eq!(
         provider_model_fallback_chain(ProviderId::Copilot, "gpt-5.4"),
-        vec!["gpt-5.4", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]
+        vec!["gpt-5.4", "gpt-6.1-sol", "gpt-5.3-codex"]
     );
     assert_eq!(
         provider_model_fallback_chain(ProviderId::DeepSeek, "flash"),

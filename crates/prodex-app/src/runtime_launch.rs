@@ -350,6 +350,9 @@ mod openai_model_policy_tests {
             " GPT-5.6-SOL "
         ));
         assert!(runtime_launch_openai_model_uses_large_context("gpt-5-mini"));
+        assert!(runtime_launch_openai_model_uses_large_context(
+            "gpt-6-astra"
+        ));
         assert!(runtime_launch_openai_model_uses_large_context("gpt-6-luna"));
         assert!(runtime_launch_openai_model_uses_large_context(
             "codex-auto-review"

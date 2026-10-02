@@ -15,7 +15,13 @@ fn model_registry_resolves_known_models_after_normalization() {
 
 #[test]
 fn model_registry_resolves_catalogued_openai_windows() {
-    for model in ["gpt-5.6-luna", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"] {
+    for model in [
+        "gpt-5.6-luna",
+        "gpt-6-astra",
+        "gpt-6.1-sol",
+        "gpt-6-sol",
+        "gpt-6-luna",
+    ] {
         assert_eq!(
             smart_context_model_context_window(Some(model)).map(|window| window.tokens),
             Some(872_000),
