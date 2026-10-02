@@ -16,6 +16,7 @@ comptime AUDIT_LOG_POLICY_ABI: Int64 = 4
 comptime AUDIT_LOG_POLICY_MAX_TEXT_BYTES: Int64 = 1_048_576
 comptime AUDIT_LOG_POLICY_MAX_ROWS: Int64 = 1_000_000
 comptime AUDIT_LOG_POLICY_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
+comptime AUDIT_LOG_POLICY_INT64_MIN: Int64 = -9_223_372_036_854_775_808
 
 
 def audit_usage_saturating_add(left: UInt64, right: UInt64) -> UInt64:
@@ -151,6 +152,50 @@ def prodex_audit_usage_total_v1(
             audit_usage_saturating_add(input_tokens, output_tokens),
             reasoning_tokens,
         )
+    return AUDIT_LOG_POLICY_OK
+
+
+def audit_floor_epoch(value: Int64, unit: Int64) -> Int64:
+    if unit <= 0:
+        return value
+    var remainder = value % unit
+    if remainder == 0:
+        return value
+    if value >= 0:
+        return value - remainder
+    var delta = remainder if remainder > 0 else unit + remainder
+    if value < AUDIT_LOG_POLICY_INT64_MIN + delta:
+        return AUDIT_LOG_POLICY_INT64_MIN
+    return value - delta
+
+
+@export("prodex_audit_budget_window_plan_v1")
+def prodex_audit_budget_window_plan_v1(
+    abi_version: Int64,
+    window: Int64,
+    now_epoch: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != AUDIT_LOG_POLICY_ABI_VERSION:
+        return AUDIT_LOG_POLICY_ABI
+    if window < 0 or window > 3 or output_address == 0:
+        return AUDIT_LOG_POLICY_INVALID
+
+    var unit: Int64 = 3_600
+    var calendar_month: Int64 = 0
+    if window == 1:
+        unit = 86_400
+    elif window == 2:
+        unit = 604_800
+    elif window == 3:
+        unit = 2_592_000
+        calendar_month = 1
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = calendar_month
+    output[unsafe_offset=1] = audit_floor_epoch(now_epoch, unit)
     return AUDIT_LOG_POLICY_OK
 
 

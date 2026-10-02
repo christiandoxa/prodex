@@ -898,6 +898,7 @@ export function findViolations(files) {
       const required = [
         "prodex_mojo_core::audit_log_policy::normalize_usage_token(",
         "prodex_mojo_core::audit_log_policy::normalized_total_tokens(",
+        "prodex_mojo_core::audit_log_policy::budget_window_plan(",
         "prodex_mojo_core::audit_log_policy::summarize_usage(",
         "prodex_mojo_core::audit_log_policy::budget_evaluation(",
         "prodex_mojo_core::audit_log_policy::query_has_filters(",
@@ -927,6 +928,8 @@ export function findViolations(files) {
         || contents.includes('reasons.push(format!("request limit reached')
         || contents.includes('reasons.push(format!("token limit reached')
         || contents.includes('reasons.push(format!("cost limit reached')
+        || contents.includes("fn floor_epoch(")
+        || contents.includes("match self {")
       ) {
         violations.push(filePath + ": contains restored Rust audit query/display/metadata semantics");
       }
@@ -936,6 +939,7 @@ export function findViolations(files) {
       const required = [
         "prodex_audit_usage_token_normalize_v1(",
         "prodex_audit_usage_total_v1(",
+        "prodex_audit_budget_window_plan_v1(",
         "prodex_audit_usage_summary_v1(",
         "prodex_audit_budget_flags_v1(",
         "prodex_audit_budget_evaluation_v1(",

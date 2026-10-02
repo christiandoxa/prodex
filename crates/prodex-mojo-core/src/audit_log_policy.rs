@@ -14,6 +14,12 @@ pub struct AuditUsageRowInput {
     pub cost_micros: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuditBudgetWindowPlan {
+    pub calendar_month: bool,
+    pub fallback_start_epoch: i64,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct AuditUsageSummary {
     pub requests: u64,
@@ -56,6 +62,12 @@ unsafe extern "C" {
         input_tokens: u64,
         output_tokens: u64,
         reasoning_tokens: u64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_audit_budget_window_plan_v1(
+        abi_version: i64,
+        window: i64,
+        now_epoch: i64,
         output_address: u64,
     ) -> i64;
     fn prodex_audit_usage_summary_v1(
@@ -242,6 +254,27 @@ pub fn normalized_total_tokens(
         )
     })?;
     Ok(output)
+}
+
+pub fn budget_window_plan(window: i64, now_epoch: i64) -> Result<AuditBudgetWindowPlan, MojoError> {
+    let mut output = [-1_i64; 2];
+    status(unsafe {
+        prodex_audit_budget_window_plan_v1(
+            ABI_VERSION,
+            window,
+            now_epoch,
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    let calendar_month = match output[0] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(AuditBudgetWindowPlan {
+        calendar_month,
+        fallback_start_epoch: output[1],
+    })
 }
 
 pub fn summarize_usage(
@@ -591,6 +624,30 @@ mod tests {
             u64::MAX
         );
         assert_eq!(normalized_total_tokens(9, 1, 2, 3).unwrap(), 9);
+        assert_eq!(
+            budget_window_plan(0, 3_800).unwrap(),
+            AuditBudgetWindowPlan {
+                calendar_month: false,
+                fallback_start_epoch: 3_600,
+            }
+        );
+        assert_eq!(
+            budget_window_plan(0, -1).unwrap().fallback_start_epoch,
+            -3_600
+        );
+        assert_eq!(
+            budget_window_plan(0, i64::MIN)
+                .unwrap()
+                .fallback_start_epoch,
+            i64::MIN
+        );
+        assert_eq!(
+            budget_window_plan(3, 3_800).unwrap(),
+            AuditBudgetWindowPlan {
+                calendar_month: true,
+                fallback_start_epoch: 0,
+            }
+        );
 
         let summary = summarize_usage(
             &[

@@ -4183,3 +4183,24 @@ with warnings denied for `prodex-mojo-core` and `prodex-audit-log`,
 report at this checkpoint counts **73,555 reachable Mojo LOC** and **201,399
 Rust production LOC**, totaling **274,954 LOC**: **26.751747565047243% Mojo**.
 The 75% broad target remains in progress.
+
+## Audit budget-window policy hard replacement
+
+Budget-window start planning now runs through `audit_log_policy.mojo`. Mojo owns
+Hour/Day/Week fixed-window selection, Rust-compatible Euclidean flooring for
+positive and negative epochs with saturating `i64::MIN` behavior, and the
+30-day fallback start used when calendar-month conversion is unavailable.
+`BudgetWindow` is now `repr(i64)` for stable ABI tags. Rust retains only the
+calendar-aware UTC month-start calculation through chrono and falls back to the
+Mojo-produced 30-day boundary when chrono cannot materialize the timestamp. The
+previous Rust `match self` fixed-window matrix and `floor_epoch()` helper were
+deleted; no Rust semantic fallback remains for the migrated fixed-window
+policy.
+
+Focused validation passes the standalone `audit_log_policy.mojo` build, the
+real-Mojo budget-window adapter tests including negative/extreme epochs, all 18
+`prodex-audit-log` tests, Clippy with warnings denied for `prodex-mojo-core` and
+`prodex-audit-log`, `git diff --check`, and the strengthened no-fallback guard.
+The canonical broad report at this checkpoint counts **73,593 reachable Mojo
+LOC** and **201,422 Rust production LOC**, totaling **275,015 LOC**:
+**26.759631292838574% Mojo**. The 75% broad target remains in progress.
