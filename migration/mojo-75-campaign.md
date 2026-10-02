@@ -4525,3 +4525,61 @@ The canonical broad report at this checkpoint counts **75,486 reachable Mojo
 LOC** and **201,807 Rust production LOC**, totaling **277,293 LOC**:
 **27.22246865229198% Mojo**. The release floor and ownership non-regression
 checks pass; the 75% broad project target remains in progress.
+
+## Route-affinity and chain log rendering hard replacement
+
+Runtime route-affinity recompute/result/prefix logs, compact-followup owner logs,
+and previous-response chain retry/dead-upstream logs now assemble in
+`log_semantics.mojo`. Mojo owns HTTP-vs-WebSocket prefixes, presence
+flags, event/field ordering, optional dash defaults, compact owner source text,
+and the complete output templates. Rust retains only typed DTO preparation,
+`u128` delay decimal materialization, and the existing Rust Debug
+materialization for optional affinity state fragments before handing them to
+the Mojo renderer.
+
+The former Rust prefix helper, five route-affinity format templates, chain
+session/default helper, and both chain format templates were deleted. The
+no-fallback guard now requires the two Mojo log ABI renderers and rejects
+restoring those templates in Rust.
+
+Focused validation passes all 3 route-affinity log regressions and both chain-log
+regressions against the real Mojo renderer, Clippy with warnings denied for
+`prodex-mojo-core` and `prodex-runtime-proxy`, the Mojo
+authority and no-fallback guards, and `git diff --check`. Development
+validation caught and fixed an initial Mojo 1.1 `Array[StringSlice]`
+indexing incompatibility before the passing build.
+
+The canonical broad report at this checkpoint counts **76,014 reachable Mojo
+LOC** and **202,171 Rust production LOC**, totaling **278,185 LOC**:
+**27.324981577008106% Mojo**. The release floor and ownership non-regression
+checks pass; the 75% broad project target remains in progress.
+
+## Governance inspection policy hard replacement
+
+Governance inspection labels and deterministic validation now extend the
+existing `governance_inspection.mojo` owner. Mojo owns data-classification
+and coverage labels, conservative coverage merge, content-location path
+validation, detector/tag/reason token validation, and configured inspection
+limit validation, alongside the already-Mojo-owned finding classification
+policy. Rust retains the public domain DTOs, Serde/debug behavior, byte-range
+integer conversion, deterministic sorting/deduplication, and typed error
+materialization.
+
+The previous Rust classification/coverage string tables, coverage merge branch,
+content-location byte predicate, token character predicate, and inspection-limit
+bounds branch were deleted. `prodex-domain` delegates those decisions through
+the checked `prodex-mojo-core` adapter; the no-fallback guard rejects
+restoration of the removed Rust semantics.
+
+Focused validation passes the direct real-Mojo governance policy contract test,
+all 5 `prodex-domain` governance-inspection tests, Clippy with warnings
+denied for `prodex-mojo-core` and `prodex-domain`, the Mojo
+authority and no-fallback guards, and staged diff hygiene. A governance-only
+canonical measurement was taken in a detached worktree from the current
+checkpoint base so an unrelated in-progress runtime-log wave did not contaminate
+the accounting.
+
+The canonical broad report for this checkpoint counts **75,662 reachable Mojo
+LOC** and **201,958 Rust production LOC**, totaling **277,620 LOC**:
+**27.253800158490023% Mojo**. The release floor and ownership non-regression
+checks pass; the 75% broad project target remains in progress.

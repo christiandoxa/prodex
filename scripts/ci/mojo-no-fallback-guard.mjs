@@ -1614,10 +1614,25 @@ export function findViolations(files) {
     const required = [
       "governance_finding_minimum_classification(",
       "governance_findings_exceed_classification(",
+      "governance_classification_label(",
+      "governance_coverage_combine(",
+      "governance_coverage_label(",
+      "governance_content_location_path_valid(",
+      "governance_inspection_token_valid(",
+      "governance_inspection_limits_valid(",
     ];
-    return required
+    const violations = required
       .filter((call) => !contents.includes(call))
-      .map((call) => `${filePath}: governance classification must retain Mojo call ${call}`);
+      .map((call) => filePath + ": governance inspection must retain Mojo call " + call);
+    if (
+      contents.includes('Self::Public => "public"')
+      || contents.includes('Self::Full => "full"')
+      || contents.includes("byte.is_ascii_alphanumeric() || matches!(byte")
+      || contents.includes("max_detectors == 0")
+    ) {
+      violations.push(filePath + ": contains restored Rust governance inspection semantics");
+    }
+    return violations;
   });
   const profileIdentityViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== PROFILE_IDENTITY_FILE) return [];
