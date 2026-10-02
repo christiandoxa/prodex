@@ -45,6 +45,7 @@ fn runtime_proxy_contract_has_source_level_evidence() {
                 "crates/prodex-runtime-proxy/src/error_policy.rs",
                 "crates/prodex-runtime-proxy/src/quota.rs",
                 "mojo/prodex_core/rich_fallback.mojo",
+                "mojo/prodex_core/observability_labels.mojo",
             ],
             required: &[
                 "profile_transport_backoff",
