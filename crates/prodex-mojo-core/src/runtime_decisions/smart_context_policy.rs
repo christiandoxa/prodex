@@ -55,6 +55,35 @@ pub struct SmartContextStaticItemPlan {
     pub retained: Vec<bool>,
 }
 
+/// Text input to the Mojo-owned request-local duplicate-reference planner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextDuplicateTextCandidate<'a> {
+    pub digest: String,
+    pub text: &'a str,
+    pub role: &'a str,
+    pub input_index: usize,
+}
+
+/// Candidate count at which the duplicate precheck preserves its existing fail-open behavior.
+pub const SMART_CONTEXT_DUPLICATE_SCAN_MAX_CANDIDATES: usize = 256;
+const SMART_CONTEXT_DUPLICATE_PLAN_MAX_CANDIDATES: usize = 50_000;
+
+/// Controls whether duplicate planning finds candidates or returns rewrite targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SmartContextDuplicateTextMode {
+    /// Apply the 256-candidate probe limit and verify full text on digest matches.
+    Probe,
+    /// Plan replacements using the full digest, matching the request rewrite contract.
+    Rewrite,
+}
+
+/// Result of probing or planning request-local duplicate text references.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SmartContextDuplicateTextPlan {
+    pub replacement_sources: Vec<Option<usize>>,
+    pub candidate_limit_exceeded: bool,
+}
+
 #[repr(C)]
 #[derive(Clone, Copy)]
 struct StringView {
@@ -69,6 +98,15 @@ struct StaticItem {
     content_hash: StringView,
     canonical_text: StringView,
     byte_len: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct DuplicateTextCandidate {
+    digest: StringView,
+    text: StringView,
+    role: StringView,
+    input_index: i64,
 }
 
 unsafe extern "C" {
@@ -123,6 +161,16 @@ unsafe extern "C" {
         selected_count_address: u64,
         count: i64,
         maximum_items: i64,
+    ) -> i64;
+    fn prodex_smart_context_duplicate_text_plan_v1(
+        candidates_address: u64,
+        replacement_sources_address: u64,
+        bucket_slots_address: u64,
+        bucket_slot_count: i64,
+        duplicate_count_address: u64,
+        candidate_limit_exceeded_address: u64,
+        count: i64,
+        mode: i64,
     ) -> i64;
 }
 
@@ -336,6 +384,95 @@ pub fn smart_context_static_item_plan(
     })
 }
 
+pub fn smart_context_duplicate_text_plan(
+    inputs: &[SmartContextDuplicateTextCandidate<'_>],
+    mode: SmartContextDuplicateTextMode,
+) -> Result<SmartContextDuplicateTextPlan, crate::MojoError> {
+    if inputs.len() > SMART_CONTEXT_DUPLICATE_PLAN_MAX_CANDIDATES {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    let bucket_slot_count = inputs
+        .len()
+        .max(1)
+        .checked_mul(2)
+        .and_then(usize::checked_next_power_of_two)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    let candidates = inputs
+        .iter()
+        .map(|input| {
+            Ok(DuplicateTextCandidate {
+                digest: string_view(&input.digest),
+                text: string_view(input.text),
+                role: string_view(input.role),
+                input_index: i64::try_from(input.input_index)
+                    .map_err(|_| crate::MojoError::InvalidInput)?,
+            })
+        })
+        .collect::<Result<Vec<_>, crate::MojoError>>()?;
+    let mut replacement_sources = vec![-1_i64; inputs.len()];
+    let mut bucket_slots = vec![-1_i64; bucket_slot_count];
+    let mut duplicate_count = 0_i64;
+    let mut candidate_limit_exceeded = 0_i64;
+    let mode = match mode {
+        SmartContextDuplicateTextMode::Rewrite => 0,
+        SmartContextDuplicateTextMode::Probe => 1,
+    };
+    let status = unsafe {
+        prodex_smart_context_duplicate_text_plan_v1(
+            candidates.as_ptr() as usize as u64,
+            replacement_sources.as_mut_ptr() as usize as u64,
+            bucket_slots.as_mut_ptr() as usize as u64,
+            i64::try_from(bucket_slot_count).map_err(|_| crate::MojoError::InvalidInput)?,
+            &mut duplicate_count as *mut i64 as usize as u64,
+            &mut candidate_limit_exceeded as *mut i64 as usize as u64,
+            i64::try_from(candidates.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            mode,
+        )
+    };
+    if status != 0
+        || duplicate_count < 0
+        || usize::try_from(duplicate_count)
+            .ok()
+            .is_none_or(|count| count > inputs.len())
+        || !matches!(candidate_limit_exceeded, 0 | 1)
+        || candidate_limit_exceeded == 1 && mode != 1
+    {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    if candidate_limit_exceeded == 1 {
+        return Ok(SmartContextDuplicateTextPlan {
+            replacement_sources: vec![None; inputs.len()],
+            candidate_limit_exceeded: true,
+        });
+    }
+    let replacement_sources = replacement_sources
+        .into_iter()
+        .zip(inputs)
+        .map(|(source, candidate)| {
+            if source == -1 {
+                return Ok(None);
+            }
+            usize::try_from(source)
+                .ok()
+                .filter(|source| *source < candidate.input_index)
+                .map(Some)
+                .ok_or(crate::MojoError::InvalidOutput)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if replacement_sources
+        .iter()
+        .filter(|source| source.is_some())
+        .count()
+        != duplicate_count as usize
+    {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok(SmartContextDuplicateTextPlan {
+        replacement_sources,
+        candidate_limit_exceeded: candidate_limit_exceeded == 1,
+    })
+}
+
 fn string_view(value: &str) -> StringView {
     StringView {
         ptr: value.as_ptr() as usize as u64,
@@ -348,6 +485,8 @@ const _: () = {
     assert!(std::mem::align_of::<StringView>() == 8);
     assert!(std::mem::size_of::<StaticItem>() == 56);
     assert!(std::mem::align_of::<StaticItem>() == 8);
+    assert!(std::mem::size_of::<DuplicateTextCandidate>() == 56);
+    assert!(std::mem::align_of::<DuplicateTextCandidate>() == 8);
 };
 
 pub fn smart_context_policy_self_test() -> bool {
@@ -369,4 +508,168 @@ pub fn smart_context_policy_self_test() -> bool {
         && smart_context_affinity_rewrite_allowed(true, 2, 1).is_ok_and(|allowed| allowed)
         && smart_context_rollout_plan(true, false, false, 10, 999)
             .is_ok_and(|plan| plan.mode == 0 && plan.reason == 5)
+}
+
+#[cfg(test)]
+mod duplicate_text_tests {
+    use super::*;
+
+    fn candidate<'a>(
+        digest: &str,
+        text: &'a str,
+        input_index: usize,
+    ) -> SmartContextDuplicateTextCandidate<'a> {
+        SmartContextDuplicateTextCandidate {
+            digest: digest.to_string(),
+            text,
+            role: "user",
+            input_index,
+        }
+    }
+
+    fn candidate_with_role<'a>(
+        digest: &str,
+        text: &'a str,
+        role: &'a str,
+        input_index: usize,
+    ) -> SmartContextDuplicateTextCandidate<'a> {
+        SmartContextDuplicateTextCandidate {
+            digest: digest.to_string(),
+            text,
+            role,
+            input_index,
+        }
+    }
+
+    #[test]
+    fn smart_context_duplicate_text_plan_keeps_first_input_source() {
+        let digest = format!("sc2:{}", "0".repeat(64));
+        let text = "same ".repeat(300);
+        let candidates = [
+            candidate(&digest, &text, 0),
+            candidate(&digest, &text, 0),
+            candidate(&digest, &text, 1),
+            candidate(&digest, &text, 2),
+        ];
+
+        let plan =
+            smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)
+                .unwrap();
+
+        assert_eq!(plan.replacement_sources, vec![None, None, Some(0), Some(0)]);
+        assert!(!plan.candidate_limit_exceeded);
+    }
+
+    #[test]
+    fn smart_context_duplicate_plan_handles_digest_bucket_collisions() {
+        let digest_prefix = format!("sc2:{}", "a".repeat(16));
+        let first_digest = format!("{digest_prefix}{}", "0".repeat(48));
+        let colliding_digest = format!("{digest_prefix}{}", "1".repeat(48));
+        let text = "long text ".repeat(110);
+        let different_text = "different long text ".repeat(60);
+        let candidates = [
+            candidate(&first_digest, &text, 0),
+            candidate(&colliding_digest, &different_text, 1),
+            candidate(&first_digest, &text, 2),
+        ];
+
+        let plan =
+            smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)
+                .unwrap();
+
+        assert_eq!(plan.replacement_sources, vec![None, None, Some(0)]);
+    }
+
+    #[test]
+    fn smart_context_duplicate_rewrite_checks_text_after_digest_match() {
+        let digest = format!("sc2:{}", "1".repeat(64));
+        let same = "same exact text ".repeat(80);
+        let different = "different text ".repeat(80);
+        let candidates = [
+            candidate(&digest, &same, 0),
+            candidate(&digest, &different, 1),
+            candidate(&digest, &same, 2),
+        ];
+
+        let plan =
+            smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)
+                .unwrap();
+
+        assert_eq!(plan.replacement_sources, vec![None, None, Some(0)]);
+    }
+
+    #[test]
+    fn smart_context_duplicate_probe_checks_text_after_digest_match() {
+        let digest = format!("sc2:{}", "1".repeat(64));
+        let same = "same ".repeat(300);
+        let different = "different ".repeat(200);
+        let candidates = [
+            candidate(&digest, &same, 0),
+            candidate(&digest, &different, 1),
+            candidate(&digest, &same, 2),
+        ];
+
+        let plan =
+            smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Probe)
+                .unwrap();
+
+        assert_eq!(plan.replacement_sources, vec![None, None, Some(0)]);
+        assert!(!plan.candidate_limit_exceeded);
+    }
+
+    #[test]
+    fn smart_context_duplicate_probe_stops_at_candidate_limit() {
+        let text = "x".repeat(1024);
+        let candidates = (0..=SMART_CONTEXT_DUPLICATE_SCAN_MAX_CANDIDATES)
+            .map(|input_index| candidate("", &text, input_index))
+            .collect::<Vec<_>>();
+
+        let plan =
+            smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Probe)
+                .unwrap();
+
+        assert!(plan.candidate_limit_exceeded);
+        assert!(plan.replacement_sources.iter().all(Option::is_none));
+    }
+
+    #[test]
+    fn smart_context_duplicate_rewrite_skips_static_prompt_roles() {
+        let digest = format!("sc2:{}", "3".repeat(64));
+        let text = "static instruction ".repeat(80);
+        let candidates = [
+            candidate_with_role(&digest, &text, "system", 0),
+            candidate_with_role(&digest, &text, "developer", 1),
+            candidate_with_role(&digest, &text, "user", 2),
+        ];
+
+        let plan =
+            smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)
+                .unwrap();
+
+        assert_eq!(plan.replacement_sources, vec![None, None, None]);
+    }
+
+    #[test]
+    fn smart_context_duplicate_rewrite_accepts_long_non_prompt_roles() {
+        let digest = format!("sc2:{}", "4".repeat(64));
+        let text = "long text ".repeat(110);
+        let role = "other".repeat(103);
+        let candidates = [candidate_with_role(&digest, &text, &role, 0)];
+
+        assert!(
+            smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn smart_context_duplicate_rewrite_rejects_more_than_json_node_ceiling() {
+        let digest = format!("sc2:{}", "2".repeat(64));
+        let candidates = vec![candidate(&digest, "text", 0); 50_001];
+
+        assert_eq!(
+            smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite,),
+            Err(crate::MojoError::InvalidInput)
+        );
+    }
 }

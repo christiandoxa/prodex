@@ -86,6 +86,17 @@ mod quota_selection_tests {
             1
         );
 
+        for (status, usable) in [(0, 1), (1, 1), (2, 1), (3, 0), (4, 0)] {
+            assert_eq!(
+                quota_selection_policy(
+                    QUOTA_SELECTION_MODE_WINDOW_USABLE,
+                    input(0, status, 0, 0, false, 10),
+                )
+                .unwrap(),
+                usable
+            );
+        }
+
         let critical = input(0, 2, 0, 2, true, 10);
         assert_eq!(
             quota_selection_policy(QUOTA_SELECTION_MODE_PRECOMMIT_REASON, critical).unwrap(),

@@ -1,109 +1,166 @@
 use super::*;
+use prodex_mojo_core::runtime_decisions::{
+    SmartContextDuplicateTextCandidate, SmartContextDuplicateTextMode,
+    smart_context_duplicate_text_plan,
+};
 
 pub(super) fn runtime_smart_context_dedupe_input_text_within_request(
     value: &mut serde_json::Value,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
+    let candidates = runtime_smart_context_duplicate_text_candidates(
+        value,
+        SmartContextDuplicateTextMode::Rewrite,
+    );
+    let plan =
+        smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)
+            .expect("Mojo Smart Context duplicate rewrite plan failed");
+    let digests = candidates
+        .into_iter()
+        .map(|candidate| candidate.digest)
+        .collect::<Vec<_>>();
     let Some(input) = value
         .get_mut("input")
         .and_then(serde_json::Value::as_array_mut)
     else {
         return;
     };
-    let mut seen = BTreeMap::<String, usize>::new();
-    for (index, item) in input.iter_mut().enumerate() {
-        if runtime_smart_context_value_is_static_context_item(item) {
-            continue;
-        }
-        runtime_smart_context_dedupe_value_text(item, index, &mut seen, stats);
+    let mut candidate_index = 0;
+    for item in input {
+        runtime_smart_context_apply_duplicate_text_plan(
+            item,
+            &digests,
+            &plan.replacement_sources,
+            &mut candidate_index,
+            stats,
+        );
     }
+    debug_assert_eq!(candidate_index, digests.len());
 }
 
 pub(super) fn runtime_smart_context_has_duplicate_input_text(value: &serde_json::Value) -> bool {
-    let Some(input) = value.get("input").and_then(serde_json::Value::as_array) else {
-        return false;
-    };
-    let mut seen = BTreeMap::<String, Vec<(usize, &str)>>::new();
-    let mut candidate_count = 0usize;
-    for (index, item) in input.iter().enumerate() {
-        if runtime_smart_context_value_is_static_context_item(item) {
-            continue;
-        }
-        if runtime_smart_context_value_has_duplicate_text(
-            item,
-            index,
-            &mut seen,
-            &mut candidate_count,
-        ) {
-            return true;
-        }
-    }
-    false
+    let candidates = runtime_smart_context_duplicate_text_candidates(
+        value,
+        SmartContextDuplicateTextMode::Probe,
+    );
+    let plan = smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Probe)
+        .expect("Mojo Smart Context duplicate probe failed");
+    plan.candidate_limit_exceeded || plan.replacement_sources.iter().any(Option::is_some)
 }
 
-fn runtime_smart_context_value_has_duplicate_text<'a>(
+fn runtime_smart_context_duplicate_text_candidates<'a>(
     value: &'a serde_json::Value,
-    item_index: usize,
-    seen: &mut BTreeMap<String, Vec<(usize, &'a str)>>,
-    candidate_count: &mut usize,
-) -> bool {
+    mode: SmartContextDuplicateTextMode,
+) -> Vec<SmartContextDuplicateTextCandidate<'a>> {
+    let mut candidates = Vec::new();
+    let Some(input) = value.get("input").and_then(serde_json::Value::as_array) else {
+        return candidates;
+    };
+    for (input_index, item) in input.iter().enumerate() {
+        let role = item
+            .get("role")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        runtime_smart_context_collect_duplicate_text_candidates(
+            item,
+            input_index,
+            role,
+            mode,
+            &mut candidates,
+        );
+    }
+    candidates
+}
+
+fn runtime_smart_context_collect_duplicate_text_candidates<'a>(
+    value: &'a serde_json::Value,
+    input_index: usize,
+    role: &'a str,
+    mode: SmartContextDuplicateTextMode,
+    candidates: &mut Vec<SmartContextDuplicateTextCandidate<'a>>,
+) {
     match value {
-        serde_json::Value::String(text) if text.len() >= SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES => {
-            *candidate_count = candidate_count.saturating_add(1);
-            if *candidate_count > 256 {
-                return true;
-            }
-            let hash = runtime_proxy_crate::smart_context_hash_text(text);
-            let entries = seen.entry(hash).or_default();
-            if entries
-                .iter()
-                .any(|(first_index, first)| *first_index != item_index && *first == text)
-            {
-                return true;
-            }
-            entries.push((item_index, text));
-            false
+        serde_json::Value::String(text) => {
+            candidates.push(SmartContextDuplicateTextCandidate {
+                digest: if mode == SmartContextDuplicateTextMode::Rewrite
+                    && text.len() >= SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES
+                {
+                    runtime_proxy_crate::smart_context_hash_text(text)
+                } else {
+                    String::new()
+                },
+                text,
+                role,
+                input_index,
+            });
         }
-        serde_json::Value::Array(items) => items.iter().any(|item| {
-            runtime_smart_context_value_has_duplicate_text(item, item_index, seen, candidate_count)
-        }),
-        serde_json::Value::Object(object) => object.values().any(|item| {
-            runtime_smart_context_value_has_duplicate_text(item, item_index, seen, candidate_count)
-        }),
-        _ => false,
+        serde_json::Value::Array(items) => {
+            for item in items {
+                runtime_smart_context_collect_duplicate_text_candidates(
+                    item,
+                    input_index,
+                    role,
+                    mode,
+                    candidates,
+                );
+            }
+        }
+        serde_json::Value::Object(object) => {
+            for item in object.values() {
+                runtime_smart_context_collect_duplicate_text_candidates(
+                    item,
+                    input_index,
+                    role,
+                    mode,
+                    candidates,
+                );
+            }
+        }
+        _ => {}
     }
 }
 
-pub(super) fn runtime_smart_context_dedupe_value_text(
+fn runtime_smart_context_apply_duplicate_text_plan(
     value: &mut serde_json::Value,
-    item_index: usize,
-    seen: &mut BTreeMap<String, usize>,
+    digests: &[String],
+    replacement_sources: &[Option<usize>],
+    candidate_index: &mut usize,
     stats: &mut RuntimeSmartContextTransformStats,
 ) {
     match value {
         serde_json::Value::String(text) => {
-            if text.len() < SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES {
+            let index = *candidate_index;
+            *candidate_index += 1;
+            let Some(first_index) = replacement_sources[index] else {
                 return;
-            }
-            let hash = runtime_proxy_crate::smart_context_hash_text(text);
-            if let Some(first_index) = seen.get(&hash).filter(|first| **first != item_index) {
-                *text = format!(
-                    "[prodex-context-ref v=1 source=original-input[{first_index}] digest={hash} bytes={}]",
-                    text.len()
-                );
-                stats.duplicate_texts += 1;
-            } else {
-                seen.insert(hash.clone(), item_index);
-            }
+            };
+            let digest = &digests[index];
+            *text = format!(
+                "[prodex-context-ref v=1 source=original-input[{first_index}] digest={digest} bytes={}]",
+                text.len()
+            );
+            stats.duplicate_texts += 1;
         }
         serde_json::Value::Array(items) => {
             for item in items {
-                runtime_smart_context_dedupe_value_text(item, item_index, seen, stats);
+                runtime_smart_context_apply_duplicate_text_plan(
+                    item,
+                    digests,
+                    replacement_sources,
+                    candidate_index,
+                    stats,
+                );
             }
         }
         serde_json::Value::Object(object) => {
             for item in object.values_mut() {
-                runtime_smart_context_dedupe_value_text(item, item_index, seen, stats);
+                runtime_smart_context_apply_duplicate_text_plan(
+                    item,
+                    digests,
+                    replacement_sources,
+                    candidate_index,
+                    stats,
+                );
             }
         }
         _ => {}
