@@ -569,7 +569,7 @@ pub fn rich_self_test() -> bool {
         value.counts[0] == 2 && value.groups.len() == 1 && value.groups[0].duplicate_count == 1
     });
     let fallback = model_fallback_chain("copilot", " codex ")
-        .is_ok_and(|value| value == ["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]);
+        .is_ok_and(|value| value == ["gpt-6-astra", "gpt-6.1-sol", "gpt-5.3-codex"]);
     let context_plan = plan_context_items(
         &[ContextPlanItem {
             id: "psc:example#L1-L2",
@@ -612,7 +612,7 @@ pub fn rich_self_test() -> bool {
     let reasoning = resolve_catalog_reasoning(&reasoning_models, Some("luna"), None, None)
         .is_ok_and(|value| value.selected_effort.as_deref() == Some("medium"));
     let fallback_plan = model_fallback_plan("copilot", &["codex", "gpt-5.3-codex"])
-        .is_ok_and(|value| value == ["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]);
+        .is_ok_and(|value| value == ["gpt-6-astra", "gpt-6.1-sol", "gpt-5.3-codex", "gpt-6-luna"]);
     let deepseek = deepseek_kernel(DeepSeekKernelInput::new(
         DeepSeekKernelOperation::UserMessage,
     ))

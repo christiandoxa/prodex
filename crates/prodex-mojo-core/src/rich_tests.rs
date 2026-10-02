@@ -495,6 +495,6 @@ fn rich_catalog_planner_rejects_oversized_inputs_without_panicking() {
 fn rich_fallback_plan_deduplicates_multiple_seed_chains() {
     assert_eq!(
         model_fallback_plan("copilot", &["codex", "gpt-5.3-codex"]).unwrap(),
-        ["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]
+        ["gpt-6-astra", "gpt-6.1-sol", "gpt-5.3-codex", "gpt-6-luna"]
     );
 }
