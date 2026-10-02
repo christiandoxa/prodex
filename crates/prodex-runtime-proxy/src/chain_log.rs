@@ -10,45 +10,45 @@ pub struct RuntimeProxyChainLog<'a> {
     pub via: Option<&'a str>,
 }
 
-fn runtime_proxy_chain_log_websocket_session(log: RuntimeProxyChainLog<'_>) -> String {
-    log.websocket_session
-        .map(|session_id| session_id.to_string())
-        .unwrap_or_else(|| "-".to_string())
-}
-
 pub fn runtime_proxy_chain_retried_owner_log_message(
     log: RuntimeProxyChainLog<'_>,
     delay_ms: u128,
 ) -> String {
-    format!(
-        "request={} transport={} route={} websocket_session={} chain_retried_owner profile={} previous_response_id={} delay_ms={delay_ms} reason={} via={}",
-        log.request_id,
-        log.transport,
-        log.route,
-        runtime_proxy_chain_log_websocket_session(log),
-        log.profile_name,
-        log.previous_response_id.unwrap_or("-"),
-        log.reason,
-        log.via.unwrap_or("-"),
-    )
+    let delay_ms = delay_ms.to_string();
+    prodex_mojo_core::log::render_chain_log(prodex_mojo_core::log::ChainLogRenderInput {
+        operation: prodex_mojo_core::log::CHAIN_LOG_RETRIED_OWNER,
+        request_id: log.request_id,
+        transport: log.transport,
+        route: log.route,
+        websocket_session: log.websocket_session,
+        profile: log.profile_name,
+        previous_response_id: log.previous_response_id,
+        reason: log.reason,
+        via: log.via,
+        detail: &delay_ms,
+        detail_present: true,
+    })
+    .expect("Mojo chain retry log renderer returned invalid output")
 }
 
 pub fn runtime_proxy_chain_dead_upstream_confirmed_log_message(
     log: RuntimeProxyChainLog<'_>,
     event: Option<&str>,
 ) -> String {
-    format!(
-        "request={} transport={} route={} websocket_session={} chain_dead_upstream_confirmed profile={} previous_response_id={} reason={} via={} event={}",
-        log.request_id,
-        log.transport,
-        log.route,
-        runtime_proxy_chain_log_websocket_session(log),
-        log.profile_name,
-        log.previous_response_id.unwrap_or("-"),
-        log.reason,
-        log.via.unwrap_or("-"),
-        event.unwrap_or("-"),
-    )
+    prodex_mojo_core::log::render_chain_log(prodex_mojo_core::log::ChainLogRenderInput {
+        operation: prodex_mojo_core::log::CHAIN_LOG_DEAD_UPSTREAM,
+        request_id: log.request_id,
+        transport: log.transport,
+        route: log.route,
+        websocket_session: log.websocket_session,
+        profile: log.profile_name,
+        previous_response_id: log.previous_response_id,
+        reason: log.reason,
+        via: log.via,
+        detail: event.unwrap_or_default(),
+        detail_present: event.is_some(),
+    })
+    .expect("Mojo chain dead-upstream log renderer returned invalid output")
 }
 
 #[cfg(test)]

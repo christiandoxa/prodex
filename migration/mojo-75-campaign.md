@@ -4531,27 +4531,32 @@ checks pass; the 75% broad project target remains in progress.
 Runtime route-affinity recompute/result/prefix logs, compact-followup owner logs,
 and previous-response chain retry/dead-upstream logs now assemble in
 `log_semantics.mojo`. Mojo owns HTTP-vs-WebSocket prefixes, presence
-flags, event/field ordering, optional dash defaults, compact owner source text,
-and the complete output templates. Rust retains only typed DTO preparation,
-`u128` delay decimal materialization, and the existing Rust Debug
-materialization for optional affinity state fragments before handing them to
-the Mojo renderer.
+flags, event/field ordering, compact owner message selection and ordering,
+optional dash defaults, compact owner source text, and complete output
+templates. A single owner-log ABI call returns the ordered optional messages.
+Rust retains typed DTO preparation, `u128` delay decimal materialization,
+existing Rust Debug materialization for optional affinity state fragments, ABI
+buffer allocation, and UTF-8 output materialization. Final runtime logging
+remains a Rust host effect.
 
 The former Rust prefix helper, five route-affinity format templates, chain
 session/default helper, and both chain format templates were deleted. The
-no-fallback guard now requires the two Mojo log ABI renderers and rejects
-restoring those templates in Rust.
+no-fallback guard requires all three Mojo log ABI renderers, rejects restoring
+the old Rust templates, and self-tests those rejection paths.
 
-Focused validation passes all 3 route-affinity log regressions and both chain-log
-regressions against the real Mojo renderer, Clippy with warnings denied for
-`prodex-mojo-core` and `prodex-runtime-proxy`, the Mojo
-authority and no-fallback guards, and `git diff --check`. Development
-validation caught and fixed an initial Mojo 1.1 `Array[StringSlice]`
-indexing incompatibility before the passing build.
+Focused validation passes the 2 direct real-Mojo ABI contract tests, all 3
+route-affinity caller regressions, both chain-log caller regressions, Clippy
+with warnings denied for `prodex-mojo-core` and `prodex-runtime-proxy`,
+`cargo fmt --all`, the Mojo authority guard, the no-fallback guard and its
+self-test, and `git diff --check`. An initial filter ran 0 tests; `--list`
+confirmed the actual names, then the focused binaries ran 2, 3, and 2 tests.
+The guard self-test also exposed an outdated quota-label fixture, which now
+includes the required Mojo calls. Earlier Mojo development caught and fixed an
+initial Mojo 1.1 `Array[StringSlice]` indexing incompatibility.
 
-The canonical broad report at this checkpoint counts **76,014 reachable Mojo
-LOC** and **202,171 Rust production LOC**, totaling **278,185 LOC**:
-**27.324981577008106% Mojo**. The release floor and ownership non-regression
+The canonical broad report at this checkpoint counts **76,076 reachable Mojo
+LOC** and **202,246 Rust production LOC**, totaling **278,322 LOC**:
+**27.333807604141963% Mojo**. The release floor and ownership non-regression
 checks pass; the 75% broad project target remains in progress.
 
 ## Governance inspection policy hard replacement

@@ -1004,6 +1004,450 @@ def prodex_mojo_previous_response_log_render_v1(
     return 0
 
 
+comptime ROUTE_AFFINITY_LOG_ABI_VERSION: Int64 = 1
+comptime ROUTE_AFFINITY_LOG_PREFIX: Int64 = 0
+comptime ROUTE_AFFINITY_LOG_RECOMPUTE: Int64 = 1
+comptime ROUTE_AFFINITY_LOG_RESULT: Int64 = 2
+comptime ROUTE_AFFINITY_LOG_FOLLOWUP_OWNER: Int64 = 3
+comptime ROUTE_AFFINITY_LOG_SESSION_OWNER: Int64 = 4
+
+comptime CHAIN_LOG_ABI_VERSION: Int64 = 1
+comptime CHAIN_LOG_RETRIED_OWNER: Int64 = 0
+comptime CHAIN_LOG_DEAD_UPSTREAM: Int64 = 1
+
+
+def runtime_log_validate_texts(
+    address: UInt, count: Int64, expected: Int64
+) -> Bool:
+    if count != expected or address == 0:
+        return False
+    var values = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(address))
+    for index in range(count):
+        var value = values[unsafe_offset=index].copy()
+        if not rich_view_valid(value, Int64(value.len)):
+            return False
+    return True
+
+
+def runtime_log_put_bool(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _], value: Bool
+) -> Bool:
+    return previous_response_log_put_literal(
+        writer, StringSlice("true") if value else StringSlice("false")
+    )
+
+
+def route_affinity_log_put_prefix(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _],
+    request_id: UInt64,
+    websocket_session: UInt64,
+    presence: UInt64,
+) -> Bool:
+    if not (
+        previous_response_log_put_literal(writer, StringSlice("request="))
+        and previous_response_log_put_u64(writer, request_id)
+    ):
+        return False
+    if presence & UInt64(1) != 0:
+        return (
+            previous_response_log_put_literal(
+                writer, StringSlice(" websocket_session=")
+            )
+            and previous_response_log_put_u64(writer, websocket_session)
+        )
+    return previous_response_log_put_literal(
+        writer, StringSlice(" transport=http")
+    )
+
+
+def route_affinity_log_render(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _],
+    operation: Int64,
+    request_id: UInt64,
+    websocket_session: UInt64,
+    text_address: UInt,
+    presence: UInt64,
+) -> Bool:
+    if not route_affinity_log_put_prefix(
+        writer, request_id, websocket_session, presence
+    ):
+        return False
+    if operation == ROUTE_AFFINITY_LOG_PREFIX:
+        return True
+
+    if operation == ROUTE_AFFINITY_LOG_RECOMPUTE:
+        return (
+            previous_response_log_put_literal(
+                writer, StringSlice(" route_affinity_recompute reason=")
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 0)
+            )
+            and previous_response_log_put_literal(
+                writer, StringSlice(" previous_response_id_present=")
+            )
+            and runtime_log_put_bool(writer, presence & UInt64(2) != 0)
+            and previous_response_log_put_literal(
+                writer, StringSlice(" request_turn_state_present=")
+            )
+            and runtime_log_put_bool(writer, presence & UInt64(4) != 0)
+            and previous_response_log_put_literal(
+                writer, StringSlice(" request_session_id_present=")
+            )
+            and runtime_log_put_bool(writer, presence & UInt64(8) != 0)
+            and previous_response_log_put_literal(
+                writer, StringSlice(" explicit_session_id_present=")
+            )
+            and runtime_log_put_bool(writer, presence & UInt64(16) != 0)
+        )
+
+    if operation == ROUTE_AFFINITY_LOG_RESULT:
+        if not (
+            previous_response_log_put_literal(
+                writer, StringSlice(" route_affinity_recompute_result reason=")
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 0)
+            )
+            and previous_response_log_put_literal(
+                writer, StringSlice(" previous_response_id_present=")
+            )
+            and runtime_log_put_bool(writer, presence & UInt64(2) != 0)
+            and previous_response_log_put_literal(
+                writer, StringSlice(" request_turn_state_present=")
+            )
+            and runtime_log_put_bool(writer, presence & UInt64(4) != 0)
+            and previous_response_log_put_literal(
+                writer, StringSlice(" request_session_id_present=")
+            )
+            and runtime_log_put_bool(writer, presence & UInt64(8) != 0)
+            and previous_response_log_put_literal(
+                writer, StringSlice(" explicit_session_id_present=")
+            )
+            and runtime_log_put_bool(writer, presence & UInt64(16) != 0)
+        ):
+            return False
+        for index in range(Int64(5)):
+            var label = StringSlice(" bound_session_profile=")
+            if index == 1:
+                label = StringSlice(" compact_followup_profile=")
+            elif index == 2:
+                label = StringSlice(" compact_session_profile=")
+            elif index == 3:
+                label = StringSlice(" session_profile=")
+            elif index == 4:
+                label = StringSlice(" pinned_profile=")
+            if not (
+                previous_response_log_put_literal(writer, label)
+                and previous_response_log_put_view(
+                    writer,
+                    previous_response_log_text(text_address, index + 1),
+                )
+            ):
+                return False
+        return True
+
+    if operation == ROUTE_AFFINITY_LOG_FOLLOWUP_OWNER:
+        if presence & UInt64(32) == 0:
+            writer[].written = 0
+            return True
+        return (
+            previous_response_log_put_literal(
+                writer, StringSlice(" compact_followup_owner profile=")
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 6)
+            )
+            and previous_response_log_put_literal(
+                writer, StringSlice(" source=")
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 7)
+            )
+        )
+
+    if presence & UInt64(64) == 0:
+        writer[].written = 0
+        return True
+    return (
+        previous_response_log_put_literal(
+            writer, StringSlice(" compact_followup_owner profile=")
+        )
+        and previous_response_log_put_view(
+            writer, previous_response_log_text(text_address, 8)
+        )
+        and previous_response_log_put_literal(
+            writer, StringSlice(" source=session_id")
+        )
+    )
+
+
+@export("prodex_mojo_route_affinity_log_render_v1")
+def prodex_mojo_route_affinity_log_render_v1(
+    abi_version: Int64,
+    operation: Int64,
+    request_id: UInt64,
+    websocket_session: UInt64,
+    text_address: UInt,
+    text_count: Int64,
+    presence: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != ROUTE_AFFINITY_LOG_ABI_VERSION:
+        return 4
+    if (
+        operation < ROUTE_AFFINITY_LOG_PREFIX
+        or operation > ROUTE_AFFINITY_LOG_SESSION_OWNER
+        or presence > UInt64(127)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+        or not runtime_log_validate_texts(text_address, text_count, 9)
+    ):
+        return 1
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var writer = PreviousResponseLogWriter(output, output_capacity, 0)
+    var ok = route_affinity_log_render(
+        Pointer(to=writer),
+        operation,
+        request_id,
+        websocket_session,
+        text_address,
+        presence,
+    )
+    written[] = writer.written
+    return 0 if ok else 2
+
+
+@export("prodex_mojo_route_affinity_owner_logs_v1")
+def prodex_mojo_route_affinity_owner_logs_v1(
+    abi_version: Int64,
+    request_id: UInt64,
+    websocket_session: UInt64,
+    text_address: UInt,
+    text_count: Int64,
+    presence: UInt64,
+    followup_output_address: UInt,
+    output_capacity: Int64,
+    followup_written_address: UInt,
+    session_output_address: UInt,
+    session_written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != ROUTE_AFFINITY_LOG_ABI_VERSION:
+        return 4
+    if (
+        presence > UInt64(127)
+        or followup_output_address == 0
+        or session_output_address == 0
+        or output_capacity < 0
+        or followup_written_address == 0
+        or session_written_address == 0
+        or not runtime_log_validate_texts(text_address, text_count, 9)
+    ):
+        return 1
+    var followup_output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(followup_output_address)
+    )
+    var followup_written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(followup_written_address)
+    )
+    var followup_writer = PreviousResponseLogWriter(
+        followup_output, output_capacity, 0
+    )
+    var followup_ok = route_affinity_log_render(
+        Pointer(to=followup_writer),
+        ROUTE_AFFINITY_LOG_FOLLOWUP_OWNER,
+        request_id,
+        websocket_session,
+        text_address,
+        presence,
+    )
+    followup_written[] = followup_writer.written
+
+    var session_output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(session_output_address)
+    )
+    var session_written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(session_written_address)
+    )
+    var session_writer = PreviousResponseLogWriter(
+        session_output, output_capacity, 0
+    )
+    var session_ok = route_affinity_log_render(
+        Pointer(to=session_writer),
+        ROUTE_AFFINITY_LOG_SESSION_OWNER,
+        request_id,
+        websocket_session,
+        text_address,
+        presence,
+    )
+    session_written[] = session_writer.written
+    return 0 if followup_ok and session_ok else 2
+
+
+def chain_log_put_optional(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _],
+    text_address: UInt,
+    index: Int64,
+    present: Bool,
+) -> Bool:
+    if not present:
+        return previous_response_log_put_byte(writer, UInt8(45))
+    return previous_response_log_put_view(
+        writer, previous_response_log_text(text_address, index)
+    )
+
+
+def chain_log_render(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _],
+    operation: Int64,
+    request_id: UInt64,
+    websocket_session: UInt64,
+    text_address: UInt,
+    presence: UInt64,
+) -> Bool:
+    if not (
+        previous_response_log_put_literal(writer, StringSlice("request="))
+        and previous_response_log_put_u64(writer, request_id)
+        and previous_response_log_put_literal(writer, StringSlice(" transport="))
+        and previous_response_log_put_view(
+            writer, previous_response_log_text(text_address, 0)
+        )
+        and previous_response_log_put_literal(writer, StringSlice(" route="))
+        and previous_response_log_put_view(
+            writer, previous_response_log_text(text_address, 1)
+        )
+        and previous_response_log_put_literal(
+            writer, StringSlice(" websocket_session=")
+        )
+    ):
+        return False
+    if presence & UInt64(1) != 0:
+        if not previous_response_log_put_u64(writer, websocket_session):
+            return False
+    elif not previous_response_log_put_byte(writer, UInt8(45)):
+        return False
+
+    if operation == CHAIN_LOG_RETRIED_OWNER:
+        return (
+            previous_response_log_put_literal(
+                writer, StringSlice(" chain_retried_owner profile=")
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 2)
+            )
+            and previous_response_log_put_literal(
+                writer, StringSlice(" previous_response_id=")
+            )
+            and chain_log_put_optional(
+                writer, text_address, 3, presence & UInt64(2) != 0
+            )
+            and previous_response_log_put_literal(
+                writer, StringSlice(" delay_ms=")
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 6)
+            )
+            and previous_response_log_put_literal(
+                writer, StringSlice(" reason=")
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 4)
+            )
+            and previous_response_log_put_literal(
+                writer, StringSlice(" via=")
+            )
+            and chain_log_put_optional(
+                writer, text_address, 5, presence & UInt64(4) != 0
+            )
+        )
+    return (
+        previous_response_log_put_literal(
+            writer, StringSlice(" chain_dead_upstream_confirmed profile=")
+        )
+        and previous_response_log_put_view(
+            writer, previous_response_log_text(text_address, 2)
+        )
+        and previous_response_log_put_literal(
+            writer, StringSlice(" previous_response_id=")
+        )
+        and chain_log_put_optional(
+            writer, text_address, 3, presence & UInt64(2) != 0
+        )
+        and previous_response_log_put_literal(
+            writer, StringSlice(" reason=")
+        )
+        and previous_response_log_put_view(
+            writer, previous_response_log_text(text_address, 4)
+        )
+        and previous_response_log_put_literal(
+            writer, StringSlice(" via=")
+        )
+        and chain_log_put_optional(
+            writer, text_address, 5, presence & UInt64(4) != 0
+        )
+        and previous_response_log_put_literal(
+            writer, StringSlice(" event=")
+        )
+        and chain_log_put_optional(
+            writer, text_address, 6, presence & UInt64(8) != 0
+        )
+    )
+
+
+@export("prodex_mojo_chain_log_render_v1")
+def prodex_mojo_chain_log_render_v1(
+    abi_version: Int64,
+    operation: Int64,
+    request_id: UInt64,
+    websocket_session: UInt64,
+    text_address: UInt,
+    text_count: Int64,
+    presence: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != CHAIN_LOG_ABI_VERSION:
+        return 4
+    if (
+        operation < CHAIN_LOG_RETRIED_OWNER
+        or operation > CHAIN_LOG_DEAD_UPSTREAM
+        or presence > UInt64(15)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+        or not runtime_log_validate_texts(text_address, text_count, 7)
+    ):
+        return 1
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var writer = PreviousResponseLogWriter(output, output_capacity, 0)
+    var ok = chain_log_render(
+        Pointer(to=writer),
+        operation,
+        request_id,
+        websocket_session,
+        text_address,
+        presence,
+    )
+    written[] = writer.written
+    return 0 if ok else 2
+
+
 comptime PRODEX_STRUCTURED_LOG_ABI_VERSION: Int64 = 1
 comptime PRODEX_STRUCTURED_LOG_STATUS_OK: Int64 = 0
 comptime PRODEX_STRUCTURED_LOG_STATUS_INVALID: Int64 = 1

@@ -146,6 +146,8 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-proxy/src/mojo.rs",
   "crates/prodex-runtime-proxy/src/quota.rs",
   "crates/prodex-runtime-proxy/src/previous_response_log.rs",
+  "crates/prodex-runtime-proxy/src/route_affinity_log.rs",
+  "crates/prodex-runtime-proxy/src/chain_log.rs",
   "crates/prodex-runtime-proxy/src/quota/mojo.rs",
   "crates/prodex-runtime-proxy/tests/src/quota.rs",
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
@@ -2381,6 +2383,51 @@ export function findViolations(files) {
     }
     return violations;
   });
+  const affinityChainLogRenderViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-proxy/src/route_affinity_log.rs") {
+      const required = [
+        "prodex_mojo_core::log::render_route_affinity_log(",
+        "prodex_mojo_core::log::render_route_affinity_owner_logs(",
+      ];
+      const missing = required.filter((call) => !contents.includes(call));
+      if (missing.length > 0) {
+        return missing.map((call) => filePath + ": route-affinity log rendering must use Mojo " + call);
+      }
+      const forbidden = [
+        " route_affinity_recompute reason=",
+        " route_affinity_recompute_result reason=",
+        " compact_followup_owner profile=",
+        " transport=http",
+      ];
+      return forbidden
+        .filter((value) => contents.includes(value))
+        .map((value) => filePath + ": contains restored Rust route-affinity log semantic " + value);
+    }
+    if (filePath === "crates/prodex-runtime-proxy/src/chain_log.rs") {
+      if (!contents.includes("prodex_mojo_core::log::render_chain_log(")) {
+        return [filePath + ": chain log rendering must use Mojo"];
+      }
+      const forbidden = [
+        " chain_retried_owner profile=",
+        " chain_dead_upstream_confirmed profile=",
+        " websocket_session=",
+      ];
+      return forbidden
+        .filter((value) => contents.includes(value))
+        .map((value) => filePath + ": contains restored Rust chain-log semantic " + value);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/log.rs") {
+      const required = [
+        "prodex_mojo_route_affinity_log_render_v1(",
+        "prodex_mojo_route_affinity_owner_logs_v1(",
+        "prodex_mojo_chain_log_render_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime log adapter must retain Mojo ABI " + call);
+    }
+    return [];
+  });
   const previousResponseLogRenderViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-runtime-proxy/src/previous_response_log.rs") return [];
     if (!contents.includes("prodex_mojo_core::log::render_previous_response_log(")) {
@@ -3338,7 +3385,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...previousResponseOutcomeLabelViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
+    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
@@ -3378,6 +3425,24 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  const routeAffinityLogFile = "crates/prodex-runtime-proxy/src/route_affinity_log.rs";
+  const routeAffinityLogCalls = "prodex_mojo_core::log::render_route_affinity_log(); prodex_mojo_core::log::render_route_affinity_owner_logs();";
+  assert.deepEqual(findViolations([[routeAffinityLogFile, routeAffinityLogCalls]]), []);
+  assert.match(findViolations([[routeAffinityLogFile,
+    "prodex_mojo_core::log::render_route_affinity_log();"]]).join("\n"),
+  /route-affinity log rendering must use Mojo/u);
+  assert.match(findViolations([[routeAffinityLogFile,
+    routeAffinityLogCalls + '\n" route_affinity_recompute reason=";']]).join("\n"),
+  /restored Rust route-affinity log semantic/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/chain_log.rs",
+    "fn runtime_proxy_chain_retried_owner_log_message() {}"]]).join("\n"),
+  /chain log rendering must use Mojo/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/chain_log.rs",
+    'prodex_mojo_core::log::render_chain_log();\n" chain_retried_owner profile=";']]).join("\n"),
+  /restored Rust chain-log semantic/u);
+  assert.match(findViolations([["crates/prodex-mojo-core/src/log.rs",
+    "prodex_mojo_route_affinity_log_render_v1(); prodex_mojo_chain_log_render_v1();"]]).join("\n"),
+  /runtime log adapter must retain Mojo ABI/u);
   assert.equal(
     findViolations([[
       "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
@@ -3484,7 +3549,7 @@ function selfTest() {
     "fn runtime_proxy_quota_summary_from_usage_snapshot_at() {}"]]).join("\n"),
     /quota snapshot and gate decisions must use Mojo/u);
   assert.deepEqual(findViolations([[RUNTIME_QUOTA_FILE,
-    "mojo::quota_snapshot_plan(); mojo::quota_gate_plan();"]]), []);
+    "mojo::quota_snapshot_plan(); mojo::quota_gate_plan(); runtime_precommit_quota_block_reason_label(self as i64); runtime_quota_pressure_band_reason_label(band as i64); runtime_quota_window_status_reason_label(status as i64); runtime_quota_source_label(source as i64);"]]), []);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/quota/rust_oracles.rs",
     "fn summary_from_usage_snapshot_at() {}"]]).join("\n"),
     /retained Rust fallback or oracle/u);

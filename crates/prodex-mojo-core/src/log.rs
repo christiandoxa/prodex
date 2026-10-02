@@ -20,6 +20,43 @@ unsafe extern "C" {
         input_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_mojo_route_affinity_log_render_v1(
+        abi_version: i64,
+        operation: i64,
+        request_id: u64,
+        websocket_session: u64,
+        text_address: u64,
+        text_count: i64,
+        presence: u64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_mojo_route_affinity_owner_logs_v1(
+        abi_version: i64,
+        request_id: u64,
+        websocket_session: u64,
+        text_address: u64,
+        text_count: i64,
+        presence: u64,
+        followup_output_address: u64,
+        output_capacity: i64,
+        followup_written_address: u64,
+        session_output_address: u64,
+        session_written_address: u64,
+    ) -> i64;
+    fn prodex_mojo_chain_log_render_v1(
+        abi_version: i64,
+        operation: i64,
+        request_id: u64,
+        websocket_session: u64,
+        text_address: u64,
+        text_count: i64,
+        presence: u64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_mojo_previous_response_log_render_v1(
         abi_version: i64,
         operation: i64,
@@ -244,6 +281,239 @@ pub fn render_previous_response_log(
             input.request_id,
             input.websocket_session.unwrap_or_default(),
             u64::try_from(input.retry_index).map_err(|_| MojoError::InvalidInput)?,
+            views.as_ptr() as usize as u64,
+            i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
+            presence,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub const ROUTE_AFFINITY_LOG_PREFIX: i64 = 0;
+pub const ROUTE_AFFINITY_LOG_RECOMPUTE: i64 = 1;
+pub const ROUTE_AFFINITY_LOG_RESULT: i64 = 2;
+
+#[derive(Debug, Clone, Copy)]
+pub struct RouteAffinityLogRenderInput<'a> {
+    pub request_id: u64,
+    pub websocket_session: Option<u64>,
+    pub reason: &'a str,
+    pub previous_response_id_present: bool,
+    pub request_turn_state_present: bool,
+    pub request_session_id_present: bool,
+    pub explicit_request_session_id_present: bool,
+    pub bound_session_profile_debug: &'a str,
+    pub compact_followup_profile_debug: &'a str,
+    pub compact_session_profile_debug: &'a str,
+    pub session_profile_debug: &'a str,
+    pub pinned_profile_debug: &'a str,
+    pub compact_followup_profile: Option<(&'a str, &'a str)>,
+    pub compact_session_profile: Option<&'a str>,
+}
+
+pub fn render_route_affinity_log(
+    operation: i64,
+    input: RouteAffinityLogRenderInput<'_>,
+) -> Result<String, MojoError> {
+    if !(ROUTE_AFFINITY_LOG_PREFIX..=ROUTE_AFFINITY_LOG_RESULT).contains(&operation) {
+        return Err(MojoError::InvalidInput);
+    }
+    let (followup_profile, followup_source) = input.compact_followup_profile.unwrap_or_default();
+    let values = [
+        input.reason,
+        input.bound_session_profile_debug,
+        input.compact_followup_profile_debug,
+        input.compact_session_profile_debug,
+        input.session_profile_debug,
+        input.pinned_profile_debug,
+        followup_profile,
+        followup_source,
+        input.compact_session_profile.unwrap_or_default(),
+    ];
+    let views = values.map(|value| LogStringView {
+        ptr: value.as_ptr() as usize as u64,
+        len: value.len() as u64,
+    });
+    let capacity = values.iter().try_fold(512_usize, |capacity, value| {
+        capacity
+            .checked_add(value.len())
+            .ok_or(MojoError::InvalidInput)
+    })?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let mut presence = u64::from(input.websocket_session.is_some());
+    presence |= u64::from(input.previous_response_id_present) << 1;
+    presence |= u64::from(input.request_turn_state_present) << 2;
+    presence |= u64::from(input.request_session_id_present) << 3;
+    presence |= u64::from(input.explicit_request_session_id_present) << 4;
+    presence |= u64::from(input.compact_followup_profile.is_some()) << 5;
+    presence |= u64::from(input.compact_session_profile.is_some()) << 6;
+    let status = unsafe {
+        prodex_mojo_route_affinity_log_render_v1(
+            1,
+            operation,
+            input.request_id,
+            input.websocket_session.unwrap_or_default(),
+            views.as_ptr() as usize as u64,
+            i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
+            presence,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn render_route_affinity_owner_logs(
+    input: RouteAffinityLogRenderInput<'_>,
+) -> Result<Vec<String>, MojoError> {
+    let (followup_profile, followup_source) = input.compact_followup_profile.unwrap_or_default();
+    let values = [
+        input.reason,
+        input.bound_session_profile_debug,
+        input.compact_followup_profile_debug,
+        input.compact_session_profile_debug,
+        input.session_profile_debug,
+        input.pinned_profile_debug,
+        followup_profile,
+        followup_source,
+        input.compact_session_profile.unwrap_or_default(),
+    ];
+    let views = values.map(|value| LogStringView {
+        ptr: value.as_ptr() as usize as u64,
+        len: value.len() as u64,
+    });
+    let capacity = values.iter().try_fold(512_usize, |capacity, value| {
+        capacity
+            .checked_add(value.len())
+            .ok_or(MojoError::InvalidInput)
+    })?;
+    let mut followup_output = vec![0_u8; capacity];
+    let mut session_output = vec![0_u8; capacity];
+    let mut followup_written = -1_i64;
+    let mut session_written = -1_i64;
+    let mut presence = u64::from(input.websocket_session.is_some());
+    presence |= u64::from(input.compact_followup_profile.is_some()) << 5;
+    presence |= u64::from(input.compact_session_profile.is_some()) << 6;
+    let status = unsafe {
+        prodex_mojo_route_affinity_owner_logs_v1(
+            1,
+            input.request_id,
+            input.websocket_session.unwrap_or_default(),
+            views.as_ptr() as usize as u64,
+            i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
+            presence,
+            followup_output.as_mut_ptr() as usize as u64,
+            i64::try_from(capacity).map_err(|_| MojoError::InvalidInput)?,
+            (&mut followup_written as *mut i64) as usize as u64,
+            session_output.as_mut_ptr() as usize as u64,
+            (&mut session_written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let mut messages = Vec::with_capacity(2);
+    for (output, written) in [
+        (followup_output, followup_written),
+        (session_output, session_written),
+    ] {
+        let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+        if written > output.len() {
+            return Err(MojoError::InvalidOutput);
+        }
+        if written > 0 {
+            messages.push(
+                String::from_utf8(output[..written].to_vec())
+                    .map_err(|_| MojoError::InvalidOutput)?,
+            );
+        }
+    }
+    Ok(messages)
+}
+
+pub const CHAIN_LOG_RETRIED_OWNER: i64 = 0;
+pub const CHAIN_LOG_DEAD_UPSTREAM: i64 = 1;
+
+#[derive(Debug, Clone, Copy)]
+pub struct ChainLogRenderInput<'a> {
+    pub operation: i64,
+    pub request_id: u64,
+    pub transport: &'a str,
+    pub route: &'a str,
+    pub websocket_session: Option<u64>,
+    pub profile: &'a str,
+    pub previous_response_id: Option<&'a str>,
+    pub reason: &'a str,
+    pub via: Option<&'a str>,
+    pub detail: &'a str,
+    pub detail_present: bool,
+}
+
+pub fn render_chain_log(input: ChainLogRenderInput<'_>) -> Result<String, MojoError> {
+    if !(CHAIN_LOG_RETRIED_OWNER..=CHAIN_LOG_DEAD_UPSTREAM).contains(&input.operation) {
+        return Err(MojoError::InvalidInput);
+    }
+    let values = [
+        input.transport,
+        input.route,
+        input.profile,
+        input.previous_response_id.unwrap_or_default(),
+        input.reason,
+        input.via.unwrap_or_default(),
+        input.detail,
+    ];
+    let views = values.map(|value| LogStringView {
+        ptr: value.as_ptr() as usize as u64,
+        len: value.len() as u64,
+    });
+    let capacity = values.iter().try_fold(512_usize, |capacity, value| {
+        capacity
+            .checked_add(value.len())
+            .ok_or(MojoError::InvalidInput)
+    })?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let mut presence = u64::from(input.websocket_session.is_some());
+    presence |= u64::from(input.previous_response_id.is_some()) << 1;
+    presence |= u64::from(input.via.is_some()) << 2;
+    presence |= u64::from(input.detail_present) << 3;
+    let status = unsafe {
+        prodex_mojo_chain_log_render_v1(
+            1,
+            input.operation,
+            input.request_id,
+            input.websocket_session.unwrap_or_default(),
             views.as_ptr() as usize as u64,
             i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
             presence,
