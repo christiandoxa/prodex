@@ -25,14 +25,14 @@ pub const PRODEX_GEMINI_DEFAULT_AUTO_COMPACT_LIMIT: usize = 900_000;
 pub const PRODEX_ANTHROPIC_PROVIDER_ID: &str = "prodex-anthropic";
 pub const PRODEX_ANTHROPIC_PROVIDER_NAME: &str = "Anthropic Claude";
 pub const PRODEX_ANTHROPIC_DEFAULT_BASE_URL: &str = "https://api.anthropic.com/v1";
-pub const PRODEX_ANTHROPIC_DEFAULT_CONTEXT_WINDOW: usize = 200_000;
-pub const PRODEX_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT: usize = 180_000;
+pub const PRODEX_ANTHROPIC_DEFAULT_CONTEXT_WINDOW: usize = 1_000_000;
+pub const PRODEX_ANTHROPIC_DEFAULT_AUTO_COMPACT_LIMIT: usize = 950_000;
 
 pub const PRODEX_COPILOT_PROVIDER_ID: &str = "prodex-copilot";
 pub const PRODEX_COPILOT_PROVIDER_NAME: &str = "GitHub Copilot";
 pub const PRODEX_COPILOT_DEFAULT_BASE_URL: &str = "https://api.githubcopilot.com";
-pub const PRODEX_COPILOT_DEFAULT_CONTEXT_WINDOW: usize = 272_000;
-pub const PRODEX_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT: usize = 258_400;
+pub const PRODEX_COPILOT_DEFAULT_CONTEXT_WINDOW: usize = 1_050_000;
+pub const PRODEX_COPILOT_DEFAULT_AUTO_COMPACT_LIMIT: usize = 997_500;
 
 pub const PRODEX_KIRO_PROVIDER_ID: &str = "prodex-kiro";
 pub const PRODEX_KIRO_PROVIDER_NAME: &str = "Kiro";
@@ -141,6 +141,11 @@ pub const fn provider_runtime_metadata(
 pub fn copilot_prompt_token_limit_for_model(model: &str) -> Option<usize> {
     prodex_mojo_core::provider_constraints::provider_copilot_prompt_token_limit(model)
         .expect("Mojo Copilot prompt-token policy failed")
+        .or_else(|| {
+            crate::provider_catalog_entry(ProviderId::Copilot, model)
+                .and_then(|entry| entry.context_window_tokens)
+                .and_then(|tokens| usize::try_from(tokens).ok())
+        })
 }
 
 #[cfg(test)]
@@ -166,6 +171,29 @@ mod tests {
     }
 
     #[test]
+    fn runtime_defaults_match_canonical_catalog_and_fallback_heads() {
+        for provider in [ProviderId::Anthropic, ProviderId::Copilot] {
+            let metadata = provider_runtime_metadata(provider).expect("runtime metadata");
+            let catalog = crate::provider_catalog_entry(provider, metadata.default_model)
+                .expect("default model must exist in canonical catalog");
+            assert_eq!(
+                catalog.context_window_tokens,
+                Some(metadata.default_context_window as u64),
+                "{} default context drift",
+                provider.label()
+            );
+            let fallback = crate::provider_model_fallback_chain(provider, "");
+            assert_eq!(
+                fallback.first().map(String::as_str),
+                Some(metadata.default_model),
+                "{} default model drift",
+                provider.label()
+            );
+            assert!(metadata.default_auto_compact_token_limit < metadata.default_context_window);
+        }
+    }
+
+    #[test]
     fn codex_provider_names_preserve_remote_compaction_compatibility() {
         assert_eq!(
             provider_runtime_metadata(ProviderId::Gemini)
@@ -184,6 +212,14 @@ mod tests {
         assert_eq!(
             copilot_prompt_token_limit_for_model("gpt-5.3-codex"),
             Some(272_000)
+        );
+        assert_eq!(
+            copilot_prompt_token_limit_for_model("gpt-6-astra"),
+            Some(1_050_000)
+        );
+        assert_eq!(
+            copilot_prompt_token_limit_for_model(" GPT-6.1-SOL "),
+            Some(1_050_000)
         );
         assert_eq!(
             copilot_prompt_token_limit_for_model("gpt-5.6-sol"),

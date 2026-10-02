@@ -257,21 +257,24 @@ fn provider_model_fallback_supports_aliases_and_combo() {
     assert_eq!(
         runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Gemini, "auto"),
         vec![
-            "gemini-3-pro-preview",
             "gemini-3.1-pro-preview",
-            "gemini-2.5-pro",
-            "gemini-3-flash-preview",
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-3-flash",
+            "gemini-3-flash-preview",
+            "gemini-2.5-pro",
             "gemini-2.5-flash"
         ]
     );
     assert_eq!(
         runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Gemini, "flash"),
         vec![
-            "gemini-3-flash-preview",
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-3-flash",
+            "gemini-3-flash-preview",
             "gemini-2.5-flash"
         ]
     );
@@ -283,12 +286,11 @@ fn provider_model_fallback_supports_aliases_and_combo() {
         vec![
             "gemini-3.1-pro-preview-customtools",
             "gemini-3.1-pro-preview",
-            "gemini-3-pro-preview",
-            "gemini-2.5-pro",
-            "gemini-3-flash-preview",
-            "gemini-3-flash",
+            "gemini-3.8-flash",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
             "gemini-3.5-flash",
-            "gemini-2.5-flash",
+            "gemini-2.5-pro",
         ]
     );
     assert_eq!(
@@ -298,8 +300,8 @@ fn provider_model_fallback_supports_aliases_and_combo() {
         ),
         vec![
             "gemini-3-flash-preview",
+            "gemini-3.8-flash",
             "gemini-3.5-flash",
-            "gemini-3-flash",
             "gemini-2.5-flash"
         ]
     );
@@ -312,15 +314,15 @@ fn provider_model_fallback_supports_aliases_and_combo() {
     );
     assert_eq!(
         runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Anthropic, "sonnet"),
-        vec!["claude-sonnet-4-6", "claude-opus-4-8"]
+        vec!["claude-sonnet-5-5", "claude-opus-5-5"]
     );
     assert_eq!(
         runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Copilot, "codex"),
-        vec!["gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]
+        vec!["gpt-6-astra", "gpt-6.1-sol", "gpt-5.3-codex"]
     );
     assert_eq!(
         runtime_provider_model_fallback_chain(RuntimeProviderBridgeKind::Copilot, "gpt-5.4"),
-        vec!["gpt-5.4", "gpt-5.3-codex", "gpt-5.1-codex", "gpt-4o"]
+        vec!["gpt-5.4", "gpt-6.1-sol", "gpt-5.3-codex"]
     );
 }
 

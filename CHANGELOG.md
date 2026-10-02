@@ -59,6 +59,9 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Add GPT-6 Astra to Smart Context's conservative GPT-6 operational window.
 - Preserve provider-specific Copilot prompt limits when known, then fall back
   to the canonical provider model context window for newly introduced models.
+- Align built-in runtime defaults with the refreshed catalogs: Anthropic now
+  defaults to Claude Sonnet 5.5 with a 1M context window, while Copilot defaults
+  to GPT-6 Astra with a 1.05M context window and matching auto-compact limits.
 
 ## Compatibility Notes
 

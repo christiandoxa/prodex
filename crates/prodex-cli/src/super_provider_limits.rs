@@ -37,10 +37,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn copilot_prompt_limit_for_default_codex_model() {
+    fn copilot_prompt_limit_for_default_model() {
         assert_eq!(
-            super_copilot_prompt_token_limit_for_model("gpt-5.3-codex"),
-            Some(272_000)
+            super_copilot_prompt_token_limit_for_model("gpt-6-astra"),
+            Some(1_050_000)
         );
     }
 

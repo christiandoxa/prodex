@@ -13,13 +13,13 @@ fn super_external_provider_codex_args_use_copilot_default_model_prompt_budget() 
     let rendered = rendered_args(super_external_provider_codex_args(
         SuperExternalProvider::Copilot,
         "https://api.githubcopilot.com",
-        Some("gpt-5.3-codex"),
+        Some("gpt-6-astra"),
         None,
         None,
     ));
 
-    assert!(rendered.contains(&"model_context_window=272000".to_string()));
-    assert!(rendered.contains(&"model_auto_compact_token_limit=258400".to_string()));
+    assert!(rendered.contains(&"model_context_window=1050000".to_string()));
+    assert!(rendered.contains(&"model_auto_compact_token_limit=997500".to_string()));
 }
 
 #[test]
