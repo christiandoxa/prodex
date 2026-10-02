@@ -67,6 +67,7 @@ fn session_link_json_child(
 
 fn session_push_json_node<'a>(
     nodes: &mut Vec<prodex_mojo_core::json::JsonNode<'a>>,
+    number_values: Option<&mut Vec<Option<i64>>>,
     value: &'a serde_json::Value,
     key: &'a str,
     parent: Option<usize>,
@@ -85,20 +86,35 @@ fn session_push_json_node<'a>(
         raw_start: 0,
         raw_length: 0,
     });
+    let mut number_values = number_values;
+    if let Some(values) = number_values.as_deref_mut() {
+        values.push(value.as_i64());
+    }
 
     let mut previous = None;
     match value {
         serde_json::Value::Array(values) => {
             for child in values {
-                let child_index = session_push_json_node(nodes, child, "", Some(index));
+                let child_index = session_push_json_node(
+                    nodes,
+                    number_values.as_deref_mut(),
+                    child,
+                    "",
+                    Some(index),
+                );
                 session_link_json_child(nodes, index, previous, child_index);
                 previous = Some(child_index);
             }
         }
         serde_json::Value::Object(map) => {
             for (child_key, child) in map {
-                let child_index =
-                    session_push_json_node(nodes, child, child_key.as_str(), Some(index));
+                let child_index = session_push_json_node(
+                    nodes,
+                    number_values.as_deref_mut(),
+                    child,
+                    child_key.as_str(),
+                    Some(index),
+                );
                 session_link_json_child(nodes, index, previous, child_index);
                 previous = Some(child_index);
             }
@@ -112,14 +128,30 @@ fn session_json_nodes<'a>(
     value: &'a serde_json::Value,
 ) -> Vec<prodex_mojo_core::json::JsonNode<'a>> {
     let mut nodes = Vec::new();
-    session_push_json_node(&mut nodes, value, "", None);
+    session_push_json_node(&mut nodes, None, value, "", None);
     nodes
+}
+
+fn session_json_nodes_with_numbers<'a>(
+    value: &'a serde_json::Value,
+) -> (Vec<prodex_mojo_core::json::JsonNode<'a>>, Vec<Option<i64>>) {
+    let mut nodes = Vec::new();
+    let mut number_values = Vec::new();
+    session_push_json_node(&mut nodes, Some(&mut number_values), value, "", None);
+    (nodes, number_values)
 }
 
 pub(super) fn session_value_metadata(value: &serde_json::Value) -> SessionValueMetadata {
     let nodes = session_json_nodes(value);
     let plan = prodex_mojo_core::json::session_report_metadata(&nodes)
         .expect("Mojo session-report metadata planner returned invalid output");
+    session_value_metadata_from_plan(&nodes, plan)
+}
+
+fn session_value_metadata_from_plan(
+    nodes: &[prodex_mojo_core::json::JsonNode<'_>],
+    plan: prodex_mojo_core::json::SessionReportMetadataPlan,
+) -> SessionValueMetadata {
     let string_at = |index: Option<usize>| index.map(|index| nodes[index].text.trim().to_string());
     SessionValueMetadata {
         type_class: plan.type_class,
@@ -180,13 +212,21 @@ impl SessionReport {
 }
 
 pub fn sort_session_reports(reports: &mut [SessionReport]) {
-    reports.sort_by(|left, right| {
-        right
-            .updated_sort_key
-            .cmp(&left.updated_sort_key)
-            .then_with(|| left.id.cmp(&right.id))
-            .then_with(|| left.path.cmp(&right.path))
-    });
+    let keys = reports
+        .iter()
+        .map(|report| prodex_mojo_core::json::SessionReportOrderKey {
+            updated_sort_key: report.updated_sort_key,
+            id: &report.id,
+            path: &report.path,
+        })
+        .collect::<Vec<_>>();
+    let order = prodex_mojo_core::json::session_report_order(&keys)
+        .expect("Mojo session-report ordering returned invalid output");
+    let sorted = order
+        .into_iter()
+        .map(|index| reports[index].clone())
+        .collect::<Vec<_>>();
+    reports.clone_from_slice(&sorted);
 }
 
 pub fn is_session_metadata_file(path: &Path) -> bool {
@@ -217,7 +257,10 @@ pub fn apply_session_json_line(report: &mut SessionReport, line: &str) {
 }
 
 pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value) {
-    let metadata = session_value_metadata(value);
+    let (nodes, number_values) = session_json_nodes_with_numbers(value);
+    let plan = prodex_mojo_core::json::session_report_update_plan(&nodes, &number_values)
+        .expect("Mojo session-report update planner returned invalid output");
+    let metadata = session_value_metadata_from_plan(&nodes, plan.metadata);
 
     if let Some(model) = metadata.model {
         report.last_model = Some(model);
@@ -226,10 +269,10 @@ pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value
         report.last_reasoning_effort = Some(effort);
     }
 
-    if matches!(metadata.type_class, 0 | 1)
-        && let Some(id) = metadata.resume_id
-    {
-        report.id = id;
+    if plan.update_resume_id.is_some() {
+        report.id = metadata
+            .resume_id
+            .expect("Mojo session-report update plan omitted eligible ID metadata");
     }
 
     if let Some(thread_name) = metadata.thread_name {
@@ -242,20 +285,11 @@ pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value
     }
 
     if let Some(updated_at) = metadata.updated_at {
-        report.updated_sort_key =
-            timestamp_label_sort_key(&updated_at).unwrap_or(report.updated_sort_key);
+        if let Some(updated_sort_key) = plan.updated_sort_key {
+            report.updated_sort_key = updated_sort_key;
+        }
         report.updated_at = Some(updated_at);
-    } else if let Some(epoch) = first_i64_value(
-        value,
-        &[
-            &["updated_at"],
-            &["ts"],
-            &["timestamp"],
-            &["payload", "updated_at"],
-            &["payload", "ts"],
-            &["payload", "timestamp"],
-        ],
-    ) {
+    } else if let Some(epoch) = plan.numeric_timestamp {
         report.updated_sort_key = epoch;
         report.updated_at = Some(format_epoch(epoch));
     }
@@ -276,12 +310,6 @@ pub fn first_string_value(value: &serde_json::Value, paths: &[&[&str]]) -> Optio
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(ToOwned::to_owned)
-}
-
-pub fn first_i64_value(value: &serde_json::Value, paths: &[&[&str]]) -> Option<i64> {
-    paths
-        .iter()
-        .find_map(|path| value_at_path(value, path).and_then(serde_json::Value::as_i64))
 }
 
 pub fn value_at_path<'a>(
@@ -309,10 +337,8 @@ pub fn session_id_from_path(path: &Path) -> String {
 }
 
 pub fn timestamp_label_sort_key(value: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(value)
-        .map(|timestamp| timestamp.timestamp())
-        .ok()
-        .or_else(|| value.parse::<i64>().ok())
+    prodex_mojo_core::json::session_report_timestamp_sort_key(value)
+        .expect("Mojo session-report timestamp parser returned invalid output")
 }
 
 pub fn format_epoch(epoch: i64) -> String {

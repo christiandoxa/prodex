@@ -16,8 +16,8 @@ mod state_db_index;
 
 pub use report::{
     SessionReport, apply_session_json_line, apply_session_json_lines, apply_session_value,
-    first_i64_value, first_string_value, format_epoch, is_session_metadata_file,
-    session_id_from_path, sort_session_reports, timestamp_label_sort_key, value_at_path,
+    first_string_value, format_epoch, is_session_metadata_file, session_id_from_path,
+    sort_session_reports, timestamp_label_sort_key, value_at_path,
 };
 pub use resolve_error::*;
 

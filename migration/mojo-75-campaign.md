@@ -4634,3 +4634,14 @@ Validation passes: the strict real-Mojo final-event ABI test, the Kiro app
 stream status caller test, all 367 `prodex-provider-core` tests, workspace
 Clippy with warnings denied, `cargo fmt --check`, and the Mojo authority and
 no-fallback guards. The broad 75% campaign objective remains in progress.
+
+## Session report planning hard replacement
+
+Session report updates, timestamp precedence and parsing, and stable report
+ordering now use a checked Mojo ABI. Rust retains JSON parsing, DTO updates,
+and local time formatting; the former Rust timestamp planner was removed.
+
+Validation passes: 3 direct real-Mojo tests, all 55 `prodex-session-store`
+tests, the affected Clippy run with warnings denied, formatting, documentation,
+and Mojo authority/no-fallback guards. The project target is still measured by
+the canonical production-share check.
