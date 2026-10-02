@@ -120,6 +120,34 @@ fn local_pressure_error_round_trips_tagged_kind() {
         runtime_websocket_local_pressure_kind_from_io_error(&plain),
         None
     );
+    assert_eq!(
+        RuntimeWebsocketLocalPressureKind::DnsResolveTimeout.as_str(),
+        "dns_resolve_timeout"
+    );
+    assert_eq!(
+        RuntimeWebsocketLocalPressureKind::DnsResolveExecutorOverflow.as_str(),
+        "dns_resolve_executor_overflow"
+    );
+    assert_eq!(
+        RuntimeWebsocketLocalPressureKind::TcpConnectExecutorOverflow.as_str(),
+        "tcp_connect_executor_overflow"
+    );
+}
+
+#[test]
+fn local_pressure_kind_names_stay_stable_for_observability() {
+    assert_eq!(
+        RuntimeWebsocketLocalPressureKind::DnsResolveTimeout.as_str(),
+        "dns_resolve_timeout"
+    );
+    assert_eq!(
+        RuntimeWebsocketLocalPressureKind::DnsResolveExecutorOverflow.as_str(),
+        "dns_resolve_executor_overflow"
+    );
+    assert_eq!(
+        RuntimeWebsocketLocalPressureKind::TcpConnectExecutorOverflow.as_str(),
+        "tcp_connect_executor_overflow"
+    );
 }
 
 #[test]

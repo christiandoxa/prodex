@@ -391,6 +391,67 @@ pub fn label(kind: i64, value: i64) -> Result<String, MojoError> {
     String::from_utf8(output[..length].to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
+fn cached_fixed_label(
+    kind: i64,
+    value: i64,
+    value_count: usize,
+    cache: &'static std::sync::OnceLock<Result<Vec<String>, MojoError>>,
+) -> Result<&'static str, MojoError> {
+    let value = usize::try_from(value)
+        .ok()
+        .filter(|value| *value < value_count)
+        .ok_or(MojoError::InvalidInput)?;
+    match cache.get_or_init(|| {
+        (0..value_count)
+            .map(|value| {
+                let value = i64::try_from(value).map_err(|_| MojoError::InvalidInput)?;
+                label(kind, value)
+            })
+            .collect()
+    }) {
+        Ok(labels) => labels
+            .get(value)
+            .map(String::as_str)
+            .ok_or(MojoError::InvalidOutput),
+        Err(error) => Err(*error),
+    }
+}
+
+pub fn runtime_websocket_local_pressure_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(147, value, 3, &LABELS)
+}
+
+pub fn runtime_websocket_task_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(148, value, 2, &LABELS)
+}
+
+pub fn runtime_websocket_worker_thread_prefix(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(149, value, 2, &LABELS)
+}
+
+pub fn runtime_websocket_dispatcher_thread_name(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(150, value, 2, &LABELS)
+}
+
+pub fn runtime_websocket_overflow_enqueue_event(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(151, value, 2, &LABELS)
+}
+
+pub fn runtime_websocket_overflow_dispatch_event(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(152, value, 2, &LABELS)
+}
+
+pub fn runtime_websocket_overflow_reject_event(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(153, value, 2, &LABELS)
+}
+
 /// Applies bounded privacy checks to borrowed metric key and value strings.
 ///
 /// The Mojo kernel only reads the strings and returns a validation tag. It
@@ -536,6 +597,43 @@ mod tests {
         assert_eq!(label(-1, 0), Err(MojoError::InvalidInput));
         assert_eq!(label(0, -1), Err(MojoError::InvalidInput));
         assert!(label(10_000, 0).is_err());
+    }
+
+    #[test]
+    fn websocket_executor_labels_are_mojo_owned() {
+        assert_eq!(
+            runtime_websocket_local_pressure_label(0).unwrap(),
+            "dns_resolve_timeout"
+        );
+        assert_eq!(
+            runtime_websocket_local_pressure_label(2).unwrap(),
+            "tcp_connect_executor_overflow"
+        );
+        assert_eq!(runtime_websocket_task_label(0).unwrap(), "tcp_connect");
+        assert_eq!(
+            runtime_websocket_worker_thread_prefix(1).unwrap(),
+            "prodex-ws-dns"
+        );
+        assert_eq!(
+            runtime_websocket_dispatcher_thread_name(0).unwrap(),
+            "prodex-ws-connect-dispatch"
+        );
+        assert_eq!(
+            runtime_websocket_overflow_enqueue_event(1).unwrap(),
+            "websocket_dns_overflow_enqueue"
+        );
+        assert_eq!(
+            runtime_websocket_overflow_dispatch_event(0).unwrap(),
+            "websocket_connect_overflow_dispatch"
+        );
+        assert_eq!(
+            runtime_websocket_overflow_reject_event(1).unwrap(),
+            "websocket_dns_overflow_reject"
+        );
+        assert_eq!(
+            runtime_websocket_task_label(2),
+            Err(MojoError::InvalidInput)
+        );
     }
 
     #[test]
