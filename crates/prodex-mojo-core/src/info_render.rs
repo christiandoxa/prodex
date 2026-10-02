@@ -12,6 +12,10 @@ const POOL_REMAINING: i64 = 7;
 const PROCESS_SUMMARY: i64 = 8;
 const LOAD_SUMMARY: i64 = 9;
 const TOKEN_USAGE: i64 = 10;
+const RUNTIME_LAUNCH_SELECTION: i64 = 11;
+const RUNTIME_LAUNCH_WARNING: i64 = 12;
+const RUNTIME_PROVIDER_DIRECT: i64 = 13;
+const RUNTIME_QUOTA_HINT: i64 = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InfoTokenUsageProfile<'a> {
@@ -20,6 +24,19 @@ pub struct InfoTokenUsageProfile<'a> {
     pub cached_input_tokens: u64,
     pub output_tokens: u64,
     pub reasoning_tokens: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InfoRuntimeLaunchSelectedProfileStatus<'a> {
+    Ready,
+    Blocked { blocked_summary: &'a str },
+    ProbeFailed { error: &'a str },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InfoRuntimeLaunchScoredCandidateOutput {
+    pub warning: Option<String>,
+    pub selection: String,
 }
 
 #[repr(C)]
@@ -230,6 +247,40 @@ pub fn format_pool_remaining(
         &[reset],
         u64::from(earliest_reset_text.is_some()),
     )
+}
+
+pub fn format_runtime_launch_scored_candidate(
+    initial_profile_name: &str,
+    candidate_name: &str,
+    quota_summary: &str,
+    selected_profile_status: Option<InfoRuntimeLaunchSelectedProfileStatus<'_>>,
+) -> Result<InfoRuntimeLaunchScoredCandidateOutput, MojoError> {
+    let (status, detail) = match selected_profile_status {
+        None => (0_u64, ""),
+        Some(InfoRuntimeLaunchSelectedProfileStatus::Ready) => (1, ""),
+        Some(InfoRuntimeLaunchSelectedProfileStatus::Blocked { blocked_summary }) => {
+            (2, blocked_summary)
+        }
+        Some(InfoRuntimeLaunchSelectedProfileStatus::ProbeFailed { error }) => (3, error),
+    };
+    let texts = [initial_profile_name, candidate_name, quota_summary, detail];
+    let selection = render(RUNTIME_LAUNCH_SELECTION, &[], &[], &texts, status)?;
+    let warning = render(RUNTIME_LAUNCH_WARNING, &[], &[], &texts, status)?;
+    Ok(InfoRuntimeLaunchScoredCandidateOutput {
+        warning: (!warning.is_empty()).then_some(warning),
+        selection,
+    })
+}
+
+pub fn format_runtime_provider_direct_launch_message(
+    provider_id: &str,
+    source: &str,
+) -> Result<String, MojoError> {
+    render(RUNTIME_PROVIDER_DIRECT, &[], &[], &[provider_id, source], 0)
+}
+
+pub fn format_runtime_launch_quota_inspect_hint(profile_name: &str) -> Result<String, MojoError> {
+    render(RUNTIME_QUOTA_HINT, &[], &[], &[profile_name], 0)
 }
 
 #[cfg(test)]

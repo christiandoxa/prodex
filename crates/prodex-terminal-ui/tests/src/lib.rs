@@ -241,9 +241,52 @@ fn runtime_launch_scored_candidate_message_formats_blocked_selected_profile() {
 }
 
 #[test]
-fn runtime_launch_provider_message_preserves_output_text() {
+fn runtime_launch_scored_candidate_message_formats_all_statuses() {
+    let candidate = RuntimeLaunchCandidateDisplay {
+        name: "备援🙂",
+        quota_summary: "5h 80%, weekly 90%",
+    };
+    let cases = [
+        (None, None, "Using profile '备援🙂' (5h 80%, weekly 90%)"),
+        (
+            Some(RuntimeLaunchSelectedProfileStatus::Ready),
+            None,
+            "Auto-selecting profile '备援🙂' over active profile 'main' using quota-pressure scoring (5h 80%, weekly 90%).",
+        ),
+        (
+            Some(RuntimeLaunchSelectedProfileStatus::Blocked {
+                blocked_summary: "5h limit exhausted",
+            }),
+            Some("Quota preflight blocked profile 'main': 5h limit exhausted"),
+            "Auto-rotating to profile '备援🙂' using quota-pressure scoring (5h 80%, weekly 90%).",
+        ),
+        (
+            Some(RuntimeLaunchSelectedProfileStatus::ProbeFailed { error: "timeout" }),
+            Some("Warning: quota preflight failed for 'main': timeout"),
+            "Using ready profile '备援🙂' after quota preflight failed (5h 80%, weekly 90%)",
+        ),
+    ];
+
+    for (selected_profile_status, warning, selection) in cases {
+        let output =
+            format_runtime_launch_scored_candidate_message(RuntimeLaunchScoredCandidateMessage {
+                initial_profile_name: "main",
+                candidate,
+                selected_profile_status,
+            });
+        assert_eq!(output.warning.as_deref(), warning);
+        assert_eq!(output.selection, selection);
+    }
+}
+
+#[test]
+fn runtime_launch_provider_and_quota_hint_messages_preserve_output_text() {
     assert_eq!(
-        format_runtime_provider_direct_launch_message("amazon-bedrock", "config.toml"),
-        "Detected model_provider 'amazon-bedrock' from config.toml. Launching directly without prodex quota preflight or auto-rotate proxy."
+        format_runtime_provider_direct_launch_message("amazon-bedrock🙂", "config.toml"),
+        "Detected model_provider 'amazon-bedrock🙂' from config.toml. Launching directly without prodex quota preflight or auto-rotate proxy."
+    );
+    assert_eq!(
+        format_runtime_launch_quota_inspect_hint("备援🙂"),
+        "Inspect with `prodex quota --profile 备援🙂` or bypass with `prodex run --skip-quota-check`."
     );
 }

@@ -1,3 +1,7 @@
+use prodex_mojo_core::info_render::{
+    self, InfoRuntimeLaunchSelectedProfileStatus as MojoRuntimeLaunchSelectedProfileStatus,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeLaunchCandidateDisplay<'a> {
     pub name: &'a str,
@@ -27,54 +31,34 @@ pub struct RuntimeLaunchScoredCandidateOutput {
 pub fn format_runtime_launch_scored_candidate_message(
     message: RuntimeLaunchScoredCandidateMessage<'_>,
 ) -> RuntimeLaunchScoredCandidateOutput {
-    let RuntimeLaunchCandidateDisplay {
-        name,
-        quota_summary,
-    } = message.candidate;
-    let mut output = RuntimeLaunchScoredCandidateOutput {
-        warning: None,
-        selection: format!("Using profile '{name}' ({quota_summary})"),
-    };
-
-    match message.selected_profile_status {
-        Some(RuntimeLaunchSelectedProfileStatus::Blocked { blocked_summary }) => {
-            output.warning = Some(format!(
-                "Quota preflight blocked profile '{}': {}",
-                message.initial_profile_name, blocked_summary
-            ));
-            output.selection = format!(
-                "Auto-rotating to profile '{name}' using quota-pressure scoring ({quota_summary})."
-            );
+    let selected_profile_status = message.selected_profile_status.map(|status| match status {
+        RuntimeLaunchSelectedProfileStatus::Ready => MojoRuntimeLaunchSelectedProfileStatus::Ready,
+        RuntimeLaunchSelectedProfileStatus::Blocked { blocked_summary } => {
+            MojoRuntimeLaunchSelectedProfileStatus::Blocked { blocked_summary }
         }
-        Some(RuntimeLaunchSelectedProfileStatus::Ready) => {
-            output.selection = format!(
-                "Auto-selecting profile '{name}' over active profile '{}' using quota-pressure scoring ({quota_summary}).",
-                message.initial_profile_name
-            );
+        RuntimeLaunchSelectedProfileStatus::ProbeFailed { error } => {
+            MojoRuntimeLaunchSelectedProfileStatus::ProbeFailed { error }
         }
-        Some(RuntimeLaunchSelectedProfileStatus::ProbeFailed { error }) => {
-            output.warning = Some(format!(
-                "Warning: quota preflight failed for '{}': {error}",
-                message.initial_profile_name
-            ));
-            output.selection = format!(
-                "Using ready profile '{name}' after quota preflight failed ({quota_summary})"
-            );
-        }
-        None => {}
+    });
+    let output = info_render::format_runtime_launch_scored_candidate(
+        message.initial_profile_name,
+        message.candidate.name,
+        message.candidate.quota_summary,
+        selected_profile_status,
+    )
+    .expect("Mojo runtime-launch message renderer returned invalid output");
+    RuntimeLaunchScoredCandidateOutput {
+        warning: output.warning,
+        selection: output.selection,
     }
-
-    output
 }
 
 pub fn format_runtime_provider_direct_launch_message(provider_id: &str, source: &str) -> String {
-    format!(
-        "Detected model_provider '{provider_id}' from {source}. Launching directly without prodex quota preflight or auto-rotate proxy."
-    )
+    info_render::format_runtime_provider_direct_launch_message(provider_id, source)
+        .expect("Mojo runtime-provider direct-launch renderer returned invalid output")
 }
 
 pub fn format_runtime_launch_quota_inspect_hint(profile_name: &str) -> String {
-    format!(
-        "Inspect with `prodex quota --profile {profile_name}` or bypass with `prodex run --skip-quota-check`."
-    )
+    info_render::format_runtime_launch_quota_inspect_hint(profile_name)
+        .expect("Mojo runtime quota-inspect hint renderer returned invalid output")
 }

@@ -4308,3 +4308,31 @@ denied for `prodex-mojo-core` and `prodex-runtime-proxy`,
 broad report at this checkpoint counts **74,368 reachable Mojo LOC** and
 **201,591 Rust production LOC**, totaling **275,959 LOC**:
 **26.948930819433322% Mojo**. The 75% broad target remains in progress.
+
+## Runtime launch notice rendering hard replacement
+
+Runtime-launch scored-candidate notices, quota-preflight warnings, direct-provider
+launch notices, and quota-inspection hints now render through
+`info_render.mojo`. Mojo owns the four selected-profile status cases,
+warning presence, exact selection text, provider/source notice text, and quota
+inspection/bypass hint text. `prodex-terminal-ui` retains the public DTOs,
+maps the typed status into the Mojo ABI tag, and materializes the returned
+strings. The previous Rust `format!` branches and string literals were
+deleted; the no-fallback guard now rejects restoration of those rendering
+semantics in Rust.
+
+Focused validation passes the real-Mojo terminal-ui runtime-launch tests (3),
+the runtime-launch quota-plan caller tests (2), the `prodex-mojo-core`
+info-render test, Clippy with warnings denied for `prodex-mojo-core`,
+`prodex-terminal-ui`, and `prodex-runtime-launch`, the Mojo
+authority and no-fallback guards, and `git diff --check`. An initial
+`prodex-mojo-core` test invocation intentionally failed the build-script
+precondition because `PRODEX_MOJO_REQUIRED=1` was supplied without a
+Mojo subsystem feature; rerunning with `--features mojo-runtime` passed.
+During the first boundary run, the test also caught a missing dispatcher arm for
+the new ABI operations; the dispatcher was fixed before the passing validation.
+
+The canonical broad report at this checkpoint counts **74,502 reachable Mojo
+LOC** and **201,617 Rust production LOC**, totaling **276,119 LOC**:
+**26.981844784314006% Mojo**. The release floor and ownership non-regression
+checks pass; the 75% broad project target remains in progress.
