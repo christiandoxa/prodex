@@ -282,7 +282,7 @@ fn runtime_soften_persisted_backoffs_for_startup_clamps_short_lived_penalties() 
     let profile_scores = BTreeMap::from([(
         runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
         RuntimeProfileHealth {
-            score: RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2,
+            score: runtime_proxy_crate::RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2,
             updated_at: now,
         },
     )]);
@@ -303,11 +303,25 @@ fn runtime_soften_persisted_backoffs_for_startup_clamps_short_lived_penalties() 
     assert!(!backoffs.route_circuit_open_until.contains_key("expired"));
     assert_eq!(
         backoffs.route_circuit_open_until.get(&circuit_key),
-        Some(
-            &now.saturating_add(runtime_profile_circuit_half_open_probe_seconds(
-                RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD + 2
-            ))
-        )
+        Some(&now.saturating_add(20))
+    );
+}
+
+#[test]
+fn runtime_route_circuit_probe_uses_mojo_half_open_policy() {
+    let now = 100;
+    let circuit_key = runtime_profile_route_circuit_key("main", RuntimeRouteKind::Responses);
+    let profile_scores = BTreeMap::from([(
+        runtime_profile_route_health_key("main", RuntimeRouteKind::Responses),
+        RuntimeProfileHealth {
+            score: u32::MAX,
+            updated_at: now,
+        },
+    )]);
+
+    assert_eq!(
+        runtime_profile_route_circuit_probe_seconds(&profile_scores, &circuit_key, now),
+        40
     );
 }
 
@@ -387,7 +401,9 @@ fn runtime_softened_backoffs_persist_after_proxy_startup() {
                 "main",
                 RuntimeRouteKind::Responses
             ))
-            .is_none_or(|until| *until <= now + RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS)
+            .is_none_or(|until| {
+                *until <= now + runtime_proxy_crate::RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS
+            })
     );
 
     drop(proxy);

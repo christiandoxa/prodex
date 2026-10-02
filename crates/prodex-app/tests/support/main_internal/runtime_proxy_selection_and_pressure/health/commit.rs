@@ -229,7 +229,7 @@ fn commit_runtime_proxy_profile_selection_clears_profile_health() {
         CommitRuntimeOptions {
             profile_route_circuit_open_until: BTreeMap::from([(
                 route_circuit_key.clone(),
-                now + RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS,
+                now + runtime_proxy_crate::RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS,
             )]),
             profile_health: runtime_health([
                 (

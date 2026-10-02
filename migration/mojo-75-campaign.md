@@ -4695,3 +4695,17 @@ including `prodex-mojo-core/src/log.rs` (989 lines against 850),
 `prodex-mojo-core/src/provider_constraints.rs` (870 against 850),
 `prodex-runtime-proxy/tests/src/error_policy.rs` (864 against 860), and 34
 near-limit files against a budget of 32. No size guard was weakened.
+
+## Profile health half-open timing hard replacement
+
+The application no longer owns a duplicate half-open circuit backoff formula.
+It delegates timing to the existing runtime-proxy Mojo adapter; Rust retains
+route-key lookup and circuit state updates. Boundary coverage checks score
+thresholds, saturation, and the Mojo ABI cap.
+
+Validation passes: the direct real-Mojo profile-health ABI test (3 tests), 365
+runtime-proxy app tests, `cargo fmt --all -- --check`, Mojo no-fallback guard
+self-test and check, and `git diff --check`. The production-share check reports
+**78,012 reachable Mojo LOC** and **202,533 Rust production LOC**, or **27.81%
+Mojo**. The 7% release floor and ownership non-regression pass; the 75% project
+target remains unmet.

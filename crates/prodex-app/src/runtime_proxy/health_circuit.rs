@@ -16,24 +16,11 @@ pub(crate) use prodex_runtime_store::{
     runtime_profile_route_circuit_profile_name, runtime_profile_route_circuit_reopen_key,
 };
 
-pub(crate) const RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD: u32 = 4;
-pub(crate) const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS: i64 = 5;
-pub(crate) const RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS: i64 =
-    if cfg!(test) { 20 } else { 60 };
 pub(crate) const RUNTIME_PROFILE_CIRCUIT_REOPEN_DECAY_SECONDS: i64 =
     if cfg!(test) { 12 } else { 1_800 };
 
 pub(crate) fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 {
-    let multiplier = 1_i64
-        .checked_shl(
-            score
-                .saturating_sub(RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD)
-                .min(3),
-        )
-        .unwrap_or(i64::MAX);
-    RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS
-        .saturating_mul(multiplier)
-        .min(RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_MAX_SECONDS)
+    runtime_proxy_crate::runtime_profile_circuit_half_open_probe_seconds(score)
 }
 
 pub(crate) fn runtime_profile_route_circuit_open_until(
@@ -58,10 +45,10 @@ pub(crate) fn runtime_profile_route_circuit_probe_seconds(
         route_profile_key,
         "__route_circuit__:",
     ) else {
-        return RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS;
+        return runtime_profile_circuit_half_open_probe_seconds(0);
     };
     let Some(route_kind) = prodex_runtime_store::runtime_route_kind_from_label(route_label) else {
-        return RUNTIME_PROFILE_CIRCUIT_HALF_OPEN_PROBE_SECONDS;
+        return runtime_profile_circuit_half_open_probe_seconds(0);
     };
     let score = runtime_profile_effective_health_score_from_map(
         profile_scores,

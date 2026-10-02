@@ -179,7 +179,7 @@ fn quota_rejected_soft_affinity_does_not_consume_half_open_probe() {
         runtime.profile_health.insert(
             runtime_profile_route_circuit_health_key(&circuit_key),
             RuntimeProfileHealth {
-                score: RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
+                score: runtime_proxy_crate::RUNTIME_PROFILE_CIRCUIT_OPEN_THRESHOLD,
                 updated_at: now,
             },
         );

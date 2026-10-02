@@ -59,6 +59,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime_route_reason.rs",
   "crates/prodex-runtime-proxy/src/route_decision_trace/reason.rs",
   "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
+  "crates/prodex-app/src/runtime_proxy/health_circuit.rs",
   "crates/prodex-mojo-core/src/smart_context_markers.rs",
   "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
   "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
@@ -780,6 +781,7 @@ const QUOTA_MODEL_CAPACITY_FILE = "crates/prodex-quota/src/render/model_capacity
 const RUNTIME_QUOTA_FILE = "crates/prodex-runtime-proxy/src/quota.rs";
 const SELECTION_POLICY_FILE = "crates/prodex-runtime-proxy/src/selection_policy.rs";
 const HEALTH_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/profile_health.rs";
+const PROFILE_HEALTH_CIRCUIT_FILE = "crates/prodex-app/src/runtime_proxy/health_circuit.rs";
 const DEEPSEEK_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/deepseek/response.rs";
 const DEEPSEEK_RESPONSE_TOOL_CALLS_FILE = "crates/prodex-provider-core/src/translators/deepseek/tooling/response_tool_calls.rs";
 const DEEPSEEK_REQUEST_FILE = "crates/prodex-provider-core/src/translators/deepseek/request_transform.rs";
@@ -932,6 +934,16 @@ export function findViolations(files) {
       UNCONDITIONAL_MOJO_FILES.has(filePath) && FEATURE_OFF_RUST_PATH.test(contents),
     )
     .map(([filePath]) => `${filePath}: Mojo-owned operation cannot have a feature-off Rust path`);
+  const profileHealthCircuitViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== PROFILE_HEALTH_CIRCUIT_FILE) return [];
+    const body = contents.match(
+      /\bfn\s+runtime_profile_circuit_half_open_probe_seconds\s*\([^)]*\)\s*->\s*i64\s*\{([^{}]*)\}/u,
+    )?.[1];
+    return body?.includes("runtime_proxy_crate::runtime_profile_circuit_half_open_probe_seconds(")
+      && !/\b(?:checked_shl|saturating_(?:sub|mul))\b/u.test(body)
+      ? []
+      : [`${filePath}: half-open profile-health timing must delegate to the Mojo runtime-health adapter`];
+  });
   const exactnessPlannerViolations = files
     .filter(([filePath, contents]) => filePath === SMART_CONTEXT_CORE_FILE &&
       !contents.includes("prodex_mojo_core::runtime::smart_context_exactness_plan("))
@@ -3614,7 +3626,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -3685,6 +3697,11 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  assert.deepEqual(findViolations([[PROFILE_HEALTH_CIRCUIT_FILE,
+    "fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 { runtime_proxy_crate::runtime_profile_circuit_half_open_probe_seconds(score) }"]]), []);
+  assert.match(findViolations([[PROFILE_HEALTH_CIRCUIT_FILE,
+    "fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 { let multiplier = 1_i64.checked_shl(score.saturating_sub(4).min(3)).unwrap_or(i64::MAX); 5_i64.saturating_mul(multiplier).min(60) }"]]).join("\n"),
+  /must delegate to the Mojo runtime-health adapter/u);
   const routeAffinityLogFile = "crates/prodex-runtime-proxy/src/route_affinity_log.rs";
   const routeAffinityLogCalls = "prodex_mojo_core::log::render_route_affinity_log(); prodex_mojo_core::log::render_route_affinity_owner_logs();";
   assert.deepEqual(findViolations([[routeAffinityLogFile, routeAffinityLogCalls]]), []);
