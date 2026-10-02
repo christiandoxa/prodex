@@ -4414,3 +4414,62 @@ The canonical broad report at this checkpoint counts **74,955 reachable Mojo
 LOC** and **201,753 Rust production LOC**, totaling **276,708 LOC**:
 **27.088121774578255% Mojo**. The release floor and ownership non-regression
 checks pass; the 75% broad project target remains in progress.
+
+## Previous-response outcome labels and structured-log policy hard replacement
+
+Previous-response fallback-shape, retry-reason, chain-reason, and
+observability-outcome labels now use `observability_labels.mojo`. The
+fallback-shape and route enums expose stable `repr(i64)` tags, removing
+duplicate Rust tag-selection matches at the Mojo boundary. Rust still performs
+validated enum reconstruction from Mojo outputs, but no longer owns the
+canonical strings for these fields.
+
+Structured runtime-log field policy now lives in `log_semantics.mojo`. Mojo
+owns field skip/safe/free-form/stable-code/location classification, control
+character sanitization and quote-required detection, plus URL/path location
+secret stripping. Rust retains secret-like text redaction, typed field
+materialization, and final structured-log assembly. The replaced Rust key
+classifiers, stable-code checker, location scrubber, and quote predicate were
+deleted rather than retained as a fallback.
+
+The no-fallback guard requires the previous-response label families and the
+structured-log Mojo ABI calls, and rejects restoration of the deleted Rust
+semantics. Focused validation covers the previous-response outcome suite,
+structured-log policy ABI contracts, structured-log quoting/redaction/location
+caller regressions, Clippy with warnings denied for `prodex-mojo-core` and
+`prodex-runtime-proxy`, the Mojo authority and no-fallback guards, and
+`git diff --check`.
+
+The canonical broad report at this checkpoint counts **75,310 reachable Mojo
+LOC** and **201,796 Rust production LOC**, totaling **277,106 LOC**:
+**27.177325644338268% Mojo**. The release floor and ownership non-regression
+checks pass; the 75% broad project target remains in progress.
+
+## Structured runtime-log policy hard replacement
+
+Structured runtime-log field policy now runs through `log_semantics.mojo`.
+Mojo owns field-key skip classification, the known-safe key set, free-form field
+classification, stable-code validation, location-field classification,
+control-character sanitization, quote-required decisions, query/fragment
+stripping, and URL user-info redaction planning. Rust retains the
+`redaction` crate boundary for secret-like text, Serde JSON escaping and
+unescaping, borrowed/owned log DTOs, map materialization, and final string
+assembly. The previous Rust key tables, stable-code scanner, location parser,
+control-character mapper, and quote predicate were deleted; no Rust semantic
+fallback remains.
+
+Focused validation passes the direct real-Mojo structured-log policy regression,
+the three structured-log runtime-proxy regressions, the typed log-event
+round-trip regression, the production `prodex-app` structured-log
+caller regression, Clippy with warnings denied for `prodex-mojo-core`
+and `prodex-runtime-proxy`, the Mojo authority and no-fallback guards,
+and `git diff --check`. The runtime-proxy dependency now directly
+enables the Mojo routing feature needed by the log owner rather than relying on
+feature unification elsewhere in the graph.
+
+This landed in the same reviewed checkpoint as the previous-response
+outcome-label hard replacement above. The canonical broad report for the
+combined checkpoint counts **75,310 reachable Mojo LOC** and **201,796 Rust
+production LOC**, totaling **277,106 LOC**: **27.177325644338268% Mojo**. The
+release floor and ownership non-regression checks pass; the 75% broad project
+target remains in progress.

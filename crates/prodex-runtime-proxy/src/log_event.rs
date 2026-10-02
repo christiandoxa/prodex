@@ -1,4 +1,3 @@
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::borrow::Cow;
 use std::collections::BTreeMap;
 
@@ -60,7 +59,9 @@ impl<'a> RuntimeProxyLogEvent<'a> {
         message.push_str(&runtime_proxy_redact_log_text(&self.event));
         for field in &self.fields {
             let key = runtime_proxy_sanitize_log_fragment(field.key());
-            if key.is_empty() || runtime_proxy_log_key_needs_skip(&key) {
+            let policy = prodex_mojo_core::log::structured_log_field_policy(&key, field.value())
+                .expect("Mojo structured-log field policy returned invalid output");
+            if key.is_empty() || policy.skip {
                 continue;
             }
             if !message.is_empty() {
@@ -68,9 +69,10 @@ impl<'a> RuntimeProxyLogEvent<'a> {
             }
             message.push_str(&key);
             message.push('=');
-            message.push_str(&runtime_proxy_format_log_field_value(
+            message.push_str(&runtime_proxy_format_log_field_value_with_policy(
                 field.key(),
                 field.value(),
+                policy,
             ));
         }
         message
@@ -158,16 +160,28 @@ pub fn runtime_proxy_log_fields(message: &str) -> BTreeMap<String, String> {
 
 /// Replaces terminal control characters and redacts secret-like text in a log fragment.
 pub fn runtime_proxy_redact_log_text(value: &str) -> String {
-    let sanitized = runtime_proxy_sanitize_log_fragment(value);
-    redaction_redact_secret_like_text(sanitized.as_ref())
+    let sanitized = prodex_mojo_core::log::structured_log_sanitize(value)
+        .expect("Mojo structured-log sanitization returned invalid output");
+    redaction_redact_secret_like_text(&sanitized.value)
 }
 
 /// Applies the structured-log redaction policy without adding field-value quotes.
 pub fn runtime_proxy_redact_log_field_value(key: &str, value: &str) -> String {
-    let value = if !runtime_proxy_log_key_is_known_safe(key) && redaction_key_looks_sensitive(key) {
+    let policy = prodex_mojo_core::log::structured_log_field_policy(key, value)
+        .expect("Mojo structured-log field policy returned invalid output");
+    runtime_proxy_redact_log_field_value_with_policy(key, value, policy)
+}
+
+fn runtime_proxy_redact_log_field_value_with_policy(
+    key: &str,
+    value: &str,
+    policy: prodex_mojo_core::log::StructuredLogFieldPolicy,
+) -> String {
+    let value = if !policy.known_safe && redaction_key_looks_sensitive(key) {
         "<redacted>".to_string()
-    } else if runtime_proxy_log_key_is_location(key) {
-        runtime_proxy_strip_log_location_secrets(value)
+    } else if policy.location {
+        prodex_mojo_core::log::structured_log_strip_location(value)
+            .expect("Mojo structured-log location policy returned invalid output")
     } else {
         value.to_string()
     };
@@ -193,153 +207,33 @@ fn runtime_proxy_log_fields_to_map(
         .collect()
 }
 
-fn runtime_proxy_log_key_needs_skip(key: &str) -> bool {
-    key.bytes()
-        .any(|byte| byte == b'=' || byte.is_ascii_whitespace())
-}
-
-fn runtime_proxy_format_log_field_value(key: &str, value: &str) -> String {
-    let value = if runtime_proxy_log_key_is_free_form(key)
-        && !runtime_proxy_log_value_is_stable_code(value)
-    {
+fn runtime_proxy_format_log_field_value_with_policy(
+    key: &str,
+    value: &str,
+    policy: prodex_mojo_core::log::StructuredLogFieldPolicy,
+) -> String {
+    let value = if policy.free_form && !policy.stable_code {
         "<redacted>".to_string()
     } else {
-        runtime_proxy_redact_log_field_value(key, value)
+        runtime_proxy_redact_log_field_value_with_policy(key, value, policy)
     };
     runtime_proxy_quote_log_field_value(&value)
 }
 
 fn runtime_proxy_quote_log_field_value(value: &str) -> String {
-    let sanitized = runtime_proxy_sanitize_log_fragment(value);
-    if runtime_proxy_log_field_value_needs_quotes(&sanitized) {
-        serde_json::to_string(sanitized.as_ref()).unwrap_or_else(|_| "\"\"".to_string())
+    let sanitized = prodex_mojo_core::log::structured_log_sanitize(value)
+        .expect("Mojo structured-log sanitization returned invalid output");
+    if sanitized.quote_required {
+        serde_json::to_string(&sanitized.value).unwrap_or_else(|_| "\"\"".to_string())
     } else {
-        sanitized.into_owned()
+        sanitized.value
     }
 }
 
-fn runtime_proxy_log_key_is_known_safe(key: &str) -> bool {
-    matches!(
-        key,
-        "affinity"
-            | "acceptance_state"
-            | "balance"
-            | "cold_start_jobs"
-            | "excluded_count"
-            | "effective_model"
-            | "eligible_profiles_remaining"
-            | "fallback"
-            | "failure_class"
-            | "health"
-            | "inflight"
-            | "mode"
-            | "order"
-            | "outcome"
-            | "performance"
-            | "pressure_mode"
-            | "profile"
-            | "profile_hash"
-            | "prompt_cache_bound"
-            | "ready"
-            | "reason"
-            | "reports"
-            | "recovery_generation"
-            | "recovery_outcome"
-            | "requeue_reason"
-            | "request"
-            | "response_id"
-            | "route"
-            | "retry_layer"
-            | "schema_version"
-            | "side_effect_state"
-            | "signaled"
-            | "soft_limit"
-            | "sync_probe_jobs"
-            | "payload_b64"
-            | "stream"
-            | "stream_committed"
-            | "trace"
-            | "transport"
-            | "useful"
-            | "wait_ms"
-            | "waited_ms"
-            | "last_prompt_requeued"
-            | "requested_model"
-    )
-}
-
-fn runtime_proxy_log_key_is_free_form(key: &str) -> bool {
-    [
-        "error", "message", "detail", "body", "response", "stderr", "panic",
-    ]
-    .iter()
-    .any(|candidate| {
-        ascii_casefold_equal_exact(key, candidate).expect("Mojo runtime log-key comparison failed")
-    })
-}
-
-fn runtime_proxy_log_value_is_stable_code(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 128
-        && !value.contains("sk-")
-        && !value.contains("sk_")
-        && value.bytes().all(|byte| {
-            byte.is_ascii_lowercase()
-                || byte.is_ascii_digit()
-                || matches!(byte, b'_' | b'-' | b'.' | b':')
-        })
-}
-
-fn runtime_proxy_log_key_is_location(key: &str) -> bool {
-    ascii_casefold_equal_exact(key, "path")
-        .expect("Mojo runtime log location-key comparison failed")
-        || key.ends_with("_path")
-        || ascii_casefold_equal_exact(key, "url")
-            .expect("Mojo runtime log location-key comparison failed")
-        || key.ends_with("_url")
-        || ascii_casefold_equal_exact(key, "endpoint")
-            .expect("Mojo runtime log location-key comparison failed")
-        || key.ends_with("_endpoint")
-}
-
-fn runtime_proxy_strip_log_location_secrets(value: &str) -> String {
-    let value = value.split(['?', '#']).next().unwrap_or(value);
-    let Some((scheme, remainder)) = value.split_once("://") else {
-        return value.to_string();
-    };
-    let Some((_, location)) = remainder.rsplit_once('@') else {
-        return value.to_string();
-    };
-    format!("{scheme}://<redacted>@{location}")
-}
-
-fn runtime_proxy_sanitize_log_fragment(value: &str) -> Cow<'_, str> {
-    if value
-        .chars()
-        .any(|character| character.is_control() || character == '\u{7f}')
-    {
-        Cow::Owned(
-            value
-                .chars()
-                .map(|character| {
-                    if character.is_control() || character == '\u{7f}' {
-                        ' '
-                    } else {
-                        character
-                    }
-                })
-                .collect(),
-        )
-    } else {
-        Cow::Borrowed(value)
-    }
-}
-
-fn runtime_proxy_log_field_value_needs_quotes(value: &str) -> bool {
-    value.is_empty()
-        || value.bytes().any(|byte| byte.is_ascii_whitespace())
-        || value.contains('"')
-        || value.contains('\\')
+fn runtime_proxy_sanitize_log_fragment(value: &str) -> String {
+    prodex_mojo_core::log::structured_log_sanitize(value)
+        .expect("Mojo structured-log sanitization returned invalid output")
+        .value
 }
 
 fn runtime_proxy_parse_log_field_value(raw_value: &str) -> String {

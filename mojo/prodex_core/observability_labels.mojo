@@ -1828,6 +1828,40 @@ def prodex_mojo_observability_label_v1(
             label = StringSlice("persisted_snapshot")
         else:
             return OBSERVABILITY_STATUS_INVALID
+    elif kind == 161:
+        if value == 0:
+            label = StringSlice("none")
+        elif value == 1:
+            label = StringSlice("tool_output_only")
+        elif value == 2:
+            label = StringSlice("empty_input")
+        elif value == 3:
+            label = StringSlice("session_replayable")
+        elif value == 4:
+            label = StringSlice("continuation_only")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 162:
+        if value == 0:
+            label = StringSlice("non_blocking_retry")
+        elif value == 1:
+            label = StringSlice("locked_affinity_no_turn_state")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 163:
+        if value == 0:
+            label = StringSlice("previous_response_not_found")
+        elif value == 1:
+            label = StringSlice("previous_response_not_found_locked_affinity")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 164:
+        if value == 0:
+            label = StringSlice("blocked_without_affinity")
+        elif value == 1:
+            label = StringSlice("blocked_nonreplayable_without_affinity")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
     else:
         return OBSERVABILITY_STATUS_INVALID
     return observability_copy_label(label, output, output_capacity, output_length)

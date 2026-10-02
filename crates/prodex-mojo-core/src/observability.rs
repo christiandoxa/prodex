@@ -489,6 +489,28 @@ pub fn runtime_quota_source_label(value: i64) -> Result<&'static str, MojoError>
     cached_fixed_label(160, value, 2, &LABELS)
 }
 
+pub fn runtime_previous_response_fallback_shape_label(
+    value: i64,
+) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(161, value, 5, &LABELS)
+}
+
+pub fn runtime_previous_response_retry_reason_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(162, value, 2, &LABELS)
+}
+
+pub fn runtime_previous_response_chain_reason_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(163, value, 2, &LABELS)
+}
+
+pub fn runtime_previous_response_outcome_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(164, value, 2, &LABELS)
+}
+
 /// Applies bounded privacy checks to borrowed metric key and value strings.
 ///
 /// The Mojo kernel only reads the strings and returns a validation tag. It

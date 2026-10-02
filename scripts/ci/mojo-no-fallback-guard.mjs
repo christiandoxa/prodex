@@ -2336,6 +2336,36 @@ export function findViolations(files) {
     }
     return [];
   });
+  const previousResponseOutcomeLabelViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== "crates/prodex-runtime-proxy/src/attempt_outcome.rs") return [];
+    const required = [
+      "runtime_previous_response_fallback_shape_label(value)",
+      "runtime_previous_response_retry_reason_label(",
+      "runtime_previous_response_chain_reason_label(",
+      "runtime_previous_response_outcome_label(1)",
+      "runtime_previous_response_outcome_label(0)",
+    ];
+    const violations = required
+      .filter((call) => !contents.includes(call))
+      .map((call) => filePath + ": previous-response labels must retain Mojo call " + call);
+    const forbidden = [
+      '"tool_output_only"',
+      '"empty_input"',
+      '"session_replayable"',
+      '"continuation_only"',
+      '"non_blocking_retry"',
+      '"locked_affinity_no_turn_state"',
+      '"previous_response_not_found_locked_affinity"',
+      '"blocked_nonreplayable_without_affinity"',
+      '"blocked_without_affinity"',
+    ];
+    for (const value of forbidden) {
+      if (contents.includes(value)) {
+        violations.push(filePath + ": contains restored Rust previous-response label semantic " + value);
+      }
+    }
+    return violations;
+  });
   const previousResponseLogRenderViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-runtime-proxy/src/previous_response_log.rs") return [];
     if (!contents.includes("prodex_mojo_core::log::render_previous_response_log(")) {
@@ -2354,6 +2384,42 @@ export function findViolations(files) {
     return forbidden
       .filter((value) => contents.includes(value))
       .map((value) => filePath + ": contains restored Rust previous-response log rendering semantic " + value);
+  });
+  const structuredLogPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-proxy/src/log_event.rs") {
+      const required = [
+        "prodex_mojo_core::log::structured_log_field_policy(",
+        "prodex_mojo_core::log::structured_log_sanitize(",
+        "prodex_mojo_core::log::structured_log_strip_location(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": structured-log policy must retain Mojo call " + call);
+      const forbidden = [
+        /\bfn\s+runtime_proxy_log_key_needs_skip\s*\(/u,
+        /\bfn\s+runtime_proxy_log_key_is_known_safe\s*\(/u,
+        /\bfn\s+runtime_proxy_log_key_is_free_form\s*\(/u,
+        /\bfn\s+runtime_proxy_log_value_is_stable_code\s*\(/u,
+        /\bfn\s+runtime_proxy_log_key_is_location\s*\(/u,
+        /\bfn\s+runtime_proxy_strip_log_location_secrets\s*\(/u,
+        /\bfn\s+runtime_proxy_log_field_value_needs_quotes\s*\(/u,
+      ];
+      if (forbidden.some((pattern) => pattern.test(contents))) {
+        violations.push(filePath + ": contains restored Rust structured-log policy semantics");
+      }
+      return violations;
+    }
+    if (
+      filePath === "crates/prodex-mojo-core/src/log.rs"
+      && (
+        !contents.includes("prodex_mojo_structured_log_field_policy_v1(")
+        || !contents.includes("prodex_mojo_structured_log_sanitize_v1(")
+        || !contents.includes("prodex_mojo_structured_log_location_strip_v1(")
+      )
+    ) {
+      return [filePath + ": structured-log ABI adapter must retain Mojo policy exports"];
+    }
+    return [];
   });
   const runtimeProxyObservabilityLabelViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-runtime-proxy/src/websocket_message.rs") {
@@ -3216,7 +3282,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...previousResponseLogRenderViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
+    ...previousResponseOutcomeLabelViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
