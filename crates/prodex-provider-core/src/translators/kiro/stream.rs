@@ -155,6 +155,21 @@ pub fn kiro_provider_core_response_incomplete_event(
     kiro_mojo_value(input)
 }
 
+pub fn kiro_provider_core_response_final_event(
+    sequence_number: u64,
+    created_at: u64,
+    response: &Value,
+) -> Value {
+    let status = response.get("status").and_then(Value::as_str);
+    let response_json = serde_json::to_string(response).expect("Kiro response serializes");
+    let mut input = KiroKernelInput::new(KiroKernelOperation::ResponseFinalEvent);
+    input.sequence_number = sequence_number;
+    input.created_at = created_at;
+    input.status = status;
+    input.output = Some(&response_json);
+    kiro_mojo_value(input)
+}
+
 pub fn kiro_provider_core_tool_call_arguments_delta_chat_value(
     tool_call_id: &str,
     arguments: &str,

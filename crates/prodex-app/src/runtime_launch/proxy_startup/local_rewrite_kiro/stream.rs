@@ -164,34 +164,18 @@ pub(super) fn runtime_kiro_send_final_stream(
         ))?;
     } else {
         state.sequence_number += 1;
-        let (event_type, event) = match response.get("status").and_then(Value::as_str) {
-            Some("failed") => (
-                "response.failed",
-                prodex_provider_core::kiro_provider_core_response_failed_event(
-                    state.sequence_number,
-                    state.created_at,
-                    response,
-                ),
-            ),
-            Some("incomplete") => (
-                "response.incomplete",
-                prodex_provider_core::kiro_provider_core_response_incomplete_event(
-                    state.sequence_number,
-                    state.created_at,
-                    response,
-                ),
-            ),
-            _ => (
-                "response.completed",
-                prodex_provider_core::kiro_provider_core_response_completed_event(
-                    state.sequence_number,
-                    state.created_at,
-                    response,
-                ),
-            ),
-        };
+        let event = prodex_provider_core::kiro_provider_core_response_final_event(
+            state.sequence_number,
+            state.created_at,
+            response,
+        );
+        let event_type = event
+            .get("type")
+            .and_then(Value::as_str)
+            .context("Mojo Kiro final event omitted its type")?
+            .to_owned();
         sender.send(RuntimeKiroStreamingChunk::Data(
-            runtime_provider_sse_event(event_type, event).into_bytes(),
+            runtime_provider_sse_event(&event_type, event).into_bytes(),
         ))?;
         sender.send(RuntimeKiroStreamingChunk::Data(
             b"data: [DONE]\r\n\r\n".to_vec(),

@@ -270,14 +270,12 @@ fn kiro_streaming_activity_resets_the_idle_timeout() {
 
 #[test]
 fn kiro_responses_stream_preserves_terminal_status() {
-    for (status, event_type, response) in [
+    for (event_type, response) in [
         (
-            "completed",
             "response.completed",
             json!({"id": "resp_1", "status": "completed"}),
         ),
         (
-            "failed",
             "response.failed",
             json!({
                 "id": "resp_1",
@@ -286,7 +284,6 @@ fn kiro_responses_stream_preserves_terminal_status() {
             }),
         ),
         (
-            "incomplete",
             "response.incomplete",
             json!({
                 "id": "resp_1",
@@ -297,9 +294,16 @@ fn kiro_responses_stream_preserves_terminal_status() {
                 }
             }),
         ),
+        (
+            "response.completed",
+            json!({"id": "resp_1", "status": "queued"}),
+        ),
+        ("response.completed", json!({"id": "resp_1", "status": 42})),
+        ("response.completed", json!({"id": "resp_1"})),
     ] {
         let (sender, receiver) = mpsc::sync_channel(4);
         let mut state = RuntimeKiroStreamingState::new(1, Some("claude-sonnet-4"));
+        state.created_at = 123;
         super::stream::runtime_kiro_send_final_stream(&sender, &response, &mut state, false)
             .expect("Kiro terminal event should be emitted");
 
@@ -310,20 +314,17 @@ fn kiro_responses_stream_preserves_terminal_status() {
             }
         }
         let body = String::from_utf8(body).expect("Kiro SSE should be UTF-8");
-        assert!(
-            body.contains(&format!("event: {event_type}")),
-            "{status}: {body}"
+        let event = serde_json::to_string(&json!({
+            "type": event_type,
+            "sequence_number": 1,
+            "created_at": 123,
+            "response": response,
+        }))
+        .expect("expected Kiro event should serialize");
+        assert_eq!(
+            body,
+            format!("event: {event_type}\r\ndata: {event}\r\n\r\ndata: [DONE]\r\n\r\n"),
         );
-        assert!(
-            body.contains(&format!("\"status\":\"{status}\"")),
-            "{status}: {body}"
-        );
-        if status != "completed" {
-            assert!(
-                !body.contains("event: response.completed"),
-                "{status}: {body}"
-            );
-        }
     }
 }
 
