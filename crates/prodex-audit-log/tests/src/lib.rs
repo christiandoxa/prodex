@@ -541,6 +541,17 @@ fn usage_budget_evaluation_blocks_when_limits_are_reached() {
 }
 
 #[test]
+fn budget_window_start_uses_mojo_fixed_windows_and_rust_calendar_month() {
+    assert_eq!(BudgetWindow::Hour.start_epoch(3_800), 3_600);
+    assert_eq!(BudgetWindow::Hour.start_epoch(-1), -3_600);
+    assert_eq!(BudgetWindow::Hour.start_epoch(i64::MIN), i64::MIN);
+    assert_eq!(
+        BudgetWindow::Month.start_epoch(1_771_113_600),
+        1_769_904_000
+    );
+}
+
+#[test]
 fn usage_summary_uses_selected_window() {
     let rows = vec![
         usage_row(3_500, 10, 5),

@@ -270,6 +270,7 @@ impl UsageLedgerRow {
     }
 }
 
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum BudgetWindow {
@@ -281,20 +282,19 @@ pub enum BudgetWindow {
 
 impl BudgetWindow {
     pub fn start_epoch(self, now_epoch: i64) -> i64 {
-        match self {
-            Self::Hour => floor_epoch(now_epoch, 60 * 60),
-            Self::Day => floor_epoch(now_epoch, 24 * 60 * 60),
-            Self::Week => floor_epoch(now_epoch, 7 * 24 * 60 * 60),
-            Self::Month => Utc
-                .timestamp_opt(now_epoch, 0)
-                .single()
-                .and_then(|now| {
-                    Utc.with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
-                        .single()
-                })
-                .map(|start| start.timestamp())
-                .unwrap_or_else(|| floor_epoch(now_epoch, 30 * 24 * 60 * 60)),
+        let plan = prodex_mojo_core::audit_log_policy::budget_window_plan(self as i64, now_epoch)
+            .expect("Mojo audit budget-window policy returned invalid output");
+        if !plan.calendar_month {
+            return plan.fallback_start_epoch;
         }
+        Utc.timestamp_opt(now_epoch, 0)
+            .single()
+            .and_then(|now| {
+                Utc.with_ymd_and_hms(now.year(), now.month(), 1, 0, 0, 0)
+                    .single()
+            })
+            .map(|start| start.timestamp())
+            .unwrap_or(plan.fallback_start_epoch)
     }
 }
 
@@ -638,13 +638,6 @@ fn truncate_audit_details(value: &str, max_chars: usize) -> String {
 fn normalize_usage_token(value: &str, fallback: &str, max_chars: usize) -> String {
     prodex_mojo_core::audit_log_policy::normalize_usage_token(value, fallback, max_chars)
         .expect("Mojo audit usage-token policy returned invalid output")
-}
-
-fn floor_epoch(value: i64, unit: i64) -> i64 {
-    if unit <= 0 {
-        return value;
-    }
-    value.div_euclid(unit).saturating_mul(unit)
 }
 
 struct AuditLogLineRead {
