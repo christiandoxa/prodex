@@ -45,6 +45,15 @@ mod scalar_policy_tests {
         assert_eq!(provider_reasoning_effort_label(5).unwrap(), Some("xhigh"));
         assert_eq!(provider_reasoning_effort_label(7).unwrap(), Some("ultra"));
         assert_eq!(provider_reasoning_effort_label(8).unwrap(), None);
+        assert_eq!(provider_id_label(0).unwrap(), "openai");
+        assert_eq!(provider_id_label(6).unwrap(), "local");
+        assert_eq!(
+            provider_wire_format_label(1).unwrap(),
+            "openai-chat-completions"
+        );
+        assert_eq!(provider_endpoint_label(1).unwrap(), "responses/compact");
+        assert_eq!(provider_endpoint_label(10).unwrap(), "a2a");
+        assert_eq!(provider_capability_status_label(4).unwrap(), "partial");
         assert_eq!(
             provider_copilot_prompt_token_limit("GPT-5.3-CODEX").unwrap(),
             Some(272_000)
@@ -215,6 +224,14 @@ unsafe extern "C" {
         abi_version: i64,
         provider: i64,
     ) -> i64;
+    fn prodex_provider_surface_label_v1(
+        abi_version: i64,
+        label_kind: i64,
+        value: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
     fn prodex_provider_bridge_native_passthrough_v1(
         abi_version: i64,
         provider: i64,
@@ -252,11 +269,90 @@ unsafe extern "C" {
     ) -> i64;
 }
 
+const PROVIDER_SURFACE_PROVIDER_ID: i64 = 0;
+const PROVIDER_SURFACE_WIRE_FORMAT: i64 = 1;
+const PROVIDER_SURFACE_ENDPOINT: i64 = 2;
+const PROVIDER_SURFACE_CAPABILITY: i64 = 3;
+
 const PROVIDER_BRIDGE_KIND_COUNT: usize = 6;
 const PROVIDER_BRIDGE_LABEL_MAX_BYTES: usize = 64;
 const PROVIDER_BRIDGE_LABEL_RATE_LIMIT_PREFIX: i64 = 0;
 const PROVIDER_BRIDGE_LABEL_RATE_LIMIT_HEADER: i64 = 1;
 const PROVIDER_BRIDGE_LABEL_CHAT_ADAPTER: i64 = 2;
+
+fn load_provider_surface_label(label_kind: i64, value: i64) -> Result<String, crate::MojoError> {
+    let mut output = [0_u8; 32];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_provider_surface_label_v1(
+            PROVIDER_RETRY_ABI_VERSION,
+            label_kind,
+            value,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| crate::MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(crate::MojoError::InvalidInput),
+        2 => return Err(crate::MojoError::Capacity),
+        4 => return Err(crate::MojoError::AbiMismatch),
+        _ => return Err(crate::MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| crate::MojoError::InvalidOutput)
+}
+
+fn cached_provider_surface_label(
+    cache: &'static std::sync::OnceLock<Result<Vec<String>, crate::MojoError>>,
+    label_kind: i64,
+    count: usize,
+    value: i64,
+) -> Result<&'static str, crate::MojoError> {
+    let index = usize::try_from(value)
+        .ok()
+        .filter(|index| *index < count)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    match cache.get_or_init(|| {
+        (0_i64..count as i64)
+            .map(|value| load_provider_surface_label(label_kind, value))
+            .collect()
+    }) {
+        Ok(labels) => labels
+            .get(index)
+            .map(String::as_str)
+            .ok_or(crate::MojoError::InvalidOutput),
+        Err(error) => Err(*error),
+    }
+}
+
+pub fn provider_id_label(value: i64) -> Result<&'static str, crate::MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, crate::MojoError>> =
+        std::sync::OnceLock::new();
+    cached_provider_surface_label(&LABELS, PROVIDER_SURFACE_PROVIDER_ID, 7, value)
+}
+
+pub fn provider_wire_format_label(value: i64) -> Result<&'static str, crate::MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, crate::MojoError>> =
+        std::sync::OnceLock::new();
+    cached_provider_surface_label(&LABELS, PROVIDER_SURFACE_WIRE_FORMAT, 5, value)
+}
+
+pub fn provider_endpoint_label(value: i64) -> Result<&'static str, crate::MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, crate::MojoError>> =
+        std::sync::OnceLock::new();
+    cached_provider_surface_label(&LABELS, PROVIDER_SURFACE_ENDPOINT, 11, value)
+}
+
+pub fn provider_capability_status_label(value: i64) -> Result<&'static str, crate::MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, crate::MojoError>> =
+        std::sync::OnceLock::new();
+    cached_provider_surface_label(&LABELS, PROVIDER_SURFACE_CAPABILITY, 7, value)
+}
 
 fn load_provider_bridge_label(provider: i64, label_kind: i64) -> Result<String, crate::MojoError> {
     let mut output = [0_u8; PROVIDER_BRIDGE_LABEL_MAX_BYTES];

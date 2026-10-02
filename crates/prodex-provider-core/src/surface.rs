@@ -19,6 +19,7 @@ pub const PRODEX_GEMINI_DEFAULT_MODEL: &str = "auto";
 pub const PRODEX_GEMINI_CHAT_COMPRESSION_MODEL: &str = "chat-compression-default";
 pub const PRODEX_KIRO_DEFAULT_MODEL: &str = "auto";
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub enum ProviderId {
     #[serde(rename = "openai")]
@@ -38,16 +39,9 @@ pub enum ProviderId {
 }
 
 impl ProviderId {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::OpenAi => "openai",
-            Self::Anthropic => "anthropic",
-            Self::Copilot => "copilot",
-            Self::DeepSeek => "deepseek",
-            Self::Gemini => "gemini",
-            Self::Kiro => "kiro",
-            Self::Local => "local",
-        }
+    pub fn label(self) -> &'static str {
+        prodex_mojo_core::provider_constraints::provider_id_label(self as i64)
+            .expect("Mojo provider-id label policy failed")
     }
 
     pub fn parse(value: &str) -> Option<Self> {
@@ -55,6 +49,7 @@ impl ProviderId {
     }
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderWireFormat {
@@ -66,17 +61,13 @@ pub enum ProviderWireFormat {
 }
 
 impl ProviderWireFormat {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::OpenAiResponses => "openai-responses",
-            Self::OpenAiChatCompletions => "openai-chat-completions",
-            Self::AnthropicMessages => "anthropic-messages",
-            Self::GeminiGenerateContent => "gemini-generate-content",
-            Self::Passthrough => "passthrough",
-        }
+    pub fn label(self) -> &'static str {
+        prodex_mojo_core::provider_constraints::provider_wire_format_label(self as i64)
+            .expect("Mojo provider wire-format label policy failed")
     }
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProviderEndpoint {
@@ -95,20 +86,9 @@ pub enum ProviderEndpoint {
 }
 
 impl ProviderEndpoint {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Responses => "responses",
-            Self::ResponsesCompact => "responses/compact",
-            Self::ChatCompletions => "chat-completions",
-            Self::Messages => "messages",
-            Self::Models => "models",
-            Self::Embeddings => "embeddings",
-            Self::Images => "images",
-            Self::Audio => "audio",
-            Self::Batches => "batches",
-            Self::Rerank => "rerank",
-            Self::A2a => "a2a",
-        }
+    pub fn label(self) -> &'static str {
+        prodex_mojo_core::provider_constraints::provider_endpoint_label(self as i64)
+            .expect("Mojo provider endpoint label policy failed")
     }
 }
 
@@ -126,15 +106,8 @@ pub enum ProviderCapabilityStatus {
 }
 
 impl ProviderCapabilityStatus {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Native => "native",
-            Self::Translated => "translated",
-            Self::Passthrough => "passthrough",
-            Self::Emulated => "emulated",
-            Self::Partial => "partial",
-            Self::Unsupported => "unsupported",
-            Self::Untested => "untested",
-        }
+    pub fn label(self) -> &'static str {
+        prodex_mojo_core::provider_constraints::provider_capability_status_label(self as i64)
+            .expect("Mojo provider capability-status label policy failed")
     }
 }

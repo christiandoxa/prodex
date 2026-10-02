@@ -159,6 +159,105 @@ def prodex_provider_bridge_label_v1(
     )
 
 
+comptime PROVIDER_SURFACE_LABEL_PROVIDER_ID: Int64 = 0
+comptime PROVIDER_SURFACE_LABEL_WIRE_FORMAT: Int64 = 1
+comptime PROVIDER_SURFACE_LABEL_ENDPOINT: Int64 = 2
+comptime PROVIDER_SURFACE_LABEL_CAPABILITY: Int64 = 3
+
+
+@export("prodex_provider_surface_label_v1")
+def prodex_provider_surface_label_v1(
+    abi_version: Int64,
+    label_kind: Int64,
+    value: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_BRIDGE_METADATA_ABI_VERSION:
+        return PROVIDER_BRIDGE_METADATA_ABI
+    if label_kind < 0 or label_kind > 3:
+        return PROVIDER_BRIDGE_METADATA_INVALID
+
+    var label = StringSlice("")
+    if label_kind == PROVIDER_SURFACE_LABEL_PROVIDER_ID:
+        if value < 0 or value > 6:
+            return PROVIDER_BRIDGE_METADATA_INVALID
+        if value == 0:
+            label = StringSlice("openai")
+        elif value == 1:
+            label = StringSlice("anthropic")
+        elif value == 2:
+            label = StringSlice("copilot")
+        elif value == 3:
+            label = StringSlice("deepseek")
+        elif value == 4:
+            label = StringSlice("gemini")
+        elif value == 5:
+            label = StringSlice("kiro")
+        else:
+            label = StringSlice("local")
+    elif label_kind == PROVIDER_SURFACE_LABEL_WIRE_FORMAT:
+        if value < 0 or value > 4:
+            return PROVIDER_BRIDGE_METADATA_INVALID
+        if value == 0:
+            label = StringSlice("openai-responses")
+        elif value == 1:
+            label = StringSlice("openai-chat-completions")
+        elif value == 2:
+            label = StringSlice("anthropic-messages")
+        elif value == 3:
+            label = StringSlice("gemini-generate-content")
+        else:
+            label = StringSlice("passthrough")
+    elif label_kind == PROVIDER_SURFACE_LABEL_ENDPOINT:
+        if value < 0 or value > 10:
+            return PROVIDER_BRIDGE_METADATA_INVALID
+        if value == 0:
+            label = StringSlice("responses")
+        elif value == 1:
+            label = StringSlice("responses/compact")
+        elif value == 2:
+            label = StringSlice("chat-completions")
+        elif value == 3:
+            label = StringSlice("messages")
+        elif value == 4:
+            label = StringSlice("models")
+        elif value == 5:
+            label = StringSlice("embeddings")
+        elif value == 6:
+            label = StringSlice("images")
+        elif value == 7:
+            label = StringSlice("audio")
+        elif value == 8:
+            label = StringSlice("batches")
+        elif value == 9:
+            label = StringSlice("rerank")
+        else:
+            label = StringSlice("a2a")
+    else:
+        if value < 0 or value > 6:
+            return PROVIDER_BRIDGE_METADATA_INVALID
+        if value == 0:
+            label = StringSlice("native")
+        elif value == 1:
+            label = StringSlice("translated")
+        elif value == 2:
+            label = StringSlice("passthrough")
+        elif value == 3:
+            label = StringSlice("emulated")
+        elif value == 4:
+            label = StringSlice("partial")
+        elif value == 5:
+            label = StringSlice("unsupported")
+        else:
+            label = StringSlice("untested")
+
+    return provider_bridge_copy_label(
+        label, output_address, output_capacity, written_address
+    )
+
+
 @export("prodex_provider_bridge_native_passthrough_v1")
 def prodex_provider_bridge_native_passthrough_v1(
     abi_version: Int64,

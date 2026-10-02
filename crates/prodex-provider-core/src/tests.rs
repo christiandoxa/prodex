@@ -1,6 +1,22 @@
 use super::*;
 
 #[test]
+fn provider_surface_labels_use_mojo_policy() {
+    assert_eq!(ProviderId::OpenAi.label(), "openai");
+    assert_eq!(ProviderId::Local.label(), "local");
+    assert_eq!(
+        ProviderWireFormat::OpenAiChatCompletions.label(),
+        "openai-chat-completions"
+    );
+    assert_eq!(
+        ProviderEndpoint::ResponsesCompact.label(),
+        "responses/compact"
+    );
+    assert_eq!(ProviderEndpoint::A2a.label(), "a2a");
+    assert_eq!(ProviderCapabilityStatus::Partial.label(), "partial");
+}
+
+#[test]
 fn provider_transform_input_debug_redacts_headers_and_body() {
     let mut input = ProviderTransformInput::new(
         ProviderEndpoint::Responses,
