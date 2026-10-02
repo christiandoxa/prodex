@@ -1,9 +1,10 @@
-use prodex_mojo_core::rich::ascii_casefold_contains;
+use prodex_mojo_core::transport_failure_policy as mojo_transport_failure;
 use std::io;
 
 pub const RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY: u32 = 4;
 pub const RUNTIME_PROFILE_CONNECT_FAILURE_HEALTH_PENALTY: u32 = 5;
 
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeTransportFailureKind {
     Dns,
@@ -20,102 +21,40 @@ pub enum RuntimeTransportFailureKind {
 }
 
 pub fn runtime_transport_failure_kind_label(kind: RuntimeTransportFailureKind) -> &'static str {
-    match kind {
-        RuntimeTransportFailureKind::Dns => "dns",
-        RuntimeTransportFailureKind::ConnectTimeout => "connect_timeout",
-        RuntimeTransportFailureKind::ConnectRefused => "connection_refused",
-        RuntimeTransportFailureKind::ConnectReset => "connection_reset",
-        RuntimeTransportFailureKind::TlsHandshake => "tls_handshake",
-        RuntimeTransportFailureKind::ConnectionAborted => "connection_aborted",
-        RuntimeTransportFailureKind::BrokenPipe => "broken_pipe",
-        RuntimeTransportFailureKind::UnexpectedEof => "unexpected_eof",
-        RuntimeTransportFailureKind::ReadTimeout => "read_timeout",
-        RuntimeTransportFailureKind::UpstreamClosedBeforeCommit => "upstream_closed_before_commit",
-        RuntimeTransportFailureKind::Other => "other",
-    }
+    mojo_transport_failure::failure_kind_label(kind as i64)
+        .expect("Mojo transport-failure label policy returned invalid output")
 }
 
 pub fn runtime_upstream_connect_failure_marker(
     failure_kind: Option<RuntimeTransportFailureKind>,
 ) -> &'static str {
-    match failure_kind {
-        Some(RuntimeTransportFailureKind::ConnectTimeout)
-        | Some(RuntimeTransportFailureKind::ReadTimeout) => "upstream_connect_timeout",
-        Some(RuntimeTransportFailureKind::Dns) => "upstream_connect_dns_error",
-        Some(RuntimeTransportFailureKind::TlsHandshake) => "upstream_tls_handshake_error",
-        _ => "upstream_connect_error",
+    mojo_transport_failure::upstream_connect_failure_marker(failure_kind.map(|kind| kind as i64))
+        .expect("Mojo upstream-connect marker policy returned invalid output")
+}
+
+fn runtime_transport_failure_kind_from_tag(tag: i64) -> RuntimeTransportFailureKind {
+    match tag {
+        0 => RuntimeTransportFailureKind::Dns,
+        1 => RuntimeTransportFailureKind::ConnectTimeout,
+        2 => RuntimeTransportFailureKind::ConnectRefused,
+        3 => RuntimeTransportFailureKind::ConnectReset,
+        4 => RuntimeTransportFailureKind::TlsHandshake,
+        5 => RuntimeTransportFailureKind::ConnectionAborted,
+        6 => RuntimeTransportFailureKind::BrokenPipe,
+        7 => RuntimeTransportFailureKind::UnexpectedEof,
+        8 => RuntimeTransportFailureKind::ReadTimeout,
+        9 => RuntimeTransportFailureKind::UpstreamClosedBeforeCommit,
+        10 => RuntimeTransportFailureKind::Other,
+        _ => unreachable!("validated Mojo transport-failure tag"),
     }
 }
-
-struct RuntimeTransportFailureMessageRule {
-    kind: RuntimeTransportFailureKind,
-    needles: &'static [&'static str],
-}
-
-const RUNTIME_TRANSPORT_FAILURE_MESSAGE_RULES: &[RuntimeTransportFailureMessageRule] = &[
-    RuntimeTransportFailureMessageRule {
-        kind: RuntimeTransportFailureKind::Dns,
-        needles: &[
-            "dns",
-            "failed to lookup address information",
-            "no such host",
-            "name or service not known",
-        ],
-    },
-    RuntimeTransportFailureMessageRule {
-        kind: RuntimeTransportFailureKind::ConnectRefused,
-        needles: &["connection refused"],
-    },
-    RuntimeTransportFailureMessageRule {
-        kind: RuntimeTransportFailureKind::ConnectTimeout,
-        needles: &["timed out", "timeout"],
-    },
-    RuntimeTransportFailureMessageRule {
-        kind: RuntimeTransportFailureKind::TlsHandshake,
-        needles: &["tls", "handshake", "certificate"],
-    },
-    RuntimeTransportFailureMessageRule {
-        kind: RuntimeTransportFailureKind::ConnectReset,
-        needles: &["connection reset"],
-    },
-    RuntimeTransportFailureMessageRule {
-        kind: RuntimeTransportFailureKind::BrokenPipe,
-        needles: &["broken pipe"],
-    },
-    RuntimeTransportFailureMessageRule {
-        kind: RuntimeTransportFailureKind::UnexpectedEof,
-        needles: &["unexpected eof"],
-    },
-    RuntimeTransportFailureMessageRule {
-        kind: RuntimeTransportFailureKind::ConnectionAborted,
-        needles: &["connection aborted"],
-    },
-    RuntimeTransportFailureMessageRule {
-        kind: RuntimeTransportFailureKind::UpstreamClosedBeforeCommit,
-        needles: &[
-            "connection closed before message completed",
-            "stream closed before response.completed",
-            "closed before response.completed",
-        ],
-    },
-    RuntimeTransportFailureMessageRule {
-        kind: RuntimeTransportFailureKind::Other,
-        needles: &["unable to connect"],
-    },
-];
 
 pub fn runtime_transport_failure_kind_from_message(
     message: &str,
 ) -> Option<RuntimeTransportFailureKind> {
-    RUNTIME_TRANSPORT_FAILURE_MESSAGE_RULES
-        .iter()
-        .find(|rule| {
-            rule.needles.iter().any(|needle| {
-                ascii_casefold_contains(message, needle)
-                    .expect("Mojo transport-failure text comparison failed")
-            })
-        })
-        .map(|rule| rule.kind)
+    mojo_transport_failure::classify_message(message)
+        .expect("Mojo transport-failure message classifier returned invalid output")
+        .map(runtime_transport_failure_kind_from_tag)
 }
 
 pub fn runtime_transport_failure_kind_from_io_error(
@@ -133,21 +72,8 @@ pub fn runtime_transport_failure_kind_from_io_error(
 }
 
 pub fn runtime_profile_transport_health_penalty(kind: RuntimeTransportFailureKind) -> u32 {
-    match kind {
-        RuntimeTransportFailureKind::Dns
-        | RuntimeTransportFailureKind::ConnectTimeout
-        | RuntimeTransportFailureKind::ConnectRefused
-        | RuntimeTransportFailureKind::ConnectReset
-        | RuntimeTransportFailureKind::TlsHandshake => {
-            RUNTIME_PROFILE_CONNECT_FAILURE_HEALTH_PENALTY
-        }
-        RuntimeTransportFailureKind::BrokenPipe
-        | RuntimeTransportFailureKind::ConnectionAborted
-        | RuntimeTransportFailureKind::UnexpectedEof
-        | RuntimeTransportFailureKind::ReadTimeout
-        | RuntimeTransportFailureKind::UpstreamClosedBeforeCommit
-        | RuntimeTransportFailureKind::Other => RUNTIME_PROFILE_TRANSPORT_FAILURE_HEALTH_PENALTY,
-    }
+    mojo_transport_failure::health_penalty(kind as i64)
+        .expect("Mojo transport-failure health penalty policy returned invalid output")
 }
 
 #[cfg(test)]

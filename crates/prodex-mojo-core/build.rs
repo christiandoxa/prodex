@@ -494,6 +494,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/compatibility_surface.mojo");
         sources.push("../../mojo/prodex_core/response_forwarding.mojo");
         sources.push("../../mojo/prodex_core/websocket_proxy_policy.mojo");
+        sources.push("../../mojo/prodex_core/transport_failure_policy.mojo");
         sources.push("../../mojo/prodex_core/sse_line.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_RICH").is_some()

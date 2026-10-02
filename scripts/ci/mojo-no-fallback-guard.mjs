@@ -97,6 +97,8 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/tests/profile_health.rs",
   "crates/prodex-mojo-core/src/provider_constraints.rs",
   "crates/prodex-mojo-core/src/websocket_proxy_policy.rs",
+  "crates/prodex-mojo-core/src/transport_failure_policy.rs",
+  "crates/prodex-runtime-proxy/src/transport_failure.rs",
   "crates/prodex-runtime-proxy/src/websocket_proxy.rs",
   "crates/prodex-provider-core/src/surface.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
@@ -781,6 +783,8 @@ const PROVIDER_SURFACE_FILE = "crates/prodex-provider-core/src/surface.rs";
 const PROVIDER_CONSTRAINTS_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints.rs";
 const WEBSOCKET_PROXY_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/websocket_proxy_policy.rs";
 const WEBSOCKET_PROXY_POLICY_FILE = "crates/prodex-runtime-proxy/src/websocket_proxy.rs";
+const TRANSPORT_FAILURE_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/transport_failure_policy.rs";
+const TRANSPORT_FAILURE_POLICY_FILE = "crates/prodex-runtime-proxy/src/transport_failure.rs";
 const PROVIDER_PRECOMMIT_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs";
 const PROVIDER_BRIDGE_METADATA_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs";
 const PROVIDER_BRIDGE_ROUTING_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs";
@@ -2184,6 +2188,48 @@ export function findViolations(files) {
     }
     return [];
   });
+  const transportFailurePolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === TRANSPORT_FAILURE_POLICY_FILE) {
+      const required = [
+        "mojo_transport_failure::failure_kind_label(",
+        "mojo_transport_failure::upstream_connect_failure_marker(",
+        "mojo_transport_failure::classify_message(",
+        "mojo_transport_failure::health_penalty(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": transport-failure migration must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      for (const retired of [
+        "RuntimeTransportFailureMessageRule",
+        "RUNTIME_TRANSPORT_FAILURE_MESSAGE_RULES",
+        "ascii_casefold_contains(",
+        '"upstream_connect_timeout"',
+        '"upstream_connect_dns_error"',
+        '"upstream_tls_handshake_error"',
+      ]) {
+        if (production.includes(retired)) {
+          violations.push(filePath + ": contains restored Rust transport-failure classifier/label policy");
+          break;
+        }
+      }
+      if (!/#\[repr\(i64\)\][^]*?enum\s+RuntimeTransportFailureKind/u.test(production)) {
+        violations.push(filePath + ": RuntimeTransportFailureKind must remain repr(i64) for Mojo policy ABI");
+      }
+      return violations;
+    }
+    if (filePath === TRANSPORT_FAILURE_POLICY_ADAPTER_FILE) {
+      const required = [
+        "prodex_transport_failure_text_v1(",
+        "prodex_transport_failure_classify_message_v1(",
+        "prodex_transport_failure_health_penalty_v1(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": transport-failure adapter must retain Mojo ABI " + call);
+    }
+    return [];
+  });
   const providerPrecommitPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === PROVIDER_CONSTRAINTS_ADAPTER_FILE) {
       return contents.includes("prodex_provider_precommit_policy_v1(")
@@ -3034,7 +3080,7 @@ export function findViolations(files) {
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
     ...deepseekReasoningViolations,
-    ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
+    ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
