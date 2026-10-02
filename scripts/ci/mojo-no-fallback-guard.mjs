@@ -2907,6 +2907,7 @@ export function findViolations(files) {
       const required = [
         "prodex_mojo_core::runtime_route_reason::lookup(",
         "prodex_mojo_core::runtime_route_reason::stage(",
+        "prodex_mojo_core::runtime_route_reason::label(",
         "prodex_mojo_core::runtime_route_reason::normalize_unknown(",
       ];
       const violations = required
@@ -2916,6 +2917,8 @@ export function findViolations(files) {
         contents.includes("VALUES.iter().copied().find(|value| value.as_str() == label)")
         || contents.includes("Self::AuthFailureBackoff | Self::AuthNotQuotaCompatible")
         || contents.includes("ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_'")
+        || contents.includes('"auth_failure_backoff"')
+        || contents.includes('"output_limit_clamped"')
       ) {
         violations.push(filePath + ": contains restored Rust route-reason semantics");
       }
@@ -2925,6 +2928,7 @@ export function findViolations(files) {
       const required = [
         "prodex_runtime_route_reason_lookup_v1(",
         "prodex_runtime_route_reason_stage_v1(",
+        "prodex_runtime_route_reason_label_v1(",
         "prodex_runtime_route_reason_unknown_span_v1(",
         "prodex_runtime_route_identifier_span_v1(",
       ];

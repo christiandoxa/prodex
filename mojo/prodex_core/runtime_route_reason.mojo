@@ -11,54 +11,193 @@ comptime ROUTE_REASON_MAX_IDENTIFIER_BYTES: Int64 = 96
 def reason_view(address: UInt, length: Int64) -> ProdexRichStringView:
     return ProdexRichStringView(address, UInt(length))
 
-def reason_equal[address_literal: StaticString](
-    address: UInt, length: Int64
+def reason_catalog_literal[label: StaticString](
+    mode: Int64,
+    address: UInt,
+    length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
 ) -> Bool:
-    var n = Int64(address_literal.byte_length())
-    if length != n:
-        return False
-    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](unsafe_from_address=Int(address))
-    var target = address_literal.unsafe_ptr()
-    for index in range(n):
-        if source[unsafe_offset=index] != target[unsafe_offset=index]:
+    var n = Int64(label.byte_length())
+    var literal = label.unsafe_ptr()
+    if mode == 0:
+        if length != n:
             return False
+        var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(address)
+        )
+        for index in range(n):
+            if source[unsafe_offset=index] != literal[unsafe_offset=index]:
+                return False
+        return True
+
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = n
+    if output_capacity < n:
+        return False
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(n):
+        output[unsafe_offset=index] = literal[unsafe_offset=index]
     return True
 
+
+def reason_catalog(
+    kind: Int64,
+    mode: Int64,
+    address: UInt,
+    length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) -> Bool:
+    if kind == 0:
+        return reason_catalog_literal["auth_failure_backoff"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 1:
+        return reason_catalog_literal["selection_backoff"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 2:
+        return reason_catalog_literal["route_circuit_open"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 3:
+        return reason_catalog_literal["route_circuit_half_open_probe_wait"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 4:
+        return reason_catalog_literal["profile_health"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 5:
+        return reason_catalog_literal["profile_performance"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 6:
+        return reason_catalog_literal["quota_probe_unavailable"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 7:
+        return reason_catalog_literal["stale_persisted_quota"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 8:
+        return reason_catalog_literal["quota_healthy"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 9:
+        return reason_catalog_literal["quota_thin"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 10:
+        return reason_catalog_literal["quota_critical"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 11:
+        return reason_catalog_literal["quota_exhausted"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 12:
+        return reason_catalog_literal["quota_unknown"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 13:
+        return reason_catalog_literal["quota_exhausted_before_send"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 14:
+        return reason_catalog_literal["quota_windows_unavailable"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 15:
+        return reason_catalog_literal["profile_inflight_soft_limit"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 16:
+        return reason_catalog_literal["auth_not_quota_compatible"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 17:
+        return reason_catalog_literal["prompt_cache_affinity"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 18:
+        return reason_catalog_literal["negative_cache"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 19:
+        return reason_catalog_literal["excluded"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 20:
+        return reason_catalog_literal["affinity_owner_unavailable"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 21:
+        return reason_catalog_literal["selection_failed"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 22:
+        return reason_catalog_literal["compatible"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 23:
+        return reason_catalog_literal["endpoint_unsupported"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 24:
+        return reason_catalog_literal["required_capability_missing"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 25:
+        return reason_catalog_literal["catalog_entry_unavailable"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 26:
+        return reason_catalog_literal["context_window_unknown"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 27:
+        return reason_catalog_literal["context_window_exceeded"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 28:
+        return reason_catalog_literal["output_limit_unknown"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 29:
+        return reason_catalog_literal["requested_output_exceeds_model_limit"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 30:
+        return reason_catalog_literal["reasoning_reserve_unsupported"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 31:
+        return reason_catalog_literal["reasoning_reserve_excessive"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 32:
+        return reason_catalog_literal["malformed_request_limits"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    elif kind == 33:
+        return reason_catalog_literal["output_limit_clamped"](
+            mode, address, length, output_address, output_capacity, written_address
+        )
+    return False
+
+
 def reason_kind(address: UInt, length: Int64) -> Int64:
-    if reason_equal["auth_failure_backoff"](address, length): return 0
-    if reason_equal["selection_backoff"](address, length): return 1
-    if reason_equal["route_circuit_open"](address, length): return 2
-    if reason_equal["route_circuit_half_open_probe_wait"](address, length): return 3
-    if reason_equal["profile_health"](address, length): return 4
-    if reason_equal["profile_performance"](address, length): return 5
-    if reason_equal["quota_probe_unavailable"](address, length): return 6
-    if reason_equal["stale_persisted_quota"](address, length): return 7
-    if reason_equal["quota_healthy"](address, length): return 8
-    if reason_equal["quota_thin"](address, length): return 9
-    if reason_equal["quota_critical"](address, length): return 10
-    if reason_equal["quota_exhausted"](address, length): return 11
-    if reason_equal["quota_unknown"](address, length): return 12
-    if reason_equal["quota_exhausted_before_send"](address, length): return 13
-    if reason_equal["quota_windows_unavailable"](address, length): return 14
-    if reason_equal["profile_inflight_soft_limit"](address, length): return 15
-    if reason_equal["auth_not_quota_compatible"](address, length): return 16
-    if reason_equal["prompt_cache_affinity"](address, length): return 17
-    if reason_equal["negative_cache"](address, length): return 18
-    if reason_equal["excluded"](address, length): return 19
-    if reason_equal["affinity_owner_unavailable"](address, length): return 20
-    if reason_equal["selection_failed"](address, length): return 21
-    if reason_equal["compatible"](address, length): return 22
-    if reason_equal["endpoint_unsupported"](address, length): return 23
-    if reason_equal["required_capability_missing"](address, length): return 24
-    if reason_equal["catalog_entry_unavailable"](address, length): return 25
-    if reason_equal["context_window_unknown"](address, length): return 26
-    if reason_equal["context_window_exceeded"](address, length): return 27
-    if reason_equal["output_limit_unknown"](address, length): return 28
-    if reason_equal["requested_output_exceeds_model_limit"](address, length): return 29
-    if reason_equal["reasoning_reserve_unsupported"](address, length): return 30
-    if reason_equal["reasoning_reserve_excessive"](address, length): return 31
-    if reason_equal["malformed_request_limits"](address, length): return 32
-    if reason_equal["output_limit_clamped"](address, length): return 33
+    for kind in range(Int64(34)):
+        if reason_catalog(kind, 0, address, length, 0, 0, 0):
+            return kind
     return ROUTE_REASON_UNKNOWN
 
 def reason_stage(kind: Int64) -> Int64:
@@ -107,6 +246,37 @@ def prodex_runtime_route_reason_lookup_v1(
     )
     stage[] = reason_stage(kind) if kind >= 0 else ROUTE_REASON_UNKNOWN
     return kind
+
+
+@export("prodex_runtime_route_reason_label_v1")
+def prodex_runtime_route_reason_label_v1(
+    abi_version: Int64,
+    kind: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != ROUTE_REASON_ABI_VERSION
+        or kind < 0
+        or kind > 33
+        or output_capacity < 0
+        or (output_capacity > 0 and output_address == 0)
+        or written_address == 0
+    ):
+        return ROUTE_REASON_INVALID
+
+    if not reason_catalog(
+        kind,
+        1,
+        0,
+        0,
+        output_address,
+        output_capacity,
+        written_address,
+    ):
+        return -3
+    return 0
 
 
 @export("prodex_runtime_route_reason_stage_v1")

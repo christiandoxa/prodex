@@ -42,43 +42,9 @@ pub enum RuntimeRouteDecisionReasonKind {
 }
 
 impl RuntimeRouteDecisionReasonKind {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::AuthFailureBackoff => "auth_failure_backoff",
-            Self::SelectionBackoff => "selection_backoff",
-            Self::RouteCircuitOpen => "route_circuit_open",
-            Self::RouteCircuitHalfOpenProbeWait => "route_circuit_half_open_probe_wait",
-            Self::ProfileHealth => "profile_health",
-            Self::ProfilePerformance => "profile_performance",
-            Self::QuotaProbeUnavailable => "quota_probe_unavailable",
-            Self::StalePersistedQuota => "stale_persisted_quota",
-            Self::QuotaHealthy => "quota_healthy",
-            Self::QuotaThin => "quota_thin",
-            Self::QuotaCritical => "quota_critical",
-            Self::QuotaExhausted => "quota_exhausted",
-            Self::QuotaUnknown => "quota_unknown",
-            Self::QuotaExhaustedBeforeSend => "quota_exhausted_before_send",
-            Self::QuotaWindowsUnavailable => "quota_windows_unavailable",
-            Self::ProfileInflightSoftLimit => "profile_inflight_soft_limit",
-            Self::AuthNotQuotaCompatible => "auth_not_quota_compatible",
-            Self::PromptCacheAffinity => "prompt_cache_affinity",
-            Self::NegativeCache => "negative_cache",
-            Self::Excluded => "excluded",
-            Self::AffinityOwnerUnavailable => "affinity_owner_unavailable",
-            Self::SelectionFailed => "selection_failed",
-            Self::Compatible => "compatible",
-            Self::EndpointUnsupported => "endpoint_unsupported",
-            Self::RequiredCapabilityMissing => "required_capability_missing",
-            Self::CatalogEntryUnavailable => "catalog_entry_unavailable",
-            Self::ContextWindowUnknown => "context_window_unknown",
-            Self::ContextWindowExceeded => "context_window_exceeded",
-            Self::OutputLimitUnknown => "output_limit_unknown",
-            Self::RequestedOutputExceedsModelLimit => "requested_output_exceeds_model_limit",
-            Self::ReasoningReserveUnsupported => "reasoning_reserve_unsupported",
-            Self::ReasoningReserveExcessive => "reasoning_reserve_excessive",
-            Self::MalformedRequestLimits => "malformed_request_limits",
-            Self::OutputLimitClamped => "output_limit_clamped",
-        }
+    pub fn as_str(self) -> &'static str {
+        prodex_mojo_core::runtime_route_reason::label(self as u8)
+            .expect("Mojo route-decision reason label returned invalid output")
     }
 
     pub fn from_label(label: &str) -> Option<Self> {
