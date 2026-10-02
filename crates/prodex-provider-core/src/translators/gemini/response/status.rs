@@ -2,39 +2,6 @@
 
 use serde_json::Value;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum GeminiResponseStatus {
-    Failed { code: String, message: String },
-    Incomplete { reason: String, message: String },
-}
-
-pub(super) fn gemini_response_status(
-    value: &Value,
-    has_visible_output: bool,
-) -> Option<GeminiResponseStatus> {
-    if let Some((code, message)) = gemini_prompt_feedback_failure(value) {
-        return Some(GeminiResponseStatus::Failed { code, message });
-    }
-    if let Some(reason) = gemini_finish_reason(value) {
-        if let Some((reason, message)) = gemini_finish_reason_incomplete(&reason) {
-            return Some(GeminiResponseStatus::Incomplete { reason, message });
-        }
-        if let Some((code, message)) = gemini_finish_reason_failure(&reason) {
-            return Some(GeminiResponseStatus::Failed { code, message });
-        }
-    }
-    if !has_visible_output {
-        let suffix = gemini_finish_reason(value)
-            .map(|reason| format!(" finishReason={reason}"))
-            .unwrap_or_default();
-        return Some(GeminiResponseStatus::Failed {
-            code: "gemini_empty_response".to_string(),
-            message: format!("Gemini returned no visible response content.{suffix}"),
-        });
-    }
-    None
-}
-
 pub(crate) fn gemini_prompt_feedback_failure(value: &Value) -> Option<(String, String)> {
     let feedback = value.get("promptFeedback")?;
     let reason = feedback
@@ -154,44 +121,6 @@ mod tests {
             gemini_prompt_feedback_failure(&json!({
                 "promptFeedback": {"blockReason": "  "},
             })),
-            None
-        );
-    }
-
-    #[test]
-    fn empty_and_unknown_finish_reasons_keep_response_status_behavior() {
-        assert_eq!(
-            gemini_response_status(
-                &json!({
-                    "candidates": [{"finishReason": "NOT_RECOGNIZED"}],
-                }),
-                false
-            ),
-            Some(GeminiResponseStatus::Failed {
-                code: "gemini_empty_response".to_string(),
-                message: "Gemini returned no visible response content. finishReason=NOT_RECOGNIZED"
-                    .to_string(),
-            })
-        );
-        assert_eq!(
-            gemini_response_status(
-                &json!({
-                    "candidates": [{"finishReason": " "}],
-                }),
-                false
-            ),
-            Some(GeminiResponseStatus::Failed {
-                code: "gemini_empty_response".to_string(),
-                message: "Gemini returned no visible response content.".to_string(),
-            })
-        );
-        assert_eq!(
-            gemini_response_status(
-                &json!({
-                    "candidates": [{"finishReason": "NOT_RECOGNIZED"}],
-                }),
-                true
-            ),
             None
         );
     }

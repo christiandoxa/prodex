@@ -1,4 +1,4 @@
-//! Gemini stream payload extraction and deterministic shaping.
+//! Gemini stream payload acquisition and Mojo-backed shaping.
 
 use super::{
     GeminiProviderCoreStreamChunkMetadata, GeminiProviderCoreStreamFunctionCallDelta,
@@ -262,44 +262,29 @@ pub fn gemini_provider_core_stream_completed_tool_call_item(
     thought_signature: Option<&str>,
     blocked: bool,
 ) -> Value {
-    if blocked {
-        return super::gemini_provider_core_stream_output_message_item(vec![
-            super::gemini_provider_core_stream_output_text_content(arguments),
-        ]);
-    }
-    let Ok(arguments_value) = serde_json::from_str::<Value>(arguments) else {
-        let mut input =
-            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::RawFunctionCallItem);
-        input.call_id = Some(call_id);
-        input.name = Some(name);
-        input.arguments = Some(arguments);
-        input.signature = thought_signature;
-        return super::gemini_mojo_value(input);
-    };
-    if name == "tool_search" {
-        let arguments = serde_json::to_string(&arguments_value).expect("tool arguments serialize");
-        let mut input =
-            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::ToolSearchCallItem);
-        input.call_id = Some(call_id);
-        input.arguments = Some(&arguments);
-        return super::gemini_mojo_value(input);
-    }
-    if name == "apply_patch" {
-        let arguments = super::super::gemini_custom_apply_patch_input(&arguments_value);
-        let mut input =
-            GeminiResponseKernelInput::new(GeminiResponseKernelOperation::CustomToolCallItem);
-        input.call_id = Some(call_id);
-        input.name = Some(name);
-        input.arguments = Some(&arguments);
-        return super::gemini_mojo_value(input);
-    }
-    let arguments = serde_json::to_string(&arguments_value).expect("tool arguments serialize");
-    let arguments = gemini_provider_core_stream_completed_tool_call_arguments(name, &arguments);
-    let mut input = GeminiResponseKernelInput::new(GeminiResponseKernelOperation::FunctionCallItem);
+    let arguments_value = serde_json::from_str::<Value>(arguments).ok();
+    let normalized_arguments = arguments_value
+        .as_ref()
+        .map(|value| {
+            let arguments = serde_json::to_string(value).expect("tool arguments serialize");
+            gemini_provider_core_stream_completed_tool_call_arguments(name, &arguments)
+        })
+        .unwrap_or_else(|| arguments.to_string());
+    let custom_tool_input = arguments_value
+        .as_ref()
+        .filter(|_| !blocked && name == "apply_patch")
+        .map(super::super::gemini_custom_apply_patch_input);
+    let mut input =
+        GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamCompletedToolCallItem);
     input.call_id = Some(call_id);
     input.name = Some(name);
-    input.arguments = Some(&arguments);
+    input.arguments = Some(&normalized_arguments);
     input.signature = thought_signature;
+    input.response = custom_tool_input.as_deref();
+    // This operation uses the ABI presence slots to select parsed, blocked, and raw argument paths.
+    input.created_at_present = arguments_value.is_some();
+    input.reason_present = blocked;
+    input.message = blocked.then_some(arguments);
     super::gemini_mojo_value(input)
 }
 

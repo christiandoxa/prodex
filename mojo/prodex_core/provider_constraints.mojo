@@ -1303,9 +1303,16 @@ struct GeminiToolCallIndexBinding(Copyable):
     var index: UInt64
 
 
+@fieldwise_init
+struct GeminiToolResponseOrderRecord(Copyable):
+    var response_present: Int64
+    var id: GeminiToolCallStringView
+
+
 comptime GEMINI_TOOL_CALL_INDEX_ABI_VERSION: Int64 = 1
 comptime GEMINI_TOOL_CALL_INDEX_UINT64_MAX: UInt64 = 18446744073709551615
 comptime GEMINI_TOOL_CALL_INDEX_INT64_MAX: UInt64 = 9223372036854775807
+comptime GEMINI_TOOL_RESPONSE_ORDER_ABI_VERSION: Int64 = 1
 
 
 def gemini_tool_call_string_view_valid(view: GeminiToolCallStringView) -> Bool:
@@ -1344,6 +1351,136 @@ def gemini_tool_call_index_contains(
         if records[unsafe_offset=offset].index == index:
             return True
     return False
+
+
+def gemini_tool_response_order_less(
+    records: Pointer[mut=False, GeminiToolResponseOrderRecord, _],
+    ranks: Pointer[mut=False, UInt64, _],
+    left: UInt64,
+    right: UInt64,
+) -> Bool:
+    var left_index = Int64(left)
+    var right_index = Int64(right)
+    var left_response = records[unsafe_offset=left_index].response_present == 1
+    var right_response = records[unsafe_offset=right_index].response_present == 1
+    if left_response != right_response:
+        return left_response
+    if left_response and ranks[unsafe_offset=left_index] != ranks[unsafe_offset=right_index]:
+        return ranks[unsafe_offset=left_index] < ranks[unsafe_offset=right_index]
+    return left < right
+
+
+def gemini_tool_response_order_sift_down(
+    records: Pointer[mut=False, GeminiToolResponseOrderRecord, _],
+    ranks: Pointer[mut=False, UInt64, _],
+    order: Pointer[mut=True, UInt64, _],
+    root: Int64,
+    end: Int64,
+) -> None:
+    var parent = root
+    while True:
+        var child = parent * 2 + 1
+        if child > end:
+            break
+        if child + 1 <= end and gemini_tool_response_order_less(
+            records,
+            ranks,
+            order[unsafe_offset=child],
+            order[unsafe_offset=child + 1],
+        ):
+            child += 1
+        if not gemini_tool_response_order_less(
+            records,
+            ranks,
+            order[unsafe_offset=parent],
+            order[unsafe_offset=child],
+        ):
+            break
+        var selected = order[unsafe_offset=parent]
+        order[unsafe_offset=parent] = order[unsafe_offset=child]
+        order[unsafe_offset=child] = selected
+        parent = child
+
+
+@export("prodex_provider_constraints_gemini_tool_response_order_v1")
+def prodex_provider_constraints_gemini_tool_response_order_v1(
+    abi_version: Int64,
+    call_ids_address: UInt64,
+    call_count: Int64,
+    records_address: UInt64,
+    part_count: Int64,
+    output_order_address: UInt64,
+    output_ranks_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_TOOL_RESPONSE_ORDER_ABI_VERSION:
+        return ABI_STATUS_MISMATCH
+    if call_count < 0 or part_count < 0:
+        return ABI_STATUS_INVALID_INPUT
+    if call_count > 0 and call_ids_address == 0:
+        return ABI_STATUS_INVALID_INPUT
+    if part_count > 0 and (
+        records_address == 0
+        or output_order_address == 0
+        or output_ranks_address == 0
+    ):
+        return ABI_STATUS_INVALID_INPUT
+
+    var call_ids = Pointer[
+        mut=False, GeminiToolCallStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(call_ids_address))
+    var records = Pointer[
+        mut=False, GeminiToolResponseOrderRecord, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(records_address))
+    for index in range(call_count):
+        if not gemini_tool_call_string_view_valid(call_ids[unsafe_offset=index]):
+            return ABI_STATUS_INVALID_INPUT
+    for index in range(part_count):
+        var record = records[unsafe_offset=index].copy()
+        if (
+            record.response_present < 0
+            or record.response_present > 1
+            or not gemini_tool_call_string_view_valid(record.id)
+            or record.response_present == 0 and record.id.len != 0
+        ):
+            return ABI_STATUS_INVALID_INPUT
+
+    var order = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_order_address)
+    )
+    var ranks = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_ranks_address)
+    )
+    for index in range(part_count):
+        var record = records[unsafe_offset=index].copy()
+        order[unsafe_offset=index] = UInt64(index)
+        ranks[unsafe_offset=index] = 0
+        if record.response_present == 1:
+            ranks[unsafe_offset=index] = UInt64(call_count)
+            for call_index in range(call_count):
+                if gemini_tool_call_string_view_equals(
+                    call_ids[unsafe_offset=call_index], record.id
+                ):
+                    ranks[unsafe_offset=index] = UInt64(call_index)
+                    break
+
+    # With no preceding calls, the Rust repair leaves the original parts untouched.
+    if call_count == 0 or part_count < 2:
+        return 0
+
+    var start = part_count // 2
+    while start > 0:
+        start -= 1
+        gemini_tool_response_order_sift_down(
+            records, ranks, order, start, part_count - 1
+        )
+    var end = part_count
+    while end > 1:
+        end -= 1
+        var selected = order[unsafe_offset=0]
+        order[unsafe_offset=0] = order[unsafe_offset=end]
+        order[unsafe_offset=end] = selected
+        gemini_tool_response_order_sift_down(records, ranks, order, 0, end - 1)
+    return 0
 
 
 @export("prodex_provider_constraints_gemini_tool_call_index_v1")

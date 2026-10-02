@@ -69,6 +69,7 @@ comptime GEMINI_STREAM_SHOULD_EMIT_ARGUMENTS_DELTA: Int64 = 43
 comptime GEMINI_STREAM_RESPONSE_ID: Int64 = 44
 comptime GEMINI_RAW_TEXT_RESPONSE: Int64 = 45
 comptime GEMINI_STREAM_EVENT_TRANSFORM: Int64 = 46
+comptime GEMINI_STREAM_COMPLETED_TOOL_CALL_ITEM: Int64 = 47
 
 
 @fieldwise_init
@@ -319,7 +320,7 @@ def gemini_views_valid(
 ) -> Bool:
     return (
         input.operation >= GEMINI_RESPONSE_CREATED
-        and input.operation <= GEMINI_STREAM_EVENT_TRANSFORM
+        and input.operation <= GEMINI_STREAM_COMPLETED_TOOL_CALL_ITEM
         and input.response_id_present >= 0
         and input.response_id_present <= 1
         and input.call_id_present >= 0
@@ -442,22 +443,47 @@ def gemini_put_reason_result(
 def gemini_put_finish_reason_failure(
     writer: Pointer[mut=True, GeminiResponseWriter, _], reason: ProdexRichStringView
 ) -> Bool:
-    var code = StringSlice("")
-    if gemini_view_equals(reason, StringSlice("MALFORMED_FUNCTION_CALL")):
-        code = StringSlice("gemini_malformed_function_call")
-    elif gemini_view_equals(reason, StringSlice("UNEXPECTED_TOOL_CALL")):
-        code = StringSlice("gemini_unexpected_tool_call")
-    elif gemini_view_equals(reason, StringSlice("OTHER")):
-        code = StringSlice("gemini_finish_other")
-    elif gemini_view_equals(reason, StringSlice("NO_IMAGE")):
-        code = StringSlice("gemini_no_image")
-    elif gemini_view_equals(reason, StringSlice("SAFETY")) or gemini_view_equals(reason, StringSlice("RECITATION")) or gemini_view_equals(reason, StringSlice("LANGUAGE")) or gemini_view_equals(reason, StringSlice("BLOCKLIST")) or gemini_view_equals(reason, StringSlice("PROHIBITED_CONTENT")) or gemini_view_equals(reason, StringSlice("SPII")) or gemini_view_equals(reason, StringSlice("IMAGE_SAFETY")) or gemini_view_equals(reason, StringSlice("IMAGE_PROHIBITED_CONTENT")):
-        code = StringSlice("invalid_prompt")
-    else:
+    var code = gemini_finish_reason_failure_code(reason)
+    if code == 0:
         return gemini_put_literal(writer, StringSlice("null"))
-    return gemini_put_reason_result(
-        writer, code, StringSlice("Gemini ended the stream with finishReason="), reason
+    return (
+        gemini_put_literal(writer, StringSlice('["'))
+        and gemini_put_finish_reason_code(writer, code)
+        and gemini_put_literal(writer, StringSlice('","Gemini ended the stream with finishReason='))
+        and gemini_put_json_escaped(writer, reason)
+        and gemini_put_literal(writer, StringSlice('"]'))
     )
+
+
+def gemini_finish_reason_failure_code(reason: ProdexRichStringView) -> Int64:
+    var code: Int64 = 0
+    if gemini_view_equals(reason, StringSlice("MALFORMED_FUNCTION_CALL")):
+        code = 1
+    elif gemini_view_equals(reason, StringSlice("UNEXPECTED_TOOL_CALL")):
+        code = 2
+    elif gemini_view_equals(reason, StringSlice("OTHER")):
+        code = 3
+    elif gemini_view_equals(reason, StringSlice("NO_IMAGE")):
+        code = 4
+    elif gemini_view_equals(reason, StringSlice("SAFETY")) or gemini_view_equals(reason, StringSlice("RECITATION")) or gemini_view_equals(reason, StringSlice("LANGUAGE")) or gemini_view_equals(reason, StringSlice("BLOCKLIST")) or gemini_view_equals(reason, StringSlice("PROHIBITED_CONTENT")) or gemini_view_equals(reason, StringSlice("SPII")) or gemini_view_equals(reason, StringSlice("IMAGE_SAFETY")) or gemini_view_equals(reason, StringSlice("IMAGE_PROHIBITED_CONTENT")):
+        code = 5
+    return code
+
+
+def gemini_put_finish_reason_code(
+    writer: Pointer[mut=True, GeminiResponseWriter, _], code: Int64
+) -> Bool:
+    if code == 1:
+        return gemini_put_literal(writer, StringSlice("gemini_malformed_function_call"))
+    if code == 2:
+        return gemini_put_literal(writer, StringSlice("gemini_unexpected_tool_call"))
+    if code == 3:
+        return gemini_put_literal(writer, StringSlice("gemini_finish_other"))
+    if code == 4:
+        return gemini_put_literal(writer, StringSlice("gemini_no_image"))
+    if code == 5:
+        return gemini_put_literal(writer, StringSlice("invalid_prompt"))
+    return False
 
 
 def gemini_put_tool_name(
@@ -535,6 +561,26 @@ def gemini_put_custom_tool_item(
     )
 
 
+def gemini_put_stream_completed_tool_call_item(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    # These existing ABI flags are operation-local here: argument JSON validity and blocked status.
+    if input.reason_present == 1:
+        return (
+            gemini_put_literal(writer, StringSlice('{"type":"message","role":"assistant","content":[{"type":"output_text","text":'))
+            and gemini_put_json_string(writer, input.message)
+            and gemini_put_literal(writer, StringSlice("}]}"))
+        )
+    if input.created_at_present == 1 and gemini_view_equals(input.name, StringSlice("tool_search")):
+        return gemini_put_tool_search_item(writer, input)
+    if input.created_at_present == 1 and gemini_view_equals(input.name, StringSlice("apply_patch")):
+        var custom_tool_input = input.copy()
+        custom_tool_input.arguments = input.response.copy()
+        return gemini_put_custom_tool_item(writer, custom_tool_input)
+    return gemini_put_tool_item(writer, input)
+
+
 def gemini_put_buffered_message(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     input: ProdexGeminiResponseKernelInput,
@@ -552,6 +598,86 @@ def gemini_put_buffered_message(
         if not gemini_put_array_items(writer, input.content):
             return False
     return gemini_put_literal(writer, StringSlice("]}"))
+
+
+def gemini_response_has_visible_output(input: ProdexGeminiResponseKernelInput) -> Bool:
+    return (
+        input.delta.len > 0
+        or input.content.len > 2
+        or input.output.len > 2
+        or input.citations.len > 0
+    )
+
+
+def gemini_put_buffered_failure(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    code: StringSlice,
+    prefix: StringSlice,
+    reason: ProdexRichStringView,
+) -> Bool:
+    return (
+        gemini_put_literal(writer, StringSlice(',"status":"failed","error":{"code":"'))
+        and gemini_put_literal(writer, code)
+        and gemini_put_literal(writer, StringSlice('","message":"'))
+        and gemini_put_literal(writer, prefix)
+        and gemini_put_json_escaped(writer, reason)
+        and gemini_put_literal(writer, StringSlice('"}'))
+    )
+
+
+def gemini_put_buffered_finish_reason_failure(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    reason: ProdexRichStringView,
+    code: Int64,
+) -> Bool:
+    return (
+        gemini_put_literal(writer, StringSlice(',"status":"failed","error":{"code":"'))
+        and gemini_put_finish_reason_code(writer, code)
+        and gemini_put_literal(writer, StringSlice('","message":"Gemini ended the stream with finishReason='))
+        and gemini_put_json_escaped(writer, reason)
+        and gemini_put_literal(writer, StringSlice('"}'))
+    )
+
+
+def gemini_put_buffered_status(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+    has_visible_output: Bool,
+) -> Bool:
+    var block_reason_bounds = rich_trim_bounds(input.message)
+    if block_reason_bounds[1] > block_reason_bounds[0]:
+        return gemini_put_buffered_failure(
+            writer,
+            StringSlice("gemini_prompt_blocked"),
+            StringSlice("Gemini blocked the prompt: "),
+            input.message,
+        )
+
+    if gemini_view_equals(input.reason, StringSlice("MAX_TOKENS")):
+        return gemini_put_literal(
+            writer,
+            StringSlice(',"status":"incomplete","incomplete_details":{"reason":"max_output_tokens","message":"Gemini stopped because it reached the maximum output token limit."}'),
+        )
+
+    var finish_reason_bounds = rich_trim_bounds(input.reason)
+    if finish_reason_bounds[1] > finish_reason_bounds[0]:
+        var code = gemini_finish_reason_failure_code(input.reason)
+        if code > 0:
+            return gemini_put_buffered_finish_reason_failure(writer, input.reason, code)
+
+    if has_visible_output:
+        return True
+    if not gemini_put_literal(
+        writer,
+        StringSlice(',"status":"failed","error":{"code":"gemini_empty_response","message":"Gemini returned no visible response content.'),
+    ):
+        return False
+    if finish_reason_bounds[1] > finish_reason_bounds[0]:
+        if not gemini_put_literal(writer, StringSlice(" finishReason=")):
+            return False
+        if not gemini_put_json_escaped(writer, input.reason):
+            return False
+    return gemini_put_literal(writer, StringSlice('"}'))
 
 
 def gemini_put_buffered_response(
@@ -594,6 +720,10 @@ def gemini_put_buffered_response(
         if not gemini_put_literal(writer, StringSlice(',"metadata":')) or not gemini_put_view(writer, input.metadata):
             return False
     elif input.include_empty_metadata == 1 and not gemini_put_literal(writer, StringSlice(',"metadata":{}')):
+        return False
+    if not gemini_put_buffered_status(
+        writer, input, gemini_response_has_visible_output(input)
+    ):
         return False
     return gemini_put_byte(writer, 125)
 
@@ -1551,6 +1681,8 @@ def gemini_write_operation(
         return gemini_put_raw_text_response(writer, input)
     if operation == GEMINI_STREAM_EVENT_TRANSFORM:
         return gemini_put_raw_stream_event_transform(writer, input)
+    if operation == GEMINI_STREAM_COMPLETED_TOOL_CALL_ITEM:
+        return gemini_put_stream_completed_tool_call_item(writer, input)
     return False
 
 

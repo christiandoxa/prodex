@@ -53,6 +53,7 @@ pub enum GeminiResponseKernelOperation {
     StreamResponseId = 44,
     RawTextResponse = 45,
     StreamEventTransform = 46,
+    StreamCompletedToolCallItem = 47,
 }
 
 /// Inputs for one bounded Gemini response or stream JSON shape.
@@ -252,6 +253,7 @@ fn gemini_kernel_operation(operation: GeminiResponseKernelOperation) -> i64 {
         GeminiResponseKernelOperation::StreamResponseId => 44,
         GeminiResponseKernelOperation::RawTextResponse => 45,
         GeminiResponseKernelOperation::StreamEventTransform => 46,
+        GeminiResponseKernelOperation::StreamCompletedToolCallItem => 47,
     }
 }
 
@@ -337,6 +339,10 @@ pub fn gemini_response_kernel(input: GeminiResponseKernelInput<'_>) -> Result<Ve
         prodex_mojo_gemini_response_kernel_v1,
     )
 }
+
+#[cfg(all(test, feature = "mojo-rich"))]
+#[path = "gemini_response_tests.rs"]
+mod tests;
 
 type GeminiKernelEntry = unsafe extern "C" fn(i64, u64, u64, i64, u64) -> i64;
 

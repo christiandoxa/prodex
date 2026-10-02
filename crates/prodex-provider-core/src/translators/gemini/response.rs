@@ -7,7 +7,6 @@ pub(crate) use self::response_media::{
     gemini_text_from_special_part,
 };
 pub(crate) use self::response_metadata::{gemini_response_metadata, gemini_responses_usage};
-use self::response_status::{GeminiResponseStatus, gemini_response_status};
 pub(crate) use self::response_status::{
     gemini_finish_reason, gemini_finish_reason_failure, gemini_finish_reason_incomplete,
     gemini_prompt_feedback_failure,

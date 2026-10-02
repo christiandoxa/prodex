@@ -112,6 +112,9 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/tests/profile_health.rs",
   "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs",
   "crates/prodex-mojo-core/src/provider_constraints.rs",
+  "crates/prodex-mojo-core/src/provider_constraints/gemini_sse_tool_call_index.rs",
+  "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs/order.rs",
+  "mojo/prodex_core/provider_constraints.mojo",
   "crates/prodex-mojo-core/src/websocket_proxy_policy.rs",
   "crates/prodex-mojo-core/src/transport_failure_policy.rs",
   "crates/prodex-runtime-proxy/src/transport_failure.rs",
@@ -763,6 +766,9 @@ const GEMINI_SCHEMA_FILE = "crates/prodex-provider-core/src/translators/gemini/r
 const GEMINI_TOOLS_FILE = "crates/prodex-provider-core/src/translators/gemini/request/tools.rs";
 const GEMINI_STATUS_FILE = "crates/prodex-provider-core/src/translators/gemini/response/status.rs";
 const GEMINI_BUFFERED_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/gemini/response/build.rs";
+const GEMINI_TOOL_RESPONSE_ORDER_FILE = "crates/prodex-provider-core/src/gemini_bridge/hardening/contents/tool_pairs/order.rs";
+const GEMINI_TOOL_RESPONSE_ORDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints/gemini_sse_tool_call_index.rs";
+const GEMINI_TOOL_RESPONSE_ORDER_MOJO_FILE = "mojo/prodex_core/provider_constraints.mojo";
 const RESPONSE_FORWARDING_FILE = "crates/prodex-runtime-proxy/src/response_forwarding.rs";
 const QUOTA_POOL_FILE = "crates/prodex-quota/src/render/pool.rs";
 const STATUS_SUMMARY_FILE = "crates/prodex-app/src/app_commands/status.rs";
@@ -2060,9 +2066,21 @@ export function findViolations(files) {
         !contents.includes("GeminiBridgeRequestOperation::TextContents")) {
       return [`${filePath}: Gemini text contents must use Mojo`];
     }
-    if (filePath === "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs" &&
-        /#\[cfg\(feature = "mojo"\)\]/u.test(contents)) {
-      return [filePath + ": Gemini stream shaping Mojo kernel must be unconditional"];
+    if (filePath === "crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs") {
+      const violations = [];
+      if (/#\[cfg\(feature = "mojo"\)\]/u.test(contents)) {
+        violations.push(filePath + ": Gemini stream shaping Mojo kernel must be unconditional");
+      }
+      const completedItem = contents.match(
+        /\bpub fn gemini_provider_core_stream_completed_tool_call_item\([^]*?^\}/mu,
+      )?.[0] ?? "";
+      if (!completedItem.includes("GeminiResponseKernelOperation::StreamCompletedToolCallItem")) {
+        violations.push(filePath + ": completed stream tool-call selection must use the Gemini Mojo kernel");
+      }
+      if (/GeminiResponseKernelOperation::(?:RawFunctionCallItem|FunctionCallItem|ToolSearchCallItem|CustomToolCallItem|OutputMessageItem)\b/u.test(completedItem)) {
+        violations.push(filePath + ": contains replaced Rust completed tool-call shaping branches");
+      }
+      return violations;
     }
     if (filePath === GEMINI_BRIDGE_ROOT_FILE &&
         /#\[cfg\(feature = "mojo"\)\]\s*pub\(crate\) use self::request::\{/u.test(contents)) {
@@ -2100,6 +2118,33 @@ export function findViolations(files) {
          filePath === GEMINI_TRANSLATOR_GENERATION_CONFIG_FILE) &&
         /(?:gemini_validate_candidate_count|gemini_request_body_without_tool)/u.test(contents)) {
       return [`${filePath}: contains a deleted Gemini feature-off fallback adapter`];
+    }
+    return [];
+  });
+  const geminiToolResponseOrderViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === GEMINI_TOOL_RESPONSE_ORDER_FILE) {
+      const body = contents.match(
+        /\bfn\s+gemini_provider_core_refine_tool_response_order\([^]*?^\}/mu,
+      )?.[0] ?? "";
+      const violations = [];
+      if (!body.includes("gemini_tool_response_part_order(")) {
+        violations.push(`${filePath}: Gemini tool-response ordering must use Mojo`);
+      }
+      if (/\.sort(?:_by_key|_unstable_by_key|_unstable)?\s*\(|\.position\s*\(/u.test(body)) {
+        violations.push(`${filePath}: contains restored Rust Gemini tool-response ordering policy`);
+      }
+      if (FEATURE_OFF_RUST_PATH.test(body)) {
+        violations.push(`${filePath}: Gemini tool-response ordering has a feature-off Rust path`);
+      }
+      return violations;
+    }
+    if (filePath === GEMINI_TOOL_RESPONSE_ORDER_ADAPTER_FILE &&
+        !contents.includes("prodex_provider_constraints_gemini_tool_response_order_v1(")) {
+      return [`${filePath}: Gemini tool-response adapter must retain the Mojo ABI call`];
+    }
+    if (filePath === GEMINI_TOOL_RESPONSE_ORDER_MOJO_FILE &&
+        !contents.includes("prodex_provider_constraints_gemini_tool_response_order_v1(")) {
+      return [`${filePath}: Gemini tool-response ordering must be implemented in Mojo`];
     }
     return [];
   });
@@ -3557,6 +3602,7 @@ export function findViolations(files) {
     ...anthropicWebSearchViolations, ...superProviderConfigViolations, ...externalProviderCatalogViolations, ...subAgentPolicyViolations, ...runtimeOverlayPolicyViolations, ...cliRuntimeFeatureViolations,
     ...superExposeProtocolViolations, ...superExposeViolations,
     ...geminiFallbackViolations, ...geminiGenerationViolations, ...geminiTranslatorHardReplacementViolations, ...geminiBridgeFallbackViolations,
+    ...geminiToolResponseOrderViolations,
     ...hardReplacementViolations, ...precommitBudgetOracleViolations,
     ...deepseekRequestViolations, ...deepseekRequestRejectViolations,
     ...deepseekReasoningViolations,
@@ -4108,8 +4154,20 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
     '#[cfg(feature = "mojo")] fn gated_shape() {}']]).join("\n"),
     /stream shaping Mojo kernel must be unconditional/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+    "pub fn gemini_provider_core_stream_completed_tool_call_item() {\n  GeminiResponseKernelOperation::ToolSearchCallItem\n}"]]).join("\n"),
+  /replaced Rust completed tool-call shaping branches/u);
   assert.match(findViolations([[GEMINI_GENERATION_CONFIG_FILE,
     "fn gemini_generation_config_from_request() {}"]])[0], /duplicate Gemini generation-config adapter/u);
+  assert.match(findViolations([[GEMINI_TOOL_RESPONSE_ORDER_FILE,
+    "fn gemini_provider_core_refine_tool_response_order() {\n  response_parts.sort_by_key(rank);\n}"]]).join("\n"),
+  /Gemini tool-response ordering must use Mojo|restored Rust Gemini tool-response ordering policy/u);
+  assert.deepEqual(findViolations([[GEMINI_TOOL_RESPONSE_ORDER_FILE,
+    "fn gemini_provider_core_refine_tool_response_order() {\n  gemini_tool_response_part_order(ids, parts);\n}"]]), []);
+  assert.match(findViolations([[GEMINI_TOOL_RESPONSE_ORDER_ADAPTER_FILE,
+    "fn gemini_tool_response_part_order() {}"]]).join("\n"), /must retain the Mojo ABI call/u);
+  assert.match(findViolations([[GEMINI_TOOL_RESPONSE_ORDER_MOJO_FILE,
+    "fn unrelated_gemini_policy() {}"]]).join("\n"), /must be implemented in Mojo/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/request/optional_fields.rs",
     "fn gemini_apply_optional_request_fields() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([[ANTHROPIC_MESSAGES_FILE,
