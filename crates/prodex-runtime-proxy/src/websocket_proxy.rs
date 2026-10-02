@@ -1,5 +1,5 @@
 use base64::Engine;
-use prodex_mojo_core::rich::{ascii_casefold_ends_with, ascii_casefold_equal_exact};
+use prodex_mojo_core::websocket_proxy_policy as mojo_websocket_proxy;
 use std::collections::VecDeque;
 use std::io::{self, Read};
 use std::net::SocketAddr;
@@ -62,9 +62,9 @@ pub fn runtime_websocket_target_from_parts(
     scheme: Option<&str>,
 ) -> RuntimeWebsocketTarget {
     let host = runtime_websocket_normalize_host(host);
-    let port = port.unwrap_or(match scheme {
-        Some("wss") | Some("https") => 443,
-        _ => 80,
+    let port = port.unwrap_or_else(|| {
+        mojo_websocket_proxy::default_port(scheme)
+            .expect("Mojo websocket proxy default-port policy returned invalid output")
     });
     let authority = runtime_websocket_authority(&host, port);
     RuntimeWebsocketTarget {
@@ -84,21 +84,13 @@ pub(crate) fn runtime_websocket_proxy_env_keys(scheme: &str) -> &'static [&'stat
 }
 
 pub fn runtime_websocket_proxy_url_candidate(value: &str) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed.contains("://") {
-        Some(trimmed.to_string())
-    } else {
-        Some(format!("http://{trimmed}"))
-    }
+    mojo_websocket_proxy::proxy_url_candidate(value)
+        .expect("Mojo websocket proxy URL policy returned invalid output")
 }
 
 pub fn runtime_websocket_no_proxy_value_matches(value: &str, host: &str, port: u16) -> bool {
-    value
-        .split(',')
-        .any(|pattern| runtime_websocket_no_proxy_pattern_matches(pattern, host, port))
+    mojo_websocket_proxy::value_matches(value, host, port)
+        .expect("Mojo websocket NO_PROXY value policy returned invalid output")
 }
 
 pub fn runtime_websocket_http_connect_request(
@@ -179,53 +171,24 @@ pub fn runtime_websocket_read_http_connect_response(
 }
 
 pub fn runtime_websocket_no_proxy_pattern_matches(pattern: &str, host: &str, port: u16) -> bool {
-    let pattern = pattern.trim();
-    if pattern.is_empty() {
-        return false;
-    }
-    if pattern == "*" {
-        return true;
-    }
-    let (pattern_host, pattern_port) = runtime_websocket_no_proxy_pattern_host_port(pattern);
-    if pattern_port.is_some_and(|candidate_port| candidate_port != port) {
-        return false;
-    }
-    let pattern_host = runtime_websocket_normalize_host(pattern_host);
-    let host = runtime_websocket_normalize_host(host);
-    let pattern_host = pattern_host.trim_start_matches('.');
-    ascii_casefold_equal_exact(&host, pattern_host).expect("Mojo no-proxy host comparison failed")
-        || ascii_casefold_ends_with(&host, &format!(".{pattern_host}"))
-            .expect("Mojo no-proxy suffix comparison failed")
+    mojo_websocket_proxy::pattern_matches(pattern, host, port)
+        .expect("Mojo websocket NO_PROXY pattern policy returned invalid output")
 }
 
 pub fn runtime_websocket_no_proxy_pattern_host_port(pattern: &str) -> (&str, Option<u16>) {
-    if let Some(stripped) = pattern.strip_prefix('[')
-        && let Some((host, rest)) = stripped.split_once(']')
-    {
-        let port = rest
-            .strip_prefix(':')
-            .and_then(|value| value.parse::<u16>().ok());
-        return (host, port);
-    }
-    if pattern.matches(':').count() == 1
-        && let Some((host, port)) = pattern.rsplit_once(':')
-        && let Ok(port) = port.parse::<u16>()
-    {
-        return (host, Some(port));
-    }
-    (pattern, None)
+    let plan = mojo_websocket_proxy::pattern_host_port(pattern)
+        .expect("Mojo websocket NO_PROXY host/port parser returned invalid output");
+    (&pattern[plan.host_start..plan.host_end], plan.port)
 }
 
 pub fn runtime_websocket_normalize_host(host: &str) -> String {
-    host.trim_matches(|ch| ch == '[' || ch == ']').to_string()
+    mojo_websocket_proxy::normalize_host(host)
+        .expect("Mojo websocket host normalization returned invalid output")
 }
 
 pub fn runtime_websocket_authority(host: &str, port: u16) -> String {
-    if host.contains(':') {
-        format!("[{host}]:{port}")
-    } else {
-        format!("{host}:{port}")
-    }
+    mojo_websocket_proxy::authority(host, port)
+        .expect("Mojo websocket authority rendering returned invalid output")
 }
 
 #[cfg(test)]
