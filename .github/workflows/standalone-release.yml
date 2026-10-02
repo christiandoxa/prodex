@@ -133,6 +133,7 @@ jobs:
 
       - name: Verify optional-tool freshness at release cut
         env:
+          GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: ${{ steps.target.outputs.target_sha }}
         shell: bash
         run: |

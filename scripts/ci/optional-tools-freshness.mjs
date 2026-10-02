@@ -175,16 +175,22 @@ export async function fetchJson(
   {
     fetchImpl = fetch,
     delay = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    githubToken = process.env.GH_TOKEN ?? process.env.GITHUB_TOKEN ?? null,
   } = {},
 ) {
+  const requestUrl = new URL(url);
+  const headers = {
+    accept: "application/json",
+    "user-agent": "prodex-optional-tools-freshness",
+  };
+  if (githubToken && requestUrl.hostname === "api.github.com") {
+    headers.authorization = `Bearer ${githubToken}`;
+  }
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     let response;
     try {
       response = await fetchImpl(url, {
-        headers: {
-          accept: "application/json",
-          "user-agent": "prodex-optional-tools-freshness",
-        },
+        headers,
         signal: AbortSignal.timeout(10_000),
       });
     } catch (error) {
