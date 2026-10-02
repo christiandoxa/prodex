@@ -89,11 +89,12 @@ pub(crate) fn handle_super_runtime_tools_dry_run(
         ));
     }
     extra_report.push_str("\nDry run: optional overlays and services are not started.\n");
-    if let Some(sub_agent) = sub_agent {
-        extra_report.push_str(&render_sub_agent_dry_run_report(sub_agent));
+    let sub_agent_report = if let Some(sub_agent) = sub_agent {
+        render_sub_agent_dry_run_report(sub_agent)?
     } else {
-        extra_report.push_str(&render_sub_agent_disabled_dry_run_report(presidio_enabled));
-    }
+        render_sub_agent_disabled_dry_run_report(presidio_enabled)?
+    };
+    extra_report.push_str(&sub_agent_report);
     print_runtime_launch_dry_run(
         "optional-tools",
         request,

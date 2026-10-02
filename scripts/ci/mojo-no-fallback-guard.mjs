@@ -25,8 +25,10 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/super_expose/protocol/dispatch.rs",
   "crates/prodex-app/src/app_commands/log_transcript.rs",
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
+  "crates/prodex-mojo-core/src/sub_agent_policy/rendering.rs",
   "crates/prodex-cli/src/sub_agent.rs",
   "crates/prodex-app/src/runtime_tools/sub_agents.rs",
+  "crates/prodex-app/src/runtime_tools/sub_agent_rendering.rs",
   "crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs",
   "crates/prodex-mojo-core/src/runtime_overlay_policy.rs",
   "crates/prodex-app/src/runtime_tools/overlay.rs",
@@ -734,7 +736,9 @@ const SUPER_PROVIDER_CONFIG_ADAPTER_FILE = "crates/prodex-mojo-core/src/super_pr
 const EXTERNAL_PROVIDER_CONFIG_FILE = "crates/prodex-app/src/runtime_external_provider_config.rs";
 const SUB_AGENT_POLICY_FILE = "crates/prodex-cli/src/sub_agent.rs";
 const SUB_AGENT_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy.rs";
+const SUB_AGENT_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy/rendering.rs";
 const SUB_AGENT_CHILD_FILE = "crates/prodex-app/src/runtime_tools/sub_agents.rs";
+const SUB_AGENT_RENDERING_FILE = "crates/prodex-app/src/runtime_tools/sub_agent_rendering.rs";
 const RUNTIME_OVERLAY_POLICY_FILE = "crates/prodex-app/src/runtime_tools/overlay.rs";
 const RUNTIME_OVERLAY_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_overlay_policy.rs";
 const CLI_RUNTIME_FEATURE_FILE = "crates/prodex-cli/src/runtime_features.rs";
@@ -1857,6 +1861,39 @@ export function findViolations(files) {
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": sub-agent policy adapter must retain Mojo ABI call " + call);
+    }
+    if (filePath === SUB_AGENT_RENDER_ADAPTER_FILE) {
+      const required = [
+        "const RENDER_ABI_VERSION: i64 = 1;",
+        "prodex_sub_agent_render_v1(",
+        "fn sub_agent_render_v1_has_exact_output_and_checked_edges()",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": sub-agent render adapter must retain versioned Mojo ABI contract " + marker);
+    }
+    if (filePath === SUB_AGENT_RENDERING_FILE) {
+      const production = contents.split("#[cfg(test)]\nmod tests", 1)[0];
+      const required = [
+        "prodex_mojo_core::sub_agent_policy::render_overlay(",
+        "prodex_mojo_core::sub_agent_policy::render_enabled_dry_run_report(",
+        "prodex_mojo_core::sub_agent_policy::render_disabled_dry_run_report(",
+      ];
+      const violations = required
+        .filter((call) => !production.includes(call))
+        .map((call) => filePath + ": sub-agent text output must use Mojo renderer " + call);
+      for (const retired of [
+        "SUB_AGENT_RULES:",
+        "Act as lead and sole integrator:",
+        "Each delegated task must request a concise structured result:",
+        "Sub-agent concurrency enforcement: cross-process exclusive slot leases",
+      ]) {
+        if (production.includes(retired)) {
+          violations.push(filePath + ": contains a replaced Rust sub-agent text template");
+          break;
+        }
+      }
+      return violations;
     }
     if (filePath === SUB_AGENT_CHILD_FILE) {
       const violations = [];
@@ -3707,6 +3744,21 @@ function selfTest() {
     /Rust fallback or oracle/u);
   assert.match(findViolations([["crates/prodex-context/src/critical_signal/rust_oracle.rs",
     "fn count_critical_signals() {}"]])[0], /Rust fallback or oracle/u);
+  const subAgentRendering = (contents) => findViolations([[SUB_AGENT_RENDERING_FILE, contents]]);
+  assert.deepEqual(subAgentRendering(`
+    prodex_mojo_core::sub_agent_policy::render_overlay(&input);
+    prodex_mojo_core::sub_agent_policy::render_enabled_dry_run_report(&input);
+    prodex_mojo_core::sub_agent_policy::render_disabled_dry_run_report(false);
+  `), []);
+  assert.match(subAgentRendering("fn render_sub_agent_overlay() { SUB_AGENT_RULES: [] } ").join("\n"),
+    /replaced Rust sub-agent text template/u);
+  assert.match(subAgentRendering("fn render_sub_agent_overlay() {}\nfn render_report() {} ").join("\n"),
+    /must use Mojo renderer/u);
+  assert.deepEqual(findViolations([[SUB_AGENT_RENDER_ADAPTER_FILE,
+    "const RENDER_ABI_VERSION: i64 = 1; prodex_sub_agent_render_v1(); fn sub_agent_render_v1_has_exact_output_and_checked_edges() {}"]]), []);
+  assert.match(findViolations([[SUB_AGENT_RENDER_ADAPTER_FILE,
+    "const RENDER_ABI_VERSION: i64 = 1; fn render_template_rust() {}"]]).join("\n"),
+    /must retain versioned Mojo ABI contract/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/token_accounting/pressure.rs",
     "fn smart_context_pressure_snapshot_rust() {}"]])[0], /Rust fallback or oracle/u);
   assert.match(findViolations([[SMART_CONTEXT_CORE_FILE,
