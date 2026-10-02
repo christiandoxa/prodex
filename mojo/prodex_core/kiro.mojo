@@ -81,6 +81,7 @@ comptime KIRO_REQUEST_VALIDATION_ERROR: Int64 = 48
 comptime KIRO_ANTHROPIC_REQUEST_REWRITE: Int64 = 49
 comptime KIRO_RESPONSE_HAS_TOOL_CALLS: Int64 = 50
 comptime KIRO_RAW_RESPONSES_ITEMS_FROM_CHAT_MESSAGE: Int64 = 51
+comptime KIRO_RESPONSE_FINAL_EVENT: Int64 = 52
 
 comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
 comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
@@ -1651,9 +1652,13 @@ def kiro_write_operation(
             if not kiro_put_literal(writer, StringSlice(',"response_id":')) or not kiro_put_json_string(writer, input.response_id):
                 return False
         return kiro_put_byte(writer, 125)
-    if operation == KIRO_RESPONSE_COMPLETED_EVENT or operation == KIRO_RESPONSE_FAILED_EVENT or operation == KIRO_RESPONSE_INCOMPLETE_EVENT:
+    if operation == KIRO_RESPONSE_COMPLETED_EVENT or operation == KIRO_RESPONSE_FAILED_EVENT or operation == KIRO_RESPONSE_INCOMPLETE_EVENT or operation == KIRO_RESPONSE_FINAL_EVENT:
         var event_type = StringSlice("response.completed")
-        if operation == KIRO_RESPONSE_FAILED_EVENT:
+        if operation == KIRO_RESPONSE_FINAL_EVENT and input.status_present == 1 and rich_view_matches_literal["failed"](input.status, False):
+            event_type = StringSlice("response.failed")
+        elif operation == KIRO_RESPONSE_FINAL_EVENT and input.status_present == 1 and rich_view_matches_literal["incomplete"](input.status, False):
+            event_type = StringSlice("response.incomplete")
+        elif operation == KIRO_RESPONSE_FAILED_EVENT:
             event_type = StringSlice("response.failed")
         elif operation == KIRO_RESPONSE_INCOMPLETE_EVENT:
             event_type = StringSlice("response.incomplete")

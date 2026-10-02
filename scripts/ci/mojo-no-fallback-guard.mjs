@@ -328,6 +328,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/kiro/stream.rs",
   "crates/prodex-provider-core/src/translators/kiro/response.rs",
   "crates/prodex-provider-core/src/translators/kiro/acp.rs",
+  "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/stream.rs",
   "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
 ];
 
@@ -775,6 +776,8 @@ const DEEPSEEK_REASONING_FILE = "crates/prodex-provider-core/src/deepseek_bridge
 const DEEPSEEK_METADATA_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs";
 const DEEPSEEK_SIMPLE_REQUEST_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs";
 const KIRO_CHAT_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/kiro/response.rs";
+const KIRO_STREAM_FILE = "crates/prodex-provider-core/src/translators/kiro/stream.rs";
+const KIRO_FINAL_STREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/stream.rs";
 const KIRO_ACP_FILE = "crates/prodex-provider-core/src/translators/kiro/acp.rs";
 const KIRO_ACP_OPERATIONS = [
   "KiroKernelOperation::AcpInitializeRequest",
@@ -1242,6 +1245,31 @@ export function findViolations(files) {
       !FEATURE_OFF_RUST_PATH.test(mapper) &&
       !/response\.(?:get|pointer)\s*\(|output\.(?:iter|get)\s*\(|json!\s*\(|kiro_provider_core_chat_completion_finish_reason\s*\(/u.test(mapper)
       ? [] : [`${filePath}: Kiro chat response mapping must use Mojo without a Rust copy`];
+  });
+  const kiroFinalStreamViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== KIRO_FINAL_STREAM_FILE) return [];
+    const start = contents.indexOf("pub(super) fn runtime_kiro_send_final_stream");
+    if (start < 0) return [`${filePath}: Kiro terminal stream path must use Mojo final event plan`];
+    const end = contents.indexOf("\n}\n", start);
+    const functionBody = contents.slice(start, end < 0 ? undefined : end);
+    const violations = [];
+    if (!functionBody.includes("kiro_provider_core_response_final_event(")) {
+      violations.push(`${filePath}: Kiro terminal stream path must use Mojo final event plan`);
+    }
+    if (/response\s*\.\s*get\(\s*"status"\s*\)/u.test(functionBody)) {
+      violations.push(`${filePath}: contains restored Rust Kiro terminal status selection`);
+    }
+    return violations;
+  });
+  const kiroStreamPlanViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== KIRO_STREAM_FILE) return [];
+    const start = contents.indexOf("pub fn kiro_provider_core_response_final_event(");
+    if (start < 0) return [`${filePath}: Kiro final event helper must use Mojo final event plan`];
+    const end = contents.indexOf("\n}\n", start);
+    const helper = contents.slice(start, end < 0 ? undefined : end);
+    return helper.includes("KiroKernelOperation::ResponseFinalEvent") &&
+      helper.includes("kiro_mojo_value(input)")
+      ? [] : [`${filePath}: Kiro final event helper must use Mojo final event plan`];
   });
   const kiroResponseHelperViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== KIRO_CHAT_RESPONSE_FILE) return [];
@@ -3479,6 +3507,8 @@ export function findViolations(files) {
     ...deepseekSimpleRequestViolations,
     ...deepseekMetadataViolations,
     ...kiroChatResponseViolations,
+    ...kiroFinalStreamViolations,
+    ...kiroStreamPlanViolations,
     ...kiroResponseHelperViolations,
     ...kiroAcpViolations,
     ...deepseekStrictSchemaViolations,
@@ -3663,6 +3693,32 @@ function selfTest() {
     }
     pub fn kiro_provider_core_apply_response_runtime_metadata() {}
   `)[0], /Kiro chat response mapping must use Mojo/u);
+  const kiroFinalStreamViolations = (contents) => findViolations([[KIRO_FINAL_STREAM_FILE, contents]]);
+  assert.deepEqual(kiroFinalStreamViolations(`
+    pub(super) fn runtime_kiro_send_final_stream() {
+      prodex_provider_core::kiro_provider_core_response_final_event();
+    }
+  `), []);
+  assert.match(kiroFinalStreamViolations(`
+    pub(super) fn runtime_kiro_send_final_stream() {
+      match response.get("status").and_then(Value::as_str) { _ => () }
+    }
+  `).join("\n"), /restored Rust Kiro terminal status selection/u);
+  assert.match(kiroFinalStreamViolations(`
+    pub(super) fn runtime_kiro_send_final_stream() {}
+  `).join("\n"), /must use Mojo final event plan/u);
+  const kiroStreamPlanViolations = (contents) => findViolations([[KIRO_STREAM_FILE, contents]]);
+  assert.deepEqual(kiroStreamPlanViolations(`
+    pub fn kiro_provider_core_response_final_event() {
+      let operation = KiroKernelOperation::ResponseFinalEvent;
+      kiro_mojo_value(input)
+    }
+  `), []);
+  assert.match(kiroStreamPlanViolations(`
+    pub fn kiro_provider_core_response_final_event() {
+      if status == "failed" { rust_event() }
+    }
+  `).join("\n"), /must use Mojo final event plan/u);
   assert.match(findViolations([[DEEPSEEK_STRICT_TOOLS_FILE, "fn strict_schema() {}"]]).join("\n"),
     /strict schema normalization must use Mojo/u);
   assert.match(findViolations([[DEEPSEEK_STRICT_SCHEMA_FILE,

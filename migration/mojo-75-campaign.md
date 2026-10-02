@@ -4623,3 +4623,14 @@ The size guard still reports existing files from the checkpoint base:
 `prodex-runtime-proxy/tests/src/error_policy.rs` (864 lines), and 33 near-limit
 production files against the budget of 32. This checkpoint does not relax that
 guard.
+
+## Kiro streaming final-event selection hard replacement
+
+The final Kiro Responses event type now comes from the existing Kiro Mojo
+kernel. Rust retains response serialization and SSE framing, then sends the
+Mojo-selected event unchanged. The old Rust status match was removed.
+
+Validation passes: the strict real-Mojo final-event ABI test, the Kiro app
+stream status caller test, all 367 `prodex-provider-core` tests, workspace
+Clippy with warnings denied, `cargo fmt --check`, and the Mojo authority and
+no-fallback guards. The broad 75% campaign objective remains in progress.
