@@ -7,7 +7,6 @@ use std::collections::BTreeMap;
 use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
 
 mod function_tools;
-mod strict_schema;
 mod tool_choice;
 mod tool_shape;
 mod web_search;
@@ -19,7 +18,6 @@ pub use self::function_tools::{
     deepseek_provider_core_validate_function_name_with_max_bytes,
     deepseek_provider_core_validate_function_parameters,
 };
-use self::strict_schema::deepseek_provider_core_validate_strict_schema;
 pub use self::tool_choice::{
     deepseek_provider_core_validate_tool_choice_name,
     deepseek_provider_core_validate_tool_choice_name_with_max_bytes,
@@ -50,7 +48,6 @@ pub fn deepseek_provider_core_apply_strict_function_schema(
     let parameters = function
         .entry("parameters".to_string())
         .or_insert_with(|| serde_json::json!({"type": "object"}));
-    deepseek_provider_core_validate_strict_schema(parameters, &name, provider_label)?;
     let schema = serde_json::to_string(parameters).map_err(|error| {
         format!("{provider_label} strict tool schema serialization failed: {error}")
     })?;

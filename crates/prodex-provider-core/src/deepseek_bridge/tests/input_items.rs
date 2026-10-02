@@ -150,3 +150,90 @@ fn deepseek_provider_core_rejects_malformed_mojo_input_item_json() {
 
     assert!(prodex_mojo_core::rich::deepseek_kernel(input).is_err());
 }
+
+#[test]
+fn deepseek_mojo_plans_history_key_and_matches_stored_tool_calls() {
+    for (items, expected) in [
+        (
+            serde_json::json!([
+                7,
+                {"type": "message", "call_id": "not-a-key"},
+                {
+                    "type": "function_call_output",
+                    "call_id": null,
+                    "tool_call_id": "call_1"
+                }
+            ]),
+            Some("call_1".to_string()),
+        ),
+        (
+            serde_json::json!([
+                {"type": "function_call_output"},
+                {"type": "function_call_output", "call_id": "later"}
+            ]),
+            Some("later".to_string()),
+        ),
+        (
+            serde_json::json!([
+                {"type": "function_call_output", "call_id": "  ", "id": "ignored"},
+                {"type": "function_call_output", "call_id": "later"}
+            ]),
+            None,
+        ),
+        (
+            serde_json::json!([{"type": "mcp_tool_result", "id": "call_mcp"}]),
+            Some("call_mcp".to_string()),
+        ),
+        (
+            serde_json::json!({"type": "function_call_output", "call_id": "not-array"}),
+            None,
+        ),
+    ] {
+        let input_json = serde_json::to_string(&items).unwrap();
+        let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+            prodex_mojo_core::rich::DeepSeekKernelOperation::ResponsesHistoryCallId,
+        );
+        input.input = Some(&input_json);
+        let output = prodex_mojo_core::rich::deepseek_kernel(input).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Option<String>>(&output).unwrap(),
+            expected
+        );
+    }
+
+    let call_id_json = serde_json::to_string("call-🔥").unwrap();
+    for (history, expected) in [
+        (
+            serde_json::json!([{"tool_calls": [{"id": "call-🔥"}]}]),
+            true,
+        ),
+        (
+            serde_json::json!([{"tool_calls": [{"id": "different"}]}]),
+            false,
+        ),
+        (
+            serde_json::json!([{"role": "tool", "tool_call_id": "call-🔥"}]),
+            false,
+        ),
+        (
+            serde_json::json!([
+                {"tool_calls": [{"id": "different"}]},
+                {"tool_calls": [{"id": "call-🔥"}]}
+            ]),
+            true,
+        ),
+        (
+            serde_json::json!({"tool_calls": [{"id": "call-🔥"}]}),
+            false,
+        ),
+    ] {
+        let history_json = serde_json::to_string(&history).unwrap();
+        let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+            prodex_mojo_core::rich::DeepSeekKernelOperation::ResponsesHistoryContainsCallId,
+        );
+        input.call_id = Some(&call_id_json);
+        input.messages = Some(&history_json);
+        let output = prodex_mojo_core::rich::deepseek_kernel(input).unwrap();
+        assert_eq!(serde_json::from_slice::<bool>(&output).unwrap(), expected);
+    }
+}

@@ -225,21 +225,7 @@ pub fn deepseek_provider_core_stream_choice_metadata(
 pub fn deepseek_provider_core_stream_choice_delta(
     choice: &Value,
 ) -> DeepSeekProviderCoreStreamChoiceDelta {
-    let mut projected: DeepSeekProviderCoreStreamChoiceDelta =
-        deepseek_provider_core_stream_projection(
-            DeepSeekKernelOperation::StreamChoiceDelta,
-            choice,
-        );
-    for text in [
-        &mut projected.reasoning_content,
-        &mut projected.refusal,
-        &mut projected.content,
-    ] {
-        if text.as_deref() == Some("") {
-            *text = None;
-        }
-    }
-    projected
+    deepseek_provider_core_stream_projection(DeepSeekKernelOperation::StreamChoiceDelta, choice)
 }
 
 pub fn deepseek_provider_core_stream_response_metadata(

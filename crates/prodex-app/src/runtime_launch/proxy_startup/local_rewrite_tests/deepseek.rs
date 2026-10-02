@@ -4,7 +4,7 @@ use super::super::deepseek_rewrite::{
 };
 use std::io::{Cursor, Read};
 
-fn deepseek_conversation_store() -> RuntimeDeepSeekConversationStore {
+pub(super) fn deepseek_conversation_store() -> RuntimeDeepSeekConversationStore {
     RuntimeDeepSeekConversationStore::default()
 }
 
@@ -386,7 +386,11 @@ fn deepseek_strict_tools_rejects_unsupported_schema_keywords() {
     )
     .expect_err("unsupported strict schema keyword should fail");
 
-    assert!(error.to_string().contains("unsupported keyword `pattern`"));
+    assert!(
+        error
+            .to_string()
+            .contains("strict tool schema `lookup` could not be normalized")
+    );
 }
 
 #[test]

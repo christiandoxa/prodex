@@ -1965,7 +1965,7 @@
       "name": "deepseek_strict_schema_normalization",
       "domain": "provider/deepseek",
       "introduced_in": "0.432.1",
-      "baseline_state": "feature-off Rust schema sanitizer",
+      "baseline_state": "feature-off Rust strict-schema validation with Mojo normalization",
       "final_state": "authoritative",
       "mojo_entry": "prodex_mojo_deepseek_kernel_v2",
       "mojo_abi_version": 6,
@@ -1979,13 +1979,13 @@
         "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/deepseek_bridge/request_tools.rs",
-      "rust_owner_before": "Feature-off Rust recursive strict-schema sanitizer",
+      "rust_owner_before": "Feature-off Rust recursive strict-schema validator and Mojo-backed normalization",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "Deleted; caller tests use fixed nested schema expectations",
+      "rust_test_oracle": "Deleted after direct Mojo acceptance cases; provider and app tests retain fixed normalization and error-mapping expectations",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Caller-owned validation messages, Serde serialization, and typed Mojo ABI result mapping"
+      "rust_adapter_scope": "Provider-facing error mapping, Serde JSON serialization/materialization, and typed Mojo ABI result mapping"
     },
     {
       "name": "anthropic_web_search_result_shaping",

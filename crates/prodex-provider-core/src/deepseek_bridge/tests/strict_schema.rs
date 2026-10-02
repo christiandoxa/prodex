@@ -45,7 +45,7 @@ fn normalizes_nested_any_of_and_array_schemas() {
 }
 
 #[test]
-fn preserves_nested_validation_error_path() {
+fn maps_mojo_validation_failure_to_provider_message() {
     let mut tool = json!({
         "function": {
             "name": "lookup",
@@ -54,6 +54,6 @@ fn preserves_nested_validation_error_path() {
     });
     assert_eq!(
         deepseek_provider_core_apply_strict_function_schema(&mut tool, "DeepSeek").unwrap_err(),
-        "DeepSeek strict tool schema `lookup.items` uses unsupported keyword `pattern`"
+        "DeepSeek strict tool schema `lookup` could not be normalized"
     );
 }

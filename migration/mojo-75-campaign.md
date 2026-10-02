@@ -4645,3 +4645,16 @@ Validation passes: 3 direct real-Mojo tests, all 55 `prodex-session-store`
 tests, the affected Clippy run with warnings denied, formatting, documentation,
 and Mojo authority/no-fallback guards. The project target is still measured by
 the canonical production-share check.
+
+## DeepSeek schema, history, and stream hard replacements
+
+Strict function-schema acceptance now runs in Mojo before the existing schema
+normalizer, and the Rust validator was removed. Mojo ABI v3 also selects the
+first eligible history call ID and checks stored tool-call history without a
+Rust scan. Empty DeepSeek text, refusal, and reasoning deltas are filtered in
+the existing Mojo stream transform; Rust no longer repeats that decision.
+
+Validation passes: direct real-Mojo schema and stream tests, all 368
+`prodex-provider-core` tests, 103 app request-translation tests, the app SSE
+regression, workspace Clippy, formatting, Mojo ownership and no-fallback
+guards, and `git diff --check`. The 75% project target remains unmet.

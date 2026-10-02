@@ -110,6 +110,53 @@ fn deepseek_sse_reader_stores_reasoning_content_for_tool_call_replay() {
 }
 
 #[test]
+fn deepseek_sse_reader_omits_empty_choice_text_and_preserves_whitespace() {
+    let stream = concat!(
+        "data: {\"id\":\"chatcmpl_empty_delta\",\"choices\":[{\"delta\":{\"reasoning_content\":\"\",\"refusal\":\"\",\"content\":\"\"}}]}\n\n",
+        "data: {\"id\":\"chatcmpl_empty_delta\",\"choices\":[{\"delta\":{\"reasoning_content\":\" \",\"refusal\":\" \",\"content\":\" \"}}]}\n\n",
+        "data: [DONE]\n\n",
+    );
+    let mut reader = RuntimeDeepSeekChatSseReader::new(
+        std::io::Cursor::new(stream.as_bytes()),
+        7,
+        Vec::new(),
+        None,
+        conversation_store(),
+    );
+    let mut output = String::new();
+    reader.read_to_string(&mut output).unwrap();
+
+    let values = sse_values(&output);
+    let text_deltas = values
+        .iter()
+        .filter(|value| value["type"] == "response.output_text.delta")
+        .collect::<Vec<_>>();
+    assert_eq!(text_deltas.len(), 1);
+    assert_eq!(text_deltas[0]["delta"], " ");
+    let reasoning_deltas = values
+        .iter()
+        .filter(|value| value["type"] == "response.reasoning_summary_text.delta")
+        .collect::<Vec<_>>();
+    assert_eq!(reasoning_deltas.len(), 1);
+    assert_eq!(reasoning_deltas[0]["delta"], " ");
+    assert_eq!(
+        output
+            .matches("event: response.output_text.delta\r\n")
+            .count(),
+        1
+    );
+    let created_at = values
+        .iter()
+        .find(|value| value["type"] == "response.created")
+        .and_then(|value| value["created_at"].as_u64())
+        .expect("response.created carries the stream timestamp");
+    let exact_text_delta = format!(
+        "event: response.output_text.delta\r\ndata: {{\"created_at\":{created_at},\"delta\":\" \",\"response_id\":\"chatcmpl_empty_delta\",\"sequence_number\":4,\"type\":\"response.output_text.delta\"}}\r\n\r\n"
+    );
+    assert!(output.contains(&exact_text_delta), "{output}");
+}
+
+#[test]
 fn deepseek_sse_state_stores_tool_call_snapshot_before_done_event() {
     let conversations = conversation_store();
     let mut state = RuntimeDeepSeekSseState::new(
