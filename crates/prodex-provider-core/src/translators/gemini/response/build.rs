@@ -2,7 +2,6 @@
 
 use serde_json::{Value, json};
 
-use super::{GeminiResponseStatus, gemini_response_status};
 use super::{
     gemini_citation_text, gemini_image_generation_call_item_from_part,
     gemini_media_content_item_from_part, gemini_response_metadata, gemini_responses_usage,
@@ -48,8 +47,6 @@ pub(super) fn gemini_build_response_value(
         &mut output,
     );
     let citations = gemini_append_grounding_and_citations(&mut output, value, response_id);
-    let has_visible_output =
-        !output.is_empty() || !text.is_empty() || !content_items.is_empty() || citations.is_some();
     let output = serde_json::to_string(&output).expect("Gemini response output serializes");
     let content =
         serde_json::to_string(&content_items).expect("Gemini response content serializes");
@@ -72,13 +69,17 @@ pub(super) fn gemini_build_response_value(
     input.usage = usage.as_deref();
     input.metadata = metadata.as_deref();
     input.citations = citations.as_deref();
+    input.reason = value
+        .pointer("/candidates/0/finishReason")
+        .and_then(Value::as_str);
+    input.message = value
+        .pointer("/promptFeedback/blockReason")
+        .and_then(Value::as_str);
     let body = gemini_buffered_response_kernel(input).map_err(|error| match error {
         GeminiBufferedResponseError::InputTooLarge => GeminiResponseBuildError::InputTooLarge,
         GeminiBufferedResponseError::Kernel(_) => GeminiResponseBuildError::Kernel,
     })?;
-    let mut response =
-        serde_json::from_slice(&body).map_err(|_| GeminiResponseBuildError::Kernel)?;
-    gemini_apply_response_status(&mut response, value, has_visible_output);
+    let response = serde_json::from_slice(&body).map_err(|_| GeminiResponseBuildError::Kernel)?;
     Ok(response)
 }
 
@@ -162,28 +163,6 @@ fn gemini_append_grounding_and_citations(
         output.push(grounding_call);
     }
     gemini_citation_text(value)
-}
-
-fn gemini_apply_response_status(response: &mut Value, value: &Value, has_visible_output: bool) {
-    let Some(status) = gemini_response_status(value, has_visible_output) else {
-        return;
-    };
-    match status {
-        GeminiResponseStatus::Failed { code, message } => {
-            response["status"] = Value::String("failed".to_string());
-            response["error"] = json!({
-                "code": code,
-                "message": message,
-            });
-        }
-        GeminiResponseStatus::Incomplete { reason, message } => {
-            response["status"] = Value::String("incomplete".to_string());
-            response["incomplete_details"] = json!({
-                "reason": reason,
-                "message": message,
-            });
-        }
-    }
 }
 
 pub(super) fn gemini_function_call_id(

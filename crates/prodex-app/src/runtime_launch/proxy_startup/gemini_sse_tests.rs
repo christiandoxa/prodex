@@ -10,6 +10,17 @@ fn conversation_store() -> RuntimeDeepSeekConversationStore {
     RuntimeDeepSeekConversationStore::default()
 }
 
+fn completed_tool_call_item(output: &str) -> serde_json::Value {
+    output
+        .lines()
+        .filter_map(|line| line.strip_prefix("data: "))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find_map(|event| {
+            (event["type"] == "response.output_item.done").then(|| event["item"].clone())
+        })
+        .expect("completed tool call item should be emitted")
+}
+
 #[test]
 fn gemini_sse_reader_maps_text_and_function_call_to_responses_events() {
     let stream = concat!(
@@ -340,6 +351,15 @@ data: [DONE]\n\n"
     assert!(output.contains("\"call_id\":\"call_patch\""));
     assert!(!output.contains("\"type\":\"function_call\",\"call_id\":\"call_patch\""));
     assert!(output.contains("event: response.completed"));
+    assert_eq!(
+        completed_tool_call_item(&output),
+        serde_json::json!({
+            "type": "custom_tool_call",
+            "call_id": "call_patch",
+            "name": "apply_patch",
+            "input": patch.replace("\\n", "\n"),
+        })
+    );
 }
 
 #[test]
@@ -616,6 +636,15 @@ fn gemini_sse_reader_maps_tool_search_function_to_tool_search_call() {
     assert!(output.contains("\"execution\":\"client\""));
     assert!(output.contains("\"arguments\":{\"query\":\"sqz tools\"}"));
     assert!(!output.contains("\"type\":\"response.function_call_arguments.delta\""));
+    assert_eq!(
+        completed_tool_call_item(&output),
+        serde_json::json!({
+            "type": "tool_search_call",
+            "call_id": "call_search",
+            "execution": "client",
+            "arguments": {"query": "sqz tools"},
+        })
+    );
 }
 
 #[test]

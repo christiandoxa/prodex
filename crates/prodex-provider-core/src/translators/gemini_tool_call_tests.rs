@@ -133,6 +133,18 @@ fn gemini_provider_core_shapes_completed_stream_tool_call_items() {
     assert_eq!(blocked["type"], "message");
     assert_eq!(blocked["content"][0]["text"], "blocked by policy");
 
+    let blocked_valid_json = gemini_provider_core_stream_completed_tool_call_item(
+        "call_blocked_json",
+        "tool_search",
+        "{ \"query\" : \"x\" }",
+        None,
+        true,
+    );
+    assert_eq!(
+        blocked_valid_json["content"][0]["text"],
+        "{ \"query\" : \"x\" }"
+    );
+
     let item = gemini_provider_core_stream_completed_tool_call_item(
         "call_1",
         "plain_tool",
@@ -145,6 +157,17 @@ fn gemini_provider_core_shapes_completed_stream_tool_call_items() {
     assert_eq!(item["name"], "plain_tool");
     assert_eq!(item["arguments"], "{\"path\":\"README.md\"}");
     assert_eq!(item["gemini_thought_signature"], "sig");
+
+    assert_eq!(
+        gemini_provider_core_stream_completed_tool_call_item(
+            "call_shell",
+            "shell",
+            r#"{"cmd":"ls"}"#,
+            None,
+            false,
+        )["arguments"],
+        r#"{"cmd":"rtk ls"}"#,
+    );
 
     let raw = gemini_provider_core_stream_completed_tool_call_item(
         "call_raw",
@@ -167,6 +190,16 @@ fn gemini_provider_core_shapes_completed_stream_tool_call_items() {
     assert_eq!(search["type"], "tool_search_call");
     assert_eq!(search["call_id"], "call_search");
     assert_eq!(search["arguments"]["query"], "sqz tools");
+
+    let malformed_search = gemini_provider_core_stream_completed_tool_call_item(
+        "call_search_raw",
+        "tool_search",
+        "not-json",
+        None,
+        false,
+    );
+    assert_eq!(malformed_search["type"], "function_call");
+    assert_eq!(malformed_search["arguments"], "not-json");
 
     assert_eq!(
         gemini_provider_core_stream_completed_tool_call_item(

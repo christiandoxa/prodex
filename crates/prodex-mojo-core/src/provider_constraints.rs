@@ -15,6 +15,7 @@ pub use gemini_request_content::{
 };
 pub use gemini_sse_tool_call_index::{
     GeminiToolCallIndexBinding, GeminiToolCallIndexRecord, gemini_tool_call_index,
+    gemini_tool_response_part_order,
 };
 
 pub fn self_test() -> bool {

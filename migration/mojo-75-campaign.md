@@ -4658,3 +4658,17 @@ Validation passes: direct real-Mojo schema and stream tests, all 368
 `prodex-provider-core` tests, 103 app request-translation tests, the app SSE
 regression, workspace Clippy, formatting, Mojo ownership and no-fallback
 guards, and `git diff --check`. The 75% project target remains unmet.
+
+## Gemini response and tool-order hard replacements
+
+Gemini buffered-response status and completed stream tool-call item selection
+now run in the existing Mojo response kernel. Rust keeps JSON acquisition,
+argument normalization, SSE framing, and thought-signature handling. Gemini
+function-response ordering now uses a stable Mojo permutation through the
+provider-constraints owner, while Rust validates and applies the returned
+indices.
+
+Validation passes: direct real-Mojo response and ordering tests, all 374
+`prodex-provider-core` tests, 51 Gemini SSE app tests, workspace Clippy,
+formatting, and the Mojo authority/no-fallback guards. The 75% target remains
+in progress.

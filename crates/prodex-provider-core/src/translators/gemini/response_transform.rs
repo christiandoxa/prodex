@@ -77,7 +77,18 @@ pub(super) fn gemini_transform_response(input: ProviderTransformInput) -> Provid
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::translator::ProviderTransformLoss;
+    use crate::translator::{ProviderTransformLoss, ProviderTranslator};
+
+    fn translate_response(value: Value) -> Value {
+        let result =
+            super::super::GeminiTranslator.transform_response(ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                serde_json::to_vec(&value).expect("Gemini test response serializes"),
+            ));
+        assert_eq!(result.loss, ProviderTransformLoss::Lossless);
+        serde_json::from_slice(result.body.as_deref().expect("translated response body"))
+            .expect("translated response parses")
+    }
 
     #[test]
     fn gemini_provider_core_buffered_response_transform_matches_expected_value() {
@@ -128,5 +139,86 @@ mod tests {
             }
         );
         assert!(result.body.is_none());
+    }
+
+    #[test]
+    fn gemini_transform_response_prefers_prompt_block_over_finish_reason() {
+        let response = translate_response(serde_json::json!({
+            "promptFeedback": {"blockReason": "SAFETY"},
+            "candidates": [{
+                "content": {"parts": [{"text": "partial"}]},
+                "finishReason": "MAX_TOKENS"
+            }]
+        }));
+
+        assert_eq!(response["status"], "failed");
+        assert_eq!(response["error"]["code"], "gemini_prompt_blocked");
+        assert_eq!(
+            response["error"]["message"],
+            "Gemini blocked the prompt: SAFETY"
+        );
+    }
+
+    #[test]
+    fn gemini_transform_response_marks_max_tokens_incomplete() {
+        let response = translate_response(serde_json::json!({
+            "candidates": [{
+                "content": {"parts": [{"text": "partial"}]},
+                "finishReason": "MAX_TOKENS"
+            }]
+        }));
+
+        assert_eq!(response["status"], "incomplete");
+        assert_eq!(
+            response["incomplete_details"]["reason"],
+            "max_output_tokens"
+        );
+        assert_eq!(response["output"][0]["content"][0]["text"], "partial");
+    }
+
+    #[test]
+    fn gemini_transform_response_maps_finish_reason_failure() {
+        let response = translate_response(serde_json::json!({
+            "candidates": [{
+                "content": {"parts": [{"text": "visible"}]},
+                "finishReason": "SAFETY"
+            }]
+        }));
+
+        assert_eq!(response["status"], "failed");
+        assert_eq!(response["error"]["code"], "invalid_prompt");
+        assert_eq!(
+            response["error"]["message"],
+            "Gemini ended the stream with finishReason=SAFETY"
+        );
+    }
+
+    #[test]
+    fn gemini_transform_response_marks_empty_output_with_finish_reason() {
+        let response = translate_response(serde_json::json!({
+            "candidates": [{"content": {"parts": []}, "finishReason": "STOP"}]
+        }));
+
+        assert_eq!(response["status"], "failed");
+        assert_eq!(response["error"]["code"], "gemini_empty_response");
+        assert_eq!(
+            response["error"]["message"],
+            "Gemini returned no visible response content. finishReason=STOP"
+        );
+    }
+
+    #[test]
+    fn gemini_transform_response_ignores_unicode_whitespace_status_values() {
+        let response = translate_response(serde_json::json!({
+            "promptFeedback": {"blockReason": " "},
+            "candidates": [{"content": {"parts": []}, "finishReason": " "}]
+        }));
+
+        assert_eq!(response["status"], "failed");
+        assert_eq!(response["error"]["code"], "gemini_empty_response");
+        assert_eq!(
+            response["error"]["message"],
+            "Gemini returned no visible response content."
+        );
     }
 }
