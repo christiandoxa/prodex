@@ -449,7 +449,7 @@ pub fn evaluate_budget_limit(
     now_epoch: i64,
 ) -> BudgetEvaluation {
     let summary = summarize_usage_for_window(rows, limit.window, now_epoch);
-    let flags = prodex_mojo_core::audit_log_policy::budget_flags(
+    let plan = prodex_mojo_core::audit_log_policy::budget_evaluation(
         prodex_mojo_core::audit_log_policy::AuditUsageSummary {
             requests: summary.requests,
             input_tokens: summary.input_tokens,
@@ -463,42 +463,13 @@ pub fn evaluate_budget_limit(
         limit.max_tokens,
         limit.max_cost_micros,
     )
-    .expect("Mojo audit budget policy returned invalid output");
-
-    let mut reasons = Vec::new();
-    if flags.request_limit_reached {
-        let max_requests = limit
-            .max_requests
-            .expect("Mojo request-limit flag requires a configured limit");
-        reasons.push(format!(
-            "request limit reached ({}/{})",
-            summary.requests, max_requests
-        ));
-    }
-    if flags.token_limit_reached {
-        let max_tokens = limit
-            .max_tokens
-            .expect("Mojo token-limit flag requires a configured limit");
-        reasons.push(format!(
-            "token budget reached ({}/{})",
-            summary.total_tokens, max_tokens
-        ));
-    }
-    if flags.cost_limit_reached {
-        let max_cost_micros = limit
-            .max_cost_micros
-            .expect("Mojo cost-limit flag requires a configured limit");
-        reasons.push(format!(
-            "cost limit reached ({}/{})",
-            summary.cost_micros, max_cost_micros
-        ));
-    }
+    .expect("Mojo audit budget evaluation policy returned invalid output");
 
     BudgetEvaluation {
         key: normalize_usage_token(&limit.key, "global", 100),
         window: limit.window,
-        allowed: reasons.is_empty(),
-        reasons,
+        allowed: plan.allowed,
+        reasons: plan.reasons,
         summary,
     }
 }
