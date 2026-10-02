@@ -4359,3 +4359,28 @@ The canonical broad report at this checkpoint counts **74,553 reachable Mojo
 LOC** and **201,655 Rust production LOC**, totaling **276,208 LOC**:
 **26.991615014771476% Mojo**. The release floor and ownership non-regression
 checks pass; the 75% broad project target remains in progress.
+
+## Runtime proxy observability-label hard replacement
+
+Runtime proxy HTTP-error, quota, and WebSocket direct-fallback observability
+labels now use the existing `observability_labels.mojo` owner. Mojo owns
+HTTP error class/action labels; precommit quota-block reasons; quota pressure
+band, window-status, and source labels; and direct-current WebSocket fallback
+reason labels. The corresponding Rust enums now expose stable `repr(i64)`
+tags where needed, while the Rust APIs preserve their existing
+`&'static str` contracts through cached Mojo adapter results. The
+WebSocket fallback planner also reuses that stable enum tag directly instead of
+maintaining a second Rust match table.
+
+The prior Rust string match tables were deleted, and the no-fallback guard now
+rejects restoration of those semantic tables. Focused validation passes two
+real-Mojo observability-label contract tests covering the HTTP and quota
+families, the WebSocket direct-fallback label/planner regression, Clippy with
+warnings denied for `prodex-mojo-core` and
+`prodex-runtime-proxy`, the Mojo authority and no-fallback guards, and
+`git diff --check`.
+
+The canonical broad report at this checkpoint counts **74,626 reachable Mojo
+LOC** and **201,652 Rust production LOC**, totaling **276,278 LOC**:
+**27.011198864911428% Mojo**. The release floor and ownership non-regression
+checks pass; the 75% broad project target remains in progress.

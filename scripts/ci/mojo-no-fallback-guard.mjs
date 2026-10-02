@@ -2335,6 +2335,58 @@ export function findViolations(files) {
     }
     return [];
   });
+  const runtimeProxyObservabilityLabelViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-proxy/src/websocket_message.rs") {
+      if (!contents.includes("runtime_websocket_direct_fallback_reason_label(self as i64)")) {
+        return [filePath + ": websocket direct-fallback reason labels must use Mojo"];
+      }
+      if (
+        contents.includes('"precommit_budget_exhausted"')
+        || contents.includes('"candidate_exhausted"')
+      ) {
+        return [filePath + ": contains restored Rust websocket direct-fallback reason labels"];
+      }
+    }
+    if (filePath === "crates/prodex-runtime-proxy/src/error_policy/stream.rs") {
+      if (
+        !contents.includes("runtime_http_error_class_label(class as i64)")
+        || !contents.includes("runtime_http_error_action_label(action as i64)")
+      ) {
+        return [filePath + ": HTTP error observability labels must use Mojo"];
+      }
+      if (
+        contents.includes("match class")
+        || contents.includes("match action")
+        || contents.includes('"profile_unavailable"')
+        || contents.includes('"transient_5xx"')
+        || contents.includes('"rotate_profile"')
+      ) {
+        return [filePath + ": contains restored Rust HTTP error observability label tables"];
+      }
+    }
+    if (filePath === "crates/prodex-runtime-proxy/src/quota.rs") {
+      const required = [
+        "runtime_precommit_quota_block_reason_label(self as i64)",
+        "runtime_quota_pressure_band_reason_label(band as i64)",
+        "runtime_quota_window_status_reason_label(status as i64)",
+        "runtime_quota_source_label(source as i64)",
+      ];
+      const missing = required.filter((call) => !contents.includes(call));
+      if (missing.length > 0) {
+        return missing.map((call) => filePath + ": quota observability labels must retain Mojo call " + call);
+      }
+      if (
+        contents.includes('"quota_critical_floor_before_send"')
+        || contents.includes('"quota_windows_unavailable_after_reprobe"')
+        || contents.includes('"quota_healthy"')
+        || contents.includes('"probe_cache"')
+        || contents.includes('"persisted_snapshot"')
+      ) {
+        return [filePath + ": contains restored Rust quota observability label tables"];
+      }
+    }
+    return [];
+  });
   const websocketExecutorLabelViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor/local_pressure.rs") {
       if (!contents.includes("runtime_websocket_local_pressure_label(self as i64)")) {
@@ -3144,7 +3196,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
+    ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,

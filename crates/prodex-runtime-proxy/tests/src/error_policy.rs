@@ -822,3 +822,43 @@ fn failure_policy_is_transport_parity_safe_before_and_after_commit() {
         }
     }
 }
+
+#[test]
+fn mojo_observability_labels_preserve_http_error_contracts() {
+    assert_eq!(
+        runtime_http_error_class_label(RuntimeHttpErrorClass::Quota),
+        "quota"
+    );
+    assert_eq!(
+        runtime_http_error_class_label(RuntimeHttpErrorClass::RateLimited),
+        "rate_limited"
+    );
+    assert_eq!(
+        runtime_http_error_class_label(RuntimeHttpErrorClass::ProfileUnavailable),
+        "profile_unavailable"
+    );
+    assert_eq!(
+        runtime_http_error_class_label(RuntimeHttpErrorClass::Overload),
+        "overload"
+    );
+    assert_eq!(
+        runtime_http_error_class_label(RuntimeHttpErrorClass::TransientServer),
+        "transient_5xx"
+    );
+    assert_eq!(
+        runtime_http_error_class_label(RuntimeHttpErrorClass::Other),
+        "other"
+    );
+    assert_eq!(
+        runtime_http_error_action_label(RuntimeHttpErrorAction::PassThrough),
+        "pass_through"
+    );
+    assert_eq!(
+        runtime_http_error_action_label(RuntimeHttpErrorAction::RotateProfile),
+        "rotate_profile"
+    );
+    assert_eq!(
+        runtime_http_error_action_label(RuntimeHttpErrorAction::RetryProfile),
+        "retry_profile"
+    );
+}

@@ -65,6 +65,7 @@ pub enum RuntimeWebsocketMessageLoopAction {
     Finished,
 }
 
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeWebsocketDirectCurrentFallbackReason {
     PrecommitBudgetExhausted,
@@ -73,19 +74,14 @@ pub enum RuntimeWebsocketDirectCurrentFallbackReason {
 
 impl RuntimeWebsocketDirectCurrentFallbackReason {
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::PrecommitBudgetExhausted => "precommit_budget_exhausted",
-            Self::CandidateExhausted => "candidate_exhausted",
-        }
+        prodex_mojo_core::observability::runtime_websocket_direct_fallback_reason_label(self as i64)
+            .expect("Mojo websocket direct-fallback reason label returned invalid output")
     }
 
     pub fn reset_previous_response_retry_index_on_local_block(self) -> bool {
         prodex_mojo_core::runtime::websocket_response_plan(
             prodex_mojo_core::runtime::WebsocketResponsePlanInput {
-                direct_fallback_reason: match self {
-                    Self::PrecommitBudgetExhausted => 0,
-                    Self::CandidateExhausted => 1,
-                },
+                direct_fallback_reason: self as i64,
                 ..Default::default()
             },
         )

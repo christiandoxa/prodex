@@ -1755,6 +1755,79 @@ def prodex_mojo_observability_label_v1(
             label = StringSlice("websocket_dns_overflow_reject")
         else:
             return OBSERVABILITY_STATUS_INVALID
+    elif kind == 154:
+        if value == 0:
+            label = StringSlice("precommit_budget_exhausted")
+        elif value == 1:
+            label = StringSlice("candidate_exhausted")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 155:
+        if value == 0:
+            label = StringSlice("quota")
+        elif value == 1:
+            label = StringSlice("rate_limited")
+        elif value == 2:
+            label = StringSlice("profile_unavailable")
+        elif value == 3:
+            label = StringSlice("overload")
+        elif value == 4:
+            label = StringSlice("transient_5xx")
+        elif value == 5:
+            label = StringSlice("other")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 156:
+        if value == 0:
+            label = StringSlice("pass_through")
+        elif value == 1:
+            label = StringSlice("rotate_profile")
+        elif value == 2:
+            label = StringSlice("retry_profile")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 157:
+        if value == 0:
+            label = StringSlice("quota_exhausted_before_send")
+        elif value == 1:
+            label = StringSlice("quota_critical_floor_before_send")
+        elif value == 2:
+            label = StringSlice("quota_windows_unavailable_after_reprobe")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 158:
+        if value == 0:
+            label = StringSlice("quota_healthy")
+        elif value == 1:
+            label = StringSlice("quota_thin")
+        elif value == 2:
+            label = StringSlice("quota_critical")
+        elif value == 3:
+            label = StringSlice("quota_exhausted")
+        elif value == 4:
+            label = StringSlice("quota_unknown")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 159:
+        if value == 0:
+            label = StringSlice("ready")
+        elif value == 1:
+            label = StringSlice("thin")
+        elif value == 2:
+            label = StringSlice("critical")
+        elif value == 3:
+            label = StringSlice("exhausted")
+        elif value == 4:
+            label = StringSlice("unknown")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 160:
+        if value == 0:
+            label = StringSlice("probe_cache")
+        elif value == 1:
+            label = StringSlice("persisted_snapshot")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
     else:
         return OBSERVABILITY_STATUS_INVALID
     return observability_copy_label(label, output, output_capacity, output_length)

@@ -23,20 +23,11 @@ pub fn runtime_stream_error_policy_from_value(
 }
 
 pub fn runtime_http_error_class_label(class: RuntimeHttpErrorClass) -> &'static str {
-    match class {
-        RuntimeHttpErrorClass::Quota => "quota",
-        RuntimeHttpErrorClass::RateLimited => "rate_limited",
-        RuntimeHttpErrorClass::ProfileUnavailable => "profile_unavailable",
-        RuntimeHttpErrorClass::Overload => "overload",
-        RuntimeHttpErrorClass::TransientServer => "transient_5xx",
-        RuntimeHttpErrorClass::Other => "other",
-    }
+    prodex_mojo_core::observability::runtime_http_error_class_label(class as i64)
+        .expect("Mojo HTTP error-class label returned invalid output")
 }
 
 pub fn runtime_http_error_action_label(action: super::RuntimeHttpErrorAction) -> &'static str {
-    match action {
-        super::RuntimeHttpErrorAction::PassThrough => "pass_through",
-        super::RuntimeHttpErrorAction::RotateProfile => "rotate_profile",
-        super::RuntimeHttpErrorAction::RetryProfile => "retry_profile",
-    }
+    prodex_mojo_core::observability::runtime_http_error_action_label(action as i64)
+        .expect("Mojo HTTP error-action label returned invalid output")
 }

@@ -412,3 +412,56 @@ fn quota_snapshot_and_gate_keep_fixed_decisions_without_feature_fallback() {
         )
     );
 }
+
+#[test]
+fn mojo_observability_labels_preserve_quota_contracts() {
+    assert_eq!(
+        RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend.as_str(),
+        "quota_exhausted_before_send"
+    );
+    assert_eq!(
+        RuntimePrecommitQuotaBlockReason::CriticalFloorBeforeSend.as_str(),
+        "quota_critical_floor_before_send"
+    );
+    assert_eq!(
+        RuntimePrecommitQuotaBlockReason::WindowsUnavailableAfterReprobe.as_str(),
+        "quota_windows_unavailable_after_reprobe"
+    );
+
+    let bands = [
+        (RuntimeSelectionQuotaPressureBand::Healthy, "quota_healthy"),
+        (RuntimeSelectionQuotaPressureBand::Thin, "quota_thin"),
+        (
+            RuntimeSelectionQuotaPressureBand::Critical,
+            "quota_critical",
+        ),
+        (
+            RuntimeSelectionQuotaPressureBand::Exhausted,
+            "quota_exhausted",
+        ),
+        (RuntimeSelectionQuotaPressureBand::Unknown, "quota_unknown"),
+    ];
+    for (band, expected) in bands {
+        assert_eq!(runtime_proxy_quota_pressure_band_reason(band), expected);
+    }
+
+    let statuses = [
+        (RuntimeSelectionQuotaWindowStatus::Ready, "ready"),
+        (RuntimeSelectionQuotaWindowStatus::Thin, "thin"),
+        (RuntimeSelectionQuotaWindowStatus::Critical, "critical"),
+        (RuntimeSelectionQuotaWindowStatus::Exhausted, "exhausted"),
+        (RuntimeSelectionQuotaWindowStatus::Unknown, "unknown"),
+    ];
+    for (status, expected) in statuses {
+        assert_eq!(runtime_proxy_quota_window_status_reason(status), expected);
+    }
+
+    assert_eq!(
+        runtime_selection_quota_source_label(RuntimeSelectionQuotaSource::LiveProbe),
+        "probe_cache"
+    );
+    assert_eq!(
+        runtime_selection_quota_source_label(RuntimeSelectionQuotaSource::PersistedSnapshot),
+        "persisted_snapshot"
+    );
+}

@@ -70,6 +70,7 @@ pub type RuntimeProxyQuotaObservationPair = (
     Option<RuntimeProxyQuotaWindowObservation>,
 );
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimePrecommitQuotaBlockReason {
     ExhaustedBeforeSend,
@@ -79,15 +80,8 @@ pub enum RuntimePrecommitQuotaBlockReason {
 
 impl RuntimePrecommitQuotaBlockReason {
     pub fn as_str(self) -> &'static str {
-        match self {
-            RuntimePrecommitQuotaBlockReason::ExhaustedBeforeSend => "quota_exhausted_before_send",
-            RuntimePrecommitQuotaBlockReason::CriticalFloorBeforeSend => {
-                "quota_critical_floor_before_send"
-            }
-            RuntimePrecommitQuotaBlockReason::WindowsUnavailableAfterReprobe => {
-                "quota_windows_unavailable_after_reprobe"
-            }
-        }
+        prodex_mojo_core::observability::runtime_precommit_quota_block_reason_label(self as i64)
+            .expect("Mojo precommit quota-block reason label returned invalid output")
     }
 }
 
@@ -129,32 +123,20 @@ pub struct RuntimeProxyPrecommitQuotaGateFinalInput {
 pub fn runtime_proxy_quota_pressure_band_reason(
     band: RuntimeSelectionQuotaPressureBand,
 ) -> &'static str {
-    match band {
-        RuntimeSelectionQuotaPressureBand::Healthy => "quota_healthy",
-        RuntimeSelectionQuotaPressureBand::Thin => "quota_thin",
-        RuntimeSelectionQuotaPressureBand::Critical => "quota_critical",
-        RuntimeSelectionQuotaPressureBand::Exhausted => "quota_exhausted",
-        RuntimeSelectionQuotaPressureBand::Unknown => "quota_unknown",
-    }
+    prodex_mojo_core::observability::runtime_quota_pressure_band_reason_label(band as i64)
+        .expect("Mojo quota pressure-band reason label returned invalid output")
 }
 
 pub fn runtime_proxy_quota_window_status_reason(
     status: RuntimeSelectionQuotaWindowStatus,
 ) -> &'static str {
-    match status {
-        RuntimeSelectionQuotaWindowStatus::Ready => "ready",
-        RuntimeSelectionQuotaWindowStatus::Thin => "thin",
-        RuntimeSelectionQuotaWindowStatus::Critical => "critical",
-        RuntimeSelectionQuotaWindowStatus::Exhausted => "exhausted",
-        RuntimeSelectionQuotaWindowStatus::Unknown => "unknown",
-    }
+    prodex_mojo_core::observability::runtime_quota_window_status_reason_label(status as i64)
+        .expect("Mojo quota window-status reason label returned invalid output")
 }
 
 pub fn runtime_selection_quota_source_label(source: RuntimeSelectionQuotaSource) -> &'static str {
-    match source {
-        RuntimeSelectionQuotaSource::LiveProbe => "probe_cache",
-        RuntimeSelectionQuotaSource::PersistedSnapshot => "persisted_snapshot",
-    }
+    prodex_mojo_core::observability::runtime_quota_source_label(source as i64)
+        .expect("Mojo quota-source label returned invalid output")
 }
 
 pub fn runtime_proxy_quota_window_summary(
