@@ -2,6 +2,93 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.435.0 - 2026-10-02
+
+### CLI
+
+- Prompt expose launch configuration (`ba35576`)
+
+### Docs
+
+- Complete 0.435.0 release notes (`fc41473`)
+- Dedupe provider bridge checkpoint (`3b38d70`)
+- Dedupe Mojo campaign checkpoint (`aec02ee`)
+
+### Misc
+
+- Align Codex 0.160.0 (`b3ae01d`)
+# Prodex 0.435.0
+
+## New Features
+
+### Codex 0.160.0 Compatibility
+
+- Advance the audited Codex compatibility target to rust-v0.160.0.
+- Preserve Prodex model transport while accommodating Codex's authoritative
+  explicit-provider catalogs, provider/history restoration, projectless
+  workspace defaults, saved permission restoration, and pending subagent
+  environment inheritance.
+- Keep the existing Codex 0.159.3 account-security reminder identity/origin
+  boundary intact: account/read bootstrap traffic remains Codex-owned while
+  model traffic continues through the governed Prodex provider path.
+- Add release-qualified guards for the new 0.160.0 invariants so future upstream
+  changes cannot silently reintroduce bundled provider models, stale catalog
+  entries, provider-history loss, unsafe projectless defaults, or pending
+  environment loss.
+
+### Runtime and Mojo Ownership
+
+- Add the interactive prodex s expose configuration prompt introduced after
+  0.434.3.
+- Continue the production Rust-to-Mojo hard-replacement campaign across runtime
+  policy, audit/query/ledger policy, provider metadata/precommit decisions,
+  terminal info rendering, quota rendering/sorting/pool aggregation, runtime-log
+  policy, shared attachments/history, MCP framing, update notices, and external
+  provider catalogs.
+- Remove the corresponding Rust fallback semantics and strengthen no-fallback
+  guards for migrated policy surfaces.
+
+## Bug Fixes
+
+- Guard Codex 0.160.0 explicit-provider catalogs so bundled fallback models and
+  stale cache entries cannot silently reappear in the audited upstream contract.
+- Preserve provider/history resolution and saved permission restoration semantics
+  for resume/fork flows when callers omit explicit overrides.
+- Preserve pending subagent environment inheritance so the child receives the
+  owner's first ready/failure result without overwriting a child-side winner.
+
+## Compatibility Notes
+
+- Codex 0.160.0 is a divergent release relative to the previous Prodex target:
+  the exact 0.159.3-to-0.160.0 tree comparison contains 362 changed files,
+  14,664 additions, and 2,380 deletions.
+- Prodex still accepts compatible Codex 0.153.2+ binaries when required
+  app-server capabilities are present; rust-v0.160.0 is the release-qualified
+  audited reference for 0.435.0.
+- The minimum Codex version is unchanged.
+
+## Verification
+
+- Complete Codex compatibility replay: 61 critical files / 564 required source
+  markers and 64 semantic checks / 414 semantic source markers, with zero Codex
+  diffs against the exact rust-v0.160.0 release.
+- Official 0.160.0 Linux musl CLI and app-server release assets match GitHub's
+  published SHA-256 digests; the extracted CLI reports codex-cli 0.160.0.
+- Isolated official 0.160.0 app-server initialize with experimentalApi=true
+  succeeds on Linux under a synthetic Codex home.
+- Exact tagged source archives verify 362 changed files, 14,664 additions, and
+  2,380 deletions from the Prodex 0.159.3 compatibility target.
+- Focused compatibility guards and existing runtime/provider/session policies
+  remain intact without a model-routing change.
+
+## Changelog
+
+- Align the audited Codex baseline with rust-v0.160.0.
+- Release the post-0.434.3 runtime, Mojo ownership, provider, quota, audit, and
+  s expose improvements as Prodex 0.435.0.
+
+Full Changelog: [0.434.3...0.435.0](https://github.com/christiandoxa/prodex/compare/0.434.3...0.435.0)
+
 ## 0.434.3 - 2026-10-01
 
 ### Runtime
@@ -30,6 +117,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Qualify Caveman 3.0.0 (`827f048`)
 - Classify private key fields as sensitive (`a08813b`)
 - Align Codex 0.159.3 (`4a6f160`)
 - Migrate noncompact failure policy (`5d06911`)
@@ -54,61 +142,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Migrate affinity outcome policy (`46b7c6c`)
 - Migrate DeepSeek native search policy (`ea15989`)
 - Migrate Gemini unified diff parser (`4ec4ed9`)
-# Prodex 0.434.3
-
-## New Features
-
-### Codex 0.159.3 Compatibility
-
-- Advance the audited Codex compatibility target to `rust-v0.159.3`.
-- Accommodate Codex's new optional account-security setup reminder without
-  routing its authenticated account/read request through Prodex model-account
-  rotation.
-- Keep `chatgpt_base_url` Codex-owned for local ChatGPT bootstrap traffic while
-  model traffic continues through the governed Prodex model provider.
-- Guard the upstream reminder contract: local ChatGPT auth only, connected
-  app-server/saved-login identity match, remote-workspace and FedRAMP exclusion,
-  redirects disabled, three-second timeout, identity recheck, and action URLs
-  restricted to HTTPS `chatgpt.com`.
-
-## Bug Fixes
-
-- Restore the Mojo Presidio JSON-field policy so normalized `private_key`
-  fields are treated as sensitive and classified as private keys instead of
-  falling through to a non-sensitive result.
-
-## CI Maintenance
-
-- Split oversized noncompact runtime handling and Mojo quota/selection tests
-  into focused modules so the post-consolidation source stays within size
-  guard budgets.
-- Consolidate the repo-map module-like check onto the existing symbol-kind ABI,
-  refresh the reviewed `too_many_arguments` allowlist entries, and make the
-  optional-tool exec assertion normalize Windows CRLF output.
-
-## Verification
-
-- Exact 0.159.2-to-0.159.3 tagged-source comparison: 24 changed files, 833
-  additions, and 5 deletions.
-- Existing 0.159.2 compatibility replay: 511/511 source markers present on the
-  exact 0.159.3 tree.
-- Official 0.159.3 Linux musl CLI and app-server release assets match their
-  published SHA-256 digests; the CLI reports `codex-cli 0.159.3`.
-- Isolated official 0.159.3 app-server initialize handshake with
-  `experimentalApi=true`: accepted on Linux with the synthetic Codex home.
-- Prodex runtime-launch tests confirm account/read `chatgpt_base_url` remains
-  outside the local model proxy.
-- Prodex Mojo core all-features tests pass, including the private-key
-  classification regression; static size, ownership, allow-attribute, and
-  runtime guards pass after the post-consolidation splits.
-
-## Changelog
-
-- Align the audited Codex baseline with `rust-v0.159.3`.
-- Track the new account-security reminder's identity and origin safety
-  invariants while preserving Prodex's existing model-routing behavior.
-
-Full Changelog: [0.434.2...0.434.3](https://github.com/christiandoxa/prodex/compare/0.434.2...0.434.3)
 
 ## 0.434.2 - 2026-09-30
 
