@@ -265,7 +265,7 @@ fn write_sub_agent_overlay_with_executable(
     secret_store::write_private_file_atomic(&config_path, &config)
         .with_context(|| format!("failed to write {}", config_path.display()))?;
     let path = overlay_home.join(SUB_AGENTS_FILE);
-    let contents = render_sub_agent_overlay_for_spec(sub_agent, &spec, &config_path);
+    let contents = render_sub_agent_overlay_for_spec(sub_agent, &spec, &config_path)?;
     secret_store::write_private_file_atomic(&path, contents.as_bytes())
         .with_context(|| format!("failed to write {}", path.display()))?;
     prodex_optional_tools::upsert_agents_block(
@@ -962,7 +962,7 @@ mod tests {
             },
         )
         .unwrap();
-        let report = render_sub_agent_dry_run_report(&resolved);
+        let report = render_sub_agent_dry_run_report(&resolved).unwrap();
         let debug = format!("{resolved:?}");
         assert!(report.contains("Sub-agent local URL: configured"));
         assert!(report.contains("Sub-agent inherited required tools: none"));

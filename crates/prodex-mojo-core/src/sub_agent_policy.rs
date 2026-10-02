@@ -1,5 +1,11 @@
 use crate::MojoError;
 
+mod rendering;
+pub use rendering::{
+    SubAgentDryRunRender, SubAgentOverlayRender, render_disabled_dry_run_report,
+    render_enabled_dry_run_report, render_overlay,
+};
+
 const ABI_VERSION: i64 = 1;
 
 #[repr(i64)]

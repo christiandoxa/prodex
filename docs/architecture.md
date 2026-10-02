@@ -206,6 +206,11 @@ hard-replaced operations have no feature-off Rust implementation or test oracle.
 static-item ordering and volatile metadata classification use the Mojo planning and normalization
 kernels in every feature mode.
 
+The versioned `sub_agent_policy` ABI renders the sub-agent overlay rules and enabled/disabled
+dry-run report templates. Rust prepares display DTOs, redacts model/UUID values, quotes and
+sanitizes platform paths and launcher commands, and performs overlay filesystem writes; renderer
+errors propagate without a Rust text-template fallback.
+
 ## Boundary Guard
 
 Run:
