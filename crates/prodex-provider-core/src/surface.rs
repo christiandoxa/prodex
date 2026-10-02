@@ -13,8 +13,8 @@ pub use self::adapter_contract::{ProviderBodyTransform, ProviderTransformPhase};
 pub use self::endpoints::{ALL_PROVIDER_ENDPOINTS, provider_supported_endpoints};
 pub use self::models::{ProviderModelCost, ProviderModelSpec};
 
-pub const PRODEX_ANTHROPIC_DEFAULT_MODEL: &str = "claude-sonnet-4-6";
-pub const PRODEX_COPILOT_DEFAULT_MODEL: &str = "gpt-5.3-codex";
+pub const PRODEX_ANTHROPIC_DEFAULT_MODEL: &str = "claude-sonnet-5-5";
+pub const PRODEX_COPILOT_DEFAULT_MODEL: &str = "gpt-6-astra";
 pub const PRODEX_GEMINI_DEFAULT_MODEL: &str = "auto";
 pub const PRODEX_GEMINI_CHAT_COMPRESSION_MODEL: &str = "chat-compression-default";
 pub const PRODEX_KIRO_DEFAULT_MODEL: &str = "auto";
