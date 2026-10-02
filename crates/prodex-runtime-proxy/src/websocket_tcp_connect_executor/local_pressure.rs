@@ -1,5 +1,6 @@
 use std::io;
 
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeWebsocketLocalPressureKind {
     DnsResolveTimeout,
@@ -9,11 +10,8 @@ pub enum RuntimeWebsocketLocalPressureKind {
 
 impl RuntimeWebsocketLocalPressureKind {
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::DnsResolveTimeout => "dns_resolve_timeout",
-            Self::DnsResolveExecutorOverflow => "dns_resolve_executor_overflow",
-            Self::TcpConnectExecutorOverflow => "tcp_connect_executor_overflow",
-        }
+        prodex_mojo_core::observability::runtime_websocket_local_pressure_label(self as i64)
+            .expect("Mojo websocket local-pressure label returned invalid output")
     }
 }
 

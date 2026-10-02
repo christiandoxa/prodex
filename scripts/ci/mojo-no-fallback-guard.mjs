@@ -100,6 +100,8 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/transport_failure_policy.rs",
   "crates/prodex-runtime-proxy/src/transport_failure.rs",
   "crates/prodex-runtime-proxy/src/websocket_proxy.rs",
+  "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor/local_pressure.rs",
+  "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor/task_kind.rs",
   "crates/prodex-provider-core/src/surface.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch/provider_precommit.rs",
   "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs",
@@ -2333,6 +2335,45 @@ export function findViolations(files) {
     }
     return [];
   });
+  const websocketExecutorLabelViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor/local_pressure.rs") {
+      if (!contents.includes("runtime_websocket_local_pressure_label(self as i64)")) {
+        return [filePath + ": websocket local-pressure labels must use Mojo"];
+      }
+      if (
+        contents.includes('"dns_resolve_timeout"')
+        || contents.includes('"dns_resolve_executor_overflow"')
+        || contents.includes('"tcp_connect_executor_overflow"')
+      ) {
+        return [filePath + ": contains restored Rust websocket local-pressure label table"];
+      }
+    }
+    if (filePath === "crates/prodex-runtime-proxy/src/websocket_tcp_connect_executor/task_kind.rs") {
+      const required = [
+        "runtime_websocket_task_label(self as i64)",
+        "runtime_websocket_worker_thread_prefix(self as i64)",
+        "runtime_websocket_dispatcher_thread_name(self as i64)",
+        "runtime_websocket_overflow_enqueue_event(self as i64)",
+        "runtime_websocket_overflow_dispatch_event(self as i64)",
+        "runtime_websocket_overflow_reject_event(self as i64)",
+      ];
+      const missing = required.filter((call) => !contents.includes(call));
+      if (missing.length > 0) {
+        return missing.map((call) => filePath + ": websocket executor labels must retain Mojo call " + call);
+      }
+      if (
+        contents.includes('"tcp_connect"')
+        || contents.includes('"dns_resolve"')
+        || contents.includes('"prodex-ws-connect"')
+        || contents.includes('"prodex-ws-dns"')
+        || contents.includes('"websocket_connect_overflow_')
+        || contents.includes('"websocket_dns_overflow_')
+      ) {
+        return [filePath + ": contains restored Rust websocket executor label table"];
+      }
+    }
+    return [];
+  });
   const infoRenderViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-terminal-ui/src/info.rs") {
       const required = [
@@ -3103,7 +3144,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
+    ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,

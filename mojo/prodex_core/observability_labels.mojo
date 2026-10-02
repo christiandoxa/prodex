@@ -1704,6 +1704,57 @@ def prodex_mojo_observability_label_v1(
             label = StringSlice("persist_policy")
         else:
             return OBSERVABILITY_STATUS_INVALID
+    elif kind == 147:
+        if value == 0:
+            label = StringSlice("dns_resolve_timeout")
+        elif value == 1:
+            label = StringSlice("dns_resolve_executor_overflow")
+        elif value == 2:
+            label = StringSlice("tcp_connect_executor_overflow")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 148:
+        if value == 0:
+            label = StringSlice("tcp_connect")
+        elif value == 1:
+            label = StringSlice("dns_resolve")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 149:
+        if value == 0:
+            label = StringSlice("prodex-ws-connect")
+        elif value == 1:
+            label = StringSlice("prodex-ws-dns")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 150:
+        if value == 0:
+            label = StringSlice("prodex-ws-connect-dispatch")
+        elif value == 1:
+            label = StringSlice("prodex-ws-dns-dispatch")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 151:
+        if value == 0:
+            label = StringSlice("websocket_connect_overflow_enqueue")
+        elif value == 1:
+            label = StringSlice("websocket_dns_overflow_enqueue")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 152:
+        if value == 0:
+            label = StringSlice("websocket_connect_overflow_dispatch")
+        elif value == 1:
+            label = StringSlice("websocket_dns_overflow_dispatch")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 153:
+        if value == 0:
+            label = StringSlice("websocket_connect_overflow_reject")
+        elif value == 1:
+            label = StringSlice("websocket_dns_overflow_reject")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
     else:
         return OBSERVABILITY_STATUS_INVALID
     return observability_copy_label(label, output, output_capacity, output_length)
