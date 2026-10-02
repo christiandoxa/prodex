@@ -9,7 +9,8 @@ use prodex_mojo_core::sub_agent_policy::{
     child_spec_scalar_violation, model_nonempty, provider_url_violation,
 };
 use prodex_provider_core::{
-    ProviderId, ProviderReasoningEffort, provider_catalog_entry, provider_model_spec,
+    ProviderId, ProviderModelReasoningError, provider_model_reasoning_resolution,
+    provider_model_spec,
 };
 use prodex_runtime_launch::ChildProcessPlan;
 use serde::{Deserialize, Serialize};
@@ -161,31 +162,28 @@ pub(crate) fn resolve_super_sub_agent_config(
             .map(|spec| spec.id.to_string())
             .unwrap_or_else(|| model.to_string())
     });
-    let effort_model = model.as_deref().or_else(|| {
-        prodex_provider_core::provider_runtime_metadata(provider)
-            .map(|metadata| metadata.default_model)
-    });
-    if let (Some(model), Some(effort)) = (effort_model, config.model_reasoning_effort)
-        && let Some(supported) = provider_catalog_entry(provider, model)
-            .and_then(|entry| entry.supported_reasoning_efforts.as_deref())
-    {
-        let effort = match effort {
-            SubAgentReasoningEffort::None => ProviderReasoningEffort::None,
-            SubAgentReasoningEffort::Minimal => ProviderReasoningEffort::Minimal,
-            SubAgentReasoningEffort::Low => ProviderReasoningEffort::Low,
-            SubAgentReasoningEffort::Medium => ProviderReasoningEffort::Medium,
-            SubAgentReasoningEffort::High => ProviderReasoningEffort::High,
-            SubAgentReasoningEffort::XHigh => ProviderReasoningEffort::XHigh,
-            SubAgentReasoningEffort::Max => ProviderReasoningEffort::Max,
-            SubAgentReasoningEffort::Ultra => ProviderReasoningEffort::Ultra,
-        };
-        if !supported.contains(&effort) {
-            bail!(
-                "reasoning effort {} is unsupported for {} model {}; choose a catalogued effort or omit the explicit effort",
-                config.model_reasoning_effort.unwrap().as_str(),
-                provider.label(),
-                model
-            );
+    if let Some(effort) = config.model_reasoning_effort {
+        match provider_model_reasoning_resolution(provider, model.as_deref(), Some(effort.as_str()))
+        {
+            Ok(_) => {}
+            Err(ProviderModelReasoningError::UnsupportedEffort) => {
+                let effort_model = model
+                    .as_deref()
+                    .or_else(|| {
+                        prodex_provider_core::provider_runtime_metadata(provider)
+                            .map(|metadata| metadata.default_model)
+                    })
+                    .unwrap_or("unknown");
+                bail!(
+                    "reasoning effort {} is unsupported for {} model {}; choose a catalogued effort or omit the explicit effort",
+                    effort.as_str(),
+                    provider.label(),
+                    effort_model
+                );
+            }
+            Err(ProviderModelReasoningError::InvalidCatalog) => {
+                bail!("provider model reasoning catalog is invalid");
+            }
         }
     }
     let url = config
@@ -748,6 +746,38 @@ mod tests {
         assert_eq!(resolved.model.as_deref(), Some("local"));
         assert_eq!(resolved.effort, Some(SubAgentReasoningEffort::XHigh));
         assert_eq!(resolved.url.as_deref(), Some("http://127.0.0.1:11434/v1"));
+    }
+
+    #[test]
+    fn resolver_uses_canonical_mojo_reasoning_compatibility() {
+        let error = resolve_super_sub_agent_config(
+            SubAgentConfig {
+                provider: ProviderId::OpenAi,
+                model: Some("gpt-5.6-luna".to_string()),
+                model_reasoning_effort: Some(SubAgentReasoningEffort::Ultra),
+                ..SubAgentConfig::default()
+            },
+            SuperLaunchTarget::Fresh,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("reasoning effort ultra is unsupported for openai model gpt-5.6-luna")
+        );
+
+        let resolved = resolve_super_sub_agent_config(
+            SubAgentConfig {
+                provider: ProviderId::OpenAi,
+                model: Some("account/model".to_string()),
+                model_reasoning_effort: Some(SubAgentReasoningEffort::Ultra),
+                ..SubAgentConfig::default()
+            },
+            SuperLaunchTarget::Fresh,
+        )
+        .unwrap();
+        assert_eq!(resolved.model.as_deref(), Some("account/model"));
+        assert_eq!(resolved.effort, Some(SubAgentReasoningEffort::Ultra));
     }
 
     #[test]

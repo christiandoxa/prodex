@@ -1730,14 +1730,20 @@ export function findViolations(files) {
         .map((call) => filePath + ": sub-agent policy adapter must retain Mojo ABI call " + call);
     }
     if (filePath === SUB_AGENT_CHILD_FILE) {
-      const violations = contents.includes("child_argv_plan(")
-        ? []
-        : [filePath + ": sub-agent child argv construction must retain Mojo planner"];
+      const violations = [];
+      if (!contents.includes("child_argv_plan(")) {
+        violations.push(filePath + ": sub-agent child argv construction must retain Mojo planner");
+      }
+      if (!contents.includes("provider_model_reasoning_resolution(")) {
+        violations.push(filePath + ": sub-agent reasoning compatibility must retain canonical Mojo-backed catalog resolver");
+      }
       const production = contents.split("#[cfg(test)]", 1)[0];
       for (const retired of [
         "let mut args = vec![OsString::from(\"s\"), OsString::from(\"--no-sub-agent\")];",
         "args.push(OsString::from(if spec.presidio_enabled {",
         "match spec.provider {",
+        "SubAgentReasoningEffort::None => ProviderReasoningEffort::None",
+        "supported.contains(&effort)",
       ]) {
         if (production.includes(retired)) {
           violations.push(filePath + ": contains restored Rust sub-agent child argv planning semantics");
