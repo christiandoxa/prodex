@@ -20,6 +20,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/sub_agent_policy.rs",
   "crates/prodex-cli/src/sub_agent.rs",
   "crates/prodex-app/src/runtime_tools/sub_agents.rs",
+  "crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs",
   "crates/prodex-mojo-core/src/runtime_overlay_policy.rs",
   "crates/prodex-app/src/runtime_tools/overlay.rs",
   "crates/prodex-mojo-core/src/rich/super_expose.rs",
@@ -1720,6 +1721,16 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === "crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs") {
+      const violations = contents.includes(".filter_map(|effort| effort.label()?.parse::<SubAgentReasoningEffort>().ok())")
+        ? []
+        : [filePath + ": sub-agent effort choices must reuse Mojo-owned provider effort labels"];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (production.includes("ProviderReasoningEffort::None =>")) {
+        violations.push(filePath + ": contains restored Rust provider-to-sub-agent effort mapping");
+      }
+      return violations;
+    }
     if (filePath === SUB_AGENT_POLICY_ADAPTER_FILE) {
       const required = [
         "prodex_sub_agent_policy_v1(",
@@ -2066,6 +2077,7 @@ export function findViolations(files) {
         "prodex_provider_bridge_label_v1(",
         "prodex_provider_bridge_function_tool_name_max_bytes_v1(",
         "prodex_provider_bridge_native_passthrough_v1(",
+        "prodex_provider_reasoning_effort_label_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))

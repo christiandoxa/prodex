@@ -3,6 +3,7 @@ use prodex_mojo_core::provider_constraints::{
 };
 use serde::{Deserialize, Serialize};
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderReasoningEffort {
@@ -19,6 +20,11 @@ pub enum ProviderReasoningEffort {
 }
 
 impl ProviderReasoningEffort {
+    pub fn label(self) -> Option<&'static str> {
+        prodex_mojo_core::provider_constraints::provider_reasoning_effort_label(self as i64)
+            .expect("Mojo provider reasoning-effort label policy failed")
+    }
+
     pub(crate) fn parse(value: &str) -> Self {
         match provider_reasoning_effort_class(value)
             .expect("Mojo provider reasoning-effort classification failed")
@@ -54,5 +60,7 @@ mod tests {
             ProviderReasoningEffort::parse("not-an-effort"),
             ProviderReasoningEffort::Unknown
         );
+        assert_eq!(ProviderReasoningEffort::XHigh.label(), Some("xhigh"));
+        assert_eq!(ProviderReasoningEffort::Unknown.label(), None);
     }
 }
