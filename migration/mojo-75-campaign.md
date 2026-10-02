@@ -4287,3 +4287,24 @@ the strengthened no-fallback guard. The canonical broad report at this
 checkpoint counts **74,170 reachable Mojo LOC** and **201,548 Rust production
 LOC**, totaling **275,718 LOC**: **26.900673876932228% Mojo**. The 75% broad
 target remains in progress.
+
+## Transport failure policy hard replacement
+
+Transport-failure classification and display policy now live in
+`transport_failure_policy.mojo`. Mojo owns the eleven canonical transport
+failure labels, upstream-connect observability marker selection, ordered
+case-insensitive message classification rules, and connect-vs-transport health
+penalty weighting. `RuntimeTransportFailureKind` is now a stable `repr(i64)`
+ABI tag. Rust retains the `std::io::ErrorKind` dependency boundary and typed
+enum materialization only; the previous Rust message-rule table, label match,
+marker match, and health-penalty match were deleted with no Rust semantic
+fallback.
+
+Focused validation passes the standalone `transport_failure_policy.mojo`
+build, the real-Mojo adapter contract test, all 4 focused
+`prodex-runtime-proxy` transport-failure regressions, Clippy with warnings
+denied for `prodex-mojo-core` and `prodex-runtime-proxy`,
+`git diff --check`, and the strengthened no-fallback guard. The canonical
+broad report at this checkpoint counts **74,368 reachable Mojo LOC** and
+**201,591 Rust production LOC**, totaling **275,959 LOC**:
+**26.948930819433322% Mojo**. The 75% broad target remains in progress.

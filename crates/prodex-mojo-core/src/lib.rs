@@ -177,6 +177,8 @@ pub mod sub_agent_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod super_provider_config;
 #[cfg(feature = "mojo-runtime")]
+pub mod transport_failure_policy;
+#[cfg(feature = "mojo-runtime")]
 pub mod update_notice_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod websocket_proxy_policy;
