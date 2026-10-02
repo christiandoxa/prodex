@@ -20,6 +20,19 @@ unsafe extern "C" {
         input_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_mojo_previous_response_log_render_v1(
+        abi_version: i64,
+        operation: i64,
+        request_id: u64,
+        websocket_session: u64,
+        retry_index: u64,
+        text_address: u64,
+        text_count: i64,
+        presence: u64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
 }
 
 #[inline]
@@ -30,6 +43,90 @@ fn pointer_address<T>(pointer: *const T) -> u64 {
 #[inline]
 fn mutable_pointer_address<T>(pointer: *mut T) -> u64 {
     pointer as usize as u64
+}
+
+pub const PREVIOUS_RESPONSE_LOG_NOT_FOUND: i64 = 0;
+pub const PREVIOUS_RESPONSE_LOG_RETRY_IMMEDIATE: i64 = 1;
+pub const PREVIOUS_RESPONSE_LOG_STALE_CONTINUATION: i64 = 2;
+pub const PREVIOUS_RESPONSE_LOG_FRESH_FALLBACK: i64 = 3;
+pub const PREVIOUS_RESPONSE_LOG_AFFINITY_RELEASED: i64 = 4;
+
+#[derive(Debug, Clone, Copy)]
+pub struct PreviousResponseLogRenderInput<'a> {
+    pub operation: i64,
+    pub request_id: u64,
+    pub transport: &'a str,
+    pub route: &'a str,
+    pub websocket_session: Option<u64>,
+    pub via: Option<&'a str>,
+    pub profile: &'a str,
+    pub retry_index: usize,
+    pub detail_one: &'a str,
+    pub detail_two: &'a str,
+    pub blocked: bool,
+}
+
+pub fn render_previous_response_log(
+    input: PreviousResponseLogRenderInput<'_>,
+) -> Result<String, MojoError> {
+    if !(PREVIOUS_RESPONSE_LOG_NOT_FOUND..=PREVIOUS_RESPONSE_LOG_AFFINITY_RELEASED)
+        .contains(&input.operation)
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let values = [
+        input.transport,
+        input.route,
+        input.via.unwrap_or_default(),
+        input.profile,
+        input.detail_one,
+        input.detail_two,
+    ];
+    let views = values.map(|value| LogStringView {
+        ptr: value.as_ptr() as usize as u64,
+        len: value.len() as u64,
+    });
+    let capacity = values.iter().try_fold(512_usize, |capacity, value| {
+        capacity
+            .checked_add(value.len())
+            .ok_or(MojoError::InvalidInput)
+    })?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let mut presence = u64::from(input.websocket_session.is_some());
+    if input.via.is_some() {
+        presence |= 2;
+    }
+    if input.blocked {
+        presence |= 4;
+    }
+    let status = unsafe {
+        prodex_mojo_previous_response_log_render_v1(
+            1,
+            input.operation,
+            input.request_id,
+            input.websocket_session.unwrap_or_default(),
+            u64::try_from(input.retry_index).map_err(|_| MojoError::InvalidInput)?,
+            views.as_ptr() as usize as u64,
+            i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
+            presence,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
 /// Classifies an already-normalized, length-bounded log line by its level.

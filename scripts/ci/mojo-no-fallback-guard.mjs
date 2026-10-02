@@ -145,6 +145,7 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/render/quota_policy.rs",
   "crates/prodex-runtime-proxy/src/mojo.rs",
   "crates/prodex-runtime-proxy/src/quota.rs",
+  "crates/prodex-runtime-proxy/src/previous_response_log.rs",
   "crates/prodex-runtime-proxy/src/quota/mojo.rs",
   "crates/prodex-runtime-proxy/tests/src/quota.rs",
   "crates/prodex-runtime-proxy/src/selection_plan.rs",
@@ -2335,6 +2336,25 @@ export function findViolations(files) {
     }
     return [];
   });
+  const previousResponseLogRenderViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== "crates/prodex-runtime-proxy/src/previous_response_log.rs") return [];
+    if (!contents.includes("prodex_mojo_core::log::render_previous_response_log(")) {
+      return [filePath + ": previous-response log rendering must use Mojo"];
+    }
+    const forbidden = [
+      "previous_response_log_suffix",
+      "previous_response_not_found_prefix",
+      "previous_response_event_prefix",
+      '" previous_response_not_found profile="',
+      '" previous_response_retry_immediate profile="',
+      '" stale_continuation reason=',
+      '" previous_response_fresh_fallback',
+      '" previous_response_affinity_released profile="',
+    ];
+    return forbidden
+      .filter((value) => contents.includes(value))
+      .map((value) => filePath + ": contains restored Rust previous-response log rendering semantic " + value);
+  });
   const runtimeProxyObservabilityLabelViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-runtime-proxy/src/websocket_message.rs") {
       if (!contents.includes("runtime_websocket_direct_fallback_reason_label(self as i64)")) {
@@ -3196,7 +3216,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
+    ...previousResponseLogRenderViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,

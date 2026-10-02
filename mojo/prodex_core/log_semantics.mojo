@@ -647,3 +647,358 @@ def prodex_mojo_upstream_payload_classify_v1(
         cursor += width
     output[unsafe_offset=0] = 1
     return 0
+
+comptime PREVIOUS_RESPONSE_LOG_ABI_VERSION: Int64 = 1
+comptime PREVIOUS_RESPONSE_LOG_NOT_FOUND: Int64 = 0
+comptime PREVIOUS_RESPONSE_LOG_RETRY_IMMEDIATE: Int64 = 1
+comptime PREVIOUS_RESPONSE_LOG_STALE_CONTINUATION: Int64 = 2
+comptime PREVIOUS_RESPONSE_LOG_FRESH_FALLBACK: Int64 = 3
+comptime PREVIOUS_RESPONSE_LOG_AFFINITY_RELEASED: Int64 = 4
+
+@fieldwise_init
+struct PreviousResponseLogWriter(Copyable):
+    var output: Pointer[mut=True, UInt8, MutUntrackedOrigin]
+    var capacity: Int64
+    var written: Int64
+
+
+def previous_response_log_put_byte(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _], byte: UInt8
+) -> Bool:
+    if writer[].written < 0 or writer[].written >= writer[].capacity:
+        return False
+    writer[].output[unsafe_offset=writer[].written] = byte
+    writer[].written += 1
+    return True
+
+
+def previous_response_log_put_literal(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _], value: StringSlice
+) -> Bool:
+    var source = value.unsafe_ptr()
+    for index in range(Int64(value.byte_length())):
+        if not previous_response_log_put_byte(
+            writer, source[unsafe_offset=index]
+        ):
+            return False
+    return True
+
+
+def previous_response_log_put_view(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _],
+    value: ProdexRichStringView,
+) -> Bool:
+    var source = rich_view_ptr(value)
+    for index in range(Int64(value.len)):
+        if not previous_response_log_put_byte(
+            writer, source[unsafe_offset=index]
+        ):
+            return False
+    return True
+
+
+def previous_response_log_put_u64(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _], value: UInt64
+) -> Bool:
+    if value == 0:
+        return previous_response_log_put_byte(writer, UInt8(48))
+    var divisor: UInt64 = 1
+    while value / divisor >= UInt64(10):
+        divisor *= UInt64(10)
+    var remaining = value
+    while divisor > 0:
+        if not previous_response_log_put_byte(
+            writer, UInt8(remaining / divisor) + UInt8(48)
+        ):
+            return False
+        remaining %= divisor
+        divisor //= UInt64(10)
+    return True
+
+
+def previous_response_log_text(
+    address: UInt, index: Int64
+) -> ProdexRichStringView:
+    var values = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(address))
+    return values[unsafe_offset=index].copy()
+
+
+def previous_response_log_validate_texts(address: UInt, count: Int64) -> Bool:
+    if count != 6 or address == 0:
+        return False
+    var values = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(address))
+    for index in range(count):
+        var value = values[unsafe_offset=index].copy()
+        if not rich_view_valid(value, Int64(value.len)):
+            return False
+    return True
+
+
+def previous_response_log_put_suffix(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _],
+    text_address: UInt,
+    presence: UInt64,
+) -> Bool:
+    if presence & UInt64(2) == 0:
+        return True
+    return (
+        previous_response_log_put_literal(writer, StringSlice(" via="))
+        and previous_response_log_put_view(
+            writer, previous_response_log_text(text_address, 2)
+        )
+    )
+
+
+def previous_response_log_put_not_found_prefix(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _],
+    request_id: UInt64,
+    websocket_session: UInt64,
+    text_address: UInt,
+    presence: UInt64,
+) -> Bool:
+    if not (
+        previous_response_log_put_literal(writer, StringSlice("request="))
+        and previous_response_log_put_u64(writer, request_id)
+        and previous_response_log_put_literal(writer, StringSlice(" transport="))
+        and previous_response_log_put_view(
+            writer, previous_response_log_text(text_address, 0)
+        )
+        and previous_response_log_put_literal(writer, StringSlice(" route="))
+        and previous_response_log_put_view(
+            writer, previous_response_log_text(text_address, 1)
+        )
+    ):
+        return False
+    if presence & UInt64(1) != 0:
+        return (
+            previous_response_log_put_literal(
+                writer, StringSlice(" websocket_session=")
+            )
+            and previous_response_log_put_u64(writer, websocket_session)
+        )
+    return True
+
+
+def previous_response_log_put_event_prefix(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _],
+    request_id: UInt64,
+    websocket_session: UInt64,
+    text_address: UInt,
+    presence: UInt64,
+) -> Bool:
+    if not (
+        previous_response_log_put_literal(writer, StringSlice("request="))
+        and previous_response_log_put_u64(writer, request_id)
+    ):
+        return False
+    if presence & UInt64(1) != 0:
+        return (
+            previous_response_log_put_literal(
+                writer, StringSlice(" websocket_session=")
+            )
+            and previous_response_log_put_u64(writer, websocket_session)
+        )
+    return (
+        previous_response_log_put_literal(writer, StringSlice(" transport="))
+        and previous_response_log_put_view(
+            writer, previous_response_log_text(text_address, 0)
+        )
+    )
+
+
+def previous_response_log_render(
+    writer: Pointer[mut=True, PreviousResponseLogWriter, _],
+    operation: Int64,
+    request_id: UInt64,
+    websocket_session: UInt64,
+    retry_index: UInt64,
+    text_address: UInt,
+    presence: UInt64,
+) -> Bool:
+    var profile = previous_response_log_text(text_address, 3)
+    if operation == PREVIOUS_RESPONSE_LOG_NOT_FOUND:
+        return (
+            previous_response_log_put_not_found_prefix(
+                writer,
+                request_id,
+                websocket_session,
+                text_address,
+                presence,
+            )
+            and previous_response_log_put_literal(
+                writer, StringSlice(" previous_response_not_found profile=")
+            )
+            and previous_response_log_put_view(writer, profile)
+            and previous_response_log_put_literal(
+                writer, StringSlice(" retry_index=")
+            )
+            and previous_response_log_put_u64(writer, retry_index)
+            and previous_response_log_put_literal(
+                writer, StringSlice(" replay_turn_state=")
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 4)
+            )
+            and previous_response_log_put_suffix(
+                writer, text_address, presence
+            )
+        )
+    if operation == PREVIOUS_RESPONSE_LOG_RETRY_IMMEDIATE:
+        return (
+            previous_response_log_put_event_prefix(
+                writer,
+                request_id,
+                websocket_session,
+                text_address,
+                presence,
+            )
+            and previous_response_log_put_literal(
+                writer,
+                StringSlice(" previous_response_retry_immediate profile="),
+            )
+            and previous_response_log_put_view(writer, profile)
+            and previous_response_log_put_literal(
+                writer, StringSlice(" delay_ms=")
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 4)
+            )
+            and previous_response_log_put_literal(
+                writer, StringSlice(" reason=")
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 5)
+            )
+            and previous_response_log_put_suffix(
+                writer, text_address, presence
+            )
+        )
+    if operation == PREVIOUS_RESPONSE_LOG_STALE_CONTINUATION:
+        return (
+            previous_response_log_put_event_prefix(
+                writer,
+                request_id,
+                websocket_session,
+                text_address,
+                presence,
+            )
+            and previous_response_log_put_literal(
+                writer,
+                StringSlice(
+                    " stale_continuation reason=previous_response_not_found_locked_affinity profile="
+                ),
+            )
+            and previous_response_log_put_view(writer, profile)
+            and previous_response_log_put_suffix(
+                writer, text_address, presence
+            )
+        )
+    if operation == PREVIOUS_RESPONSE_LOG_FRESH_FALLBACK:
+        if not previous_response_log_put_event_prefix(
+            writer,
+            request_id,
+            websocket_session,
+            text_address,
+            presence,
+        ):
+            return False
+        if presence & UInt64(4) != 0:
+            if not previous_response_log_put_literal(
+                writer,
+                StringSlice(" previous_response_fresh_fallback_blocked"),
+            ):
+                return False
+        elif not previous_response_log_put_literal(
+            writer, StringSlice(" previous_response_fresh_fallback")
+        ):
+            return False
+        return (
+            previous_response_log_put_literal(
+                writer,
+                StringSlice(
+                    " reason=previous_response_not_found request_shape="
+                ),
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 4)
+            )
+            and previous_response_log_put_literal(
+                writer, StringSlice(" outcome=")
+            )
+            and previous_response_log_put_view(
+                writer, previous_response_log_text(text_address, 5)
+            )
+            and previous_response_log_put_literal(
+                writer, StringSlice(" profile=")
+            )
+            and previous_response_log_put_view(writer, profile)
+            and previous_response_log_put_suffix(
+                writer, text_address, presence
+            )
+        )
+    return (
+        previous_response_log_put_event_prefix(
+            writer,
+            request_id,
+            websocket_session,
+            text_address,
+            presence,
+        )
+        and previous_response_log_put_literal(
+            writer, StringSlice(" previous_response_affinity_released profile=")
+        )
+        and previous_response_log_put_view(writer, profile)
+        and previous_response_log_put_suffix(writer, text_address, presence)
+    )
+
+
+@export("prodex_mojo_previous_response_log_render_v1")
+def prodex_mojo_previous_response_log_render_v1(
+    abi_version: Int64,
+    operation: Int64,
+    request_id: UInt64,
+    websocket_session: UInt64,
+    retry_index: UInt64,
+    text_address: UInt,
+    text_count: Int64,
+    presence: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PREVIOUS_RESPONSE_LOG_ABI_VERSION:
+        return 4
+    if (
+        operation < PREVIOUS_RESPONSE_LOG_NOT_FOUND
+        or operation > PREVIOUS_RESPONSE_LOG_AFFINITY_RELEASED
+        or presence > UInt64(7)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+        or not previous_response_log_validate_texts(text_address, text_count)
+    ):
+        return 1
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var writer = PreviousResponseLogWriter(output, output_capacity, 0)
+    var ok = previous_response_log_render(
+        Pointer(to=writer),
+        operation,
+        request_id,
+        websocket_session,
+        retry_index,
+        text_address,
+        presence,
+    )
+    written[] = writer.written
+    if not ok:
+        return 2
+    return 0
