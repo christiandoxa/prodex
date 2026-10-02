@@ -72,6 +72,10 @@ fn direct_current_fallback_reason_labels_match_runtime_logs() {
         RuntimeWebsocketDirectCurrentFallbackReason::PrecommitBudgetExhausted.as_str(),
         "precommit_budget_exhausted"
     );
+    assert_eq!(
+        RuntimeWebsocketDirectCurrentFallbackReason::CandidateExhausted.as_str(),
+        "candidate_exhausted"
+    );
     assert!(
         RuntimeWebsocketDirectCurrentFallbackReason::PrecommitBudgetExhausted
             .reset_previous_response_retry_index_on_local_block()

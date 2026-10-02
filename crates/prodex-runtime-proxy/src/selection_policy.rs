@@ -244,6 +244,7 @@ pub fn runtime_proxy_allows_direct_current_profile_fallback(
     )
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeSelectionQuotaWindowStatus {
     Ready,
@@ -266,6 +267,7 @@ pub struct RuntimeSelectionQuotaSummary {
     pub route_band: RuntimeSelectionQuotaPressureBand,
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum RuntimeSelectionQuotaPressureBand {
     Healthy,
@@ -275,6 +277,7 @@ pub enum RuntimeSelectionQuotaPressureBand {
     Unknown,
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeSelectionQuotaSource {
     LiveProbe,

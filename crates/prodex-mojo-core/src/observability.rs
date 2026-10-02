@@ -452,6 +452,43 @@ pub fn runtime_websocket_overflow_reject_event(value: i64) -> Result<&'static st
     cached_fixed_label(153, value, 2, &LABELS)
 }
 
+pub fn runtime_websocket_direct_fallback_reason_label(
+    value: i64,
+) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(154, value, 2, &LABELS)
+}
+
+pub fn runtime_http_error_class_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(155, value, 6, &LABELS)
+}
+
+pub fn runtime_http_error_action_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(156, value, 3, &LABELS)
+}
+
+pub fn runtime_precommit_quota_block_reason_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(157, value, 3, &LABELS)
+}
+
+pub fn runtime_quota_pressure_band_reason_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(158, value, 5, &LABELS)
+}
+
+pub fn runtime_quota_window_status_reason_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(159, value, 5, &LABELS)
+}
+
+pub fn runtime_quota_source_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(160, value, 2, &LABELS)
+}
+
 /// Applies bounded privacy checks to borrowed metric key and value strings.
 ///
 /// The Mojo kernel only reads the strings and returns a validation tag. It
@@ -634,6 +671,37 @@ mod tests {
             runtime_websocket_task_label(2),
             Err(MojoError::InvalidInput)
         );
+    }
+
+    #[test]
+    fn runtime_proxy_observability_labels_are_mojo_owned() {
+        assert_eq!(
+            runtime_websocket_direct_fallback_reason_label(0).unwrap(),
+            "precommit_budget_exhausted"
+        );
+        assert_eq!(runtime_http_error_class_label(4).unwrap(), "transient_5xx");
+        assert_eq!(
+            runtime_http_error_action_label(1).unwrap(),
+            "rotate_profile"
+        );
+        assert_eq!(
+            runtime_precommit_quota_block_reason_label(2).unwrap(),
+            "quota_windows_unavailable_after_reprobe"
+        );
+        assert_eq!(
+            runtime_quota_pressure_band_reason_label(3).unwrap(),
+            "quota_exhausted"
+        );
+        assert_eq!(
+            runtime_quota_window_status_reason_label(2).unwrap(),
+            "critical"
+        );
+        assert_eq!(runtime_quota_source_label(1).unwrap(), "persisted_snapshot");
+        assert_eq!(
+            runtime_http_error_class_label(6),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(runtime_quota_source_label(2), Err(MojoError::InvalidInput));
     }
 
     #[test]
