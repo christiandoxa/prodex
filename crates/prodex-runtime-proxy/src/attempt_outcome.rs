@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimePreviousResponseFreshFallbackShape {
     ToolOutputOnly,
@@ -101,13 +102,7 @@ fn runtime_previous_response_fallback_policy_shape(
 fn runtime_previous_response_fallback_shape_tag(
     shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> i64 {
-    match shape {
-        None => -1,
-        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly) => 0,
-        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly) => 1,
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay) => 2,
-        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation) => 3,
-    }
+    shape.map_or(-1, |shape| shape as i64)
 }
 
 fn runtime_previous_response_fallback_shape_from_tag(
@@ -126,17 +121,9 @@ fn runtime_previous_response_fallback_shape_from_tag(
 pub fn runtime_previous_response_fresh_fallback_shape_label(
     shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> &'static str {
-    match shape {
-        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly) => "tool_output_only",
-        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly) => "empty_input",
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay) => {
-            "session_replayable"
-        }
-        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation) => {
-            "continuation_only"
-        }
-        None => "none",
-    }
+    let value = shape.map_or(0, |shape| shape as i64 + 1);
+    prodex_mojo_core::observability::runtime_previous_response_fallback_shape_label(value)
+        .expect("Mojo previous-response fallback-shape label returned invalid output")
 }
 
 pub fn runtime_previous_response_fresh_fallback_shape_allows_recovery(
@@ -258,6 +245,7 @@ pub fn runtime_websocket_request_requires_locked_previous_response_affinity(
     .request_requires_locked_affinity
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimePreviousResponseNotFoundRoute {
     Responses,
@@ -313,10 +301,7 @@ pub fn runtime_previous_response_not_found_decision(
 ) -> RuntimePreviousResponseNotFoundDecision {
     let plan = prodex_mojo_core::rich::previous_response_plan(
         prodex_mojo_core::rich::PreviousResponsePlanInput {
-            route: match input.route {
-                RuntimePreviousResponseNotFoundRoute::Responses => 0,
-                RuntimePreviousResponseNotFoundRoute::Websocket => 1,
-            },
+            route: input.route as i64,
             previous_response_present: input.previous_response_id.is_some(),
             has_turn_state_retry: input.has_turn_state_retry,
             request_requires_previous_response_affinity: input
@@ -336,14 +321,22 @@ pub fn runtime_previous_response_not_found_decision(
         retry_delay: plan.retry_delay_ms.map(Duration::from_millis),
         retry_reason: match plan.retry_reason {
             0 => None,
-            1 => Some("non_blocking_retry"),
-            2 => Some("locked_affinity_no_turn_state"),
+            1 | 2 => Some(
+                prodex_mojo_core::observability::runtime_previous_response_retry_reason_label(
+                    plan.retry_reason - 1,
+                )
+                .expect("Mojo previous-response retry-reason label returned invalid output"),
+            ),
             _ => unreachable!("validated Mojo previous-response retry reason"),
         },
         chain_retry_reason: match plan.chain_reason {
             0 => None,
-            1 => Some("previous_response_not_found"),
-            2 => Some("previous_response_not_found_locked_affinity"),
+            1 | 2 => Some(
+                prodex_mojo_core::observability::runtime_previous_response_chain_reason_label(
+                    plan.chain_reason - 1,
+                )
+                .expect("Mojo previous-response chain-reason label returned invalid output"),
+            ),
             _ => unreachable!("validated Mojo previous-response chain reason"),
         },
         request_requires_locked_previous_response_affinity: plan.request_requires_locked_affinity,
@@ -363,9 +356,15 @@ pub fn runtime_previous_response_not_found_observability_outcome(
             Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
         )
     {
-        Some("blocked_nonreplayable_without_affinity")
+        Some(
+            prodex_mojo_core::observability::runtime_previous_response_outcome_label(1)
+                .expect("Mojo previous-response outcome label returned invalid output"),
+        )
     } else if decision.fresh_fallback_blocked_without_affinity {
-        Some("blocked_without_affinity")
+        Some(
+            prodex_mojo_core::observability::runtime_previous_response_outcome_label(0)
+                .expect("Mojo previous-response outcome label returned invalid output"),
+        )
     } else {
         None
     }

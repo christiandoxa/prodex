@@ -1002,3 +1002,356 @@ def prodex_mojo_previous_response_log_render_v1(
     if not ok:
         return 2
     return 0
+
+
+comptime PRODEX_STRUCTURED_LOG_ABI_VERSION: Int64 = 1
+comptime PRODEX_STRUCTURED_LOG_STATUS_OK: Int64 = 0
+comptime PRODEX_STRUCTURED_LOG_STATUS_INVALID: Int64 = 1
+comptime PRODEX_STRUCTURED_LOG_STATUS_CAPACITY: Int64 = 2
+comptime PRODEX_STRUCTURED_LOG_STATUS_ABI: Int64 = 4
+
+
+@fieldwise_init
+struct StructuredLogWriter(Copyable):
+    var output: Pointer[mut=True, UInt8, MutUntrackedOrigin]
+    var capacity: Int64
+    var written: Int64
+
+
+def structured_log_put_byte(
+    writer: Pointer[mut=True, StructuredLogWriter, _], value: UInt8
+) -> Bool:
+    if writer[].written < 0 or writer[].written >= writer[].capacity:
+        return False
+    writer[].output[unsafe_offset=writer[].written] = value
+    writer[].written += 1
+    return True
+
+
+def structured_log_put_range(
+    writer: Pointer[mut=True, StructuredLogWriter, _],
+    input: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    for index in range(start, end):
+        if not structured_log_put_byte(writer, input[unsafe_offset=index]):
+            return False
+    return True
+
+
+def structured_log_put_literal(
+    writer: Pointer[mut=True, StructuredLogWriter, _], value: StringSlice
+) -> Bool:
+    var input = value.unsafe_ptr()
+    return structured_log_put_range(
+        writer, input, 0, Int64(value.byte_length())
+    )
+
+
+def structured_log_key_skip(view: ProdexRichStringView) -> Bool:
+    var input = rich_view_ptr(view)
+    for index in range(Int64(view.len)):
+        var value = input[unsafe_offset=index]
+        if (
+            value == UInt8(61)
+            or value == UInt8(32)
+            or (value >= UInt8(9) and value <= UInt8(13))
+        ):
+            return True
+    return False
+
+
+def structured_log_key_known_safe(view: ProdexRichStringView) -> Bool:
+    return (
+        rich_view_matches_literal["affinity"](view, False)
+        or rich_view_matches_literal["acceptance_state"](view, False)
+        or rich_view_matches_literal["balance"](view, False)
+        or rich_view_matches_literal["cold_start_jobs"](view, False)
+        or rich_view_matches_literal["excluded_count"](view, False)
+        or rich_view_matches_literal["effective_model"](view, False)
+        or rich_view_matches_literal["eligible_profiles_remaining"](view, False)
+        or rich_view_matches_literal["fallback"](view, False)
+        or rich_view_matches_literal["failure_class"](view, False)
+        or rich_view_matches_literal["health"](view, False)
+        or rich_view_matches_literal["inflight"](view, False)
+        or rich_view_matches_literal["mode"](view, False)
+        or rich_view_matches_literal["order"](view, False)
+        or rich_view_matches_literal["outcome"](view, False)
+        or rich_view_matches_literal["performance"](view, False)
+        or rich_view_matches_literal["pressure_mode"](view, False)
+        or rich_view_matches_literal["profile"](view, False)
+        or rich_view_matches_literal["profile_hash"](view, False)
+        or rich_view_matches_literal["prompt_cache_bound"](view, False)
+        or rich_view_matches_literal["ready"](view, False)
+        or rich_view_matches_literal["reason"](view, False)
+        or rich_view_matches_literal["reports"](view, False)
+        or rich_view_matches_literal["recovery_generation"](view, False)
+        or rich_view_matches_literal["recovery_outcome"](view, False)
+        or rich_view_matches_literal["requeue_reason"](view, False)
+        or rich_view_matches_literal["request"](view, False)
+        or rich_view_matches_literal["response_id"](view, False)
+        or rich_view_matches_literal["route"](view, False)
+        or rich_view_matches_literal["retry_layer"](view, False)
+        or rich_view_matches_literal["schema_version"](view, False)
+        or rich_view_matches_literal["side_effect_state"](view, False)
+        or rich_view_matches_literal["signaled"](view, False)
+        or rich_view_matches_literal["soft_limit"](view, False)
+        or rich_view_matches_literal["sync_probe_jobs"](view, False)
+        or rich_view_matches_literal["payload_b64"](view, False)
+        or rich_view_matches_literal["stream"](view, False)
+        or rich_view_matches_literal["stream_committed"](view, False)
+        or rich_view_matches_literal["trace"](view, False)
+        or rich_view_matches_literal["transport"](view, False)
+        or rich_view_matches_literal["useful"](view, False)
+        or rich_view_matches_literal["wait_ms"](view, False)
+        or rich_view_matches_literal["waited_ms"](view, False)
+        or rich_view_matches_literal["last_prompt_requeued"](view, False)
+        or rich_view_matches_literal["requested_model"](view, False)
+    )
+
+
+def structured_log_key_free_form(view: ProdexRichStringView) -> Bool:
+    return (
+        rich_view_matches_literal["error"](view, True)
+        or rich_view_matches_literal["message"](view, True)
+        or rich_view_matches_literal["detail"](view, True)
+        or rich_view_matches_literal["body"](view, True)
+        or rich_view_matches_literal["response"](view, True)
+        or rich_view_matches_literal["stderr"](view, True)
+        or rich_view_matches_literal["panic"](view, True)
+    )
+
+
+def structured_log_view_suffix(
+    view: ProdexRichStringView, suffix: StringSlice
+) -> Bool:
+    var suffix_length = Int64(suffix.byte_length())
+    if suffix_length > Int64(view.len):
+        return False
+    var input = rich_view_ptr(view)
+    var expected = suffix.unsafe_ptr()
+    var start = Int64(view.len) - suffix_length
+    for index in range(suffix_length):
+        if input[unsafe_offset=start + index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def structured_log_key_location(view: ProdexRichStringView) -> Bool:
+    return (
+        rich_view_matches_literal["path"](view, True)
+        or structured_log_view_suffix(view, StringSlice("_path"))
+        or rich_view_matches_literal["url"](view, True)
+        or structured_log_view_suffix(view, StringSlice("_url"))
+        or rich_view_matches_literal["endpoint"](view, True)
+        or structured_log_view_suffix(view, StringSlice("_endpoint"))
+    )
+
+
+def structured_log_value_stable_code(view: ProdexRichStringView) -> Bool:
+    if view.len == 0 or view.len > 128:
+        return False
+    var input = rich_view_ptr(view)
+    if view.len >= 3:
+        for index in range(Int64(view.len) - 2):
+            if (
+                input[unsafe_offset=index] == UInt8(115)
+                and input[unsafe_offset=index + 1] == UInt8(107)
+                and (
+                    input[unsafe_offset=index + 2] == UInt8(45)
+                    or input[unsafe_offset=index + 2] == UInt8(95)
+                )
+            ):
+                return False
+    for index in range(Int64(view.len)):
+        var value = input[unsafe_offset=index]
+        if (
+            (value >= UInt8(97) and value <= UInt8(122))
+            or (value >= UInt8(48) and value <= UInt8(57))
+            or value == UInt8(95)
+            or value == UInt8(45)
+            or value == UInt8(46)
+            or value == UInt8(58)
+        ):
+            continue
+        return False
+    return True
+
+
+@export("prodex_mojo_structured_log_field_policy_v1")
+def prodex_mojo_structured_log_field_policy_v1(
+    abi_version: Int64,
+    key_address: UInt,
+    key_length: Int64,
+    value_address: UInt,
+    value_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != PRODEX_STRUCTURED_LOG_ABI_VERSION
+        or key_length < 0
+        or value_length < 0
+        or output_address == 0
+        or (key_length > 0 and key_address == 0)
+        or (value_length > 0 and value_address == 0)
+    ):
+        return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+    var key = ProdexRichStringView(key_address, UInt(key_length))
+    var value = ProdexRichStringView(value_address, UInt(value_length))
+    if (
+        not rich_view_valid(key, key_length)
+        or not rich_view_valid(value, value_length)
+    ):
+        return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 1 if structured_log_key_skip(key) else 0
+    output[unsafe_offset=1] = 1 if structured_log_key_known_safe(key) else 0
+    output[unsafe_offset=2] = 1 if structured_log_key_free_form(key) else 0
+    output[unsafe_offset=3] = 1 if structured_log_value_stable_code(value) else 0
+    output[unsafe_offset=4] = 1 if structured_log_key_location(key) else 0
+    return PRODEX_STRUCTURED_LOG_STATUS_OK
+
+
+@export("prodex_mojo_structured_log_sanitize_v1")
+def prodex_mojo_structured_log_sanitize_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    quote_required_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != PRODEX_STRUCTURED_LOG_ABI_VERSION
+        or input_length < 0
+        or output_capacity < 0
+        or written_address == 0
+        or quote_required_address == 0
+        or (input_length > 0 and input_address == 0)
+        or (output_capacity > 0 and output_address == 0)
+    ):
+        return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, input_length):
+        return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+    var writer = StructuredLogWriter(
+        Pointer[mut=True, UInt8, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        ),
+        output_capacity,
+        0,
+    )
+    var quote_required = input_length == 0
+    var input = rich_view_ptr(view)
+    var index: Int64 = 0
+    while index < input_length:
+        var value = input[unsafe_offset=index]
+        var output_value = value
+        if (
+            value <= UInt8(31)
+            or value == UInt8(127)
+        ):
+            output_value = UInt8(32)
+        elif (
+            value == UInt8(194)
+            and index + 1 < input_length
+            and input[unsafe_offset=index + 1] >= UInt8(128)
+            and input[unsafe_offset=index + 1] <= UInt8(159)
+        ):
+            output_value = UInt8(32)
+            index += 1
+        if not structured_log_put_byte(Pointer(to=writer), output_value):
+            return PRODEX_STRUCTURED_LOG_STATUS_CAPACITY
+        if (
+            output_value == UInt8(34)
+            or output_value == UInt8(92)
+            or output_value == UInt8(32)
+            or (output_value >= UInt8(9) and output_value <= UInt8(13))
+        ):
+            quote_required = True
+        index += 1
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var quote_output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(quote_required_address)
+    )
+    written[] = writer.written
+    quote_output[] = 1 if quote_required else 0
+    return PRODEX_STRUCTURED_LOG_STATUS_OK
+
+
+@export("prodex_mojo_structured_log_location_strip_v1")
+def prodex_mojo_structured_log_location_strip_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != PRODEX_STRUCTURED_LOG_ABI_VERSION
+        or input_length < 0
+        or output_capacity < 0
+        or written_address == 0
+        or (input_length > 0 and input_address == 0)
+        or (output_capacity > 0 and output_address == 0)
+    ):
+        return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, input_length):
+        return PRODEX_STRUCTURED_LOG_STATUS_INVALID
+    var input = rich_view_ptr(view)
+    var end = input_length
+    for index in range(input_length):
+        var value = input[unsafe_offset=index]
+        if value == UInt8(63) or value == UInt8(35):
+            end = index
+            break
+    var scheme_end: Int64 = -1
+    if end >= 3:
+        for index in range(end - 2):
+            if (
+                input[unsafe_offset=index] == UInt8(58)
+                and input[unsafe_offset=index + 1] == UInt8(47)
+                and input[unsafe_offset=index + 2] == UInt8(47)
+            ):
+                scheme_end = index
+                break
+    var last_at: Int64 = -1
+    if scheme_end >= 0:
+        for index in range(scheme_end + 3, end):
+            if input[unsafe_offset=index] == UInt8(64):
+                last_at = index
+    var writer = StructuredLogWriter(
+        Pointer[mut=True, UInt8, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        ),
+        output_capacity,
+        0,
+    )
+    var ok = True
+    if scheme_end < 0 or last_at < 0:
+        ok = structured_log_put_range(Pointer(to=writer), input, 0, end)
+    else:
+        ok = (
+            structured_log_put_range(Pointer(to=writer), input, 0, scheme_end)
+            and structured_log_put_literal(
+                Pointer(to=writer), StringSlice("://<redacted>@")
+            )
+            and structured_log_put_range(
+                Pointer(to=writer), input, last_at + 1, end
+            )
+        )
+    if not ok:
+        return PRODEX_STRUCTURED_LOG_STATUS_CAPACITY
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = writer.written
+    return PRODEX_STRUCTURED_LOG_STATUS_OK

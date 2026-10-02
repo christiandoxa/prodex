@@ -45,6 +45,143 @@ fn mutable_pointer_address<T>(pointer: *mut T) -> u64 {
     pointer as usize as u64
 }
 
+const STRUCTURED_LOG_ABI_VERSION: i64 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StructuredLogFieldPolicy {
+    pub skip: bool,
+    pub known_safe: bool,
+    pub free_form: bool,
+    pub stable_code: bool,
+    pub location: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StructuredLogSanitized {
+    pub value: String,
+    pub quote_required: bool,
+}
+
+unsafe extern "C" {
+    fn prodex_mojo_structured_log_field_policy_v1(
+        abi_version: i64,
+        key_address: u64,
+        key_length: i64,
+        value_address: u64,
+        value_length: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_mojo_structured_log_sanitize_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+        quote_required_address: u64,
+    ) -> i64;
+    fn prodex_mojo_structured_log_location_strip_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
+}
+
+fn structured_log_status(status: i64) -> Result<(), MojoError> {
+    match status {
+        0 => Ok(()),
+        1 => Err(MojoError::InvalidInput),
+        2 => Err(MojoError::Capacity),
+        4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn structured_log_field_policy(
+    key: &str,
+    value: &str,
+) -> Result<StructuredLogFieldPolicy, MojoError> {
+    let mut output = [-1_i64; 5];
+    let status = unsafe {
+        prodex_mojo_structured_log_field_policy_v1(
+            STRUCTURED_LOG_ABI_VERSION,
+            key.as_ptr() as usize as u64,
+            i64::try_from(key.len()).map_err(|_| MojoError::InvalidInput)?,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    structured_log_status(status)?;
+    if output.iter().any(|value| !matches!(value, 0 | 1)) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(StructuredLogFieldPolicy {
+        skip: output[0] == 1,
+        known_safe: output[1] == 1,
+        free_form: output[2] == 1,
+        stable_code: output[3] == 1,
+        location: output[4] == 1,
+    })
+}
+
+pub fn structured_log_sanitize(value: &str) -> Result<StructuredLogSanitized, MojoError> {
+    let mut output = vec![0_u8; value.len().max(1)];
+    let mut written = -1_i64;
+    let mut quote_required = -1_i64;
+    let status = unsafe {
+        prodex_mojo_structured_log_sanitize_v1(
+            STRUCTURED_LOG_ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+            (&mut quote_required as *mut i64) as usize as u64,
+        )
+    };
+    structured_log_status(status)?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() || !matches!(quote_required, 0 | 1) {
+        return Err(MojoError::InvalidOutput);
+    }
+    let value =
+        String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)?;
+    Ok(StructuredLogSanitized {
+        value,
+        quote_required: quote_required == 1,
+    })
+}
+
+pub fn structured_log_strip_location(value: &str) -> Result<String, MojoError> {
+    let capacity = value
+        .len()
+        .checked_add(32)
+        .ok_or(MojoError::InvalidInput)?
+        .max(1);
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_mojo_structured_log_location_strip_v1(
+            STRUCTURED_LOG_ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    structured_log_status(status)?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
 pub const PREVIOUS_RESPONSE_LOG_NOT_FOUND: i64 = 0;
 pub const PREVIOUS_RESPONSE_LOG_RETRY_IMMEDIATE: i64 = 1;
 pub const PREVIOUS_RESPONSE_LOG_STALE_CONTINUATION: i64 = 2;
@@ -456,6 +593,57 @@ pub fn sanitize_transcript_tool_name(value: &str) -> Result<String, MojoError> {
             .to_vec(),
     )
     .map_err(|_| MojoError::InvalidOutput)
+}
+
+#[cfg(test)]
+mod structured_log_policy_tests {
+    use super::*;
+
+    #[test]
+    fn structured_log_policy_preserves_redaction_and_render_contracts() {
+        let safe = structured_log_field_policy("profile", "main").unwrap();
+        assert!(!safe.skip);
+        assert!(safe.known_safe);
+        assert!(!safe.free_form);
+        assert!(safe.stable_code);
+        assert!(!safe.location);
+
+        let free = structured_log_field_policy("ERROR", "upstream_timeout").unwrap();
+        assert!(free.free_form);
+        assert!(free.stable_code);
+        assert!(
+            !structured_log_field_policy("error", "sk-secret")
+                .unwrap()
+                .stable_code
+        );
+
+        let location =
+            structured_log_field_policy("upstream_url", "https://u:p@example.test/v1").unwrap();
+        assert!(location.location);
+        assert_eq!(
+            structured_log_strip_location("https://u:p@example.test/v1?key=secret#frag").unwrap(),
+            "https://<redacted>@example.test/v1"
+        );
+        assert_eq!(
+            structured_log_strip_location("/v1/responses?token=secret").unwrap(),
+            "/v1/responses"
+        );
+
+        let sanitized = structured_log_sanitize("line\nnext\u{0085}tail").unwrap();
+        assert_eq!(sanitized.value, "line next tail");
+        assert!(sanitized.quote_required);
+        assert!(
+            !structured_log_sanitize("plain_code")
+                .unwrap()
+                .quote_required
+        );
+        assert!(structured_log_sanitize("").unwrap().quote_required);
+        assert!(
+            structured_log_field_policy("bad key", "value")
+                .unwrap()
+                .skip
+        );
+    }
 }
 
 #[cfg(test)]
