@@ -2,6 +2,22 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.435.2 - 2026-10-03
+
+### Runtime
+
+- Keep auto-rotate alive while quota remains (`02997e4`)
+
+### CLI
+
+- Delegate profile health circuit timing (`a00b4dc`)
+
+### Docs
+
+- Record compact-exit checkpoint (`6b67cd6`)
+- Record sub-agent renderer wave (`c5af517`)
+- Record provider surface migration checkpoint (`4e175fc`)
+
 ## 0.435.1 - 2026-10-02
 
 ### Docs
@@ -10,88 +26,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Misc
 
+- Align Mojo fallback self tests (`99c68d8`)
+- Align provider defaults with latest models (`ecacd64`)
 - Retain active Copilot GPT-5.6 models (`b2e0611`)
 - Sync latest provider models (`e6965ee`)
-# Prodex 0.435.1
-
-## New Features
-
-- No new user-facing features; 0.435.1 is a provider-catalog synchronization hotfix.
-
-## Bug Fixes
-
-### Provider model catalog synchronization
-
-- Refresh the canonical OpenAI model catalog with GPT-6 Astra, GPT-6.1 Sol,
-  GPT-6 Luna, and GPT-6 Sol ahead of the retained GPT-5.x compatibility
-  entries.
-- Move generic OpenAI aliases such as `default`, `best`, `sol`, and
-  `luna` to the newest matching model generation instead of GPT-5.6-era
-  entries.
-- Refresh Anthropic fallback metadata with Claude Opus 5.5, Claude Sonnet 5.5,
-  and Claude Fable 5.1.
-- Refresh Gemini fallback metadata with Gemini 3.8 Flash, 3.7 Flash, 3.6 Flash,
-  and 3.5 Flash Lite, while removing the shut-down Gemini 3 Pro Preview from
-  the canonical picker.
-- Refresh the GitHub Copilot static fallback catalog with current GPT-6,
-  retained GPT-5.6 Sol/Terra/Luna, Claude 5.x, and Gemini 3.6/3.7/3.8
-  families and remove retired fallback entries such as GPT-5.1-Codex,
-  MAI-Code-1-Flash, Raptor Mini, and retired Gemini/Claude variants.
-- Update provider fallback chains so Copilot and Gemini retries no longer fall
-  back through retired model IDs.
-
-### Main and sub-agent model pickers
-
-- Keep one canonical provider-core static catalog for the main picker,
-  sub-agent picker, and generated external-provider model catalogs.
-- Continue merging provider/account-specific dynamic catalogs on top of the
-  canonical fallback, so newly enabled Copilot, Gemini, Kiro, DeepSeek, local,
-  and OpenAI account models remain visible without replacing the built-in
-  latest-model set.
-- Ensure partial or stale OpenAI `models_cache.json` data cannot hide GPT-6
-  Astra, GPT-6.1 Sol, GPT-6 Luna, or GPT-6 Sol from either picker.
-- Route external Anthropic/Copilot/Kiro catalog generation through the same
-  provider-core source of truth instead of the older duplicate static table.
-
-### GPT-6 runtime metadata
-
-- Treat GPT-6 Astra as a large-context / prefer-max-context OpenAI model.
-- Add GPT-6 Astra to Smart Context's conservative GPT-6 operational window.
-- Preserve provider-specific Copilot prompt limits when known, then fall back
-  to the canonical provider model context window for newly introduced models.
-- Align built-in runtime defaults with the refreshed catalogs: Anthropic now
-  defaults to Claude Sonnet 5.5 with a 1M context window, while Copilot defaults
-  to GPT-6 Astra with a 1.05M context window and matching auto-compact limits.
-
-## Compatibility Notes
-
-- Codex compatibility remains qualified against rust-v0.160.0.
-- Provider/account-specific dynamic catalogs remain authoritative additions to
-  the canonical fallback catalog; model availability can still vary by account
-  plan, organization policy, region, and provider rollout.
-- Kiro keeps its minimal built-in fallback catalog and continues to merge the
-  imported account catalog rather than assuming unsupported static model IDs.
-
-## Verification
-
-- Provider catalog validator passes with 82 canonical models across 7
-  providers and no duplicate ID/alias issues.
-- All 358 `prodex-provider-core` library tests and 7 companion tests pass.
-- Focused main-picker, sub-agent-picker, external-catalog, and OpenAI
-  large-context regressions pass.
-- Standalone Mojo builds for the provider fallback and Super provider policy
-  kernels pass.
-- Clippy passes with warnings denied for the affected provider-core and
-  prodex-app libraries.
-- Mojo no-fallback, Rust allow-attribute, and size guards pass.
-
-## Changelog
-
-- Synchronize model discovery, picker ordering, fallback policy, and external
-  provider catalogs with current provider model families.
-- Release the provider catalog hotfix as Prodex 0.435.1.
-
-Full Changelog: [0.435.0...0.435.1](https://github.com/christiandoxa/prodex/compare/0.435.0...0.435.1)
 
 ## 0.435.0 - 2026-10-02
 
