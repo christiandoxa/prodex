@@ -1818,6 +1818,16 @@ export function findViolations(files) {
     return violations;
   });
   const profileIdentityViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-domain/src/secrets.rs") {
+      const body = contents.match(/\bpub fn is_well_formed\(&self\) -> bool \{[^]*?^    \}/mu)?.[0];
+      const violations = body?.includes(
+        "prodex_mojo_core::secret_policy::secret_reference_is_well_formed(",
+      ) ? [] : [filePath + ": SecretRef::is_well_formed must retain Mojo validation"];
+      if (/\bfn\s+secret_ref_part_is_well_formed\s*\(/u.test(contents)) {
+        violations.push(filePath + ": contains restored Rust secret-reference validation");
+      }
+      return violations;
+    }
     if (filePath !== PROFILE_IDENTITY_FILE) return [];
     const functions = [
       ["find_matching_profile_identity", "mojo_profile_identity::find_matching_profile_identity("],
@@ -3920,6 +3930,11 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  assert.match(findViolations([["crates/prodex-domain/src/secrets.rs",
+    "pub fn is_well_formed(&self) -> bool { true }\nfn secret_ref_part_is_well_formed() {}"]]).join("\n"),
+  /SecretRef::is_well_formed must retain Mojo validation/u);
+  assert.deepEqual(findViolations([["crates/prodex-domain/src/secrets.rs",
+    "pub fn is_well_formed(&self) -> bool {\n        prodex_mojo_core::secret_policy::secret_reference_is_well_formed(provider, name, version)\n    }"]]), []);
   const runtimeLogRetentionCalls = [
     "mojo_retention::bounded_text_policy_value(raw, default, min, max);",
     "selection::remove_expired_runtime_logs(logs, oldest_allowed);",

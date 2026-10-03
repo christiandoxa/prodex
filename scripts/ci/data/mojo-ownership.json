@@ -1143,6 +1143,30 @@
       "rust_adapter_scope": "JWT and access-token decoding, zeroized secret ownership, caller callbacks for unique-name availability, collection reconstruction and human-readable error mapping; migrated profile metadata decisions are Mojo-authoritative"
     },
     {
+      "name": "secret_reference_validation",
+      "domain": "secrets/reference",
+      "introduced_in": "0.435.2",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_secret_reference_valid_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/secret_policy.mojo",
+      "consumer": "crates/prodex-domain/src/secrets.rs",
+      "consumer_marker": "prodex_mojo_core::secret_policy::secret_reference_is_well_formed",
+      "production_consumers": [
+        "crates/prodex-secret-store/src/development_provider.rs",
+        "crates/prodex-secret-store/src/projected_provider.rs"
+      ],
+      "production_reachability_test": "crates/prodex-domain/tests/secrets.rs",
+      "rust_owner_before": "per-component non-empty, 128-byte, printable-ASCII secret-reference validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; caller-boundary tests cover valid ASCII limits, empty values, whitespace, controls, Unicode, and overlong components",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "pass borrowed reference components through the versioned ABI and map the validated result to bool"
+    },
+    {
       "name": "critical_signal_text_grouping",
       "domain": "text/collections",
       "introduced_in": "0.418.0",

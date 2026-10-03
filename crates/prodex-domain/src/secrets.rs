@@ -36,17 +36,13 @@ impl SecretRef {
     }
 
     pub fn is_well_formed(&self) -> bool {
-        secret_ref_part_is_well_formed(&self.provider)
-            && secret_ref_part_is_well_formed(&self.name)
-            && self
-                .version
-                .as_deref()
-                .is_none_or(secret_ref_part_is_well_formed)
+        prodex_mojo_core::secret_policy::secret_reference_is_well_formed(
+            &self.provider,
+            &self.name,
+            self.version.as_deref(),
+        )
+        .expect("Mojo secret-reference validator returned invalid output")
     }
-}
-
-fn secret_ref_part_is_well_formed(value: &str) -> bool {
-    !value.is_empty() && value.len() <= 128 && value.chars().all(|ch| ch.is_ascii_graphic())
 }
 
 impl fmt::Debug for SecretRef {
