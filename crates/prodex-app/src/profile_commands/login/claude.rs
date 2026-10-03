@@ -174,7 +174,9 @@ fn finish_anthropic_login_for_new_profile(
         .as_deref()
         .map(|account| format!("claude_{account}"))
         .unwrap_or_else(|| "claude".to_string());
-    let profile_name = unique_profile_name_for_slug(paths, state, &slug);
+    let profile_name = unique_profile_name_for_slug(&slug, |candidate| {
+        crate::profile_name_is_available(paths, state, candidate)
+    });
     let codex_home = managed_profile_home_path(paths, &profile_name)?;
     let desired_profile = ProfileEntry {
         codex_home: codex_home.clone(),

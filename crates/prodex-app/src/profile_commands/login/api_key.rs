@@ -148,7 +148,9 @@ fn finish_api_key_login_for_new_profile(
     openai_base_url: Option<&str>,
     openai_base_url_specified: bool,
 ) -> Result<()> {
-    let profile_name = unique_profile_name_for_slug(paths, state, requested_profile_name);
+    let profile_name = unique_profile_name_for_slug(requested_profile_name, |candidate| {
+        crate::profile_name_is_available(paths, state, candidate)
+    });
     let codex_home = managed_profile_home_path(paths, &profile_name)?;
     let desired_profile = ProfileEntry {
         codex_home: codex_home.clone(),
