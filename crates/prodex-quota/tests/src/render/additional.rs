@@ -202,6 +202,50 @@ fn app_server_rate_limits_payload_keeps_regular_and_reserve_buckets_separate() {
 }
 
 #[test]
+fn indexed_rate_limits_keep_alias_precedence_and_deduplicate_existing_buckets() {
+    let usage: UsageResponse = serde_json::from_value(serde_json::json!({
+        "ordinary_usage_allowed": false,
+        "ordinaryUsageAllowed": null,
+        "rateLimitReachedType": false,
+        "rateLimitsByLimitId": {
+            "codex": {
+                "planType": "  Plus  ",
+                "primary": {"usedPercent": 20}
+            },
+            "  feature-bucket  ": {
+                "limitId": " ",
+                "limitName": "  Future  ",
+                "meteredFeature": "  Feature  "
+            },
+            "Bucket-A": {"limitId": "bucket-a"}
+        },
+        "additionalRateLimits": [{"limitId": "BUCKET-A"}]
+    }))
+    .expect("indexed quota payload should deserialize");
+
+    let main = usage.rate_limit.as_ref().expect("indexed Codex bucket");
+    assert_eq!(usage.plan_type.as_deref(), Some("Plus"));
+    assert_eq!(main.allowed, Some(false));
+    assert_eq!(
+        main.extra.get("ordinaryUsageAllowed"),
+        Some(&serde_json::Value::Null)
+    );
+    assert_eq!(usage.additional_rate_limits.len(), 2);
+    assert_eq!(
+        usage.additional_rate_limits[1].limit_id.as_deref(),
+        Some("  feature-bucket  ")
+    );
+    assert_eq!(
+        usage.additional_rate_limits[1].limit_name.as_deref(),
+        Some("Future")
+    );
+    assert_eq!(
+        usage.additional_rate_limits[1].metered_feature.as_deref(),
+        Some("Feature")
+    );
+}
+
+#[test]
 fn unavailable_ordinary_permission_does_not_recover_from_percentages() {
     let usage: UsageResponse = serde_json::from_value(serde_json::json!({
         "ordinaryUsageAllowed": null,

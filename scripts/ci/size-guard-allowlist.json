@@ -66,8 +66,8 @@
   },
   {
     "file": "crates/prodex-mojo-core/src/quota.rs",
-    "maxLines": 1609,
-    "reason": "Quota.rs is the typed Rust ABI/materialization boundary for the expanded Mojo quota policy families shipped through 0.435.0; this exact cap records current production LOC pending a post-release adapter split, without adding fallback semantics."
+    "maxLines": 1554,
+    "reason": "Quota.rs remains the typed Rust ABI boundary for Mojo quota policy; report comparison and sort adapters now live in quota/report_sort.rs. This exact post-split cap blocks further growth until remaining policy families can move behind cohesive adapters."
   },
   {
     "file": "crates/prodex-runtime-state/tests/src/lib.rs",

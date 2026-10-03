@@ -996,7 +996,6 @@ def quota_plan_type_matches(
     return target_index == Int64(literal.byte_length())
 
 
-
 comptime QUOTA_DISPLAY_LABEL_SORT: Int64 = 0
 comptime QUOTA_DISPLAY_LABEL_BLOCKED_STATUS: Int64 = 1
 comptime QUOTA_DISPLAY_LABEL_AUTH_SYNC_SOURCE: Int64 = 2
