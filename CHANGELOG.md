@@ -93,22 +93,6 @@ Full Changelog: [0.435.1...0.435.2](https://github.com/christiandoxa/prodex/comp
 
 ## 0.435.0 - 2026-10-02
 
-### CLI
-
-- Prompt expose launch configuration (`ba35576`)
-
-### Docs
-
-- Complete 0.435.0 release notes (`fc41473`)
-- Dedupe provider bridge checkpoint (`3b38d70`)
-- Dedupe Mojo campaign checkpoint (`aec02ee`)
-
-### Misc
-
-- Align Codex 0.160.0 (`b3ae01d`)
-
-## 0.434.3 - 2026-10-01
-
 ### Runtime
 
 - Migrate websocket recovery policy (`a65206e`)
@@ -117,76 +101,6 @@ Full Changelog: [0.435.1...0.435.2](https://github.com/christiandoxa/prodex/comp
 - Migrate websocket failure policy (`a4da101`)
 - Migrate runtime log retention policy (`6e42ebe`)
 - Migrate runtime admission policy (`d0832e6`)
-
-### CLI
-
-- Migrate profile password policy (`10cb1c1`)
-- Expose validated optional tools to exec (`fe31ee4`)
-- Migrate profile identity source policy (`6aa569f`)
-- Migrate quota auth policy (`303ac12`)
-- Migrate profile import identity policy (`11ede5e`)
-- Migrate profile backoff policy (`57ebb15`)
-- Migrate profile score policy (`3920a9b`)
-- Migrate cached quota source policy (`5589543`)
-
-### Claude
-
-- Migrate Anthropic retry transition (`3f7b187`)
-
-### Misc
-
-- Qualify Caveman 3.0.0 (`827f048`)
-- Classify private key fields as sensitive (`a08813b`)
-- Align Codex 0.159.3 (`4a6f160`)
-- Migrate noncompact failure policy (`5d06911`)
-- Migrate Super choice policy (`1a93be4`)
-- Migrate login menu policy (`92c61df`)
-- Migrate lineage lookup policy (`3bd28ea`)
-- Migrate repo map indexing policy (`2f3dbed`)
-- Migrate login argument policy (`50d6191`)
-- Migrate provider SSE framing policy (`8d3d1a1`)
-- Migrate Presidio transport policy (`baf86b6`)
-- Migrate Super prompt step policy (`697a27c`)
-- Migrate waitable candidate policy (`3a16ee9`)
-- Migrate response usage progress policy (`7b71251`)
-- Migrate Gemini SSE lifecycle policy (`90ae761`)
-- Migrate hard binding resolution (`29c24ba`)
-- Migrate upstream payload classification (`c51bc72`)
-- Migrate lineage release policy (`a6cf981`)
-- Migrate Presidio JSON field policy (`3319ebe`)
-- Migrate provider route parsing (`a5b37b8`)
-- Migrate Kiro response input policy (`f4763b8`)
-- Migrate provider retry policy (`06622ce`)
-- Migrate affinity outcome policy (`46b7c6c`)
-- Migrate DeepSeek native search policy (`ea15989`)
-- Migrate Gemini unified diff parser (`4ec4ed9`)
-
-## 0.434.2 - 2026-09-30
-
-### CLI
-
-- Auto-trust local workspaces (`21ead45`)
-
-## 0.434.1 - 2026-09-30
-
-### Claude
-
-- Migrate Kiro Anthropic response (`2bb110c`)
-
-### Misc
-
-- Align Codex 0.159.2 (`016a520`)
-- Migrate Kiro chat message items (`9cc96a9`)
-- Align Codex 0.159.1 (`0fa6400`)
-- Migrate Copilot request policy (`a4d3c39`)
-- Migrate DeepSeek request planning (`7aa2bd5`)
-- Migrate Gemini request contents (`034b6c1`)
-- Migrate Gemini Code Assist policy (`5d75057`)
-
-## 0.434.0 - 2026-09-29
-
-### Runtime
-
 - Migrate runtime cookie identity (`9b6755b`)
 - Migrate runtime scalar config (`4376b2b`)
 - Remove runtime proxy identity duplicates (`b36c6c3`)
@@ -390,6 +304,16 @@ Full Changelog: [0.435.1...0.435.2](https://github.com/christiandoxa/prodex/comp
 
 ### CLI
 
+- Prompt expose launch configuration (`ba35576`)
+- Migrate profile password policy (`10cb1c1`)
+- Expose validated optional tools to exec (`fe31ee4`)
+- Migrate profile identity source policy (`6aa569f`)
+- Migrate quota auth policy (`303ac12`)
+- Migrate profile import identity policy (`11ede5e`)
+- Migrate profile backoff policy (`57ebb15`)
+- Migrate profile score policy (`3920a9b`)
+- Migrate cached quota source policy (`5589543`)
+- Auto-trust local workspaces (`21ead45`)
 - Support mixed attachment separators (`a37b9c8`)
 - Persist resumed pasted attachments (`670e153`)
 - Migrate quota render casefold policy (`97a9e27`)
@@ -512,6 +436,8 @@ Full Changelog: [0.435.1...0.435.2](https://github.com/christiandoxa/prodex/comp
 
 ### Claude
 
+- Migrate Anthropic retry transition (`3f7b187`)
+- Migrate Kiro Anthropic response (`2bb110c`)
 - Move Anthropic response defaults into Mojo (`598b5f3`)
 - Move Anthropic web-search shaping into Mojo (`42cf266`)
 - Move Anthropic Messages request shaping into Mojo (`dbbd8d7`)
@@ -541,6 +467,9 @@ Full Changelog: [0.435.1...0.435.2](https://github.com/christiandoxa/prodex/comp
 
 ### Docs
 
+- Complete 0.435.0 release notes (`fc41473`)
+- Dedupe provider bridge checkpoint (`3b38d70`)
+- Dedupe Mojo campaign checkpoint (`aec02ee`)
 - Record hard replacement authority and current share (`cf17b3c`)
 - Record stable 1.1 compiler baseline (`1c04046`)
 - Align native provider compatibility guidance (`9daf777`)
@@ -646,6 +575,39 @@ Full Changelog: [0.435.1...0.435.2](https://github.com/christiandoxa/prodex/comp
 
 ### Misc
 
+- Align Codex 0.160.0 (`b3ae01d`)
+- Qualify Caveman 3.0.0 (`827f048`)
+- Classify private key fields as sensitive (`a08813b`)
+- Align Codex 0.159.3 (`4a6f160`)
+- Migrate noncompact failure policy (`5d06911`)
+- Migrate Super choice policy (`1a93be4`)
+- Migrate login menu policy (`92c61df`)
+- Migrate lineage lookup policy (`3bd28ea`)
+- Migrate repo map indexing policy (`2f3dbed`)
+- Migrate login argument policy (`50d6191`)
+- Migrate provider SSE framing policy (`8d3d1a1`)
+- Migrate Presidio transport policy (`baf86b6`)
+- Migrate Super prompt step policy (`697a27c`)
+- Migrate waitable candidate policy (`3a16ee9`)
+- Migrate response usage progress policy (`7b71251`)
+- Migrate Gemini SSE lifecycle policy (`90ae761`)
+- Migrate hard binding resolution (`29c24ba`)
+- Migrate upstream payload classification (`c51bc72`)
+- Migrate lineage release policy (`a6cf981`)
+- Migrate Presidio JSON field policy (`3319ebe`)
+- Migrate provider route parsing (`a5b37b8`)
+- Migrate Kiro response input policy (`f4763b8`)
+- Migrate provider retry policy (`06622ce`)
+- Migrate affinity outcome policy (`46b7c6c`)
+- Migrate DeepSeek native search policy (`ea15989`)
+- Migrate Gemini unified diff parser (`4ec4ed9`)
+- Align Codex 0.159.2 (`016a520`)
+- Migrate Kiro chat message items (`9cc96a9`)
+- Align Codex 0.159.1 (`0fa6400`)
+- Migrate Copilot request policy (`a4d3c39`)
+- Migrate DeepSeek request planning (`7aa2bd5`)
+- Migrate Gemini request contents (`034b6c1`)
+- Migrate Gemini Code Assist policy (`5d75057`)
 - Align Codex 0.159.0 (`39a9d2c`)
 - Migrate secret backend identity (`44d43df`)
 - Migrate Copilot export host identity (`bfe7cdb`)
