@@ -185,94 +185,6 @@ fn status_error(status: i64) -> MojoError {
     }
 }
 
-fn input_is_valid(input: &RuntimeDoctorPlanInput) -> bool {
-    (0..=RUNTIME_DOCTOR_PLAN_OP_POLICY_SUGGESTIONS).contains(&input.operation)
-        && (RUNTIME_DOCTOR_PLAN_LANE_MISSING..=RUNTIME_DOCTOR_PLAN_LANE_OTHER).contains(&input.lane)
-        && (0..=1).contains(&input.compact_exit_pressure)
-        && (RUNTIME_DOCTOR_PLAN_COMPACT_REASON_UNKNOWN
-            ..=RUNTIME_DOCTOR_PLAN_COMPACT_REASON_INFLIGHT)
-            .contains(&input.compact_reason)
-        && (0..=1).contains(&input.quota_stale_risk)
-        && (0..=1).contains(&input.context_dependent)
-        && [
-            input.counts.lane,
-            input.counts.active,
-            input.counts.profile_inflight,
-            input.counts.profile_health,
-            input.counts.websocket_rejected,
-            input.counts.websocket_reject,
-            input.counts.websocket_enqueue,
-            input.counts.websocket_dispatch,
-            input.counts.auth_failed,
-            input.counts.auth_recovered,
-            input.counts.state_backpressure,
-            input.counts.journal_backpressure,
-            input.counts.sync_probe_skip,
-            input.counts.probe_backpressure,
-            input.counts.transport_backoff,
-            input.counts.profile_transport_failure,
-            input.counts.stream_read_error,
-            input.counts.upstream_connect_timeout,
-            input.counts.upstream_connect_error,
-            input.counts.upstream_connect_dns_error,
-            input.counts.upstream_tls_handshake_error,
-            input.counts.quota_blocked,
-            input.counts.responses_pre_send_skip,
-            input.counts.websocket_pre_send_skip,
-            input.counts.precommit_budget,
-            input.counts.compact_precommit_budget,
-            input.counts.compact_exit_precommit_budget,
-            input.counts.compact_candidate,
-            input.counts.compact_exit_candidate,
-            input.counts.dns_reject,
-            input.counts.dns_enqueue,
-            input.counts.dns_dispatch,
-        ]
-        .iter()
-        .all(|value| (0..=RUNTIME_DOCTOR_PLAN_MAX_COUNT).contains(value))
-        && [
-            input.observations.lane_active,
-            input.observations.lane_limit,
-            input.observations.active_active,
-            input.observations.active_limit,
-            input.observations.inflight_hard_limit,
-            input.observations.websocket_pending,
-            input.observations.websocket_max_pending,
-            input.observations.websocket_worker_count,
-            input.observations.websocket_queue_capacity,
-            input.observations.dns_pending,
-            input.observations.dns_max_pending,
-            input.observations.dns_worker_count,
-            input.observations.dns_queue_capacity,
-            input.observations.state_backlog,
-            input.observations.journal_backlog,
-            input.observations.probe_backlog,
-            input.observations.sync_cold_start_jobs,
-            input.observations.sync_cold_start_profiles,
-        ]
-        .iter()
-        .all(|value| (-1..=RUNTIME_DOCTOR_PLAN_MAX_SCALAR).contains(value))
-        && [
-            input.tuning.active_request_limit,
-            input.tuning.responses_active_limit,
-            input.tuning.compact_active_limit,
-            input.tuning.websocket_active_limit,
-            input.tuning.standard_active_limit,
-            input.tuning.admission_wait_budget_ms,
-            input.tuning.pressure_admission_wait_budget_ms,
-            input.tuning.websocket_connect_worker_count,
-            input.tuning.websocket_connect_queue_capacity,
-            input.tuning.websocket_connect_overflow_capacity,
-            input.tuning.websocket_dns_worker_count,
-            input.tuning.websocket_dns_queue_capacity,
-            input.tuning.websocket_dns_overflow_capacity,
-            input.tuning.profile_inflight_soft_limit,
-            input.tuning.profile_inflight_hard_limit,
-        ]
-        .iter()
-        .all(|value| (0..=RUNTIME_DOCTOR_PLAN_MAX_SCALAR).contains(value))
-}
-
 fn output_is_valid(output: &RuntimeDoctorPlan) -> bool {
     if output.abi_version != RUNTIME_DOCTOR_PLAN_ABI_VERSION
         || !(RUNTIME_DOCTOR_PLAN_NEXT_NONE..=RUNTIME_DOCTOR_PLAN_NEXT_PROBE_REFRESH)
@@ -322,9 +234,6 @@ fn output_is_valid(output: &RuntimeDoctorPlan) -> bool {
 /// Run the bounded runtime-doctor diagnosis and policy planning kernel.
 pub fn runtime_doctor_plan(input: RuntimeDoctorPlanInput) -> Result<RuntimeDoctorPlan, MojoError> {
     ensure_rich_abi()?;
-    if !input_is_valid(&input) {
-        return Err(MojoError::InvalidInput);
-    }
     let mut output = RuntimeDoctorPlanOutput::default();
     let mut suggestion_ids = [0_i64; RUNTIME_DOCTOR_PLAN_MAX_SUGGESTIONS];
     let mut suggestion_severities = [0_i64; RUNTIME_DOCTOR_PLAN_MAX_SUGGESTIONS];
@@ -576,33 +485,6 @@ fn summary_plan_status_error(status: i64) -> MojoError {
     }
 }
 
-fn summary_plan_input_is_valid(input: &RuntimeDoctorSummaryPlanInput) -> bool {
-    input
-        .marker_counts
-        .iter()
-        .all(|value| (0..=RUNTIME_DOCTOR_PLAN_MAX_COUNT).contains(value))
-        && (0..=RUNTIME_DOCTOR_PLAN_MAX_COUNT).contains(&input.line_count)
-        && [
-            input.pointer_exists,
-            input.log_exists,
-            input.orphan_managed_dirs,
-            input.startup_audit_risk,
-            input.runtime_broker_mismatch,
-            input.prodex_binary_mismatch,
-            input.persisted_quota_snapshot_risk,
-        ]
-        .iter()
-        .all(|value| (0..=1).contains(value))
-        && [
-            input.stale_persisted_usage_snapshots,
-            input.persisted_dead_continuations,
-            input.suspect_continuations,
-            input.degraded_routes,
-        ]
-        .iter()
-        .all(|value| (0..=RUNTIME_DOCTOR_PLAN_MAX_COUNT).contains(value))
-}
-
 fn summary_plan_output_is_valid(output: &RuntimeDoctorSummaryPlan) -> bool {
     output.abi_version == RUNTIME_DOCTOR_SUMMARY_PLAN_ABI_VERSION
         && (RUNTIME_DOCTOR_PRESSURE_LOW..=RUNTIME_DOCTOR_PRESSURE_STALE_RISK)
@@ -624,9 +506,6 @@ pub fn runtime_doctor_summary_plan(
     input: RuntimeDoctorSummaryPlanInput,
 ) -> Result<RuntimeDoctorSummaryPlan, MojoError> {
     ensure_rich_abi()?;
-    if !summary_plan_input_is_valid(&input) {
-        return Err(MojoError::InvalidInput);
-    }
     let mut output = RuntimeDoctorSummaryPlan::default();
     let status = unsafe {
         prodex_mojo_rich_runtime_doctor_summary_plan_v1(
@@ -641,20 +520,6 @@ pub fn runtime_doctor_summary_plan(
     summary_plan_output_is_valid(&output)
         .then_some(output)
         .ok_or(MojoError::InvalidOutput)
-}
-
-fn state_plan_input_is_valid(input: &RuntimeDoctorStatePlanInput) -> bool {
-    (RUNTIME_DOCTOR_STATE_OP_QUOTA..=RUNTIME_DOCTOR_STATE_OP_CIRCUIT).contains(&input.operation)
-        && (RUNTIME_DOCTOR_STATE_ROUTE_RESPONSES..=RUNTIME_DOCTOR_STATE_ROUTE_STANDARD)
-            .contains(&input.route_kind)
-        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
-            .contains(&input.five_hour_status)
-        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
-            .contains(&input.weekly_status)
-        && (input.operation == RUNTIME_DOCTOR_STATE_OP_QUOTA || input.stale_grace_seconds >= 0)
-        && input.score >= 0
-        && input.circuit_until >= -1
-        && (input.operation != RUNTIME_DOCTOR_STATE_OP_SCORE || input.decay_seconds > 0)
 }
 
 fn state_plan_output_is_valid(output: &RuntimeDoctorStatePlan) -> bool {
@@ -677,9 +542,6 @@ pub fn runtime_doctor_state_plan(
     input: RuntimeDoctorStatePlanInput,
 ) -> Result<RuntimeDoctorStatePlan, MojoError> {
     ensure_rich_abi()?;
-    if !state_plan_input_is_valid(&input) {
-        return Err(MojoError::InvalidInput);
-    }
     let mut output = RuntimeDoctorStatePlan::default();
     let status = unsafe {
         prodex_mojo_rich_runtime_doctor_state_plan_v2(
@@ -694,24 +556,6 @@ pub fn runtime_doctor_state_plan(
     state_plan_output_is_valid(&output)
         .then_some(output)
         .ok_or(MojoError::InvalidOutput)
-}
-
-fn route_plan_input_is_valid(input: &RuntimeDoctorRoutePlanInput) -> bool {
-    (RUNTIME_DOCTOR_STATE_ROUTE_RESPONSES..=RUNTIME_DOCTOR_STATE_ROUTE_STANDARD)
-        .contains(&input.route_kind)
-        && matches!(input.snapshot_present, 0 | 1)
-        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
-            .contains(&input.five_hour_status)
-        && (RUNTIME_DOCTOR_STATE_STATUS_READY..=RUNTIME_DOCTOR_STATE_STATUS_UNKNOWN)
-            .contains(&input.weekly_status)
-        && input.stale_grace_seconds >= 0
-        && input.health_score >= 0
-        && input.bad_pairing_score >= 0
-        && input.performance_score >= 0
-        && input.health_decay_seconds > 0
-        && input.bad_pairing_decay_seconds > 0
-        && input.performance_decay_seconds > 0
-        && input.circuit_until >= -1
 }
 
 fn route_plan_output_is_valid(output: &RuntimeDoctorRoutePlan) -> bool {
@@ -736,9 +580,6 @@ pub fn runtime_doctor_route_plan(
     input: RuntimeDoctorRoutePlanInput,
 ) -> Result<RuntimeDoctorRoutePlan, MojoError> {
     ensure_rich_abi()?;
-    if !route_plan_input_is_valid(&input) {
-        return Err(MojoError::InvalidInput);
-    }
     let mut output = RuntimeDoctorRoutePlan::default();
     let status = unsafe {
         prodex_mojo_rich_runtime_doctor_route_plan_v1(
@@ -802,6 +643,44 @@ pub fn runtime_doctor_state_plan_self_test() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn input_contracts_are_validated_by_mojo() {
+        let plan = RuntimeDoctorPlanInput {
+            operation: RUNTIME_DOCTOR_PLAN_OP_POLICY_SUGGESTIONS + 1,
+            ..RuntimeDoctorPlanInput::default()
+        };
+        assert!(matches!(
+            runtime_doctor_plan(plan),
+            Err(MojoError::InvalidInput)
+        ));
+
+        let mut summary = RuntimeDoctorSummaryPlanInput::default();
+        summary.marker_counts[RUNTIME_DOCTOR_SUMMARY_MARKER_COUNT - 1] =
+            RUNTIME_DOCTOR_PLAN_MAX_COUNT + 1;
+        assert!(matches!(
+            runtime_doctor_summary_plan(summary),
+            Err(MojoError::InvalidInput)
+        ));
+
+        let state = RuntimeDoctorStatePlanInput {
+            operation: RUNTIME_DOCTOR_STATE_OP_CIRCUIT + 1,
+            ..RuntimeDoctorStatePlanInput::default()
+        };
+        assert!(matches!(
+            runtime_doctor_state_plan(state),
+            Err(MojoError::InvalidInput)
+        ));
+
+        let route = RuntimeDoctorRoutePlanInput {
+            health_decay_seconds: 0,
+            ..RuntimeDoctorRoutePlanInput::default()
+        };
+        assert!(matches!(
+            runtime_doctor_route_plan(route),
+            Err(MojoError::InvalidInput)
+        ));
+    }
 
     #[test]
     fn plan_self_test_passes() {

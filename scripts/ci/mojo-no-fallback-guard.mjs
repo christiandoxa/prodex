@@ -23,6 +23,8 @@ const DOCTOR_TIMELINE_DETAIL_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/p
 const DOCTOR_LAST_MARKER_LINE_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/parsing/log_line.rs";
 const DOCTOR_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_render.rs";
 const DOCTOR_RENDER_MOJO_FILE = "mojo/prodex_core/runtime_doctor_render.mojo";
+const RUNTIME_DOCTOR_PLAN_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs";
+const RUNTIME_DOCTOR_PLAN_MOJO_FILE = "mojo/prodex_core/runtime_doctor_plan.mojo";
 const CLI_DEFAULT_RUN_CONSUMER_FILE = "crates/prodex-cli/src/lib.rs";
 const CLI_DEFAULT_RUN_ABI_FILE = "crates/prodex-mojo-core/src/launch.rs";
 const CLI_DEFAULT_RUN_MOJO_FILE = "mojo/prodex_core/launch_args.mojo";
@@ -3124,6 +3126,29 @@ export function findViolations(files) {
     }
     return [];
   });
+  const runtimeDoctorPlanInputViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_DOCTOR_PLAN_ADAPTER_FILE) {
+      const rustValidators = /\bfn (?:input_is_valid|summary_plan_input_is_valid|state_plan_input_is_valid|route_plan_input_is_valid)\s*\(/u;
+      return !rustValidators.test(contents) &&
+          contents.includes("input_contracts_are_validated_by_mojo")
+        ? []
+        : [`${filePath}: runtime-doctor fixed-layout input contracts must be validated by Mojo and covered through the real Rust caller`];
+    }
+    if (filePath === RUNTIME_DOCTOR_PLAN_MOJO_FILE &&
+        (!contents.includes("def runtime_doctor_input_valid(") ||
+          !contents.includes("if not runtime_doctor_input_valid(input):") ||
+          !contents.includes("def runtime_doctor_summary_validate_input(") ||
+          !contents.includes("for index in range(Int(RUNTIME_DOCTOR_SUMMARY_MARKER_COUNT)):") ||
+          !contents.includes("runtime_doctor_count_valid(input.marker_counts[index])") ||
+          !contents.includes("if not runtime_doctor_summary_validate_input(input):") ||
+          !contents.includes("def runtime_doctor_state_validate_input(") ||
+          !contents.includes("if not runtime_doctor_state_validate_input(input):") ||
+          !contents.includes("def runtime_doctor_route_plan_valid(") ||
+          !contents.includes("if not runtime_doctor_route_plan_valid(input):"))) {
+      return [`${filePath}: all runtime-doctor plan ABI input contracts, including the bounded marker arena, must be validated in Mojo`];
+    }
+    return [];
+  });
   const cliDefaultRunViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === CLI_DEFAULT_RUN_CONSUMER_FILE) {
       const body = contents.match(/\bpub fn should_default_cli_invocation_to_run\s*\([^]*?^\}/mu)?.[0];
@@ -3952,7 +3977,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...doctorLastMarkerLineViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
+    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...doctorLastMarkerLineViolations, ...runtimeDoctorPlanInputViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
@@ -4439,6 +4464,12 @@ function selfTest() {
   /last-marker line truncation must retain bounded real-Mojo operation 23 and its ABI boundary test/u);
   assert.match(findViolations([[DOCTOR_RENDER_MOJO_FILE, "def runtime_doctor_render_value(): pass"]]).join("\n"),
   /bounded Unicode truncation for timeline details and last-marker lines must stay in the production Mojo renderer/u);
+  assert.match(findViolations([[RUNTIME_DOCTOR_PLAN_ADAPTER_FILE,
+    "fn input_is_valid(input: &Input) -> bool { true }\n"]]).join("\n"),
+  /runtime-doctor fixed-layout input contracts must be validated by Mojo and covered through the real Rust caller/u);
+  assert.match(findViolations([[RUNTIME_DOCTOR_PLAN_MOJO_FILE,
+    "def runtime_doctor_summary_validate_input(): pass\n"]]).join("\n"),
+  /all runtime-doctor plan ABI input contracts, including the bounded marker arena, must be validated in Mojo/u);
   assert.match(findViolations([[CLI_DEFAULT_RUN_CONSUMER_FILE,
     "fn reassemble_super_expose_alias() { prodex_mojo_core::launch::find_super_expose_alias_index(); }\npub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {\n  matches!(args.first(), Some(_))\n}\n"]]).join("\n"),
   /CLI default-run decision must use the Mojo launch-arguments policy/u);
