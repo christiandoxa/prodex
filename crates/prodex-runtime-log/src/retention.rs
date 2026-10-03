@@ -8,6 +8,9 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+#[path = "retention_selection.rs"]
+mod selection;
+
 pub(super) const RUNTIME_LOG_FILE_PREFIX: &str = "prodex-runtime";
 const RUNTIME_LOG_LATEST_POINTER_FILE: &str = "prodex-runtime-latest.path";
 const RUNTIME_LOG_DIRECTORY_LOCK_FILE: &str = "prodex-runtime.lock";
@@ -481,15 +484,10 @@ fn cleanup_runtime_log_directory_locked(
     log_prefix: &str,
 ) -> RuntimeLogCleanupReport {
     let RuntimeLogScan {
-        mut logs,
+        logs,
         lock_paths,
         mut report,
     } = scan_runtime_log_directory(dir, log_prefix);
-    logs.sort_by(|left, right| {
-        left.modified_epoch_seconds
-            .cmp(&right.modified_epoch_seconds)
-            .then_with(|| left.path.cmp(&right.path))
-    });
     let protected_paths = protected_paths.iter().collect::<BTreeSet<_>>();
     let now_epoch = now
         .duration_since(UNIX_EPOCH)
@@ -501,7 +499,7 @@ fn cleanup_runtime_log_directory_locked(
     let mut total_bytes = logs.iter().map(|log| log.size).sum::<u64>();
     let mut remaining_count = logs.len();
 
-    remove_expired_runtime_logs(
+    selection::remove_expired_runtime_logs(
         &logs,
         oldest_allowed,
         &protected_paths,
@@ -510,7 +508,7 @@ fn cleanup_runtime_log_directory_locked(
         &mut total_bytes,
         &mut remaining_count,
     );
-    remove_over_budget_runtime_logs(
+    selection::remove_over_budget_runtime_logs(
         &logs,
         policy,
         &protected_paths,
@@ -602,61 +600,6 @@ fn runtime_log_is_removable(path: &Path, protected_paths: &BTreeSet<&PathBuf>) -
         .iter()
         .any(|protected| protected.as_path() == path)
         && !runtime_log_path_is_active(path)
-}
-
-fn remove_expired_runtime_logs(
-    logs: &[RuntimeLogFileEntry],
-    oldest_allowed: i64,
-    protected_paths: &BTreeSet<&PathBuf>,
-    removed_paths: &mut BTreeSet<PathBuf>,
-    report: &mut RuntimeLogCleanupReport,
-    total_bytes: &mut u64,
-    remaining_count: &mut usize,
-) {
-    for log in logs {
-        let removable = runtime_log_is_removable(&log.path, protected_paths);
-        if mojo_retention::log_expired_removal_allowed(
-            log.modified_epoch_seconds,
-            oldest_allowed,
-            removable,
-        )
-        .expect("Mojo runtime-log expiry policy returned invalid output")
-            && remove_runtime_log_file(log, report, total_bytes, remaining_count)
-        {
-            removed_paths.insert(log.path.clone());
-        }
-    }
-}
-
-fn remove_over_budget_runtime_logs(
-    logs: &[RuntimeLogFileEntry],
-    policy: RuntimeLogPolicy,
-    protected_paths: &BTreeSet<&PathBuf>,
-    removed_paths: &mut BTreeSet<PathBuf>,
-    report: &mut RuntimeLogCleanupReport,
-    total_bytes: &mut u64,
-    remaining_count: &mut usize,
-) {
-    for log in logs {
-        let plan = mojo_retention::log_over_budget_plan(
-            *remaining_count,
-            policy.max_files,
-            *total_bytes,
-            policy.total_bytes,
-            removed_paths.contains(&log.path),
-            runtime_log_is_removable(&log.path, protected_paths),
-        )
-        .expect("Mojo runtime-log budget policy returned invalid output");
-        if plan.within_budget {
-            break;
-        }
-        if !plan.remove_current {
-            continue;
-        }
-        if remove_runtime_log_file(log, report, total_bytes, remaining_count) {
-            removed_paths.insert(log.path.clone());
-        }
-    }
 }
 
 fn remove_stale_runtime_log_locks(

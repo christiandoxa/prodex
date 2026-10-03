@@ -29,6 +29,7 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
   "crates/prodex-mojo-core/src/log_throughput_policy.rs",
   "crates/prodex-runtime-log/src/retention.rs",
+  "crates/prodex-runtime-log/src/retention_selection.rs",
   "crates/prodex-runtime-broker/src/version_guard.rs",
   "crates/prodex-mojo-core/src/super_provider_config.rs",
   "crates/prodex-app/src/runtime_deepseek_config.rs",
@@ -744,6 +745,7 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
 ]);
 const RUNTIME_STATE_BACKGROUND_FILE = "crates/prodex-runtime-state/src/background.rs";
 const RUNTIME_LOG_RETENTION_FILE = "crates/prodex-runtime-log/src/retention.rs";
+const RUNTIME_LOG_RETENTION_SELECTION_FILE = "crates/prodex-runtime-log/src/retention_selection.rs";
 const RUNTIME_STATE_QUOTA_FILE = "crates/prodex-runtime-state/src/quota.rs";
 const RUNTIME_PROXY_ROOT_FILE = "crates/prodex-runtime-proxy/src/lib.rs";
 const BROKER_CONTINUITY_FILE = "crates/prodex-runtime-broker/src/continuity.rs";
@@ -1550,12 +1552,45 @@ export function findViolations(files) {
   });
   const logThroughputViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === RUNTIME_LOG_RETENTION_FILE) {
-      const violations = contents.includes("mojo_retention::bounded_text_policy_value(")
-        ? []
-        : [filePath + ": runtime-log environment numeric policy must retain Mojo text parser"];
+      const required = [
+        "mojo_retention::bounded_text_policy_value(",
+        "selection::remove_expired_runtime_logs(",
+        "selection::remove_over_budget_runtime_logs(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime-log policy must retain " + call);
       const production = contents.split("#[cfg(test)]", 1)[0];
       if (production.includes(".parse::<u64>()")) {
         violations.push(filePath + ": contains restored Rust runtime-log environment numeric parser");
+      }
+      if (
+        /\bfn\s+remove_(?:expired|over_budget)_runtime_logs\s*\(/u.test(production)
+        || /\.sort_by(?:_key)?\s*\(/u.test(production)
+        || production.includes("log_expired_removal_allowed(")
+        || production.includes("log_over_budget_plan(")
+      ) {
+        violations.push(filePath + ": contains restored Rust runtime-log retention selection semantics");
+      }
+      return violations;
+    }
+    if (filePath === RUNTIME_LOG_RETENTION_SELECTION_FILE) {
+      const required = [
+        "mojo_retention::log_expired_candidate_plan(",
+        "mojo_retention::log_over_budget_candidate_plan(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": runtime-log candidate selection must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /\.(?:sort|sort_by|sort_by_key|sort_unstable|sort_unstable_by|sort_unstable_by_key)\s*\(/u.test(production)
+        || /\bmodified_epoch_seconds\s*(?:<=|<)\s*oldest_allowed\b/u.test(production)
+        || /\*?\bremaining_count\s*(?:<=|>|<|>=)\s*(?:policy\.)?max_files\b/u.test(production)
+        || /\*?\btotal_bytes\s*(?:<=|>|<|>=)\s*(?:policy\.)?total_bytes\b/u.test(production)
+        || /\bfn\s+(?:log_expired_removal_allowed|log_over_budget_plan)\s*\(/u.test(production)
+      ) {
+        violations.push(filePath + ": contains restored Rust runtime-log retention selection semantics");
       }
       return violations;
     }
@@ -1584,10 +1619,15 @@ export function findViolations(files) {
         "prodex_log_throughput_completed_rate_v1(",
         "prodex_log_throughput_stream_rate_v1(",
         "prodex_log_retention_policy_v1(",
+        "prodex_log_retention_candidates_v1(",
       ];
-      return required
+      const violations = required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": log-throughput ABI adapter must retain " + call);
+      if (/\b(?:log_expired_removal_allowed|log_over_budget_plan)\s*\(/u.test(contents)) {
+        violations.push(filePath + ": contains retired Rust runtime-log retention policy APIs");
+      }
+      return violations;
     }
     return [];
   });
@@ -3865,6 +3905,45 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  const runtimeLogRetentionCalls = [
+    "mojo_retention::bounded_text_policy_value(raw, default, min, max);",
+    "selection::remove_expired_runtime_logs(logs, oldest_allowed);",
+    "selection::remove_over_budget_runtime_logs(logs, policy);",
+  ].join("\n");
+  const runtimeLogSelectionCalls = [
+    "mojo_retention::log_expired_candidate_plan(&candidates, oldest_allowed);",
+    "mojo_retention::log_over_budget_candidate_plan(&candidates, count, max_files, bytes, budget);",
+  ].join("\n");
+  const runtimeLogAdapterCalls = [
+    "prodex_log_throughput_sample_plan_v1();",
+    "prodex_log_throughput_completed_rate_v1();",
+    "prodex_log_throughput_stream_rate_v1();",
+    "prodex_log_retention_policy_v1();",
+    "prodex_log_retention_candidates_v1();",
+  ].join("\n");
+  assert.deepEqual(findViolations([
+    [RUNTIME_LOG_RETENTION_FILE, runtimeLogRetentionCalls],
+    [RUNTIME_LOG_RETENTION_SELECTION_FILE, runtimeLogSelectionCalls],
+    ["crates/prodex-mojo-core/src/log_throughput_policy.rs", runtimeLogAdapterCalls],
+  ]), []);
+  assert.match(findViolations([[RUNTIME_LOG_RETENTION_SELECTION_FILE,
+    runtimeLogSelectionCalls + "\nlogs.sort_by(|left, right| left.modified_epoch_seconds.cmp(&right.modified_epoch_seconds));"]]).join("\n"),
+  /contains restored Rust runtime-log retention selection semantics/u);
+  assert.match(findViolations([[RUNTIME_LOG_RETENTION_SELECTION_FILE,
+    "mojo_retention::log_expired_candidate_plan(&candidates, oldest_allowed);"]]).join("\n"),
+  /must retain Mojo call mojo_retention::log_over_budget_candidate_plan/u);
+  assert.match(findViolations([[RUNTIME_LOG_RETENTION_FILE,
+    "mojo_retention::bounded_text_policy_value(raw, default, min, max);\nfn remove_expired_runtime_logs() {}"]]).join("\n"),
+  /contains restored Rust runtime-log retention selection semantics/u);
+  assert.match(findViolations([[RUNTIME_LOG_RETENTION_FILE,
+    "mojo_retention::bounded_text_policy_value(raw, default, min, max);\nselection::remove_expired_runtime_logs(logs, cutoff);"]]).join("\n"),
+  /must retain selection::remove_over_budget_runtime_logs/u);
+  assert.match(findViolations([[
+    "crates/prodex-mojo-core/src/log_throughput_policy.rs",
+    runtimeLogAdapterCalls.split("\n")
+      .filter((call) => !call.includes("prodex_log_retention_candidates_v1("))
+      .join("\n"),
+  ]]).join("\n"), /must retain prodex_log_retention_candidates_v1/u);
   assert.deepEqual(findViolations([[PROFILE_HEALTH_CIRCUIT_FILE,
     "fn runtime_profile_circuit_half_open_probe_seconds(score: u32) -> i64 { runtime_proxy_crate::runtime_profile_circuit_half_open_probe_seconds(score) }"]]), []);
   assert.match(findViolations([[PROFILE_HEALTH_CIRCUIT_FILE,
