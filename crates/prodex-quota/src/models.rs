@@ -1,8 +1,24 @@
 use anyhow::{Result, bail};
+mod openai_usage;
+pub use openai_usage::{
+    AdditionalRateLimit, RateLimitResetCreditsSummary, UsageResponse, UsageWindow, WindowPair,
+};
+
+use prodex_mojo_core::quota::QuotaAdmissionValue;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fmt;
 use zeroize::{Zeroize, ZeroizeOnDrop};
+
+pub(crate) fn quota_admission_value(value: Option<&serde_json::Value>) -> QuotaAdmissionValue {
+    match value {
+        None => QuotaAdmissionValue::Missing,
+        Some(serde_json::Value::Null) => QuotaAdmissionValue::Null,
+        Some(serde_json::Value::Bool(true)) => QuotaAdmissionValue::True,
+        Some(serde_json::Value::Bool(false)) => QuotaAdmissionValue::False,
+        Some(_) => QuotaAdmissionValue::Other,
+    }
+}
 
 pub fn deserialize_null_default<'de, D, T>(deserializer: D) -> std::result::Result<T, D::Error>
 where
@@ -244,171 +260,6 @@ pub struct BlockedLimit {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct UsageResponse {
-    pub email: Option<String>,
-    pub plan_type: Option<String>,
-    pub rate_limit: Option<WindowPair>,
-    pub code_review_rate_limit: Option<WindowPair>,
-    #[serde(default, alias = "rateLimitResetCredits")]
-    pub rate_limit_reset_credits: Option<RateLimitResetCreditsSummary>,
-    #[serde(default, deserialize_with = "deserialize_null_default")]
-    pub additional_rate_limits: Vec<AdditionalRateLimit>,
-}
-
-impl<'de> Deserialize<'de> for UsageResponse {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let raw = RawUsageResponse::deserialize(deserializer)?;
-        let indexed_rate_limits = raw.rate_limits_by_limit_id.unwrap_or_default();
-        let indexed_main = indexed_rate_limits
-            .iter()
-            .find(|(id, pair)| {
-                id.eq_ignore_ascii_case("codex")
-                    || extra_string(&pair.extra, &["limit_id", "limitId"])
-                        .is_some_and(|value| value.eq_ignore_ascii_case("codex"))
-            })
-            .map(|(_, pair)| pair.clone());
-        let mut rate_limit = indexed_main.or(raw.rate_limit).or(raw.rate_limits);
-        let reserve_upsell = raw
-            .extra
-            .get("rateLimitUpsell")
-            .or_else(|| raw.extra.get("rate_limit_upsell"))
-            .cloned();
-        let response_account_id = raw
-            .extra
-            .get("accountId")
-            .or_else(|| raw.extra.get("account_id"))
-            .cloned();
-        let backend_blocked = raw
-            .rate_limit_reached_type
-            .as_ref()
-            .is_some_and(|value| !value.is_null());
-        if let Some(pair) = rate_limit.as_mut() {
-            let ordinary_usage_allowed = raw
-                .extra
-                .get("ordinaryUsageAllowed")
-                .or_else(|| raw.extra.get("ordinary_usage_allowed"));
-            match ordinary_usage_allowed {
-                Some(value) if value.as_bool() == Some(false) => pair.allowed = Some(false),
-                Some(value) if value.as_bool() == Some(true) => {}
-                Some(value) => {
-                    pair.extra
-                        .insert("ordinaryUsageAllowed".to_string(), value.clone());
-                }
-                None => {}
-            }
-            if backend_blocked {
-                pair.allowed = Some(false);
-            }
-            if let Some(value) = reserve_upsell {
-                pair.extra.insert("rateLimitUpsell".to_string(), value);
-            }
-            if let Some(value) = response_account_id {
-                pair.extra.insert("accountId".to_string(), value);
-            }
-        }
-        let plan_type = raw.plan_type.or_else(|| {
-            rate_limit
-                .as_ref()
-                .and_then(|pair| extra_string(&pair.extra, &["plan_type", "planType"]))
-        });
-        let mut additional_rate_limits = raw.additional_rate_limits;
-
-        for (limit_id, pair) in indexed_rate_limits {
-            if limit_id.eq_ignore_ascii_case("codex")
-                || extra_string(&pair.extra, &["limit_id", "limitId"])
-                    .is_some_and(|value| value.eq_ignore_ascii_case("codex"))
-                || additional_rate_limits.iter().any(|additional| {
-                    additional
-                        .limit_id
-                        .as_deref()
-                        .is_some_and(|id| id.eq_ignore_ascii_case(&limit_id))
-                })
-            {
-                continue;
-            }
-            additional_rate_limits.push(additional_rate_limit_from_indexed_pair(limit_id, pair));
-        }
-
-        Ok(Self {
-            email: raw.email,
-            plan_type,
-            rate_limit,
-            code_review_rate_limit: raw.code_review_rate_limit,
-            rate_limit_reset_credits: raw.rate_limit_reset_credits,
-            additional_rate_limits,
-        })
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct RawUsageResponse {
-    #[serde(default)]
-    email: Option<String>,
-    #[serde(default, alias = "planType")]
-    plan_type: Option<String>,
-    #[serde(default)]
-    rate_limit: Option<WindowPair>,
-    #[serde(default, rename = "rateLimits", alias = "rate_limits")]
-    rate_limits: Option<WindowPair>,
-    #[serde(default, alias = "codeReviewRateLimit")]
-    code_review_rate_limit: Option<WindowPair>,
-    #[serde(default, alias = "rateLimitResetCredits")]
-    rate_limit_reset_credits: Option<RateLimitResetCreditsSummary>,
-    #[serde(
-        default,
-        alias = "additionalRateLimits",
-        deserialize_with = "deserialize_null_default"
-    )]
-    additional_rate_limits: Vec<AdditionalRateLimit>,
-    #[serde(default, alias = "rateLimitsByLimitId")]
-    rate_limits_by_limit_id: Option<BTreeMap<String, WindowPair>>,
-    #[serde(default, alias = "rateLimitReachedType")]
-    rate_limit_reached_type: Option<serde_json::Value>,
-    #[serde(flatten)]
-    extra: BTreeMap<String, serde_json::Value>,
-}
-
-fn additional_rate_limit_from_indexed_pair(
-    limit_id: String,
-    pair: WindowPair,
-) -> AdditionalRateLimit {
-    let limit_id = extra_string(&pair.extra, &["limit_id", "limitId"])
-        .or_else(|| (!limit_id.trim().is_empty()).then_some(limit_id));
-    let limit_name = extra_string(&pair.extra, &["limit_name", "limitName"]);
-    let metered_feature = extra_string(&pair.extra, &["metered_feature", "meteredFeature"]);
-    let extra = pair.extra.clone();
-    AdditionalRateLimit {
-        limit_id,
-        limit_name,
-        metered_feature,
-        allowed: pair.allowed,
-        limit_reached: pair.limit_reached,
-        rate_limit: pair,
-        extra,
-    }
-}
-
-fn extra_string(extra: &BTreeMap<String, serde_json::Value>, keys: &[&str]) -> Option<String> {
-    keys.iter().find_map(|key| {
-        extra
-            .get(*key)
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToOwned::to_owned)
-    })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RateLimitResetCreditsSummary {
-    #[serde(rename = "availableCount", alias = "available_count")]
-    pub available_count: i64,
-}
-
 pub fn usage_plan_capacity_pressure_scale_bps(usage: &UsageResponse) -> i64 {
     usage
         .plan_type
@@ -425,88 +276,6 @@ pub fn plan_capacity_pressure_scale_bps(plan_type: &str) -> i64 {
 pub fn scale_quota_pressure_for_plan(pressure: i64, scale_bps: i64) -> i64 {
     prodex_mojo_core::quota::scale_quota_pressure_for_plan(pressure, scale_bps)
         .expect("Mojo quota pressure scaling returned invalid output")
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct WindowPair {
-    /// Explicit backend admission state. `None` means unavailable, not denied.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed: Option<bool>,
-    #[serde(
-        default,
-        alias = "limitReached",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub limit_reached: Option<bool>,
-    #[serde(default, alias = "primary", alias = "primaryWindow")]
-    pub primary_window: Option<UsageWindow>,
-    #[serde(default, alias = "secondary", alias = "secondaryWindow")]
-    pub secondary_window: Option<UsageWindow>,
-    /// Preserve future fields from the provider's rate-limit object.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AdditionalRateLimit {
-    /// Optional backend bucket identifier. Unknown identifiers remain generic and non-routable.
-    #[serde(default, alias = "limitId", skip_serializing_if = "Option::is_none")]
-    pub limit_id: Option<String>,
-    #[serde(alias = "limitName")]
-    pub limit_name: Option<String>,
-    #[serde(alias = "meteredFeature")]
-    pub metered_feature: Option<String>,
-    #[serde(
-        default,
-        alias = "rateLimit",
-        deserialize_with = "deserialize_null_default"
-    )]
-    pub rate_limit: WindowPair,
-    /// Exact backend admission state when the usage endpoint provides it.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub allowed: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "limitReached")]
-    pub limit_reached: Option<bool>,
-    /// Retain fields introduced by a newer usage endpoint; unknown fields are not routing authority.
-    #[serde(flatten)]
-    pub extra: BTreeMap<String, serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize)]
-pub struct UsageWindow {
-    pub used_percent: Option<i64>,
-    pub reset_at: Option<i64>,
-    pub limit_window_seconds: Option<i64>,
-}
-
-impl<'de> Deserialize<'de> for UsageWindow {
-    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let raw = RawUsageWindow::deserialize(deserializer)?;
-        Ok(Self {
-            used_percent: raw.used_percent,
-            reset_at: raw.reset_at,
-            limit_window_seconds: raw.limit_window_seconds.or_else(|| {
-                raw.window_duration_mins
-                    .and_then(|minutes| minutes.checked_mul(60))
-            }),
-        })
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct RawUsageWindow {
-    #[serde(default, alias = "usedPercent")]
-    used_percent: Option<i64>,
-    #[serde(default, alias = "resetAt", alias = "resetsAt")]
-    reset_at: Option<i64>,
-    #[serde(default, alias = "limitWindowSeconds")]
-    limit_window_seconds: Option<i64>,
-    #[serde(default, alias = "windowDurationMins")]
-    window_duration_mins: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize)]

@@ -152,13 +152,7 @@ fn admission_value(
     extra: &std::collections::BTreeMap<String, serde_json::Value>,
     key: &str,
 ) -> prodex_mojo_core::quota::QuotaAdmissionValue {
-    match extra.get(key) {
-        None => prodex_mojo_core::quota::QuotaAdmissionValue::Missing,
-        Some(serde_json::Value::Null) => prodex_mojo_core::quota::QuotaAdmissionValue::Null,
-        Some(serde_json::Value::Bool(true)) => prodex_mojo_core::quota::QuotaAdmissionValue::True,
-        Some(serde_json::Value::Bool(false)) => prodex_mojo_core::quota::QuotaAdmissionValue::False,
-        Some(_) => prodex_mojo_core::quota::QuotaAdmissionValue::Other,
-    }
+    crate::quota_admission_value(extra.get(key))
 }
 
 fn route_kind_code(route_kind: RuntimeRouteKind) -> i64 {
