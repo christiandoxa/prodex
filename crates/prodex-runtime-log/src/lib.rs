@@ -508,6 +508,15 @@ mod tests {
         fs::write(path, []).unwrap();
     }
 
+    fn set_log_modified(path: &Path, modified: SystemTime) {
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+    }
+
     fn remove_test_root(root: &Path) {
         for _ in 0..100 {
             match fs::remove_dir_all(root) {
@@ -645,22 +654,69 @@ mod tests {
     fn total_runtime_log_budget_removes_old_inactive_files_but_keeps_active() {
         let root = test_path("budget");
         fs::create_dir_all(&root).unwrap();
-        let active = runtime_log_path(&root, "active");
+        let active = runtime_log_path(&root, "z-active");
         create_empty_log(&active);
-        let logger =
-            RuntimeAsyncLogger::new_with_policy(4, dropped_marker, test_policy(1024, 8, 8))
+        let active_logger =
+            RuntimeAsyncLogger::new_with_policy(4, dropped_marker, test_policy(1024, 8, 1024))
                 .unwrap();
-        logger.try_enqueue(&active, "active\n".to_string());
-        logger.flush_path(&active).unwrap();
+        active_logger.try_enqueue(&active, "zlive\n".to_string());
+        active_logger.flush_path(&active).unwrap();
 
-        for name in ["old-a", "old-b", "old-c"] {
-            fs::write(runtime_log_path(&root, name), "12345\n").unwrap();
+        let cutoff = runtime_log_path(&root, "b-cutoff");
+        create_empty_log(&cutoff);
+        let cutoff_logger =
+            RuntimeAsyncLogger::new_with_policy(4, dropped_marker, test_policy(1024, 8, 1024))
+                .unwrap();
+        cutoff_logger.try_enqueue(&cutoff, "ok\n".to_string());
+        cutoff_logger.flush_path(&cutoff).unwrap();
+
+        let expired = runtime_log_path(&root, "a-expired");
+        let oldest = runtime_log_path(&root, "c-oldest");
+        let middle = runtime_log_path(&root, "d-middle");
+        let newest = runtime_log_path(&root, "e-kept");
+        fs::write(&expired, "x\n").unwrap();
+        fs::write(&oldest, "aaaa").unwrap();
+        fs::write(&middle, "bbbbb").unwrap();
+        fs::write(&newest, "ccccccc").unwrap();
+        let timestamp = UNIX_EPOCH + Duration::from_secs(500_000);
+        for path in [&active, &oldest, &middle, &newest] {
+            set_log_modified(path, timestamp);
         }
-        let report =
-            cleanup_runtime_log_directory(&root, SystemTime::now(), test_policy(1024, 8, 8));
+        set_log_modified(&cutoff, UNIX_EPOCH + Duration::from_secs(400_000));
+        set_log_modified(&expired, UNIX_EPOCH + Duration::from_secs(399_999));
 
-        assert!(report.removed >= 2);
-        assert!(active.exists());
+        let policy = RuntimeLogPolicy {
+            max_file_bytes: 1024,
+            max_files: 3,
+            total_bytes: 16,
+            max_age_seconds: 600_000,
+            record_to_disk: true,
+        };
+        let report = cleanup_runtime_log_directory(
+            &root,
+            UNIX_EPOCH + Duration::from_secs(1_000_000),
+            policy,
+        );
+
+        assert_eq!(report.removed, 3);
+        assert_eq!(report.scan_failures, 0);
+        assert_eq!(report.delete_failures, 0);
+        let mut remaining_names = fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("log"))
+            .map(|path| path.file_name().unwrap().to_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        remaining_names.sort();
+        assert_eq!(
+            remaining_names,
+            [
+                "prodex-runtime-b-cutoff.log",
+                "prodex-runtime-e-kept.log",
+                "prodex-runtime-z-active.log",
+            ]
+        );
         let total = fs::read_dir(&root)
             .unwrap()
             .filter_map(Result::ok)
@@ -668,9 +724,10 @@ mod tests {
             .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("log"))
             .map(|path| fs::metadata(path).unwrap().len())
             .sum::<u64>();
-        assert!(total <= 8, "runtime log budget exceeded: {total}");
+        assert_eq!(total, 16);
 
-        drop(logger);
+        drop(cutoff_logger);
+        drop(active_logger);
         remove_test_root(&root);
     }
 

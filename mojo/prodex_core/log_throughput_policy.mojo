@@ -123,9 +123,10 @@ def prodex_log_throughput_stream_rate_v1(
 comptime LOG_RETENTION_POLICY_ABI_VERSION: Int64 = 1
 comptime LOG_RETENTION_POLICY_BOUNDED_VALUE: Int64 = 1
 comptime LOG_RETENTION_POLICY_ROTATION: Int64 = 2
-comptime LOG_RETENTION_POLICY_EXPIRED: Int64 = 3
-comptime LOG_RETENTION_POLICY_OVER_BUDGET: Int64 = 4
 comptime LOG_RETENTION_POLICY_BOUNDED_TEXT: Int64 = 5
+comptime LOG_RETENTION_CANDIDATES_EXPIRED: Int64 = 6
+comptime LOG_RETENTION_CANDIDATES_OVER_BUDGET: Int64 = 7
+comptime LOG_RETENTION_CANDIDATE_STRIDE: Int = 5
 comptime LOG_RETENTION_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
 
 
@@ -205,24 +206,6 @@ def prodex_log_retention_policy_v1(
         output[unsafe_offset=1] = UInt64(line_len > max_file_bytes)
         return LOG_THROUGHPUT_OK
 
-    if operation == LOG_RETENTION_POLICY_EXPIRED:
-        # modified_epoch, oldest_allowed encoded with sign-bit bias, removable
-        if input2 > 1:
-            return LOG_THROUGHPUT_INVALID
-        output[unsafe_offset=0] = UInt64(input0 < input1 and input2 == 1)
-        return LOG_THROUGHPUT_OK
-
-    if operation == LOG_RETENTION_POLICY_OVER_BUDGET:
-        # remaining_count, max_files, total_bytes, total_budget, already_removed, removable
-        if input4 > 1 or input5 > 1:
-            return LOG_THROUGHPUT_INVALID
-        var within_budget = input0 <= input1 and input2 <= input3
-        output[unsafe_offset=0] = UInt64(within_budget)
-        output[unsafe_offset=1] = UInt64(
-            not within_budget and input4 == 0 and input5 == 1
-        )
-        return LOG_THROUGHPUT_OK
-
     if operation == LOG_RETENTION_POLICY_BOUNDED_TEXT:
         # input0 address, input1 length, input2 present, input3 default, input4 min, input5 max
         if input2 > 1 or input4 > input5:
@@ -238,3 +221,204 @@ def prodex_log_retention_policy_v1(
         return LOG_THROUGHPUT_OK
 
     return LOG_THROUGHPUT_INVALID
+
+
+def log_retention_candidate_before(
+    candidates: Pointer[mut=False, UInt64, _],
+    file_names: Pointer[mut=False, UInt8, _],
+    left: Int,
+    right: Int,
+) -> Bool:
+    var left_base = left * LOG_RETENTION_CANDIDATE_STRIDE
+    var right_base = right * LOG_RETENTION_CANDIDATE_STRIDE
+    var left_modified = candidates[unsafe_offset=left_base + 1]
+    var right_modified = candidates[unsafe_offset=right_base + 1]
+    if left_modified != right_modified:
+        return left_modified < right_modified
+
+    var left_start = Int(candidates[unsafe_offset=left_base + 3])
+    var right_start = Int(candidates[unsafe_offset=right_base + 3])
+    var left_length = Int(candidates[unsafe_offset=left_base + 4])
+    var right_length = Int(candidates[unsafe_offset=right_base + 4])
+    var common_length = min(left_length, right_length)
+    for offset in range(common_length):
+        var left_byte = file_names[unsafe_offset=left_start + offset]
+        var right_byte = file_names[unsafe_offset=right_start + offset]
+        if left_byte != right_byte:
+            return left_byte < right_byte
+    if left_length != right_length:
+        return left_length < right_length
+    return left < right
+
+
+def log_retention_candidate_swap(
+    indices: Pointer[mut=True, UInt64, _], left: Int, right: Int
+) -> None:
+    var selected = indices[unsafe_offset=left]
+    indices[unsafe_offset=left] = indices[unsafe_offset=right]
+    indices[unsafe_offset=right] = selected
+
+
+def log_retention_candidate_sift_down(
+    candidates: Pointer[mut=False, UInt64, _],
+    file_names: Pointer[mut=False, UInt8, _],
+    indices: Pointer[mut=True, UInt64, _],
+    root_index: Int,
+    end: Int,
+) -> None:
+    var root = root_index
+    while True:
+        var child = root * 2 + 1
+        if child > end:
+            break
+        if child + 1 <= end and log_retention_candidate_before(
+            candidates,
+            file_names,
+            Int(indices[unsafe_offset=child]),
+            Int(indices[unsafe_offset=child + 1]),
+        ):
+            child += 1
+        if not log_retention_candidate_before(
+            candidates,
+            file_names,
+            Int(indices[unsafe_offset=root]),
+            Int(indices[unsafe_offset=child]),
+        ):
+            break
+        log_retention_candidate_swap(indices, root, child)
+        root = child
+
+
+def log_retention_candidate_heap_sort(
+    candidates: Pointer[mut=False, UInt64, _],
+    file_names: Pointer[mut=False, UInt8, _],
+    indices: Pointer[mut=True, UInt64, _],
+    count: Int,
+) -> None:
+    var start = count // 2
+    while start > 0:
+        start -= 1
+        log_retention_candidate_sift_down(
+            candidates, file_names, indices, start, count - 1
+        )
+    var end = count
+    while end > 1:
+        end -= 1
+        log_retention_candidate_swap(indices, 0, end)
+        log_retention_candidate_sift_down(
+            candidates, file_names, indices, 0, end - 1
+        )
+
+
+# Candidate rows are [size, signed-order epoch, removable/unavailable flags, name offset, name length].
+# Output holds selected candidate indices with a max-value sentinel, then sort indices.
+@export("prodex_log_retention_candidates_v1")
+def prodex_log_retention_candidates_v1(
+    abi_version: Int64,
+    operation: Int64,
+    candidate_count: UInt64,
+    candidates_address: UInt,
+    file_names_address: UInt,
+    file_names_length: UInt64,
+    policy_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_RETENTION_POLICY_ABI_VERSION:
+        return LOG_THROUGHPUT_ABI
+    if (
+        (
+            operation != LOG_RETENTION_CANDIDATES_EXPIRED
+            and operation != LOG_RETENTION_CANDIDATES_OVER_BUDGET
+        )
+        or policy_address == 0
+        or file_names_length > UInt64(0x7FFF_FFFF_FFFF_FFFF)
+    ):
+        return LOG_THROUGHPUT_INVALID
+    if candidate_count > UInt64(0x7FFF_FFFF_FFFF_FFFF) // UInt64(10):
+        return LOG_THROUGHPUT_INVALID
+    if candidate_count > 0 and (
+        candidates_address == 0
+        or file_names_address == 0
+        or output_address == 0
+    ):
+        return LOG_THROUGHPUT_INVALID
+    if candidate_count == 0:
+        return LOG_THROUGHPUT_OK
+
+    var candidates = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(candidates_address)
+    )
+    var file_names = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(file_names_address)
+    )
+    var policy = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(policy_address)
+    )
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var count = Int(candidate_count)
+    for index in range(count):
+        var base = index * LOG_RETENTION_CANDIDATE_STRIDE
+        var flags = candidates[unsafe_offset=base + 2]
+        var name_offset = candidates[unsafe_offset=base + 3]
+        var name_length = candidates[unsafe_offset=base + 4]
+        if operation == LOG_RETENTION_CANDIDATES_EXPIRED and flags > 1:
+            return LOG_THROUGHPUT_INVALID
+        if operation == LOG_RETENTION_CANDIDATES_OVER_BUDGET and flags > 3:
+            return LOG_THROUGHPUT_INVALID
+        if (
+            name_length == 0
+            or name_offset > file_names_length
+            or name_length > file_names_length - name_offset
+        ):
+            return LOG_THROUGHPUT_INVALID
+        output[unsafe_offset=index] = (
+            UInt64(0) if operation
+            == LOG_RETENTION_CANDIDATES_EXPIRED else LOG_RETENTION_UINT64_MAX
+        )
+        output[unsafe_offset=count + index] = UInt64(index)
+
+    # Policy is [age cutoff, remaining count, max files, bytes, byte budget].
+    if operation == LOG_RETENTION_CANDIDATES_EXPIRED:
+        var oldest_allowed = policy[unsafe_offset=0]
+        for index in range(count):
+            var base = index * LOG_RETENTION_CANDIDATE_STRIDE
+            var modified = candidates[unsafe_offset=base + 1]
+            var removable = candidates[unsafe_offset=base + 2] == 1
+            output[unsafe_offset=index] = UInt64(
+                modified < oldest_allowed and removable
+            )
+        return LOG_THROUGHPUT_OK
+
+    var remaining_count = policy[unsafe_offset=1]
+    var max_files = policy[unsafe_offset=2]
+    var total_bytes = policy[unsafe_offset=3]
+    var total_budget = policy[unsafe_offset=4]
+    var indices = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address) + count * 8
+    )
+    log_retention_candidate_heap_sort(candidates, file_names, indices, count)
+    var selected_count = 0
+    for position in range(count):
+        if remaining_count <= max_files and total_bytes <= total_budget:
+            break
+        var index = Int(indices[unsafe_offset=position])
+        var base = index * LOG_RETENTION_CANDIDATE_STRIDE
+        var size = candidates[unsafe_offset=base]
+        var flags = candidates[unsafe_offset=base + 2]
+        var unavailable = flags & UInt64(2) != 0
+        var removable = flags & UInt64(1) != 0
+        if unavailable or not removable:
+            continue
+        output[unsafe_offset=selected_count] = UInt64(index)
+        selected_count += 1
+        if remaining_count > 0:
+            remaining_count = remaining_count - 1
+        if total_bytes > size:
+            total_bytes = total_bytes - size
+        else:
+            total_bytes = 0
+    for position in range(selected_count, count):
+        output[unsafe_offset=position] = LOG_RETENTION_UINT64_MAX
+    return LOG_THROUGHPUT_OK
