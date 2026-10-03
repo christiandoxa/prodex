@@ -7,6 +7,7 @@ use prodex_domain::{
     ContentLocation, DetectorId, FindingKind, InspectionCoverage, InspectionFinding,
     MAX_INSPECTION_FINDINGS, TenantId,
 };
+use prodex_mojo_core::{MojoError, redaction::LocalInspectionFindingKind};
 
 const LOCAL_DETECTOR_ID: &str = "local-bounded-v1";
 
@@ -37,13 +38,6 @@ struct RuntimeLocalInspectionResult {
     coverage: InspectionCoverage,
     findings: Vec<InspectionFinding>,
     changed: bool,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct LocalMatch {
-    start: usize,
-    end: usize,
-    kind: FindingKind,
 }
 
 #[cfg(test)]
@@ -87,11 +81,11 @@ fn runtime_local_inspect_and_mask_text(text: &str) -> Result<RuntimeLocalInspect
         let mut findings = Vec::new();
         let mut masked_values = Vec::with_capacity(content.values.len());
         for value in &content.values {
-            let (masked, value_findings) = inspect_and_mask_value(value)?;
+            let remaining_findings = MAX_INSPECTION_FINDINGS
+                .checked_sub(findings.len())
+                .context("local inspection finding count exceeded safe limit")?;
+            let (masked, value_findings) = inspect_and_mask_value(value, remaining_findings)?;
             findings.extend(value_findings);
-            if findings.len() > MAX_INSPECTION_FINDINGS {
-                anyhow::bail!("local inspection finding count exceeded safe limit");
-            }
             masked_values.push(masked);
         }
         if findings.is_empty() {
@@ -122,7 +116,7 @@ fn runtime_local_inspect_and_mask_text(text: &str) -> Result<RuntimeLocalInspect
     if value.text.len() > MAX_PRESIDIO_JSON_TEXT_BYTES {
         anyhow::bail!("request content exceeds inspection limits");
     }
-    let (text, findings) = inspect_and_mask_value(&value)?;
+    let (text, findings) = inspect_and_mask_value(&value, MAX_INSPECTION_FINDINGS)?;
     let changed = !findings.is_empty();
     Ok(RuntimeLocalInspectionResult {
         body: changed.then(|| text.into_bytes()),
@@ -132,14 +126,54 @@ fn runtime_local_inspect_and_mask_text(text: &str) -> Result<RuntimeLocalInspect
     })
 }
 
-fn inspect_and_mask_value(value: &PresidioJsonString) -> Result<(String, Vec<InspectionFinding>)> {
-    let matches = local_matches(&value.text, value.sensitive_kind)?;
+fn inspect_and_mask_value(
+    value: &PresidioJsonString,
+    max_matches: usize,
+) -> Result<(String, Vec<InspectionFinding>)> {
+    let sensitive_kind = value.sensitive_kind.map(|kind| match kind {
+        FindingKind::EmailAddress => LocalInspectionFindingKind::EmailAddress,
+        FindingKind::PhoneNumber => LocalInspectionFindingKind::PhoneNumber,
+        FindingKind::PersonName => LocalInspectionFindingKind::PersonName,
+        FindingKind::PhysicalAddress => LocalInspectionFindingKind::PhysicalAddress,
+        FindingKind::GovernmentId => LocalInspectionFindingKind::GovernmentId,
+        FindingKind::FinancialAccount => LocalInspectionFindingKind::FinancialAccount,
+        FindingKind::PaymentCard => LocalInspectionFindingKind::PaymentCard,
+        FindingKind::AccessToken => LocalInspectionFindingKind::AccessToken,
+        FindingKind::ApiKey => LocalInspectionFindingKind::ApiKey,
+        FindingKind::PrivateKey => LocalInspectionFindingKind::PrivateKey,
+        FindingKind::Password => LocalInspectionFindingKind::Password,
+        FindingKind::TenantSensitive => LocalInspectionFindingKind::TenantSensitive,
+    });
+    let redaction = prodex_mojo_core::redaction::local_inspect_and_redact(
+        &value.text,
+        sensitive_kind,
+        max_matches,
+    )
+    .map_err(|error| match error {
+        MojoError::Capacity => anyhow!("local inspection finding count exceeded safe limit"),
+        error => anyhow!("{error:?}").context("Mojo local inspection failed"),
+    })?;
     let detector_id = DetectorId::new(LOCAL_DETECTOR_ID)?;
-    let findings = matches
+    let findings = redaction
+        .matches
         .iter()
         .map(|finding| {
+            let kind = match finding.kind {
+                LocalInspectionFindingKind::EmailAddress => FindingKind::EmailAddress,
+                LocalInspectionFindingKind::PhoneNumber => FindingKind::PhoneNumber,
+                LocalInspectionFindingKind::PersonName => FindingKind::PersonName,
+                LocalInspectionFindingKind::PhysicalAddress => FindingKind::PhysicalAddress,
+                LocalInspectionFindingKind::GovernmentId => FindingKind::GovernmentId,
+                LocalInspectionFindingKind::FinancialAccount => FindingKind::FinancialAccount,
+                LocalInspectionFindingKind::PaymentCard => FindingKind::PaymentCard,
+                LocalInspectionFindingKind::AccessToken => FindingKind::AccessToken,
+                LocalInspectionFindingKind::ApiKey => FindingKind::ApiKey,
+                LocalInspectionFindingKind::PrivateKey => FindingKind::PrivateKey,
+                LocalInspectionFindingKind::Password => FindingKind::Password,
+                LocalInspectionFindingKind::TenantSensitive => FindingKind::TenantSensitive,
+            };
             InspectionFinding::new(
-                finding.kind,
+                kind,
                 ContentLocation::new(&value.path, finding.start, finding.end)?,
                 10_000,
                 detector_id.clone(),
@@ -148,277 +182,7 @@ fn inspect_and_mask_value(value: &PresidioJsonString) -> Result<(String, Vec<Ins
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let mut masked = String::with_capacity(value.text.len());
-    let mut cursor = 0;
-    for finding in matches {
-        masked.push_str(&value.text[cursor..finding.start]);
-        masked.push_str(local_placeholder(finding.kind));
-        cursor = finding.end;
-    }
-    masked.push_str(&value.text[cursor..]);
-    Ok((masked, findings))
-}
-
-fn local_matches(text: &str, sensitive_kind: Option<FindingKind>) -> Result<Vec<LocalMatch>> {
-    if let Some(kind) = sensitive_kind.filter(|_| !text.is_empty()) {
-        return Ok(vec![LocalMatch {
-            start: 0,
-            end: text.len(),
-            kind,
-        }]);
-    }
-
-    let mut matches = Vec::new();
-    detect_private_keys(text, &mut matches);
-    detect_labeled_credentials(text, &mut matches);
-    detect_bearer_tokens(text, &mut matches);
-    detect_prefixed_api_keys(text, &mut matches);
-    detect_emails(text, &mut matches);
-    detect_financial_identifiers(text, &mut matches);
-    matches.sort_by_key(|finding| (finding.start, usize::MAX - finding.end, finding.kind));
-
-    let mut bounded = Vec::new();
-    let mut covered_until = 0;
-    for finding in matches {
-        if finding.start < covered_until || finding.start >= finding.end {
-            continue;
-        }
-        covered_until = finding.end;
-        bounded.push(finding);
-        if bounded.len() > MAX_INSPECTION_FINDINGS {
-            anyhow::bail!("local inspection finding count exceeded safe limit");
-        }
-    }
-    Ok(bounded)
-}
-
-fn detect_private_keys(text: &str, matches: &mut Vec<LocalMatch>) {
-    let mut offset = 0;
-    while let Some(relative) = text[offset..].find("-----BEGIN ") {
-        let start = offset + relative;
-        let Some(header_end_relative) = text[start..].find("PRIVATE KEY-----") else {
-            break;
-        };
-        let body_start = start + header_end_relative + "PRIVATE KEY-----".len();
-        let end = text[body_start..]
-            .find("PRIVATE KEY-----")
-            .map(|relative| body_start + relative + "PRIVATE KEY-----".len())
-            .unwrap_or(text.len());
-        matches.push(LocalMatch {
-            start,
-            end,
-            kind: FindingKind::PrivateKey,
-        });
-        offset = end;
-    }
-}
-
-fn detect_labeled_credentials(text: &str, matches: &mut Vec<LocalMatch>) {
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if !bytes[index].is_ascii_alphabetic() && !matches!(bytes[index], b'_' | b'-') {
-            index += text[index..].chars().next().map_or(1, char::len_utf8);
-            continue;
-        }
-        let key_start = index;
-        index += 1;
-        while index < bytes.len()
-            && (bytes[index].is_ascii_alphanumeric() || matches!(bytes[index], b'_' | b'-'))
-        {
-            index += 1;
-        }
-        let key = &text[key_start..index];
-        let mut cursor = skip_ascii_whitespace(bytes, index);
-        if cursor >= bytes.len()
-            || !matches!(bytes[cursor], b':' | b'=')
-            || !redaction::redaction_key_looks_sensitive(key)
-        {
-            continue;
-        }
-        cursor = skip_ascii_whitespace(bytes, cursor + 1);
-        let (start, end) = delimited_value_range(bytes, cursor);
-        if start < end {
-            matches.push(LocalMatch {
-                start,
-                end,
-                kind: sensitive_key_kind(key),
-            });
-        }
-        index = end.max(index);
-    }
-}
-
-fn detect_bearer_tokens(text: &str, matches: &mut Vec<LocalMatch>) {
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    while index + 6 <= bytes.len() {
-        if bytes[index..index + 6].eq_ignore_ascii_case(b"bearer")
-            && (index == 0 || !bytes[index - 1].is_ascii_alphanumeric())
-        {
-            let start = skip_ascii_whitespace(bytes, index + 6);
-            if start > index + 6 {
-                let end = secret_token_end(bytes, start);
-                if end > start {
-                    matches.push(LocalMatch {
-                        start,
-                        end,
-                        kind: FindingKind::AccessToken,
-                    });
-                    index = end;
-                    continue;
-                }
-            }
-        }
-        index += 1;
-    }
-}
-
-fn detect_prefixed_api_keys(text: &str, matches: &mut Vec<LocalMatch>) {
-    const PREFIXES: &[&str] = &[
-        "sk-proj-", "sk-ant-", "sk-live-", "sk_test_", "sk_live_", "sk-", "sk_",
-    ];
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        let Some(prefix) = PREFIXES.iter().find(|prefix| {
-            bytes
-                .get(index..index + prefix.len())
-                .is_some_and(|value| value.eq_ignore_ascii_case(prefix.as_bytes()))
-        }) else {
-            index += 1;
-            continue;
-        };
-        let end = secret_token_end(bytes, index);
-        if end >= index + prefix.len() + 8 {
-            matches.push(LocalMatch {
-                start: index,
-                end,
-                kind: FindingKind::ApiKey,
-            });
-            index = end;
-        } else {
-            index += 1;
-        }
-    }
-}
-
-fn detect_emails(text: &str, matches: &mut Vec<LocalMatch>) {
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if !email_byte(bytes[index]) {
-            index += text[index..].chars().next().map_or(1, char::len_utf8);
-            continue;
-        }
-        let start = index;
-        while index < bytes.len() && email_byte(bytes[index]) {
-            index += 1;
-        }
-        let token = &text[start..index];
-        if let Some((local, domain)) = token.split_once('@')
-            && !local.is_empty()
-            && domain.contains('.')
-            && domain.split('.').all(|part| !part.is_empty())
-        {
-            matches.push(LocalMatch {
-                start,
-                end: index,
-                kind: FindingKind::EmailAddress,
-            });
-        }
-    }
-}
-
-fn detect_financial_identifiers(text: &str, matches: &mut Vec<LocalMatch>) {
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    while index < bytes.len() {
-        if !bytes[index].is_ascii_digit() {
-            index += text[index..].chars().next().map_or(1, char::len_utf8);
-            continue;
-        }
-        let start = index;
-        let mut digits = 0;
-        while index < bytes.len()
-            && (bytes[index].is_ascii_digit() || matches!(bytes[index], b' ' | b'-'))
-        {
-            digits += usize::from(bytes[index].is_ascii_digit());
-            index += 1;
-        }
-        while index > start && matches!(bytes[index - 1], b' ' | b'-') {
-            index -= 1;
-        }
-        if (13..=19).contains(&digits) {
-            matches.push(LocalMatch {
-                start,
-                end: index,
-                kind: FindingKind::FinancialAccount,
-            });
-        }
-        index = index.max(start + 1);
-    }
-}
-
-fn sensitive_key_kind(key: &str) -> FindingKind {
-    let normalized = key
-        .bytes()
-        .filter(u8::is_ascii_alphanumeric)
-        .map(|byte| byte.to_ascii_lowercase())
-        .collect::<Vec<_>>();
-    let normalized = std::str::from_utf8(&normalized).unwrap_or_default();
-    if normalized.contains("privatekey") {
-        FindingKind::PrivateKey
-    } else if normalized.contains("apikey") {
-        FindingKind::ApiKey
-    } else if normalized.contains("token") || normalized == "authorization" {
-        FindingKind::AccessToken
-    } else {
-        FindingKind::Password
-    }
-}
-
-fn delimited_value_range(bytes: &[u8], start: usize) -> (usize, usize) {
-    let Some(first) = bytes.get(start).copied() else {
-        return (start, start);
-    };
-    if matches!(first, b'\'' | b'"') {
-        let value_start = start + 1;
-        let mut end = value_start;
-        while end < bytes.len() && bytes[end] != first {
-            end += 1;
-        }
-        return (value_start, end);
-    }
-    (start, secret_token_end(bytes, start))
-}
-
-fn skip_ascii_whitespace(bytes: &[u8], mut index: usize) -> usize {
-    while index < bytes.len() && bytes[index].is_ascii_whitespace() {
-        index += 1;
-    }
-    index
-}
-
-fn secret_token_end(bytes: &[u8], mut index: usize) -> usize {
-    while index < bytes.len()
-        && !bytes[index].is_ascii_whitespace()
-        && !matches!(
-            bytes[index],
-            b'"' | b'\'' | b',' | b'}' | b']' | b')' | b';' | b'&'
-        )
-    {
-        index += 1;
-    }
-    index
-}
-
-fn email_byte(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'%' | b'+' | b'-' | b'@')
-}
-
-const fn local_placeholder(_kind: FindingKind) -> &'static str {
-    "<redacted>"
+    Ok((redaction.text, findings))
 }
 
 #[cfg(test)]
@@ -450,10 +214,31 @@ mod tests {
         let rendered = value.to_string();
 
         assert_eq!(value["model"], "gpt-5");
-        assert!(rendered.contains("héllo <redacted>"));
-        assert!(rendered.matches("<redacted>").count() >= 5);
+        assert_eq!(value["input"][0], "héllo <redacted>");
+        assert_eq!(value["input"][1], "Bearer <redacted>");
+        assert_eq!(value["input"][2]["arguments"]["api_key"], "<redacted>");
+        assert_eq!(value["input"][2]["arguments"]["private_key"], "<redacted>");
+        assert_eq!(
+            value["input"][2]["arguments"]["note"],
+            "<redacted> card <redacted>"
+        );
+        assert_eq!(rendered.matches("<redacted>").count(), 6);
         assert!(!rendered.contains("user@example.com"));
         assert_eq!(inspected.coverage, InspectionCoverage::Full);
+        for expected in [
+            FindingKind::EmailAddress,
+            FindingKind::AccessToken,
+            FindingKind::ApiKey,
+            FindingKind::PrivateKey,
+            FindingKind::FinancialAccount,
+        ] {
+            assert!(
+                inspected
+                    .findings
+                    .iter()
+                    .any(|finding| finding.kind() == expected)
+            );
+        }
         assert!(
             inspected
                 .findings
@@ -490,5 +275,16 @@ mod tests {
 
         assert!(!rendered.contains("malformed-secret-without-footer"));
         assert!(rendered.contains("<redacted>"));
+    }
+
+    #[test]
+    fn local_inspection_preserves_short_and_malformed_candidates() {
+        let text = "12 digits 123456789012, 20 digits 12345678901234567890, short sk-1234567, malformed a@.test";
+        let inspected = runtime_local_inspect_and_mask(text.as_bytes().to_vec()).unwrap();
+        let rendered = String::from_utf8(inspected.body).unwrap();
+
+        assert_eq!(rendered, text);
+        assert!(inspected.findings.is_empty());
+        assert!(!inspected.changed);
     }
 }

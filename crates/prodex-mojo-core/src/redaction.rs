@@ -1,6 +1,45 @@
 use crate::MojoError;
 
 const REDACTION_ABI_VERSION: i64 = 1;
+const REDACTION_LOCAL_PLACEHOLDER_EXPANSION: usize = 9;
+
+/// Finding-kind tag used by the local-redaction Mojo ABI.
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalInspectionFindingKind {
+    EmailAddress = 0,
+    PhoneNumber = 1,
+    PersonName = 2,
+    PhysicalAddress = 3,
+    GovernmentId = 4,
+    FinancialAccount = 5,
+    PaymentCard = 6,
+    AccessToken = 7,
+    ApiKey = 8,
+    PrivateKey = 9,
+    Password = 10,
+    TenantSensitive = 11,
+}
+
+impl LocalInspectionFindingKind {
+    fn from_abi_tag(value: i64) -> Result<Self, MojoError> {
+        match value {
+            0 => Ok(Self::EmailAddress),
+            1 => Ok(Self::PhoneNumber),
+            2 => Ok(Self::PersonName),
+            3 => Ok(Self::PhysicalAddress),
+            4 => Ok(Self::GovernmentId),
+            5 => Ok(Self::FinancialAccount),
+            6 => Ok(Self::PaymentCard),
+            7 => Ok(Self::AccessToken),
+            8 => Ok(Self::ApiKey),
+            9 => Ok(Self::PrivateKey),
+            10 => Ok(Self::Password),
+            11 => Ok(Self::TenantSensitive),
+            _ => Err(MojoError::InvalidOutput),
+        }
+    }
+}
 
 unsafe extern "C" {
     fn prodex_redaction_json_field_plan_v1(
@@ -40,6 +79,18 @@ unsafe extern "C" {
         scratch_address: u64,
         output_address: u64,
         capacity: i64,
+        written_address: u64,
+    ) -> i64;
+    fn prodex_redaction_local_inspection_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        sensitive_kind: i64,
+        output_address: u64,
+        output_capacity: i64,
+        match_output_address: u64,
+        match_capacity: i64,
+        match_count_address: u64,
         written_address: u64,
     ) -> i64;
 }
@@ -258,6 +309,85 @@ pub fn redact_gateway_text(value: &str) -> Result<String, MojoError> {
     redact_gateway_extra(&redacted)
 }
 
+/// One local detector result, encoded with the stable `FindingKind` ABI tag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LocalInspectionMatch {
+    pub start: usize,
+    pub end: usize,
+    pub kind: LocalInspectionFindingKind,
+}
+
+/// Mojo-redacted text and ordered byte ranges from the local inspection scan.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalInspectionResult {
+    pub text: String,
+    pub matches: Vec<LocalInspectionMatch>,
+}
+
+/// Detects and masks local sensitive text. Mojo owns detector semantics,
+/// match ordering, overlap resolution, and replacement; Rust validates ABI
+/// records and owns only the returned storage.
+pub fn local_inspect_and_redact(
+    value: &str,
+    sensitive_kind: Option<LocalInspectionFindingKind>,
+    max_matches: usize,
+) -> Result<LocalInspectionResult, MojoError> {
+    let output_capacity = value
+        .len()
+        .checked_add(
+            max_matches
+                .checked_mul(REDACTION_LOCAL_PLACEHOLDER_EXPANSION)
+                .ok_or(MojoError::Capacity)?,
+        )
+        .and_then(|capacity| capacity.checked_add(32))
+        .ok_or(MojoError::Capacity)?;
+    let match_storage_len = max_matches.checked_mul(3).ok_or(MojoError::Capacity)?;
+    let mut output = vec![0_u8; output_capacity];
+    let mut match_storage = vec![-1_i64; match_storage_len];
+    let mut match_count = 0_i64;
+    let mut written = 0_i64;
+    let result_status = unsafe {
+        prodex_redaction_local_inspection_v1(
+            REDACTION_ABI_VERSION,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            sensitive_kind.map_or(-1, |kind| kind as i64),
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output_capacity).map_err(|_| MojoError::Capacity)?,
+            match_storage.as_mut_ptr() as usize as u64,
+            i64::try_from(max_matches).map_err(|_| MojoError::Capacity)?,
+            (&mut match_count as *mut i64) as usize as u64,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    status(result_status)?;
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let match_count = usize::try_from(match_count).map_err(|_| MojoError::InvalidOutput)?;
+    if match_count > max_matches {
+        return Err(MojoError::InvalidOutput);
+    }
+    let mut matches = Vec::with_capacity(match_count);
+    let mut covered_until = 0;
+    for record in match_storage[..match_count * 3].as_chunks::<3>().0 {
+        let start = usize::try_from(record[0]).map_err(|_| MojoError::InvalidOutput)?;
+        let end = usize::try_from(record[1]).map_err(|_| MojoError::InvalidOutput)?;
+        let kind = LocalInspectionFindingKind::from_abi_tag(record[2])?;
+        if start < covered_until || start >= end || end > value.len() {
+            return Err(MojoError::InvalidOutput);
+        }
+        covered_until = end;
+        matches.push(LocalInspectionMatch { start, end, kind });
+    }
+    Ok(LocalInspectionResult {
+        text: String::from_utf8(output[..written].to_vec())
+            .map_err(|_| MojoError::InvalidOutput)?,
+        matches,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -304,6 +434,104 @@ mod tests {
         assert_eq!(
             redact_gateway_text("user@example.test 4111-1111-1111-1111").unwrap(),
             "<redacted><redacted>"
+        );
+    }
+
+    #[test]
+    fn local_inspection_masks_supported_values_and_returns_byte_ranges() {
+        let value = "héllo user@example.test | Bearer token-123 | sk-proj-1234567890 | card 4111-1111-1111-1111";
+        let redaction = local_inspect_and_redact(value, None, 8).unwrap();
+
+        assert_eq!(
+            redaction.text,
+            "héllo <redacted> | Bearer <redacted> | <redacted> | card <redacted>"
+        );
+        let range = |needle: &str| {
+            let start = value.find(needle).unwrap();
+            (start, start + needle.len())
+        };
+        let (email_start, email_end) = range("user@example.test");
+        let (token_start, token_end) = range("token-123");
+        let (api_key_start, api_key_end) = range("sk-proj-1234567890");
+        let (account_start, account_end) = range("4111-1111-1111-1111");
+        assert_eq!(
+            redaction.matches,
+            vec![
+                LocalInspectionMatch {
+                    start: email_start,
+                    end: email_end,
+                    kind: LocalInspectionFindingKind::EmailAddress
+                },
+                LocalInspectionMatch {
+                    start: token_start,
+                    end: token_end,
+                    kind: LocalInspectionFindingKind::AccessToken
+                },
+                LocalInspectionMatch {
+                    start: api_key_start,
+                    end: api_key_end,
+                    kind: LocalInspectionFindingKind::ApiKey
+                },
+                LocalInspectionMatch {
+                    start: account_start,
+                    end: account_end,
+                    kind: LocalInspectionFindingKind::FinancialAccount
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn local_inspection_resolves_overlaps_and_sensitive_field_override() {
+        let labeled = local_inspect_and_redact("api_key=sk-proj-1234567890", None, 8).unwrap();
+        assert_eq!(labeled.text, "api_key=<redacted>");
+        assert_eq!(
+            labeled.matches,
+            vec![LocalInspectionMatch {
+                start: 8,
+                end: 26,
+                kind: LocalInspectionFindingKind::ApiKey,
+            }]
+        );
+
+        let sensitive = local_inspect_and_redact(
+            "tenant value",
+            Some(LocalInspectionFindingKind::TenantSensitive),
+            8,
+        )
+        .unwrap();
+        assert_eq!(sensitive.text, "<redacted>");
+        assert_eq!(
+            sensitive.matches,
+            vec![LocalInspectionMatch {
+                start: 0,
+                end: 12,
+                kind: LocalInspectionFindingKind::TenantSensitive,
+            }]
+        );
+        let empty =
+            local_inspect_and_redact("", Some(LocalInspectionFindingKind::TenantSensitive), 8)
+                .unwrap();
+        assert_eq!(empty.text, "");
+        assert!(empty.matches.is_empty());
+    }
+
+    #[test]
+    fn local_inspection_rejects_more_matches_than_the_caller_capacity() {
+        assert_eq!(
+            local_inspect_and_redact("a@example.test b@example.test", None, 1),
+            Err(MojoError::Capacity)
+        );
+        assert_eq!(
+            local_inspect_and_redact("ordinary text", None, 0).unwrap(),
+            LocalInspectionResult {
+                text: "ordinary text".to_string(),
+                matches: Vec::new(),
+            }
+        );
+        assert_eq!(
+            local_inspect_and_redact("a@example.test", None, 0),
+            Err(MojoError::Capacity)
         );
     }
 }
