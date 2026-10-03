@@ -6,6 +6,7 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Runtime
 
+- Stop exhausted same-request probe races (`063f81f`)
 - Keep auto-rotate alive while quota remains (`02997e4`)
 
 ### CLI
