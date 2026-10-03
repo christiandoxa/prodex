@@ -19,6 +19,9 @@ const DOCTOR_MARKER_SUMMARY_COUNTS_SELECTION_FILE = "crates/prodex-runtime-docto
 const DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE = "crates/prodex-runtime-doctor/tests/src/parsing.rs";
 const DOCTOR_COMPACT_EXIT_COUNTS_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/diagnosis/final_summary/compact.rs";
 const DOCTOR_COMPACT_EXIT_COUNTS_CALLER_TEST_FILE = "crates/prodex-runtime-doctor/tests/src/diagnosis.rs";
+const DOCTOR_TIMELINE_DETAIL_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs";
+const DOCTOR_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_render.rs";
+const DOCTOR_RENDER_MOJO_FILE = "mojo/prodex_core/runtime_doctor_render.mojo";
 const CLI_DEFAULT_RUN_CONSUMER_FILE = "crates/prodex-cli/src/lib.rs";
 const CLI_DEFAULT_RUN_ABI_FILE = "crates/prodex-mojo-core/src/launch.rs";
 const CLI_DEFAULT_RUN_MOJO_FILE = "mojo/prodex_core/launch_args.mojo";
@@ -94,6 +97,9 @@ const PROMOTED_FILES = [
   DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE,
   DOCTOR_COMPACT_EXIT_COUNTS_CONSUMER_FILE,
   DOCTOR_COMPACT_EXIT_COUNTS_CALLER_TEST_FILE,
+  DOCTOR_TIMELINE_DETAIL_CONSUMER_FILE,
+  DOCTOR_RENDER_ADAPTER_FILE,
+  DOCTOR_RENDER_MOJO_FILE,
   CLI_DEFAULT_RUN_CONSUMER_FILE,
   CLI_DEFAULT_RUN_ABI_FILE,
   CLI_DEFAULT_RUN_MOJO_FILE,
@@ -3062,6 +3068,34 @@ export function findViolations(files) {
     }
     return [];
   });
+  const doctorTimelineDetailViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === DOCTOR_TIMELINE_DETAIL_CONSUMER_FILE) {
+      const body = contents.match(/\bpub\(super\) fn runtime_doctor_request_timeline_detail\s*\([^]*?^\}/mu)?.[0];
+      const rustFormatter = /runtime_doctor_truncate_value|\.chars\(\)|parts\.join\(/u;
+      return body?.includes("prodex_mojo_core::rich::runtime_doctor_render(") &&
+          !rustFormatter.test(contents) &&
+          contents.includes("request_timeline_detail_preserves_field_order_cap_and_unicode")
+        ? []
+        : [`${filePath}: request-timeline field ordering, cap, truncation, and joining must use the Mojo renderer with caller coverage`];
+    }
+    if (filePath === DOCTOR_RENDER_ADAPTER_FILE &&
+        (!contents.includes("RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL: i64 = 22") ||
+          !contents.includes("prodex_mojo_runtime_doctor_render_v1(") ||
+          !contents.includes("timeline_detail_preserves_order_caps_fields_and_truncates_unicode"))) {
+      return [`${filePath}: request-timeline rendering must retain its bounded real-Mojo operation and ABI test`];
+    }
+    if (filePath === DOCTOR_RENDER_MOJO_FILE &&
+        (!contents.includes("RENDER_REQUEST_TIMELINE_DETAIL: Int64 = 22") ||
+          !contents.includes("def runtime_doctor_render_request_timeline_detail(") ||
+          !contents.includes("def runtime_doctor_render_put_timeline_value(") ||
+          !contents.includes("characters == 46") ||
+          !contents.includes("characters == 49") ||
+          !contents.includes("runtime_doctor_render_request_timeline_detail(writer, input)") ||
+          !contents.includes('@export("prodex_mojo_runtime_doctor_render_v1")'))) {
+      return [`${filePath}: request-timeline detail semantics must stay in the production Mojo renderer`];
+    }
+    return [];
+  });
   const cliDefaultRunViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === CLI_DEFAULT_RUN_CONSUMER_FILE) {
       const body = contents.match(/\bpub fn should_default_cli_invocation_to_run\s*\([^]*?^\}/mu)?.[0];
@@ -3890,7 +3924,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
+    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
@@ -4363,6 +4397,13 @@ function selfTest() {
   /direct ABI coverage must assert all compact-exit marker buckets and invalid inputs/u);
   assert.match(findViolations([[DOCTOR_COMPACT_EXIT_COUNTS_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
   /production diagnosis caller must protect compact-exit alias totals and order/u);
+  assert.match(findViolations([[DOCTOR_TIMELINE_DETAIL_CONSUMER_FILE,
+    "pub(super) fn runtime_doctor_request_timeline_detail(fields: &Fields) -> String {\n  fields.iter().map(|(key, value)| format!(\"{key}={value}\")).collect()\n}\n"]]).join("\n"),
+  /request-timeline field ordering, cap, truncation, and joining must use the Mojo renderer/u);
+  assert.match(findViolations([[DOCTOR_RENDER_ADAPTER_FILE, "fn runtime_doctor_render() {}"]]).join("\n"),
+  /request-timeline rendering must retain its bounded real-Mojo operation and ABI test/u);
+  assert.match(findViolations([[DOCTOR_RENDER_MOJO_FILE, "def runtime_doctor_render_value(): pass"]]).join("\n"),
+  /request-timeline detail semantics must stay in the production Mojo renderer/u);
   assert.match(findViolations([[CLI_DEFAULT_RUN_CONSUMER_FILE,
     "fn reassemble_super_expose_alias() { prodex_mojo_core::launch::find_super_expose_alias_index(); }\npub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {\n  matches!(args.first(), Some(_))\n}\n"]]).join("\n"),
   /CLI default-run decision must use the Mojo launch-arguments policy/u);

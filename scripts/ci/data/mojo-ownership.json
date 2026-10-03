@@ -1073,6 +1073,30 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/runtime_doctor_render.mojo",
+        "language": "mojo",
+        "classification": "MIXED",
+        "semantic_ranges": [
+          {
+            "start": 31,
+            "end": 31
+          },
+          {
+            "start": 538,
+            "end": 609
+          },
+          {
+            "start": 631,
+            "end": 632
+          }
+        ],
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_doctor_request_timeline_detail"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/secret_policy.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -4513,6 +4537,34 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "bounded marker/count batching and fixed-slot DTO projection"
+    },
+    {
+      "name": "runtime_doctor_request_timeline_detail",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.435.2",
+      "baseline_state": "Rust ordered fields, capped output at five values, truncated Unicode values, and joined key-value details",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_render_v1",
+      "mojo_operation_ids": {
+        "request_timeline_detail": 22
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_render",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+        "crates/prodex-runtime-doctor/src/parsing/selection.rs",
+        "crates/prodex-runtime-doctor/src/parsing/route_profile.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+      "rust_owner_before": "fixed request-timeline field ordering, first-five selection, Unicode-scalar truncation, and key-value joining",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct renderer ABI and runtime-doctor caller tests cover field ordering, five-value cap, Unicode truncation, and boundary lengths",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "fixed field-slot projection and existing event/summary assembly"
     }
   ],
   "rust_semantic_reductions": [
@@ -5196,6 +5248,31 @@
           "start": 27,
           "end": 29
         }
+      }
+    },
+    {
+      "file": "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+      "symbol": "runtime_doctor_request_timeline_detail",
+      "operation": "runtime_doctor_request_timeline_detail",
+      "previous_responsibility": "fixed request-timeline field ordering, first-five selection, Unicode-scalar truncation, and key-value joining",
+      "final_state": "adapter-only",
+      "rust_before": "Rust selected and formatted request-timeline detail fields",
+      "rust_after": "Rust projects fixed field slots into the Mojo renderer",
+      "mojo_owner": "mojo/prodex_core/runtime_doctor_render.mojo::runtime_doctor_render_request_timeline_detail",
+      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "mojo_entry": "prodex_mojo_runtime_doctor_render_v1 operation 22",
+      "production_consumer": "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+      "parity_test": "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs",
+      "performance": "one bounded Mojo call with sixteen borrowed optional field values",
+      "cleanup_loc": 43,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 101,
+          "end": 144
+        },
+        "release_symbol": "runtime_doctor_request_timeline_detail",
+        "release_marker": "prodex_mojo_core::rich::runtime_doctor_render("
       }
     }
   ],

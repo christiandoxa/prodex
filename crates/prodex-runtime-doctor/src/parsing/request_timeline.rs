@@ -1,8 +1,30 @@
 use std::collections::BTreeMap;
 
 use crate::{RuntimeDoctorRequestTimelineEvent, RuntimeDoctorSummary};
+use prodex_mojo_core::rich::{
+    RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL, RuntimeDoctorRenderInput,
+};
 
 const RUNTIME_DOCTOR_REQUEST_TIMELINE_MAX_EVENTS: usize = 12;
+// ABI slots stay aligned with the field labels owned by the Mojo renderer.
+const RUNTIME_DOCTOR_REQUEST_TIMELINE_DETAIL_FIELDS: [&str; 16] = [
+    "profile",
+    "route",
+    "transport",
+    "reason",
+    "status",
+    "code",
+    "exit",
+    "outcome",
+    "quota_source",
+    "affinity",
+    "request_shape",
+    "retry_index",
+    "attempt",
+    "response_id",
+    "previous_response_id",
+    "session_id",
+];
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct RuntimeDoctorRequestTimelineBuilder {
@@ -32,49 +54,15 @@ fn runtime_doctor_request_timeline_phase(marker: &str) -> Option<&'static str> {
     }
 }
 
-fn runtime_doctor_truncate_value(value: &str, limit: usize) -> String {
-    let count = value.chars().count();
-    if count <= limit {
-        return value.to_string();
-    }
-    value
-        .chars()
-        .take(limit.saturating_sub(3))
-        .collect::<String>()
-        + "..."
-}
-
 pub(super) fn runtime_doctor_request_timeline_detail(fields: &BTreeMap<String, String>) -> String {
-    let mut parts = Vec::new();
-    for key in [
-        "profile",
-        "route",
-        "transport",
-        "reason",
-        "status",
-        "code",
-        "exit",
-        "outcome",
-        "quota_source",
-        "affinity",
-        "request_shape",
-        "retry_index",
-        "attempt",
-        "response_id",
-        "previous_response_id",
-        "session_id",
-    ] {
-        if let Some(value) = fields.get(key) {
-            parts.push(format!(
-                "{key}={}",
-                runtime_doctor_truncate_value(value, 48)
-            ));
-        }
-        if parts.len() >= 5 {
-            break;
-        }
-    }
-    parts.join(" ")
+    let values = RUNTIME_DOCTOR_REQUEST_TIMELINE_DETAIL_FIELDS
+        .map(|key| fields.get(key).map(String::as_str));
+    prodex_mojo_core::rich::runtime_doctor_render(RuntimeDoctorRenderInput {
+        operation: RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL,
+        detail: 0,
+        values: &values,
+    })
+    .expect("Mojo runtime-doctor timeline detail renderer returned invalid output")
 }
 
 pub(super) fn runtime_doctor_record_request_timeline_event(
@@ -243,5 +231,32 @@ mod expected_timeline_phases {
                 "{marker}"
             );
         }
+    }
+}
+
+#[cfg(all(test, feature = "runtime-log-mojo"))]
+mod timeline_detail_tests {
+    use super::runtime_doctor_request_timeline_detail;
+    use std::collections::BTreeMap;
+
+    #[test]
+    fn request_timeline_detail_preserves_field_order_cap_and_unicode() {
+        let route = "🧭".repeat(49);
+        let fields = BTreeMap::from([
+            ("profile".to_string(), "東京".to_string()),
+            ("route".to_string(), route),
+            ("reason".to_string(), "timeout".to_string()),
+            ("status".to_string(), "429".to_string()),
+            ("code".to_string(), "ignored".to_string()),
+            ("session_id".to_string(), "later".to_string()),
+        ]);
+
+        assert_eq!(
+            runtime_doctor_request_timeline_detail(&fields),
+            format!(
+                "profile=東京 route={}... reason=timeout status=429 code=ignored",
+                "🧭".repeat(45)
+            )
+        );
     }
 }
