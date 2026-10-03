@@ -25,6 +25,7 @@ const CLI_DEFAULT_RUN_MOJO_FILE = "mojo/prodex_core/launch_args.mojo";
 const CLI_DEFAULT_RUN_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/launch_args.rs";
 const CLI_DEFAULT_RUN_CALLER_TEST_FILE = "crates/prodex-cli/tests/src/shortcuts.rs";
 const DEEPSEEK_INPUT_HISTORY_FILE = "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs";
+const PRESIDIO_LOCAL_REDACTION_FILE = "crates/prodex-app/src/runtime_proxy/presidio/local.rs";
 const PROMOTED_FILES = [
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
   "crates/prodex-mojo-core/src/log_throughput_policy.rs",
@@ -121,6 +122,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime_state.rs",
   "crates/prodex-redaction/src/lib.rs",
   "crates/prodex-mojo-core/src/redaction.rs",
+  PRESIDIO_LOCAL_REDACTION_FILE,
   "crates/prodex-quota/src/models.rs",
   "crates/prodex-quota/src/auth.rs",
   "crates/prodex-quota/src/render/time.rs",
@@ -1763,18 +1765,30 @@ export function findViolations(files) {
     return violations;
   });
   const redactionViolations = files.flatMap(([filePath, contents]) => {
-    if (filePath !== REDACTION_FILE) return [];
-    const required = [
-      "prodex_mojo_core::redaction::key_looks_sensitive(",
-      "prodex_mojo_core::redaction::redact_secret_like_text(",
-      "prodex_mojo_core::redaction::redact_gateway_text(",
-    ];
-    const violations = required
-      .filter((call) => !contents.includes(call))
-      .map((call) => `${filePath}: redaction migration must retain Mojo call ${call}`);
-    const retired = /\bfn\s+(?:redaction_redact_email_tokens|redaction_redact_long_digit_tokens|redaction_redact_matching_tokens|redaction_redact_sensitive_key_value_text|redaction_process_field_name|redaction_sensitive_field_replacement|redaction_parse_potential_field_name|redaction_redacted_field_value|redaction_redact_authorization_like_values|redaction_try_authorization_value|redaction_redact_prefixed_api_key_tokens|redaction_secret_token_end)\s*\(/u;
-    if (retired.test(contents)) {
-      violations.push(`${filePath}: contains retired Rust redaction semantics`);
+    if (filePath === REDACTION_FILE) {
+      const required = [
+        "prodex_mojo_core::redaction::key_looks_sensitive(",
+        "prodex_mojo_core::redaction::redact_secret_like_text(",
+        "prodex_mojo_core::redaction::redact_gateway_text(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: redaction migration must retain Mojo call ${call}`);
+      const retired = /\bfn\s+(?:redaction_redact_email_tokens|redaction_redact_long_digit_tokens|redaction_redact_matching_tokens|redaction_redact_sensitive_key_value_text|redaction_process_field_name|redaction_sensitive_field_replacement|redaction_parse_potential_field_name|redaction_redacted_field_value|redaction_redact_authorization_like_values|redaction_try_authorization_value|redaction_redact_prefixed_api_key_tokens|redaction_secret_token_end)\s*\(/u;
+      if (retired.test(contents)) {
+        violations.push(`${filePath}: contains retired Rust redaction semantics`);
+      }
+      return violations;
+    }
+    if (filePath !== PRESIDIO_LOCAL_REDACTION_FILE) return [];
+    const production = contents.split("#[cfg(test)]\nmod tests", 1)[0];
+    const violations = [];
+    if (!production.includes("prodex_mojo_core::redaction::local_inspect_and_redact(")) {
+      violations.push(`${filePath}: local inspection must call the Mojo redaction kernel`);
+    }
+    const retiredLocal = /\bfn\s+(?:local_matches|detect_private_keys|detect_labeled_credentials|detect_bearer_tokens|detect_prefixed_api_keys|detect_emails|detect_financial_identifiers|sensitive_key_kind|delimited_value_range|skip_ascii_whitespace|secret_token_end|email_byte)\s*\(/u;
+    if (retiredLocal.test(production)) {
+      violations.push(`${filePath}: contains retired Rust local-redaction semantics`);
     }
     return violations;
   });
