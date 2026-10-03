@@ -66,12 +66,23 @@ pub(crate) fn build_runtime_response_probe_plan(
                 auth,
                 result: Err("runtime quota snapshot unavailable".to_string()),
             });
-            cold_start_probe_jobs.push(RunProfileProbeJob {
-                name,
-                order_index,
-                provider: entry.profile.provider.clone(),
-                codex_home: entry.profile.codex_home.clone(),
-            });
+            let snapshot_blocks_cold_start =
+                entry
+                    .cached_usage_snapshot
+                    .as_ref()
+                    .is_some_and(|snapshot| {
+                        runtime_snapshot_blocks_same_request_cold_start_probe(
+                            snapshot, route_kind, now,
+                        )
+                    });
+            if !snapshot_blocks_cold_start {
+                cold_start_probe_jobs.push(RunProfileProbeJob {
+                    name,
+                    order_index,
+                    provider: entry.profile.provider.clone(),
+                    codex_home: entry.profile.codex_home.clone(),
+                });
+            }
         }
     }
 
