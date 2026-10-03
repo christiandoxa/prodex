@@ -4747,3 +4747,20 @@ Validation passed:
 - `cargo fmt --check`, `git diff --check`, and `node scripts/ci/churn-hygiene.mjs --worktree --check`.
 - `node scripts/ci/mojo-no-fallback-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, and `node scripts/ci/mojo-authority-guard.mjs`.
 - `node scripts/ci/mojo-production-share.mjs --check`: 27.81% Mojo (78,073 Mojo LOC, 202,617 Rust LOC); the 7% release floor passes, and the 75% project target remains unmet.
+
+## CLI default-run discovery
+
+The `prodex` CLI now uses launch-arguments Mojo operation 13 to decide whether
+an unrecognized first command defaults to `run`. Rust still projects the two
+relevant `OsString` arguments into borrowed UTF-8 views and leaves Clap help,
+version, command parsing, and error behavior unchanged. Operation 13 reuses the
+versioned launch-arguments ABI and its existing production build path; the
+ownership ledger and no-fallback guard now cover the new consumer and tests.
+
+Validation passed:
+
+- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -p prodex-mojo-core --all-features --test launch_args default_cli_invocation_policy_uses_real_mojo_classification -- --exact` — 1 passed; `--list` confirmed all 6 launch-argument tests are present.
+- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -p prodex-cli --lib bare_invocation_defaults_to_run_and_clap_keeps_help_and_version` — 1 passed through the production caller. A temporary incorrect Mojo default made this same test fail with Clap's missing-command help; the Mojo source was restored and the test passed again.
+- `cargo fmt --all -- --check`, workspace Clippy with warnings denied, `npm run docs`, the Mojo no-fallback self-test and check, Mojo ownership and authority checks, and `git diff --check` — passed.
+- `node scripts/ci/mojo-production-share.mjs --check` — 27.83% Mojo; the 7% release floor passes and the 75% project target remains unmet.
+- `npm run test:changed` stopped at the size guard before test selection: it reported 7 violations and 34 near-limit Rust files against the budget of 32. No tests ran under that command.

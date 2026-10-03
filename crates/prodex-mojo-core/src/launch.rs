@@ -14,6 +14,7 @@ const METADATA_WORDS: usize = 11;
 const SCAN_SUPER_OVERRIDES: i64 = 10;
 const FIND_SUPER_EXPOSE_ALIAS: i64 = 11;
 const LOGIN_POLICY: i64 = 12;
+const CLI_DEFAULT_RUN: i64 = 13;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i64)]
@@ -470,6 +471,28 @@ pub fn login_argument_plan(arguments: &[Option<&str>]) -> Result<LoginArgumentPl
         removed_gemini_oauth: boolean(meta[1])?,
         base_url_allowed: boolean(meta[2])?,
     })
+}
+
+/// Decide whether an unrecognized top-level command should default to `run`.
+pub fn default_cli_invocation_to_run(arguments: &[Option<&str>]) -> Result<bool, MojoError> {
+    let input = views(arguments)?;
+    let mut meta = [0_i64; METADATA_WORDS];
+    // SAFETY: input and metadata live through the synchronous call. Operation
+    // 13 only reads the argument views and writes metadata[0].
+    status(unsafe {
+        prodex_mojo_launch_args_v1(
+            ABI_VERSION,
+            CLI_DEFAULT_RUN,
+            0,
+            input.as_ptr() as u64,
+            input.len() as i64,
+            0,
+            0,
+            0,
+            meta.as_mut_ptr() as u64,
+        )
+    })?;
+    boolean(meta[0])
 }
 
 pub fn inspect_launch_arguments<'a>(

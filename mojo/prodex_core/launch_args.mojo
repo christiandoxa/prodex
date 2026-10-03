@@ -35,6 +35,7 @@ comptime LAUNCH_SCOPE_CONFIG: Int64 = 9
 comptime LAUNCH_SCAN_SUPER_OVERRIDES: Int64 = 10
 comptime LAUNCH_FIND_SUPER_EXPOSE_ALIAS: Int64 = 11
 comptime LAUNCH_LOGIN_POLICY: Int64 = 12
+comptime LAUNCH_CLI_DEFAULT_RUN: Int64 = 13
 
 comptime LOGIN_METHOD_CHATGPT: Int64 = 0
 comptime LOGIN_METHOD_DEVICE_CODE: Int64 = 1
@@ -273,6 +274,54 @@ def launch_find_super_expose_alias(arguments: UInt64, count: Int64) -> Int64:
     return -1
 
 
+def launch_cli_command_is_prodex(arg: LaunchArgView) -> Bool:
+    return (
+        launch_is["-h"](arg)
+        or launch_is["--help"](arg)
+        or launch_is["-V"](arg)
+        or launch_is["--version"](arg)
+        or launch_is["profile"](arg)
+        or launch_is["use"](arg)
+        or launch_is["current"](arg)
+        or launch_is["info"](arg)
+        or launch_is["status"](arg)
+        or launch_is["log"](arg)
+        or launch_is["session"](arg)
+        or launch_is["doctor"](arg)
+        or launch_is["login"](arg)
+        or launch_is["logout"](arg)
+        or launch_is["update"](arg)
+        or launch_is["quota"](arg)
+        or launch_is["redeem"](arg)
+        or launch_is["ping"](arg)
+        or launch_is["run"](arg)
+        or launch_is["super"](arg)
+        or launch_is["s"](arg)
+        or launch_is["gateway"](arg)
+        or launch_is["gui"](arg)
+        or launch_is["dashboard"](arg)
+        or launch_is["claude"](arg)
+        or launch_is["help"](arg)
+        or launch_is["__super-expose"](arg)
+        or launch_is["__runtime-broker"](arg)
+        or launch_is["__mcp-jsonl-bridge"](arg)
+        or launch_is["__sub-agent-exec"](arg)
+    )
+
+
+def launch_cli_default_run_policy(
+    arguments: UInt64,
+    count: Int64,
+    metadata: Pointer[mut=True, Int64, _],
+):
+    var should_default = True
+    if count > 1:
+        var command = launch_arg(arguments, 0, 1)
+        if command.valid_utf8 == 1:
+            should_default = not launch_cli_command_is_prodex(command)
+    metadata[unsafe_offset=0] = Int64(should_default)
+
+
 def launch_login_policy(
     arguments: UInt64,
     count: Int64,
@@ -485,7 +534,7 @@ def prodex_mojo_launch_args_v1(
     # Lengths are bounded by caller-owned storage and signed address arithmetic.
     if (
         operation < LAUNCH_INSPECT
-        or operation > LAUNCH_LOGIN_POLICY
+        or operation > LAUNCH_CLI_DEFAULT_RUN
         or operation == 4
         or operation == 5
         or full_access < 0
@@ -519,6 +568,9 @@ def prodex_mojo_launch_args_v1(
         return 0
     if operation == LAUNCH_LOGIN_POLICY:
         launch_login_policy(arguments, count, metadata)
+        return 0
+    if operation == LAUNCH_CLI_DEFAULT_RUN:
+        launch_cli_default_run_policy(arguments, count, metadata)
         return 0
     if operation == LAUNCH_INSPECT:
         launch_inspect(arguments, count, metadata)
