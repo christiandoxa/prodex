@@ -518,7 +518,7 @@ fn slice(output: &[u8], value: RichSlice) -> Result<&[u8], MojoError> {
     output.get(offset..end).ok_or(MojoError::InvalidOutput)
 }
 
-fn ensure_rich_abi() -> Result<(), MojoError> {
+pub(crate) fn ensure_rich_abi() -> Result<(), MojoError> {
     rich_abi_ready().then_some(()).ok_or(MojoError::AbiMismatch)
 }
 

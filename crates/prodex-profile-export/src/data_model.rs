@@ -357,31 +357,11 @@ impl fmt::Debug for ProfileImportAuthUpdatePlan {
     }
 }
 
-pub trait ProfileImportPlanProfile {
-    fn profile_name(&self) -> &str;
-    fn supports_codex_runtime(&self) -> bool;
-    fn import_identity(&self) -> ProfileImportIdentity;
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileImportPlanInput {
     pub profile_name: String,
     pub supports_codex_runtime: bool,
     pub identity: ProfileImportIdentity,
-}
-
-impl ProfileImportPlanProfile for ProfileImportPlanInput {
-    fn profile_name(&self) -> &str {
-        &self.profile_name
-    }
-
-    fn supports_codex_runtime(&self) -> bool {
-        self.supports_codex_runtime
-    }
-
-    fn import_identity(&self) -> ProfileImportIdentity {
-        self.identity.clone()
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -404,12 +384,6 @@ pub enum ProfileImportPlanAction {
         source_index: usize,
         staged_index: usize,
     },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ImportIdentityTarget {
-    Existing(String),
-    PendingNew(usize),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

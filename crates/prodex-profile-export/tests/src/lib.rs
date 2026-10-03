@@ -6,28 +6,19 @@ mod journal;
 
 use envelope::profile_export_private_temp_dir;
 
-#[derive(Debug)]
-struct PlanProfile {
-    name: &'static str,
+fn plan_profile(
+    name: &str,
     supports_codex_runtime: bool,
-    email: Option<&'static str>,
-    account_id: Option<&'static str>,
-}
-
-impl ProfileImportPlanProfile for PlanProfile {
-    fn profile_name(&self) -> &str {
-        self.name
-    }
-
-    fn supports_codex_runtime(&self) -> bool {
-        self.supports_codex_runtime
-    }
-
-    fn import_identity(&self) -> ProfileImportIdentity {
-        ProfileImportIdentity {
-            email: self.email.map(ToOwned::to_owned),
-            account_id: self.account_id.map(ToOwned::to_owned),
-        }
+    email: Option<&str>,
+    account_id: Option<&str>,
+) -> ProfileImportPlanInput {
+    ProfileImportPlanInput {
+        profile_name: name.to_string(),
+        supports_codex_runtime,
+        identity: ProfileImportIdentity {
+            email: email.map(ToOwned::to_owned),
+            account_id: account_id.map(ToOwned::to_owned),
+        },
     }
 }
 
@@ -174,12 +165,12 @@ fn import_transaction_records_commit_order_and_previous_active() {
 
 #[test]
 fn import_plan_updates_same_name_runtime_profile() {
-    let profiles = [PlanProfile {
-        name: "main",
-        supports_codex_runtime: true,
-        email: Some("user@example.com"),
-        account_id: Some("acct-main"),
-    }];
+    let profiles = [plan_profile(
+        "main",
+        true,
+        Some("user@example.com"),
+        Some("acct-main"),
+    )];
 
     let plan = plan_profile_import(
         &profiles,
@@ -203,12 +194,12 @@ fn import_plan_updates_same_name_runtime_profile() {
 
 #[test]
 fn import_plan_updates_same_name_non_runtime_profile() {
-    let profiles = [PlanProfile {
-        name: "gemini-main",
-        supports_codex_runtime: false,
-        email: Some("gemini@example.com"),
-        account_id: None,
-    }];
+    let profiles = [plan_profile(
+        "gemini-main",
+        false,
+        Some("gemini@example.com"),
+        None,
+    )];
 
     let plan = plan_profile_import(
         &profiles,
@@ -232,12 +223,12 @@ fn import_plan_updates_same_name_non_runtime_profile() {
 
 #[test]
 fn import_plan_rejects_same_name_runtime_provider_mismatch() {
-    let profiles = [PlanProfile {
-        name: "main",
-        supports_codex_runtime: true,
-        email: Some("main@example.com"),
-        account_id: Some("acct-main"),
-    }];
+    let profiles = [plan_profile(
+        "main",
+        true,
+        Some("main@example.com"),
+        Some("acct-main"),
+    )];
 
     let error = plan_profile_import(
         &profiles,
@@ -252,18 +243,8 @@ fn import_plan_rejects_same_name_runtime_provider_mismatch() {
 #[test]
 fn import_plan_rewrites_pending_new_profile_for_duplicate_identity() {
     let profiles = [
-        PlanProfile {
-            name: "first",
-            supports_codex_runtime: true,
-            email: Some("user@example.com"),
-            account_id: Some("acct-main"),
-        },
-        PlanProfile {
-            name: "second",
-            supports_codex_runtime: true,
-            email: Some("User@Example.com"),
-            account_id: Some("acct-main"),
-        },
+        plan_profile("first", true, Some("user@example.com"), Some("acct-main")),
+        plan_profile("second", true, Some("User@Example.com"), Some("acct-main")),
     ];
 
     let plan = plan_profile_import(&profiles, |_| None, |_| Ok(None)).expect("plan should resolve");
@@ -293,18 +274,13 @@ fn import_plan_rewrites_pending_new_profile_for_duplicate_identity() {
 #[test]
 fn import_plan_keeps_same_account_with_different_emails_distinct() {
     let profiles = [
-        PlanProfile {
-            name: "first",
-            supports_codex_runtime: true,
-            email: Some("first@example.com"),
-            account_id: Some("acct-main"),
-        },
-        PlanProfile {
-            name: "second",
-            supports_codex_runtime: true,
-            email: Some("second@example.com"),
-            account_id: Some("acct-main"),
-        },
+        plan_profile("first", true, Some("first@example.com"), Some("acct-main")),
+        plan_profile(
+            "second",
+            true,
+            Some("second@example.com"),
+            Some("acct-main"),
+        ),
     ];
 
     let plan = plan_profile_import(&profiles, |_| None, |_| Ok(None)).expect("plan should resolve");
@@ -333,12 +309,12 @@ fn import_plan_keeps_same_account_with_different_emails_distinct() {
 
 #[test]
 fn import_plan_uses_external_identity_match() {
-    let profiles = [PlanProfile {
-        name: "incoming",
-        supports_codex_runtime: true,
-        email: Some("user@example.com"),
-        account_id: Some("acct-main"),
-    }];
+    let profiles = [plan_profile(
+        "incoming",
+        true,
+        Some("user@example.com"),
+        Some("acct-main"),
+    )];
 
     let plan = plan_profile_import(&profiles, |_| None, |_| Ok(Some("existing".to_string())))
         .expect("plan should resolve");
@@ -353,6 +329,74 @@ fn import_plan_uses_external_identity_match() {
     assert_eq!(
         plan.resolved_profile_names,
         BTreeMap::from([("incoming".to_string(), "existing".to_string())])
+    );
+}
+
+#[test]
+fn import_plan_reuses_external_identity_match_without_a_second_lookup() {
+    let profiles = [
+        plan_profile(
+            "incoming-one",
+            true,
+            Some("User@example.com"),
+            Some("acct-main"),
+        ),
+        plan_profile(
+            "incoming-two",
+            true,
+            Some("user@example.com"),
+            Some("acct-main"),
+        ),
+    ];
+    let mut looked_up = Vec::new();
+
+    let plan = plan_profile_import(
+        &profiles,
+        |_| None,
+        |identity| {
+            looked_up.push(identity.clone());
+            Ok(Some("existing".to_string()))
+        },
+    )
+    .expect("matching identity should resolve");
+
+    assert_eq!(
+        looked_up,
+        vec![ProfileImportIdentity {
+            email: Some("User@example.com".to_string()),
+            account_id: Some("acct-main".to_string()),
+        }]
+    );
+    assert_eq!(
+        plan.actions,
+        vec![
+            ProfileImportPlanAction::UpdateExisting {
+                source_index: 0,
+                target_profile_name: "existing".to_string(),
+            },
+            ProfileImportPlanAction::UpdateExisting {
+                source_index: 1,
+                target_profile_name: "existing".to_string(),
+            },
+        ]
+    );
+    assert_eq!(
+        plan.resolved_profile_names,
+        BTreeMap::from([
+            ("incoming-one".to_string(), "existing".to_string()),
+            ("incoming-two".to_string(), "existing".to_string()),
+        ])
+    );
+}
+
+#[test]
+fn import_plan_rejects_empty_bundle() {
+    let error = plan_profile_import(&[], |_| None, |_| Ok(None))
+        .expect_err("empty profile bundles should fail");
+
+    assert_eq!(
+        error.to_string(),
+        "profile export bundle does not contain any profiles"
     );
 }
 
