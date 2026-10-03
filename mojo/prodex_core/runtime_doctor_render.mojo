@@ -28,6 +28,7 @@ comptime RENDER_POLICY_SETTING_KEY: Int64 = 18
 comptime RENDER_POLICY_SETTING_RATIONALE: Int64 = 19
 comptime RENDER_POLICY_SUGGESTION_REASON: Int64 = 20
 comptime RENDER_POLICY_MARKER_NAME: Int64 = 21
+comptime RENDER_REQUEST_TIMELINE_DETAIL: Int64 = 22
 
 comptime DETAIL_CONTEXT_DEPENDENT: Int64 = 1
 comptime DETAIL_COMPACT_PRESSURE: Int64 = 2
@@ -533,6 +534,80 @@ def runtime_doctor_render_policy_suggestion_reason(
         return runtime_doctor_render_put_value_or_literal(writer, input, 0, StringSlice("0")) and runtime_doctor_render_put_literal(writer, StringSlice(" route-scoped health marker(s), latest=")) and runtime_doctor_render_put_value_or_literal(writer, input, 6, StringSlice("unknown")) and runtime_doctor_render_put_literal(writer, StringSlice("/")) and runtime_doctor_render_put_value_or_literal(writer, input, 7, StringSlice("unknown")) and runtime_doctor_render_put_literal(writer, StringSlice(" reason=")) and runtime_doctor_render_put_value_or_literal(writer, input, 8, StringSlice("unknown")) and runtime_doctor_render_put_literal(writer, StringSlice("; lower per-profile fresh pressure if this repeats"))
     return False
 
+
+def runtime_doctor_render_timeline_field_prefix(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _], index: Int
+) -> Bool:
+    if index == 0:
+        return runtime_doctor_render_put_literal(writer, StringSlice("profile="))
+    if index == 1:
+        return runtime_doctor_render_put_literal(writer, StringSlice("route="))
+    if index == 2:
+        return runtime_doctor_render_put_literal(writer, StringSlice("transport="))
+    if index == 3:
+        return runtime_doctor_render_put_literal(writer, StringSlice("reason="))
+    if index == 4:
+        return runtime_doctor_render_put_literal(writer, StringSlice("status="))
+    if index == 5:
+        return runtime_doctor_render_put_literal(writer, StringSlice("code="))
+    if index == 6:
+        return runtime_doctor_render_put_literal(writer, StringSlice("exit="))
+    if index == 7:
+        return runtime_doctor_render_put_literal(writer, StringSlice("outcome="))
+    if index == 8:
+        return runtime_doctor_render_put_literal(writer, StringSlice("quota_source="))
+    if index == 9:
+        return runtime_doctor_render_put_literal(writer, StringSlice("affinity="))
+    if index == 10:
+        return runtime_doctor_render_put_literal(writer, StringSlice("request_shape="))
+    if index == 11:
+        return runtime_doctor_render_put_literal(writer, StringSlice("retry_index="))
+    if index == 12:
+        return runtime_doctor_render_put_literal(writer, StringSlice("attempt="))
+    if index == 13:
+        return runtime_doctor_render_put_literal(writer, StringSlice("response_id="))
+    if index == 14:
+        return runtime_doctor_render_put_literal(writer, StringSlice("previous_response_id="))
+    if index == 15:
+        return runtime_doctor_render_put_literal(writer, StringSlice("session_id="))
+    return False
+
+
+def runtime_doctor_render_put_timeline_value(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
+    value: ProdexRichStringView,
+) -> Bool:
+    var ptr = rich_view_ptr(value)
+    var characters: Int64 = 0
+    var prefix_bytes: Int64 = 0
+    for index in range(Int64(value.len)):
+        if (ptr[unsafe_offset=index] & UInt8(192)) != UInt8(128):
+            characters += 1
+            if characters == 46:
+                prefix_bytes = index
+            elif characters == 49:
+                for prefix_index in range(prefix_bytes):
+                    if not runtime_doctor_render_put_byte(writer, ptr[unsafe_offset=prefix_index]):
+                        return False
+                return runtime_doctor_render_put_literal(writer, StringSlice("..."))
+    return runtime_doctor_render_put_view(writer, value)
+
+
+def runtime_doctor_render_request_timeline_detail(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
+    input: ProdexRuntimeDoctorRenderInput,
+) -> Bool:
+    var written_fields: Int64 = 0
+    for index in range(16):
+        if runtime_doctor_render_input_present(input, index) and written_fields < 5:
+            if written_fields > 0 and not runtime_doctor_render_put_byte(writer, 32):
+                return False
+            if not runtime_doctor_render_timeline_field_prefix(writer, index) or not runtime_doctor_render_put_timeline_value(writer, runtime_doctor_render_input_value(input, index)):
+                return False
+            written_fields += 1
+    return True
+
+
 def runtime_doctor_render_value(
     writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
     input: ProdexRuntimeDoctorRenderInput,
@@ -553,6 +628,8 @@ def runtime_doctor_render_value(
         return runtime_doctor_render_policy_suggestion_reason(writer, input)
     if input.operation == RENDER_POLICY_MARKER_NAME:
         return runtime_doctor_render_policy_marker_name(writer, input.detail)
+    if input.operation == RENDER_REQUEST_TIMELINE_DETAIL:
+        return runtime_doctor_render_request_timeline_detail(writer, input)
     if input.operation == RENDER_PREVIOUS_RESPONSE:
         return runtime_doctor_render_previous(writer, input)
     if input.operation == RENDER_COMPACT_FINAL_FAILURE:
@@ -678,7 +755,7 @@ def prodex_mojo_runtime_doctor_render_v1(
         return 1
     var input_pointer = Pointer[mut=False, ProdexRuntimeDoctorRenderInput, ImmUntrackedOrigin](unsafe_from_address=Int(input_address))
     var input = input_pointer[].copy()
-    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_POLICY_MARKER_NAME or input.detail < 0 or input.detail > 799 or input.values_address == 0:
+    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_REQUEST_TIMELINE_DETAIL or input.detail < 0 or input.detail > 799 or input.values_address == 0:
         return 1
     for index in range(16):
         if not rich_view_valid(runtime_doctor_render_input_value(input, index), RUNTIME_DOCTOR_RENDER_MAX_VALUE_BYTES):

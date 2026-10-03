@@ -3,6 +3,8 @@ use super::{
 };
 
 pub const RUNTIME_DOCTOR_RENDER_ABI_VERSION: i64 = 1;
+/// Mojo renderer operation for request-timeline detail fields.
+pub const RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL: i64 = 22;
 const RUNTIME_DOCTOR_RENDER_VALUE_COUNT: usize = 16;
 
 pub struct RuntimeDoctorRenderInput<'a> {
@@ -33,7 +35,7 @@ unsafe extern "C" {
 
 pub fn runtime_doctor_render(input: RuntimeDoctorRenderInput<'_>) -> Result<String, MojoError> {
     ensure_rich_abi()?;
-    if !(0..=21).contains(&input.operation)
+    if !(0..=RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL).contains(&input.operation)
         || !(0..=799).contains(&input.detail)
         || input.values.len() > RUNTIME_DOCTOR_RENDER_VALUE_COUNT
         || input
@@ -103,6 +105,39 @@ mod tests {
             })
             .unwrap(),
             "Refresh credentials for profile 配置 with `prodex login --profile 配置` and retry route responses; latest recovery error: expired."
+        );
+    }
+
+    #[test]
+    fn timeline_detail_preserves_order_caps_fields_and_truncates_unicode() {
+        let route = "🧭".repeat(49);
+        assert_eq!(
+            runtime_doctor_render(RuntimeDoctorRenderInput {
+                operation: RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL,
+                detail: 0,
+                values: &[
+                    Some("東京"),
+                    Some(&route),
+                    None,
+                    Some("timeout"),
+                    Some("429"),
+                    Some("ignored"),
+                ],
+            })
+            .unwrap(),
+            format!(
+                "profile=東京 route={}... reason=timeout status=429 code=ignored",
+                "🧭".repeat(45)
+            )
+        );
+        assert_eq!(
+            runtime_doctor_render(RuntimeDoctorRenderInput {
+                operation: RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL,
+                detail: 0,
+                values: &[Some("profile"), Some(&"🧭".repeat(48))],
+            })
+            .unwrap(),
+            format!("profile=profile route={}", "🧭".repeat(48))
         );
     }
 

@@ -4803,3 +4803,19 @@ The canonical production-share check
 reports **79,571 Mojo LOC** and **203,726 Rust LOC**, or **28.09% Mojo**. The 7%
 release floor and ownership non-regression pass; the 75% campaign target remains
 in progress.
+
+## Runtime-doctor request-timeline detail wave
+
+Request-timeline detail formatting now uses operation 22 in the existing
+runtime-doctor Mojo renderer. Mojo owns the fixed field order, five-field cap,
+48-Unicode-scalar truncation, and `key=value` joining; Rust projects the parsed
+field map into bounded ABI slots and keeps event assembly.
+
+Direct real-Mojo and runtime-doctor caller tests pass, including the 48/49
+Unicode-scalar boundary, omitted fields, field order, and the five-field cap.
+The existing parser regression for timeline caps and Unicode also passes.
+Workspace Clippy, Rust formatting, Mojo no-fallback/authority/ownership guards,
+targeted Markdown and runtime-policy checks, diff hygiene, and staged churn
+hygiene pass. The production-share check reports **79,641 Mojo LOC** and
+**203,712 Rust LOC**, or **28.11% Mojo**. The 7% floor and Mojo ownership
+non-regression pass; the 75% campaign target remains in progress.
