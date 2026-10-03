@@ -61,7 +61,7 @@ pub(super) enum RuntimeProxyBackendMode {
     HttpOnlySlowStream,
     HttpOnlyStallAfterSeveralChunks,
     HttpOnlyResetBeforeFirstByte,
-    HttpOnlyResetBeforeFirstByteAll,
+    HttpOnlyResetBeforeFirstByteOnceEach,
     HttpOnlyResetAfterHeaders,
     HttpOnlyPreviousResponseNeedsTurnState,
     HttpOnlyInvalidPreviousResponseId,
@@ -140,8 +140,8 @@ impl RuntimeProxyBackend {
         Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByte)
     }
 
-    pub(super) fn start_http_reset_before_first_byte_all() -> Self {
-        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByteAll)
+    pub(super) fn start_http_reset_before_first_byte_once_each() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByteOnceEach)
     }
 
     pub(super) fn start_http_reset_after_headers() -> Self {

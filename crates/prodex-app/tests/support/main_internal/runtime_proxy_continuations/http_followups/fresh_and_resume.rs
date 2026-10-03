@@ -72,9 +72,9 @@ fn runtime_proxy_http_precommit_transport_rotates_fresh_sse_close() {
 }
 
 #[test]
-fn runtime_proxy_http_precommit_transport_returns_503_after_pool_exhaustion() {
+fn runtime_proxy_http_precommit_transport_retries_single_positive_profile_until_recovery() {
     let fixture = start_runtime_continuation_fixture(
-        RuntimeProxyBackend::start_http_reset_before_first_byte(),
+        RuntimeProxyBackend::start_http_reset_before_first_byte_once_each(),
         "main",
         &["main"],
         &[],
@@ -88,24 +88,28 @@ fn runtime_proxy_http_precommit_transport_returns_503_after_pool_exhaustion() {
             "input": [{
                 "type": "message",
                 "role": "user",
-                "content": "fail only after every usable profile is tried",
+                "content": "keep retrying while this account still has quota",
             }],
         }),
     );
 
-    assert_eq!(response.status().as_u16(), 503);
-    let body = response.text().expect("error body should decode");
-    assert!(body.contains("service_unavailable"), "{body}");
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("responses body should decode");
+    assert!(
+        body.contains("\"id\":\"resp-main\""),
+        "single positive-quota profile should recover instead of leaking local 503: {body}"
+    );
     assert_eq!(
         fixture.backend.responses_accounts(),
-        vec!["main-account".to_string()]
+        vec!["main-account".to_string(), "main-account".to_string()],
+        "the first disconnect must be retried on the same still-usable account"
     );
 }
 
 #[test]
-fn runtime_proxy_http_precommit_transport_tries_every_profile_before_503() {
+fn runtime_proxy_http_precommit_transport_retries_pool_after_every_profile_disconnects_once() {
     let fixture = start_runtime_continuation_fixture(
-        RuntimeProxyBackend::start_http_reset_before_first_byte_all(),
+        RuntimeProxyBackend::start_http_reset_before_first_byte_once_each(),
         "main",
         &["main", "second", "third"],
         &[],
@@ -116,24 +120,28 @@ fn runtime_proxy_http_precommit_transport_tries_every_profile_before_503() {
         "backend-api/codex/responses",
         serde_json::json!({
             "model": "gpt-5.4",
-            "input": [{"role": "user", "content": "try every account before failing"}],
+            "input": [{"role": "user", "content": "survive one disconnect on every usable account"}],
         }),
     );
 
-    assert_eq!(response.status().as_u16(), 503);
+    assert_eq!(response.status().as_u16(), 200);
+    let body = response.text().expect("responses body should decode");
     assert!(
-        response
-            .text()
-            .expect("error body should decode")
-            .contains("service_unavailable")
+        body.contains("\"id\":\"resp-main\"")
+            || body.contains("\"id\":\"resp-second\"")
+            || body.contains("\"id\":\"resp-third\""),
+        "a later recovery must complete instead of surfacing 503: {body}"
     );
     let accounts = fixture.backend.responses_accounts();
-    let mut sorted = accounts.clone();
-    sorted.sort();
-    assert_eq!(
-        sorted,
-        ["main-account", "second-account", "third-account"],
-        "every eligible account must receive exactly one pre-commit attempt: {accounts:?}"
+    for account in ["main-account", "second-account", "third-account"] {
+        assert!(
+            accounts.iter().any(|seen| seen == account),
+            "every eligible account must be attempted before the recovery sweep: {accounts:?}"
+        );
+    }
+    assert!(
+        accounts.len() >= 4,
+        "the proxy must start a new transport recovery sweep after all first attempts fail: {accounts:?}"
     );
 }
 

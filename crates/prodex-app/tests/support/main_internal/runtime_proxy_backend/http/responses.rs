@@ -38,6 +38,14 @@ pub(super) fn handle_runtime_proxy_backend_responses_route(
             {
                 initial_account_response("main-account", mode)
             }
+            "main-account"
+                if matches!(
+                    mode,
+                    RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByteOnceEach
+                ) =>
+            {
+                initial_account_response("main-account", mode)
+            }
             "main-account" => {
                 let body = if matches!(
                     mode,

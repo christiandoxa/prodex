@@ -126,6 +126,91 @@ fn fresh_responses_use_last_positive_quota_after_current_exhaustion() {
     assert_eq!(backend.responses_accounts(), ["second-account"]);
 }
 
+#[test]
+fn fresh_responses_drain_last_positive_profile_after_previous_profile_hits_zero() {
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::explicit_quota_429(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+        ]));
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot(
+            "main",
+            quota_snapshot(RuntimeQuotaWindowStatus::Critical, 1),
+        )
+        .profile_usage_snapshot(
+            "second",
+            quota_snapshot(RuntimeQuotaWindowStatus::Critical, 1),
+        )
+        .build();
+
+    let reply = proxy_runtime_responses_request(
+        102,
+        &responses_request(br#"{"input":[]}"#),
+        harness.shared(),
+    )
+    .expect("one account reaching authoritative zero must rotate to the remaining positive account");
+    let (status, body, profile) = consume_responses_reply(reply);
+
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(profile.as_deref(), Some("second"));
+    assert_eq!(
+        backend.responses_accounts(),
+        ["main-account", "second-account"],
+        "the request must rotate smoothly instead of leaking the first account's quota failure"
+    );
+    assert!(
+        !body.contains("insufficient_quota"),
+        "the exhausted account's error must remain internal while another account has quota: {body}"
+    );
+}
+
+#[test]
+fn fresh_responses_stop_retrying_when_entire_pool_is_authoritatively_exhausted() {
+    let backend = RuntimeProxyBackend::start();
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot(
+            "main",
+            quota_snapshot(RuntimeQuotaWindowStatus::Exhausted, 0),
+        )
+        .profile_usage_snapshot(
+            "second",
+            quota_snapshot(RuntimeQuotaWindowStatus::Exhausted, 0),
+        )
+        .build();
+
+    let started = std::time::Instant::now();
+    let reply = proxy_runtime_responses_request(
+        105,
+        &responses_request(br#"{"input":[]}"#),
+        harness.shared(),
+    )
+    .expect("fully exhausted pool should return a bounded local terminal response");
+    let (status, _body, _profile) = consume_responses_reply(reply);
+
+    assert_eq!(status, 503);
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "known zero-quota pool should not enter persistent retry"
+    );
+    assert!(
+        backend.responses_accounts().is_empty(),
+        "known exhausted profiles must not be sent upstream"
+    );
+}
+
 #[derive(Clone, Copy)]
 enum RetryableFailure {
     Quota429,
@@ -333,7 +418,7 @@ fn compact_rate_limit_rotates_without_overload_penalty() {
 }
 
 #[test]
-fn compact_rate_limit_exhaustion_preserves_rate_limit_classification() {
+fn compact_rate_limit_pool_recovery_retries_until_success() {
     let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
         RuntimeProxyBackendFaultStep::rate_limited_429(
             RuntimeProxyBackendFaultRoute::Compact,
@@ -343,19 +428,31 @@ fn compact_rate_limit_exhaustion_preserves_rate_limit_classification() {
             RuntimeProxyBackendFaultRoute::Compact,
             "second-account",
         ),
+        RuntimeProxyBackendFaultStep::success(
+            RuntimeProxyBackendFaultRoute::Compact,
+            "main-account",
+        ),
     ]));
     let harness = ready_profiles(&backend);
 
     let response = proxy_runtime_standard_request(117, &compact_request(), harness.shared())
-        .expect("compact rate-limit exhaustion should preserve the upstream response");
+        .expect("compact temporary rate limits should recover while quota-positive profiles remain");
     let (status, body) = tiny_http_response_status_and_body(response);
 
-    assert_eq!(status, 429, "{body}");
-    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        backend.responses_accounts(),
+        ["main-account", "second-account", "main-account"]
+    );
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(
-        log.contains("compact_final_failure") && log.contains("last_failure=rate_limited"),
-        "rate-limit exhaustion should remain visibly distinct from overload: {log}"
+        log.contains("compact_rate_limited"),
+        "rate-limit classification must remain visible during recovery: {log}"
+    );
+    assert!(
+        log.contains("rotation_waiting_for_recovery")
+            || log.contains("rotation_sweep_start"),
+        "compact must wait for a retryable profile instead of surfacing temporary 429: {log}"
     );
 }
 

@@ -488,7 +488,7 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
     filter: "main_internal_tests::runtime_proxy_selection_and_pressure::health::",
     weightSeconds: 2,
   },
-            {
+      {
     name: "runtime_doctor_summary_counts_recent_runtime_markers",
     weightSeconds: 7,
   },
@@ -508,7 +508,7 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
     name: "runtime_state_save_scheduler_persists_latest_snapshot",
     weightSeconds: 4,
   },
-        {
+  {
     name: "runtime_affinity_touch_lookups_do_not_requeue_persistence_before_interval",
     weightSeconds: 3,
   },
@@ -555,20 +555,48 @@ export const RUNTIME_CI_TEST_CASES = [
     name: "fresh_responses_keep_recovering_after_multiple_provider_overload_sweeps",
     tags: SERIALIZED_TAGS,
   },
-                                {
+  {
+    name: "fresh_responses_keep_recovering_past_old_two_sweep_limit",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "fresh_responses_wait_for_rate_limit_pool_recovery_instead_of_leaking_429",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "responses_wait_past_old_admission_window_for_healthy_saturated_profile",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "responses_keep_waiting_after_capacity_epoch_while_quota_remains_positive",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "responses_rotate_around_saturated_current_when_another_profile_is_ready",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "standard_fresh_request_rotates_around_saturated_current_profile",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "scripted_noncompact_pool_overload_recovers_after_every_profile_temporarily_fails",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "runtime_proxy_websocket_fresh_overload_rotates_without_leaking_retryable_error",
     tags: SERIALIZED_TAGS,
   },
   {
     name: "responses_wait_for_any_saturated_profile_and_reselect_after_release",
     tags: SERIALIZED_TAGS,
   },
-        {
+  {
     name: "runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream",
     tags: SERIALIZED_TAGS,
   },
   {
-    name: "compact_final_failure_logs_inflight_saturation_terminal_reason",
+    name: "compact_capacity_saturation_retries_across_epoch_until_profile_relieves",
     tags: SERIALIZED_TAGS,
   },
   {
@@ -607,7 +635,7 @@ export const RUNTIME_CI_TEST_CASES = [
     name: "websocket_reuse_watchdog_fresh_fallback_stays_blocked_for_locked_affinity",
     tags: SERIALIZED_TAGS,
   },
-        {
+  {
     name: "runtime_proxy_websocket_previous_response_not_found_after_commit_passes_through",
     tags: CONTINUATION_TAGS,
   },

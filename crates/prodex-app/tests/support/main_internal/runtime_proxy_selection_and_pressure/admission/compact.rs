@@ -1,6 +1,8 @@
 use super::helpers::*;
 use super::*;
 mod failures;
+use std::thread;
+use std::time::Duration;
 
 #[test]
 fn runtime_proxy_pressure_mode_sheds_fresh_compact_requests_before_upstream() {
@@ -692,101 +694,39 @@ fn compact_final_failure_logs_local_selection_terminal_reason() {
 }
 
 #[test]
-fn compact_final_failure_logs_inflight_saturation_terminal_reason() {
-    let temp_dir = TestDir::isolated();
-    let main_home = temp_dir.path.join("homes/main");
-    let second_home = temp_dir.path.join("homes/second");
-    write_auth_json(&main_home.join("auth.json"), "main-account");
-    write_auth_json(&second_home.join("auth.json"), "second-account");
-
-    let now = Local::now().timestamp();
-    let hard_limit = runtime_proxy_profile_inflight_hard_limit();
-    let shared = runtime_rotation_proxy_shared(
-        &temp_dir,
-        RuntimeRotationState {
-            paths: AppPaths {
-                root: temp_dir.path.join("prodex"),
-                state_file: temp_dir.path.join("prodex/state.json"),
-                managed_profiles_root: temp_dir.path.join("prodex/profiles"),
-                shared_codex_root: temp_dir.path.join("shared"),
-                legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
-            },
-            state: AppState {
-                active_profile: Some("main".to_string()),
-                profiles: BTreeMap::from([
-                    (
-                        "main".to_string(),
-                        ProfileEntry {
-                            codex_home: main_home,
-                            managed: true,
-                            email: Some("main@example.com".to_string()),
-                            provider: ProfileProvider::Openai,
-                        },
-                    ),
-                    (
-                        "second".to_string(),
-                        ProfileEntry {
-                            codex_home: second_home,
-                            managed: true,
-                            email: Some("second@example.com".to_string()),
-                            provider: ProfileProvider::Openai,
-                        },
-                    ),
-                ]),
-                last_run_selected_at: BTreeMap::new(),
-                response_profile_bindings: BTreeMap::new(),
-                session_profile_bindings: BTreeMap::new(),
-            },
-            upstream_base_url: "http://127.0.0.1:1/backend-api".to_string(),
-            include_code_review: false,
-            current_profile: "main".to_string(),
-            profile_usage_auth: BTreeMap::new(),
-            turn_state_bindings: BTreeMap::new(),
-            session_id_bindings: BTreeMap::new(),
-            continuation_statuses: RuntimeContinuationStatuses::default(),
-            profile_probe_cache: BTreeMap::new(),
-            profile_usage_snapshots: BTreeMap::from([
-                (
-                    "main".to_string(),
-                    RuntimeProfileUsageSnapshot {
-                        checked_at: now,
-                        plan_type: None,
-                        five_hour_status: RuntimeQuotaWindowStatus::Ready,
-                        five_hour_remaining_percent: 80,
-                        five_hour_reset_at: now + 3600,
-                        weekly_status: RuntimeQuotaWindowStatus::Ready,
-                        weekly_remaining_percent: 80,
-                        weekly_reset_at: now + 86_400,
-                    },
-                ),
-                (
-                    "second".to_string(),
-                    RuntimeProfileUsageSnapshot {
-                        checked_at: now,
-                        plan_type: None,
-                        five_hour_status: RuntimeQuotaWindowStatus::Ready,
-                        five_hour_remaining_percent: 75,
-                        five_hour_reset_at: now + 3600,
-                        weekly_status: RuntimeQuotaWindowStatus::Ready,
-                        weekly_remaining_percent: 78,
-                        weekly_reset_at: now + 86_400,
-                    },
-                ),
-            ]),
-            profile_retry_backoff_until: BTreeMap::new(),
-            profile_transport_backoff_until: BTreeMap::new(),
-            profile_route_circuit_open_until: BTreeMap::new(),
-            profile_backoff_updated_at: BTreeMap::new(),
-            profile_health: BTreeMap::new(),
-        },
-        usize::MAX,
+fn compact_capacity_saturation_retries_across_epoch_until_profile_relieves() {
+    let backend = RuntimeProxyBackend::start();
+    let ready = runtime_usage_snapshot(
+        quota_window_ready(12, 3_600),
+        quota_window_ready(77, 86_400),
     );
-    shared
-        .lane_admission
-        .set_profile_inflight("main", hard_limit);
-    shared
-        .lane_admission
-        .set_profile_inflight("second", hard_limit);
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot("main", ready.clone())
+        .profile_usage_snapshot("second", ready)
+        .build();
+    let hard_limit = runtime_proxy_profile_inflight_hard_limit();
+    let guard_count = hard_limit / runtime_profile_inflight_weight("compact_http");
+    let main_guards = (0..guard_count)
+        .map(|_| acquire_runtime_profile_inflight_guard(harness.shared(), "main", "compact_http"))
+        .collect::<Result<Vec<_>>>()
+        .expect("main compact profile should be saturated");
+    let mut second_guards = (0..guard_count)
+        .map(|_| acquire_runtime_profile_inflight_guard(harness.shared(), "second", "compact_http"))
+        .collect::<Result<Vec<_>>>()
+        .expect("second compact profile should be saturated");
+    let released_guard = second_guards
+        .pop()
+        .expect("one compact permit should be releasable");
+    let release = thread::spawn(move || {
+        // Test builds use a 1.5s capacity epoch. This crosses that old terminal boundary.
+        thread::sleep(Duration::from_millis(1_700));
+        drop(released_guard);
+    });
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/responses/compact".to_string(),
@@ -794,22 +734,30 @@ fn compact_final_failure_logs_inflight_saturation_terminal_reason() {
         body: br#"{"input":[],"instructions":"compact"}"#.to_vec(),
     };
 
-    let response = proxy_runtime_standard_request(44, &request, &shared)
-        .expect("saturated compact request should receive a local failure");
+    let response = proxy_runtime_standard_request(44, &request, harness.shared())
+        .expect("quota-positive compact request should survive local capacity epochs");
     let (status, body) = tiny_http_response_status_and_body(response);
-    let log = read_runtime_proxy_test_log(&shared.log_path);
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
 
-    assert_eq!(status, 503);
-    assert!(
-        body.contains("local capacity remained saturated until the request deadline"),
-        "unexpected compact inflight saturation response body: {body}"
+    assert_eq!(
+        status, 200,
+        "local compact capacity saturation must remain internal while quota remains: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        ["second-account"],
+        "the relieved profile should serve the compact request"
     );
     assert!(
-        log.contains("compact_final_failure") && log.contains("reason=inflight_saturation"),
-        "compact saturation terminal marker should identify inflight saturation: {log}"
+        log.contains("local_capacity_retry_epoch route=compact"),
+        "the request must renew the old bounded capacity epoch instead of returning 503: {log}"
     );
     assert!(
-        log.contains("saw_inflight_saturation=true"),
-        "compact saturation terminal marker should preserve the saturation flag: {log}"
+        !body.contains("local_capacity_timeout"),
+        "local capacity timeout must not leak while a profile still has quota: {body}"
     );
+
+    release.join().expect("compact permit release should finish");
+    drop(main_guards);
+    drop(second_guards);
 }

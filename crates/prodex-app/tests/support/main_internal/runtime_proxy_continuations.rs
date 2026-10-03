@@ -6,6 +6,8 @@ mod websocket_precommit;
 mod websocket_pool_exhaustion;
 #[path = "runtime_proxy_continuations/websocket_recovery.rs"]
 mod websocket_recovery;
+#[path = "runtime_proxy_continuations/websocket_retry_recovery.rs"]
+mod websocket_retry_recovery;
 #[path = "runtime_proxy_continuations/websocket_invalid_previous_response.rs"]
 mod websocket_invalid_previous_response;
 #[path = "runtime_proxy_continuations/http_followups.rs"]
