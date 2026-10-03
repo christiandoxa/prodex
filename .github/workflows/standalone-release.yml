@@ -164,7 +164,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          deadline=$((SECONDS + 30 * 60))
+          deadline=$((SECONDS + 75 * 60))
           while true; do
             runs_json="$(gh run list --workflow ci.yml --event push --limit 50 --json headSha,status,conclusion,url)"
             set +e
