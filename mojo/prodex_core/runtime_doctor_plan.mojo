@@ -1414,9 +1414,9 @@ def runtime_doctor_summary_select_diagnosis(
 def runtime_doctor_summary_validate_input(
     input: ProdexRuntimeDoctorSummaryPlanInput,
 ) -> Bool:
-    # Rust validates the complete fixed marker arena before this call. The
-    # fields used below are only read as zero/non-zero decisions, so no
-    # unbounded traversal is needed on the Mojo side.
+    for index in range(Int(RUNTIME_DOCTOR_SUMMARY_MARKER_COUNT)):
+        if not runtime_doctor_count_valid(input.marker_counts[index]):
+            return False
     if input.line_count < 0 or input.line_count > RUNTIME_DOCTOR_PLAN_MAX_COUNT:
         return False
     if (

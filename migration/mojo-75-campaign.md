@@ -4839,3 +4839,25 @@ floor and ownership non-regression pass, while the 75% target remains unmet.
 An initial attempt to run the marker-summary regression as `--test parsing`
 failed because the crate has no integration-test target by that name. The test
 is mounted as a library unit test; the corrected `--lib` command passed.
+
+## Runtime-doctor plan input-validation wave
+
+The main plan, summary plan, state plan, and route plan ABIs now own their
+fixed-layout input validation in Mojo. The summary validator checks every one
+of its 128 marker-count slots before reduction. Rust no longer repeats those
+range decisions; it keeps input record construction, output validation, and
+typed ABI error mapping.
+
+Validation passed:
+
+- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-mojo-core --all-features input_contracts_are_validated_by_mojo` — 1 passed across all four ABIs.
+- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-mojo-core --all-features` — 132 unit tests and all integration targets passed.
+- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-runtime-doctor --lib` — 42 passed.
+- `cargo fmt --all -- --check` and `PRODEX_MOJO_REQUIRED=1 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` — passed.
+- `node scripts/ci/mojo-no-fallback-guard.mjs --self-test`, `node scripts/ci/mojo-no-fallback-guard.mjs`, `node scripts/ci/mojo-authority-guard.mjs`, and `node scripts/ci/mojo-ownership.mjs --check` — passed; ownership reports 144 authoritative operations.
+- `node scripts/docs/lint-markdown.mjs migration/mojo-75-campaign.md`, `node scripts/docs/runtime-policy.mjs --self-test`, `node scripts/docs/runtime-policy.mjs --check`, and `git diff --check` — passed.
+- `node scripts/ci/mojo-production-share.mjs --check` — 79,664 Mojo LOC and 203,557 Rust LOC, or **28.13% Mojo**. The 7% floor and ownership non-regression pass; the 75% target remains unmet.
+
+The adapter source was added after the frozen ownership baseline, so this wave
+claims no frozen semantic LOC credit. The canonical broad-source count records
+the reduction in current Rust production LOC directly.

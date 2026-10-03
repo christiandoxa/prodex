@@ -1098,6 +1098,37 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/runtime_doctor_plan.mojo",
+        "language": "mojo",
+        "classification": "MIXED",
+        "semantic_ranges": [
+          {
+            "start": 230,
+            "end": 341
+          },
+          {
+            "start": 1414,
+            "end": 1448
+          },
+          {
+            "start": 1656,
+            "end": 1668
+          },
+          {
+            "start": 1781,
+            "end": 1799
+          }
+        ],
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_doctor_plan_input_validation",
+          "runtime_doctor_summary_input_validation",
+          "runtime_doctor_state_input_validation",
+          "runtime_doctor_route_input_validation"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/secret_policy.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -4593,6 +4624,101 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "secret-safe log redaction, Unicode trim, borrowed input projection, and log summary assembly"
+    },
+    {
+      "name": "runtime_doctor_plan_input_validation",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.435.2",
+      "baseline_state": "Rust validated fixed-layout values before the existing Mojo plan ABI",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_runtime_doctor_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_plan.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/diagnosis/next_steps/mojo_render.rs",
+      "consumer_marker": "runtime_doctor_plan(runtime_doctor_plan_input(summary, operation))",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/diagnosis/next_steps/mojo_render.rs",
+        "crates/prodex-runtime-doctor/src/suggestions/mojo.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs",
+      "rust_owner_before": "bounded operation, marker count, optional observation, and tuning input validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; the real-Mojo caller test verifies invalid-input mapping",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "fixed-layout input construction, returned DTO validation, and typed status mapping"
+    },
+    {
+      "name": "runtime_doctor_summary_input_validation",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.435.2",
+      "baseline_state": "Rust validated the complete marker count arena and summary values before the existing Mojo summary ABI",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_runtime_doctor_summary_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_plan.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/diagnosis/final_summary/mojo.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_summary_plan(input(summary))",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/diagnosis/final_summary/mojo.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs",
+      "rust_owner_before": "all 128 marker count bounds, line count, presence flags, and summary count bounds",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; the real-Mojo caller test checks the final marker count slot",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "fixed-layout input construction, returned DTO validation, and typed status mapping"
+    },
+    {
+      "name": "runtime_doctor_state_input_validation",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.435.2",
+      "baseline_state": "Rust duplicated the existing Mojo quota, score, and circuit input checks",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_runtime_doctor_state_plan_v2",
+      "mojo_abi_version": 2,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_plan.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_state_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/state_summary/quota.rs",
+        "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+        "crates/prodex-runtime-doctor/src/state_summary/routes.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs",
+      "rust_owner_before": "operation, route, status, reset-grace, score, circuit, and decay input validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; the real-Mojo caller test verifies invalid-input mapping",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "fixed-layout input construction, returned DTO validation, and typed status mapping"
+    },
+    {
+      "name": "runtime_doctor_route_input_validation",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.435.2",
+      "baseline_state": "Rust duplicated the existing Mojo route snapshot, score, decay, and circuit input checks",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_runtime_doctor_route_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_plan.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/state_summary/profiles.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_route_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/state_summary/profiles.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs",
+      "rust_owner_before": "route kind, snapshot presence, status, score, decay, and circuit input validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; the real-Mojo caller test verifies invalid-input mapping",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "fixed-layout input construction, returned DTO validation, and typed status mapping"
     }
   ],
   "rust_semantic_reductions": [
