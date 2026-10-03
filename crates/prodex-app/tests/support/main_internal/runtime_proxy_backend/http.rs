@@ -86,7 +86,14 @@ pub(super) fn handle_runtime_proxy_backend_request(
     }
 
     if path.ends_with("/backend-api/codex/responses")
-        && (matches!(mode, RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByteAll)
+        && (matches!(
+                mode,
+                RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByteOnceEach
+            ) && !responses_accounts
+                .lock()
+                .expect("responses_accounts poisoned")
+                .iter()
+                .any(|seen| seen == &account_id)
             || account_id == "main-account"
                 && matches!(mode, RuntimeProxyBackendMode::HttpOnlyResetBeforeFirstByte))
     {

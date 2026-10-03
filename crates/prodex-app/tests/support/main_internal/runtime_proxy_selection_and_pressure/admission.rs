@@ -4,6 +4,8 @@ use super::*;
 mod compact;
 #[path = "admission/responses_overload_recovery.rs"]
 mod responses_overload_recovery;
+#[path = "admission/standard_retry_recovery.rs"]
+mod standard_retry_recovery;
 #[path = "admission/continuation_store.rs"]
 mod continuation_store;
 #[path = "admission/doctor_summary.rs"]
