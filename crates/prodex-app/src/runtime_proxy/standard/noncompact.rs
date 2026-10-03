@@ -197,7 +197,12 @@ fn runtime_noncompact_budget_action(
             build_runtime_proxy_text_response(503, runtime_proxy_local_capacity_timeout_message()),
         ));
     }
-    if !loop_state.budget_exhausted(shared, session_present, pressure_mode)? {
+    if !loop_state.budget_exhausted(
+        shared,
+        RuntimeRouteKind::Standard,
+        session_present,
+        pressure_mode,
+    )? {
         return Ok(RuntimeNoncompactBudgetAction::Proceed);
     }
     runtime_proxy_log(
@@ -249,7 +254,11 @@ fn wait_after_runtime_noncompact_inflight_saturation(
         })?,
         RuntimeInflightReliefWaitResult::DeadlineExpired
     ) {
-        loop_state.record_local_capacity_wait_timeout();
+        if runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Standard)? {
+            loop_state.selection_started_at = std::time::Instant::now();
+        } else {
+            loop_state.record_local_capacity_wait_timeout();
+        }
     }
     Ok(())
 }
@@ -357,26 +366,54 @@ fn runtime_noncompact_next_action(
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
 ) -> Result<RuntimePrecommitLoopAction<String, tiny_http::ResponseBox>> {
     if loop_state.excluded_profiles.is_empty() {
-        runtime_selection_trace_log_direct(
-            shared,
-            request_id,
-            RuntimeSelectionTraceDirect {
-                requested_model: request_model_name,
-                route_kind: RuntimeRouteKind::Standard,
-                candidate_key: preferred_profile,
-                class: if preferred_is_session {
-                    runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity
-                } else {
-                    runtime_proxy_crate::RuntimeRouteCandidateClass::Current
+        let preferred_hard_limited = !preferred_is_session
+            && runtime_profile_inflight_hard_limited_for_context(
+                shared,
+                preferred_profile,
+                runtime_route_kind_inflight_context(RuntimeRouteKind::Standard),
+            )?;
+        if !preferred_hard_limited {
+            runtime_selection_trace_log_direct(
+                shared,
+                request_id,
+                RuntimeSelectionTraceDirect {
+                    requested_model: request_model_name,
+                    route_kind: RuntimeRouteKind::Standard,
+                    candidate_key: preferred_profile,
+                    class: if preferred_is_session {
+                        runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity
+                    } else {
+                        runtime_proxy_crate::RuntimeRouteCandidateClass::Current
+                    },
+                    affinity_kind: preferred_is_session
+                        .then_some(runtime_proxy_crate::RuntimeRouteAffinityKind::Session),
+                    hard_affinity: preferred_is_session,
                 },
-                affinity_kind: preferred_is_session
-                    .then_some(runtime_proxy_crate::RuntimeRouteAffinityKind::Session),
-                hard_affinity: preferred_is_session,
-            },
+            );
+            return Ok(RuntimePrecommitLoopAction::Attempt(
+                preferred_profile.to_string(),
+            ));
+        }
+        loop_state.record_inflight_saturation();
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "profile_inflight_saturated",
+                [
+                    runtime_proxy_log_field("request", request_id.to_string()),
+                    runtime_proxy_log_field("transport", "http"),
+                    runtime_proxy_log_field("profile", preferred_profile),
+                    runtime_proxy_log_field(
+                        "hard_limit",
+                        shared
+                            .runtime_config
+                            .tuning
+                            .profile_inflight_hard_limit
+                            .to_string(),
+                    ),
+                ],
+            ),
         );
-        return Ok(RuntimePrecommitLoopAction::Attempt(
-            preferred_profile.to_string(),
-        ));
     }
     if let Some(candidate_name) = select_runtime_response_candidate_for_route_with_request(
         shared,
@@ -388,6 +425,35 @@ fn runtime_noncompact_next_action(
         request_model_name,
     )? {
         return Ok(RuntimePrecommitLoopAction::Attempt(candidate_name));
+    }
+    match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        request_id,
+        shared,
+        excluded_profiles: &loop_state.excluded_profiles,
+        route_kind: RuntimeRouteKind::Standard,
+        selection_started_at: loop_state.selection_started_at,
+        continuation: session_present,
+        wait_affinity_owner: session_present.then_some(preferred_profile),
+        selected_profile: None,
+    })? {
+        RuntimeInflightReliefWaitResult::Relieved => {
+            return Ok(RuntimePrecommitLoopAction::Continue);
+        }
+        RuntimeInflightReliefWaitResult::DeadlineExpired => {
+            if runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Standard)? {
+                loop_state.selection_started_at = std::time::Instant::now();
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http local_capacity_retry_epoch route=standard"
+                    ),
+                );
+            } else {
+                loop_state.record_local_capacity_wait_timeout();
+            }
+            return Ok(RuntimePrecommitLoopAction::Continue);
+        }
+        RuntimeInflightReliefWaitResult::NotWaitable => {}
     }
     let remaining_cold_start_profiles = runtime_remaining_sync_probe_cold_start_profiles_for_route(
         shared,
@@ -479,7 +545,17 @@ fn runtime_noncompact_candidate_saturated(
         RuntimeInflightReliefWaitResult::Relieved
         | RuntimeInflightReliefWaitResult::NotWaitable => Ok(true),
         RuntimeInflightReliefWaitResult::DeadlineExpired => {
-            loop_state.record_local_capacity_wait_timeout();
+            if runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Standard)? {
+                loop_state.selection_started_at = std::time::Instant::now();
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http local_capacity_retry_epoch route=standard"
+                    ),
+                );
+            } else {
+                loop_state.record_local_capacity_wait_timeout();
+            }
             Ok(true)
         }
     }

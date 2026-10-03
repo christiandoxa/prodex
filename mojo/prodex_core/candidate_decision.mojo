@@ -1416,6 +1416,7 @@ def prodex_runtime_websocket_transport_failure_plan_v1(
 comptime WAITABLE_CANDIDATE_MODE_COLD_START: Int64 = 0
 comptime WAITABLE_CANDIDATE_MODE_WAITABLE: Int64 = 1
 comptime WAITABLE_CANDIDATE_MODE_RELIEVED: Int64 = 2
+comptime WAITABLE_CANDIDATE_MODE_RETRYABLE_POOL: Int64 = 3
 
 
 @export("prodex_runtime_waitable_candidate_eligible_v1")
@@ -1433,7 +1434,7 @@ def prodex_runtime_waitable_candidate_eligible_v1(
     snapshot_blocks: Int64,
     quota_blocked: Int64,
 ) abi("C") -> Int64:
-    if mode < WAITABLE_CANDIDATE_MODE_COLD_START or mode > WAITABLE_CANDIDATE_MODE_RELIEVED:
+    if mode < WAITABLE_CANDIDATE_MODE_COLD_START or mode > WAITABLE_CANDIDATE_MODE_RETRYABLE_POOL:
         return -1
     for value in [
         context_allowed,
@@ -1450,6 +1451,15 @@ def prodex_runtime_waitable_candidate_eligible_v1(
     ]:
         if value != 0 and value != 1:
             return -1
+
+    if mode == WAITABLE_CANDIDATE_MODE_RETRYABLE_POOL:
+        return Int64(
+            context_allowed == 1
+            and auth_compatible == 1
+            and supports_runtime == 1
+            and auth_failure_active == 0
+            and quota_blocked == 0
+        )
 
     if (
         context_allowed == 0

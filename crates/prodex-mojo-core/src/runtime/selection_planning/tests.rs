@@ -49,6 +49,49 @@ mod waitable_candidate_tests {
             )
             .unwrap()
         );
+        assert!(
+            waitable_candidate_eligible(
+                WaitableCandidateMode::RetryablePool,
+                WaitableCandidateInput {
+                    in_selection_backoff: true,
+                    health_penalized: true,
+                    hard_limited: true,
+                    ..base
+                },
+            )
+            .unwrap(),
+            "transient backoff, health, and local load must not make a quota-positive profile terminal"
+        );
+        assert!(
+            !waitable_candidate_eligible(
+                WaitableCandidateMode::RetryablePool,
+                WaitableCandidateInput {
+                    quota_blocked: true,
+                    ..base
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            !waitable_candidate_eligible(
+                WaitableCandidateMode::RetryablePool,
+                WaitableCandidateInput {
+                    auth_failure_active: true,
+                    ..base
+                },
+            )
+            .unwrap()
+        );
+        assert!(
+            !waitable_candidate_eligible(
+                WaitableCandidateMode::RetryablePool,
+                WaitableCandidateInput {
+                    auth_compatible: false,
+                    ..base
+                },
+            )
+            .unwrap()
+        );
     }
 }
 

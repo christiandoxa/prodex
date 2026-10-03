@@ -318,7 +318,18 @@ fn runtime_responses_candidate_saturated(
         RuntimeInflightReliefWaitResult::Relieved
         | RuntimeInflightReliefWaitResult::NotWaitable => Ok(true),
         RuntimeInflightReliefWaitResult::DeadlineExpired => {
-            loop_state.record_local_capacity_wait_timeout();
+            if runtime_route_has_retryable_profile(context.shared, RuntimeRouteKind::Responses)? {
+                loop_state.selection_started_at = std::time::Instant::now();
+                runtime_proxy_log(
+                    context.shared,
+                    format!(
+                        "request={} transport=http local_capacity_retry_epoch route=responses",
+                        context.request_id
+                    ),
+                );
+            } else {
+                loop_state.record_local_capacity_wait_timeout();
+            }
             Ok(true)
         }
     }
@@ -334,6 +345,7 @@ fn handle_runtime_responses_budget_exhausted(
         runtime_proxy_pressure_mode_active_for_route(context.shared, RuntimeRouteKind::Responses);
     if !loop_state.budget_exhausted(
         context.shared,
+        RuntimeRouteKind::Responses,
         affinity_state
             .has_continuation_priority(context.previous_response_id, context.request_turn_state),
         pressure_mode,
@@ -452,6 +464,17 @@ fn handle_runtime_responses_candidate_exhausted(
             return Ok(RuntimeResponsesLoopControl::Continue);
         }
         RuntimeInflightReliefWaitResult::DeadlineExpired => {
+            if runtime_route_has_retryable_profile(context.shared, RuntimeRouteKind::Responses)? {
+                loop_state.selection_started_at = std::time::Instant::now();
+                runtime_proxy_log(
+                    context.shared,
+                    format!(
+                        "request={} transport=http local_capacity_retry_epoch route=responses",
+                        context.request_id
+                    ),
+                );
+                return Ok(RuntimeResponsesLoopControl::Continue);
+            }
             return Ok(RuntimeResponsesLoopControl::Return(Box::new(
                 RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
                     503,
@@ -676,6 +699,7 @@ fn handle_runtime_responses_rate_limited_attempt(
     if affinity_state.candidate_has_hard_affinity(&profile_name) {
         return Ok(Some(response));
     }
+    loop_state.record_rate_limit_failure();
     loop_state.excluded_profiles.insert(profile_name);
     loop_state.last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), false));
     Ok(None)

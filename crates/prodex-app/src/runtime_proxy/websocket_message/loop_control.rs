@@ -9,7 +9,8 @@ use super::super::{
     runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_precommit_budget_for_profile_count, runtime_proxy_pressure_mode_active_for_route,
     runtime_proxy_probe_refresh_pause, runtime_proxy_structured_log_message,
-    runtime_remaining_sync_probe_cold_start_profiles_for_route, runtime_route_kind_label,
+    runtime_remaining_sync_probe_cold_start_profiles_for_route,
+    runtime_route_has_retryable_profile, runtime_route_kind_label,
     runtime_selection_trace_log_direct, runtime_smart_context_model_name_from_body,
     send_runtime_proxy_websocket_error,
 };
@@ -57,6 +58,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
 
             match self.process_next_candidate(&mut selection_started_at, &mut selection_attempts)? {
                 RuntimeWebsocketMessageLoopAction::Continue => {
+                    if std::mem::take(&mut self.reset_selection_budget) {
+                        selection_started_at = Instant::now();
+                        selection_attempts = 0;
+                    }
                     continue;
                 }
                 RuntimeWebsocketMessageLoopAction::Finished => return Ok(()),
@@ -72,10 +77,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let Some(candidate_name) = self.select_candidate()? else {
             return match self.handle_candidate_exhausted()? {
                 RuntimeWebsocketMessageLoopAction::Continue => {
-                    if std::mem::take(&mut self.reset_selection_budget) {
-                        *selection_started_at = Instant::now();
-                        *selection_attempts = 0;
-                    }
                     Ok(RuntimeWebsocketMessageLoopAction::Continue)
                 }
                 RuntimeWebsocketMessageLoopAction::Finished => {
@@ -140,7 +141,11 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             RuntimeInflightReliefWaitResult::Relieved
             | RuntimeInflightReliefWaitResult::NotWaitable => Ok(true),
             RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                self.local_capacity_wait_timed_out = true;
+                if runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Websocket)? {
+                    self.reset_selection_budget = true;
+                } else {
+                    self.local_capacity_wait_timed_out = true;
+                }
                 Ok(true)
             }
         }
@@ -191,6 +196,14 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             self.has_continuation_priority(),
             pressure_mode,
         )?;
+        if !self.has_continuation_priority()
+            && (self.saw_overload_failure
+                || self.saw_rate_limit_failure
+                || self.saw_transport_failure)
+            && runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Websocket)?
+        {
+            return Ok(false);
+        }
         if self.recovery_sweeps == 0 {
             if self.saw_transport_failure
                 && !self.has_continuation_priority()
@@ -215,15 +228,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             pressure_mode,
             profile_count,
         );
-        Ok(selection_attempts >= attempt_limit
-            || self.recovery_sweeps
-                >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
-            || self.recovery_started_at.is_some_and(|started_at| {
-                started_at.elapsed()
-                    >= std::time::Duration::from_millis(
-                        runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
-                    )
-            }))
+        Ok(selection_attempts >= attempt_limit)
     }
 
     fn profile_count(&self) -> Result<usize> {
@@ -239,16 +244,11 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     fn wait_for_transient_recovery(&mut self) -> Result<bool> {
-        if !(self.saw_overload_failure || self.saw_transport_failure) {
-            return Ok(false);
-        }
-        let recovery_started_at = *self
-            .recovery_started_at
-            .get_or_insert_with(std::time::Instant::now);
-        if recovery_started_at.elapsed()
-            >= Duration::from_millis(
-                runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
-            )
+        if self.has_continuation_priority()
+            || !(self.saw_overload_failure
+                || self.saw_rate_limit_failure
+                || self.saw_transport_failure)
+            || !runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Websocket)?
         {
             return Ok(false);
         }
@@ -287,13 +287,10 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             return Ok(false);
         };
         let now = chrono::Local::now().timestamp();
-        let recovery_budget =
-            Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
-                .saturating_sub(recovery_started_at.elapsed());
         let wait =
             std::time::Duration::from_secs(u64::try_from(until.saturating_sub(now)).unwrap_or(0))
                 .saturating_add(std::time::Duration::from_secs(1))
-                .min(recovery_budget);
+                .min(Duration::from_secs(30));
         if wait.is_zero() {
             return Ok(false);
         }
@@ -411,6 +408,33 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         }
         if self.wait_for_transient_recovery()? {
             return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+        }
+        match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+            request_id: self.request_id,
+            shared: self.shared,
+            excluded_profiles: &self.excluded_profiles,
+            route_kind: RuntimeRouteKind::Websocket,
+            selection_started_at: Instant::now(),
+            continuation: self.has_continuation_priority(),
+            wait_affinity_owner: runtime_noncompact_session_priority_profile(
+                self.session_profile.as_deref(),
+                self.compact_session_profile.as_deref(),
+            ),
+            selected_profile: None,
+        })? {
+            RuntimeInflightReliefWaitResult::Relieved => {
+                self.reset_selection_budget = true;
+                return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+            }
+            RuntimeInflightReliefWaitResult::DeadlineExpired => {
+                if runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Websocket)? {
+                    self.reset_selection_budget = true;
+                } else {
+                    self.local_capacity_wait_timed_out = true;
+                }
+                return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+            }
+            RuntimeInflightReliefWaitResult::NotWaitable => {}
         }
         let remaining_cold_start_profiles =
             runtime_remaining_sync_probe_cold_start_profiles_for_route(

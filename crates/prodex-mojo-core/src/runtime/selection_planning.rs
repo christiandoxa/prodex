@@ -128,6 +128,7 @@ pub enum WaitableCandidateMode {
     ColdStart,
     Waitable,
     Relieved,
+    RetryablePool,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -370,6 +371,7 @@ pub fn waitable_candidate_eligible(
         WaitableCandidateMode::ColdStart => 0,
         WaitableCandidateMode::Waitable => 1,
         WaitableCandidateMode::Relieved => 2,
+        WaitableCandidateMode::RetryablePool => 3,
     };
     match unsafe {
         prodex_runtime_waitable_candidate_eligible_v1(

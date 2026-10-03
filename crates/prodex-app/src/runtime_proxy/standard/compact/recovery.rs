@@ -1,32 +1,84 @@
+use super::super::super::{
+    build_runtime_proxy_json_error_response, runtime_proxy_local_capacity_timeout_message,
+};
+use super::admission::log_runtime_compact_local_capacity_timeout;
 use super::{
-    RuntimeRotationProxyShared, RuntimeRouteKind, await_runtime_proxy_async_task,
-    clear_runtime_recovered_profiles, runtime_profile_recovery_wait_for_route, runtime_proxy_log,
+    RuntimeInflightReliefWait, RuntimeInflightReliefWaitResult, RuntimeRotationProxyShared,
+    RuntimeRouteKind, await_runtime_proxy_async_task, clear_runtime_recovered_profiles,
+    runtime_profile_recovery_wait_for_route, runtime_proxy_log,
+    runtime_proxy_maybe_wait_for_interactive_inflight_relief, runtime_route_has_retryable_profile,
 };
 use anyhow::Result;
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
+
+pub(super) fn compact_profile_count(shared: &RuntimeRotationProxyShared) -> Result<usize> {
+    Ok(shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
+        .state
+        .profiles
+        .len()
+        .max(1))
+}
+
+pub(super) fn wait_for_compact_inflight_relief(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &BTreeSet<String>,
+    selection_started_at: Instant,
+    continuation: bool,
+    wait_affinity_owner: Option<&str>,
+) -> Result<RuntimeInflightReliefWaitResult> {
+    runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        request_id,
+        shared,
+        excluded_profiles,
+        route_kind: RuntimeRouteKind::Compact,
+        selection_started_at,
+        continuation,
+        wait_affinity_owner,
+        selected_profile: None,
+    })
+}
+
+pub(super) fn compact_inflight_capacity_epoch_expired(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    selection_attempts: usize,
+    selection_started_at: &mut Instant,
+    pressure_mode: bool,
+) -> Result<Option<tiny_http::ResponseBox>> {
+    if runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Compact)? {
+        *selection_started_at = Instant::now();
+        runtime_proxy_log(
+            shared,
+            format!("request={request_id} transport=http local_capacity_retry_epoch route=compact"),
+        );
+        return Ok(None);
+    }
+    log_runtime_compact_local_capacity_timeout(
+        request_id,
+        shared,
+        selection_attempts,
+        *selection_started_at,
+        pressure_mode,
+    );
+    Ok(Some(build_runtime_proxy_json_error_response(
+        503,
+        "local_capacity_timeout",
+        runtime_proxy_local_capacity_timeout_message(),
+    )))
+}
 
 pub(super) fn wait_for_compact_overload_recovery(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &mut BTreeSet<String>,
     recovery_sweeps: &mut usize,
-    recovery_started_at: &mut Option<Instant>,
 ) -> Result<bool> {
-    let recovery_started_at = *recovery_started_at.get_or_insert_with(Instant::now);
-    if recovery_started_at.elapsed()
-        >= Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
-    {
-        return Ok(false);
-    }
-    let profile_count = shared
-        .runtime
-        .lock()
-        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
-        .state
-        .profiles
-        .len();
-    if profile_count < 2 {
+    if !runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Compact)? {
         return Ok(false);
     }
     let recovered = clear_runtime_recovered_profiles(
@@ -51,12 +103,9 @@ pub(super) fn wait_for_compact_overload_recovery(
         return Ok(false);
     };
     let now = chrono::Local::now().timestamp();
-    let remaining_budget =
-        Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
-            .saturating_sub(recovery_started_at.elapsed());
     let wait = Duration::from_secs(u64::try_from(until.saturating_sub(now)).unwrap_or(0))
         .saturating_add(Duration::from_secs(1))
-        .min(remaining_budget);
+        .min(Duration::from_secs(30));
     if wait.is_zero() {
         return Ok(false);
     }
