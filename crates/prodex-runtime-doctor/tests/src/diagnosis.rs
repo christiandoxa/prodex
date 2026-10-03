@@ -128,3 +128,26 @@ fn runtime_doctor_diagnosis_uses_summary_warning_and_provider_fields() {
         "Recent gemini model fallback was used before commit (model-a -> model-b)."
     );
 }
+
+#[test]
+fn runtime_doctor_diagnosis_aggregates_compact_exit_alias_counts_in_stable_order() {
+    let mut summary = RuntimeDoctorSummary {
+        pointer_exists: true,
+        log_exists: true,
+        line_count: 4,
+        marker_counts: [
+            ("compact_candidate_exhausted".to_string(), 1),
+            ("compact_exit_candidate_exhausted".to_string(), 1),
+            ("compact_exit_precommit_budget_exhausted".to_string(), 1),
+        ]
+        .into(),
+        ..RuntimeDoctorSummary::default()
+    };
+
+    runtime_doctor_finalize_summary(&mut summary);
+
+    assert_eq!(
+        summary.diagnosis,
+        "Recent compact exit paths were logged: candidate_exhausted=2, precommit_budget=1."
+    );
+}

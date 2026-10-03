@@ -17,6 +17,8 @@ const DOCTOR_MARKER_SUMMARY_COUNTS_MOJO_FILE = "mojo/prodex_core/runtime_doctor_
 const DOCTOR_MARKER_SUMMARY_COUNTS_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs";
 const DOCTOR_MARKER_SUMMARY_COUNTS_SELECTION_FILE = "crates/prodex-runtime-doctor/src/parsing/selection.rs";
 const DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE = "crates/prodex-runtime-doctor/tests/src/parsing.rs";
+const DOCTOR_COMPACT_EXIT_COUNTS_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/diagnosis/final_summary/compact.rs";
+const DOCTOR_COMPACT_EXIT_COUNTS_CALLER_TEST_FILE = "crates/prodex-runtime-doctor/tests/src/diagnosis.rs";
 const CLI_DEFAULT_RUN_CONSUMER_FILE = "crates/prodex-cli/src/lib.rs";
 const CLI_DEFAULT_RUN_ABI_FILE = "crates/prodex-mojo-core/src/launch.rs";
 const CLI_DEFAULT_RUN_MOJO_FILE = "mojo/prodex_core/launch_args.mojo";
@@ -88,6 +90,8 @@ const PROMOTED_FILES = [
   DOCTOR_MARKER_SUMMARY_COUNTS_CONSUMER_FILE,
   DOCTOR_MARKER_SUMMARY_COUNTS_SELECTION_FILE,
   DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE,
+  DOCTOR_COMPACT_EXIT_COUNTS_CONSUMER_FILE,
+  DOCTOR_COMPACT_EXIT_COUNTS_CALLER_TEST_FILE,
   CLI_DEFAULT_RUN_CONSUMER_FILE,
   CLI_DEFAULT_RUN_ABI_FILE,
   CLI_DEFAULT_RUN_MOJO_FILE,
@@ -2947,6 +2951,52 @@ export function findViolations(files) {
     }
     return [];
   });
+  const doctorCompactExitCountsViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === DOCTOR_COMPACT_EXIT_COUNTS_CONSUMER_FILE) {
+      const body = contents.match(/\bpub\(super\) fn runtime_doctor_compact_exit_counts\s*\([^]*?^\}/mu)?.[0];
+      const restoredAliases = /"compact_(?:exit_)?(?:candidate_exhausted|committed|committed_owner|followup_owner|lineage_released|overload_conservative_retry|precommit_budget_exhausted|pressure_shed|quota_unclassified|retryable_failure|transport_failure)"/u;
+      return body?.includes("prodex_mojo_core::rich::runtime_doctor_compact_exit_counts(") &&
+          !restoredAliases.test(body)
+        ? []
+        : [`${filePath}: compact-exit alias grouping must use the Mojo reducer without Rust marker tables`];
+    }
+    if (filePath === DOCTOR_MARKER_ABI_ADAPTER_FILE &&
+        (!contents.includes("prodex_mojo_runtime_doctor_compact_exit_counts_v1(") ||
+          !contents.includes("RUNTIME_DOCTOR_COMPACT_EXIT_COUNTS_ABI_VERSION: i64 = 1") ||
+          !contents.includes("RUNTIME_DOCTOR_COMPACT_EXIT_COUNT_LABELS"))) {
+      return [`${filePath}: compact-exit adapter must use the versioned Mojo reducer and fixed output slots`];
+    }
+    if (filePath === DOCTOR_MARKER_SUMMARY_COUNTS_MOJO_FILE &&
+        (!contents.includes('@export("prodex_mojo_runtime_doctor_compact_exit_counts_v1")') ||
+          !contents.includes("def runtime_doctor_compact_exit_bucket(") ||
+          !contents.includes('rich_view_matches_literal["compact_exit_candidate_exhausted"]'))) {
+      return [`${filePath}: compact-exit alias policy must remain in the production Mojo reducer`];
+    }
+    if (filePath === DOCTOR_MARKER_ABI_TEST_FILE) {
+      const aliases = [
+        "compact_candidate_exhausted", "compact_exit_candidate_exhausted",
+        "compact_committed", "compact_exit_committed",
+        "compact_committed_owner", "compact_exit_committed_owner",
+        "compact_followup_owner", "compact_exit_followup_owner",
+        "compact_lineage_released", "compact_exit_lineage_released",
+        "compact_overload_conservative_retry", "compact_exit_overload_conservative_retry",
+        "compact_precommit_budget_exhausted", "compact_exit_precommit_budget_exhausted",
+        "compact_pressure_shed", "compact_exit_pressure_shed",
+        "compact_quota_unclassified", "compact_exit_quota_unclassified",
+        "compact_retryable_failure", "compact_exit_retryable_failure",
+        "compact_transport_failure",
+      ];
+      if (!contents.includes("compact_exit_counts_abi_sums_aliases_and_rejects_invalid_inputs") ||
+          !aliases.every((alias) => contents.includes(`"${alias}"`))) {
+        return [`${filePath}: direct ABI coverage must assert all compact-exit marker buckets and invalid inputs`];
+      }
+    }
+    if (filePath === DOCTOR_COMPACT_EXIT_COUNTS_CALLER_TEST_FILE &&
+        !contents.includes("runtime_doctor_diagnosis_aggregates_compact_exit_alias_counts_in_stable_order")) {
+      return [`${filePath}: production diagnosis caller must protect compact-exit alias totals and order`];
+    }
+    return [];
+  });
   const cliDefaultRunViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === CLI_DEFAULT_RUN_CONSUMER_FILE) {
       const body = contents.match(/\bpub fn should_default_cli_invocation_to_run\s*\([^]*?^\}/mu)?.[0];
@@ -3775,7 +3825,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
+    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
@@ -4191,6 +4241,19 @@ function selfTest() {
   /direct ABI coverage must exercise fixed selection and failure totals/u);
   assert.match(findViolations([[DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
   /runtime-doctor caller coverage must protect reducer caps, synthesis order, and Unicode truncation/u);
+  assert.deepEqual(findViolations([[DOCTOR_COMPACT_EXIT_COUNTS_CONSUMER_FILE,
+    "pub(super) fn runtime_doctor_compact_exit_counts(summary: &Summary) {\n  prodex_mojo_core::rich::runtime_doctor_compact_exit_counts(input);\n}\n"]]), []);
+  assert.match(findViolations([[DOCTOR_COMPACT_EXIT_COUNTS_CONSUMER_FILE,
+    "pub(super) fn runtime_doctor_compact_exit_counts(summary: &Summary) {\n  let aliases = [\"compact_candidate_exhausted\"];\n}\n"]]).join("\n"),
+  /compact-exit alias grouping must use the Mojo reducer without Rust marker tables/u);
+  assert.match(findViolations([[DOCTOR_MARKER_ABI_ADAPTER_FILE, "fn compact_exit_counts() {}"]]).join("\n"),
+  /compact-exit adapter must use the versioned Mojo reducer and fixed output slots/u);
+  assert.match(findViolations([[DOCTOR_MARKER_SUMMARY_COUNTS_MOJO_FILE, "fn compact_exit_counts() {}"]]).join("\n"),
+  /compact-exit alias policy must remain in the production Mojo reducer/u);
+  assert.match(findViolations([[DOCTOR_MARKER_ABI_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
+  /direct ABI coverage must assert all compact-exit marker buckets and invalid inputs/u);
+  assert.match(findViolations([[DOCTOR_COMPACT_EXIT_COUNTS_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
+  /production diagnosis caller must protect compact-exit alias totals and order/u);
   assert.match(findViolations([[CLI_DEFAULT_RUN_CONSUMER_FILE,
     "fn reassemble_super_expose_alias() { prodex_mojo_core::launch::find_super_expose_alias_index(); }\npub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {\n  matches!(args.first(), Some(_))\n}\n"]]).join("\n"),
   /CLI default-run decision must use the Mojo launch-arguments policy/u);

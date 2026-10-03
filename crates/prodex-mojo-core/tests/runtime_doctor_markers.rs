@@ -39,6 +39,13 @@ unsafe extern "C" {
         count: i64,
         output: u64,
     ) -> i64;
+    fn prodex_mojo_runtime_doctor_compact_exit_counts_v1(
+        abi: i64,
+        markers: u64,
+        counts: u64,
+        count: i64,
+        output: u64,
+    ) -> i64;
 }
 
 #[test]
@@ -198,4 +205,130 @@ fn marker_summary_counts_abi_tags_fixed_selection_and_failure_totals() {
     };
     assert_eq!(status, 5);
     assert!(overflow_accumulator.iter().all(|count| *count >= 0));
+}
+
+#[test]
+fn compact_exit_counts_abi_sums_aliases_and_rejects_invalid_inputs() {
+    let inputs = [
+        ("compact_candidate_exhausted", 2_i64),
+        ("compact_exit_candidate_exhausted", 3),
+        ("compact_committed", 1),
+        ("compact_exit_committed", 2),
+        ("compact_committed_owner", 1),
+        ("compact_exit_committed_owner", 2),
+        ("compact_followup_owner", 1),
+        ("compact_exit_followup_owner", 2),
+        ("compact_lineage_released", 1),
+        ("compact_exit_lineage_released", 2),
+        ("compact_overload_conservative_retry", 1),
+        ("compact_exit_overload_conservative_retry", 2),
+        ("compact_precommit_budget_exhausted", 1),
+        ("compact_exit_precommit_budget_exhausted", 2),
+        ("compact_pressure_shed", 1),
+        ("compact_exit_pressure_shed", 2),
+        ("compact_quota_unclassified", 1),
+        ("compact_exit_quota_unclassified", 2),
+        ("compact_retryable_failure", 1),
+        ("compact_exit_retryable_failure", 2),
+        ("compact_transport_failure", 5),
+        ("unrelated_marker", 9),
+    ];
+    let views = inputs
+        .iter()
+        .map(|(marker, _)| View {
+            ptr: marker.as_ptr() as u64,
+            len: marker.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let counts = inputs.map(|(_, count)| count);
+    let mut output = [0_i64; 11];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_compact_exit_counts_v1(
+            1,
+            views.as_ptr() as u64,
+            counts.as_ptr() as u64,
+            views.len() as i64,
+            output.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(status, 0);
+    assert_eq!(output, [5, 3, 3, 3, 3, 3, 3, 3, 3, 3, 5]);
+
+    let mut unchanged = [77_i64; 11];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_compact_exit_counts_v1(
+            9,
+            views.as_ptr() as u64,
+            counts.as_ptr() as u64,
+            views.len() as i64,
+            unchanged.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(status, 4);
+    assert_eq!(unchanged, [77; 11]);
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_compact_exit_counts_v1(
+            1,
+            views.as_ptr() as u64,
+            counts.as_ptr() as u64,
+            257,
+            unchanged.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(status, 3);
+    assert_eq!(unchanged, [77; 11]);
+
+    let invalid_utf8 = [0xff_u8];
+    let invalid_view = View {
+        ptr: invalid_utf8.as_ptr() as u64,
+        len: invalid_utf8.len() as u64,
+    };
+    let invalid_count = [1_i64];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_compact_exit_counts_v1(
+            1,
+            &invalid_view as *const View as u64,
+            invalid_count.as_ptr() as u64,
+            1,
+            unchanged.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(status, 2);
+    assert_eq!(unchanged, [77; 11]);
+
+    let overflow_inputs = [
+        ("compact_candidate_exhausted", i64::MAX),
+        ("compact_exit_candidate_exhausted", 1),
+    ];
+    let overflow_views = overflow_inputs
+        .iter()
+        .map(|(marker, _)| View {
+            ptr: marker.as_ptr() as u64,
+            len: marker.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let overflow_counts = overflow_inputs.map(|(_, count)| count);
+    let mut overflow_output = [0_i64; 11];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_compact_exit_counts_v1(
+            1,
+            overflow_views.as_ptr() as u64,
+            overflow_counts.as_ptr() as u64,
+            overflow_views.len() as i64,
+            overflow_output.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(status, 5);
+    assert!(overflow_output.iter().all(|count| *count >= 0));
+}
+
+#[test]
+fn compact_exit_counts_adapter_batches_large_marker_sets() {
+    let counts = prodex_mojo_core::rich::runtime_doctor_compact_exit_counts(std::iter::repeat_n(
+        ("compact_committed", 1),
+        257,
+    ))
+    .unwrap();
+
+    assert_eq!(counts, vec![("committed".to_string(), 257)]);
 }

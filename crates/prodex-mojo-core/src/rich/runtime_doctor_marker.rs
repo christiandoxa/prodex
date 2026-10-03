@@ -7,6 +7,21 @@ const RUNTIME_DOCTOR_MARKER_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: i64 = 2;
 const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_MAX_BATCH: usize = 256;
+const RUNTIME_DOCTOR_COMPACT_EXIT_COUNTS_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_COMPACT_EXIT_COUNTS_MAX_BATCH: usize = 256;
+const RUNTIME_DOCTOR_COMPACT_EXIT_COUNT_LABELS: [&str; 11] = [
+    "candidate_exhausted",
+    "committed",
+    "committed_owner",
+    "followup_owner",
+    "lineage_released",
+    "owner_retry",
+    "precommit_budget",
+    "pressure_shed",
+    "quota_misc",
+    "retryable_failure",
+    "transport_failure",
+];
 
 unsafe extern "C" {
     fn prodex_mojo_runtime_doctor_marker_known_v1(abi_version: i64, marker: u64, known: u64)
@@ -17,6 +32,13 @@ unsafe extern "C" {
         output: u64,
     ) -> i64;
     fn prodex_mojo_runtime_doctor_marker_summary_counts_v1(
+        abi_version: i64,
+        marker_views: u64,
+        counts: u64,
+        count: i64,
+        output: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_compact_exit_counts_v1(
         abi_version: i64,
         marker_views: u64,
         counts: u64,
@@ -128,6 +150,65 @@ fn runtime_doctor_marker_summary_counts_batch(
     let status = unsafe {
         prodex_mojo_runtime_doctor_marker_summary_counts_v1(
             RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_ABI_VERSION,
+            mojo_pointer_address(markers.as_ptr()),
+            mojo_pointer_address(counts.as_ptr()),
+            count,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            2 | 5 => MojoError::InvalidOutput,
+            3 => MojoError::Capacity,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    Ok(())
+}
+
+/// Aggregate compact-exit marker aliases into the stable Mojo-owned label order.
+pub fn runtime_doctor_compact_exit_counts<'a>(
+    marker_counts: impl IntoIterator<Item = (&'a str, usize)>,
+) -> Result<Vec<(String, usize)>, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = [0_i64; RUNTIME_DOCTOR_COMPACT_EXIT_COUNT_LABELS.len()];
+    let mut markers = Vec::with_capacity(RUNTIME_DOCTOR_COMPACT_EXIT_COUNTS_MAX_BATCH);
+    let mut counts = Vec::with_capacity(RUNTIME_DOCTOR_COMPACT_EXIT_COUNTS_MAX_BATCH);
+    for (marker, count) in marker_counts {
+        markers.push(view(marker));
+        counts.push(i64::try_from(count).map_err(|_| MojoError::InvalidInput)?);
+        if markers.len() == RUNTIME_DOCTOR_COMPACT_EXIT_COUNTS_MAX_BATCH {
+            runtime_doctor_compact_exit_counts_batch(&markers, &counts, &mut output)?;
+            markers.clear();
+            counts.clear();
+        }
+    }
+    if !markers.is_empty() {
+        runtime_doctor_compact_exit_counts_batch(&markers, &counts, &mut output)?;
+    }
+    RUNTIME_DOCTOR_COMPACT_EXIT_COUNT_LABELS
+        .into_iter()
+        .zip(output)
+        .filter(|(_, count)| *count > 0)
+        .map(|(label, count)| {
+            usize::try_from(count)
+                .map(|count| (label.to_string(), count))
+                .map_err(|_| MojoError::InvalidOutput)
+        })
+        .collect()
+}
+
+fn runtime_doctor_compact_exit_counts_batch(
+    markers: &[RichStringView],
+    counts: &[i64],
+    output: &mut [i64; RUNTIME_DOCTOR_COMPACT_EXIT_COUNT_LABELS.len()],
+) -> Result<(), MojoError> {
+    let count = i64::try_from(markers.len()).map_err(|_| MojoError::InvalidInput)?;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_compact_exit_counts_v1(
+            RUNTIME_DOCTOR_COMPACT_EXIT_COUNTS_ABI_VERSION,
             mojo_pointer_address(markers.as_ptr()),
             mojo_pointer_address(counts.as_ptr()),
             count,
