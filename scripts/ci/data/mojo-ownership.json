@@ -748,7 +748,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "governance_finding_classification"
+          "governance_finding_classification",
+          "governance_inspection_collection_order"
         ]
       },
       {
@@ -1184,6 +1185,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "enum-to-tag mapping, validated classification tag reconstruction, and bounded finding collection"
+    },
+    {
+      "name": "governance_inspection_collection_order",
+      "domain": "governance/inspection",
+      "introduced_in": "0.435.2",
+      "baseline_state": "Rust sorted findings by location, kind, detector, and confidence, then sorted and deduplicated tags and reason codes",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_governance_inspection_order_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/governance_inspection.mojo",
+      "consumer": "crates/prodex-domain/src/governance/inspection.rs",
+      "consumer_marker": "prodex_mojo_core::policy::governance_inspection_order(",
+      "production_consumers": [
+        "crates/prodex-domain/src/governance/inspection.rs"
+      ],
+      "production_reachability_test": "crates/prodex-domain/tests/governance_inspection.rs",
+      "rust_owner_before": "finding-key comparison, sorting, and tag/reason-code deduplication",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; caller test verifies finding key order and metadata deduplication",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed key projection and application of validated Mojo indices"
     },
     {
       "name": "profile_identity_planning",
