@@ -2,9 +2,60 @@
 #![allow(unsafe_code)]
 
 use prodex_mojo_core::launch::{
-    LaunchArgument, LaunchArgumentOperation, find_super_expose_alias_index,
-    inspect_launch_arguments, plan_launch_arguments,
+    LaunchArgument, LaunchArgumentOperation, default_cli_invocation_to_run,
+    find_super_expose_alias_index, inspect_launch_arguments, plan_launch_arguments,
 };
+
+#[test]
+fn default_cli_invocation_policy_uses_real_mojo_classification() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    let prodex_commands = [
+        "-h",
+        "--help",
+        "-V",
+        "--version",
+        "profile",
+        "use",
+        "current",
+        "info",
+        "status",
+        "log",
+        "session",
+        "doctor",
+        "login",
+        "logout",
+        "update",
+        "quota",
+        "redeem",
+        "ping",
+        "run",
+        "super",
+        "s",
+        "gateway",
+        "gui",
+        "dashboard",
+        "claude",
+        "help",
+        "__super-expose",
+        "__runtime-broker",
+        "__mcp-jsonl-bridge",
+        "__sub-agent-exec",
+    ];
+    for command in prodex_commands {
+        assert!(
+            !default_cli_invocation_to_run(&[Some("prodex"), Some(command)]).unwrap(),
+            "{command} must remain a top-level command"
+        );
+    }
+
+    assert!(default_cli_invocation_to_run(&[]).unwrap());
+    assert!(default_cli_invocation_to_run(&[Some("prodex")]).unwrap());
+    assert!(default_cli_invocation_to_run(&[Some("prodex"), None]).unwrap());
+    assert!(default_cli_invocation_to_run(&[Some("prodex"), Some("remote-control")]).unwrap());
+    assert!(default_cli_invocation_to_run(&[Some("prodex"), Some("mcp-server")]).unwrap());
+    assert!(!default_cli_invocation_to_run(&[None, Some("--help")]).unwrap());
+}
 
 #[test]
 fn super_expose_alias_scan_matches_versioned_mojo_abi_values() {

@@ -318,42 +318,12 @@ fn rewrite_super_compat_args(args: &[OsString]) -> Vec<OsString> {
 }
 
 pub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {
-    let Some(first_arg) = args.get(1).and_then(|arg| arg.to_str()) else {
-        return true;
-    };
-
-    !matches!(
-        first_arg,
-        "-h" | "--help"
-            | "-V"
-            | "--version"
-            | "profile"
-            | "use"
-            | "current"
-            | "info"
-            | "status"
-            | "log"
-            | "session"
-            | "doctor"
-            | "login"
-            | "logout"
-            | "update"
-            | "quota"
-            | "redeem"
-            | "ping"
-            | "run"
-            | "super"
-            | "s"
-            | "gateway"
-            | "gui"
-            | "dashboard"
-            | "claude"
-            | "help"
-            | "__super-expose"
-            | "__runtime-broker"
-            | "__mcp-jsonl-bridge"
-            | "__sub-agent-exec"
-    )
+    let argument_views = [
+        args.first().and_then(|arg| arg.to_str()),
+        args.get(1).and_then(|arg| arg.to_str()),
+    ];
+    prodex_mojo_core::launch::default_cli_invocation_to_run(&argument_views)
+        .expect("Mojo CLI default invocation policy returned invalid output")
 }
 
 pub fn is_codex_command_server_subcommand(args: &[OsString]) -> bool {

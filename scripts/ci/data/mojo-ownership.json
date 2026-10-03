@@ -1870,14 +1870,15 @@
       "name": "super_override_argument_classification",
       "domain": "cli/super-arguments",
       "introduced_in": "0.431.7",
-      "expanded_in": "0.432.1",
+      "expanded_in": "0.435.1",
       "baseline_state": "candidate",
       "final_state": "authoritative",
       "mojo_entry": "prodex_mojo_launch_args_v1",
       "mojo_abi_version": 1,
       "mojo_operation_ids": {
         "super_override_scan": 10,
-        "super_expose_alias_scan": 11
+        "super_expose_alias_scan": 11,
+        "cli_default_run": 13
       },
       "mojo_source": "mojo/prodex_core/launch_args.mojo",
       "consumer": "crates/prodex-cli/src/runtime_args/super_tail_extract.rs",
@@ -1887,7 +1888,7 @@
         "crates/prodex-cli/src/lib.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/launch_args.rs",
-      "rust_owner_before": "Prodex option classification, inline values, paired value boundaries, and Super expose alias scanning",
+      "rust_owner_before": "Prodex option classification, inline values, paired value boundaries, Super expose alias scanning, and default-run command discovery",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted after parity; independent caller-boundary values cover override kinds and expose alias boundaries",
       "production_fallback": false,

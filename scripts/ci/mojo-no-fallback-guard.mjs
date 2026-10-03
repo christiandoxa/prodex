@@ -17,6 +17,11 @@ const DOCTOR_MARKER_SUMMARY_COUNTS_MOJO_FILE = "mojo/prodex_core/runtime_doctor_
 const DOCTOR_MARKER_SUMMARY_COUNTS_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs";
 const DOCTOR_MARKER_SUMMARY_COUNTS_SELECTION_FILE = "crates/prodex-runtime-doctor/src/parsing/selection.rs";
 const DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE = "crates/prodex-runtime-doctor/tests/src/parsing.rs";
+const CLI_DEFAULT_RUN_CONSUMER_FILE = "crates/prodex-cli/src/lib.rs";
+const CLI_DEFAULT_RUN_ABI_FILE = "crates/prodex-mojo-core/src/launch.rs";
+const CLI_DEFAULT_RUN_MOJO_FILE = "mojo/prodex_core/launch_args.mojo";
+const CLI_DEFAULT_RUN_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/launch_args.rs";
+const CLI_DEFAULT_RUN_CALLER_TEST_FILE = "crates/prodex-cli/tests/src/shortcuts.rs";
 const DEEPSEEK_INPUT_HISTORY_FILE = "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs";
 const PROMOTED_FILES = [
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
@@ -83,6 +88,11 @@ const PROMOTED_FILES = [
   DOCTOR_MARKER_SUMMARY_COUNTS_CONSUMER_FILE,
   DOCTOR_MARKER_SUMMARY_COUNTS_SELECTION_FILE,
   DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE,
+  CLI_DEFAULT_RUN_CONSUMER_FILE,
+  CLI_DEFAULT_RUN_ABI_FILE,
+  CLI_DEFAULT_RUN_MOJO_FILE,
+  CLI_DEFAULT_RUN_ABI_TEST_FILE,
+  CLI_DEFAULT_RUN_CALLER_TEST_FILE,
   "crates/prodex-session-store/src/session_selector.rs",
   "crates/prodex-session-store/src/report.rs",
   "crates/prodex-mojo-core/src/runtime_lineage.rs",
@@ -2937,6 +2947,41 @@ export function findViolations(files) {
     }
     return [];
   });
+  const cliDefaultRunViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === CLI_DEFAULT_RUN_CONSUMER_FILE) {
+      const body = contents.match(/\bpub fn should_default_cli_invocation_to_run\s*\([^]*?^\}/mu)?.[0];
+      if (!body) {
+        return contents.includes("parse_cli_command_from")
+          ? [`${filePath}: CLI default-run decision must use the Mojo launch-arguments policy`]
+          : [];
+      }
+      return body?.includes("prodex_mojo_core::launch::default_cli_invocation_to_run(") &&
+          !/matches!\s*\(/u.test(body)
+        ? []
+        : [`${filePath}: CLI default-run decision must use the Mojo launch-arguments policy`];
+    }
+    if (filePath === CLI_DEFAULT_RUN_ABI_FILE &&
+        (!contents.includes("const CLI_DEFAULT_RUN: i64 = 13;") ||
+          !contents.includes("pub fn default_cli_invocation_to_run(") ||
+          !contents.includes("prodex_mojo_launch_args_v1("))) {
+      return [`${filePath}: CLI default-run adapter must retain launch Mojo operation 13`];
+    }
+    if (filePath === CLI_DEFAULT_RUN_MOJO_FILE &&
+        (!contents.includes("LAUNCH_CLI_DEFAULT_RUN: Int64 = 13") ||
+          !contents.includes("def launch_cli_default_run_policy(") ||
+          !contents.includes("launch_cli_default_run_policy(arguments, count, metadata)"))) {
+      return [`${filePath}: CLI default-run classification must remain in the launch-arguments Mojo kernel`];
+    }
+    if (filePath === CLI_DEFAULT_RUN_ABI_TEST_FILE &&
+        !contents.includes("default_cli_invocation_policy_uses_real_mojo_classification")) {
+      return [`${filePath}: direct real-Mojo CLI default-run coverage is required`];
+    }
+    if (filePath === CLI_DEFAULT_RUN_CALLER_TEST_FILE &&
+        !contents.includes("bare_invocation_defaults_to_run_and_clap_keeps_help_and_version")) {
+      return [`${filePath}: CLI default-run behavior must retain caller-boundary coverage`];
+    }
+    return [];
+  });
   const responseMetadataViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === RESPONSE_METADATA_FILE) {
       const body = contents.match(/\bfn\s+runtime_response_metadata_from_value\s*\([^]*?^\}/mu)?.[0];
@@ -3730,7 +3775,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
+    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
@@ -4146,6 +4191,20 @@ function selfTest() {
   /direct ABI coverage must exercise fixed selection and failure totals/u);
   assert.match(findViolations([[DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
   /runtime-doctor caller coverage must protect reducer caps, synthesis order, and Unicode truncation/u);
+  assert.match(findViolations([[CLI_DEFAULT_RUN_CONSUMER_FILE,
+    "fn reassemble_super_expose_alias() { prodex_mojo_core::launch::find_super_expose_alias_index(); }\npub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {\n  matches!(args.first(), Some(_))\n}\n"]]).join("\n"),
+  /CLI default-run decision must use the Mojo launch-arguments policy/u);
+  assert.match(findViolations([[CLI_DEFAULT_RUN_CONSUMER_FILE,
+    "fn parse_cli_command_from() {}\n"]]).join("\n"),
+  /CLI default-run decision must use the Mojo launch-arguments policy/u);
+  assert.match(findViolations([[CLI_DEFAULT_RUN_ABI_FILE, "fn default_cli_invocation_to_run() {}"]]).join("\n"),
+  /CLI default-run adapter must retain launch Mojo operation 13/u);
+  assert.match(findViolations([[CLI_DEFAULT_RUN_MOJO_FILE, "def launch_cli_default_run_policy(): pass"]]).join("\n"),
+  /CLI default-run classification must remain in the launch-arguments Mojo kernel/u);
+  assert.match(findViolations([[CLI_DEFAULT_RUN_ABI_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
+  /direct real-Mojo CLI default-run coverage is required/u);
+  assert.match(findViolations([[CLI_DEFAULT_RUN_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
+  /CLI default-run behavior must retain caller-boundary coverage/u);
   assert.deepEqual(findViolations([[RESPONSE_METADATA_FILE,
     "fn runtime_response_metadata_from_value(value: &Value) -> Plan {\n  prodex_mojo_core::json::runtime_response_metadata(&nodes, &number_texts)\n}"]]), []);
   assert.match(findViolations([[RESPONSE_METADATA_FILE,
