@@ -400,23 +400,18 @@ pub fn unique_profile_name_from_base(
     fallback_name: &str,
     mut is_available: impl FnMut(&str) -> bool,
 ) -> String {
-    let base_name = if base_name.trim().is_empty() {
-        fallback_name.to_string()
-    } else {
-        base_name.to_string()
-    };
-    if is_available(&base_name) {
-        return base_name;
-    }
-
-    for suffix in 2.. {
-        let candidate = format!("{base_name}-{suffix}");
+    let mut attempt = 0_u64;
+    loop {
+        let candidate =
+            mojo_profile_identity::profile_name_candidate(base_name, fallback_name, attempt)
+                .expect("Mojo profile-name candidate planner returned invalid output");
         if is_available(&candidate) {
             return candidate;
         }
+        attempt = attempt
+            .checked_add(1)
+            .expect("profile name candidate space exhausted");
     }
-
-    unreachable!("integer suffix space should not be exhausted")
 }
 
 pub fn resolve_remove_profile_targets<'a>(

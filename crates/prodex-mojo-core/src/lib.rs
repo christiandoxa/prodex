@@ -122,7 +122,7 @@ pub mod observability;
 pub mod optional_tools_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod policy;
-#[cfg(feature = "mojo-runtime")]
+#[cfg(all(feature = "mojo-runtime", feature = "mojo-rich"))]
 pub mod profile_export;
 #[cfg(feature = "mojo-runtime")]
 pub mod profile_identity;
