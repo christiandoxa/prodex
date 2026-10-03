@@ -28,6 +28,7 @@ enum ProfileIdentityOperation {
     OptionalNonemptyCasefoldEqual = 16,
     FirstPresentSource = 17,
     RemovedActiveChoice = 18,
+    NameCandidate = 19,
 }
 
 #[repr(C)]
@@ -227,6 +228,29 @@ pub fn profile_name_from_email(value: &str) -> Result<String, MojoError> {
         value,
         "profile".len(),
     )
+}
+
+pub fn profile_name_candidate(
+    base_name: &str,
+    fallback_name: &str,
+    attempt: u64,
+) -> Result<String, MojoError> {
+    let capacity = base_name
+        .len()
+        .max(fallback_name.len())
+        .checked_add(20)
+        .ok_or(MojoError::InvalidInput)?;
+    let result = call_kernel(
+        ProfileIdentityOperation::NameCandidate,
+        base_name,
+        fallback_name,
+        i64::try_from(attempt).map_err(|_| MojoError::InvalidInput)?,
+        0,
+        0,
+        capacity,
+    )?;
+    String::from_utf8(result.output[..result.written].to_vec())
+        .map_err(|_| MojoError::InvalidOutput)
 }
 
 pub fn sanitize_profile_slug(value: &str) -> Result<String, MojoError> {
@@ -589,6 +613,18 @@ mod tests {
         assert_eq!(
             profile_name_from_email(" User+Work@example.com ").unwrap(),
             "user-work_example.com"
+        );
+        assert_eq!(
+            profile_name_candidate("", "fallback", 0).unwrap(),
+            "fallback"
+        );
+        assert_eq!(
+            profile_name_candidate("  base  ", "fallback", 1).unwrap(),
+            "  base  -2"
+        );
+        assert_eq!(
+            profile_name_candidate("base", "fallback", 10).unwrap(),
+            "base-11"
         );
         assert_eq!(
             sanitize_profile_slug("  API_KEY_User@EXAMPLE.com  ").unwrap(),

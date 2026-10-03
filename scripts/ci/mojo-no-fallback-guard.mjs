@@ -1821,6 +1821,7 @@ export function findViolations(files) {
     if (filePath !== PROFILE_IDENTITY_FILE) return [];
     const functions = [
       ["find_matching_profile_identity", "mojo_profile_identity::find_matching_profile_identity("],
+      ["unique_profile_name_from_base", "mojo_profile_identity::profile_name_candidate("],
       ["normalize_email", "mojo_profile_identity::normalize_email("],
       ["normalize_account_id", "mojo_profile_identity::normalize_account_id("],
       ["canonical_profile_identity_key", "mojo_profile_identity::canonical_profile_identity_key("],

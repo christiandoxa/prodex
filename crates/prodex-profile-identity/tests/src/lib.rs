@@ -298,7 +298,9 @@ fn unique_profile_name_helpers_pick_first_available_candidate() {
         "copilot-user-name-2"
     );
     assert_eq!(
-        unique_profile_name_from_base("", "copilot", |candidate| candidate == "copilot-2"),
+        unique_profile_name_from_base(" \u{2003} ", "copilot", |candidate| {
+            candidate == "copilot-2"
+        }),
         "copilot-2"
     );
 }

@@ -28,6 +28,7 @@ comptime PROFILE_IDENTITY_OPTIONAL_CASEFOLD_WILDCARD: Int64 = 15
 comptime PROFILE_IDENTITY_OPTIONAL_NONEMPTY_CASEFOLD_EQUAL: Int64 = 16
 comptime PROFILE_IDENTITY_FIRST_PRESENT_SOURCE: Int64 = 17
 comptime PROFILE_IDENTITY_REMOVED_ACTIVE_CHOICE: Int64 = 18
+comptime PROFILE_IDENTITY_NAME_CANDIDATE: Int64 = 19
 
 comptime PROFILE_PRIMARY_PRESENT: Int64 = 1
 comptime PROFILE_SECONDARY_PRESENT: Int64 = 2
@@ -221,6 +222,48 @@ def profile_name_from_email(
         capacity,
         written,
         StringSlice("profile"),
+    )
+
+
+def profile_write_positive_decimal(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    value: Int64,
+) -> Bool:
+    if value <= 0:
+        return False
+    var divisor: Int64 = 1
+    while value // divisor >= 10:
+        divisor *= 10
+    while divisor > 0:
+        var digit = (value // divisor) % 10
+        if not profile_write_byte(output, capacity, written, UInt8(digit + 48)):
+            return False
+        divisor //= 10
+    return True
+
+
+def profile_name_candidate(
+    base: ProdexRichStringView,
+    fallback: ProdexRichStringView,
+    attempt: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var base_bounds = rich_trim_bounds(base)
+    var selected = base.copy()
+    if base_bounds[1] == base_bounds[0]:
+        selected = fallback.copy()
+    if not profile_write_normalized_range(
+        selected, 0, Int64(selected.len), output, capacity, written, False
+    ):
+        return False
+    if attempt == 0:
+        return True
+    return profile_write_byte(output, capacity, written, 45) and profile_write_positive_decimal(
+        output, capacity, written, attempt + 1
     )
 
 
@@ -572,7 +615,7 @@ def prodex_mojo_profile_identity_v1(
         return PROFILE_IDENTITY_ABI
     if (
         operation < 0
-        or operation > PROFILE_IDENTITY_REMOVED_ACTIVE_CHOICE
+        or operation > PROFILE_IDENTITY_NAME_CANDIDATE
         or primary_length < 0
         or secondary_length < 0
         or record_count < 0
@@ -626,6 +669,15 @@ def prodex_mojo_profile_identity_v1(
     if operation == PROFILE_IDENTITY_PROFILE_NAME:
         if not profile_name_from_email(
             primary, output, output_capacity, written
+        ):
+            return PROFILE_IDENTITY_CAPACITY
+        return PROFILE_IDENTITY_OK
+
+    if operation == PROFILE_IDENTITY_NAME_CANDIDATE:
+        if flags < 0 or flags == 9_223_372_036_854_775_807:
+            return PROFILE_IDENTITY_INVALID
+        if not profile_name_candidate(
+            primary, secondary, flags, output, output_capacity, written
         ):
             return PROFILE_IDENTITY_CAPACITY
         return PROFILE_IDENTITY_OK
