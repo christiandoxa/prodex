@@ -4784,3 +4784,22 @@ Validation passed:
 - `npm run docs` passed. `npm run test:changed` stopped at the existing repository-wide size guard before test selection: seven violations and 34 near-limit files against a budget of 32. No guard was weakened.
 - `node scripts/ci/mojo-production-share.mjs --check`: 27.85% Mojo (78,228 Mojo LOC, 202,626 Rust LOC), up about 0.02 percentage points from the previous checkpoint. The 7% release floor passes; the 75% project target remains unmet.
 - Checkpoint commit `fd6767e6c` was pushed to `origin/main`.
+
+## Profile-name and secret-reference policy hard replacements
+
+Profile-name fallback and suffix candidate formatting now use the existing
+`profile_identity.mojo` planner. API-key and Claude login share the same
+profile-identity adapter; Rust retains profile-state and filesystem availability
+checks through the caller callback. The new `secret_policy.mojo` kernel validates
+`SecretRef` provider, name, and optional version metadata as nonempty, printable
+ASCII components of at most 128 bytes. Secret storage and resolution remain in
+Rust, and neither path recomputes a Rust policy result after a Mojo error.
+
+Validation passed: the domain suite (26 tests), secret-store suite (56 tests),
+Mojo-core all-features suite (207 tests), app profile-name caller test,
+workspace and focused app Clippy with warnings denied, formatting, size and
+churn guards, Mojo ownership/authority/no-fallback guards, and diff hygiene.
+The canonical production-share check
+reports **79,571 Mojo LOC** and **203,726 Rust LOC**, or **28.09% Mojo**. The 7%
+release floor and ownership non-regression pass; the 75% campaign target remains
+in progress.

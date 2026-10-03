@@ -56,6 +56,26 @@ fn secret_ref_well_formed_rejects_non_printable_or_overlong_parts() {
 }
 
 #[test]
+fn secret_ref_validation_reaches_real_mojo_abi() {
+    assert!(
+        prodex_mojo_core::secret_policy::secret_reference_is_well_formed(
+            "vault",
+            "providers/openai",
+            Some("v1"),
+        )
+        .expect("Mojo secret-reference ABI should accept valid reference metadata")
+    );
+    assert!(
+        !prodex_mojo_core::secret_policy::secret_reference_is_well_formed(
+            "vault",
+            "providers/openai key",
+            None,
+        )
+        .expect("Mojo secret-reference ABI should reject whitespace in reference metadata")
+    );
+}
+
+#[test]
 fn secret_material_debug_display_do_not_expose_value_or_version() {
     let material = SecretMaterial::new("super-secret-token", Some("v7"));
 

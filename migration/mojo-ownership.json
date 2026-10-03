@@ -1071,6 +1071,16 @@
           "runtime_doctor_marker_summary_counts",
           "runtime_doctor_compact_exit_counts"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/secret_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "secret_reference_validation"
+        ]
       }
     ],
     "removed": [
