@@ -88,6 +88,7 @@ fn kiro_streaming_reader_stays_alive_while_worker_is_silent() {
 #[test]
 fn dropping_kiro_streaming_reader_cancels_silent_worker() {
     let (sender, receiver) = mpsc::sync_channel(4);
+    let (cancel_observed_sender, cancel_observed_receiver) = mpsc::sync_channel(1);
     let cancelled = Arc::new(AtomicBool::new(false));
     let reader = RuntimeKiroStreamingReader {
         receiver,
@@ -106,18 +107,22 @@ fn dropping_kiro_streaming_reader_cancels_silent_worker() {
         let mut child = child.spawn().unwrap();
         let result =
             runtime_kiro_next_stream_line(&mut child, &sender, &lines, &cancelled).unwrap_err();
+        cancel_observed_sender
+            .send(())
+            .expect("cancellation observation should reach the test");
         let _ = child.kill();
         let _ = child.wait();
         result
     });
 
     std::thread::sleep(Duration::from_millis(20));
-    let started = std::time::Instant::now();
     drop(reader);
+    cancel_observed_receiver
+        .recv_timeout(Duration::from_secs(1))
+        .expect("silent worker should observe reader cancellation within one second");
     let error = worker.join().unwrap();
 
     assert!(error.to_string().contains("consumer disconnected"));
-    assert!(started.elapsed() < Duration::from_secs(1));
 }
 
 #[test]
