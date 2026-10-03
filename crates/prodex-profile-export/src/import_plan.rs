@@ -1,240 +1,185 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 
-use anyhow::{Context, Result, bail};
-
-use crate::data_model::ImportIdentityTarget;
-use crate::{
-    ProfileImportAuthUpdatePlan, ProfileImportIdentity, ProfileImportPlan, ProfileImportPlanAction,
-    ProfileImportPlanProfile,
+use anyhow::{Result, bail};
+use prodex_mojo_core::profile_export::{
+    ProfileImportIdentityLookup, ProfileImportPlanAction as MojoImportAction,
+    ProfileImportPlanInput as MojoImportInput, ProfileImportPlanStep, ProfileImportPlanTarget,
+    profile_import_duplicate_name_index, profile_import_plan_step,
 };
 
-pub fn plan_profile_import<P>(
-    profiles: &[P],
+use crate::{
+    ProfileImportAuthUpdatePlan, ProfileImportIdentity, ProfileImportPlan, ProfileImportPlanAction,
+    ProfileImportPlanInput,
+};
+
+pub fn plan_profile_import(
+    profiles: &[ProfileImportPlanInput],
     existing_profile_supports_codex_runtime: impl Fn(&str) -> Option<bool>,
     mut find_existing_profile_by_identity: impl FnMut(&ProfileImportIdentity) -> Result<Option<String>>,
-) -> Result<ProfileImportPlan>
-where
-    P: ProfileImportPlanProfile,
-{
-    if profiles.is_empty() {
-        bail!("profile export bundle does not contain any profiles");
-    }
+) -> Result<ProfileImportPlan> {
+    let identity_keys = profiles
+        .iter()
+        .map(|profile| {
+            prodex_mojo_core::profile_identity::canonical_profile_identity_key(
+                profile.identity.account_id.as_deref(),
+                profile.identity.email.as_deref(),
+            )
+            .map_err(|error| anyhow::anyhow!("Mojo profile-import identity failed: {error:?}"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let existing_profiles = profiles
+        .iter()
+        .map(|profile| existing_profile_supports_codex_runtime(&profile.profile_name))
+        .collect::<Vec<_>>();
+    let mut identity_lookups = vec![None::<Option<String>>; profiles.len()];
 
-    let mut plan = ProfileImportPlanBuilder::new(profiles.len());
+    loop {
+        let inputs = profiles
+            .iter()
+            .enumerate()
+            .map(|(index, profile)| {
+                let identity_lookup = match identity_lookups[index].as_ref() {
+                    Some(Some(profile_name)) => {
+                        ProfileImportIdentityLookup::Found(profile_name.as_str())
+                    }
+                    Some(None) => ProfileImportIdentityLookup::Missing,
+                    None if profile.supports_codex_runtime && identity_keys[index].is_some() => {
+                        ProfileImportIdentityLookup::Pending
+                    }
+                    None => ProfileImportIdentityLookup::NotRequested,
+                };
+                MojoImportInput {
+                    profile_name: &profile.profile_name,
+                    identity_key: identity_keys[index].as_deref(),
+                    supports_codex_runtime: profile.supports_codex_runtime,
+                    existing_profile_supports_codex_runtime: existing_profiles[index],
+                    identity_lookup,
+                }
+            })
+            .collect::<Vec<_>>();
 
-    for (source_index, profile) in profiles.iter().enumerate() {
-        plan.add_profile(
-            source_index,
-            profile,
-            &existing_profile_supports_codex_runtime,
-            &mut find_existing_profile_by_identity,
-        )?;
-    }
-
-    Ok(plan.finish())
-}
-
-struct ProfileImportPlanBuilder {
-    seen_names: BTreeSet<String>,
-    identity_targets: BTreeMap<String, ImportIdentityTarget>,
-    actions: Vec<ProfileImportPlanAction>,
-    resolved_profile_names: BTreeMap<String, String>,
-    staged_profile_names: Vec<String>,
-}
-
-impl ProfileImportPlanBuilder {
-    fn new(capacity: usize) -> Self {
-        Self {
-            seen_names: BTreeSet::new(),
-            identity_targets: BTreeMap::new(),
-            actions: Vec::with_capacity(capacity),
-            resolved_profile_names: BTreeMap::new(),
-            staged_profile_names: Vec::new(),
-        }
-    }
-
-    fn add_profile<P, F, G>(
-        &mut self,
-        source_index: usize,
-        profile: &P,
-        existing_profile_supports_codex_runtime: &F,
-        find_existing_profile_by_identity: &mut G,
-    ) -> Result<()>
-    where
-        P: ProfileImportPlanProfile,
-        F: Fn(&str) -> Option<bool>,
-        G: FnMut(&ProfileImportIdentity) -> Result<Option<String>>,
-    {
-        let source_profile_name = profile.profile_name();
-        if !self.seen_names.insert(source_profile_name.to_string()) {
-            bail!(
-                "profile export bundle contains duplicate profile '{}'",
-                source_profile_name
-            );
-        }
-        let provider_supports_codex_runtime = profile.supports_codex_runtime();
-        let resolved_identity = profile.import_identity();
-        let identity_key = resolved_identity.target_key();
-
-        if let Some(existing_supports_codex_runtime) =
-            existing_profile_supports_codex_runtime(source_profile_name)
+        match profile_import_plan_step(&inputs)
+            .map_err(|error| anyhow::anyhow!("Mojo profile-import planner failed: {error:?}"))?
         {
-            if existing_supports_codex_runtime != provider_supports_codex_runtime {
+            ProfileImportPlanStep::Empty => {
+                bail!("profile export bundle does not contain any profiles");
+            }
+            ProfileImportPlanStep::DuplicateName(index) => {
+                let profile = &profiles[index];
                 bail!(
-                    "profile '{}' already exists with an incompatible provider",
-                    source_profile_name
+                    "profile export bundle contains duplicate profile '{}'",
+                    profile.profile_name
                 );
             }
-            self.record_update(
+            ProfileImportPlanStep::ProviderMismatch(index) => {
+                let profile = &profiles[index];
+                bail!(
+                    "profile '{}' already exists with an incompatible provider",
+                    profile.profile_name
+                );
+            }
+            ProfileImportPlanStep::LookupIdentity(index) => {
+                identity_lookups[index] = Some(find_existing_profile_by_identity(
+                    &profiles[index].identity,
+                )?);
+            }
+            ProfileImportPlanStep::Complete(mojo_actions) => {
+                return build_profile_import_plan(profiles, &identity_lookups, mojo_actions);
+            }
+        }
+    }
+}
+
+fn build_profile_import_plan(
+    profiles: &[ProfileImportPlanInput],
+    identity_lookups: &[Option<Option<String>>],
+    mojo_actions: Vec<MojoImportAction>,
+) -> Result<ProfileImportPlan> {
+    let mut actions = Vec::with_capacity(mojo_actions.len());
+    let mut resolved_profile_names = BTreeMap::new();
+
+    for action in mojo_actions {
+        match action {
+            MojoImportAction::UpdateExisting {
                 source_index,
-                source_profile_name,
-                source_profile_name,
-                identity_key,
-            );
-            return Ok(());
-        }
-
-        if provider_supports_codex_runtime
-            && (self.resolve_known_identity(source_index, source_profile_name, &identity_key)?
-                || self.resolve_external_identity(
+                target: ProfileImportPlanTarget::SourceProfile(target_index),
+            } => {
+                let target_profile_name = profiles
+                    .get(target_index)
+                    .ok_or_else(|| anyhow::anyhow!("Mojo import target index is invalid"))?
+                    .profile_name
+                    .clone();
+                resolved_profile_names.insert(
+                    profiles[source_index].profile_name.clone(),
+                    target_profile_name.clone(),
+                );
+                actions.push(ProfileImportPlanAction::UpdateExisting {
                     source_index,
-                    source_profile_name,
-                    &identity_key,
-                    &resolved_identity,
-                    find_existing_profile_by_identity,
-                )?)
-        {
-            return Ok(());
-        }
-
-        self.stage_new(
-            source_index,
-            source_profile_name,
-            provider_supports_codex_runtime,
-            identity_key,
-        );
-        Ok(())
-    }
-
-    fn resolve_known_identity(
-        &mut self,
-        source_index: usize,
-        source_profile_name: &str,
-        identity_key: &Option<String>,
-    ) -> Result<bool> {
-        let Some(identity_key) = identity_key.as_deref() else {
-            return Ok(false);
-        };
-        let Some(target) = self.identity_targets.get(identity_key).cloned() else {
-            return Ok(false);
-        };
-        match target {
-            ImportIdentityTarget::Existing(profile_name) => {
-                self.record_update(source_index, source_profile_name, &profile_name, None);
+                    target_profile_name,
+                });
             }
-            ImportIdentityTarget::PendingNew(staged_index) => {
-                self.actions
-                    .push(ProfileImportPlanAction::RewriteStagedAuth {
-                        source_index,
-                        staged_index,
-                    });
-                let target_profile_name = self
-                    .staged_profile_names
-                    .get(staged_index)
+            MojoImportAction::UpdateExisting {
+                source_index,
+                target: ProfileImportPlanTarget::ExistingProfileLookup(lookup_index),
+            } => {
+                let target_profile_name = identity_lookups
+                    .get(lookup_index)
+                    .and_then(Option::as_ref)
+                    .and_then(Option::as_ref)
                     .cloned()
-                    .with_context(|| {
-                        format!(
-                            "staged import profile index {} is missing for '{}'",
-                            staged_index, source_profile_name
-                        )
-                    })?;
-                self.resolved_profile_names
-                    .insert(source_profile_name.to_string(), target_profile_name);
+                    .ok_or_else(|| anyhow::anyhow!("Mojo import lookup target is missing"))?;
+                resolved_profile_names.insert(
+                    profiles[source_index].profile_name.clone(),
+                    target_profile_name.clone(),
+                );
+                actions.push(ProfileImportPlanAction::UpdateExisting {
+                    source_index,
+                    target_profile_name,
+                });
+            }
+            MojoImportAction::StageNew {
+                source_index,
+                staged_index,
+            } => {
+                let profile_name = profiles
+                    .get(source_index)
+                    .ok_or_else(|| anyhow::anyhow!("Mojo staged source index is invalid"))?
+                    .profile_name
+                    .clone();
+                resolved_profile_names.insert(profile_name.clone(), profile_name);
+                actions.push(ProfileImportPlanAction::StageNew {
+                    source_index,
+                    staged_index,
+                });
+            }
+            MojoImportAction::RewriteStagedAuth {
+                source_index,
+                staged_index,
+                target_source_index,
+            } => {
+                let source_name = profiles
+                    .get(source_index)
+                    .ok_or_else(|| anyhow::anyhow!("Mojo rewrite source index is invalid"))?
+                    .profile_name
+                    .clone();
+                let target_name = profiles
+                    .get(target_source_index)
+                    .ok_or_else(|| anyhow::anyhow!("Mojo rewrite target index is invalid"))?
+                    .profile_name
+                    .clone();
+                resolved_profile_names.insert(source_name, target_name);
+                actions.push(ProfileImportPlanAction::RewriteStagedAuth {
+                    source_index,
+                    staged_index,
+                });
             }
         }
-        Ok(true)
     }
 
-    fn resolve_external_identity<G>(
-        &mut self,
-        source_index: usize,
-        source_profile_name: &str,
-        identity_key: &Option<String>,
-        resolved_identity: &ProfileImportIdentity,
-        find_existing_profile_by_identity: &mut G,
-    ) -> Result<bool>
-    where
-        G: FnMut(&ProfileImportIdentity) -> Result<Option<String>>,
-    {
-        let Some(identity_key) = identity_key else {
-            return Ok(false);
-        };
-        let Some(existing_profile_name) = find_existing_profile_by_identity(resolved_identity)?
-        else {
-            return Ok(false);
-        };
-        self.record_update(
-            source_index,
-            source_profile_name,
-            &existing_profile_name,
-            Some(identity_key.clone()),
-        );
-        Ok(true)
-    }
-
-    fn stage_new(
-        &mut self,
-        source_index: usize,
-        source_profile_name: &str,
-        provider_supports_codex_runtime: bool,
-        identity_key: Option<String>,
-    ) {
-        let staged_index = self.staged_profile_names.len();
-        self.staged_profile_names
-            .push(source_profile_name.to_string());
-        self.actions.push(ProfileImportPlanAction::StageNew {
-            source_index,
-            staged_index,
-        });
-        self.resolved_profile_names.insert(
-            source_profile_name.to_string(),
-            source_profile_name.to_string(),
-        );
-        if provider_supports_codex_runtime && let Some(identity_key) = identity_key {
-            self.identity_targets
-                .insert(identity_key, ImportIdentityTarget::PendingNew(staged_index));
-        }
-    }
-
-    fn record_update(
-        &mut self,
-        source_index: usize,
-        source_profile_name: &str,
-        target_profile_name: &str,
-        identity_key: Option<String>,
-    ) {
-        self.actions.push(ProfileImportPlanAction::UpdateExisting {
-            source_index,
-            target_profile_name: target_profile_name.to_string(),
-        });
-        self.resolved_profile_names.insert(
-            source_profile_name.to_string(),
-            target_profile_name.to_string(),
-        );
-        if let Some(identity_key) = identity_key {
-            self.identity_targets.insert(
-                identity_key,
-                ImportIdentityTarget::Existing(target_profile_name.to_string()),
-            );
-        }
-    }
-
-    fn finish(self) -> ProfileImportPlan {
-        ProfileImportPlan {
-            actions: self.actions,
-            resolved_profile_names: self.resolved_profile_names,
-        }
-    }
+    Ok(ProfileImportPlan {
+        actions,
+        resolved_profile_names,
+    })
 }
 
 pub fn profile_import_identity_target_key(identity: &ProfileImportIdentity) -> Option<String> {
@@ -252,14 +197,14 @@ pub fn profile_import_identity_parts_target_key(
 pub fn validate_profile_import_source_names<'a>(
     profile_names: impl IntoIterator<Item = &'a str>,
 ) -> Result<()> {
-    let mut seen_names = BTreeSet::new();
-    for profile_name in profile_names {
-        if !seen_names.insert(profile_name.to_string()) {
-            bail!(
-                "profile export bundle contains duplicate profile '{}'",
-                profile_name
-            );
-        }
+    let profile_names = profile_names.into_iter().collect::<Vec<_>>();
+    if let Some(index) = profile_import_duplicate_name_index(&profile_names)
+        .map_err(|error| anyhow::anyhow!("Mojo profile-import name validation failed: {error:?}"))?
+    {
+        bail!(
+            "profile export bundle contains duplicate profile '{}'",
+            profile_names[index]
+        );
     }
     Ok(())
 }
