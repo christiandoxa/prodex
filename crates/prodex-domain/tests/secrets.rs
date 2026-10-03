@@ -40,7 +40,10 @@ fn secret_ref_well_formed_rejects_empty_or_whitespace_parts() {
 #[test]
 fn secret_ref_well_formed_rejects_non_printable_or_overlong_parts() {
     let overlong = "x".repeat(129);
+    let max_length = "x".repeat(128);
 
+    assert!(SecretRef::new("!", "~", Some("!")).is_well_formed());
+    assert!(SecretRef::new("vault", max_length.as_str(), None::<String>).is_well_formed());
     assert!(!SecretRef::new("vault\nprod", "providers/openai", None::<String>).is_well_formed());
     assert!(!SecretRef::new("välut", "providers/openai", None::<String>).is_well_formed());
     assert!(!SecretRef::new("vault", "providers/openai\u{7f}", None::<String>).is_well_formed());
