@@ -4764,3 +4764,22 @@ Validation passed:
 - `cargo fmt --all -- --check`, workspace Clippy with warnings denied, `npm run docs`, the Mojo no-fallback self-test and check, Mojo ownership and authority checks, and `git diff --check` — passed.
 - `node scripts/ci/mojo-production-share.mjs --check` — 27.83% Mojo; the 7% release floor passes and the 75% project target remains unmet.
 - `npm run test:changed` stopped at the size guard before test selection: it reported 7 violations and 34 near-limit Rust files against the budget of 32. No tests ran under that command.
+
+## Runtime-doctor compact-exit aggregation wave
+
+`runtime_doctor_compact_exit_counts` in `runtime_doctor_marker_summary.mojo`
+now owns the eleven compact-exit marker families, their legacy/current aliases,
+and fixed output slots. Rust batches raw summary counts and projects the Mojo
+slots into the existing diagnosis formatter. Filesystem and log parsing stay
+in their host owners.
+
+Validation passed:
+
+- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -p prodex-mojo-core --features mojo-rich --test runtime_doctor_markers -- --list` listed 6 tests; `PRODEX_MOJO_REQUIRED=1 cargo test --locked -p prodex-mojo-core --features mojo-rich --test runtime_doctor_markers -- --test-threads=1` passed 6/6, including all eleven compact-exit buckets, alias pairs, and the 257-marker batch boundary.
+- The first caller filter used `--exact` with an unqualified name and ran 0 tests, so it was discarded. `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-runtime-doctor --lib -- --list` listed the fully qualified production caller test and 39 other tests; `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-runtime-doctor --lib -- --test-threads=1` then passed all 40.
+- Sensitivity check: temporarily redirected the `committed` aliases to the adjacent output slot. The direct ABI test failed with the expected shifted totals; after restoring Mojo, it passed again.
+- `cargo fmt --check`, `mojo format mojo/prodex_core/runtime_doctor_marker_summary.mojo`, `git diff --check`, and `node scripts/ci/churn-hygiene.mjs --worktree` passed; 543 changed lines, maximum changed file 133 lines.
+- The Mojo no-fallback self-test and check, `npm run mojo:ownership`, and `npm run mojo:authority` passed.
+- `cargo clippy --locked -p prodex-mojo-core -p prodex-runtime-doctor --all-targets --all-features -- -D warnings` passed.
+- `npm run docs` passed. `npm run test:changed` stopped at the existing repository-wide size guard before test selection: seven violations and 34 near-limit files against a budget of 32. No guard was weakened.
+- `node scripts/ci/mojo-production-share.mjs --check`: 27.85% Mojo (78,228 Mojo LOC, 202,626 Rust LOC), up about 0.02 percentage points from the previous checkpoint. The 7% release floor passes; the 75% project target remains unmet.
