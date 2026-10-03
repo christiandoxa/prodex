@@ -4819,3 +4819,23 @@ targeted Markdown and runtime-policy checks, diff hygiene, and staged churn
 hygiene pass. The production-share check reports **79,641 Mojo LOC** and
 **203,712 Rust LOC**, or **28.11% Mojo**. The 7% floor and Mojo ownership
 non-regression pass; the 75% campaign target remains in progress.
+
+## Runtime-doctor last-marker line truncation wave
+
+Operation 23 in `runtime_doctor_render.mojo` now owns the 160-Unicode-scalar
+cap and ellipsis for `last_marker_line`. The shared bounded-text helper also
+preserves operation 22's request-timeline behavior. Rust keeps log redaction
+and trimming, then passes the borrowed text through the existing versioned
+renderer ABI; the Rust truncation loop is gone.
+
+Direct Mojo ABI coverage and the production caller test pass at the 160/161
+Unicode-scalar boundary. The existing request-timeline and marker-summary
+regressions pass after sharing the bounded-text helper. Rust formatting,
+workspace Clippy, Mojo no-fallback/authority/ownership guards, targeted
+Markdown/runtime-policy checks, and diff hygiene pass. The canonical report
+shows **79,661 Mojo LOC** and **203,712 Rust LOC**, or **28.11% Mojo**; the 7%
+floor and ownership non-regression pass, while the 75% target remains unmet.
+
+An initial attempt to run the marker-summary regression as `--test parsing`
+failed because the crate has no integration-test target by that name. The test
+is mounted as a library unit test; the corrected `--lib` command passed.

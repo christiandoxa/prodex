@@ -175,7 +175,7 @@ fn runtime_doctor_record_parsed_marker(
 ) {
     let (line_index, line_timestamp, line) = line;
     *summary.marker_counts.entry(marker.to_string()).or_insert(0) += 1;
-    summary.last_marker_line = Some(runtime_doctor_truncate_line(line, 160));
+    summary.last_marker_line = Some(runtime_doctor_truncate_line(line));
     if matches!(
         marker,
         "chain_retried_owner" | "chain_dead_upstream_confirmed" | "stale_continuation"
