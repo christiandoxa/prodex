@@ -1,8 +1,12 @@
-use super::{ensure_rich_abi, mojo_mut_pointer_address, mojo_pointer_address, view};
+use super::{
+    RichStringView, ensure_rich_abi, mojo_mut_pointer_address, mojo_pointer_address, view,
+};
 use crate::MojoError;
 
 const RUNTIME_DOCTOR_MARKER_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: i64 = 2;
+const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_MAX_BATCH: usize = 256;
 
 unsafe extern "C" {
     fn prodex_mojo_runtime_doctor_marker_known_v1(abi_version: i64, marker: u64, known: u64)
@@ -10,6 +14,13 @@ unsafe extern "C" {
     fn prodex_mojo_runtime_doctor_marker_semantics_v2(
         abi_version: i64,
         marker: u64,
+        output: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_marker_summary_counts_v1(
+        abi_version: i64,
+        marker_views: u64,
+        counts: u64,
+        count: i64,
         output: u64,
     ) -> i64;
     fn prodex_mojo_runtime_doctor_parse_message_v1(
@@ -57,6 +68,82 @@ pub struct RuntimeDoctorMarkerSemantics {
     pub selection_bucket: i64,
     pub route_action: i64,
     pub failure_class: i64,
+}
+
+/// Fixed marker totals used by the runtime-doctor summary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuntimeDoctorMarkerSummaryCounts {
+    pub selection_picked: usize,
+    pub selection_kept: usize,
+    pub selection_skipped: usize,
+    pub selection_blocked: usize,
+    pub failure_admission: usize,
+    pub failure_auth: usize,
+    pub failure_continuation: usize,
+    pub failure_persistence: usize,
+    pub failure_quota: usize,
+    pub failure_transport: usize,
+}
+
+/// Count fixed selection and failure-class marker totals through the Mojo reducer.
+pub fn runtime_doctor_marker_summary_counts<'a>(
+    marker_counts: impl IntoIterator<Item = (&'a str, usize)>,
+) -> Result<RuntimeDoctorMarkerSummaryCounts, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = [0_i64; 10];
+    let mut markers = Vec::with_capacity(RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_MAX_BATCH);
+    let mut counts = Vec::with_capacity(RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_MAX_BATCH);
+    for (marker, count) in marker_counts {
+        markers.push(view(marker));
+        counts.push(i64::try_from(count).map_err(|_| MojoError::InvalidInput)?);
+        if markers.len() == RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_MAX_BATCH {
+            runtime_doctor_marker_summary_counts_batch(&markers, &counts, &mut output)?;
+            markers.clear();
+            counts.clear();
+        }
+    }
+    if !markers.is_empty() {
+        runtime_doctor_marker_summary_counts_batch(&markers, &counts, &mut output)?;
+    }
+    Ok(RuntimeDoctorMarkerSummaryCounts {
+        selection_picked: usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?,
+        selection_kept: usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?,
+        selection_skipped: usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?,
+        selection_blocked: usize::try_from(output[3]).map_err(|_| MojoError::InvalidOutput)?,
+        failure_admission: usize::try_from(output[4]).map_err(|_| MojoError::InvalidOutput)?,
+        failure_auth: usize::try_from(output[5]).map_err(|_| MojoError::InvalidOutput)?,
+        failure_continuation: usize::try_from(output[6]).map_err(|_| MojoError::InvalidOutput)?,
+        failure_persistence: usize::try_from(output[7]).map_err(|_| MojoError::InvalidOutput)?,
+        failure_quota: usize::try_from(output[8]).map_err(|_| MojoError::InvalidOutput)?,
+        failure_transport: usize::try_from(output[9]).map_err(|_| MojoError::InvalidOutput)?,
+    })
+}
+
+fn runtime_doctor_marker_summary_counts_batch(
+    markers: &[RichStringView],
+    counts: &[i64],
+    output: &mut [i64; 10],
+) -> Result<(), MojoError> {
+    let count = i64::try_from(markers.len()).map_err(|_| MojoError::InvalidInput)?;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_summary_counts_v1(
+            RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_ABI_VERSION,
+            mojo_pointer_address(markers.as_ptr()),
+            mojo_pointer_address(counts.as_ptr()),
+            count,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            2 | 5 => MojoError::InvalidOutput,
+            3 => MojoError::Capacity,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    Ok(())
 }
 
 pub fn runtime_doctor_marker_semantics(
@@ -216,5 +303,53 @@ mod tests {
         assert!(runtime_doctor_marker_known("selection_pick").unwrap());
         assert!(runtime_doctor_marker_known("websocket_connect_overflow_rejected").unwrap());
         assert!(!runtime_doctor_marker_known("not_a_runtime_marker").unwrap());
+    }
+
+    #[test]
+    fn runtime_doctor_marker_summary_counts_batch_and_chunk_marker_totals() {
+        let long_marker = "x".repeat(257);
+        let mut marker_counts = vec![
+            ("selection_pick", 2),
+            ("selection_keep_current", 3),
+            ("selection_skip_current", 4),
+            ("local_selection_blocked", 5),
+            ("websocket_connect_overflow_rejected", 6),
+            ("profile_auth_proactive_sync_failed", 7),
+            ("compact_pressure_shed", 8),
+            ("continuation_journal_queue_backpressure", 9),
+            ("quota_critical_floor_before_send", 10),
+            ("local_rewrite_gemini_live_sidecar_session_error", 11),
+            (long_marker.as_str(), 12),
+            ("unknown_marker", 0),
+        ];
+        marker_counts.extend((0..300).map(|_| ("selection_pick", 1)));
+
+        let counts = runtime_doctor_marker_summary_counts(marker_counts).unwrap();
+
+        assert_eq!(counts.selection_picked, 302);
+        assert_eq!(counts.selection_kept, 3);
+        assert_eq!(counts.selection_skipped, 4);
+        assert_eq!(counts.selection_blocked, 15);
+        assert_eq!(counts.failure_admission, 6);
+        assert_eq!(counts.failure_auth, 7);
+        assert_eq!(counts.failure_continuation, 8);
+        assert_eq!(counts.failure_persistence, 9);
+        assert_eq!(counts.failure_quota, 15);
+        assert_eq!(counts.failure_transport, 11);
+    }
+
+    #[test]
+    fn runtime_doctor_marker_summary_counts_rejects_unrepresentable_and_overflowing_totals() {
+        assert_eq!(
+            runtime_doctor_marker_summary_counts([("selection_pick", usize::MAX)]),
+            Err(MojoError::InvalidInput),
+        );
+        assert_eq!(
+            runtime_doctor_marker_summary_counts([
+                ("selection_pick", i64::MAX as usize),
+                ("selection_pick", 1),
+            ]),
+            Err(MojoError::InvalidOutput),
+        );
     }
 }

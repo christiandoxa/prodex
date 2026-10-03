@@ -25,14 +25,6 @@ pub(super) fn runtime_doctor_record_selection_summary(
     let Some(bucket) = runtime_doctor_selection_bucket(marker) else {
         return;
     };
-    match bucket {
-        "picked" => summary.selection_summary.picked += 1,
-        "kept" => summary.selection_summary.kept += 1,
-        "skipped" => summary.selection_summary.skipped += 1,
-        "blocked" => summary.selection_summary.blocked += 1,
-        _ => {}
-    }
-
     let profile = fields.get("profile").filter(|value| !value.is_empty());
     let route = fields.get("route").filter(|value| !value.is_empty());
     if matches!(bucket, "picked" | "kept") {

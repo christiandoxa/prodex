@@ -32,6 +32,13 @@ struct View {
 unsafe extern "C" {
     fn prodex_mojo_runtime_doctor_marker_known_v1(abi: i64, marker: u64, output: u64) -> i64;
     fn prodex_mojo_runtime_doctor_marker_semantics_v2(abi: i64, marker: u64, output: u64) -> i64;
+    fn prodex_mojo_runtime_doctor_marker_summary_counts_v1(
+        abi: i64,
+        markers: u64,
+        counts: u64,
+        count: i64,
+        output: u64,
+    ) -> i64;
 }
 
 #[test]
@@ -96,4 +103,99 @@ fn long_marker_support_does_not_accept_invalid_utf8_or_abi() {
             assert_eq!(output, [77; 4]);
         }
     }
+}
+
+#[test]
+fn marker_summary_counts_abi_tags_fixed_selection_and_failure_totals() {
+    let inputs = [
+        ("selection_pick", 2_i64),
+        ("selection_keep_current", 3),
+        ("selection_skip_current", 4),
+        ("local_selection_blocked", 5),
+        ("websocket_connect_overflow_rejected", 6),
+        ("profile_auth_proactive_sync_failed", 7),
+        ("compact_pressure_shed", 8),
+        ("continuation_journal_queue_backpressure", 9),
+        ("quota_critical_floor_before_send", 10),
+        ("local_rewrite_gemini_live_sidecar_session_error", 11),
+    ];
+    let views = inputs
+        .iter()
+        .map(|(marker, _)| View {
+            ptr: marker.as_ptr() as u64,
+            len: marker.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let counts = inputs.map(|(_, count)| count);
+    let mut output = [0_i64; 10];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_summary_counts_v1(
+            1,
+            views.as_ptr() as u64,
+            counts.as_ptr() as u64,
+            views.len() as i64,
+            output.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(status, 0);
+    assert_eq!(output, [2, 3, 4, 15, 6, 7, 8, 9, 15, 11]);
+
+    let mut unchanged = [77_i64; 10];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_summary_counts_v1(
+            9,
+            views.as_ptr() as u64,
+            counts.as_ptr() as u64,
+            views.len() as i64,
+            unchanged.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(status, 4);
+    assert_eq!(unchanged, [77; 10]);
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_summary_counts_v1(
+            1,
+            views.as_ptr() as u64,
+            counts.as_ptr() as u64,
+            257,
+            unchanged.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(status, 3);
+    assert_eq!(unchanged, [77; 10]);
+
+    let mut negative_accumulator = [-1_i64; 10];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_summary_counts_v1(
+            1,
+            views.as_ptr() as u64,
+            counts.as_ptr() as u64,
+            views.len() as i64,
+            negative_accumulator.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(status, 2);
+    assert_eq!(negative_accumulator, [-1; 10]);
+
+    let overflow_inputs = [("selection_pick", i64::MAX), ("selection_pick", 1)];
+    let overflow_views = overflow_inputs
+        .iter()
+        .map(|(marker, _)| View {
+            ptr: marker.as_ptr() as u64,
+            len: marker.len() as u64,
+        })
+        .collect::<Vec<_>>();
+    let overflow_counts = overflow_inputs.map(|(_, count)| count);
+    let mut overflow_accumulator = [0_i64; 10];
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_marker_summary_counts_v1(
+            1,
+            overflow_views.as_ptr() as u64,
+            overflow_counts.as_ptr() as u64,
+            overflow_views.len() as i64,
+            overflow_accumulator.as_mut_ptr() as u64,
+        )
+    };
+    assert_eq!(status, 5);
+    assert!(overflow_accumulator.iter().all(|count| *count >= 0));
 }

@@ -424,3 +424,37 @@ fn runtime_doctor_failure_class_counts_preserve_categories_and_totals() {
     let empty = summarize_runtime_log_tail(br#"{"event":"selection_pick"}"#);
     assert!(empty.failure_class_counts.is_empty());
 }
+
+#[test]
+fn runtime_doctor_marker_summary_reducer_preserves_caps_synthesis_order_and_unicode() {
+    let route = "🧭".repeat(60);
+    let mut lines = (0..24)
+        .map(|_| {
+            format!(
+                r#"{{"event":"selection_pick","fields":{{"request_id":"req-1","profile":"alpha","route":"{route}"}}}}"#
+            )
+        })
+        .collect::<Vec<_>>();
+    lines.push(
+        r#"{"event":"responses_pre_send_skip","fields":{"request_id":"req-1","profile":"beta","route":"/responses","reason":"quota_critical_floor_before_send"}}"#.to_string(),
+    );
+
+    let summary = summarize_runtime_log_tail(lines.join("\n").as_bytes());
+
+    assert_eq!(summary.selection_summary.picked, 24);
+    assert_eq!(summary.selection_summary.blocked, 1);
+    assert_eq!(summary.latest_request_timeline.len(), 12);
+    assert_eq!(summary.route_profile_events.len(), 20);
+    assert_eq!(summary.latest_request_id.as_deref(), Some("req-1"));
+    assert_eq!(
+        summary.latest_request_timeline[0].detail,
+        format!("profile=alpha route={}...", "🧭".repeat(45))
+    );
+    assert_eq!(
+        summary
+            .marker_counts
+            .get("quota_critical_floor_before_send"),
+        Some(&1)
+    );
+    assert_eq!(summary.failure_class_counts.get("quota"), Some(&2));
+}

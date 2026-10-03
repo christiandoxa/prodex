@@ -13,6 +13,10 @@ const RESPONSE_METADATA_MOJO_FILE = "mojo/prodex_core/runtime_response_metadata.
 const DOCTOR_MARKER_ABI_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_marker.rs";
 const DOCTOR_MARKER_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs";
 const DOCTOR_MARKER_ABI_MOJO_FILE = "mojo/prodex_core/runtime_doctor_marker.mojo";
+const DOCTOR_MARKER_SUMMARY_COUNTS_MOJO_FILE = "mojo/prodex_core/runtime_doctor_marker_summary.mojo";
+const DOCTOR_MARKER_SUMMARY_COUNTS_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs";
+const DOCTOR_MARKER_SUMMARY_COUNTS_SELECTION_FILE = "crates/prodex-runtime-doctor/src/parsing/selection.rs";
+const DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE = "crates/prodex-runtime-doctor/tests/src/parsing.rs";
 const DEEPSEEK_INPUT_HISTORY_FILE = "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs";
 const PROMOTED_FILES = [
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
@@ -75,6 +79,10 @@ const PROMOTED_FILES = [
   DOCTOR_MARKER_ABI_ADAPTER_FILE,
   DOCTOR_MARKER_ABI_TEST_FILE,
   DOCTOR_MARKER_ABI_MOJO_FILE,
+  DOCTOR_MARKER_SUMMARY_COUNTS_MOJO_FILE,
+  DOCTOR_MARKER_SUMMARY_COUNTS_CONSUMER_FILE,
+  DOCTOR_MARKER_SUMMARY_COUNTS_SELECTION_FILE,
+  DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE,
   "crates/prodex-session-store/src/session_selector.rs",
   "crates/prodex-session-store/src/report.rs",
   "crates/prodex-mojo-core/src/runtime_lineage.rs",
@@ -2876,9 +2884,58 @@ export function findViolations(files) {
     if (filePath !== RUNTIME_DOCTOR_FAILURE_CLASS_FILE) return [];
     const body = contents.match(/\bfn\s+runtime_doctor_failure_class_counts\s*\([^]*?^\}/mu)?.[0];
     const markerLiteral = /"(?:runtime_proxy_[a-z0-9_]+|profile_[a-z0-9_]+|websocket_[a-z0-9_]+|compact_[a-z0-9_]+|local_rewrite_[a-z0-9_]+|previous_response_[a-z0-9_]+|chain_[a-z0-9_]+|stale_continuation|state_save_[a-z0-9_]+|continuation_journal_[a-z0-9_]+|upstream_[a-z0-9_]+|stream_read_error|local_writer_error|selection_skip_sync_probe|local_selection_blocked|quota_blocked|quota_critical_floor_before_send|responses_pre_send_skip)"/u;
-    return body?.includes("runtime_doctor_marker_semantics(") && !markerLiteral.test(body)
+    const semanticOwner = body?.includes("prodex_mojo_core::rich::runtime_doctor_marker_semantics(") ||
+      ["admission", "auth", "continuation", "persistence", "quota", "transport"]
+        .every((label) => body?.includes(`counts.failure_${label}`));
+    return semanticOwner && !markerLiteral.test(body)
       ? []
       : [`${filePath}: failure-class counts must use Mojo tags without Rust marker lists`];
+  });
+  const doctorMarkerSummaryCountsViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === DOCTOR_MARKER_SUMMARY_COUNTS_CONSUMER_FILE) {
+      const reducer = contents.match(/\bfn\s+runtime_doctor_marker_summary_counts\s*\([^]*?^\}/mu)?.[0];
+      const finalize = contents.match(/\bpub fn runtime_doctor_finalize_log_summary\s*\([^]*?^\}/mu)?.[0];
+      if (!finalize) {
+        return contents.includes("runtime_doctor_facet_count(summary")
+          ? [`${filePath}: fixed selection and failure totals must use the Mojo batch reducer before and after quota-floor synthesis`]
+          : [];
+      }
+      return reducer?.includes("prodex_mojo_core::rich::runtime_doctor_marker_summary_counts(") &&
+          finalize.includes("runtime_doctor_marker_summary_counts(summary)") &&
+          finalize.includes("runtime_doctor_failure_class_counts(runtime_doctor_marker_summary_counts(summary))") &&
+          !/for\s*\(\s*\(\s*marker\s*,\s*count\s*\)\s*in\s*&summary\.marker_counts/u.test(contents)
+        ? []
+        : [`${filePath}: fixed selection and failure totals must use the Mojo batch reducer before and after quota-floor synthesis`];
+    }
+    if (filePath === DOCTOR_MARKER_SUMMARY_COUNTS_SELECTION_FILE) {
+      const body = contents.match(/\bpub\(super\) fn runtime_doctor_record_selection_summary\s*\([^]*?^\}/mu)?.[0];
+      return body && /summary\.selection_summary\.(?:picked|kept|skipped|blocked)\s*\+=/u.test(body)
+        ? [`${filePath}: selection bucket totals must be reduced from marker counts, not incremented per event`]
+        : [];
+    }
+    if (filePath === DOCTOR_MARKER_ABI_ADAPTER_FILE &&
+        (!contents.includes("prodex_mojo_runtime_doctor_marker_summary_counts_v1(") ||
+          !contents.includes("RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_ABI_VERSION: i64 = 1") ||
+          !contents.includes("RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_MAX_BATCH: usize = 256"))) {
+      return [`${filePath}: marker summary adapter must use the versioned bounded Mojo ABI`];
+    }
+    if (filePath === DOCTOR_MARKER_SUMMARY_COUNTS_MOJO_FILE &&
+        (!contents.includes('@export("prodex_mojo_runtime_doctor_marker_summary_counts_v1")') ||
+          !contents.includes("RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_ABI_VERSION: Int64 = 1") ||
+          !contents.includes("RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_MAX_BATCH: Int64 = 256") ||
+          !contents.includes("runtime_doctor_marker_selection_bucket(marker)") ||
+          !contents.includes("runtime_doctor_marker_failure_class(marker)"))) {
+      return [`${filePath}: fixed marker totals must retain their versioned bounded Mojo reducer`];
+    }
+    if (filePath === DOCTOR_MARKER_ABI_TEST_FILE &&
+        !contents.includes("marker_summary_counts_abi_tags_fixed_selection_and_failure_totals")) {
+      return [`${filePath}: direct ABI coverage must exercise fixed selection and failure totals`];
+    }
+    if (filePath === DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE &&
+        !contents.includes("runtime_doctor_marker_summary_reducer_preserves_caps_synthesis_order_and_unicode")) {
+      return [`${filePath}: runtime-doctor caller coverage must protect reducer caps, synthesis order, and Unicode truncation`];
+    }
+    return [];
   });
   const responseMetadataViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === RESPONSE_METADATA_FILE) {
@@ -3673,7 +3730,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
+    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
@@ -4072,6 +4129,23 @@ function selfTest() {
   assert.match(findViolations([[RUNTIME_DOCTOR_FAILURE_CLASS_FILE,
     "fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) {\n  let classes = [(\"admission\", \"runtime_proxy_queue_overloaded\")];\n  prodex_mojo_core::rich::runtime_doctor_marker_semantics(marker);\n}"]]).join("\n"),
   /failure-class counts must use Mojo tags without Rust marker lists/u);
+  assert.match(findViolations([[DOCTOR_MARKER_SUMMARY_COUNTS_CONSUMER_FILE,
+    "pub fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSummary) {\n}\n"]]).join("\n"),
+  /fixed selection and failure totals must use the Mojo batch reducer/u);
+  assert.match(findViolations([[DOCTOR_MARKER_SUMMARY_COUNTS_CONSUMER_FILE,
+    "fn runtime_doctor_failure_class_counts() {\n  counts.failure_admission; counts.failure_auth; counts.failure_continuation; counts.failure_persistence; counts.failure_quota; counts.failure_transport;\n}\nruntime_doctor_facet_count(summary);\n"]]).join("\n"),
+  /fixed selection and failure totals must use the Mojo batch reducer/u);
+  assert.match(findViolations([[DOCTOR_MARKER_SUMMARY_COUNTS_SELECTION_FILE,
+    "pub(super) fn runtime_doctor_record_selection_summary(summary: &mut RuntimeDoctorSummary) {\n  summary.selection_summary.picked += 1;\n}\n"]]).join("\n"),
+  /selection bucket totals must be reduced from marker counts/u);
+  assert.match(findViolations([[DOCTOR_MARKER_ABI_ADAPTER_FILE, "fn marker_counts() {}"]]).join("\n"),
+  /marker summary adapter must use the versioned bounded Mojo ABI/u);
+  assert.match(findViolations([[DOCTOR_MARKER_SUMMARY_COUNTS_MOJO_FILE, "fn marker_counts() {}"]]).join("\n"),
+  /fixed marker totals must retain their versioned bounded Mojo reducer/u);
+  assert.match(findViolations([[DOCTOR_MARKER_ABI_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
+  /direct ABI coverage must exercise fixed selection and failure totals/u);
+  assert.match(findViolations([[DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
+  /runtime-doctor caller coverage must protect reducer caps, synthesis order, and Unicode truncation/u);
   assert.deepEqual(findViolations([[RESPONSE_METADATA_FILE,
     "fn runtime_response_metadata_from_value(value: &Value) -> Plan {\n  prodex_mojo_core::json::runtime_response_metadata(&nodes, &number_texts)\n}"]]), []);
   assert.match(findViolations([[RESPONSE_METADATA_FILE,
