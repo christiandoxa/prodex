@@ -1874,6 +1874,17 @@ export function findViolations(files) {
       if (/\bfn\s+secret_ref_part_is_well_formed\s*\(/u.test(contents)) {
         violations.push(filePath + ": contains restored Rust secret-reference validation");
       }
+      const rotation = contents.match(
+        /\bpub fn validate\(&self\) -> Result<\(\), SecretRotationPolicyError> \{[^]*?^    \}/mu,
+      )?.[0];
+      if (!rotation?.includes(
+        "prodex_mojo_core::secret_policy::secret_rotation_policy_decision(",
+      )) {
+        violations.push(filePath + ": SecretRotationPolicy::validate must retain Mojo policy");
+      }
+      if (/\bself\.max_age_seconds\s*==\s*0|\bself\.overlap_seconds\s*>=\s*self\.max_age_seconds/u.test(rotation ?? "")) {
+        violations.push(filePath + ": contains restored Rust secret rotation bounds policy");
+      }
       return violations;
     }
     if (filePath !== PROFILE_IDENTITY_FILE) return [];
@@ -4059,8 +4070,20 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-domain/src/secrets.rs",
     "pub fn is_well_formed(&self) -> bool { true }\nfn secret_ref_part_is_well_formed() {}"]]).join("\n"),
   /SecretRef::is_well_formed must retain Mojo validation/u);
-  assert.deepEqual(findViolations([["crates/prodex-domain/src/secrets.rs",
-    "pub fn is_well_formed(&self) -> bool {\n        prodex_mojo_core::secret_policy::secret_reference_is_well_formed(provider, name, version)\n    }"]]), []);
+  const secretPolicyConsumer = [
+    "pub fn is_well_formed(&self) -> bool {",
+    "    prodex_mojo_core::secret_policy::secret_reference_is_well_formed(provider, name, version)",
+    "    }",
+    "pub fn validate(&self) -> Result<(), SecretRotationPolicyError> {",
+    "    prodex_mojo_core::secret_policy::secret_rotation_policy_decision(self.max_age_seconds, self.overlap_seconds)",
+    "    }",
+  ].join("\n");
+  assert.deepEqual(findViolations([["crates/prodex-domain/src/secrets.rs", secretPolicyConsumer]]), []);
+  assert.match(findViolations([["crates/prodex-domain/src/secrets.rs",
+    secretPolicyConsumer.replace(
+      "prodex_mojo_core::secret_policy::secret_rotation_policy_decision(self.max_age_seconds, self.overlap_seconds)",
+      "if self.max_age_seconds == 0 { return Err(ZeroMaxAge); }",
+    )]]).join("\n"), /SecretRotationPolicy::validate must retain Mojo policy/u);
   const governanceOrderConsumer = [
     "governance_finding_minimum_classification(",
     "governance_findings_exceed_classification(",

@@ -1136,7 +1136,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "secret_reference_validation"
+          "secret_reference_validation",
+          "secret_rotation_policy_validation"
         ]
       }
     ],
@@ -1255,6 +1256,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "pass borrowed reference components through the versioned ABI and map the validated result to bool"
+    },
+    {
+      "name": "secret_rotation_policy_validation",
+      "domain": "secrets/rotation",
+      "introduced_in": "0.435.2",
+      "baseline_state": "Rust checked nonzero maximum age and overlap shorter than maximum age, with zero-age error precedence",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_secret_rotation_policy_validate_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/secret_policy.mojo",
+      "consumer": "crates/prodex-domain/src/secrets.rs",
+      "consumer_marker": "prodex_mojo_core::secret_policy::secret_rotation_policy_decision(",
+      "production_consumers": [
+        "crates/prodex-domain/src/secrets.rs"
+      ],
+      "production_reachability_test": "crates/prodex-domain/tests/secrets.rs",
+      "rust_owner_before": "SecretRotationPolicy::validate maximum-age and overlap bounds",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct real-Mojo and domain caller tests cover precedence, invalid bounds, and u64 extremes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "map a validated Mojo decision tag to the existing domain error enum"
     },
     {
       "name": "critical_signal_text_grouping",
