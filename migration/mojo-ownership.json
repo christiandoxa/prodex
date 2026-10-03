@@ -1060,6 +1060,16 @@
           "gemini_tool_name_policy",
           "gemini3_model_toolset_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_doctor_marker_summary_counts"
+        ]
       }
     ],
     "removed": [
@@ -4421,6 +4431,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "marker selection, numeric duration parsing, duration clamping, and caller-specific retry policy mapping"
+    },
+    {
+      "name": "runtime_doctor_marker_summary_counts",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust per-marker selection and failure-class counter reductions",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_marker_summary_counts_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker_summary.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_marker_summary_counts",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
+      "rust_owner_before": "fixed selection-bucket and failure-class marker counting loops",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct ABI and runtime-doctor parsing fixtures cover fixed totals, caps, Unicode truncation, and quota-floor synthesis order",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "bounded marker/count preparation, validated fixed-slot mapping, DTO projection, and quota-floor synthetic marker sequencing"
     }
   ],
   "rust_semantic_reductions": [

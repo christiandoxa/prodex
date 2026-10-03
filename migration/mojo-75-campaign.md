@@ -4728,3 +4728,22 @@ checked for this checkpoint. `npm run test:changed` passes churn hygiene, then
 stops at the existing size guard with seven violations and 34 near-limit files
 against a budget of 32; changed-test selection does not run. No guard was
 weakened.
+
+## Runtime doctor marker-summary wave
+
+`runtime_doctor_marker_summary.mojo` now owns bounded batch reduction of log
+marker counts into the four selection totals and six failure-class totals. The
+production consumer is `runtime_doctor_finalize_log_summary` in
+`crates/prodex-runtime-doctor/src/diagnosis/final_summary/log_summary.rs`.
+Rust retains log parsing and quota-floor reason-facet extraction. Selection
+totals are reduced before the synthesized quota-floor marker is added; failure
+totals are reduced after it is added, preserving the existing summary contract.
+
+Validation passed:
+
+- `cargo test --locked -q -p prodex-mojo-core --features mojo-rich --test runtime_doctor_markers marker_summary_counts_abi_tags_fixed_selection_and_failure_totals` (1 test).
+- `cargo test --locked -q -p prodex-runtime-doctor --lib runtime_doctor_marker_summary_reducer_preserves_caps_synthesis_order_and_unicode` (1 test).
+- `cargo clippy --locked -p prodex-mojo-core -p prodex-runtime-doctor --all-targets --all-features -- -D warnings`.
+- `cargo fmt --check`, `git diff --check`, and `node scripts/ci/churn-hygiene.mjs --worktree --check`.
+- `node scripts/ci/mojo-no-fallback-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, and `node scripts/ci/mojo-authority-guard.mjs`.
+- `node scripts/ci/mojo-production-share.mjs --check`: 27.81% Mojo (78,073 Mojo LOC, 202,617 Rust LOC); the 7% release floor passes, and the 75% project target remains unmet.

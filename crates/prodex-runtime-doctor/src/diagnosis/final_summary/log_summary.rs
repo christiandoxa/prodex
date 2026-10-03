@@ -5,34 +5,33 @@ use crate::RuntimeDoctorSummary;
 use super::super::marker_accessors::*;
 use super::runtime_doctor_top_facet;
 
-fn runtime_doctor_failure_class_counts(summary: &RuntimeDoctorSummary) -> BTreeMap<String, usize> {
-    let mut counts = BTreeMap::<&str, usize>::new();
-    for (marker, count) in &summary.marker_counts {
-        if *count == 0 {
-            continue;
-        }
-        let semantics = prodex_mojo_core::rich::runtime_doctor_marker_semantics(marker)
-            .expect("Mojo runtime-doctor marker semantics returned invalid output");
-        let label = match semantics.failure_class {
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_ADMISSION => "admission",
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_AUTH => "auth",
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_CONTINUATION => {
-                "continuation"
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_PERSISTENCE => {
-                "persistence"
-            }
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_QUOTA => "quota",
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_TRANSPORT => "transport",
-            prodex_mojo_core::rich::RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_NONE => continue,
-            _ => unreachable!("validated Mojo runtime-doctor failure class"),
-        };
-        *counts.entry(label).or_default() += *count;
-    }
-    counts
-        .into_iter()
-        .map(|(label, count)| (label.to_string(), count))
-        .collect()
+fn runtime_doctor_marker_summary_counts(
+    summary: &RuntimeDoctorSummary,
+) -> prodex_mojo_core::rich::RuntimeDoctorMarkerSummaryCounts {
+    prodex_mojo_core::rich::runtime_doctor_marker_summary_counts(
+        summary
+            .marker_counts
+            .iter()
+            .map(|(marker, count)| (marker.as_str(), *count)),
+    )
+    .expect("Mojo runtime-doctor summary counter returned invalid output")
+}
+
+fn runtime_doctor_failure_class_counts(
+    counts: prodex_mojo_core::rich::RuntimeDoctorMarkerSummaryCounts,
+) -> BTreeMap<String, usize> {
+    [
+        ("admission", counts.failure_admission),
+        ("auth", counts.failure_auth),
+        ("continuation", counts.failure_continuation),
+        ("persistence", counts.failure_persistence),
+        ("quota", counts.failure_quota),
+        ("transport", counts.failure_transport),
+    ]
+    .into_iter()
+    .filter(|(_, count)| *count > 0)
+    .map(|(label, count)| (label.to_string(), count))
+    .collect()
 }
 
 pub fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSummary) {
@@ -87,6 +86,11 @@ pub fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSummary) {
                     "lag_ms",
                 )
             });
+    let selection_counts = runtime_doctor_marker_summary_counts(summary);
+    summary.selection_summary.picked = selection_counts.selection_picked;
+    summary.selection_summary.kept = selection_counts.selection_kept;
+    summary.selection_summary.skipped = selection_counts.selection_skipped;
+    summary.selection_summary.blocked = selection_counts.selection_blocked;
     // Count quota-floor pre-send skips via the reason facet so the doctor keeps
     // exposing the hardening signal even though the runtime logs it as a reason,
     // not as a standalone marker.
@@ -103,5 +107,6 @@ pub fn runtime_doctor_finalize_log_summary(summary: &mut RuntimeDoctorSummary) {
     summary.top_client = runtime_doctor_top_facet(summary, "client");
     summary.top_tool_surface = runtime_doctor_top_facet(summary, "tool_surface");
     summary.top_compat_warning = runtime_doctor_top_facet(summary, "warning");
-    summary.failure_class_counts = runtime_doctor_failure_class_counts(summary);
+    summary.failure_class_counts =
+        runtime_doctor_failure_class_counts(runtime_doctor_marker_summary_counts(summary));
 }
