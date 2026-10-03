@@ -2,7 +2,8 @@ use super::{
     RuntimeRotationProxyShared, RuntimeRouteKind, await_runtime_proxy_async_task,
     clear_runtime_recovered_profiles, runtime_profile_recovery_wait_for_route, runtime_proxy_log,
     runtime_proxy_log_field, runtime_proxy_precommit_budget_exhausted_for_route,
-    runtime_proxy_structured_log_message, runtime_route_kind_label,
+    runtime_proxy_structured_log_message, runtime_route_has_retryable_profile,
+    runtime_route_kind_label,
 };
 use anyhow::Result;
 use std::collections::BTreeSet;
@@ -23,9 +24,9 @@ pub(super) struct RuntimePrecommitLoopState<F> {
     pub saw_transport_failure: bool,
     pub saw_transport_recovery_candidate: bool,
     pub saw_overload_failure: bool,
+    pub saw_rate_limit_failure: bool,
     pub cold_start_probe_waited: bool,
     pub recovery_sweeps: usize,
-    pub recovery_started_at: Option<Instant>,
     pub last_failure: Option<(F, bool)>,
 }
 
@@ -40,9 +41,9 @@ impl<F> RuntimePrecommitLoopState<F> {
             saw_transport_failure: false,
             saw_transport_recovery_candidate: false,
             saw_overload_failure: false,
+            saw_rate_limit_failure: false,
             cold_start_probe_waited: false,
             recovery_sweeps: 0,
-            recovery_started_at: None,
             last_failure: None,
         }
     }
@@ -50,6 +51,7 @@ impl<F> RuntimePrecommitLoopState<F> {
     pub fn budget_exhausted(
         &self,
         shared: &RuntimeRotationProxyShared,
+        route_kind: RuntimeRouteKind,
         continuation: bool,
         pressure_mode: bool,
     ) -> Result<bool> {
@@ -60,6 +62,10 @@ impl<F> RuntimePrecommitLoopState<F> {
             continuation,
             pressure_mode,
         )?;
+        if self.saw_transient_failure() && runtime_route_has_retryable_profile(shared, route_kind)?
+        {
+            return Ok(false);
+        }
         if self.recovery_sweeps == 0 {
             if self.selection_attempts < Self::profile_count(shared)? {
                 return Ok(false);
@@ -73,7 +79,7 @@ impl<F> RuntimePrecommitLoopState<F> {
                 pressure_mode,
                 profile_count,
             );
-        Ok(self.selection_attempts >= attempt_limit || self.recovery_budget_exhausted())
+        Ok(self.selection_attempts >= attempt_limit)
     }
 
     fn profile_count(shared: &RuntimeRotationProxyShared) -> Result<usize> {
@@ -117,18 +123,12 @@ impl<F> RuntimePrecommitLoopState<F> {
         self.saw_overload_failure = true;
     }
 
-    fn saw_transient_failure(&self) -> bool {
-        self.saw_overload_failure || self.saw_transport_recovery_candidate
+    pub fn record_rate_limit_failure(&mut self) {
+        self.saw_rate_limit_failure = true;
     }
 
-    pub fn recovery_budget_exhausted(&self) -> bool {
-        self.recovery_sweeps >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
-            || self.recovery_started_at.is_some_and(|started_at| {
-                started_at.elapsed()
-                    >= Duration::from_millis(
-                        runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
-                    )
-            })
+    fn saw_transient_failure(&self) -> bool {
+        self.saw_overload_failure || self.saw_rate_limit_failure || self.saw_transport_failure
     }
 
     pub fn record_recovery_sweep(&mut self) {
@@ -141,13 +141,11 @@ impl<F> RuntimePrecommitLoopState<F> {
         shared: &RuntimeRotationProxyShared,
         route_kind: RuntimeRouteKind,
     ) -> Result<bool> {
-        if !self.saw_transient_failure() || self.recovery_budget_exhausted() {
+        if !self.saw_transient_failure()
+            || !runtime_route_has_retryable_profile(shared, route_kind)?
+        {
             return Ok(false);
         }
-        let recovery_started_at = *self.recovery_started_at.get_or_insert_with(Instant::now);
-        let recovery_budget =
-            Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
-                .saturating_sub(recovery_started_at.elapsed());
         let recovered = clear_runtime_recovered_profiles(
             shared,
             &mut self.excluded_profiles,
@@ -175,11 +173,11 @@ impl<F> RuntimePrecommitLoopState<F> {
                 let now = chrono::Local::now().timestamp();
                 Duration::from_secs(u64::try_from(until.saturating_sub(now)).unwrap_or(0))
                     .saturating_add(Duration::from_secs(1))
-                    .min(recovery_budget)
+                    .min(Duration::from_secs(30))
             })
             .filter(|wait| !wait.is_zero())
         else {
-            if self.saw_overload_failure && !recovery_budget.is_zero() {
+            if self.saw_overload_failure {
                 let exponent = self.recovery_sweeps.min(5) as u32;
                 let base_ms = 250_u64.saturating_mul(1_u64 << exponent);
                 let jitter_ms = (request_id.saturating_add(self.recovery_sweeps as u64)) % 251;
@@ -281,15 +279,16 @@ mod tests {
     }
 
     #[test]
-    fn overload_recovery_sweeps_are_bounded() {
+    fn recovery_sweeps_track_retry_epochs_without_becoming_a_terminal_cap() {
         let mut state = RuntimePrecommitLoopState::<()>::new();
 
         state.record_overload_failure();
-        state.record_recovery_sweep();
-        assert!(!state.recovery_budget_exhausted());
-        state.record_recovery_sweep();
+        for _ in 0..8 {
+            state.record_recovery_sweep();
+        }
 
-        assert!(state.recovery_budget_exhausted());
+        assert_eq!(state.recovery_sweeps, 8);
+        assert!(state.saw_transient_failure());
     }
 
     #[test]

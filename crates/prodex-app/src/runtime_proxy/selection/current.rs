@@ -129,6 +129,44 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
             }),
         )
     };
+    if runtime_profile_inflight_hard_limited_for_context(
+        shared,
+        &current_profile,
+        runtime_route_kind_inflight_context(route_kind),
+    )? {
+        let reason = "profile_inflight_saturated";
+        let mut candidate = trace_candidate();
+        runtime_selection_trace_reject(&mut candidate, reason, None);
+        trace.record_candidate(&current_profile, candidate);
+        runtime_proxy_log(
+            shared,
+            runtime_proxy_structured_log_message(
+                "selection_skip_current",
+                runtime_selection_log_fields_with_quota(
+                    [
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("profile", current_profile.as_str()),
+                        runtime_proxy_log_field("reason", reason),
+                        runtime_proxy_log_field("inflight", inflight_count.to_string()),
+                        runtime_proxy_log_field(
+                            "hard_limit",
+                            shared
+                                .runtime_config
+                                .tuning
+                                .profile_inflight_hard_limit
+                                .to_string(),
+                        ),
+                        runtime_proxy_log_field(
+                            "quota_source",
+                            runtime_selection_quota_source_label(quota_source),
+                        ),
+                    ],
+                    quota_summary,
+                ),
+            ),
+        );
+        return Ok(None);
+    }
     if let RuntimeOptimisticCurrentCandidateDecision::Skip(skip) =
         runtime_optimistic_current_candidate_decision(
             RuntimeOptimisticCurrentCandidateSelectionInput {

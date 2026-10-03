@@ -45,6 +45,7 @@ pub(super) fn handle_runtime_noncompact_rate_limited(
     if plan.terminal {
         return Ok(Some(response));
     }
+    loop_state.record_rate_limit_failure();
     if plan.clear_session {
         clear_noncompact_session_profile(session_profile, &profile_name);
     }

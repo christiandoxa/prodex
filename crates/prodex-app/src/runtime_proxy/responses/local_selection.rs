@@ -89,6 +89,9 @@ pub(super) fn handle_runtime_responses_local_selection_blocked(
                 RuntimeInflightReliefWaitResult::Relieved
                 | RuntimeInflightReliefWaitResult::NotWaitable => return Ok(None),
                 RuntimeInflightReliefWaitResult::DeadlineExpired => {
+                    if runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Responses)? {
+                        return Ok(None);
+                    }
                     runtime_responses_local_capacity_timeout_reply()
                 }
             },

@@ -316,6 +316,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
+        self.saw_rate_limit_failure = true;
         if plan.exclude_profile {
             self.excluded_profiles.insert(profile_name);
         }

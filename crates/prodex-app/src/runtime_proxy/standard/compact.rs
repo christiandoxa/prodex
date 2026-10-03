@@ -1,19 +1,18 @@
 use super::super::{
     RuntimeInflightReliefWait, RuntimeInflightReliefWaitResult, RuntimeResponseCandidateSelection,
-    await_runtime_proxy_async_task, build_runtime_proxy_json_error_response,
-    clear_runtime_recovered_profiles, mark_runtime_profile_retry_backoff,
-    mark_runtime_profile_retry_backoff_for_delay, runtime_compact_route_followup_bound_profile,
-    runtime_profile_recovery_wait_for_route, runtime_proxy_current_profile,
-    runtime_proxy_local_capacity_timeout_message, runtime_proxy_log,
+    await_runtime_proxy_async_task, clear_runtime_recovered_profiles,
+    mark_runtime_profile_retry_backoff, mark_runtime_profile_retry_backoff_for_delay,
+    runtime_compact_route_followup_bound_profile, runtime_profile_recovery_wait_for_route,
+    runtime_proxy_current_profile, runtime_proxy_log,
     runtime_proxy_maybe_wait_for_interactive_inflight_relief,
     runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_pressure_mode_active_for_route, runtime_proxy_probe_refresh_pause,
     runtime_proxy_should_shed_fresh_compact_request,
     runtime_remaining_sync_probe_cold_start_profiles_for_route,
     runtime_request_previous_response_id, runtime_request_session_id, runtime_request_turn_state,
-    runtime_response_bound_profile, runtime_session_bound_profile,
-    runtime_smart_context_model_name_from_body, runtime_turn_state_affinity_profile,
-    select_runtime_response_candidate_for_route_with_request,
+    runtime_response_bound_profile, runtime_route_has_retryable_profile,
+    runtime_session_bound_profile, runtime_smart_context_model_name_from_body,
+    runtime_turn_state_affinity_profile, select_runtime_response_candidate_for_route_with_request,
 };
 use super::attempt_runtime_standard_request;
 use crate::runtime_proxy_shared::RuntimeStandardAttempt;
@@ -21,7 +20,7 @@ use crate::runtime_state_shared::{RuntimeRotationProxyShared, RuntimeRouteKind};
 use crate::shared_types::RuntimeProxyRequest;
 use anyhow::Result;
 use std::collections::BTreeSet;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 mod admission;
 mod affinity;
 mod auth;
@@ -34,23 +33,28 @@ mod retryable;
 mod transport;
 use admission::{
     build_runtime_fresh_compact_pressure_response, log_runtime_compact_inflight_saturated,
-    log_runtime_compact_local_capacity_timeout, log_runtime_compact_local_selection_blocked,
-    runtime_compact_candidate_inflight_saturated,
+    log_runtime_compact_local_selection_blocked, runtime_compact_candidate_inflight_saturated,
 };
 use affinity::runtime_compact_route_candidate_has_hard_affinity;
 use auth::{RuntimeProxyCompactAuthFailure, handle_runtime_proxy_compact_auth_failure};
 use commit::commit_runtime_proxy_compact_success;
-use fallback::RuntimeProxyCompactSelectionExhausted;
-use fallback::finish_runtime_proxy_compact_selection_exhausted;
+use fallback::{
+    RuntimeProxyCompactSelectionExhausted, finish_runtime_proxy_compact_selection_exhausted,
+};
 use flow::RuntimeCompactFailureFlow;
 use logging::{
     RuntimeCompactFailureKind, RuntimeCompactLastFailure, log_runtime_proxy_compact_candidate,
 };
-use recovery::wait_for_compact_overload_recovery;
-use retryable::RuntimeProxyCompactRetryableFailure;
-use retryable::handle_runtime_proxy_compact_retryable_failure;
-use transport::RuntimeProxyCompactTransportFailure;
-use transport::finish_runtime_proxy_compact_transport_failure;
+use recovery::{
+    compact_inflight_capacity_epoch_expired, compact_profile_count,
+    wait_for_compact_inflight_relief, wait_for_compact_overload_recovery,
+};
+use retryable::{
+    RuntimeProxyCompactRetryableFailure, handle_runtime_proxy_compact_retryable_failure,
+};
+use transport::{
+    RuntimeProxyCompactTransportFailure, finish_runtime_proxy_compact_transport_failure,
+};
 
 pub(super) fn proxy_runtime_compact_request(
     request_id: u64,
@@ -154,9 +158,9 @@ pub(super) fn proxy_runtime_compact_request(
         saw_inflight_saturation,
         saw_transport_failure,
         saw_overload_failure: false,
+        saw_rate_limit_failure: false,
         cold_start_probe_waited: false,
         recovery_sweeps: 0,
-        recovery_started_at: None,
     })
 }
 
@@ -183,9 +187,9 @@ struct RuntimeCompactSelectionContext<'a> {
     saw_inflight_saturation: bool,
     saw_transport_failure: bool,
     saw_overload_failure: bool,
+    saw_rate_limit_failure: bool,
     cold_start_probe_waited: bool,
     recovery_sweeps: usize,
-    recovery_started_at: Option<Instant>,
 }
 
 enum RuntimeCompactLoopAction {
@@ -234,7 +238,7 @@ impl RuntimeCompactSelectionContext<'_> {
                 self.pressure_mode
             ),
         );
-        if self.can_wait_for_overload_recovery() && self.wait_for_overload_recovery()? {
+        if self.can_wait_for_retryable_recovery() && self.wait_for_overload_recovery()? {
             return Ok(Some(RuntimeCompactLoopAction::Continue));
         }
         Ok(Some(RuntimeCompactLoopAction::Return(self.finish(
@@ -255,11 +259,15 @@ impl RuntimeCompactSelectionContext<'_> {
             continuation,
             self.pressure_mode,
         )?;
+        if self.can_wait_for_retryable_recovery()
+            && runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Compact)?
+        {
+            return Ok(false);
+        }
         if self.recovery_sweeps == 0 {
             // Complete one bounded attempt/retry opportunity for every profile before the
             // elapsed-time budget can route to the current-profile last chance.
-            let initial_sweep_attempt_limit = self
-                .profile_count()?
+            let initial_sweep_attempt_limit = compact_profile_count(self.shared)?
                 .saturating_mul(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_ATTEMPTS_PER_PROFILE);
             if self.selection_attempts < initial_sweep_attempt_limit {
                 return Ok(false);
@@ -270,31 +278,9 @@ impl RuntimeCompactSelectionContext<'_> {
             runtime_proxy_crate::runtime_proxy_precommit_budget_for_profile_count(
                 continuation,
                 self.pressure_mode,
-                self.profile_count()?,
+                compact_profile_count(self.shared)?,
             );
-        Ok(self.selection_attempts >= attempt_limit || self.recovery_budget_exhausted())
-    }
-
-    fn profile_count(&self) -> Result<usize> {
-        Ok(self
-            .shared
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
-            .state
-            .profiles
-            .len()
-            .max(1))
-    }
-
-    fn recovery_budget_exhausted(&self) -> bool {
-        self.recovery_sweeps >= runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_SWEEP_LIMIT
-            || self.recovery_started_at.is_some_and(|started_at| {
-                started_at.elapsed()
-                    >= Duration::from_millis(
-                        runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS,
-                    )
-            })
+        Ok(self.selection_attempts >= attempt_limit)
     }
 
     fn next_action(&mut self) -> Result<RuntimeCompactLoopAction> {
@@ -339,6 +325,39 @@ impl RuntimeCompactSelectionContext<'_> {
                 }
             ),
         );
+        let wait_affinity_owner = self
+            .compact_followup_profile
+            .as_ref()
+            .map(|(profile_name, _)| profile_name.as_str())
+            .or(self.previous_response_profile.as_deref())
+            .or(self.session_profile.as_deref());
+        match wait_for_compact_inflight_relief(
+            self.request_id,
+            self.shared,
+            &self.excluded_profiles,
+            self.selection_started_at,
+            !self.is_fresh_request(),
+            wait_affinity_owner,
+        )? {
+            RuntimeInflightReliefWaitResult::Relieved => {
+                return Ok(RuntimeCompactLoopAction::Continue);
+            }
+            RuntimeInflightReliefWaitResult::DeadlineExpired => {
+                return Ok(
+                    match compact_inflight_capacity_epoch_expired(
+                        self.request_id,
+                        self.shared,
+                        self.selection_attempts,
+                        &mut self.selection_started_at,
+                        self.pressure_mode,
+                    )? {
+                        Some(response) => RuntimeCompactLoopAction::Return(response),
+                        None => RuntimeCompactLoopAction::Continue,
+                    },
+                );
+            }
+            RuntimeInflightReliefWaitResult::NotWaitable => {}
+        }
         let remaining_cold_start_profiles =
             runtime_remaining_sync_probe_cold_start_profiles_for_route(
                 self.shared,
@@ -360,7 +379,7 @@ impl RuntimeCompactSelectionContext<'_> {
             runtime_proxy_probe_refresh_pause(self.shared, RuntimeRouteKind::Compact);
             return Ok(RuntimeCompactLoopAction::Continue);
         }
-        if self.can_wait_for_overload_recovery() && self.wait_for_overload_recovery()? {
+        if self.can_wait_for_retryable_recovery() && self.wait_for_overload_recovery()? {
             return Ok(RuntimeCompactLoopAction::Continue);
         }
         Ok(RuntimeCompactLoopAction::Return(self.finish(
@@ -392,24 +411,24 @@ impl RuntimeCompactSelectionContext<'_> {
             candidate_has_hard_affinity,
         )? {
             self.saw_inflight_saturation = true;
-            return match self
-                .wait_for_inflight_relief(&candidate_name, candidate_has_hard_affinity)?
-            {
+            return match wait_for_compact_inflight_relief(
+                self.request_id,
+                self.shared,
+                &self.excluded_profiles,
+                self.selection_started_at,
+                !self.is_fresh_request(),
+                candidate_has_hard_affinity.then_some(candidate_name.as_str()),
+            )? {
                 RuntimeInflightReliefWaitResult::Relieved
                 | RuntimeInflightReliefWaitResult::NotWaitable => Ok(None),
                 RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                    log_runtime_compact_local_capacity_timeout(
+                    compact_inflight_capacity_epoch_expired(
                         self.request_id,
                         self.shared,
                         self.selection_attempts,
-                        self.selection_started_at,
+                        &mut self.selection_started_at,
                         self.pressure_mode,
-                    );
-                    Ok(Some(build_runtime_proxy_json_error_response(
-                        503,
-                        "local_capacity_timeout",
-                        runtime_proxy_local_capacity_timeout_message(),
-                    )))
+                    )
                 }
             };
         }
@@ -426,24 +445,24 @@ impl RuntimeCompactSelectionContext<'_> {
             RuntimeStandardAttempt::ProfileInflightSaturated { .. }
         ) {
             self.saw_inflight_saturation = true;
-            return match self
-                .wait_for_inflight_relief(&candidate_name, candidate_has_hard_affinity)?
-            {
+            return match wait_for_compact_inflight_relief(
+                self.request_id,
+                self.shared,
+                &self.excluded_profiles,
+                self.selection_started_at,
+                !self.is_fresh_request(),
+                candidate_has_hard_affinity.then_some(candidate_name.as_str()),
+            )? {
                 RuntimeInflightReliefWaitResult::Relieved
                 | RuntimeInflightReliefWaitResult::NotWaitable => Ok(None),
                 RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                    log_runtime_compact_local_capacity_timeout(
+                    compact_inflight_capacity_epoch_expired(
                         self.request_id,
                         self.shared,
                         self.selection_attempts,
-                        self.selection_started_at,
+                        &mut self.selection_started_at,
                         self.pressure_mode,
-                    );
-                    Ok(Some(build_runtime_proxy_json_error_response(
-                        503,
-                        "local_capacity_timeout",
-                        runtime_proxy_local_capacity_timeout_message(),
-                    )))
+                    )
                 }
             };
         }
@@ -476,26 +495,10 @@ impl RuntimeCompactSelectionContext<'_> {
                 saw_inflight_saturation: &mut self.saw_inflight_saturation,
                 saw_transport_failure: &mut self.saw_transport_failure,
                 saw_overload_failure: &mut self.saw_overload_failure,
+                saw_rate_limit_failure: &mut self.saw_rate_limit_failure,
             },
             attempt,
         )
-    }
-
-    fn wait_for_inflight_relief(
-        &self,
-        candidate_name: &str,
-        hard_affinity: bool,
-    ) -> Result<RuntimeInflightReliefWaitResult> {
-        runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
-            request_id: self.request_id,
-            shared: self.shared,
-            excluded_profiles: &self.excluded_profiles,
-            route_kind: RuntimeRouteKind::Compact,
-            selection_started_at: self.selection_started_at,
-            continuation: !self.is_fresh_request(),
-            wait_affinity_owner: hard_affinity.then_some(candidate_name),
-            selected_profile: None,
-        })
     }
 
     fn is_fresh_request(&self) -> bool {
@@ -505,11 +508,13 @@ impl RuntimeCompactSelectionContext<'_> {
             && self.session_profile.is_none()
     }
 
-    fn can_wait_for_overload_recovery(&self) -> bool {
+    fn can_wait_for_retryable_recovery(&self) -> bool {
         self.request_previous_response_id.is_none()
             && self.request_turn_state.is_none()
             && self.request_session_id.is_none()
-            && (self.saw_overload_failure || self.saw_transport_failure)
+            && (self.saw_overload_failure
+                || self.saw_rate_limit_failure
+                || self.saw_transport_failure)
     }
 
     fn wait_for_overload_recovery(&mut self) -> Result<bool> {
@@ -518,7 +523,6 @@ impl RuntimeCompactSelectionContext<'_> {
             self.shared,
             &mut self.excluded_profiles,
             &mut self.recovery_sweeps,
-            &mut self.recovery_started_at,
         )
     }
 
@@ -574,6 +578,7 @@ struct RuntimeCompactAttemptContext<'a> {
     saw_inflight_saturation: &'a mut bool,
     saw_transport_failure: &'a mut bool,
     saw_overload_failure: &'a mut bool,
+    saw_rate_limit_failure: &'a mut bool,
 }
 
 fn handle_runtime_compact_attempt(
@@ -601,6 +606,7 @@ fn handle_runtime_compact_attempt(
         saw_inflight_saturation,
         saw_transport_failure,
         saw_overload_failure,
+        saw_rate_limit_failure,
     } = context;
     match attempt {
         RuntimeStandardAttempt::Success {
@@ -629,6 +635,7 @@ fn handle_runtime_compact_attempt(
             if candidate_has_hard_affinity {
                 return Ok(Some(response));
             }
+            *saw_rate_limit_failure = true;
             excluded_profiles.insert(profile_name);
             *last_failure = Some((response, RuntimeCompactFailureKind::RateLimited));
             Ok(None)

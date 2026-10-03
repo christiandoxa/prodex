@@ -79,6 +79,18 @@ pub(super) fn select_runtime_response_candidate(
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<Option<String>> {
     for candidate in candidates {
+        if runtime_profile_inflight_hard_limited_for_context(
+            shared,
+            &candidate.name,
+            runtime_route_kind_inflight_context(route_kind),
+        )? {
+            let reason = "profile_inflight_saturated";
+            let mut traced = runtime_selection_trace_planned_candidate(&candidate, pass.class());
+            runtime_selection_trace_reject(&mut traced, reason, None);
+            trace.record_candidate(&candidate.name, traced);
+            log_runtime_response_candidate_skip(shared, route_kind, &candidate, pass, reason);
+            continue;
+        }
         if let Some(reason) = pass.skip_reason(&candidate) {
             let mut traced = runtime_selection_trace_planned_candidate(&candidate, pass.class());
             runtime_selection_trace_reject(&mut traced, reason, None);

@@ -22,6 +22,59 @@ pub(crate) use prodex_runtime_store::{
     runtime_profile_backoff_sort_key, runtime_profile_name_in_selection_backoff,
 };
 
+pub(crate) fn runtime_route_has_retryable_profile(
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+) -> Result<bool> {
+    let now = Local::now().timestamp();
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    for (profile_name, profile) in &runtime.state.profiles {
+        let auth_compatible = runtime_profile_cached_auth_summary_from_maps_for_selection(
+            profile_name,
+            &runtime.profile_usage_auth,
+            &runtime.profile_probe_cache,
+        )
+        .is_none_or(|auth| auth.quota_compatible);
+        let auth_failure_active = runtime_profile_auth_failure_active_from_map(
+            &runtime.profile_health,
+            profile_name,
+            now,
+        );
+        let (quota_summary, _) = runtime_profile_quota_summary_for_route_from_state(
+            &runtime,
+            profile_name,
+            route_kind,
+            now,
+        );
+        let quota_blocked =
+            runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some();
+        if prodex_mojo_core::runtime::waitable_candidate_eligible(
+            prodex_mojo_core::runtime::WaitableCandidateMode::RetryablePool,
+            prodex_mojo_core::runtime::WaitableCandidateInput {
+                context_allowed: true,
+                auth_compatible,
+                supports_runtime: profile.provider.supports_codex_runtime(),
+                cached_probe_present: false,
+                soft_limited: false,
+                in_selection_backoff: false,
+                auth_failure_active,
+                health_penalized: false,
+                hard_limited: false,
+                snapshot_blocks: false,
+                quota_blocked,
+            },
+        )
+        .expect("Mojo retryable-pool candidate policy returned invalid output")
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 pub(crate) fn runtime_profile_recovery_wait_for_route(
     shared: &RuntimeRotationProxyShared,
     route_kind: RuntimeRouteKind,
