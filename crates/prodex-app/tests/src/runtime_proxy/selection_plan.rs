@@ -42,6 +42,49 @@ fn probe_plan_queues_cold_profiles_for_background_refresh() {
 }
 
 #[test]
+fn probe_plan_does_not_refresh_authoritatively_exhausted_responses_snapshot() {
+    let now = Local::now().timestamp();
+    let state = RuntimeRouteSelectionCatalog {
+        current_profile: "main".to_string(),
+        include_code_review: false,
+        upstream_base_url: "https://chatgpt.com/backend-api".to_string(),
+        entries: vec![selection_entry(
+            "main",
+            SelectionEntryFixture {
+                cached_usage_snapshot: Some(RuntimeProfileUsageSnapshot {
+                    checked_at: now,
+                    plan_type: None,
+                    five_hour_status: RuntimeQuotaWindowStatus::Exhausted,
+                    five_hour_remaining_percent: 0,
+                    five_hour_reset_at: now + 300,
+                    weekly_status: RuntimeQuotaWindowStatus::Ready,
+                    weekly_remaining_percent: 80,
+                    weekly_reset_at: now + 86_400,
+                }),
+                ..SelectionEntryFixture::default()
+            },
+        )],
+    };
+
+    let plan = build_runtime_response_probe_plan(
+        &state,
+        &BTreeSet::new(),
+        RuntimeRouteKind::Responses,
+        None,
+        now,
+    );
+
+    assert!(
+        plan.cold_start_probe_jobs.is_empty(),
+        "an authoritative zero-quota snapshot must not race a same-request background probe"
+    );
+    assert!(
+        plan.ready_candidates.is_empty(),
+        "an authoritative exhausted snapshot must not become a ready candidate"
+    );
+}
+
+#[test]
 fn candidate_plan_reuses_supplied_ready_candidates_without_rebuilding() {
     let state = RuntimeRouteSelectionCatalog {
         current_profile: "main".to_string(),
