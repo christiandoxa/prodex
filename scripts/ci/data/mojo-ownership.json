@@ -1079,21 +1079,22 @@
         "semantic_ranges": [
           {
             "start": 31,
-            "end": 31
+            "end": 32
           },
           {
             "start": 538,
-            "end": 609
+            "end": 628
           },
           {
-            "start": 631,
-            "end": 632
+            "start": 651,
+            "end": 654
           }
         ],
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_doctor_request_timeline_detail"
+          "runtime_doctor_request_timeline_detail",
+          "runtime_doctor_last_marker_line_truncation"
         ]
       },
       {
@@ -4565,6 +4566,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "fixed field-slot projection and existing event/summary assembly"
+    },
+    {
+      "name": "runtime_doctor_last_marker_line_truncation",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.435.2",
+      "baseline_state": "Rust counted Unicode scalars and truncated last-marker log lines to the configured limit with an ellipsis",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_render_v1",
+      "mojo_operation_ids": {
+        "last_marker_line_truncation": 23
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_render",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
+        "crates/prodex-runtime-doctor/src/parsing.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
+      "rust_owner_before": "160-Unicode-scalar last-marker line truncation after log redaction and trim",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct renderer ABI and runtime-doctor caller tests cover the 160-scalar boundary and trim-before-truncation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "secret-safe log redaction, Unicode trim, borrowed input projection, and log summary assembly"
     }
   ],
   "rust_semantic_reductions": [
@@ -5272,6 +5300,30 @@
           "end": 144
         },
         "release_symbol": "runtime_doctor_request_timeline_detail",
+        "release_marker": "prodex_mojo_core::rich::runtime_doctor_render("
+      }
+    },
+    {
+      "file": "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
+      "symbol": "runtime_doctor_truncate_line",
+      "operation": "runtime_doctor_last_marker_line_truncation",
+      "previous_responsibility": "bounded last-marker line truncation by Unicode scalar count with an ellipsis",
+      "final_state": "adapter-only",
+      "rust_before": "Rust redacted, trimmed, counted, and truncated last-marker lines",
+      "rust_after": "Rust redacts and trims; Mojo applies the 160-scalar truncation",
+      "mojo_owner": "mojo/prodex_core/runtime_doctor_render.mojo::runtime_doctor_render_last_marker_line",
+      "mojo_source": "mojo/prodex_core/runtime_doctor_render.mojo",
+      "mojo_entry": "prodex_mojo_runtime_doctor_render_v1 operation 23",
+      "production_consumer": "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
+      "parity_test": "crates/prodex-runtime-doctor/src/parsing/log_line.rs",
+      "cleanup_loc": 13,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 285,
+          "end": 297
+        },
+        "release_symbol": "runtime_doctor_truncate_line",
         "release_marker": "prodex_mojo_core::rich::runtime_doctor_render("
       }
     }

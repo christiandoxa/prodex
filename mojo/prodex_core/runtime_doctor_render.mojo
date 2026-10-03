@@ -29,6 +29,7 @@ comptime RENDER_POLICY_SETTING_RATIONALE: Int64 = 19
 comptime RENDER_POLICY_SUGGESTION_REASON: Int64 = 20
 comptime RENDER_POLICY_MARKER_NAME: Int64 = 21
 comptime RENDER_REQUEST_TIMELINE_DETAIL: Int64 = 22
+comptime RENDER_LAST_MARKER_LINE_TRUNCATION: Int64 = 23
 
 comptime DETAIL_CONTEXT_DEPENDENT: Int64 = 1
 comptime DETAIL_COMPACT_PRESSURE: Int64 = 2
@@ -573,24 +574,43 @@ def runtime_doctor_render_timeline_field_prefix(
     return False
 
 
-def runtime_doctor_render_put_timeline_value(
+def runtime_doctor_render_put_bounded_value(
     writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
     value: ProdexRichStringView,
+    maximum_characters: Int64,
+    suffix: StringSlice,
+    suffix_characters: Int64,
 ) -> Bool:
     var ptr = rich_view_ptr(value)
     var characters: Int64 = 0
+    var prefix_characters = maximum_characters - suffix_characters
     var prefix_bytes: Int64 = 0
     for index in range(Int64(value.len)):
         if (ptr[unsafe_offset=index] & UInt8(192)) != UInt8(128):
             characters += 1
-            if characters == 46:
+            if characters == prefix_characters + 1:
                 prefix_bytes = index
-            elif characters == 49:
+            elif characters == maximum_characters + 1:
                 for prefix_index in range(prefix_bytes):
                     if not runtime_doctor_render_put_byte(writer, ptr[unsafe_offset=prefix_index]):
                         return False
-                return runtime_doctor_render_put_literal(writer, StringSlice("..."))
+                return runtime_doctor_render_put_literal(writer, suffix)
     return runtime_doctor_render_put_view(writer, value)
+
+
+def runtime_doctor_render_last_marker_line(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
+    input: ProdexRuntimeDoctorRenderInput,
+) -> Bool:
+    if not runtime_doctor_render_input_present(input, 0):
+        return True
+    return runtime_doctor_render_put_bounded_value(
+        writer,
+        runtime_doctor_render_input_value(input, 0),
+        160,
+        StringSlice("…"),
+        1,
+    )
 
 
 def runtime_doctor_render_request_timeline_detail(
@@ -602,7 +622,7 @@ def runtime_doctor_render_request_timeline_detail(
         if runtime_doctor_render_input_present(input, index) and written_fields < 5:
             if written_fields > 0 and not runtime_doctor_render_put_byte(writer, 32):
                 return False
-            if not runtime_doctor_render_timeline_field_prefix(writer, index) or not runtime_doctor_render_put_timeline_value(writer, runtime_doctor_render_input_value(input, index)):
+            if not runtime_doctor_render_timeline_field_prefix(writer, index) or not runtime_doctor_render_put_bounded_value(writer, runtime_doctor_render_input_value(input, index), 48, StringSlice("..."), 3):
                 return False
             written_fields += 1
     return True
@@ -630,6 +650,8 @@ def runtime_doctor_render_value(
         return runtime_doctor_render_policy_marker_name(writer, input.detail)
     if input.operation == RENDER_REQUEST_TIMELINE_DETAIL:
         return runtime_doctor_render_request_timeline_detail(writer, input)
+    if input.operation == RENDER_LAST_MARKER_LINE_TRUNCATION:
+        return runtime_doctor_render_last_marker_line(writer, input)
     if input.operation == RENDER_PREVIOUS_RESPONSE:
         return runtime_doctor_render_previous(writer, input)
     if input.operation == RENDER_COMPACT_FINAL_FAILURE:
@@ -755,7 +777,7 @@ def prodex_mojo_runtime_doctor_render_v1(
         return 1
     var input_pointer = Pointer[mut=False, ProdexRuntimeDoctorRenderInput, ImmUntrackedOrigin](unsafe_from_address=Int(input_address))
     var input = input_pointer[].copy()
-    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_REQUEST_TIMELINE_DETAIL or input.detail < 0 or input.detail > 799 or input.values_address == 0:
+    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_LAST_MARKER_LINE_TRUNCATION or input.detail < 0 or input.detail > 799 or input.values_address == 0:
         return 1
     for index in range(16):
         if not rich_view_valid(runtime_doctor_render_input_value(input, index), RUNTIME_DOCTOR_RENDER_MAX_VALUE_BYTES):

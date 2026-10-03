@@ -5,6 +5,8 @@ use super::{
 pub const RUNTIME_DOCTOR_RENDER_ABI_VERSION: i64 = 1;
 /// Mojo renderer operation for request-timeline detail fields.
 pub const RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL: i64 = 22;
+/// Mojo renderer operation for the bounded last-marker log line.
+pub const RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION: i64 = 23;
 const RUNTIME_DOCTOR_RENDER_VALUE_COUNT: usize = 16;
 
 pub struct RuntimeDoctorRenderInput<'a> {
@@ -35,7 +37,7 @@ unsafe extern "C" {
 
 pub fn runtime_doctor_render(input: RuntimeDoctorRenderInput<'_>) -> Result<String, MojoError> {
     ensure_rich_abi()?;
-    if !(0..=RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL).contains(&input.operation)
+    if !(0..=RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION).contains(&input.operation)
         || !(0..=799).contains(&input.detail)
         || input.values.len() > RUNTIME_DOCTOR_RENDER_VALUE_COUNT
         || input
@@ -138,6 +140,30 @@ mod tests {
             })
             .unwrap(),
             format!("profile=profile route={}", "🧭".repeat(48))
+        );
+    }
+
+    #[test]
+    fn last_marker_line_preserves_160_unicode_scalars_and_truncates_at_boundary() {
+        let at_limit = "🧭".repeat(160);
+        let over_limit = "🧭".repeat(161);
+        assert_eq!(
+            runtime_doctor_render(RuntimeDoctorRenderInput {
+                operation: RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION,
+                detail: 0,
+                values: &[Some(&at_limit)],
+            })
+            .unwrap(),
+            at_limit
+        );
+        assert_eq!(
+            runtime_doctor_render(RuntimeDoctorRenderInput {
+                operation: RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION,
+                detail: 0,
+                values: &[Some(&over_limit)],
+            })
+            .unwrap(),
+            format!("{}…", "🧭".repeat(159))
         );
     }
 

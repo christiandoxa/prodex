@@ -20,6 +20,7 @@ const DOCTOR_MARKER_SUMMARY_COUNTS_CALLER_TEST_FILE = "crates/prodex-runtime-doc
 const DOCTOR_COMPACT_EXIT_COUNTS_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/diagnosis/final_summary/compact.rs";
 const DOCTOR_COMPACT_EXIT_COUNTS_CALLER_TEST_FILE = "crates/prodex-runtime-doctor/tests/src/diagnosis.rs";
 const DOCTOR_TIMELINE_DETAIL_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/parsing/request_timeline.rs";
+const DOCTOR_LAST_MARKER_LINE_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/parsing/log_line.rs";
 const DOCTOR_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_render.rs";
 const DOCTOR_RENDER_MOJO_FILE = "mojo/prodex_core/runtime_doctor_render.mojo";
 const CLI_DEFAULT_RUN_CONSUMER_FILE = "crates/prodex-cli/src/lib.rs";
@@ -3087,12 +3088,39 @@ export function findViolations(files) {
     if (filePath === DOCTOR_RENDER_MOJO_FILE &&
         (!contents.includes("RENDER_REQUEST_TIMELINE_DETAIL: Int64 = 22") ||
           !contents.includes("def runtime_doctor_render_request_timeline_detail(") ||
-          !contents.includes("def runtime_doctor_render_put_timeline_value(") ||
-          !contents.includes("characters == 46") ||
-          !contents.includes("characters == 49") ||
+          !contents.includes("def runtime_doctor_render_put_bounded_value(") ||
+          !contents.includes("prefix_characters + 1") ||
+          !contents.includes("maximum_characters + 1") ||
           !contents.includes("runtime_doctor_render_request_timeline_detail(writer, input)") ||
           !contents.includes('@export("prodex_mojo_runtime_doctor_render_v1")'))) {
       return [`${filePath}: request-timeline detail semantics must stay in the production Mojo renderer`];
+    }
+    return [];
+  });
+  const doctorLastMarkerLineViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === DOCTOR_LAST_MARKER_LINE_CONSUMER_FILE) {
+      const body = contents.match(/\bpub\(super\) fn runtime_doctor_truncate_line\s*\([^]*?^\}/mu)?.[0];
+      return body?.includes("RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION") &&
+          body.includes("prodex_mojo_core::rich::runtime_doctor_render(") &&
+          !/\.chars\(\)|\.take\(|\.count\(\)/u.test(body) &&
+          contents.includes("last_marker_line_trims_before_mojo_unicode_truncation")
+        ? []
+        : [`${filePath}: last-marker line truncation must use the Mojo renderer with caller coverage`];
+    }
+    if (filePath === DOCTOR_RENDER_ADAPTER_FILE &&
+        (!contents.includes("RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION: i64 = 23") ||
+          !contents.includes("last_marker_line_preserves_160_unicode_scalars_and_truncates_at_boundary"))) {
+      return [`${filePath}: last-marker line truncation must retain bounded real-Mojo operation 23 and its ABI boundary test`];
+    }
+    if (filePath === DOCTOR_RENDER_MOJO_FILE &&
+        (!contents.includes("RENDER_LAST_MARKER_LINE_TRUNCATION: Int64 = 23") ||
+          !contents.includes("def runtime_doctor_render_put_bounded_value(") ||
+          !contents.includes("def runtime_doctor_render_last_marker_line(") ||
+          !contents.includes("runtime_doctor_render_put_bounded_value(writer, runtime_doctor_render_input_value(input, index), 48, StringSlice(\"...\"), 3)") ||
+          !contents.includes("runtime_doctor_render_put_bounded_value(\n        writer,\n        runtime_doctor_render_input_value(input, 0),\n        160,") ||
+          !contents.includes("runtime_doctor_render_last_marker_line(writer, input)") ||
+          !contents.includes("input.operation > RENDER_LAST_MARKER_LINE_TRUNCATION"))) {
+      return [`${filePath}: bounded Unicode truncation for timeline details and last-marker lines must stay in the production Mojo renderer`];
     }
     return [];
   });
@@ -3924,7 +3952,7 @@ export function findViolations(files) {
     ...deepseekReasoningViolations,
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
-    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
+    ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...doctorLastMarkerLineViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
     ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
@@ -4404,6 +4432,13 @@ function selfTest() {
   /request-timeline rendering must retain its bounded real-Mojo operation and ABI test/u);
   assert.match(findViolations([[DOCTOR_RENDER_MOJO_FILE, "def runtime_doctor_render_value(): pass"]]).join("\n"),
   /request-timeline detail semantics must stay in the production Mojo renderer/u);
+  assert.match(findViolations([[DOCTOR_LAST_MARKER_LINE_CONSUMER_FILE,
+    "pub(super) fn runtime_doctor_truncate_line(line: &str) -> String { line.chars().take(159).collect() }\n"]]).join("\n"),
+  /last-marker line truncation must use the Mojo renderer with caller coverage/u);
+  assert.match(findViolations([[DOCTOR_RENDER_ADAPTER_FILE, "fn runtime_doctor_render() {}"]]).join("\n"),
+  /last-marker line truncation must retain bounded real-Mojo operation 23 and its ABI boundary test/u);
+  assert.match(findViolations([[DOCTOR_RENDER_MOJO_FILE, "def runtime_doctor_render_value(): pass"]]).join("\n"),
+  /bounded Unicode truncation for timeline details and last-marker lines must stay in the production Mojo renderer/u);
   assert.match(findViolations([[CLI_DEFAULT_RUN_CONSUMER_FILE,
     "fn reassemble_super_expose_alias() { prodex_mojo_core::launch::find_super_expose_alias_index(); }\npub fn should_default_cli_invocation_to_run(args: &[OsString]) -> bool {\n  matches!(args.first(), Some(_))\n}\n"]]).join("\n"),
   /CLI default-run decision must use the Mojo launch-arguments policy/u);

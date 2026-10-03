@@ -211,18 +211,17 @@ pub(super) fn runtime_doctor_chain_event_summary(
 }
 
 #[cfg(feature = "runtime-log-mojo")]
-pub(super) fn runtime_doctor_truncate_line(line: &str, limit: usize) -> String {
+pub(super) fn runtime_doctor_truncate_line(line: &str) -> String {
     let redacted = runtime_proxy_redact_log_text(line);
     let trimmed = redacted.trim();
-    let count = trimmed.chars().count();
-    if count <= limit {
-        return trimmed.to_string();
-    }
-    trimmed
-        .chars()
-        .take(limit.saturating_sub(1))
-        .collect::<String>()
-        + "…"
+    prodex_mojo_core::rich::runtime_doctor_render(
+        prodex_mojo_core::rich::RuntimeDoctorRenderInput {
+            operation: prodex_mojo_core::rich::RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION,
+            detail: 0,
+            values: &[Some(trimmed)],
+        },
+    )
+    .expect("Mojo runtime-doctor last-marker renderer returned invalid output")
 }
 
 #[cfg(all(test, feature = "runtime-log-mojo"))]
@@ -243,6 +242,21 @@ mod expected_message_parser_output {
                 ("note".to_string(), "say \"yes\"".to_string()),
                 ("count".to_string(), "42".to_string()),
             ]
+        );
+    }
+}
+
+#[cfg(all(test, feature = "runtime-log-mojo"))]
+mod expected_last_marker_line_output {
+    use super::runtime_doctor_truncate_line;
+
+    #[test]
+    fn last_marker_line_trims_before_mojo_unicode_truncation() {
+        let line = format!("  {}  ", "🧭".repeat(161));
+
+        assert_eq!(
+            runtime_doctor_truncate_line(&line),
+            format!("{}…", "🧭".repeat(159))
         );
     }
 }
