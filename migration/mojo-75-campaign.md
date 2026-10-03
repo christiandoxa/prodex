@@ -4881,3 +4881,19 @@ Validation passed:
 - The Mojo no-fallback guard and self-test, authority guard, and ownership check passed; ownership reports 145 authoritative operations.
 - `node scripts/ci/mojo-production-share.mjs --check` — 79,961 Mojo LOC and 203,719 Rust LOC, or **28.19% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
 - `git diff --check` passed for the wave.
+
+## Secret rotation bounds migration
+
+`SecretRotationPolicy::validate` now delegates its maximum-age and overlap
+decision to the existing `secret_policy.mojo` kernel. Mojo preserves zero-age
+error precedence and compares the full `u64` range. Rust keeps the public
+domain error enum and maps the validated decision tag; no Rust bounds check
+remains.
+
+Validation passed:
+
+- `mojo format mojo/prodex_core/secret_policy.mojo` and `cargo fmt --all -- --check`.
+- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-domain` and `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-mojo-core --all-features`.
+- `PRODEX_MOJO_REQUIRED=1 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`.
+- The no-fallback guard and self-test, authority guard, and ownership check pass; ownership reports 146 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` — 79,996 Mojo LOC and 203,764 Rust LOC, or **28.19% Mojo**. The 7% release floor and ownership non-regression pass; the 75% target remains unmet.

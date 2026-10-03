@@ -14,6 +14,23 @@ unsafe extern "C" {
         version_present: i64,
         result_address: u64,
     ) -> i64;
+    fn prodex_mojo_secret_rotation_policy_validate_v1(
+        abi_version: i64,
+        max_age_seconds: u64,
+        overlap_seconds: u64,
+        decision_address: u64,
+    ) -> i64;
+}
+
+/// Mojo's validation result for a secret rotation policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecretRotationPolicyDecision {
+    /// Maximum age is nonzero and overlap is shorter than maximum age.
+    Valid,
+    /// Maximum age is zero.
+    ZeroMaxAge,
+    /// Overlap is at least as long as maximum age.
+    OverlapNotShorterThanMaxAge,
 }
 
 fn view(value: &str) -> Result<(u64, i64), MojoError> {
@@ -50,6 +67,33 @@ pub fn secret_reference_is_well_formed(
         0 => match result {
             0 => Ok(false),
             1 => Ok(true),
+            _ => Err(MojoError::InvalidOutput),
+        },
+        1 => Err(MojoError::InvalidInput),
+        4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Validate secret rotation bounds through the Mojo secret-policy kernel.
+pub fn secret_rotation_policy_decision(
+    max_age_seconds: u64,
+    overlap_seconds: u64,
+) -> Result<SecretRotationPolicyDecision, MojoError> {
+    let mut decision = -1_i64;
+    let status = unsafe {
+        prodex_mojo_secret_rotation_policy_validate_v1(
+            SECRET_POLICY_ABI_VERSION,
+            max_age_seconds,
+            overlap_seconds,
+            (&mut decision as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => match decision {
+            0 => Ok(SecretRotationPolicyDecision::Valid),
+            1 => Ok(SecretRotationPolicyDecision::ZeroMaxAge),
+            2 => Ok(SecretRotationPolicyDecision::OverlapNotShorterThanMaxAge),
             _ => Err(MojoError::InvalidOutput),
         },
         1 => Err(MojoError::InvalidInput),

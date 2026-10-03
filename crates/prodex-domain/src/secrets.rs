@@ -218,13 +218,22 @@ impl SecretRotationPolicy {
     }
 
     pub fn validate(&self) -> Result<(), SecretRotationPolicyError> {
-        if self.max_age_seconds == 0 {
-            return Err(SecretRotationPolicyError::ZeroMaxAge);
+        match prodex_mojo_core::secret_policy::secret_rotation_policy_decision(
+            self.max_age_seconds,
+            self.overlap_seconds,
+        )
+        .expect("Mojo secret rotation policy returned invalid output")
+        {
+            prodex_mojo_core::secret_policy::SecretRotationPolicyDecision::Valid => Ok(()),
+            prodex_mojo_core::secret_policy::SecretRotationPolicyDecision::ZeroMaxAge => {
+                Err(SecretRotationPolicyError::ZeroMaxAge)
+            }
+            prodex_mojo_core::secret_policy::SecretRotationPolicyDecision::
+                OverlapNotShorterThanMaxAge =>
+            {
+                Err(SecretRotationPolicyError::OverlapNotShorterThanMaxAge)
+            }
         }
-        if self.overlap_seconds >= self.max_age_seconds {
-            return Err(SecretRotationPolicyError::OverlapNotShorterThanMaxAge);
-        }
-        Ok(())
     }
 }
 

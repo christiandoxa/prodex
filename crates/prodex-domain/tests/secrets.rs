@@ -76,6 +76,30 @@ fn secret_ref_validation_reaches_real_mojo_abi() {
 }
 
 #[test]
+fn secret_rotation_policy_decision_reaches_real_mojo_abi() {
+    use prodex_mojo_core::secret_policy::{
+        SecretRotationPolicyDecision as Decision, secret_rotation_policy_decision,
+    };
+
+    assert_eq!(
+        secret_rotation_policy_decision(600, 60),
+        Ok(Decision::Valid)
+    );
+    assert_eq!(
+        secret_rotation_policy_decision(0, u64::MAX),
+        Ok(Decision::ZeroMaxAge)
+    );
+    assert_eq!(
+        secret_rotation_policy_decision(10, 10),
+        Ok(Decision::OverlapNotShorterThanMaxAge)
+    );
+    assert_eq!(
+        secret_rotation_policy_decision(u64::MAX, u64::MAX - 1),
+        Ok(Decision::Valid)
+    );
+}
+
+#[test]
 fn secret_material_debug_display_do_not_expose_value_or_version() {
     let material = SecretMaterial::new("super-secret-token", Some("v7"));
 
