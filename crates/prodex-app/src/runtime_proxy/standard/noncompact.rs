@@ -365,55 +365,15 @@ fn runtime_noncompact_next_action(
     session_present: bool,
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
 ) -> Result<RuntimePrecommitLoopAction<String, tiny_http::ResponseBox>> {
-    if loop_state.excluded_profiles.is_empty() {
-        let preferred_hard_limited = !preferred_is_session
-            && runtime_profile_inflight_hard_limited_for_context(
-                shared,
-                preferred_profile,
-                runtime_route_kind_inflight_context(RuntimeRouteKind::Standard),
-            )?;
-        if !preferred_hard_limited {
-            runtime_selection_trace_log_direct(
-                shared,
-                request_id,
-                RuntimeSelectionTraceDirect {
-                    requested_model: request_model_name,
-                    route_kind: RuntimeRouteKind::Standard,
-                    candidate_key: preferred_profile,
-                    class: if preferred_is_session {
-                        runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity
-                    } else {
-                        runtime_proxy_crate::RuntimeRouteCandidateClass::Current
-                    },
-                    affinity_kind: preferred_is_session
-                        .then_some(runtime_proxy_crate::RuntimeRouteAffinityKind::Session),
-                    hard_affinity: preferred_is_session,
-                },
-            );
-            return Ok(RuntimePrecommitLoopAction::Attempt(
-                preferred_profile.to_string(),
-            ));
-        }
-        loop_state.record_inflight_saturation();
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "profile_inflight_saturated",
-                [
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field("transport", "http"),
-                    runtime_proxy_log_field("profile", preferred_profile),
-                    runtime_proxy_log_field(
-                        "hard_limit",
-                        shared
-                            .runtime_config
-                            .tuning
-                            .profile_inflight_hard_limit
-                            .to_string(),
-                    ),
-                ],
-            ),
-        );
+    if let Some(action) = runtime_noncompact_preferred_action(
+        request_id,
+        shared,
+        request_model_name,
+        preferred_profile,
+        preferred_is_session,
+        loop_state,
+    )? {
+        return Ok(action);
     }
     if let Some(candidate_name) = select_runtime_response_candidate_for_route_with_request(
         shared,
@@ -492,6 +452,69 @@ fn runtime_noncompact_next_action(
             build_runtime_proxy_text_response(503, runtime_proxy_local_selection_failure_message())
         }),
     ))
+}
+
+fn runtime_noncompact_preferred_action(
+    request_id: u64,
+    shared: &RuntimeRotationProxyShared,
+    request_model_name: Option<&str>,
+    preferred_profile: &str,
+    preferred_is_session: bool,
+    loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
+) -> Result<Option<RuntimePrecommitLoopAction<String, tiny_http::ResponseBox>>> {
+    if !loop_state.excluded_profiles.is_empty() {
+        return Ok(None);
+    }
+    let preferred_hard_limited = !preferred_is_session
+        && runtime_profile_inflight_hard_limited_for_context(
+            shared,
+            preferred_profile,
+            runtime_route_kind_inflight_context(RuntimeRouteKind::Standard),
+        )?;
+    if !preferred_hard_limited {
+        runtime_selection_trace_log_direct(
+            shared,
+            request_id,
+            RuntimeSelectionTraceDirect {
+                requested_model: request_model_name,
+                route_kind: RuntimeRouteKind::Standard,
+                candidate_key: preferred_profile,
+                class: if preferred_is_session {
+                    runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity
+                } else {
+                    runtime_proxy_crate::RuntimeRouteCandidateClass::Current
+                },
+                affinity_kind: preferred_is_session
+                    .then_some(runtime_proxy_crate::RuntimeRouteAffinityKind::Session),
+                hard_affinity: preferred_is_session,
+            },
+        );
+        return Ok(Some(RuntimePrecommitLoopAction::Attempt(
+            preferred_profile.to_string(),
+        )));
+    }
+
+    loop_state.record_inflight_saturation();
+    runtime_proxy_log(
+        shared,
+        runtime_proxy_structured_log_message(
+            "profile_inflight_saturated",
+            [
+                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("transport", "http"),
+                runtime_proxy_log_field("profile", preferred_profile),
+                runtime_proxy_log_field(
+                    "hard_limit",
+                    shared
+                        .runtime_config
+                        .tuning
+                        .profile_inflight_hard_limit
+                        .to_string(),
+                ),
+            ],
+        ),
+    );
+    Ok(None)
 }
 
 fn runtime_noncompact_candidate_saturated(

@@ -1,12 +1,12 @@
 [
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 2599,
+    "maxLines": 2600,
     "reason": "Local rewrite cross-provider regression coverage is ratcheted to the current audited size after gateway and retired compatibility fixtures were removed."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/deepseek.rs",
-    "maxLines": 2388,
+    "maxLines": 2392,
     "reason": "DeepSeek request rewrite regression coverage remains capped while compatibility cases are split by feature family."
   },
   {
@@ -31,7 +31,7 @@
   },
   {
     "file": "crates/prodex-provider-core/src/deepseek_bridge/tests.rs",
-    "maxLines": 1136,
+    "maxLines": 1134,
     "reason": "DeepSeek input-item fixtures moved to a focused sibling module; remaining request, response, stream, tool-call, usage, and error conformance regressions stay colocated until split by fixture family."
   },
   {
@@ -73,5 +73,20 @@
     "file": "crates/prodex-runtime-state/tests/src/lib.rs",
     "maxLines": 961,
     "reason": "Runtime-state fixed parity coverage now includes exhaustive Mojo mutation/quota/background policy matrices and usize boundary regressions; exact test cap ratchets the audited 0.433.0 suite until policy fixtures split into sibling modules."
+  },
+  {
+    "file": "crates/prodex-mojo-core/src/log.rs",
+    "maxLines": 989,
+    "reason": "Mojo log ABI/materialization remains a single migration boundary while runtime log semantics continue moving out of Rust; exact cap records the current production surface without widening the global limit."
+  },
+  {
+    "file": "crates/prodex-mojo-core/src/provider_constraints.rs",
+    "maxLines": 870,
+    "reason": "Provider-constraint Mojo ABI coverage currently spans the consolidated deterministic policy boundary; exact cap records current production LOC pending a focused adapter split."
+  },
+  {
+    "file": "crates/prodex-runtime-proxy/tests/src/error_policy.rs",
+    "maxLines": 864,
+    "reason": "Runtime error-policy parity tests cover HTTP, stream, quota, overload, retry-after, and payload classification in one focused suite; exact cap records the audited regression surface."
   }
 ]
