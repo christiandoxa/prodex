@@ -25,6 +25,10 @@ const DOCTOR_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doc
 const DOCTOR_RENDER_MOJO_FILE = "mojo/prodex_core/runtime_doctor_render.mojo";
 const RUNTIME_DOCTOR_PLAN_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs";
 const RUNTIME_DOCTOR_PLAN_MOJO_FILE = "mojo/prodex_core/runtime_doctor_plan.mojo";
+const GOVERNANCE_INSPECTION_CONSUMER_FILE = "crates/prodex-domain/src/governance/inspection.rs";
+const GOVERNANCE_INSPECTION_ADAPTER_FILE = "crates/prodex-mojo-core/src/policy.rs";
+const GOVERNANCE_INSPECTION_MOJO_FILE = "mojo/prodex_core/governance_inspection.mojo";
+const GOVERNANCE_INSPECTION_TEST_FILE = "crates/prodex-domain/tests/governance_inspection.rs";
 const CLI_DEFAULT_RUN_CONSUMER_FILE = "crates/prodex-cli/src/lib.rs";
 const CLI_DEFAULT_RUN_ABI_FILE = "crates/prodex-mojo-core/src/launch.rs";
 const CLI_DEFAULT_RUN_MOJO_FILE = "mojo/prodex_core/launch_args.mojo";
@@ -1802,7 +1806,7 @@ export function findViolations(files) {
     return violations;
   });
   const governanceInspectionViolations = files.flatMap(([filePath, contents]) => {
-    if (filePath !== "crates/prodex-domain/src/governance/inspection.rs") return [];
+    if (filePath !== GOVERNANCE_INSPECTION_CONSUMER_FILE) return [];
     const required = [
       "governance_finding_minimum_classification(",
       "governance_findings_exceed_classification(",
@@ -1825,6 +1829,41 @@ export function findViolations(files) {
       violations.push(filePath + ": contains restored Rust governance inspection semantics");
     }
     return violations;
+  });
+  const governanceInspectionOrderingViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === GOVERNANCE_INSPECTION_CONSUMER_FILE) {
+      const required = [
+        "prodex_mojo_core::policy::governance_inspection_order(",
+        "apply_mojo_order(findings, &order.finding_indices)",
+        "apply_mojo_order(tags, &order.tag_indices)",
+        "apply_mojo_order(reason_codes, &order.reason_code_indices)",
+      ];
+      const violations = required
+        .filter((value) => !contents.includes(value))
+        .map((value) => `${filePath}: inspection ordering must use Mojo plan ${value}`);
+      if (/\b(?:findings|tags|reason_codes)\.sort(?:_by)?\s*\(|\.dedup\s*\(/u.test(contents)) {
+        violations.push(`${filePath}: contains restored Rust inspection ordering or deduplication`);
+      }
+      return violations;
+    }
+    if (filePath === GOVERNANCE_INSPECTION_ADAPTER_FILE &&
+        (!contents.includes("fn prodex_mojo_governance_inspection_order_v1(") ||
+          !contents.includes("pub fn governance_inspection_order(") ||
+          !contents.includes("validate_governance_order("))) {
+      return [`${filePath}: inspection ordering adapter must use the bounded Mojo ABI and validate returned indices`];
+    }
+    if (filePath === GOVERNANCE_INSPECTION_MOJO_FILE &&
+        (!contents.includes('@export("prodex_mojo_governance_inspection_order_v1")') ||
+          !contents.includes("governance_finding_order_sort(") ||
+          !contents.includes("governance_view_order_sort(") ||
+          !contents.includes("governance_view_order_deduplicate("))) {
+      return [`${filePath}: finding order and metadata deduplication must stay in the governance Mojo kernel`];
+    }
+    if (filePath === GOVERNANCE_INSPECTION_TEST_FILE &&
+        !contents.includes("inspection_result_ordering_uses_mojo_key_and_deduplicates")) {
+      return [`${filePath}: production governance ordering needs a caller-boundary regression test`];
+    }
+    return [];
   });
   const profileIdentityViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-domain/src/secrets.rs") {
@@ -3946,7 +3985,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -4022,6 +4061,41 @@ function selfTest() {
   /SecretRef::is_well_formed must retain Mojo validation/u);
   assert.deepEqual(findViolations([["crates/prodex-domain/src/secrets.rs",
     "pub fn is_well_formed(&self) -> bool {\n        prodex_mojo_core::secret_policy::secret_reference_is_well_formed(provider, name, version)\n    }"]]), []);
+  const governanceOrderConsumer = [
+    "governance_finding_minimum_classification(",
+    "governance_findings_exceed_classification(",
+    "governance_classification_label(",
+    "governance_coverage_combine(",
+    "governance_coverage_label(",
+    "governance_content_location_path_valid(",
+    "governance_inspection_token_valid(",
+    "governance_inspection_limits_valid(",
+    "prodex_mojo_core::policy::governance_inspection_order(",
+    "apply_mojo_order(findings, &order.finding_indices)",
+    "apply_mojo_order(tags, &order.tag_indices)",
+    "apply_mojo_order(reason_codes, &order.reason_code_indices)",
+  ].join("\n");
+  assert.deepEqual(findViolations([
+    [GOVERNANCE_INSPECTION_CONSUMER_FILE, governanceOrderConsumer],
+    [GOVERNANCE_INSPECTION_ADAPTER_FILE,
+      "fn prodex_mojo_governance_inspection_order_v1() {}\npub fn governance_inspection_order() {}\nfn validate_governance_order() {}"],
+    [GOVERNANCE_INSPECTION_MOJO_FILE,
+      '@export("prodex_mojo_governance_inspection_order_v1")\ndef governance_finding_order_sort(): pass\ndef governance_view_order_sort(): pass\ndef governance_view_order_deduplicate(): pass'],
+    [GOVERNANCE_INSPECTION_TEST_FILE,
+      "fn inspection_result_ordering_uses_mojo_key_and_deduplicates() {}"],
+  ]), []);
+  assert.match(findViolations([[GOVERNANCE_INSPECTION_CONSUMER_FILE,
+    governanceOrderConsumer + "\ntags.sort(); tags.dedup();"]]).join("\n"),
+  /contains restored Rust inspection ordering or deduplication/u);
+  assert.match(findViolations([[GOVERNANCE_INSPECTION_ADAPTER_FILE,
+    "pub fn governance_inspection_order() {}"]]).join("\n"),
+  /inspection ordering adapter must use the bounded Mojo ABI/u);
+  assert.match(findViolations([[GOVERNANCE_INSPECTION_MOJO_FILE,
+    "def governance_finding_order_sort(): pass"]]).join("\n"),
+  /finding order and metadata deduplication must stay in the governance Mojo kernel/u);
+  assert.match(findViolations([[GOVERNANCE_INSPECTION_TEST_FILE,
+    "fn unrelated_test() {}"]]).join("\n"),
+  /production governance ordering needs a caller-boundary regression test/u);
   const runtimeLogRetentionCalls = [
     "mojo_retention::bounded_text_policy_value(raw, default, min, max);",
     "selection::remove_expired_runtime_logs(logs, oldest_allowed);",

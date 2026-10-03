@@ -4861,3 +4861,23 @@ Validation passed:
 The adapter source was added after the frozen ownership baseline, so this wave
 claims no frozen semantic LOC credit. The canonical broad-source count records
 the reduction in current Rust production LOC directly.
+
+## Governance inspection collection ordering migration
+
+Finding ordering and tag/reason-code sorting and deduplication now run through
+the versioned ABI in the existing `governance_inspection.mojo` kernel. Mojo
+returns validated index plans and enforces input caps of 256 findings and 32
+tags or reason codes before sorting. Rust projects typed keys and applies the
+returned indices; the Rust sort/dedup implementation was removed. Caller tests
+verify the exact finding key order and metadata deduplication. The direct ABI
+test covers each cap and rejects cap-plus-one inputs, including duplicate
+metadata.
+
+Validation passed:
+
+- `mojo format mojo/prodex_core/governance_inspection.mojo` — unchanged; `cargo fmt --all -- --check` passed.
+- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-mojo-core --all-features` — 133 unit tests and all integration targets passed.
+- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-domain` and `PRODEX_MOJO_REQUIRED=1 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` — passed.
+- The Mojo no-fallback guard and self-test, authority guard, and ownership check passed; ownership reports 145 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` — 79,961 Mojo LOC and 203,719 Rust LOC, or **28.19% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
+- `git diff --check` passed for the wave.

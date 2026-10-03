@@ -329,9 +329,9 @@ impl InspectionResult {
     pub fn new(
         coverage: InspectionCoverage,
         classification: DataClassification,
-        mut findings: Vec<InspectionFinding>,
-        mut tags: Vec<InspectionTag>,
-        mut reason_codes: Vec<InspectionReasonCode>,
+        findings: Vec<InspectionFinding>,
+        tags: Vec<InspectionTag>,
+        reason_codes: Vec<InspectionReasonCode>,
         detector_revision: DetectorRevisionId,
         limits: InspectionLimits,
     ) -> Result<Self, InspectionModelError> {
@@ -355,20 +355,34 @@ impl InspectionResult {
             return Err(InspectionModelError::ClassificationTooLow);
         }
 
-        findings.sort_by(|left, right| {
-            left.location
-                .cmp(&right.location)
-                .then_with(|| left.kind.cmp(&right.kind))
-                .then_with(|| left.detector_id.cmp(&right.detector_id))
-                .then_with(|| {
-                    left.confidence_basis_points
-                        .cmp(&right.confidence_basis_points)
-                })
-        });
-        tags.sort();
-        tags.dedup();
-        reason_codes.sort();
-        reason_codes.dedup();
+        let finding_keys = findings
+            .iter()
+            .map(|finding| {
+                let location = &finding.location;
+                prodex_mojo_core::policy::GovernanceInspectionFindingOrderKey {
+                    field_path: &location.field_path,
+                    start_byte: location.start_byte,
+                    end_byte: location.end_byte,
+                    kind: finding.kind as u8,
+                    detector_id: finding.detector_id.as_str(),
+                    confidence_basis_points: finding.confidence_basis_points,
+                }
+            })
+            .collect::<Vec<_>>();
+        let tag_values = tags.iter().map(InspectionTag::as_str).collect::<Vec<_>>();
+        let reason_code_values = reason_codes
+            .iter()
+            .map(InspectionReasonCode::as_str)
+            .collect::<Vec<_>>();
+        let order = prodex_mojo_core::policy::governance_inspection_order(
+            &finding_keys,
+            &tag_values,
+            &reason_code_values,
+        )
+        .expect("Mojo governance inspection ordering returned invalid output");
+        let findings = apply_mojo_order(findings, &order.finding_indices);
+        let tags = apply_mojo_order(tags, &order.tag_indices);
+        let reason_codes = apply_mojo_order(reason_codes, &order.reason_code_indices);
 
         Ok(Self {
             coverage,
@@ -403,6 +417,18 @@ impl InspectionResult {
     pub fn detector_revision(&self) -> &DetectorRevisionId {
         &self.detector_revision
     }
+}
+
+fn apply_mojo_order<T>(values: Vec<T>, order: &[usize]) -> Vec<T> {
+    let mut values = values.into_iter().map(Some).collect::<Vec<_>>();
+    order
+        .iter()
+        .map(|index| {
+            values[*index]
+                .take()
+                .expect("Mojo governance order indices are unique and in range")
+        })
+        .collect()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

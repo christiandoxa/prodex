@@ -14,6 +14,23 @@ fn finding(kind: FindingKind, path: &str) -> InspectionFinding {
     .unwrap()
 }
 
+fn finding_at(
+    kind: FindingKind,
+    path: &str,
+    start_byte: usize,
+    end_byte: usize,
+    confidence_basis_points: u16,
+    detector_id: &str,
+) -> InspectionFinding {
+    InspectionFinding::new(
+        kind,
+        ContentLocation::new(path, start_byte, end_byte).unwrap(),
+        confidence_basis_points,
+        DetectorId::new(detector_id).unwrap(),
+    )
+    .unwrap()
+}
+
 #[test]
 fn inspection_result_is_bounded_deterministic_and_content_free() {
     let result = InspectionResult::new(
@@ -77,6 +94,113 @@ fn inspection_result_rejects_weak_classification_and_excess_findings() {
     )
     .unwrap_err();
     assert_eq!(error, InspectionModelError::LimitExceeded);
+}
+
+#[test]
+fn inspection_result_ordering_uses_mojo_key_and_deduplicates() {
+    let result = InspectionResult::new(
+        InspectionCoverage::Full,
+        DataClassification::Restricted,
+        vec![
+            finding_at(FindingKind::ApiKey, "$.input[1]", 1, 2, 9_000, "detector.b"),
+            finding_at(FindingKind::ApiKey, "$.input[0]", 2, 5, 9_000, "detector.b"),
+            finding_at(
+                FindingKind::EmailAddress,
+                "$.input[0]",
+                2,
+                5,
+                8_000,
+                "detector.a",
+            ),
+            finding_at(FindingKind::ApiKey, "$.input[0]", 2, 5, 9_000, "detector.a"),
+            finding_at(FindingKind::ApiKey, "$.input[0]", 2, 5, 7_000, "detector.a"),
+        ],
+        vec![
+            InspectionTag::new("secret").unwrap(),
+            InspectionTag::new("alpha").unwrap(),
+            InspectionTag::new("secret").unwrap(),
+            InspectionTag::new("beta").unwrap(),
+            InspectionTag::new("alpha").unwrap(),
+        ],
+        vec![
+            InspectionReasonCode::new("zeta").unwrap(),
+            InspectionReasonCode::new("alpha").unwrap(),
+            InspectionReasonCode::new("zeta").unwrap(),
+        ],
+        DetectorRevisionId::new("detectors-v1").unwrap(),
+        InspectionLimits::default(),
+    )
+    .unwrap();
+
+    let findings = result
+        .findings()
+        .iter()
+        .map(|finding| {
+            (
+                finding.location().field_path(),
+                finding.kind(),
+                finding.detector_id().as_str(),
+                finding.confidence_basis_points(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        findings,
+        vec![
+            ("$.input[0]", FindingKind::EmailAddress, "detector.a", 8_000),
+            ("$.input[0]", FindingKind::ApiKey, "detector.a", 7_000),
+            ("$.input[0]", FindingKind::ApiKey, "detector.a", 9_000),
+            ("$.input[0]", FindingKind::ApiKey, "detector.b", 9_000),
+            ("$.input[1]", FindingKind::ApiKey, "detector.b", 9_000),
+        ]
+    );
+    assert_eq!(
+        result
+            .tags()
+            .iter()
+            .map(InspectionTag::as_str)
+            .collect::<Vec<_>>(),
+        ["alpha", "beta", "secret"]
+    );
+    assert_eq!(
+        result
+            .reason_codes()
+            .iter()
+            .map(InspectionReasonCode::as_str)
+            .collect::<Vec<_>>(),
+        ["alpha", "zeta"]
+    );
+}
+
+#[test]
+fn governance_order_plan_returns_sorted_original_indices() {
+    let findings = [
+        prodex_mojo_core::policy::GovernanceInspectionFindingOrderKey {
+            field_path: "$.input[1]",
+            start_byte: 4,
+            end_byte: 20,
+            kind: FindingKind::ApiKey as u8,
+            detector_id: "detector.b",
+            confidence_basis_points: 9_000,
+        },
+        prodex_mojo_core::policy::GovernanceInspectionFindingOrderKey {
+            field_path: "$.input[0]",
+            start_byte: 4,
+            end_byte: 20,
+            kind: FindingKind::EmailAddress as u8,
+            detector_id: "detector.a",
+            confidence_basis_points: 9_000,
+        },
+    ];
+    let tags = ["zeta", "alpha"];
+    let reason_codes = ["reason.z", "reason.a"];
+    let order =
+        prodex_mojo_core::policy::governance_inspection_order(&findings, &tags, &reason_codes)
+            .unwrap();
+
+    assert_eq!(order.finding_indices, [1, 0]);
+    assert_eq!(order.tag_indices, [1, 0]);
+    assert_eq!(order.reason_code_indices, [1, 0]);
 }
 
 #[test]
