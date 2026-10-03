@@ -90,6 +90,20 @@ fn valid_sha256(value: &str) -> bool {
     value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
 }
 
+fn previous_stable_legacy_manifest_supported(
+    manifest: &ToolInstallManifest,
+    actual_digest: &str,
+) -> bool {
+    manifest.version == crate::PONYTAIL_PREVIOUS_STABLE_REFERENCE
+        && manifest.commit == crate::PONYTAIL_PREVIOUS_STABLE_COMMIT
+        && actual_digest == crate::PONYTAIL_PREVIOUS_STABLE_TREE_SHA256
+        && manifest_tree_sha256_supported(
+            &manifest.tree_sha256,
+            crate::PONYTAIL_PREVIOUS_STABLE_TREE_SHA256,
+            crate::PONYTAIL_PREVIOUS_LEGACY_MANIFEST_TREE_SHA256,
+        )
+}
+
 fn validate_install(allowed_root: &Path, candidate: &Path) -> Result<ResolvedTool> {
     let candidate = validated_managed_directory(allowed_root, candidate)?;
     let manifest_path = candidate.join(TOOL_MANIFEST);
@@ -157,17 +171,18 @@ fn validate_install(allowed_root: &Path, candidate: &Path) -> Result<ResolvedToo
             "Ponytail latest-stable commit does not match release-qualified metadata"
         );
         anyhow::ensure!(
-            manifest_tree_sha256_supported(
-                &manifest.tree_sha256,
-                crate::PONYTAIL_LATEST_STABLE_TREE_SHA256,
-                crate::PONYTAIL_LEGACY_MANIFEST_TREE_SHA256,
-            ),
+            manifest.tree_sha256 == crate::PONYTAIL_LATEST_STABLE_TREE_SHA256,
             "Ponytail latest-stable manifest tree digest does not match release-qualified metadata"
         );
         anyhow::ensure!(
             digest == crate::PONYTAIL_LATEST_STABLE_TREE_SHA256,
             "Ponytail tree digest mismatch: expected {}, got {digest}",
             crate::PONYTAIL_LATEST_STABLE_TREE_SHA256
+        );
+    } else if manifest.version == crate::PONYTAIL_PREVIOUS_STABLE_REFERENCE {
+        anyhow::ensure!(
+            previous_stable_legacy_manifest_supported(&manifest, &digest),
+            "Ponytail previous-stable metadata does not match release-qualified compatibility metadata"
         );
     } else {
         anyhow::ensure!(
@@ -220,6 +235,29 @@ mod tests {
         let health = tool_status_with_node(None);
         assert_eq!(health.status, ToolHealthStatus::Missing);
         assert!(health.detail.contains("Node.js was not found"));
+    }
+
+    #[test]
+    fn previous_stable_legacy_manifest_requires_vetted_identity_and_tree() {
+        let manifest = ToolInstallManifest {
+            schema_version: 1,
+            id: "ponytail".to_string(),
+            version: crate::PONYTAIL_PREVIOUS_STABLE_REFERENCE.to_string(),
+            source: PONYTAIL_SOURCE.to_string(),
+            commit: crate::PONYTAIL_PREVIOUS_STABLE_COMMIT.to_string(),
+            tree_sha256: crate::PONYTAIL_PREVIOUS_LEGACY_MANIFEST_TREE_SHA256.to_string(),
+        };
+        assert!(previous_stable_legacy_manifest_supported(
+            &manifest,
+            crate::PONYTAIL_PREVIOUS_STABLE_TREE_SHA256,
+        ));
+
+        let mut wrong_commit = manifest;
+        wrong_commit.commit = "0123456789abcdef0123456789abcdef01234567".to_string();
+        assert!(!previous_stable_legacy_manifest_supported(
+            &wrong_commit,
+            crate::PONYTAIL_PREVIOUS_STABLE_TREE_SHA256,
+        ));
     }
 
     #[test]
