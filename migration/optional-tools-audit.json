@@ -26,17 +26,17 @@
     {
       "id": "rtk",
       "repository": "https://github.com/rtk-ai/rtk",
-      "latest_stable": "0.50.0",
-      "release": "v0.50.0",
-      "commit": "1d87b8e719ce0a50c223cd93ca64dd16921f9aec",
-      "git_tree": "118601af23dfff9f2a59baa320539c0999909163",
-      "checksums_asset": "sha256:4c7116898ae812960dfa0de3b3acc5406a0da49209f0ad7bed4d4ed8c4785048",
+      "latest_stable": "0.51.0",
+      "release": "v0.51.0",
+      "commit": "e001f773f80b22b7dc4c7a79521b30e35aaef026",
+      "git_tree": "629a681dd003b85320ae1c49189cbd3fec551c0c",
+      "checksums_asset": "sha256:02368b8bb526e8a6e00299bfb9d27aa8feb0364228b48a707e1410e4e903ed31",
       "assets": {
-        "linux-x86_64-musl": "sha256:bc2b8902b0d9c796c82ef45f16ae2307e17757afeca5ee156235a3dc7bda5f89",
-        "linux-aarch64-gnu": "sha256:d1cc49dfa2cd443fc32625444b59fe616b6c80478cca210985118347174dd758",
-        "darwin-x86_64": "sha256:ac23e20024ab3c71e7f50069f8b34190aec1b2d8f0c2cc19834039b3dac73373",
-        "darwin-aarch64": "sha256:fe54761a9950266e3a78ddb66a8af5e067251169da306a288e0751de63d836fe",
-        "windows-x86_64": "sha256:cb03399305135dd59ee23eb59a3260ccdeea5a8e08fbc7a271b115b85583a6c9"
+        "linux-x86_64-musl": "sha256:5028d3b19a8f0990d30fec9fbb07e32782bc5698e618fb1861aad8a9ccba4eb5",
+        "linux-aarch64-gnu": "sha256:8d6d1aad9e69b42481eda7039507d1f7ee93698f87713cecd873d287c1931632",
+        "darwin-x86_64": "sha256:bd39c8153f4147358360c7dc51665a8131cc9ee16f81f69a9402ffa500be3cc2",
+        "darwin-aarch64": "sha256:8817d8b71afc02ac8bf06eb24bcc41c306592ab735b68e8fee9db1ba0de7cb59",
+        "windows-x86_64": "sha256:1623e9b45d28b15122d69e7314776e1123a804224885ce07e7182fb40080f05c"
       },
       "license": "Apache-2.0",
       "runtime": "Externally managed executable; recommended, not latest-only",
@@ -46,7 +46,7 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "v0.50.0 is the latest stable release; the exact release commit, Git tree, GitHub asset digests, and checksum manifest digest are pinned."
+      "notes": "v0.51.0 is the latest stable release; the exact release commit, Git tree, GitHub asset digests, and checksum manifest digest are pinned."
     },
     {
       "id": "codebase-memory-mcp",
@@ -99,11 +99,11 @@
     {
       "id": "ponytail",
       "repository": "https://github.com/DietrichGebert/ponytail",
-      "latest_stable": "4.10.0",
-      "release": "v4.10.0",
-      "commit": "1d95ff7d39de12d87014ea40d4e22201bddc501b",
-      "git_tree": "1e6313c25542d1762ea60ec62f6ff220ac835f92",
-      "prodex_tree_sha256": "05fe532f2a310cc7d12a60d6b51d1638a7d1465598d82ffa9f6a3d4cbf970f48",
+      "latest_stable": "4.10.3",
+      "release": "v4.10.3",
+      "commit": "ef8ca48fed2321ab6668b2a954f23b1af97d7f6d",
+      "git_tree": "1998991dfc07a81be214bf90aa1b5c783bd4bf04",
+      "prodex_tree_sha256": "fcd46adfb2846ce9afbb96d1c3fe8e51892f8e6ee5b59423a81b193d89342fbb",
       "license": "MIT",
       "runtime": "Node.js plugin; externally managed immutable checkout",
       "platforms": [
@@ -112,7 +112,7 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Latest stable release revalidated from a clean v4.10.0 checkout for Codex hooks, sub-agent scoping, Windows behavior, and the complete Prodex tree digest. Prodex 0.430.3 accepts the legacy manifest digest while always recomputing and enforcing this corrected tree digest."
+      "notes": "Latest stable release revalidated from a clean v4.10.3 checkout; the exact release commit, Git tree, plugin version, and complete Prodex tree digest are pinned. The previously qualified v4.10.0 checkout remains accepted with its audited compatibility metadata."
     },
     {
       "id": "presidio",

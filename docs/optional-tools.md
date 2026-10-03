@@ -97,15 +97,15 @@ Claude plugin hooks can use Caveman's documented `caveman telemetry off` or
 
 ## Ponytail
 
-Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/4.10.0/` with metadata:
+Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/4.10.3/` with metadata:
 
 - source: `https://github.com/DietrichGebert/ponytail`
-- commit: `1d95ff7d39de12d87014ea40d4e22201bddc501b`
-- tree SHA-256: `05fe532f2a310cc7d12a60d6b51d1638a7d1465598d82ffa9f6a3d4cbf970f48`
+- commit: `ef8ca48fed2321ab6668b2a954f23b1af97d7f6d`
+- tree SHA-256: `fcd46adfb2846ce9afbb96d1c3fe8e51892f8e6ee5b59423a81b193d89342fbb`
 
-The same legacy-manifest compatibility rule applies to the 4.10.0 qualified reference. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
+The 4.10.3 qualified reference requires its exact audited commit and complete tree digest. The previously qualified 4.10.0 checkout remains accepted with its audited tree and legacy-manifest compatibility rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
 
-RTK requires `0.46.0` or newer; `0.50.0` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
+RTK requires `0.46.0` or newer; `0.51.0` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
 `0.11.0` is the latest stable release validated for this Prodex release. Both resolve from
 managed roots first and then `PATH`.
 The README installs the current stable Codebase Memory MCP `0.11.0`; Prodex

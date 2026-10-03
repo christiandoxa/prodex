@@ -211,7 +211,7 @@ prodex caveman --dry-run
 
 The target directory must not already exist. Prodex validates the commit metadata and complete tree digest before activating Caveman. Caveman 3.0.0 documents telemetry as enabled by default for its CLI and agent hooks; its skill-only integration sends no telemetry. Use Caveman's documented `caveman telemetry off` or `DO_NOT_TRACK=1` controls when running its CLI/plugin hooks if telemetry is not desired.
 
-RTK (latest stable `0.50.0`, externally managed):
+RTK (latest stable `0.51.0`, externally managed):
 
 ```bash
 brew install rtk
@@ -219,9 +219,9 @@ brew install rtk
 rtk_dir="$(mktemp -d)"
 trap 'rm -rf "$rtk_dir"' EXIT
 curl -fsSLo "$rtk_dir/checksums.txt" \
-  https://github.com/rtk-ai/rtk/releases/download/v0.50.0/checksums.txt
+  https://github.com/rtk-ai/rtk/releases/download/v0.51.0/checksums.txt
 curl -fsSLo "$rtk_dir/rtk.tar.gz" \
-  https://github.com/rtk-ai/rtk/releases/download/v0.50.0/rtk-x86_64-unknown-linux-musl.tar.gz
+  https://github.com/rtk-ai/rtk/releases/download/v0.51.0/rtk-x86_64-unknown-linux-musl.tar.gz
 (cd "$rtk_dir" && grep '  rtk-x86_64-unknown-linux-musl.tar.gz$' checksums.txt | sha256sum --check)
 tar -xzf "$rtk_dir/rtk.tar.gz" -C "$rtk_dir"
 install -m 0755 "$rtk_dir/rtk" "$HOME/.local/bin/rtk"
@@ -231,7 +231,7 @@ rtk gain
 prodex capability super-doctor
 ```
 
-Use the matching archive and checksum row from the official v0.50.0 release on
+Use the matching archive and checksum row from the official v0.51.0 release on
 other architectures. Finish any process using the old executable before an
 explicit upgrade; Prodex never replaces RTK during startup.
 
@@ -272,24 +272,24 @@ The browser install command above installs the Chrome channel used by Prodex's d
 
 Prodex preserves inherited `[mcp_servers.playwright]` entries. Add a custom entry to the base profile's `config.toml` to change flags, use a persistent/headed browser, or set `enabled = false`; the temporary Super overlay will not replace it.
 
-Ponytail (Prodex-vetted `4.10.0` checkout):
+Ponytail (Prodex-vetted `4.10.3` checkout):
 
 ```bash
 export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
 install -d "$PRODEX_OPTIMIZERS_HOME/ponytail"
 git clone --no-checkout https://github.com/DietrichGebert/ponytail \
-  "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.0"
-git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.0" config core.autocrlf false
-git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.0" checkout --detach \
-  1d95ff7d39de12d87014ea40d4e22201bddc501b
-cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.0/prodex-tool.json" <<'JSON'
+  "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.3"
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.3" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.3" checkout --detach \
+  ef8ca48fed2321ab6668b2a954f23b1af97d7f6d
+cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.3/prodex-tool.json" <<'JSON'
 {
   "schema_version": 1,
   "id": "ponytail",
-  "version": "4.10.0",
+  "version": "4.10.3",
   "source": "https://github.com/DietrichGebert/ponytail",
-  "commit": "1d95ff7d39de12d87014ea40d4e22201bddc501b",
-  "tree_sha256": "5443a5ee4a7248adcb59e1e102dd5bbd14af3083a9c3b4f271dd86790ac88c9c"
+  "commit": "ef8ca48fed2321ab6668b2a954f23b1af97d7f6d",
+  "tree_sha256": "fcd46adfb2846ce9afbb96d1c3fe8e51892f8e6ee5b59423a81b193d89342fbb"
 }
 JSON
 
