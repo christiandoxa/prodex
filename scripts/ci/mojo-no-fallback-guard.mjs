@@ -1867,6 +1867,7 @@ export function findViolations(files) {
       "prodex_mojo_core::codex_config::profile_v2_name(",
       "prodex_mojo_core::codex_config::config_override(",
       "prodex_mojo_core::codex_config::normalize_value(",
+      "prodex_mojo_core::codex_config::model_provider_plan(",
     ];
     const violations = required
       .filter((call) => !contents.includes(call))
@@ -1874,6 +1875,15 @@ export function findViolations(files) {
     if (/\bfn\s+(?:parse_config_override_string|parse_config_override_exact_string)\s*\(/u.test(contents) ||
         /while\s+index\s*<\s*args\.len\(\)/u.test(contents)) {
       violations.push(`${filePath}: contains retired Rust Codex config argument scanning semantics`);
+    }
+    const providerResolution = contents.match(
+      /\bpub fn codex_non_openai_model_provider_with_profile_v2\([^]*?^\}/mu,
+    )?.[0] ?? "";
+    if (!providerResolution.includes("prodex_mojo_core::codex_config::model_provider_plan(")) {
+      violations.push(`${filePath}: model-provider resolution must retain Mojo plan dispatch`);
+    }
+    if (/\bfn\s+codex_model_provider_setting_from_config\s*\(/u.test(contents)) {
+      violations.push(`${filePath}: contains restored Rust model-provider source selection`);
     }
     return violations;
   });
