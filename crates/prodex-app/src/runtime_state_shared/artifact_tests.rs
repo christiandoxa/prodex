@@ -167,6 +167,51 @@ test result: FAILED. 0 passed; 1 failed";
     }
 
     #[test]
+    fn runtime_smart_context_artifact_symbol_index_uses_mojo_classification() {
+        let text = "#[test]\nfn r#entry() {\n    enter();\n}\n\nasync def test_parse():\n    parse()\n\nit(\"unicode 雪\", () => {});\n";
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store.insert_text(text).expect("artifact inserted");
+
+        let index = store
+            .line_index(&artifact.id)
+            .expect("new artifacts should carry a line index");
+
+        assert!(index.semantic_complete);
+        assert!(index.symbol_complete);
+        assert_eq!(
+            index
+                .symbol_ranges
+                .iter()
+                .map(|range| (range.start, range.end, range.line, range.symbol.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                (1, 4, Some(2), Some("entry")),
+                (5, 8, Some(6), Some("test_parse")),
+                (8, 9, Some(9), Some("unicode 雪"))
+            ]
+        );
+        assert_eq!(index.symbol_ranges[0].label.as_deref(), Some("test_symbol"));
+        assert_eq!(
+            index.symbol_ranges[0].text,
+            "#[test]\nfn r#entry() {\n    enter();\n}"
+        );
+        assert_eq!(
+            index.symbol_ranges[1].text,
+            "\nasync def test_parse():\n    parse()\n"
+        );
+        assert_eq!(
+            index.symbol_ranges[2].text,
+            "\nit(\"unicode 雪\", () => {});"
+        );
+        for range in &index.symbol_ranges {
+            assert_eq!(
+                range.content_hash,
+                runtime_proxy_crate::smart_context_hash_text(&range.text)
+            );
+        }
+    }
+
+    #[test]
     fn runtime_smart_context_artifact_semantic_line_index_is_bounded() {
         let text = (0..400)
             .map(|index| format!("src/file{index}.rs:{}:1: error[E0001]: failure", index + 1))
