@@ -222,9 +222,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
 
     fn wait_for_transient_recovery(&mut self) -> Result<bool> {
         if self.has_continuation_priority()
-            || !(self.saw_overload_failure
-                || self.saw_rate_limit_failure
-                || self.saw_transport_failure)
             || !runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Websocket)?
         {
             return Ok(false);

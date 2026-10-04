@@ -46,6 +46,8 @@ pub(super) use self::health::*;
 pub(crate) use self::lifecycle::*;
 pub(super) use self::lineage::*;
 pub(super) use self::payload_detection::*;
+#[cfg(test)]
+pub(crate) use self::precommit_loop::test_runtime_precommit_retryable_recovery_without_transient;
 use self::precommit_loop::*;
 pub(super) use self::prefetch::*;
 pub(super) use self::presidio::*;
