@@ -51,6 +51,7 @@ from smart_context_normalization import (
     prodex_mojo_smart_context_memory_capsule_budget_v1,
     prodex_mojo_smart_context_capsule_plan_v1,
 )
+from smart_context_capsule_order import prodex_mojo_smart_context_capsule_order_v1
 
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 
