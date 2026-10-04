@@ -5185,3 +5185,36 @@ Validation passed:
 - `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -p prodex-app runtime_smart_context_artifact_symbol_index_uses_mojo_ranges -- --list` listed 1 production caller test; it passed.
 - Mojo no-fallback, authority, and ownership guards passed; ownership reports 167 authoritative operations and 95.10% Mojo in the frozen semantic ledger.
 - `node scripts/ci/mojo-production-share.mjs --check` reports 83,922 reachable Mojo LOC and 204,650 Rust production LOC, or **29.0818% Mojo**.
+## Kiro model-catalog normalization
+
+Kiro profile catalogs, ACP model lists, quota lookup, import validation, and
+dynamic provider configuration share one normalization path. The existing
+Kiro Mojo domain now selects root and nested model arrays, enforces the input
+entry cap, applies identifier/name alias precedence, trims strings with Rust
+Unicode whitespace rules, and selects optional description and positive
+context-window metadata. The versioned v1 ABI returns checked string spans and
+typed issue tags. Rust retains Serde tree acquisition and JSON materialization;
+the existing provider catalog service still owns canonical-ID merge and total
+catalog limit enforcement. Mojo failures return errors without Rust policy
+recomputation.
+
+The required-Mojo ABI test covers primary aliases, Unicode trim, fallback names,
+source order, missing arrays, empty catalogs, and limits. The provider-core
+caller test covers output shape, metadata, alias precedence, and dynamic
+deduplication. The app parser test covers all supported root and nested shapes.
+A mutation changed primary identifier precedence; both the direct ABI test and
+provider-core caller test failed. Restored Mojo source matched its pre-mutation
+SHA-256 exactly (`516ed644fd8f926849a98de95cd28d779216e08c57a10fa13f0525d25c78f2af`).
+
+Focused validation passed:
+
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-mojo-core --features mojo-rich --test kiro_catalog -- --test-threads=1` — 2 passed after restoration.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-provider-core kiro_model_catalog_uses_mojo_precedence_and_preserves_model_metadata -- --test-threads=1` — 1 passed after restoration.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-app --lib kiro_model_catalog -- --test-threads=1` — 4 passed, including supported root/nested shapes and the hard limit.
+- Formatting, docs, no-fallback, authority, ownership, and size checks pass; ownership reports 161 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` — 81,976 reachable Mojo LOC and 204,388 Rust LOC (286,364 total), or **28.63% Mojo**. The 7% release floor and non-regression pass; the 75% project target remains unmet.
+
+The checkpoint-wide gates also pass: workspace Clippy with warnings denied,
+`cargo fmt --all -- --check`, `npm run docs`, `npm run test:changed -- --base HEAD`
+(16 changed paths, 341 tracked changed lines; 1,124 including new files), size guard, Mojo no-fallback
+self-test/check, authority and ownership checks, and `git diff --check`.

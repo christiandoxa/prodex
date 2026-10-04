@@ -251,3 +251,7 @@ credentials and durable state remain outside these pure transformation calls.
 Provider error class/cooldown and rejected-request-member decisions use Mojo in
 every feature mode. Rust retains bounded Serde error-body parsing and structured
 code selection; Mojo receives the 64 KiB-bounded error tree for member matching.
+Kiro model-catalog array precedence, aliases, Unicode trimming, and optional
+metadata selection use a versioned Mojo plan. Rust retains Serde tree acquisition,
+checked output mapping, canonical catalog deduplication, and provider-limit checks;
+Mojo errors do not trigger a Rust catalog-policy fallback.

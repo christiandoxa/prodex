@@ -45,6 +45,7 @@ from kiro import (
     kiro_request_validation_json_v1,
     kiro_request_validation_v1,
 )
+from kiro_model_catalog import kiro_model_catalog_normalize_v1
 from smart_context_normalization import (
     prodex_mojo_smart_context_normalization_v1,
     prodex_mojo_smart_context_budget_tier_v1,
@@ -530,6 +531,31 @@ def prodex_mojo_kiro_kernel_v1(
 ) abi("C") -> Int64:
     return kiro_kernel_v1(
         abi_version, input_address, output_address, output_capacity, written_address
+    )
+
+
+@export("prodex_mojo_kiro_catalog_normalize_v1")
+def prodex_mojo_kiro_catalog_normalize_v1(
+    abi_version: Int64,
+    nodes_address: UInt,
+    nodes_count: Int64,
+    raw_address: UInt,
+    raw_length: Int64,
+    max_entries: Int64,
+    records_address: UInt,
+    records_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    return kiro_model_catalog_normalize_v1(
+        abi_version,
+        nodes_address,
+        nodes_count,
+        raw_address,
+        raw_length,
+        max_entries,
+        records_address,
+        records_capacity,
+        result_address,
     )
 
 
