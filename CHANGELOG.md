@@ -6,6 +6,8 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 ### Runtime
 
+- Honor request-local quota exclusions (`4f3e21a`)
+- Reselect profiles after recovery wait (`12d69a1`)
 - Keep retryable profiles alive past precommit budget (`0934e00`)
 # Prodex 0.435.4
 
