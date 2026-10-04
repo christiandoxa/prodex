@@ -252,6 +252,65 @@ fn capsule_selection_preserves_unicode_order_and_avoids_cost_overflow() {
 }
 
 #[test]
+fn capsule_selection_preserves_required_and_nan_partial_order_keys() {
+    let selected = smart_context_select_memory_capsules_impl(
+        [
+            SmartContextMemoryCapsule {
+                id: "optional-low".to_string(),
+                token_cost: 30,
+                relevance: 0.1,
+                required: false,
+            },
+            SmartContextMemoryCapsule {
+                id: "required-z".to_string(),
+                token_cost: 1,
+                relevance: f32::NAN,
+                required: true,
+            },
+            SmartContextMemoryCapsule {
+                id: "nan-late".to_string(),
+                token_cost: 40,
+                relevance: f32::NAN,
+                required: false,
+            },
+            SmartContextMemoryCapsule {
+                id: "optional-high".to_string(),
+                token_cost: 20,
+                relevance: 0.9,
+                required: false,
+            },
+            SmartContextMemoryCapsule {
+                id: "required-a".to_string(),
+                token_cost: 1,
+                relevance: 0.0,
+                required: true,
+            },
+            SmartContextMemoryCapsule {
+                id: "nan-first".to_string(),
+                token_cost: 10,
+                relevance: f32::NAN,
+                required: false,
+            },
+        ],
+        102,
+    );
+
+    assert_eq!(
+        selected.selected_ids,
+        vec![
+            "required-a",
+            "required-z",
+            "nan-first",
+            "optional-high",
+            "optional-low",
+            "nan-late",
+        ]
+    );
+    assert!(selected.omitted_ids.is_empty());
+    assert_eq!(selected.used_tokens, 102);
+}
+
+#[test]
 fn mojo_budget_and_capsule_abis_keep_input_validation() {
     for (mode, tier) in [(-1, 0), (4, 0), (0, -1), (0, 4)] {
         assert_eq!(
@@ -305,6 +364,51 @@ fn capsule_selection_batches_more_than_65536_items_without_losing_budget() {
     );
     assert!(result.omitted_ids.is_empty());
     assert_eq!(result.used_tokens, 65_537);
+}
+
+#[test]
+fn capsule_selection_orders_ids_above_the_old_aggregate_abi_limit() {
+    let prefix = "x".repeat(2 * 1024 * 1024);
+    let id_a = format!("{prefix}a");
+    let id_z = format!("{prefix}z");
+    assert!(id_a.len() + id_z.len() > 4 * 1024 * 1024);
+
+    let result = smart_context_select_memory_capsules_impl(
+        [
+            SmartContextMemoryCapsule {
+                id: id_z.clone(),
+                token_cost: 1,
+                relevance: 0.5,
+                required: false,
+            },
+            SmartContextMemoryCapsule {
+                id: id_a.clone(),
+                token_cost: 1,
+                relevance: 0.5,
+                required: false,
+            },
+        ],
+        2,
+    );
+
+    assert_eq!(result.selected_ids, vec![id_a, id_z]);
+    assert!(result.omitted_ids.is_empty());
+    assert_eq!(result.used_tokens, 2);
+}
+
+#[test]
+fn capsule_order_rejects_inputs_above_count_bound() {
+    let input = prodex_mojo_core::rich::SmartContextCapsuleOrderInput {
+        id: "capsule",
+        token_cost: 1,
+        relevance: 0.0,
+        required: false,
+    };
+    let too_many = vec![input; 65_538];
+    assert_eq!(
+        prodex_mojo_core::rich::order_smart_context_capsules(&too_many),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    );
 }
 
 #[test]

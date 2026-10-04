@@ -5130,3 +5130,35 @@ new operation ID without changing the ABI layout. Direct required-Mojo tests
 cover exact and structured markers, ignored conversation text, and both sides
 of the 2,048-value boundary. App caller regressions cover marker recognition
 and post-child profile rotation.
+- `PRODEX_MOJO_REQUIRED=1 cargo clippy --locked -p prodex-mojo-core -p prodex-provider-core --all-targets --all-features -- -D warnings`, `cargo fmt --all -- --check`, and `git diff --check` passed.
+- Mojo no-fallback self-test and guard, authority guard, and ownership check passed; ownership reports 148 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` — 81,025 Mojo LOC and 203,351 Rust LOC, or **28.49% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
+
+## Smart Context memory-capsule ordering migration
+
+Mojo now owns required-first ordering and optional relevance-descending,
+token-cost-ascending, ID-ascending ordering through
+`prodex_mojo_smart_context_capsule_order_v1`. The stable merge sort compares
+borrowed UTF-8 ID byte spans and typed relevance, token-cost, and required
+keys. NaN relevance compares equal before token-cost and ID tie-breakers;
+equal keys retain input order. The v1 ABI bounds inputs to 65,537 capsules and
+passes each ID as a borrowed byte pointer with a checked length, then returns a
+permutation. The ABI copies no ID bytes and imposes no aggregate ID-byte limit.
+
+Rust retains every `String`, marshals count-bounded ID pointers, checked lengths,
+and typed keys, validates the full permutation, and moves capsules into that
+order. The existing Mojo admission planner still receives 65,536-item batches
+with the remaining token budget. Rust contains no capsule comparator or
+ordering fallback. Rust supplies permutation and scratch buffers, so the Mojo
+ordering kernel performs no heap allocation.
+
+Validation passed:
+
+- `mojo format mojo/prodex_core/smart_context_capsule_order.mojo mojo/tests/smart_context_capsule_order_test.mojo` and `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/smart_context_capsule_order_test.mojo` passed.
+- The mutation proof inverted required-first ordering; the direct Mojo test failed at the expected permutation assertion. Restoring saved source bytes was byte-exact: SHA-256 before and after was `0567239cb15ec10ff2055660f963323612988c1db3f893fbeb2b7bf50b5ee426`.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-runtime-proxy --lib capsule_ -- --test-threads=1` — 7 passed, including NaN tie-breaks, 65,537-item batching, total ID bytes above 4 MiB, and per-ID span validation.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo clippy --locked -q -p prodex-mojo-core -p prodex-runtime-proxy --all-targets --all-features -- -D warnings` and `cargo fmt --all -- --check` passed.
+- `npm run docs`, `npm run test:changed`, and `git diff --check` passed.
+- `node scripts/ci/mojo-no-fallback-guard.mjs --self-test`, `node scripts/ci/mojo-authority-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, and `node scripts/ci/size-guard.mjs` passed. Ownership reports 154 authoritative operations; the new Mojo module is 198 lines.
+- `node scripts/ci/mojo-production-share.mjs --check` — 81,486 Mojo LOC and 203,748 Rust LOC, or **28.57% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
+- No commit or push was made.

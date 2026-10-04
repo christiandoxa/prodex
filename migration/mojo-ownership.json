@@ -591,6 +591,16 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/smart_context_capsule_order.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "smart_context_capsule_order"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/runtime_health.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -1460,6 +1470,24 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "artifact acquisition, ordering, and adapter"
+    },
+    {
+      "name": "smart_context_capsule_order",
+      "domain": "collections/ordering",
+      "introduced_in": "0.420.0",
+      "baseline_state": "rust-owned",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_capsule_order_v1",
+      "mojo_source": "mojo/prodex_core/smart_context_capsule_order.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs",
+      "consumer_marker": "prodex_mojo_core::rich::order_smart_context_capsules",
+      "production_reachability_test": "crates/prodex-runtime-proxy/tests/src/smart_context/token_budget.rs",
+      "rust_owner_before": "required-first and optional relevance, token-cost, and ID ordering with Rust partial_cmp and stable-sort semantics",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "count-bounded per-ID pointer and checked-length projection, typed-key projection, validated permutation application, and existing admission batches"
     },
     {
       "name": "log_event_classification",
@@ -5802,16 +5830,16 @@
     {
       "file": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
       "symbol": "smart_context_select_memory_capsules",
-      "operation": "smart_context_rehydration_plan",
-      "previous_responsibility": "required-first and relevance-ordered memory-capsule admission under a token budget",
+      "operation": "smart_context_capsule_order",
+      "previous_responsibility": "required-first and optional relevance, token-cost, and ID ordering before memory-capsule admission",
       "final_state": "adapter-only",
       "rust_before": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs::smart_context_select_memory_capsules",
-      "rust_after": "collapsed adapter delegating directly to the normalization owner",
-      "mojo_owner": "mojo/prodex_core/smart_context_normalization.mojo::prodex_mojo_smart_context_capsule_plan_v1",
-      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
-      "mojo_entry": "prodex_mojo_smart_context_capsule_plan_v1",
-      "production_consumer": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
-      "parity_test": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+      "rust_after": "public wrapper delegates to Mojo ordering and retains the existing bounded admission call",
+      "mojo_owner": "mojo/prodex_core/smart_context_capsule_order.mojo::prodex_mojo_smart_context_capsule_order_v1",
+      "mojo_source": "mojo/prodex_core/smart_context_capsule_order.mojo",
+      "mojo_entry": "prodex_mojo_smart_context_capsule_order_v1",
+      "production_consumer": "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs",
+      "parity_test": "crates/prodex-runtime-proxy/tests/src/smart_context/token_budget.rs",
       "cleanup_loc": 32,
       "cleanup_source": {
         "kind": "collapsed-adapter",
@@ -5822,7 +5850,7 @@
         "release_symbol": "pub fn smart_context_select_memory_capsules",
         "release_marker": "super::normalization::smart_context_select_memory_capsules_impl"
       },
-      "cleanup_evidence": "The duplicated feature-gated wrappers collapsed to one adapter that delegates directly to the normalization owner; bounded capsule admission is not reimplemented here."
+      "cleanup_evidence": "The Rust required/optional partition and capsule comparators were removed. The public wrapper reaches the versioned Mojo ordering ABI before the existing bounded admission batches."
     },
     {
       "file": "crates/prodex-runtime-store/src/profile_backoff/score.rs",
