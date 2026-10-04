@@ -95,6 +95,14 @@
         "crates/prodex-profile-identity/src/lib.rs",
         "crates/prodex-state/src/lib.rs"
       ]
+    },
+    "runtime_policy_proxy_preset_resolution": {
+      "expanded_in": "0.435.4",
+      "consumer": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+      "consumer_marker": "runtime_tuning_proxy_preset_plan",
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_policy_preset.rs",
+      "rust_owner_before": "runtime-proxy preset defaults, environment-over-config precedence, and explicit override merging",
+      "rust_adapter_scope": "encode typed preset and optional-field inputs, then map the Mojo plan into runtime settings"
     }
   },
   "classification_legend": {
@@ -487,7 +495,7 @@
         "operations": [
           "runtime_tuning_defaults_kernel",
           "runtime_tuning_capacity_defaults",
-          "runtime_policy_proxy_preset_defaults",
+          "runtime_policy_proxy_preset_resolution",
           "runtime_scalar_config_policy"
         ]
       },
@@ -1922,22 +1930,22 @@
       "rust_adapter_scope": "profile-state observation and validated name reconstruction"
     },
     {
-      "name": "runtime_policy_proxy_preset_defaults",
+      "name": "runtime_policy_proxy_preset_resolution",
       "domain": "runtime-policy/capacity",
       "introduced_in": "0.420.0",
       "baseline_state": "candidate",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_runtime_proxy_preset_defaults_v1",
+      "mojo_entry": "prodex_runtime_proxy_preset_plan_v1",
       "mojo_source": "mojo/prodex_core/runtime_tuning.mojo",
       "consumer": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
-      "consumer_marker": "runtime_tuning_proxy_preset_defaults",
-      "production_reachability_test": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
-      "rust_owner_before": "runtime-proxy preset default normalization",
+      "consumer_marker": "runtime_tuning_proxy_preset_plan",
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_policy_preset.rs",
+      "rust_owner_before": "runtime-proxy preset defaults, environment-over-config precedence, and explicit override merging",
       "rust_state_after": "adapter-only",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "typed preset selection and validated scalar mapping"
+      "rust_adapter_scope": "encode typed preset and optional-field inputs, then map the Mojo plan into runtime settings"
     },
     {
       "name": "runtime_log_level_classification",
@@ -5445,27 +5453,50 @@
     {
       "file": "crates/prodex-runtime-policy/src/types.rs",
       "symbol": "fn settings(self) -> RuntimePolicyProxySettings",
-      "operation": "runtime_policy_proxy_preset_defaults",
+      "operation": "runtime_policy_proxy_preset_resolution",
       "previous_responsibility": "runtime-proxy preset default normalization",
-      "final_state": "adapter-only",
       "rust_before": "crates/prodex-runtime-policy/src/types.rs::RuntimePolicyProxyPreset::settings",
-      "rust_after": "adapter-only wrapper; Mojo owns the preset default table",
-      "mojo_owner": "mojo/prodex_core/runtime_tuning.mojo::prodex_runtime_proxy_preset_defaults_v1",
+      "rust_after": "the Rust preset default table was deleted; Mojo returns typed preset defaults",
+      "mojo_owner": "mojo/prodex_core/runtime_tuning.mojo::prodex_runtime_proxy_preset_plan_v1",
       "mojo_source": "mojo/prodex_core/runtime_tuning.mojo",
-      "mojo_entry": "prodex_runtime_proxy_preset_defaults_v1",
+      "mojo_entry": "prodex_runtime_proxy_preset_plan_v1",
       "production_consumer": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
-      "parity_test": "crates/prodex-runtime-policy/tests/src/runtime_proxy.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/runtime_policy_preset.rs",
       "cleanup_loc": 78,
+      "final_state": "deleted",
       "cleanup_source": {
-        "kind": "collapsed-adapter",
+        "kind": "deleted",
         "baseline_range": {
           "start": 672,
           "end": 751
-        },
-        "release_symbol": "fn settings(self) -> RuntimePolicyProxySettings",
-        "release_marker": "self.resolve()"
+        }
       },
-      "cleanup_evidence": "The former Rust preset default table collapsed to settings() -> resolve(); resolve() delegates preset values to prodex_mojo_core::runtime::runtime_tuning_proxy_preset_defaults."
+      "cleanup_evidence": "Rust preset default values were removed; the versioned Mojo preset plan returns those defaults as part of the complete policy decision."
+    },
+    {
+      "file": "crates/prodex-runtime-policy/src/types.rs",
+      "symbol": "pub fn with_effective_preset(",
+      "operation": "runtime_policy_proxy_preset_resolution",
+      "previous_responsibility": "environment-over-config preset precedence and explicit runtime-proxy field override merging",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-policy/src/types.rs::RuntimePolicyProxySettings::with_effective_preset and apply_non_preset_overrides",
+      "rust_after": "typed Mojo plan input/output adapter",
+      "mojo_owner": "mojo/prodex_core/runtime_tuning.mojo::prodex_runtime_proxy_preset_plan_v1",
+      "mojo_source": "mojo/prodex_core/runtime_tuning.mojo",
+      "mojo_entry": "prodex_runtime_proxy_preset_plan_v1",
+      "production_consumer": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+      "parity_test": "crates/prodex-runtime-policy/src/lib.rs",
+      "cleanup_loc": 66,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 832,
+          "end": 900
+        },
+        "release_symbol": "pub fn with_effective_preset(",
+        "release_marker": "runtime_proxy_preset::RuntimePolicyProxySettings::resolve_effective_preset("
+      },
+      "cleanup_evidence": "Rust preset precedence and field merging were deleted. The public policy entry delegates to a typed adapter whose plan and merge decisions come from Mojo."
     },
     {
       "file": "crates/prodex-context/src/command_output/log_stream.rs",
