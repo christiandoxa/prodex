@@ -60,6 +60,14 @@
     "log_event_classification": {
       "expanded_in": "0.427.0"
     },
+    "log_throughput_sample_planning": {
+      "expanded_in": "0.435.4",
+      "mojo_entry": "prodex_log_throughput_observation_plan_v1",
+      "consumer_marker": "prodex_mojo_core::log_throughput_policy::observation_plan",
+      "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy/state.rs",
+      "rust_owner_before": "counter reset and sample append planning, expanded to event acceptance and duplicate-replay-aware state transition",
+      "rust_adapter_scope": "event projection, stream mutation, timestamps, sample storage, and typed ABI error mapping"
+    },
     "critical_signal_text_grouping": {
       "production_reachability_test": "crates/prodex-context/src/critical_signal.rs",
       "rust_adapter_scope": "typed Mojo result mapping; Rust oracle deleted"
@@ -992,7 +1000,12 @@
         "operations": [
           "log_throughput_sample_planning",
           "log_throughput_completed_rate",
-          "log_throughput_stream_rate"
+          "log_throughput_stream_rate",
+          "log_throughput_duplicate_replay_classification",
+          "log_throughput_candidate_selection",
+          "log_throughput_sample_freshness",
+          "log_throughput_bounded_state_eviction",
+          "log_throughput_finish_rate_precedence"
         ]
       },
       {
@@ -4817,6 +4830,121 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON traversal, borrowed string views, caller-owned output allocation, and typed ABI error mapping"
+    },
+    {
+      "name": "log_throughput_duplicate_replay_classification",
+      "domain": "app/log-throughput",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust live-log and disk-log replay path classification",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_log_throughput_duplicate_replay_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
+      "consumer_marker": "prodex_mojo_core::log_throughput_policy::duplicate_live_disk_replay",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_throughput_state.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy/state.rs",
+      "rust_owner_before": "broker/direct live-path prefix recognition and cross-live/disk replay classification",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; real-Mojo adapter and app tests cover broker/direct live paths, disk paths, and same-path replay",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Path projection and duplicate observation map lookup"
+    },
+    {
+      "name": "log_throughput_candidate_selection",
+      "domain": "app/log-throughput",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust active profile/rate and live/historical identity candidate ordering",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_log_throughput_select_candidate_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
+      "consumer_marker": "prodex_mojo_core::log_throughput_policy::select_active_profile_candidate",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_throughput_state.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy/state.rs",
+      "rust_owner_before": "latest eligible active profile/rate selection plus monotonic live and lexicographic historical identity repair with stable tie ordering",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; real-Mojo adapter and app tests cover all candidate modes, eligibility windows, preferred profiles, and ties",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "candidate projection, stable collection iteration, and selected-key lookup"
+    },
+    {
+      "name": "log_throughput_sample_freshness",
+      "domain": "app/log-throughput",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust strict two-second monotonic sample expiry decision",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_log_throughput_sample_expired_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
+      "consumer_marker": "prodex_mojo_core::log_throughput_policy::sample_expired",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_throughput_state.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy/state.rs",
+      "rust_owner_before": "strict two-second sample-window expiry comparison",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; real-Mojo adapter and app tests cover the inclusive boundary and first nanosecond beyond it",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Instant age acquisition and expired sample removal"
+    },
+    {
+      "name": "log_throughput_bounded_state_eviction",
+      "domain": "app/log-throughput",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust stream and duplicate-observation state insertion bounds",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_log_throughput_bounded_insert_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
+      "consumer_marker": "prodex_mojo_core::log_throughput_policy::bounded_insert_needs_eviction",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_throughput_state.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy/state.rs",
+      "rust_owner_before": "64-stream and 256-observation insertion threshold decisions",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; real-Mojo adapter and app tests cover below-bound, at-bound, and already-present states",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "collection length projection, native BTreeMap `keys().next()` victim order over platform PathBuf/profile/request keys, and eviction application; Mojo owns the 64-stream/256-observation bounds and whether eviction is required"
+    },
+    {
+      "name": "log_throughput_finish_rate_precedence",
+      "domain": "app/log-throughput",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust finish-rate first-present precedence followed by finite-positive validation",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_log_throughput_finish_rate_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_throughput_policy.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_throughput_state.rs",
+      "consumer_marker": "prodex_mojo_core::log_throughput_policy::finish_rate_candidate",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_throughput_state.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/log_throughput_policy/state.rs",
+      "rust_owner_before": "duplicate, stream, keyed, and completed candidate first-present selection followed by finite-positive validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; real-Mojo adapter regression covers invalid first-present suppression and valid first-present precedence",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "candidate projection and selected-rate reconstruction"
     }
   ],
   "rust_semantic_reductions": [

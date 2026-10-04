@@ -3,10 +3,54 @@ use crate::app_commands::log_tui::{
     LOG_TUI_TITLE, OutputThroughput, OutputThroughputDisplay, render_log_header,
     render_log_header_with_display,
 };
+use crate::reports::InfoTokenUsageEvent;
 use std::collections::VecDeque;
 use std::hint::black_box;
 use std::path::Path;
 use std::time::{Duration, Instant};
+
+#[test]
+fn active_rate_keeps_two_second_boundary_then_shows_sticky_rate() {
+    let path = Path::new("/home/test-user/runtime-throughput-freshness.log");
+    let start = Instant::now();
+    let mut throughput = OutputThroughput::default();
+    throughput.observe_token_usage(
+        path,
+        &InfoTokenUsageEvent {
+            profile: "main".to_string(),
+            request: Some(1),
+            output_tokens: 100,
+            generation_ms: Some(1_000),
+            ..InfoTokenUsageEvent::default()
+        },
+        start,
+    );
+    throughput.observe_token_usage(
+        path,
+        &InfoTokenUsageEvent {
+            profile: "main".to_string(),
+            request: Some(1),
+            output_tokens: 200,
+            generation_ms: Some(3_000),
+            ..InfoTokenUsageEvent::default()
+        },
+        start + Duration::from_secs(1),
+    );
+
+    let boundary = start + Duration::from_secs(3);
+    assert_eq!(
+        throughput.active_rate_for_profile(boundary, Some("main")),
+        Some(50.0)
+    );
+    assert_eq!(
+        throughput.active_rate_for_profile(boundary + Duration::from_nanos(1), Some("main")),
+        None
+    );
+    assert_eq!(
+        throughput.display_for_profile(boundary + Duration::from_nanos(1), Some("main")),
+        Some(OutputThroughputDisplay::Last(50.0))
+    );
+}
 
 #[test]
 fn completed_rate_reaches_tui_header_and_survives_log_flood() {

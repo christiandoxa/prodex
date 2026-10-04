@@ -1,10 +1,40 @@
 from std.memory import Pointer
+from std.math import isfinite
 
 comptime LOG_THROUGHPUT_ABI_VERSION: Int64 = 1
+comptime LOG_THROUGHPUT_STATE_ABI_VERSION: Int64 = 1
 comptime LOG_THROUGHPUT_OK: Int64 = 0
 comptime LOG_THROUGHPUT_INVALID: Int64 = 1
 comptime LOG_THROUGHPUT_ABI: Int64 = 4
 comptime LOG_THROUGHPUT_MIN_SAMPLE_MS: UInt64 = 250
+comptime LOG_THROUGHPUT_WINDOW_NS: UInt64 = 2_000_000_000
+comptime LOG_THROUGHPUT_MAX_STREAMS: UInt64 = 64
+comptime LOG_THROUGHPUT_MAX_OBSERVATIONS: UInt64 = 256
+comptime LOG_THROUGHPUT_CANDIDATE_STRIDE: Int = 4
+comptime LOG_THROUGHPUT_SELECT_ACTIVE_PROFILE: Int64 = 1
+comptime LOG_THROUGHPUT_SELECT_ACTIVE_RATE: Int64 = 2
+comptime LOG_THROUGHPUT_SELECT_LIVE_IDENTITY: Int64 = 3
+comptime LOG_THROUGHPUT_SELECT_HISTORICAL_IDENTITY: Int64 = 4
+comptime LOG_THROUGHPUT_BOUND_STREAMS: Int64 = 1
+comptime LOG_THROUGHPUT_BOUND_OBSERVATIONS: Int64 = 2
+comptime LOG_THROUGHPUT_FINISH_CANDIDATE_COUNT: Int = 4
+
+
+def throughput_sample_bits(
+    previous_present: Int64,
+    previous_tokens: UInt64,
+    previous_generation_ms: UInt64,
+    current_tokens: UInt64,
+    current_generation_ms: UInt64,
+) -> Tuple[Bool, Bool]:
+    var reset = previous_present == 1 and (
+        current_tokens < previous_tokens
+        or current_generation_ms < previous_generation_ms
+    )
+    var append = (
+        previous_present == 0 or reset or current_tokens > previous_tokens
+    )
+    return (reset, append)
 
 
 @export("prodex_log_throughput_sample_plan_v1")
@@ -19,29 +49,296 @@ def prodex_log_throughput_sample_plan_v1(
 ) abi("C") -> Int64:
     if abi_version != LOG_THROUGHPUT_ABI_VERSION:
         return LOG_THROUGHPUT_ABI
-    if (
-        (previous_present != 0 and previous_present != 1)
-        or output_address == 0
-    ):
+    if (previous_present != 0 and previous_present != 1) or output_address == 0:
         return LOG_THROUGHPUT_INVALID
 
-    var reset = (
-        previous_present == 1
-        and (
-            current_tokens < previous_tokens
-            or current_generation_ms < previous_generation_ms
-        )
-    )
-    var append = (
-        previous_present == 0
-        or reset
-        or current_tokens > previous_tokens
+    var plan = throughput_sample_bits(
+        previous_present,
+        previous_tokens,
+        previous_generation_ms,
+        current_tokens,
+        current_generation_ms,
     )
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    output[unsafe_offset=0] = Int64(reset)
-    output[unsafe_offset=1] = Int64(append)
+    output[unsafe_offset=0] = Int64(plan[0])
+    output[unsafe_offset=1] = Int64(plan[1])
+    return LOG_THROUGHPUT_OK
+
+
+@export("prodex_log_throughput_observation_plan_v1")
+def prodex_log_throughput_observation_plan_v1(
+    abi_version: Int64,
+    generation_present: Int64,
+    previous_present: Int64,
+    duplicate_replay: Int64,
+    previous_tokens: UInt64,
+    previous_generation_ms: UInt64,
+    current_tokens: UInt64,
+    current_generation_ms: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_THROUGHPUT_STATE_ABI_VERSION:
+        return LOG_THROUGHPUT_ABI
+    if (
+        (generation_present != 0 and generation_present != 1)
+        or (previous_present != 0 and previous_present != 1)
+        or (duplicate_replay != 0 and duplicate_replay != 1)
+        or output_address == 0
+    ):
+        return LOG_THROUGHPUT_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(4):
+        output[unsafe_offset=index] = 0
+    if (
+        generation_present == 0
+        or current_generation_ms == 0
+        or current_tokens == 0
+    ):
+        return LOG_THROUGHPUT_OK
+
+    var plan = throughput_sample_bits(
+        previous_present,
+        previous_tokens,
+        previous_generation_ms,
+        current_tokens,
+        current_generation_ms,
+    )
+    output[unsafe_offset=0] = 1
+    output[unsafe_offset=1] = Int64(plan[0])
+    output[unsafe_offset=2] = Int64(plan[1])
+    output[unsafe_offset=3] = Int64(duplicate_replay == 1 and not plan[0])
+    return LOG_THROUGHPUT_OK
+
+
+def throughput_path_is_live(address: UInt64, length: UInt64) -> Bool:
+    if length < 7 or address == 0:
+        return False
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    var broker = (
+        source[unsafe_offset=0] == 98
+        and source[unsafe_offset=1] == 114
+        and source[unsafe_offset=2] == 111
+        and source[unsafe_offset=3] == 107
+        and source[unsafe_offset=4] == 101
+        and source[unsafe_offset=5] == 114
+        and source[unsafe_offset=6] == 58
+    )
+    var direct = (
+        source[unsafe_offset=0] == 100
+        and source[unsafe_offset=1] == 105
+        and source[unsafe_offset=2] == 114
+        and source[unsafe_offset=3] == 101
+        and source[unsafe_offset=4] == 99
+        and source[unsafe_offset=5] == 116
+        and source[unsafe_offset=6] == 58
+    )
+    return broker or direct
+
+
+@export("prodex_log_throughput_duplicate_replay_v1")
+def prodex_log_throughput_duplicate_replay_v1(
+    abi_version: Int64,
+    same_path: Int64,
+    previous_address: UInt64,
+    previous_length: UInt64,
+    current_address: UInt64,
+    current_length: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_THROUGHPUT_STATE_ABI_VERSION:
+        return LOG_THROUGHPUT_ABI
+    if (
+        (same_path != 0 and same_path != 1)
+        or output_address == 0
+        or (previous_length > 0 and previous_address == 0)
+        or (current_length > 0 and current_address == 0)
+    ):
+        return LOG_THROUGHPUT_INVALID
+    var previous_live = throughput_path_is_live(
+        previous_address, previous_length
+    )
+    var current_live = throughput_path_is_live(current_address, current_length)
+    var duplicate = same_path == 0 and previous_live != current_live
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(duplicate)
+    return LOG_THROUGHPUT_OK
+
+
+def throughput_candidate_is_better(
+    mode: Int64,
+    rows: Pointer[mut=False, UInt64, _],
+    payload: Pointer[mut=False, UInt8, _],
+    candidate: Int,
+    selected: Int,
+) -> Bool:
+    var candidate_base = candidate * LOG_THROUGHPUT_CANDIDATE_STRIDE
+    var selected_base = selected * LOG_THROUGHPUT_CANDIDATE_STRIDE
+    if mode == LOG_THROUGHPUT_SELECT_HISTORICAL_IDENTITY:
+        var candidate_start = Int(rows[unsafe_offset=candidate_base + 1])
+        var selected_start = Int(rows[unsafe_offset=selected_base + 1])
+        var candidate_length = Int(rows[unsafe_offset=candidate_base + 2])
+        var selected_length = Int(rows[unsafe_offset=selected_base + 2])
+        var common_length = min(candidate_length, selected_length)
+        for offset in range(common_length):
+            var candidate_byte = payload[unsafe_offset=candidate_start + offset]
+            var selected_byte = payload[unsafe_offset=selected_start + offset]
+            if candidate_byte != selected_byte:
+                return candidate_byte > selected_byte
+        if candidate_length != selected_length:
+            return candidate_length > selected_length
+        return candidate > selected
+
+    var candidate_flags = rows[unsafe_offset=candidate_base]
+    var selected_flags = rows[unsafe_offset=selected_base]
+    if mode == LOG_THROUGHPUT_SELECT_LIVE_IDENTITY:
+        var candidate_has_event = candidate_flags & 2
+        var selected_has_event = selected_flags & 2
+        if candidate_has_event != selected_has_event:
+            return candidate_has_event > selected_has_event
+    var candidate_age = rows[unsafe_offset=candidate_base + 1]
+    var selected_age = rows[unsafe_offset=selected_base + 1]
+    if candidate_age != selected_age:
+        return candidate_age < selected_age
+    return candidate > selected
+
+
+@export("prodex_log_throughput_select_candidate_v1")
+def prodex_log_throughput_select_candidate_v1(
+    abi_version: Int64,
+    mode: Int64,
+    candidate_count: UInt64,
+    rows_address: UInt64,
+    payload_address: UInt64,
+    payload_length: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_THROUGHPUT_STATE_ABI_VERSION:
+        return LOG_THROUGHPUT_ABI
+    if (
+        (
+            mode < LOG_THROUGHPUT_SELECT_ACTIVE_PROFILE
+            or mode > LOG_THROUGHPUT_SELECT_HISTORICAL_IDENTITY
+        )
+        or output_address == 0
+        or candidate_count
+        > UInt64(0x7FFF_FFFF_FFFF_FFFF)
+        // UInt64(LOG_THROUGHPUT_CANDIDATE_STRIDE)
+        or (candidate_count > 0 and rows_address == 0)
+        or (payload_length > 0 and payload_address == 0)
+    ):
+        return LOG_THROUGHPUT_INVALID
+
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = UInt64(0xFFFF_FFFF_FFFF_FFFF)
+    if candidate_count == 0:
+        return LOG_THROUGHPUT_OK
+    var rows = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rows_address)
+    )
+    var payload = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(payload_address)
+    )
+    var selected = -1
+    for candidate in range(Int(candidate_count)):
+        var base = candidate * LOG_THROUGHPUT_CANDIDATE_STRIDE
+        var flags = rows[unsafe_offset=base]
+        if mode == LOG_THROUGHPUT_SELECT_HISTORICAL_IDENTITY:
+            if flags > 1:
+                return LOG_THROUGHPUT_INVALID
+            var start = rows[unsafe_offset=base + 1]
+            var length = rows[unsafe_offset=base + 2]
+            if start > payload_length or length > payload_length - start:
+                return LOG_THROUGHPUT_INVALID
+        elif mode == LOG_THROUGHPUT_SELECT_ACTIVE_PROFILE:
+            if flags > 3:
+                return LOG_THROUGHPUT_INVALID
+        elif mode == LOG_THROUGHPUT_SELECT_ACTIVE_RATE:
+            if flags > 15:
+                return LOG_THROUGHPUT_INVALID
+        else:
+            if flags > 3:
+                return LOG_THROUGHPUT_INVALID
+        if selected < 0 and flags == 0:
+            continue
+        if mode == LOG_THROUGHPUT_SELECT_ACTIVE_PROFILE:
+            if (flags & 3) != 3:
+                continue
+            if rows[unsafe_offset=base + 1] > LOG_THROUGHPUT_WINDOW_NS:
+                continue
+        elif mode == LOG_THROUGHPUT_SELECT_ACTIVE_RATE:
+            if (flags & 15) != 15:
+                continue
+            if rows[unsafe_offset=base + 1] > LOG_THROUGHPUT_WINDOW_NS:
+                continue
+        elif mode == LOG_THROUGHPUT_SELECT_LIVE_IDENTITY:
+            if (flags & 1) == 0:
+                continue
+        else:
+            if flags == 0:
+                continue
+        if selected < 0 or throughput_candidate_is_better(
+            mode, rows, payload, candidate, selected
+        ):
+            selected = candidate
+    if selected >= 0:
+        output[] = UInt64(selected)
+    return LOG_THROUGHPUT_OK
+
+
+@export("prodex_log_throughput_sample_expired_v1")
+def prodex_log_throughput_sample_expired_v1(
+    abi_version: Int64,
+    age_ns: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_THROUGHPUT_STATE_ABI_VERSION:
+        return LOG_THROUGHPUT_ABI
+    if output_address == 0:
+        return LOG_THROUGHPUT_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(age_ns > LOG_THROUGHPUT_WINDOW_NS)
+    return LOG_THROUGHPUT_OK
+
+
+@export("prodex_log_throughput_bounded_insert_v1")
+def prodex_log_throughput_bounded_insert_v1(
+    abi_version: Int64,
+    kind: Int64,
+    current_count: UInt64,
+    already_present: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_THROUGHPUT_STATE_ABI_VERSION:
+        return LOG_THROUGHPUT_ABI
+    if (
+        (
+            kind != LOG_THROUGHPUT_BOUND_STREAMS
+            and kind != LOG_THROUGHPUT_BOUND_OBSERVATIONS
+        )
+        or (already_present != 0 and already_present != 1)
+        or output_address == 0
+    ):
+        return LOG_THROUGHPUT_INVALID
+    var maximum = LOG_THROUGHPUT_MAX_STREAMS
+    if kind == LOG_THROUGHPUT_BOUND_OBSERVATIONS:
+        maximum = LOG_THROUGHPUT_MAX_OBSERVATIONS
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = Int64(already_present == 0 and current_count >= maximum)
     return LOG_THROUGHPUT_OK
 
 
@@ -64,6 +361,38 @@ def throughput_write_rate(
     return LOG_THROUGHPUT_OK
 
 
+@export("prodex_log_throughput_finish_rate_v1")
+def prodex_log_throughput_finish_rate_v1(
+    abi_version: Int64,
+    present_mask: UInt64,
+    rates_address: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != LOG_THROUGHPUT_STATE_ABI_VERSION:
+        return LOG_THROUGHPUT_ABI
+    if (
+        present_mask >= UInt64(1 << LOG_THROUGHPUT_FINISH_CANDIDATE_COUNT)
+        or rates_address == 0
+        or output_address == 0
+    ):
+        return LOG_THROUGHPUT_INVALID
+    var rates = Pointer[mut=False, Float64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(rates_address)
+    )
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = UInt64(0xFFFF_FFFF_FFFF_FFFF)
+    for index in range(LOG_THROUGHPUT_FINISH_CANDIDATE_COUNT):
+        if (present_mask & (UInt64(1) << UInt64(index))) == 0:
+            continue
+        var rate = rates[unsafe_offset=index]
+        if isfinite(rate) and rate > 0.0:
+            output[] = UInt64(index)
+            return LOG_THROUGHPUT_OK
+    return LOG_THROUGHPUT_OK
+
+
 @export("prodex_log_throughput_completed_rate_v1")
 def prodex_log_throughput_completed_rate_v1(
     abi_version: Int64,
@@ -75,15 +404,9 @@ def prodex_log_throughput_completed_rate_v1(
     if abi_version != LOG_THROUGHPUT_ABI_VERSION:
         return LOG_THROUGHPUT_ABI
     if output_tokens == 0 or generation_ms == 0:
-        return throughput_write_rate(
-            False, 0.0, valid_address, rate_address
-        )
-    var rate = (
-        Float64(output_tokens) * 1000.0 / Float64(generation_ms)
-    )
-    return throughput_write_rate(
-        True, rate, valid_address, rate_address
-    )
+        return throughput_write_rate(False, 0.0, valid_address, rate_address)
+    var rate = Float64(output_tokens) * 1000.0 / Float64(generation_ms)
+    return throughput_write_rate(True, rate, valid_address, rate_address)
 
 
 @export("prodex_log_throughput_stream_rate_v1")
@@ -98,26 +421,14 @@ def prodex_log_throughput_stream_rate_v1(
 ) abi("C") -> Int64:
     if abi_version != LOG_THROUGHPUT_ABI_VERSION:
         return LOG_THROUGHPUT_ABI
-    if (
-        last_generation_ms < first_generation_ms
-        or last_tokens < first_tokens
-    ):
-        return throughput_write_rate(
-            False, 0.0, valid_address, rate_address
-        )
+    if last_generation_ms < first_generation_ms or last_tokens < first_tokens:
+        return throughput_write_rate(False, 0.0, valid_address, rate_address)
     var elapsed_ms = last_generation_ms - first_generation_ms
     var tokens = last_tokens - first_tokens
-    if (
-        elapsed_ms < LOG_THROUGHPUT_MIN_SAMPLE_MS
-        or tokens == 0
-    ):
-        return throughput_write_rate(
-            False, 0.0, valid_address, rate_address
-        )
+    if elapsed_ms < LOG_THROUGHPUT_MIN_SAMPLE_MS or tokens == 0:
+        return throughput_write_rate(False, 0.0, valid_address, rate_address)
     var rate = Float64(tokens) * 1000.0 / Float64(elapsed_ms)
-    return throughput_write_rate(
-        True, rate, valid_address, rate_address
-    )
+    return throughput_write_rate(True, rate, valid_address, rate_address)
 
 
 comptime LOG_RETENTION_POLICY_ABI_VERSION: Int64 = 1

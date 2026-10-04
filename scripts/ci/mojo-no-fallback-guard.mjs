@@ -1611,7 +1611,15 @@ export function findViolations(files) {
     }
     if (filePath === "crates/prodex-app/src/app_commands/log_throughput_state.rs") {
       const required = [
-        "prodex_mojo_core::log_throughput_policy::sample_plan(",
+        "prodex_mojo_core::log_throughput_policy::observation_plan(",
+        "prodex_mojo_core::log_throughput_policy::duplicate_live_disk_replay(",
+        "prodex_mojo_core::log_throughput_policy::select_active_profile_candidate(",
+        "prodex_mojo_core::log_throughput_policy::select_active_rate_candidate(",
+        "prodex_mojo_core::log_throughput_policy::select_live_identity_candidate(",
+        "prodex_mojo_core::log_throughput_policy::select_historical_identity_candidate(",
+        "prodex_mojo_core::log_throughput_policy::sample_expired(",
+        "prodex_mojo_core::log_throughput_policy::bounded_insert_needs_eviction(",
+        "prodex_mojo_core::log_throughput_policy::finish_rate_candidate(",
         "prodex_mojo_core::log_throughput_policy::completed_rate(",
         "prodex_mojo_core::log_throughput_policy::stream_rate(",
       ];
@@ -1623,6 +1631,12 @@ export function findViolations(files) {
         production.includes("OUTPUT_THROUGHPUT_MIN_SAMPLE")
         || /output_tokens as f64 \* 1_000\.0 \/ duration as f64/u.test(production)
         || /checked_sub\(\*first_generation_ms\)/u.test(production)
+        || /\.max_by(?:_key)?\s*\(/u.test(production)
+        || production.includes("OUTPUT_THROUGHPUT_WINDOW")
+        || production.includes("OUTPUT_THROUGHPUT_MAX_STREAMS")
+        || production.includes("OUTPUT_THROUGHPUT_MAX_OBSERVATIONS")
+        || production.includes('starts_with("broker:")')
+        || production.includes('starts_with("direct:")')
       ) {
         violations.push(filePath + ": contains restored Rust log-throughput counter/rate semantics");
       }

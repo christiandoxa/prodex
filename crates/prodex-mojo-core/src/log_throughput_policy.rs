@@ -2,6 +2,15 @@ use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
 
+mod state;
+pub use state::{
+    ThroughputBoundedState, ThroughputCandidateMode, ThroughputObservationPlan,
+    bounded_insert_needs_eviction, duplicate_live_disk_replay, finish_rate_candidate,
+    observation_plan, sample_expired, select_active_profile_candidate,
+    select_active_rate_candidate, select_historical_identity_candidate,
+    select_live_identity_candidate,
+};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ThroughputSamplePlan {
     pub counter_reset: bool,
