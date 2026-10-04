@@ -1,8 +1,8 @@
 [
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests.rs",
-    "maxLines": 2600,
-    "reason": "Local rewrite cross-provider regression coverage is ratcheted to the current audited size after gateway and retired compatibility fixtures were removed."
+    "maxLines": 2517,
+    "reason": "Local rewrite cross-provider regression coverage is ratcheted after extracting Kiro binding-continuity coverage to a focused sibling test module."
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_tests/deepseek.rs",
@@ -46,8 +46,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-    "maxLines": 1983,
-    "reason": "Upstream transport remains one audited I/O boundary after native-first prefetch, retry, and request-metadata policy migrations; 0.435.0 ratchets this cap to the measured production LOC without restoring policy fallbacks."
+    "maxLines": 1980,
+    "reason": "Upstream transport remains one audited I/O boundary after extracting binding-candidate policy; cap tracks measured production LOC without restoring policy fallbacks."
   },
   {
     "file": "crates/prodex-app/src/runtime_proxy/presidio/tests.rs",
