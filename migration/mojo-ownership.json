@@ -1214,6 +1214,16 @@
         "operations": [
           "runtime_operational_histogram_bucket_planning"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/update_notice_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "update_notice_release_version_policy"
+        ]
       }
     ],
     "removed": [
@@ -5111,7 +5121,7 @@
       "rust_adapter_scope": "candidate projection and selected-rate reconstruction"
     },
     {
-"name": "kiro_chat_message_prompt_construction",
+      "name": "kiro_chat_message_prompt_construction",
       "domain": "provider/kiro",
       "introduced_in": "0.435.4",
       "baseline_state": "Rust recursively extracted chat content and formatted role, tool-call, section, and legacy function-tool prompt shapes",
@@ -5255,6 +5265,35 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "typed Mojo result re-export, histogram state mutation, and metric emission"
+    },
+    {
+      "name": "update_notice_release_version_policy",
+      "domain": "update-notice/release-version",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust semver::Version::parse validation, total ordering, and SemVer precedence comparison",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_update_notice_policy_v1",
+      "mojo_operation_ids": {
+        "release_version_valid": 3,
+        "release_version_compare": 4
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/update_notice_policy.mojo",
+      "consumer": "crates/prodex-update-notice/src/release_version.rs",
+      "consumer_marker": "prodex_mojo_core::update_notice_policy::compare_release_versions",
+      "production_consumers": [
+        "crates/prodex-update-notice/src/lib.rs",
+        "crates/prodex-update-notice/src/updater.rs",
+        "crates/prodex-update-notice/src/release_version.rs"
+      ],
+      "production_reachability_test": "crates/prodex-update-notice/src/lib.rs",
+      "rust_owner_before": "Unicode-trimmed release-version validation after one optional lowercase v prefix, u64 core-number parsing, prerelease ordering, build metadata validation and total ordering",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct ABI and prodex-update-notice caller tests cover validation, total ordering, precedence ordering, boundaries, and malformed inputs",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "GitHub redirect/tag acquisition, returned version strings, cache/network IO, typed comparison/error mapping, and ProdexUpdateDecision construction; Mojo failures propagate without semantic recomputation"
     }
   ],
   "rust_semantic_reductions": [

@@ -3012,7 +3012,6 @@ dependencies = [
  "prodex-mojo-core",
  "prodex-terminal-ui",
  "reqwest",
- "semver",
  "serde",
  "serde_json",
 ]

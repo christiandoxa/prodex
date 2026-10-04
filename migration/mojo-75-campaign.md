@@ -5083,3 +5083,31 @@ Validation passed:
 - `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo clippy --locked -q -p prodex-config -p prodex-codex-config -p prodex-mojo-core --all-targets -- -D warnings` and `cargo fmt --all -- --check` passed.
 - `npm run docs`, `npm run test:changed -- --base HEAD`, and `git diff --check` passed. Plain `npm run test:changed` stopped before tests because its inherited `origin/main..HEAD + worktree` range contains 1,892 lines from earlier committed campaign changes; this worktree measures 410 changed lines, with a 132-line largest file.
 - `node scripts/ci/mojo-no-fallback-guard.mjs --self-test && node scripts/ci/mojo-no-fallback-guard.mjs`, `node scripts/ci/mojo-authority-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, `node scripts/ci/size-guard.mjs`, and `node scripts/ci/mojo-production-share.mjs --check` passed. Ownership reports 160 authoritative operations; the source report remains at **28.58% Mojo**, above the 7% release floor.
+
+## Update-notice release-version migration
+
+`update_notice_policy.mojo` now owns fetched-release validation and both release
+comparison contracts. It trims the same Unicode whitespace as Rust `str::trim`,
+accepts one optional lowercase `v`, validates strict SemVer identifiers and
+`u64` core components, and compares prerelease/build identifiers. Notice
+comparison preserves `semver::Version` total ordering, including build metadata;
+update decisions use SemVer precedence and ignore build metadata. Rust retains
+GitHub redirect/tag acquisition, version strings, cache/network IO, and typed
+result mapping. Invalid UTF-8 is rejected at the ABI boundary, and Mojo errors
+propagate without Rust recomputation. The existing ABI caps each input at
+1 MiB; larger version strings are rejected as invalid input.
+
+The required-Mojo ABI and `prodex-update-notice` caller tests cover equality,
+numeric and prerelease ordering, build metadata, leading zeros, overflow,
+missing components, extra `v`, Unicode whitespace, malformed text, and invalid
+UTF-8. They also verify the existing 1 MiB input boundary. The ownership ledger
+records the new release-version operation; the no-fallback guard requires the
+production Mojo calls and propagating error path.
+
+Validation passes:
+
+- The required-Mojo `prodex-mojo-core` ABI tests passed (4); all `prodex-update-notice` caller tests passed (11).
+- A mutation reversed minor-version ordering. The ABI test failed with `Less` instead of `Greater`; restoring the Mojo source returned SHA-256 `0c1995227cbd29426bc19b5e236cb530683dd830f7a389eafa0a8165ce78879c`.
+- `npm run test:changed -- --base origin/main`, workspace Clippy with all targets/features, `cargo fmt --all -- --check`, `npm run docs`, and `git diff --check` passed.
+- The no-fallback guard and self-test, authority guard, ownership check, and size guard passed. Ownership reports 161 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` reports 82,068 Mojo LOC and 204,312 Rust LOC (**28.66% Mojo**); the 7% release floor and ownership non-regression pass. The 75% project target remains in progress.
