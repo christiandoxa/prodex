@@ -211,4 +211,47 @@ fn kiro_provider_core_maps_chat_messages_and_legacy_functions() {
         kiro_provider_core_tool_choice_from_legacy_chat_function_call(&json!("auto")),
         Some(json!("auto"))
     );
+    assert_eq!(
+        kiro_provider_core_tool_from_legacy_chat_function(&json!({
+            "name": "\u{2003}read_file\u{00a0}",
+            "description": "\u{00a0} Read a file \u{2003}",
+            "parameters": null,
+        })),
+        Some(json!({
+            "type": "function",
+            "function": {
+                "name": "read_file",
+                "description": "Read a file",
+                "parameters": null,
+            }
+        }))
+    );
+    assert_eq!(
+        kiro_provider_core_tool_from_legacy_chat_function(&json!({
+            "name": "\tread_file\t"
+        })),
+        Some(json!({"type": "function", "function": {"name": "read_file"}}))
+    );
+    for invalid in [
+        json!({"name": " \u{2003} "}),
+        json!({"name": 7}),
+        json!("read_file"),
+    ] {
+        assert_eq!(
+            kiro_provider_core_tool_from_legacy_chat_function(&invalid),
+            None
+        );
+    }
+    assert_eq!(
+        kiro_provider_core_tool_choice_from_legacy_chat_function_call(&json!({
+            "name": "\u{2003}read_file\u{00a0}"
+        })),
+        Some(json!({"type": "function", "function": {"name": "read_file"}}))
+    );
+    for invalid in [json!("required"), json!({"name": "\u{2003}"}), json!(false)] {
+        assert_eq!(
+            kiro_provider_core_tool_choice_from_legacy_chat_function_call(&invalid),
+            None
+        );
+    }
 }
