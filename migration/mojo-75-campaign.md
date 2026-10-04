@@ -4961,15 +4961,17 @@ kernel operation was added without changing the Kiro ABI record layout.
 Direct ABI and provider caller assertions cover nested content precedence,
 Unicode trimming, blank-text suppression, unknown/default roles, malformed
 tool-call fields, empty sections, legacy name/description trimming, and invalid
-legacy shapes. A deliberate `User!:\n` Mojo mutation made the empty-output ABI
-test fail; restoring the source byte-for-byte made it pass again.
+legacy shapes. A sensitivity proof changed the empty fallback predicate from
+`sections == 0` to `sections > 0`; the strict ABI test then returned an empty
+string instead of `User:\n` and failed. Restoring the original bytes produced
+the same SHA-256 before and after: `d912707ad0c47077ca1781e9364c668d5e793872ccefbc4522f8ab6709636e4e`.
 
 Validation passed:
 
-- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -p prodex-mojo-core --features mojo-rich --test kiro_prompt -- --list` — both direct ABI tests are registered.
-- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-mojo-core --features mojo-rich --test kiro_prompt` — 2 passed, including after restoring the mutation.
-- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-provider-core kiro_provider_core_` — 40 unit tests and 7 integration tests passed.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-mojo-core --features mojo-rich --test kiro_prompt` — 2 passed, including after restoring the mutation.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-provider-core kiro_provider_core_maps_chat_messages_and_legacy_functions` — 1 passed.
+- `npm run test:changed` — Mojo core tests passed; provider-core passed 371 unit tests and 7 integration tests.
 - `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-app --lib local_rewrite_tests::kiro_chat_completions_route_reuses_responses_translation_surface -- --test-threads=1` — 1 passed through the live local Kiro route.
-- `PRODEX_MOJO_REQUIRED=1 cargo clippy --locked -p prodex-mojo-core -p prodex-provider-core --all-targets --all-features -- -D warnings`, `cargo fmt --all -- --check`, and `git diff --check` passed.
-- Mojo no-fallback self-test and guard, authority guard, and ownership check passed; ownership reports 148 authoritative operations.
-- `node scripts/ci/mojo-production-share.mjs --check` — 81,025 Mojo LOC and 203,351 Rust LOC, or **28.49% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
+- `cargo clippy --locked -q -p prodex-provider-core -p prodex-mojo-core --all-targets --all-features -- -D warnings`, `cargo fmt --all -- --check`, `npm run docs`, and `git diff --check` passed.
+- Mojo no-fallback self-test and guard, authority guard, and ownership check passed; combined ownership reports 153 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` — 81,306 Mojo LOC and 203,673 Rust LOC, or **28.53% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
