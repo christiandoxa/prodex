@@ -1,5 +1,6 @@
 use super::super::test_support::{
-    test_runtime_local_websocket_pair, test_runtime_shared, test_runtime_websocket_flow,
+    read_runtime_websocket_text, test_runtime_local_websocket_pair, test_runtime_shared,
+    test_runtime_websocket_flow,
 };
 use super::*;
 
@@ -406,4 +407,107 @@ fn candidate_local_selection_blocked_releasable_affinity_rotates() {
         RuntimeWebsocketMessageLoopAction::Continue
     ));
     assert!(flow.excluded_profiles.contains("alpha"));
+}
+
+#[test]
+fn candidate_pre_send_quota_blocked_hard_affinity_signals_full_context_retry() {
+    let _guard = acquire_test_runtime_lock();
+    let mut shared = test_runtime_shared("failure-local-selection-hard-affinity");
+    configure_quota_last_chance_profiles(&mut shared, 6, false);
+    let (mut local_socket, mut client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    flow.request_text = r#"{"type":"response.create","previous_response_id":"resp_alpha","input":[{"type":"message","content":"continue"}]}"#.to_string();
+    flow.previous_response_id = Some("resp_alpha".to_string());
+    flow.request_session_id = Some("session-alpha".to_string());
+    flow.previous_response_fresh_fallback_shape =
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation);
+    flow.request_requires_previous_response_affinity = true;
+    flow.trusted_previous_response_affinity = true;
+    flow.pinned_profile = Some("alpha".to_string());
+    flow.bound_profile = Some("alpha".to_string());
+
+    let action = flow
+        .handle_candidate_local_selection_blocked(
+            "alpha".to_string(),
+            "quota_exhausted_before_send",
+        )
+        .expect("pre-send quota block should signal full-context retry");
+
+    assert!(matches!(
+        action,
+        RuntimeWebsocketMessageLoopAction::Finished
+    ));
+    let retry = read_runtime_websocket_text(&mut client_socket);
+    assert!(
+        retry.contains("previous_response_not_found"),
+        "hard-affinity pre-send quota block must request full-context replay: {retry}"
+    );
+    assert!(
+        !retry.contains("service_unavailable"),
+        "retryable hard-affinity quota block must not leak terminal 503: {retry}"
+    );
+    assert!(
+        flow.bound_profile.is_none(),
+        "full-context retry must release the exhausted owner binding"
+    );
+    assert!(
+        flow.pinned_profile.is_none(),
+        "full-context retry must release the exhausted pinned owner"
+    );
+}
+
+#[test]
+fn direct_current_pre_send_quota_blocked_hard_affinity_signals_full_context_retry() {
+    let _guard = acquire_test_runtime_lock();
+    let mut shared = test_runtime_shared("failure-direct-local-selection-hard-affinity");
+    configure_quota_last_chance_profiles(&mut shared, 0, false);
+    {
+        let mut runtime = shared
+            .runtime
+            .lock()
+            .expect("runtime state should not be poisoned");
+        runtime.profile_route_circuit_open_until.remove(
+            &crate::runtime_proxy::runtime_profile_route_circuit_key(
+                "beta",
+                RuntimeRouteKind::Websocket,
+            ),
+        );
+    }
+    let (mut local_socket, mut client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    flow.request_text = r#"{"type":"response.create","previous_response_id":"resp_alpha","input":[{"type":"message","content":"continue"}]}"#.to_string();
+    flow.previous_response_id = Some("resp_alpha".to_string());
+    flow.request_session_id = Some("session-alpha".to_string());
+    flow.previous_response_fresh_fallback_shape =
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation);
+    flow.request_requires_previous_response_affinity = true;
+    flow.trusted_previous_response_affinity = true;
+    flow.pinned_profile = Some("alpha".to_string());
+    flow.bound_profile = Some("alpha".to_string());
+
+    let action = flow
+        .handle_direct_current_local_selection_blocked(
+            "alpha".to_string(),
+            "quota_exhausted_before_send",
+            true,
+        )
+        .expect("direct-current pre-send quota block should signal full-context retry");
+
+    assert!(matches!(
+        action,
+        RuntimeWebsocketMessageLoopAction::Finished
+    ));
+    let retry = read_runtime_websocket_text(&mut client_socket);
+    assert!(
+        retry.contains("previous_response_not_found"),
+        "direct-current hard-affinity pre-send quota block must request full-context replay: {retry}"
+    );
+    assert!(
+        !retry.contains("service_unavailable"),
+        "direct-current retryable quota block must not leak terminal 503: {retry}"
+    );
+    assert!(flow.bound_profile.is_none());
+    assert!(flow.pinned_profile.is_none());
 }
