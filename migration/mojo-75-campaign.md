@@ -5054,3 +5054,32 @@ Validation passed:
 - `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` and `cargo fmt --all -- --check` passed.
 - `npm run docs` and `npm run test:changed` passed. `node scripts/ci/mojo-no-fallback-guard.mjs --self-test`, the no-fallback guard, `node scripts/ci/mojo-authority-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, and `node scripts/ci/size-guard.mjs` passed; ownership reports 157 authoritative operations.
 - `node scripts/ci/mojo-production-share.mjs --check` — 81,456 Mojo LOC and 203,809 Rust LOC, or **28.55% Mojo**. The 7% release floor and Mojo non-regression pass; the 75% project target remains unmet.
+
+## Codex model-provider source selection migration
+
+The `prodex-config` crate contains governance data types and defaults, with no
+config parser or standalone decision kernel to migrate. `prodex-codex-config`
+now routes model-provider source selection through the versioned
+`prodex_codex_config_model_provider_plan_v1` ABI in the existing
+`codex_config.mojo` owner. Mojo directs profile-v2 and base-config reads,
+selects the normalized CLI override or parsed config candidate, and returns its
+source. Rust keeps file access, TOML parsing, profile-path construction,
+plan-directed reads, typed source mapping, and provider string ownership.
+Provider-value normalization and OpenAI identity continue through their
+existing Mojo operations.
+
+The config consumer regression covers CLI-over-profile precedence while a
+malformed base config remains unparsed when the profile config supplies a
+provider. Direct required-Mojo tests cover read ordering, all three sources,
+normalization, and the no-provider case. A mutation inverted CLI-over-profile
+precedence; both the direct ABI test and consumer test failed as expected. The
+Mojo source was restored byte-for-byte; SHA-256 before and after was
+`d7833c5d05523c0e7768e6bd29b6ea859d066a3cc731ec30480374399dbbcf89`.
+
+Validation passed:
+
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-config -p prodex-codex-config` — 20 Codex config tests and 3 governance config tests passed.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-mojo-core --features mojo-runtime --lib codex_config::tests -- --test-threads=1` — 2 direct ABI tests passed.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo clippy --locked -q -p prodex-config -p prodex-codex-config -p prodex-mojo-core --all-targets -- -D warnings` and `cargo fmt --all -- --check` passed.
+- `npm run docs`, `npm run test:changed -- --base HEAD`, and `git diff --check` passed. Plain `npm run test:changed` stopped before tests because its inherited `origin/main..HEAD + worktree` range contains 1,892 lines from earlier committed campaign changes; this worktree measures 410 changed lines, with a 132-line largest file.
+- `node scripts/ci/mojo-no-fallback-guard.mjs --self-test && node scripts/ci/mojo-no-fallback-guard.mjs`, `node scripts/ci/mojo-authority-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, `node scripts/ci/size-guard.mjs`, and `node scripts/ci/mojo-production-share.mjs --check` passed. Ownership reports 160 authoritative operations; the source report remains at **28.58% Mojo**, above the 7% release floor.

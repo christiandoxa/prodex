@@ -300,22 +300,28 @@ fn cli_override_takes_precedence_over_profile_v2_config() {
     let root = temp_dir("profile-v2-cli-override");
     fs::create_dir_all(&root).unwrap();
     fs::write(
+        root.join("config.toml"),
+        "model_provider = 'base-provider'\ninvalid = [\n",
+    )
+    .unwrap();
+    fs::write(
         root.join("bedrock.config.toml"),
-        "model_provider = 'amazon-bedrock'\n",
+        "model_provider = 'openai'\n",
     )
     .unwrap();
 
-    assert!(
-        codex_non_openai_model_provider_for_args(
-            &root,
-            &[
-                OsString::from("--profile-v2=bedrock"),
-                OsString::from("--config=model_provider=openai"),
-            ],
-        )
-        .unwrap()
-        .is_none()
-    );
+    let provider = codex_non_openai_model_provider_for_args(
+        &root,
+        &[
+            OsString::from("--profile-v2=bedrock"),
+            OsString::from("--config=model_provider=amazon-bedrock"),
+        ],
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(provider.provider_id, "amazon-bedrock");
+    assert_eq!(provider.source, CodexModelProviderSource::CliOverride);
 }
 
 #[test]
