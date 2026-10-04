@@ -140,12 +140,17 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/auth.rs",
   "crates/prodex-quota/src/render/time.rs",
   "crates/prodex-quota/src/render/copilot.rs",
+  "crates/prodex-quota/src/render/windows.rs",
+  "crates/prodex-quota/tests/src/render/quota_reset_message.rs",
+  "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
+  "mojo/prodex_core/quota.mojo",
   "crates/prodex-profile-identity/src/lib.rs",
   "crates/prodex-mojo-core/src/profile_identity.rs",
   "crates/prodex-domain/src/governance/inspection.rs",
   "crates/prodex-mojo-core/build.rs",
   "crates/prodex-mojo-core/src/lib.rs",
   "crates/prodex-mojo-core/src/quota.rs",
+  "crates/prodex-mojo-core/src/quota/reset_epoch.rs",
   "crates/prodex-mojo-core/src/routing.rs",
   "crates/prodex-mojo-core/src/runtime.rs",
   "crates/prodex-mojo-core/src/runtime/candidate_plan.rs",
@@ -797,6 +802,10 @@ const QUOTA_GEMINI_DISPLAY_FILE = "crates/prodex-quota/src/render/gemini.rs";
 const QUOTA_REPORTS_FILE = "crates/prodex-quota/src/render/reports.rs";
 const QUOTA_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
+const QUOTA_RESET_EPOCH_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota/reset_epoch.rs";
+const QUOTA_RESET_EPOCH_MOJO_FILE = "mojo/prodex_core/quota.mojo";
+const QUOTA_RESET_EPOCH_TEST_FILE = "crates/prodex-mojo-core/tests/quota_reset_epoch.rs";
+const QUOTA_RESET_EPOCH_CALLER_TEST_FILE = "crates/prodex-quota/tests/src/render/quota_reset_message.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
 const SUPER_EXPOSE_FILE = "crates/prodex-cli/src/lib.rs";
@@ -3559,6 +3568,69 @@ export function findViolations(files) {
     }
     return violations;
   });
+  const quotaResetEpochViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === QUOTA_WINDOWS_FILE) {
+      const required = [
+        "prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(",
+        "quota_json_i64_path(&value, &[\"resets_at\"])",
+        "quota_json_i64_path(&value, &[\"reset_at\"])",
+        "quota_json_i64_path(&value, &[\"error\", \"resets_at\"])",
+        "quota_json_i64_path(&value, &[\"error\", \"reset_at\"])",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: reset-epoch candidate acquisition must retain ${marker}`);
+      if (/\bif\s+primary_used\b|\bif\s+secondary_used\b|primary_reset\.or\(secondary_reset\)/u.test(contents) ||
+          /\bfn\s+quota_json_(?:reset|precedence)\w*\s*\(/u.test(contents)) {
+        violations.push(`${filePath}: contains Rust reset-epoch precedence policy`);
+      }
+      return violations;
+    }
+    if (filePath === QUOTA_RESET_EPOCH_ADAPTER_FILE) {
+      const required = [
+        "pub struct QuotaResetEpochInput",
+        "pub fn quota_reset_epoch_precedence(",
+        "prodex_quota_reset_epoch_v1(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: typed reset-epoch adapter must retain ${marker}`);
+    }
+    if (filePath === QUOTA_RESET_EPOCH_MOJO_FILE) {
+      const required = [
+        '@export("prodex_quota_reset_epoch_v1")',
+        "while index < 4:",
+        "primary_used >= 100",
+        "secondary_used >= 100",
+        "fields[unsafe_offset=9] == 1",
+        "fields[unsafe_offset=11] == 1",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: quota reset-epoch precedence must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === QUOTA_RESET_EPOCH_TEST_FILE) {
+      const required = [
+        "quota_reset_epoch_prefers_valid_candidates_in_declared_order",
+        "quota_reset_epoch_applies_used_percent_gates_and_missing_values",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: direct Mojo reset-epoch tests must retain ${marker}`);
+    }
+    if (filePath === QUOTA_RESET_EPOCH_CALLER_TEST_FILE) {
+      const required = [
+        "quota_reset_json_uses_top_level_then_nested_candidate_order",
+        "quota_reset_json_uses_used_percent_gates_and_header_fallback_order",
+        "quota_reset_json_preserves_serde_duplicate_key_behavior",
+        "quota_reset_json_ignores_malformed_and_non_object_values",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: quota caller-boundary tests must retain ${marker}`);
+    }
+    return [];
+  });
   const rehydrateViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== REHYDRATE_FILE) return [];
     const body = contents.match(/\bpub fn smart_context_auto_rehydrate_plan\([^]*?^fn smart_context_auto_rehydrate_plan_mojo/mu)?.[0];
@@ -4094,7 +4166,7 @@ export function findViolations(files) {
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,
-    ...quotaWindowViolations,
+    ...quotaWindowViolations, ...quotaResetEpochViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations, ...runtimeTuningViolations,
     ...defaultFeatureViolations];
@@ -4483,6 +4555,68 @@ function selfTest() {
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
     'prodex_mojo_core::quota::quota_blocked_status_label(0);\nfn format_blocked_quota_status() {\n    #[cfg(not(feature = "mojo"))] rust();\n}']]).join("\n"),
     /feature-off Rust classifier/u);
+  const quotaResetEpochConsumer = [
+    "prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(",
+    'quota_json_i64_path(&value, &["resets_at"]);',
+    'quota_json_i64_path(&value, &["reset_at"]);',
+    'quota_json_i64_path(&value, &["error", "resets_at"]);',
+    'quota_json_i64_path(&value, &["error", "reset_at"]);',
+  ].join("\n");
+  const quotaResetEpochAdapter = [
+    "pub struct QuotaResetEpochInput",
+    "pub fn quota_reset_epoch_precedence(",
+    "prodex_quota_reset_epoch_v1(",
+  ].join("\n");
+  const quotaDisplayAdapter = [
+    "prodex_quota_display_label_v1(",
+    "prodex_quota_window_label_plan_v1(",
+    "prodex_quota_copilot_feature_key_v1(",
+    "prodex_quota_copilot_display_v1(",
+    "prodex_quota_copilot_main_remaining_percent_v1(",
+    "prodex_quota_ready_pool_remaining_v1(",
+    "prodex_quota_info_pool_remaining_v1(",
+    "prodex_quota_gemini_bucket_label_v1(",
+    "prodex_quota_gemini_bucket_summary_v1(",
+    "prodex_quota_gemini_display_v1(",
+    "prodex_quota_report_compare_v1(",
+    "prodex_quota_workspace_label_v1(",
+  ].join("\n");
+  const quotaResetEpochMojo = [
+    '@export("prodex_quota_reset_epoch_v1")',
+    "while index < 4:",
+    "primary_used >= 100",
+    "secondary_used >= 100",
+    "fields[unsafe_offset=9] == 1",
+    "fields[unsafe_offset=11] == 1",
+  ].join("\n");
+  const quotaResetEpochMojoTest = [
+    "quota_reset_epoch_prefers_valid_candidates_in_declared_order",
+    "quota_reset_epoch_applies_used_percent_gates_and_missing_values",
+  ].join("\n");
+  const quotaResetEpochCallerTest = [
+    "quota_reset_json_uses_top_level_then_nested_candidate_order",
+    "quota_reset_json_uses_used_percent_gates_and_header_fallback_order",
+    "quota_reset_json_preserves_serde_duplicate_key_behavior",
+    "quota_reset_json_ignores_malformed_and_non_object_values",
+  ].join("\n");
+  assert.deepEqual(findViolations([
+    [QUOTA_WINDOWS_FILE,
+      quotaResetEpochConsumer + "\nprodex_mojo_core::quota::quota_blocked_status_label(0);"],
+    [QUOTA_ADAPTER_FILE, quotaDisplayAdapter],
+    [QUOTA_RESET_EPOCH_ADAPTER_FILE, quotaResetEpochAdapter],
+    [QUOTA_RESET_EPOCH_MOJO_FILE, quotaResetEpochMojo],
+    [QUOTA_RESET_EPOCH_TEST_FILE, quotaResetEpochMojoTest],
+    [QUOTA_RESET_EPOCH_CALLER_TEST_FILE, quotaResetEpochCallerTest],
+  ]), []);
+  assert.match(findViolations([[QUOTA_WINDOWS_FILE,
+    quotaResetEpochConsumer + "\nprodex_mojo_core::quota::quota_blocked_status_label(0);\nif primary_used { return primary_reset; }"]]).join("\n"),
+  /contains Rust reset-epoch precedence policy/u);
+  assert.match(findViolations([[QUOTA_RESET_EPOCH_MOJO_FILE,
+    quotaResetEpochMojo.replace("primary_used >= 100", "primary_used > 100")]]).join("\n"),
+  /quota reset-epoch precedence must remain Mojo-owned/u);
+  assert.match(findViolations([[QUOTA_RESET_EPOCH_CALLER_TEST_FILE,
+    quotaResetEpochCallerTest.replace("quota_reset_json_preserves_serde_duplicate_key_behavior", "")]]).join("\n"),
+  /caller-boundary tests must retain quota_reset_json_preserves_serde_duplicate_key_behavior/u);
   assert.match(findViolations([["crates/prodex-quota/src/capacity.rs",
     '#[cfg(not(feature = "mojo"))] fn old_capacity() {}']]).join("\n"),
     /feature-off Rust path/u);

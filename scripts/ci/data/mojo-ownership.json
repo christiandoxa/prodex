@@ -543,7 +543,8 @@
         "operations": [
           "quota_aggregation_kernel",
           "quota_capacity_lane_planning",
-          "quota_model_policy"
+          "quota_model_policy",
+          "quota_reset_epoch_precedence"
         ]
       },
       "mojo/prodex_core/candidate_decision.mojo": {
@@ -1700,6 +1701,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "upstream usage acquisition and bounded record conversion"
+    },
+    {
+      "name": "quota_reset_epoch_precedence",
+      "domain": "quota/reset-epoch",
+      "introduced_in": "0.435.4",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_reset_epoch_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "consumer": "crates/prodex-quota/src/render/windows.rs",
+      "consumer_marker": "prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(",
+      "production_consumers": [
+        "crates/prodex-quota/src/render/windows.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
+      "rust_owner_before": "valid JSON reset candidate precedence followed by primary/secondary used-percent gates and reset fallback",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo and prodex-quota caller tests cover precedence, missing values, gates, conversions, and duplicate keys",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "serde_json parsing, typed candidate extraction, case-insensitive header-key acquisition, and numeric/string conversion"
     },
     {
       "name": "quota_model_policy",
@@ -5832,6 +5856,22 @@
         }
       },
       "cleanup_evidence": "The Rust token normalizer is deleted and no production copy remains outside the checked Mojo ABI."
+    },
+    {
+      "file": "crates/prodex-quota/src/render/windows.rs",
+      "symbol": "quota_reset_at_from_json_message",
+      "operation": "quota_reset_epoch_precedence",
+      "previous_responsibility": "ordered JSON reset candidate selection and exhaustion-gated reset preference",
+      "migrated_semantic_loc": 1,
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-quota/src/render/windows.rs::quota_reset_at_from_json_message",
+      "rust_after": "Serde acquisition and typed candidate projection delegated to Mojo precedence",
+      "mojo_owner": "mojo/prodex_core/quota.mojo::prodex_quota_reset_epoch_v1",
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "mojo_entry": "prodex_quota_reset_epoch_v1",
+      "production_consumer": "crates/prodex-quota/src/render/windows.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
+      "performance": "one scalar v1 ABI call per JSON reset message"
     }
   ],
   "deleted_authoritative_operations": [

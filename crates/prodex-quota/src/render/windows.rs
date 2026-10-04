@@ -188,32 +188,25 @@ pub fn quota_reset_at_from_message(message: &str) -> Option<i64> {
 
 fn quota_reset_at_from_json_message(message: &str) -> Option<i64> {
     let value = serde_json::from_str::<serde_json::Value>(message.trim()).ok()?;
-    for path in [
-        &["resets_at"][..],
-        &["reset_at"][..],
-        &["error", "resets_at"][..],
-        &["error", "reset_at"][..],
-    ] {
-        if let Some(reset_at) = quota_json_i64_path(&value, path) {
-            return Some(reset_at);
-        }
-    }
-
-    let headers = quota_json_path(&value, &["headers"])?;
-    let primary_reset = quota_json_object_i64(headers, "X-Codex-Primary-Reset-At");
-    let secondary_reset = quota_json_object_i64(headers, "X-Codex-Secondary-Reset-At");
-    let primary_used = quota_json_object_i64(headers, "X-Codex-Primary-Used-Percent")
-        .is_some_and(|used| used >= 100);
-    let secondary_used = quota_json_object_i64(headers, "X-Codex-Secondary-Used-Percent")
-        .is_some_and(|used| used >= 100);
-
-    if primary_used {
-        return primary_reset;
-    }
-    if secondary_used {
-        return secondary_reset;
-    }
-    primary_reset.or(secondary_reset)
+    let headers = quota_json_path(&value, &["headers"]);
+    prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(
+        prodex_mojo_core::quota::reset_epoch::QuotaResetEpochInput {
+            resets_at: quota_json_i64_path(&value, &["resets_at"]),
+            reset_at: quota_json_i64_path(&value, &["reset_at"]),
+            error_resets_at: quota_json_i64_path(&value, &["error", "resets_at"]),
+            error_reset_at: quota_json_i64_path(&value, &["error", "reset_at"]),
+            primary_reset_at: headers
+                .and_then(|headers| quota_json_object_i64(headers, "X-Codex-Primary-Reset-At")),
+            secondary_reset_at: headers
+                .and_then(|headers| quota_json_object_i64(headers, "X-Codex-Secondary-Reset-At")),
+            primary_used_percent: headers
+                .and_then(|headers| quota_json_object_i64(headers, "X-Codex-Primary-Used-Percent")),
+            secondary_used_percent: headers.and_then(|headers| {
+                quota_json_object_i64(headers, "X-Codex-Secondary-Used-Percent")
+            }),
+        },
+    )
+    .expect("Mojo quota reset-epoch precedence returned an invalid result")
 }
 
 fn quota_json_i64_path(value: &serde_json::Value, path: &[&str]) -> Option<i64> {
