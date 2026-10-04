@@ -36,7 +36,20 @@ const CLI_DEFAULT_RUN_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/launch_args
 const CLI_DEFAULT_RUN_CALLER_TEST_FILE = "crates/prodex-cli/tests/src/shortcuts.rs";
 const DEEPSEEK_INPUT_HISTORY_FILE = "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs";
 const PRESIDIO_LOCAL_REDACTION_FILE = "crates/prodex-app/src/runtime_proxy/presidio/local.rs";
+const LIVE_LOG_RECORD_FILE = "crates/prodex-runtime-log/src/live.rs";
+const LIVE_LOG_RECORD_ADAPTER_FILE = "crates/prodex-mojo-core/src/live_log_record.rs";
+const LIVE_LOG_RECORD_MOJO_FILE = "mojo/prodex_core/live_log_record.mojo";
+const LIVE_LOG_RECORD_DIRECT_TEST_FILE = "mojo/tests/live_log_record_test.mojo";
+const RUNTIME_POLICY_PRESET_CONSUMER_FILE = "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs";
+const RUNTIME_POLICY_PRESET_CALLER_FILE = "crates/prodex-runtime-policy/src/lib.rs";
+const RUNTIME_POLICY_PRESET_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_decisions/preset.rs";
+const RUNTIME_POLICY_PRESET_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_policy_preset.rs";
+const RUNTIME_POLICY_PRESET_MOJO_FILE = "mojo/prodex_core/runtime_tuning.mojo";
 const PROMOTED_FILES = [
+  LIVE_LOG_RECORD_FILE,
+  LIVE_LOG_RECORD_ADAPTER_FILE,
+  LIVE_LOG_RECORD_MOJO_FILE,
+  LIVE_LOG_RECORD_DIRECT_TEST_FILE,
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
   "crates/prodex-mojo-core/src/log_throughput_policy.rs",
   "crates/prodex-runtime-log/src/retention.rs",
@@ -140,12 +153,17 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/auth.rs",
   "crates/prodex-quota/src/render/time.rs",
   "crates/prodex-quota/src/render/copilot.rs",
+  "crates/prodex-quota/src/render/windows.rs",
+  "crates/prodex-quota/tests/src/render/quota_reset_message.rs",
+  "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
+  "mojo/prodex_core/quota.mojo",
   "crates/prodex-profile-identity/src/lib.rs",
   "crates/prodex-mojo-core/src/profile_identity.rs",
   "crates/prodex-domain/src/governance/inspection.rs",
   "crates/prodex-mojo-core/build.rs",
   "crates/prodex-mojo-core/src/lib.rs",
   "crates/prodex-mojo-core/src/quota.rs",
+  "crates/prodex-mojo-core/src/quota/reset_epoch.rs",
   "crates/prodex-mojo-core/src/routing.rs",
   "crates/prodex-mojo-core/src/runtime.rs",
   "crates/prodex-mojo-core/src/runtime/candidate_plan.rs",
@@ -255,7 +273,11 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
   "crates/prodex-runtime-launch/src/args.rs",
   "crates/prodex-runtime-launch/src/lib.rs",
-  "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+  RUNTIME_POLICY_PRESET_CONSUMER_FILE,
+  RUNTIME_POLICY_PRESET_CALLER_FILE,
+  RUNTIME_POLICY_PRESET_ADAPTER_FILE,
+  RUNTIME_POLICY_PRESET_TEST_FILE,
+  RUNTIME_POLICY_PRESET_MOJO_FILE,
   "crates/prodex-observability/src/lib.rs",
   "crates/prodex-observability/src/metric_label.rs",
   "crates/prodex-observability/src/mojo.rs",
@@ -797,6 +819,10 @@ const QUOTA_GEMINI_DISPLAY_FILE = "crates/prodex-quota/src/render/gemini.rs";
 const QUOTA_REPORTS_FILE = "crates/prodex-quota/src/render/reports.rs";
 const QUOTA_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
+const QUOTA_RESET_EPOCH_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota/reset_epoch.rs";
+const QUOTA_RESET_EPOCH_MOJO_FILE = "mojo/prodex_core/quota.mojo";
+const QUOTA_RESET_EPOCH_TEST_FILE = "crates/prodex-mojo-core/tests/quota_reset_epoch.rs";
+const QUOTA_RESET_EPOCH_CALLER_TEST_FILE = "crates/prodex-quota/tests/src/render/quota_reset_message.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
 const SUPER_EXPOSE_FILE = "crates/prodex-cli/src/lib.rs";
@@ -980,6 +1006,60 @@ export function findViolations(files) {
       UNCONDITIONAL_MOJO_FILES.has(filePath) && FEATURE_OFF_RUST_PATH.test(contents),
     )
     .map(([filePath]) => `${filePath}: Mojo-owned operation cannot have a feature-off Rust path`);
+  const liveLogRecordViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== LIVE_LOG_RECORD_FILE) return [];
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const required = [
+      "record_exceeds_bound(line.len())?",
+      "nested_string_clip_end(text)?",
+      "json_plan(serialized.len())?",
+      "truncate_plain_text(line)",
+      "let line = bounded_live_log_line(line)?;",
+    ];
+    const missing = required.filter((marker) => !production.includes(marker));
+    if (missing.length > 0) {
+      return [`${filePath}: live-log record decisions must propagate through Mojo (${missing.join(", ")})`];
+    }
+    return /clip_json_strings|\.char_indices\s*\(|MAX_RUNTIME_LIVE_LOG_LINE_BYTES/u.test(production)
+      ? [`${filePath}: contains restored Rust live-log clipping or truncation policy`]
+      : [];
+  });
+  const runtimePolicyPresetViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_POLICY_PRESET_CONSUMER_FILE) {
+      const required = "runtime_tuning_proxy_preset_plan(";
+      const violations = contents.includes(required)
+        ? []
+        : [`${filePath}: runtime-proxy preset resolution must use the Mojo plan`];
+      if (/apply_non_preset_overrides|env_preset\.or_else\(\|\|\s*self\.preset\(\)\)/u.test(contents)) {
+        violations.push(`${filePath}: contains restored Rust preset precedence or override merging`);
+      }
+      return violations;
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_ADAPTER_FILE) {
+      return contents.includes("prodex_runtime_proxy_preset_plan_v1(") &&
+          contents.includes("RUNTIME_PROXY_PRESET_PLAN_ABI_VERSION")
+        ? []
+        : [`${filePath}: preset planning adapter must retain its versioned Mojo ABI`];
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_MOJO_FILE) {
+      return contents.includes('@export("prodex_runtime_proxy_preset_plan_v1")')
+        ? []
+        : [`${filePath}: runtime-proxy preset plan must be implemented in Mojo`];
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_TEST_FILE) {
+      return contents.includes("required_mojo_resolves_preset_precedence_and_all_overrides") &&
+          contents.includes("prodex_mojo_required")
+        ? []
+        : [`${filePath}: preset ABI needs direct required-Mojo regression coverage`];
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_CALLER_FILE) {
+      return contents.includes("runtime_policy_proxy_caller_uses_mojo_preset_plan") &&
+          contents.includes("runtime_policy_proxy_from_root(")
+        ? []
+        : [`${filePath}: runtime-policy caller needs a preset-plan regression test`];
+    }
+    return [];
+  });
   const profileHealthCircuitViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== PROFILE_HEALTH_CIRCUIT_FILE) return [];
     const body = contents.match(
@@ -1004,6 +1084,7 @@ export function findViolations(files) {
         "prodex_mojo_core::provider_usage::extract_json(",
         "prodex_mojo_core::provider_usage::calculate_cost(",
         "prodex_mojo_core::provider_usage::merged_total(",
+        "prodex_mojo_core::provider_usage::merge_latest_present(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -1016,6 +1097,9 @@ export function findViolations(files) {
       ) {
         violations.push(filePath + ": contains restored Rust provider-usage semantics");
       }
+      if (/if\s+\w+\.(input|output|total)_tokens\.is_some\(\)\s*\{\s*\w+\.\1_tokens\s*=/u.test(production)) {
+        violations.push(filePath + ": contains restored Rust SSE usage merge policy");
+      }
       return violations;
     }
     if (filePath === "crates/prodex-mojo-core/src/provider_usage.rs") {
@@ -1023,6 +1107,7 @@ export function findViolations(files) {
         "prodex_provider_usage_extract_v1(",
         "prodex_provider_usage_cost_v1(",
         "prodex_provider_usage_merged_total_v1(",
+        "prodex_provider_usage_merge_latest_present_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
@@ -3554,6 +3639,69 @@ export function findViolations(files) {
     }
     return violations;
   });
+  const quotaResetEpochViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === QUOTA_WINDOWS_FILE) {
+      const required = [
+        "prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(",
+        "quota_json_i64_path(&value, &[\"resets_at\"])",
+        "quota_json_i64_path(&value, &[\"reset_at\"])",
+        "quota_json_i64_path(&value, &[\"error\", \"resets_at\"])",
+        "quota_json_i64_path(&value, &[\"error\", \"reset_at\"])",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: reset-epoch candidate acquisition must retain ${marker}`);
+      if (/\bif\s+primary_used\b|\bif\s+secondary_used\b|primary_reset\.or\(secondary_reset\)/u.test(contents) ||
+          /\bfn\s+quota_json_(?:reset|precedence)\w*\s*\(/u.test(contents)) {
+        violations.push(`${filePath}: contains Rust reset-epoch precedence policy`);
+      }
+      return violations;
+    }
+    if (filePath === QUOTA_RESET_EPOCH_ADAPTER_FILE) {
+      const required = [
+        "pub struct QuotaResetEpochInput",
+        "pub fn quota_reset_epoch_precedence(",
+        "prodex_quota_reset_epoch_v1(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: typed reset-epoch adapter must retain ${marker}`);
+    }
+    if (filePath === QUOTA_RESET_EPOCH_MOJO_FILE) {
+      const required = [
+        '@export("prodex_quota_reset_epoch_v1")',
+        "while index < 4:",
+        "primary_used >= 100",
+        "secondary_used >= 100",
+        "fields[unsafe_offset=9] == 1",
+        "fields[unsafe_offset=11] == 1",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: quota reset-epoch precedence must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === QUOTA_RESET_EPOCH_TEST_FILE) {
+      const required = [
+        "quota_reset_epoch_prefers_valid_candidates_in_declared_order",
+        "quota_reset_epoch_applies_used_percent_gates_and_missing_values",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: direct Mojo reset-epoch tests must retain ${marker}`);
+    }
+    if (filePath === QUOTA_RESET_EPOCH_CALLER_TEST_FILE) {
+      const required = [
+        "quota_reset_json_uses_top_level_then_nested_candidate_order",
+        "quota_reset_json_uses_used_percent_gates_and_header_fallback_order",
+        "quota_reset_json_preserves_serde_duplicate_key_behavior",
+        "quota_reset_json_ignores_malformed_and_non_object_values",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: quota caller-boundary tests must retain ${marker}`);
+    }
+    return [];
+  });
   const rehydrateViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== REHYDRATE_FILE) return [];
     const body = contents.match(/\bpub fn smart_context_auto_rehydrate_plan\([^]*?^fn smart_context_auto_rehydrate_plan_mojo/mu)?.[0];
@@ -4052,7 +4200,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -4089,7 +4237,7 @@ export function findViolations(files) {
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,
-    ...quotaWindowViolations,
+    ...quotaWindowViolations, ...quotaResetEpochViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations, ...runtimeTuningViolations,
     ...defaultFeatureViolations];
@@ -4124,6 +4272,18 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  const liveLogRecordConsumer = [
+    "fn bounded_live_log_line(line: &str) -> Result<String, MojoError> {",
+    "record_exceeds_bound(line.len())?",
+    "nested_string_clip_end(text)?",
+    "json_plan(serialized.len())?",
+    "truncate_plain_text(line)",
+    "let line = bounded_live_log_line(line)?;",
+  ].join("\n");
+  assert.deepEqual(findViolations([[LIVE_LOG_RECORD_FILE, liveLogRecordConsumer]]), []);
+  assert.match(findViolations([[LIVE_LOG_RECORD_FILE,
+    liveLogRecordConsumer.replace("nested_string_clip_end(text)?", "clip_json_strings(value, 8192);")]])
+    .join("\n"), /restored Rust live-log clipping or truncation policy|must propagate through Mojo/u);
   assert.match(findViolations([["crates/prodex-domain/src/secrets.rs",
     "pub fn is_well_formed(&self) -> bool { true }\nfn secret_ref_part_is_well_formed() {}"]]).join("\n"),
   /SecretRef::is_well_formed must retain Mojo validation/u);
@@ -4478,6 +4638,68 @@ function selfTest() {
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
     'prodex_mojo_core::quota::quota_blocked_status_label(0);\nfn format_blocked_quota_status() {\n    #[cfg(not(feature = "mojo"))] rust();\n}']]).join("\n"),
     /feature-off Rust classifier/u);
+  const quotaResetEpochConsumer = [
+    "prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(",
+    'quota_json_i64_path(&value, &["resets_at"]);',
+    'quota_json_i64_path(&value, &["reset_at"]);',
+    'quota_json_i64_path(&value, &["error", "resets_at"]);',
+    'quota_json_i64_path(&value, &["error", "reset_at"]);',
+  ].join("\n");
+  const quotaResetEpochAdapter = [
+    "pub struct QuotaResetEpochInput",
+    "pub fn quota_reset_epoch_precedence(",
+    "prodex_quota_reset_epoch_v1(",
+  ].join("\n");
+  const quotaDisplayAdapter = [
+    "prodex_quota_display_label_v1(",
+    "prodex_quota_window_label_plan_v1(",
+    "prodex_quota_copilot_feature_key_v1(",
+    "prodex_quota_copilot_display_v1(",
+    "prodex_quota_copilot_main_remaining_percent_v1(",
+    "prodex_quota_ready_pool_remaining_v1(",
+    "prodex_quota_info_pool_remaining_v1(",
+    "prodex_quota_gemini_bucket_label_v1(",
+    "prodex_quota_gemini_bucket_summary_v1(",
+    "prodex_quota_gemini_display_v1(",
+    "prodex_quota_report_compare_v1(",
+    "prodex_quota_workspace_label_v1(",
+  ].join("\n");
+  const quotaResetEpochMojo = [
+    '@export("prodex_quota_reset_epoch_v1")',
+    "while index < 4:",
+    "primary_used >= 100",
+    "secondary_used >= 100",
+    "fields[unsafe_offset=9] == 1",
+    "fields[unsafe_offset=11] == 1",
+  ].join("\n");
+  const quotaResetEpochMojoTest = [
+    "quota_reset_epoch_prefers_valid_candidates_in_declared_order",
+    "quota_reset_epoch_applies_used_percent_gates_and_missing_values",
+  ].join("\n");
+  const quotaResetEpochCallerTest = [
+    "quota_reset_json_uses_top_level_then_nested_candidate_order",
+    "quota_reset_json_uses_used_percent_gates_and_header_fallback_order",
+    "quota_reset_json_preserves_serde_duplicate_key_behavior",
+    "quota_reset_json_ignores_malformed_and_non_object_values",
+  ].join("\n");
+  assert.deepEqual(findViolations([
+    [QUOTA_WINDOWS_FILE,
+      quotaResetEpochConsumer + "\nprodex_mojo_core::quota::quota_blocked_status_label(0);"],
+    [QUOTA_ADAPTER_FILE, quotaDisplayAdapter],
+    [QUOTA_RESET_EPOCH_ADAPTER_FILE, quotaResetEpochAdapter],
+    [QUOTA_RESET_EPOCH_MOJO_FILE, quotaResetEpochMojo],
+    [QUOTA_RESET_EPOCH_TEST_FILE, quotaResetEpochMojoTest],
+    [QUOTA_RESET_EPOCH_CALLER_TEST_FILE, quotaResetEpochCallerTest],
+  ]), []);
+  assert.match(findViolations([[QUOTA_WINDOWS_FILE,
+    quotaResetEpochConsumer + "\nprodex_mojo_core::quota::quota_blocked_status_label(0);\nif primary_used { return primary_reset; }"]]).join("\n"),
+  /contains Rust reset-epoch precedence policy/u);
+  assert.match(findViolations([[QUOTA_RESET_EPOCH_MOJO_FILE,
+    quotaResetEpochMojo.replace("primary_used >= 100", "primary_used > 100")]]).join("\n"),
+  /quota reset-epoch precedence must remain Mojo-owned/u);
+  assert.match(findViolations([[QUOTA_RESET_EPOCH_CALLER_TEST_FILE,
+    quotaResetEpochCallerTest.replace("quota_reset_json_preserves_serde_duplicate_key_behavior", "")]]).join("\n"),
+  /caller-boundary tests must retain quota_reset_json_preserves_serde_duplicate_key_behavior/u);
   assert.match(findViolations([["crates/prodex-quota/src/capacity.rs",
     '#[cfg(not(feature = "mojo"))] fn old_capacity() {}']]).join("\n"),
     /feature-off Rust path/u);
@@ -4805,7 +5027,12 @@ function selfTest() {
     'fn smart_context_stabilize_static_context_items_bounded() { #[cfg(not(feature = "mojo"))] old_sort(); }\nfn smart_context_reduce_static_context_items_mojo(']]).join("\n"),
     /static-item selection must use Mojo/u);
   assert.match(findViolations([["crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
-    "fn resolve_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+    "runtime_tuning_proxy_preset_plan(\n); fn resolve_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+  const presetConsumer = "runtime_tuning_proxy_preset_plan(\n);";
+  assert.deepEqual(findViolations([[RUNTIME_POLICY_PRESET_CONSUMER_FILE, presetConsumer]]), []);
+  assert.match(findViolations([[RUNTIME_POLICY_PRESET_CONSUMER_FILE,
+    presetConsumer.replace("runtime_tuning_proxy_preset_plan(\n);", "apply_non_preset_overrides();")]]).join("\n"),
+  /must use the Mojo plan|restored Rust preset precedence or override merging/u);
   assert.match(findViolations([[PRECOMMIT_BUDGET_FILE,
     "fn runtime_proxy_precommit_budget_for_profile_count_rust() {}"]])[0],
     /Rust semantic oracle or copy/u);
@@ -4866,6 +5093,20 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
   ]])[0], /Mojo-owned operation cannot have a feature-off Rust path/u);
+  const providerUsageFile = "crates/prodex-provider-core/src/usage.rs";
+  const providerUsageCalls = [
+    "prodex_mojo_core::provider_usage::extract_json(",
+    "prodex_mojo_core::provider_usage::calculate_cost(",
+    "prodex_mojo_core::provider_usage::merged_total(",
+    "prodex_mojo_core::provider_usage::merge_latest_present(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[providerUsageFile, providerUsageCalls]]), []);
+  assert.match(
+    findViolations([[providerUsageFile,
+      providerUsageCalls + "\nif usage.input_tokens.is_some() { merged.input_tokens = usage.input_tokens; }",
+    ]]).join("\n"),
+    /restored Rust SSE usage merge policy/u,
+  );
 }
 
 async function main() {

@@ -528,6 +528,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/gemini_tooling_policy.mojo");
         sources.push("../../mojo/prodex_core/log_semantics.mojo");
         sources.push("../../mojo/prodex_core/log_throughput_policy.mojo");
+        sources.push("../../mojo/prodex_core/live_log_record.mojo");
         sources.push("../../mojo/prodex_core/log_parser.mojo");
         sources.push("../../mojo/prodex_core/runtime_doctor_plan.mojo");
         sources.push("../../mojo/prodex_core/runtime_doctor_marker.mojo");
