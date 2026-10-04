@@ -5003,3 +5003,28 @@ Validation passed:
 - `npm run test:changed`, `npm run docs`, `cargo fmt --all -- --check`, `git diff --check`, and `node scripts/ci/size-guard.mjs` passed.
 - Mojo no-fallback self-test/guard, authority guard, and ownership check pass; ownership reports 154 authoritative operations.
 - `node scripts/ci/mojo-production-share.mjs --check` — 81,354 Mojo LOC and 203,725 Rust LOC (28.54% Mojo); the 7% release floor and Mojo non-regression pass. The 75% project target remains unmet.
+
+## Quota reset-epoch precedence migration
+
+`mojo/prodex_core/quota.mojo` now owns JSON reset-epoch precedence through the
+typed `prodex_quota_reset_epoch_v1` ABI. Rust retains Serde parsing, duplicate
+key resolution, typed candidate extraction, case-insensitive header lookup,
+and signed numeric/string conversion. Mojo selects the first valid top-level
+`resets_at`, `reset_at`, `error.resets_at`, or `error.reset_at`; absent those,
+it honors primary and secondary used-percent gates, including a missing gated
+reset, then falls back from primary to secondary. The existing textual reset
+parser stays unchanged.
+
+Direct real-Mojo tests and `prodex-quota` caller tests cover candidate order,
+missing gated values, 100% thresholds, negative epochs, numeric strings,
+malformed and non-object JSON, case-variant header names, and Serde's
+last-duplicate-key behavior.
+
+Validation passed:
+
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-mojo-core --features mojo-quota --test quota_reset_epoch` — 2 direct real-Mojo tests passed.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-quota quota_reset` — 7 focused caller tests passed; the full changed-test run passed all 87 `prodex-quota` tests.
+- `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`, `cargo fmt --all -- --check`, `npm run docs`, and `npm run test:changed` passed. The changed-test run also passed 371 provider unit tests and 7 provider integration tests.
+- `node scripts/ci/mojo-no-fallback-guard.mjs --self-test`, `node scripts/ci/mojo-authority-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, `node scripts/ci/size-guard.mjs`, and `git diff --check` passed; ownership reports 154 authoritative operations.
+- The primary gate was mutated from `>= 100` to `> 100`; the direct test failed on the 100% case as expected. The original Mojo source was restored byte-for-byte, with SHA-256 `f50493c4ff9f58e5260533260c1cf9511e77d791ce20fa633b591fb09b8d4127` before and after.
+- `node scripts/ci/mojo-production-share.mjs --check` — 81,355 Mojo LOC and 203,718 Rust LOC, or **28.54% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.

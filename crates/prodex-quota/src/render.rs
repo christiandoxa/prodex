@@ -41,6 +41,10 @@ mod tests;
 #[path = "../tests/src/render/quota_policy.rs"]
 mod quota_policy_tests;
 
+#[cfg(test)]
+#[path = "../tests/src/render/quota_reset_message.rs"]
+mod quota_reset_message_tests;
+
 #[cfg(all(test, feature = "mojo"))]
 #[path = "../tests/src/render/mojo.rs"]
 mod mojo_tests;
