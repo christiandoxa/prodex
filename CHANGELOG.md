@@ -23,10 +23,19 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
   viability is authoritative, not the incidental presence of an overload/rate-limit/transport flag.
 - A temporarily backed-off profile remains internal backpressure/recovery work instead of leaking
   the user-visible `pre-commit retry budget was exhausted` 503 while usable quota still exists.
+- This recovery rule applies to concurrent `prodex s ... exec` workloads as well: parallel callers
+  may queue or wait internally, but a still-viable account must not be converted into a retry-budget 503.
 - Hard continuation affinity remains fail-closed where switching profiles would violate conversation
   ownership semantics.
 - Fully exhausted pools remain bounded and terminal; known zero-quota accounts are still not sent
   upstream.
+
+## Compatibility Notes
+
+- The retry-budget change does not relax hard continuation affinity: requests that cannot legally
+  switch profile still preserve their ownership constraints.
+- Known zero-quota pools remain terminal and bounded; this patch only prevents retry-budget 503s
+  while a compatible profile is still semantically retryable.
 
 ## Verification
 
