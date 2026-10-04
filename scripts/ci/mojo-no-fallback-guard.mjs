@@ -40,6 +40,11 @@ const LIVE_LOG_RECORD_FILE = "crates/prodex-runtime-log/src/live.rs";
 const LIVE_LOG_RECORD_ADAPTER_FILE = "crates/prodex-mojo-core/src/live_log_record.rs";
 const LIVE_LOG_RECORD_MOJO_FILE = "mojo/prodex_core/live_log_record.mojo";
 const LIVE_LOG_RECORD_DIRECT_TEST_FILE = "mojo/tests/live_log_record_test.mojo";
+const RUNTIME_POLICY_PRESET_CONSUMER_FILE = "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs";
+const RUNTIME_POLICY_PRESET_CALLER_FILE = "crates/prodex-runtime-policy/src/lib.rs";
+const RUNTIME_POLICY_PRESET_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_decisions/preset.rs";
+const RUNTIME_POLICY_PRESET_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_policy_preset.rs";
+const RUNTIME_POLICY_PRESET_MOJO_FILE = "mojo/prodex_core/runtime_tuning.mojo";
 const PROMOTED_FILES = [
   LIVE_LOG_RECORD_FILE,
   LIVE_LOG_RECORD_ADAPTER_FILE,
@@ -268,7 +273,11 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
   "crates/prodex-runtime-launch/src/args.rs",
   "crates/prodex-runtime-launch/src/lib.rs",
-  "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+  RUNTIME_POLICY_PRESET_CONSUMER_FILE,
+  RUNTIME_POLICY_PRESET_CALLER_FILE,
+  RUNTIME_POLICY_PRESET_ADAPTER_FILE,
+  RUNTIME_POLICY_PRESET_TEST_FILE,
+  RUNTIME_POLICY_PRESET_MOJO_FILE,
   "crates/prodex-observability/src/lib.rs",
   "crates/prodex-observability/src/metric_label.rs",
   "crates/prodex-observability/src/mojo.rs",
@@ -1014,6 +1023,42 @@ export function findViolations(files) {
     return /clip_json_strings|\.char_indices\s*\(|MAX_RUNTIME_LIVE_LOG_LINE_BYTES/u.test(production)
       ? [`${filePath}: contains restored Rust live-log clipping or truncation policy`]
       : [];
+  });
+  const runtimePolicyPresetViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_POLICY_PRESET_CONSUMER_FILE) {
+      const required = "runtime_tuning_proxy_preset_plan(";
+      const violations = contents.includes(required)
+        ? []
+        : [`${filePath}: runtime-proxy preset resolution must use the Mojo plan`];
+      if (/apply_non_preset_overrides|env_preset\.or_else\(\|\|\s*self\.preset\(\)\)/u.test(contents)) {
+        violations.push(`${filePath}: contains restored Rust preset precedence or override merging`);
+      }
+      return violations;
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_ADAPTER_FILE) {
+      return contents.includes("prodex_runtime_proxy_preset_plan_v1(") &&
+          contents.includes("RUNTIME_PROXY_PRESET_PLAN_ABI_VERSION")
+        ? []
+        : [`${filePath}: preset planning adapter must retain its versioned Mojo ABI`];
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_MOJO_FILE) {
+      return contents.includes('@export("prodex_runtime_proxy_preset_plan_v1")')
+        ? []
+        : [`${filePath}: runtime-proxy preset plan must be implemented in Mojo`];
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_TEST_FILE) {
+      return contents.includes("required_mojo_resolves_preset_precedence_and_all_overrides") &&
+          contents.includes("prodex_mojo_required")
+        ? []
+        : [`${filePath}: preset ABI needs direct required-Mojo regression coverage`];
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_CALLER_FILE) {
+      return contents.includes("runtime_policy_proxy_caller_uses_mojo_preset_plan") &&
+          contents.includes("runtime_policy_proxy_from_root(")
+        ? []
+        : [`${filePath}: runtime-policy caller needs a preset-plan regression test`];
+    }
+    return [];
   });
   const profileHealthCircuitViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== PROFILE_HEALTH_CIRCUIT_FILE) return [];
@@ -4155,7 +4200,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -4982,7 +5027,12 @@ function selfTest() {
     'fn smart_context_stabilize_static_context_items_bounded() { #[cfg(not(feature = "mojo"))] old_sort(); }\nfn smart_context_reduce_static_context_items_mojo(']]).join("\n"),
     /static-item selection must use Mojo/u);
   assert.match(findViolations([["crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
-    "fn resolve_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+    "runtime_tuning_proxy_preset_plan(\n); fn resolve_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+  const presetConsumer = "runtime_tuning_proxy_preset_plan(\n);";
+  assert.deepEqual(findViolations([[RUNTIME_POLICY_PRESET_CONSUMER_FILE, presetConsumer]]), []);
+  assert.match(findViolations([[RUNTIME_POLICY_PRESET_CONSUMER_FILE,
+    presetConsumer.replace("runtime_tuning_proxy_preset_plan(\n);", "apply_non_preset_overrides();")]]).join("\n"),
+  /must use the Mojo plan|restored Rust preset precedence or override merging/u);
   assert.match(findViolations([[PRECOMMIT_BUDGET_FILE,
     "fn runtime_proxy_precommit_budget_for_profile_count_rust() {}"]])[0],
     /Rust semantic oracle or copy/u);

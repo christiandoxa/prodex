@@ -87,19 +87,36 @@ impl RuntimePolicyProxyPreset {
     }
 
     pub fn parse(value: &str) -> Option<Self> {
-        match runtime_proxy_preset_class(value)
+        runtime_proxy_preset_class(value)
             .expect("Mojo runtime proxy-preset classification failed")
-        {
-            Some(RuntimeProxyPresetClass::Low) => Some(Self::Low),
-            Some(RuntimeProxyPresetClass::Default) => Some(Self::Default),
-            Some(RuntimeProxyPresetClass::ManyTerminals) => Some(Self::ManyTerminals),
-            Some(RuntimeProxyPresetClass::Aggressive) => Some(Self::Aggressive),
-            None => None,
+            .map(Self::from_mojo)
+    }
+
+    pub(super) fn to_mojo(self) -> RuntimeProxyPresetClass {
+        match self {
+            Self::Low => RuntimeProxyPresetClass::Low,
+            Self::Default => RuntimeProxyPresetClass::Default,
+            Self::ManyTerminals => RuntimeProxyPresetClass::ManyTerminals,
+            Self::Aggressive => RuntimeProxyPresetClass::Aggressive,
         }
     }
 
-    pub(super) fn settings(self) -> RuntimePolicyProxySettings {
-        self.resolve()
+    pub(super) fn from_mojo(preset: RuntimeProxyPresetClass) -> Self {
+        match preset {
+            RuntimeProxyPresetClass::Low => Self::Low,
+            RuntimeProxyPresetClass::Default => Self::Default,
+            RuntimeProxyPresetClass::ManyTerminals => Self::ManyTerminals,
+            RuntimeProxyPresetClass::Aggressive => Self::Aggressive,
+        }
+    }
+}
+
+impl RuntimePolicyProxySettings {
+    pub fn with_effective_preset(
+        self,
+        env_preset: Option<RuntimePolicyProxyPreset>,
+    ) -> RuntimePolicyProxySettings {
+        runtime_proxy_preset::RuntimePolicyProxySettings::resolve_effective_preset(self, env_preset)
     }
 }
 

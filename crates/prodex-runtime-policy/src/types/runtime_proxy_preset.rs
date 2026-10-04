@@ -1,7 +1,8 @@
 use super::{RuntimePolicyProxyPreset, RuntimePolicyProxyPresetSelection};
+use prodex_mojo_core::runtime::{RuntimeTuningProxyPresetValues, runtime_tuning_proxy_preset_plan};
 use serde::Deserialize;
 
-#[derive(Debug, Clone, Default, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimePolicyProxySettings {
     #[serde(default)]
@@ -52,145 +53,113 @@ impl RuntimePolicyProxySettings {
         self.preset.get()
     }
 
-    pub fn with_effective_preset(
+    pub(super) fn resolve_effective_preset(
         self,
         env_preset: Option<RuntimePolicyProxyPreset>,
     ) -> RuntimePolicyProxySettings {
-        let selected_preset = env_preset.or_else(|| self.preset());
-        let Some(selected_preset) = selected_preset else {
-            return self;
-        };
-
-        let mut effective = selected_preset.settings();
-        effective.apply_non_preset_overrides(self);
-        effective.preset = RuntimePolicyProxyPresetSelection::selected(selected_preset);
-        effective
-    }
-
-    fn apply_non_preset_overrides(&mut self, overrides: RuntimePolicyProxySettings) {
-        macro_rules! apply_optional_overrides {
-            ($($field:ident),+ $(,)?) => {
-                $(
-                    if overrides.$field.is_some() {
-                        self.$field = overrides.$field;
-                    }
-                )+
-            };
-        }
-
-        apply_optional_overrides!(
-            worker_count,
-            long_lived_worker_count,
-            probe_refresh_worker_count,
-            async_worker_count,
-            long_lived_queue_capacity,
-            active_request_limit,
-            profile_inflight_soft_limit,
-            profile_inflight_hard_limit,
-            responses_active_limit,
-            compact_active_limit,
-            websocket_active_limit,
-            standard_active_limit,
-            http_connect_timeout_ms,
-            stream_idle_timeout_ms,
-            compact_request_timeout_ms,
-            sse_lookahead_timeout_ms,
-            prefetch_backpressure_retry_ms,
-            prefetch_backpressure_timeout_ms,
-            prefetch_max_buffered_bytes,
-            websocket_connect_timeout_ms,
-            websocket_happy_eyeballs_delay_ms,
-            websocket_precommit_progress_timeout_ms,
-            websocket_connect_worker_count,
-            websocket_connect_queue_capacity,
-            websocket_connect_overflow_capacity,
-            websocket_dns_worker_count,
-            websocket_dns_queue_capacity,
-            websocket_dns_overflow_capacity,
-            broker_ready_timeout_ms,
-            broker_health_connect_timeout_ms,
-            broker_health_read_timeout_ms,
-            websocket_previous_response_reuse_stale_ms,
-            admission_wait_budget_ms,
-            pressure_admission_wait_budget_ms,
-            long_lived_queue_wait_budget_ms,
-            pressure_long_lived_queue_wait_budget_ms,
-            sync_probe_pressure_pause_ms,
-            responses_critical_floor_percent,
-            startup_sync_probe_warm_limit,
-        );
-    }
-}
-
-impl RuntimePolicyProxyPreset {
-    pub(super) fn resolve(self) -> RuntimePolicyProxySettings {
-        let preset = RuntimePolicyProxyPresetSelection::selected(self);
-        let preset_id = match self {
-            Self::Low => 0,
-            Self::Default => 1,
-            Self::ManyTerminals => 2,
-            Self::Aggressive => 3,
-        };
-        let values = prodex_mojo_core::runtime::runtime_tuning_proxy_preset_defaults(preset_id)
-            .expect("valid runtime-proxy preset must have Mojo defaults");
+        let plan = runtime_tuning_proxy_preset_plan(
+            self.preset().map(RuntimePolicyProxyPreset::to_mojo),
+            env_preset.map(RuntimePolicyProxyPreset::to_mojo),
+            RuntimeTuningProxyPresetValues {
+                worker_count: self.worker_count,
+                long_lived_worker_count: self.long_lived_worker_count,
+                probe_refresh_worker_count: self.probe_refresh_worker_count,
+                async_worker_count: self.async_worker_count,
+                long_lived_queue_capacity: self.long_lived_queue_capacity,
+                active_request_limit: self.active_request_limit,
+                profile_inflight_soft_limit: self.profile_inflight_soft_limit,
+                profile_inflight_hard_limit: self.profile_inflight_hard_limit,
+                responses_active_limit: self.responses_active_limit,
+                compact_active_limit: self.compact_active_limit,
+                websocket_active_limit: self.websocket_active_limit,
+                standard_active_limit: self.standard_active_limit,
+                http_connect_timeout_ms: self.http_connect_timeout_ms,
+                stream_idle_timeout_ms: self.stream_idle_timeout_ms,
+                compact_request_timeout_ms: self.compact_request_timeout_ms,
+                sse_lookahead_timeout_ms: self.sse_lookahead_timeout_ms,
+                prefetch_backpressure_retry_ms: self.prefetch_backpressure_retry_ms,
+                prefetch_backpressure_timeout_ms: self.prefetch_backpressure_timeout_ms,
+                prefetch_max_buffered_bytes: self.prefetch_max_buffered_bytes,
+                websocket_connect_timeout_ms: self.websocket_connect_timeout_ms,
+                websocket_happy_eyeballs_delay_ms: self.websocket_happy_eyeballs_delay_ms,
+                websocket_precommit_progress_timeout_ms: self
+                    .websocket_precommit_progress_timeout_ms,
+                websocket_connect_worker_count: self.websocket_connect_worker_count,
+                websocket_connect_queue_capacity: self.websocket_connect_queue_capacity,
+                websocket_connect_overflow_capacity: self.websocket_connect_overflow_capacity,
+                websocket_dns_worker_count: self.websocket_dns_worker_count,
+                websocket_dns_queue_capacity: self.websocket_dns_queue_capacity,
+                websocket_dns_overflow_capacity: self.websocket_dns_overflow_capacity,
+                broker_ready_timeout_ms: self.broker_ready_timeout_ms,
+                broker_health_connect_timeout_ms: self.broker_health_connect_timeout_ms,
+                broker_health_read_timeout_ms: self.broker_health_read_timeout_ms,
+                websocket_previous_response_reuse_stale_ms: self
+                    .websocket_previous_response_reuse_stale_ms,
+                admission_wait_budget_ms: self.admission_wait_budget_ms,
+                pressure_admission_wait_budget_ms: self.pressure_admission_wait_budget_ms,
+                long_lived_queue_wait_budget_ms: self.long_lived_queue_wait_budget_ms,
+                pressure_long_lived_queue_wait_budget_ms: self
+                    .pressure_long_lived_queue_wait_budget_ms,
+                sync_probe_pressure_pause_ms: self.sync_probe_pressure_pause_ms,
+                responses_critical_floor_percent: self.responses_critical_floor_percent,
+                startup_sync_probe_warm_limit: self.startup_sync_probe_warm_limit,
+            },
+        )
+        .expect("runtime proxy preset policy must be resolved by Mojo");
         RuntimePolicyProxySettings {
-            preset,
-            worker_count: values.worker_count,
-            long_lived_worker_count: values.long_lived_worker_count,
-            probe_refresh_worker_count: values.probe_refresh_worker_count,
-            async_worker_count: values.async_worker_count,
-            long_lived_queue_capacity: values.long_lived_queue_capacity,
-            active_request_limit: values.active_request_limit,
-            profile_inflight_soft_limit: values.profile_inflight_soft_limit,
-            profile_inflight_hard_limit: values.profile_inflight_hard_limit,
-            responses_active_limit: values.responses_active_limit,
-            compact_active_limit: values.compact_active_limit,
-            websocket_active_limit: values.websocket_active_limit,
-            standard_active_limit: values.standard_active_limit,
-            websocket_connect_worker_count: values.websocket_connect_worker_count,
-            websocket_connect_queue_capacity: values.websocket_connect_queue_capacity,
-            websocket_connect_overflow_capacity: values.websocket_connect_overflow_capacity,
-            websocket_dns_worker_count: values.websocket_dns_worker_count,
-            websocket_dns_queue_capacity: values.websocket_dns_queue_capacity,
-            websocket_dns_overflow_capacity: values.websocket_dns_overflow_capacity,
-            startup_sync_probe_warm_limit: values.startup_sync_probe_warm_limit,
-            ..RuntimePolicyProxySettings::default()
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn preset_defaults_and_explicit_overrides_match_policy() {
-        for (preset, workers, active, websocket) in [
-            (RuntimePolicyProxyPreset::Low, Some(4), Some(48), Some(8)),
-            (RuntimePolicyProxyPreset::Default, None, None, None),
-            (
-                RuntimePolicyProxyPreset::ManyTerminals,
-                Some(12),
-                Some(160),
-                Some(32),
-            ),
-            (
-                RuntimePolicyProxyPreset::Aggressive,
-                Some(24),
-                Some(384),
-                Some(96),
-            ),
-        ] {
-            let effective = RuntimePolicyProxySettings {
-                worker_count: Some(7),
-                ..RuntimePolicyProxySettings::default()
-            }
-            .with_effective_preset(Some(preset));
-            assert_eq!(effective.preset(), Some(preset));
-            assert_eq!(effective.worker_count, Some(7));
-            assert_eq!(effective.active_request_limit, active);
-            assert_eq!(effective.websocket_active_limit, websocket);
-            assert_eq!(preset.resolve().worker_count, workers);
+            preset: plan
+                .effective_preset
+                .map(|preset| {
+                    RuntimePolicyProxyPresetSelection::selected(
+                        RuntimePolicyProxyPreset::from_mojo(preset),
+                    )
+                })
+                .unwrap_or_default(),
+            worker_count: plan.values.worker_count,
+            long_lived_worker_count: plan.values.long_lived_worker_count,
+            probe_refresh_worker_count: plan.values.probe_refresh_worker_count,
+            async_worker_count: plan.values.async_worker_count,
+            long_lived_queue_capacity: plan.values.long_lived_queue_capacity,
+            active_request_limit: plan.values.active_request_limit,
+            profile_inflight_soft_limit: plan.values.profile_inflight_soft_limit,
+            profile_inflight_hard_limit: plan.values.profile_inflight_hard_limit,
+            responses_active_limit: plan.values.responses_active_limit,
+            compact_active_limit: plan.values.compact_active_limit,
+            websocket_active_limit: plan.values.websocket_active_limit,
+            standard_active_limit: plan.values.standard_active_limit,
+            http_connect_timeout_ms: plan.values.http_connect_timeout_ms,
+            stream_idle_timeout_ms: plan.values.stream_idle_timeout_ms,
+            compact_request_timeout_ms: plan.values.compact_request_timeout_ms,
+            sse_lookahead_timeout_ms: plan.values.sse_lookahead_timeout_ms,
+            prefetch_backpressure_retry_ms: plan.values.prefetch_backpressure_retry_ms,
+            prefetch_backpressure_timeout_ms: plan.values.prefetch_backpressure_timeout_ms,
+            prefetch_max_buffered_bytes: plan.values.prefetch_max_buffered_bytes,
+            websocket_connect_timeout_ms: plan.values.websocket_connect_timeout_ms,
+            websocket_happy_eyeballs_delay_ms: plan.values.websocket_happy_eyeballs_delay_ms,
+            websocket_precommit_progress_timeout_ms: plan
+                .values
+                .websocket_precommit_progress_timeout_ms,
+            websocket_connect_worker_count: plan.values.websocket_connect_worker_count,
+            websocket_connect_queue_capacity: plan.values.websocket_connect_queue_capacity,
+            websocket_connect_overflow_capacity: plan.values.websocket_connect_overflow_capacity,
+            websocket_dns_worker_count: plan.values.websocket_dns_worker_count,
+            websocket_dns_queue_capacity: plan.values.websocket_dns_queue_capacity,
+            websocket_dns_overflow_capacity: plan.values.websocket_dns_overflow_capacity,
+            broker_ready_timeout_ms: plan.values.broker_ready_timeout_ms,
+            broker_health_connect_timeout_ms: plan.values.broker_health_connect_timeout_ms,
+            broker_health_read_timeout_ms: plan.values.broker_health_read_timeout_ms,
+            websocket_previous_response_reuse_stale_ms: plan
+                .values
+                .websocket_previous_response_reuse_stale_ms,
+            admission_wait_budget_ms: plan.values.admission_wait_budget_ms,
+            pressure_admission_wait_budget_ms: plan.values.pressure_admission_wait_budget_ms,
+            long_lived_queue_wait_budget_ms: plan.values.long_lived_queue_wait_budget_ms,
+            pressure_long_lived_queue_wait_budget_ms: plan
+                .values
+                .pressure_long_lived_queue_wait_budget_ms,
+            sync_probe_pressure_pause_ms: plan.values.sync_probe_pressure_pause_ms,
+            responses_critical_floor_percent: plan.values.responses_critical_floor_percent,
+            startup_sync_probe_warm_limit: plan.values.startup_sync_probe_warm_limit,
         }
     }
 }
