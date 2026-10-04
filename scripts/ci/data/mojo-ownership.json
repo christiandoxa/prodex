@@ -818,7 +818,8 @@
         "operations": [
           "codex_profile_v2_arg_selection",
           "codex_config_override_selection",
-          "codex_config_value_normalization"
+          "codex_config_value_normalization",
+          "codex_model_provider_source_selection"
         ]
       },
       {
@@ -2651,6 +2652,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "slice-to-owned-String mapping and provider source attribution"
+    },
+    {
+      "name": "codex_model_provider_source_selection",
+      "domain": "config/model-provider",
+      "introduced_in": "0.435.4",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_codex_config_model_provider_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/codex_config.mojo",
+      "consumer": "crates/prodex-codex-config/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::codex_config::model_provider_plan",
+      "production_consumers": [
+        "crates/prodex-codex-config/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/codex_config.rs",
+      "rust_owner_before": "CLI override precedence, profile-v2/base provider source selection, and source attribution after config parsing",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "no separate Rust decision oracle; strict direct Mojo plan tests and Codex config consumer tests cover CLI/profile/base precedence and lazy file parsing",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "TOML file reads and parsing, profile path handling, plan-directed reads, source enum mapping, provider string ownership, and the existing Mojo OpenAI identity call"
     },
     {
       "name": "state_core_policy",
