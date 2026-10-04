@@ -111,6 +111,8 @@ pub mod gemini_internal_instruction;
 pub mod gemini_tooling_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod info_render;
+#[cfg(feature = "mojo-runtime")]
+pub mod live_log_record;
 #[cfg(feature = "mojo-routing")]
 #[cfg(feature = "mojo-rich")]
 pub mod log;

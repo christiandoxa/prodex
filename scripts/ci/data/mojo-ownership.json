@@ -1180,6 +1180,19 @@
         "operations": [
           "gemini_internal_instruction_leak_detection"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/live_log_record.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_live_log_record_bound",
+          "runtime_live_log_nested_string_clipping",
+          "runtime_live_log_json_fallback",
+          "runtime_live_log_plain_text_truncation"
+        ]
       }
     ],
     "removed": [
@@ -5029,6 +5042,98 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON acquisition and serialization, bounded Kiro ABI invocation, and UTF-8/JSON decoding"
+    },
+    {
+      "name": "runtime_live_log_record_bound",
+      "domain": "runtime-log/live-record",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust live-log record byte-bound pass-through decision",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_live_log_record_over_limit_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/live_log_record.mojo",
+      "consumer": "crates/prodex-runtime-log/src/live.rs",
+      "consumer_marker": "mojo_live_log_record::record_exceeds_bound",
+      "production_consumers": [
+        "crates/prodex-runtime-log/src/live.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
+      "rust_owner_before": "bounded_live_log_line pass-through threshold at 128 KiB",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; Mojo and runtime-log caller tests cover exact-bound and over-bound records",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "record byte-length projection and bounded live-log state materialization"
+    },
+    {
+      "name": "runtime_live_log_nested_string_clipping",
+      "domain": "runtime-log/live-record",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust recursive JSON string clipping at UTF-8 character boundaries",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_live_log_string_clip_end_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/live_log_record.mojo",
+      "consumer": "crates/prodex-runtime-log/src/live.rs",
+      "consumer_marker": "mojo_live_log_record::nested_string_clip_end",
+      "production_consumers": [
+        "crates/prodex-runtime-log/src/live.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
+      "rust_owner_before": "clip_json_strings recursive 8 KiB UTF-8-safe prefix calculation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct Mojo and runtime-log caller tests cover ASCII, Unicode, arrays, and objects",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "serde_json traversal, clipped string ownership, and marker materialization"
+    },
+    {
+      "name": "runtime_live_log_json_fallback",
+      "domain": "runtime-log/live-record",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust serialized-size fallback and selected JSON metadata decision",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_live_log_json_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/live_log_record.mojo",
+      "consumer": "crates/prodex-runtime-log/src/live.rs",
+      "consumer_marker": "mojo_live_log_record::json_plan",
+      "production_consumers": [
+        "crates/prodex-runtime-log/src/live.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
+      "rust_owner_before": "serialized JSON 128 KiB comparison and timestamp/pid/event compact fallback selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct Mojo and runtime-log caller tests cover the serialized oversize fallback and selected fields",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "serde_json serialization, selected-field materialization, and compact JSON serialization"
+    },
+    {
+      "name": "runtime_live_log_plain_text_truncation",
+      "domain": "runtime-log/live-record",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust plain-text UTF-8 prefix length and truncation tail decision",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_live_log_plain_text_truncate_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/live_log_record.mojo",
+      "consumer": "crates/prodex-runtime-log/src/live.rs",
+      "consumer_marker": "mojo_live_log_record::truncate_plain_text",
+      "production_consumers": [
+        "crates/prodex-runtime-log/src/live.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
+      "rust_owner_before": "bounded_live_log_line Unicode-safe prefix at record limit minus 32 bytes and exact marker/newline tail",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct Mojo and runtime-log caller tests cover ASCII, Unicode, exact marker, and newline",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "bounded byte buffer allocation and UTF-8 string ownership"
     }
   ],
   "rust_semantic_reductions": [
