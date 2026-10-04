@@ -330,22 +330,40 @@ fn compact_candidate_wait_without_selection_does_not_consume_an_attempt() {
         .lane_admission
         .set_profile_inflight("second", hard_limit);
 
+    let lane_admission = shared.lane_admission.clone();
+    let release = std::thread::spawn(move || {
+        // Cross two historical test capacity epochs. Waiting itself must not
+        // spend a provider attempt or surface a local 503.
+        std::thread::sleep(Duration::from_millis(3_200));
+        lane_admission.set_profile_inflight("second", hard_limit.saturating_sub(1));
+        lane_admission.record_inflight_release();
+    });
+
     let response = proxy_runtime_standard_request(53, &compact_request(None), shared)
-        .expect("saturated compact selection should fail locally");
-    let (status, _) = tiny_http_response_status_and_body(response);
+        .expect("saturated compact selection should backpressure until capacity returns");
+    let (status, body) = tiny_http_response_status_and_body(response);
+    release.join().expect("capacity release should join");
     let log = read_runtime_proxy_test_log(&shared.log_path);
 
-    assert_eq!(status, 503, "{log}");
-    let selected_candidates = log.matches("transport=http compact_candidate=").count();
-    let candidate_exhausted = log.contains("compact_final_failure exit=candidate_exhausted")
-        && log.contains(&format!("attempts={selected_candidates} "));
-    let bounded_capacity_timeout = log.contains("compact_final_failure exit=local_capacity_timeout")
-        && log.contains("attempts=0 ");
-    assert!(
-        candidate_exhausted || bounded_capacity_timeout,
-        "only the selected saturated candidate may spend an attempt, or the bounded local-capacity timeout may return before any attempt: {log}"
+    assert_eq!(
+        status, 200,
+        "local saturation must not surface as an error: {body}\n{log}"
     );
-    assert!(backend.responses_accounts().is_empty(), "{log}");
+    assert_eq!(
+        log.matches("transport=http compact_candidate=").count(),
+        1,
+        "waiting without a selected candidate must not consume an upstream attempt: {log}"
+    );
+    assert!(
+        log.contains("local_capacity_wait_continued")
+            && log.contains("mode=backpressure"),
+        "compact request should remain queued across old capacity epochs: {log}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["second-account".to_string()],
+        "only the profile released from saturation should receive the upstream attempt"
+    );
 }
 
 #[test]

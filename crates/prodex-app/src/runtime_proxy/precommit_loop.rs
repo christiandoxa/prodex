@@ -20,7 +20,6 @@ pub(super) struct RuntimePrecommitLoopState<F> {
     pub selection_attempts: usize,
     pub excluded_profiles: BTreeSet<String>,
     pub saw_inflight_saturation: bool,
-    pub local_capacity_wait_timed_out: bool,
     pub saw_transport_failure: bool,
     pub saw_transport_recovery_candidate: bool,
     pub saw_overload_failure: bool,
@@ -37,7 +36,6 @@ impl<F> RuntimePrecommitLoopState<F> {
             selection_attempts: 0,
             excluded_profiles: BTreeSet::new(),
             saw_inflight_saturation: false,
-            local_capacity_wait_timed_out: false,
             saw_transport_failure: false,
             saw_transport_recovery_candidate: false,
             saw_overload_failure: false,
@@ -107,10 +105,6 @@ impl<F> RuntimePrecommitLoopState<F> {
 
     pub fn record_inflight_saturation(&mut self) {
         self.saw_inflight_saturation = true;
-    }
-
-    pub fn record_local_capacity_wait_timeout(&mut self) {
-        self.local_capacity_wait_timed_out = true;
     }
 
     pub fn record_transport_failure_at(&mut self, stage: &str) {

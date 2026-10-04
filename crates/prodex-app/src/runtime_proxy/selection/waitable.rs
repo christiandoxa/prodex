@@ -64,6 +64,25 @@ pub(crate) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
     Ok(count)
 }
 
+fn runtime_inflight_wait_quota_blocked(
+    entry: &RuntimeRouteSelectionEntry,
+    route_kind: RuntimeRouteKind,
+    now: i64,
+) -> bool {
+    let live_probe_usage = entry
+        .cached_probe_entry
+        .as_ref()
+        .and_then(|probe| probe.result.as_ref().ok());
+    let (quota_summary, _) = runtime_quota_summary_from_cached_sources(
+        live_probe_usage,
+        entry.cached_usage_snapshot.as_ref(),
+        route_kind,
+        now,
+        RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+    );
+    runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some()
+}
+
 pub(crate) fn runtime_waitable_inflight_candidates_for_route(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
@@ -81,31 +100,31 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
         runtime_route_selection_catalog(&runtime, &profile_inflight, route_kind, now)
     };
     let mut waitable_profiles = BTreeSet::new();
-    for candidate in
-        build_runtime_response_probe_plan(&state, excluded_profiles, route_kind, None, now)
-            .ready_candidates
-    {
-        let Some(entry) = state.entry(&candidate.name) else {
+    for name in active_profile_selection_order_with_view(
+        runtime_route_selection_view(&state),
+        &state.current_profile,
+    ) {
+        let Some(entry) = state.entry(&name) else {
             continue;
         };
         let hard_limited = runtime_profile_inflight_hard_limited_for_context(
             shared,
-            &candidate.name,
+            &name,
             runtime_route_kind_inflight_context(route_kind),
         )?;
-        let quota_blocked = runtime_quota_precommit_guard_reason(
-            runtime_quota_summary_for_route(&candidate.usage, route_kind),
-            route_kind,
-        )
-        .is_some();
+        let auth_compatible = !entry
+            .cached_auth_summary
+            .as_ref()
+            .is_some_and(|auth| !auth.quota_compatible);
+        let quota_blocked = runtime_inflight_wait_quota_blocked(entry, route_kind, now);
         let eligible = prodex_mojo_core::runtime::waitable_candidate_eligible(
             prodex_mojo_core::runtime::WaitableCandidateMode::Waitable,
             prodex_mojo_core::runtime::WaitableCandidateInput {
-                context_allowed: !excluded_profiles.contains(&candidate.name)
-                    && wait_affinity_owner.is_none_or(|owner| owner == candidate.name),
-                auth_compatible: true,
+                context_allowed: !excluded_profiles.contains(&name)
+                    && wait_affinity_owner.is_none_or(|owner| owner == name),
+                auth_compatible,
                 supports_runtime: entry.supports_codex_runtime(),
-                cached_probe_present: false,
+                cached_probe_present: entry.cached_probe_entry.is_some(),
                 soft_limited: false,
                 in_selection_backoff: entry.in_selection_backoff,
                 auth_failure_active: entry.auth_failure_active,
@@ -117,7 +136,7 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
         )
         .expect("Mojo waitable candidate policy returned invalid output");
         if eligible {
-            waitable_profiles.insert(candidate.name.clone());
+            waitable_profiles.insert(name);
         }
     }
 
@@ -142,30 +161,27 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
         prune_runtime_profile_selection_backoff(&mut runtime, now);
         runtime_route_selection_catalog(&runtime, &profile_inflight, route_kind, now)
     };
-    for candidate in
-        build_runtime_response_probe_plan(&state, &BTreeSet::new(), route_kind, None, now)
-            .ready_candidates
-    {
-        let Some(entry) = state.entry(&candidate.name) else {
+    for name in waited_profiles {
+        let Some(entry) = state.entry(name) else {
             continue;
         };
         let hard_limited = runtime_profile_inflight_hard_limited_for_context(
             shared,
-            &candidate.name,
+            name,
             runtime_route_kind_inflight_context(route_kind),
         )?;
-        let quota_blocked = runtime_quota_precommit_guard_reason(
-            runtime_quota_summary_for_route(&candidate.usage, route_kind),
-            route_kind,
-        )
-        .is_some();
+        let auth_compatible = !entry
+            .cached_auth_summary
+            .as_ref()
+            .is_some_and(|auth| !auth.quota_compatible);
+        let quota_blocked = runtime_inflight_wait_quota_blocked(entry, route_kind, now);
         let eligible = prodex_mojo_core::runtime::waitable_candidate_eligible(
             prodex_mojo_core::runtime::WaitableCandidateMode::Relieved,
             prodex_mojo_core::runtime::WaitableCandidateInput {
-                context_allowed: waited_profiles.contains(&candidate.name),
-                auth_compatible: true,
+                context_allowed: true,
+                auth_compatible,
                 supports_runtime: entry.supports_codex_runtime(),
-                cached_probe_present: false,
+                cached_probe_present: entry.cached_probe_entry.is_some(),
                 soft_limited: false,
                 in_selection_backoff: entry.in_selection_backoff,
                 auth_failure_active: entry.auth_failure_active,
@@ -199,7 +215,6 @@ pub(crate) struct RuntimeInflightReliefWait<'a> {
 pub(crate) enum RuntimeInflightReliefWaitResult {
     NotWaitable,
     Relieved,
-    DeadlineExpired,
 }
 
 struct RuntimeInflightWaitState {
@@ -237,16 +252,11 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
         return Ok(RuntimeInflightReliefWaitResult::NotWaitable);
     }
 
-    let capacity_budget = if cfg!(test) {
+    let wait_epoch = if cfg!(test) {
         Duration::from_millis(1_500)
     } else {
         Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
     };
-    let total_wait_budget = capacity_budget.saturating_sub(selection_started_at.elapsed());
-    if total_wait_budget.is_zero() {
-        return Ok(RuntimeInflightReliefWaitResult::DeadlineExpired);
-    }
-    let wait_deadline = Instant::now() + total_wait_budget;
 
     runtime_proxy_log(
         shared,
@@ -256,7 +266,11 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                 runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
                 runtime_proxy_log_field("request", request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
-                runtime_proxy_log_field("wait_ms", total_wait_budget.as_millis().to_string()),
+                runtime_proxy_log_field("wait_ms", wait_epoch.as_millis().to_string()),
+                runtime_proxy_log_field(
+                    "selection_elapsed_ms",
+                    selection_started_at.elapsed().as_millis().to_string(),
+                ),
                 runtime_proxy_log_field(
                     "eligible_candidate_count",
                     waited_profiles.len().to_string(),
@@ -273,7 +287,8 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                         "normal"
                     },
                 ),
-                runtime_proxy_log_field("deadline_ms", total_wait_budget.as_millis().to_string()),
+                runtime_proxy_log_field("deadline_ms", "none"),
+                runtime_proxy_log_field("mode", "backpressure"),
             ],
         ),
     );
@@ -285,17 +300,53 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
         useful_relief: false,
         wake_source: RuntimeProfileInFlightWaitOutcome::Timeout,
     };
+    let mut no_longer_waitable = false;
     loop {
-        let remaining_wait = wait_deadline.saturating_duration_since(Instant::now());
-        if remaining_wait.is_zero() {
-            break;
-        }
         let outcome = runtime_profile_inflight_wait_outcome_since_with_selection_revision(
             shared,
-            remaining_wait,
+            wait_epoch,
             wait_state.observed_revision,
             wait_state.observed_selection_revision,
         );
+        if matches!(outcome, RuntimeProfileInFlightWaitOutcome::Timeout) {
+            let mut refreshed = runtime_waitable_inflight_candidates_for_route(
+                shared,
+                excluded_profiles,
+                route_kind,
+                wait_affinity_owner,
+            )?;
+            if let Some(selected_profile) = selected_profile {
+                refreshed.retain(|profile| profile == selected_profile);
+            }
+            if refreshed.is_empty() {
+                no_longer_waitable = true;
+                break;
+            }
+            waited_profiles = refreshed;
+            wait_state.observed_revision = runtime_profile_inflight_release_revision(shared);
+            wait_state.observed_selection_revision =
+                shared.lane_admission.selection_change_revision();
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "local_capacity_wait_continued",
+                    [
+                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field(
+                            "waited_ms",
+                            started_at.elapsed().as_millis().to_string(),
+                        ),
+                        runtime_proxy_log_field(
+                            "eligible_candidate_count",
+                            waited_profiles.len().to_string(),
+                        ),
+                        runtime_proxy_log_field("mode", "backpressure"),
+                    ],
+                ),
+            );
+            continue;
+        }
         if process_runtime_inflight_wait_outcome(
             shared,
             &waited_profiles,
@@ -328,23 +379,10 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     );
     if wait_state.useful_relief {
         Ok(RuntimeInflightReliefWaitResult::Relieved)
+    } else if no_longer_waitable {
+        Ok(RuntimeInflightReliefWaitResult::NotWaitable)
     } else {
-        runtime_proxy_log(
-            shared,
-            runtime_proxy_structured_log_message(
-                "local_capacity_wait_timeout",
-                [
-                    runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                    runtime_proxy_log_field("request", request_id.to_string()),
-                    runtime_proxy_log_field(
-                        "waited_ms",
-                        started_at.elapsed().as_millis().to_string(),
-                    ),
-                    runtime_proxy_log_field("wake_reason", "deadline_expired"),
-                ],
-            ),
-        );
-        Ok(RuntimeInflightReliefWaitResult::DeadlineExpired)
+        unreachable!("inflight backpressure wait exits only after relief or eligibility changes")
     }
 }
 

@@ -18,7 +18,6 @@ use super::super::{
     runtime_proxy_maybe_wait_for_interactive_inflight_relief, runtime_proxy_structured_log_message,
     runtime_quota_blocked_affinity_is_releasable, runtime_request_explicit_session_id,
     runtime_request_turn_state, runtime_response_bound_profile,
-    runtime_route_has_retryable_profile,
     runtime_smart_context_effective_websocket_prompt_cache_key,
     runtime_smart_context_model_name_from_body, runtime_turn_state_affinity_profile,
     runtime_websocket_request_requires_locked_previous_response_affinity,
@@ -149,7 +148,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             quota_last_chance_profile: None,
             reset_selection_budget: false,
             saw_inflight_saturation: false,
-            local_capacity_wait_timed_out: false,
             saw_transport_failure: false,
             saw_overload_failure: false,
             saw_rate_limit_failure: false,
@@ -314,17 +312,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             )? {
                 RuntimeInflightReliefWaitResult::Relieved
                 | RuntimeInflightReliefWaitResult::NotWaitable => Ok(true),
-                RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                    if runtime_route_has_retryable_profile(
-                        self.shared,
-                        RuntimeRouteKind::Websocket,
-                    )? {
-                        self.reset_selection_budget = true;
-                    } else {
-                        self.local_capacity_wait_timed_out = true;
-                    }
-                    Ok(true)
-                }
             };
         }
         Ok(false)

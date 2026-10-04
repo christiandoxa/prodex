@@ -46,8 +46,7 @@ use logging::{
     RuntimeCompactFailureKind, RuntimeCompactLastFailure, log_runtime_proxy_compact_candidate,
 };
 use recovery::{
-    compact_inflight_capacity_epoch_expired, compact_profile_count,
-    wait_for_compact_inflight_relief, wait_for_compact_overload_recovery,
+    compact_profile_count, wait_for_compact_inflight_relief, wait_for_compact_overload_recovery,
 };
 use retryable::{
     RuntimeProxyCompactRetryableFailure, handle_runtime_proxy_compact_retryable_failure,
@@ -342,20 +341,6 @@ impl RuntimeCompactSelectionContext<'_> {
             RuntimeInflightReliefWaitResult::Relieved => {
                 return Ok(RuntimeCompactLoopAction::Continue);
             }
-            RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                return Ok(
-                    match compact_inflight_capacity_epoch_expired(
-                        self.request_id,
-                        self.shared,
-                        self.selection_attempts,
-                        &mut self.selection_started_at,
-                        self.pressure_mode,
-                    )? {
-                        Some(response) => RuntimeCompactLoopAction::Return(response),
-                        None => RuntimeCompactLoopAction::Continue,
-                    },
-                );
-            }
             RuntimeInflightReliefWaitResult::NotWaitable => {}
         }
         let remaining_cold_start_profiles =
@@ -421,15 +406,6 @@ impl RuntimeCompactSelectionContext<'_> {
             )? {
                 RuntimeInflightReliefWaitResult::Relieved
                 | RuntimeInflightReliefWaitResult::NotWaitable => Ok(None),
-                RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                    compact_inflight_capacity_epoch_expired(
-                        self.request_id,
-                        self.shared,
-                        self.selection_attempts,
-                        &mut self.selection_started_at,
-                        self.pressure_mode,
-                    )
-                }
             };
         }
         let attempt = attempt_runtime_standard_request(
@@ -455,15 +431,6 @@ impl RuntimeCompactSelectionContext<'_> {
             )? {
                 RuntimeInflightReliefWaitResult::Relieved
                 | RuntimeInflightReliefWaitResult::NotWaitable => Ok(None),
-                RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                    compact_inflight_capacity_epoch_expired(
-                        self.request_id,
-                        self.shared,
-                        self.selection_attempts,
-                        &mut self.selection_started_at,
-                        self.pressure_mode,
-                    )
-                }
             };
         }
         if !matches!(

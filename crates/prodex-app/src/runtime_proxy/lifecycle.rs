@@ -184,6 +184,7 @@ fn runtime_proxy_request_has_owned_lane_affinity(
     false
 }
 
+#[cfg(test)]
 fn record_runtime_proxy_admission_rejection(
     shared: &RuntimeRotationProxyShared,
     transport: &str,
@@ -278,7 +279,7 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
             }
             Err(rejection) => {
                 let elapsed = started_at.elapsed();
-                if runtime_proxy_admission_wait_is_exhausted_or_started(
+                runtime_proxy_admission_wait_is_exhausted_or_started(
                     shared,
                     RuntimeProxyAdmissionWaitContext { transport, path },
                     pressure_mode,
@@ -286,9 +287,7 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
                     elapsed,
                     rejection,
                     &mut wait_metric,
-                ) {
-                    return Err(rejection);
-                }
+                );
                 let (mutex, condvar) = shared.lane_admission.wait();
                 let wait_guard = mutex
                     .lock()
@@ -298,12 +297,14 @@ pub(crate) fn acquire_runtime_proxy_active_request_slot_with_wait_for_request(
                 {
                     return Ok(guard);
                 }
-                let wait_for = budget.saturating_sub(elapsed);
-                if !wait_for.is_zero() {
-                    let _ = condvar
-                        .wait_timeout(wait_guard, wait_for)
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                }
+                let wait_for = if budget.is_zero() {
+                    Duration::from_millis(1)
+                } else {
+                    budget
+                };
+                let _ = condvar
+                    .wait_timeout(wait_guard, wait_for)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
             }
         }
     }
@@ -349,7 +350,7 @@ where
             Err((RuntimeProxyQueueRejection::Full, returned_item)) => {
                 item = returned_item;
                 let elapsed = started_at.elapsed();
-                if runtime_proxy_queue_wait_is_exhausted_or_started(
+                runtime_proxy_queue_wait_is_exhausted_or_started(
                     shared,
                     transport,
                     path,
@@ -357,9 +358,7 @@ where
                     budget,
                     elapsed,
                     &mut wait_metric,
-                ) {
-                    return Err((RuntimeProxyQueueRejection::Full, item));
-                }
+                );
                 let (mutex, condvar) = shared.lane_admission.wait();
                 let wait_guard = mutex
                     .lock()
@@ -378,12 +377,14 @@ where
                     }
                     Err(err) => return Err(err),
                 }
-                let wait_for = budget.saturating_sub(elapsed);
-                if !wait_for.is_zero() {
-                    let _ = condvar
-                        .wait_timeout(wait_guard, wait_for)
-                        .unwrap_or_else(|poisoned| poisoned.into_inner());
-                }
+                let wait_for = if budget.is_zero() {
+                    Duration::from_millis(1)
+                } else {
+                    budget
+                };
+                let _ = condvar
+                    .wait_timeout(wait_guard, wait_for)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
                 continue;
             }
             Err((RuntimeProxyQueueRejection::Disconnected, returned_item)) => {
@@ -407,41 +408,21 @@ fn runtime_proxy_admission_wait_is_exhausted_or_started(
     elapsed: Duration,
     rejection: RuntimeProxyAdmissionRejection,
     wait_metric: &mut RuntimeProxyWaitMetricGuard<'_>,
-) -> bool {
-    if elapsed >= budget {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "runtime_proxy_admission_wait_exhausted transport={} path={} waited_ms={} reason={} pressure_mode={pressure_mode}",
-                context.transport,
-                context.path,
-                elapsed.as_millis(),
-                runtime_proxy_admission_rejection_reason(rejection),
-            ),
-        );
-        record_runtime_proxy_admission_rejection(
-            shared,
-            context.transport,
-            context.path,
-            rejection,
-        );
-        return true;
-    }
+) {
     if !wait_metric.started() {
         runtime_proxy_log(
             shared,
             format!(
-                "runtime_proxy_admission_wait_started transport={} path={} budget_ms={} wait_timeout_ms={} reason={} pressure_mode={pressure_mode}",
+                "runtime_proxy_admission_wait_started transport={} path={} poll_ms={} waited_ms={} reason={} pressure_mode={pressure_mode} mode=backpressure",
                 context.transport,
                 context.path,
                 budget.as_millis(),
-                budget.saturating_sub(elapsed).as_millis(),
+                elapsed.as_millis(),
                 runtime_proxy_admission_rejection_reason(rejection),
             ),
         );
         wait_metric.start();
     }
-    false
 }
 
 fn runtime_proxy_admission_rejection_reason(
@@ -461,29 +442,18 @@ fn runtime_proxy_queue_wait_is_exhausted_or_started(
     budget: Duration,
     elapsed: Duration,
     wait_metric: &mut RuntimeProxyWaitMetricGuard<'_>,
-) -> bool {
-    if elapsed >= budget {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "runtime_proxy_queue_wait_exhausted transport={transport} path={path} waited_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode}",
-                elapsed.as_millis()
-            ),
-        );
-        return true;
-    }
+) {
     if !wait_metric.started() {
         runtime_proxy_log(
             shared,
             format!(
-                "runtime_proxy_queue_wait_started transport={transport} path={path} budget_ms={} wait_timeout_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode}",
+                "runtime_proxy_queue_wait_started transport={transport} path={path} poll_ms={} waited_ms={} reason=long_lived_queue_full pressure_mode={pressure_mode} mode=backpressure",
                 budget.as_millis(),
-                budget.saturating_sub(elapsed).as_millis()
+                elapsed.as_millis()
             ),
         );
         wait_metric.start();
     }
-    false
 }
 
 fn runtime_proxy_queue_enqueue_after_wait<T, F>(

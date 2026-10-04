@@ -3,8 +3,7 @@ use super::super::{
     RuntimeSelectionTraceDirect, RuntimeWebsocketAttempt, await_runtime_proxy_async_task,
     clear_runtime_recovered_profiles, runtime_noncompact_session_priority_profile,
     runtime_profile_recovery_wait_for_route, runtime_proxy_allows_direct_current_profile_fallback,
-    runtime_proxy_direct_current_fallback_profile, runtime_proxy_local_capacity_timeout_message,
-    runtime_proxy_log, runtime_proxy_log_field,
+    runtime_proxy_direct_current_fallback_profile, runtime_proxy_log, runtime_proxy_log_field,
     runtime_proxy_maybe_wait_for_interactive_inflight_relief,
     runtime_proxy_precommit_budget_exhausted_for_route,
     runtime_proxy_precommit_budget_for_profile_count, runtime_proxy_pressure_mode_active_for_route,
@@ -12,7 +11,6 @@ use super::super::{
     runtime_remaining_sync_probe_cold_start_profiles_for_route,
     runtime_route_has_retryable_profile, runtime_route_kind_label,
     runtime_selection_trace_log_direct, runtime_smart_context_model_name_from_body,
-    send_runtime_proxy_websocket_error,
 };
 use super::{
     RuntimeWebsocketDirectCurrentFallbackReason, RuntimeWebsocketMessageLoopAction,
@@ -39,9 +37,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         let mut selection_started_at = Instant::now();
         let mut selection_attempts = 0usize;
         loop {
-            if self.local_capacity_wait_timed_out {
-                return self.finish_local_capacity_timeout();
-            }
             let pressure_mode = runtime_proxy_pressure_mode_active_for_route(
                 self.shared,
                 RuntimeRouteKind::Websocket,
@@ -103,16 +98,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         self.handle_candidate_attempt(attempt, turn_state_override.as_deref())
     }
 
-    fn finish_local_capacity_timeout(&mut self) -> Result<()> {
-        send_runtime_proxy_websocket_error(
-            &mut *self.local_socket,
-            503,
-            "local_capacity_timeout",
-            runtime_proxy_local_capacity_timeout_message(),
-        )?;
-        Ok(())
-    }
-
     fn handle_inflight_saturation(
         &mut self,
         attempt: &RuntimeWebsocketAttempt,
@@ -140,14 +125,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         })? {
             RuntimeInflightReliefWaitResult::Relieved
             | RuntimeInflightReliefWaitResult::NotWaitable => Ok(true),
-            RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                if runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Websocket)? {
-                    self.reset_selection_budget = true;
-                } else {
-                    self.local_capacity_wait_timed_out = true;
-                }
-                Ok(true)
-            }
         }
     }
 
@@ -424,14 +401,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         })? {
             RuntimeInflightReliefWaitResult::Relieved => {
                 self.reset_selection_budget = true;
-                return Ok(RuntimeWebsocketMessageLoopAction::Continue);
-            }
-            RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                if runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Websocket)? {
-                    self.reset_selection_budget = true;
-                } else {
-                    self.local_capacity_wait_timed_out = true;
-                }
                 return Ok(RuntimeWebsocketMessageLoopAction::Continue);
             }
             RuntimeInflightReliefWaitResult::NotWaitable => {}

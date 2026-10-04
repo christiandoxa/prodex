@@ -1,7 +1,3 @@
-use super::super::super::{
-    build_runtime_proxy_json_error_response, runtime_proxy_local_capacity_timeout_message,
-};
-use super::admission::log_runtime_compact_local_capacity_timeout;
 use super::{
     RuntimeInflightReliefWait, RuntimeInflightReliefWaitResult, RuntimeRotationProxyShared,
     RuntimeRouteKind, await_runtime_proxy_async_task, clear_runtime_recovered_profiles,
@@ -41,35 +37,6 @@ pub(super) fn wait_for_compact_inflight_relief(
         wait_affinity_owner,
         selected_profile: None,
     })
-}
-
-pub(super) fn compact_inflight_capacity_epoch_expired(
-    request_id: u64,
-    shared: &RuntimeRotationProxyShared,
-    selection_attempts: usize,
-    selection_started_at: &mut Instant,
-    pressure_mode: bool,
-) -> Result<Option<tiny_http::ResponseBox>> {
-    if runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Compact)? {
-        *selection_started_at = Instant::now();
-        runtime_proxy_log(
-            shared,
-            format!("request={request_id} transport=http local_capacity_retry_epoch route=compact"),
-        );
-        return Ok(None);
-    }
-    log_runtime_compact_local_capacity_timeout(
-        request_id,
-        shared,
-        selection_attempts,
-        *selection_started_at,
-        pressure_mode,
-    );
-    Ok(Some(build_runtime_proxy_json_error_response(
-        503,
-        "local_capacity_timeout",
-        runtime_proxy_local_capacity_timeout_message(),
-    )))
 }
 
 pub(super) fn wait_for_compact_overload_recovery(
