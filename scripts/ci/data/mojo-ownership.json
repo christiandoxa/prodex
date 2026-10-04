@@ -670,6 +670,7 @@
           "kiro_anthropic_response_mapping",
           "kiro_response_shape_fallbacks",
           "kiro_acp_shape_fallbacks",
+          "kiro_chat_message_prompt_construction",
           "deepseek_stream_shape_fallbacks",
           "deepseek_response_format_shape_policy",
           "deepseek_request_metadata_shape_policy",
@@ -738,6 +739,10 @@
         "role": "semantic",
         "semantic_ranges": [
           {
+            "start": 2587,
+            "end": 2880
+          },
+          {
             "start": 3014,
             "end": 3663
           }
@@ -746,7 +751,8 @@
           "kiro_chat_response_mapping",
           "kiro_anthropic_response_mapping",
           "kiro_response_shape_fallbacks",
-          "kiro_acp_shape_fallbacks"
+          "kiro_acp_shape_fallbacks",
+          "kiro_chat_message_prompt_construction"
         ]
       },
       {
@@ -4945,6 +4951,36 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "candidate projection and selected-rate reconstruction"
+    },
+    {
+"name": "kiro_chat_message_prompt_construction",
+      "domain": "provider/kiro",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust recursively extracted chat content and formatted role, tool-call, section, and legacy function-tool prompt shapes",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_kiro_kernel_v1",
+      "mojo_operation_ids": {
+        "prompt_from_chat_messages": 53,
+        "legacy_function_tool": 6,
+        "legacy_tool_choice": 7
+      },
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/kiro.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/kiro/request/messages.rs",
+      "consumer_marker": "KiroKernelOperation::PromptFromChatMessages",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/kiro/request/messages.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/kiro_prompt.rs",
+      "rust_owner_before": "recursive Rust JSON content extraction, Unicode trimming, role mapping, tool-call formatting, section filtering and joining, and legacy function-tool/choice normalization",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; direct Mojo ABI and provider caller assertions cover recursive precedence, Unicode trim, role labels, malformed content/tool fields, legacy function defaults, and exact empty output",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON acquisition and serialization, bounded Kiro ABI invocation, and UTF-8/JSON decoding"
     }
   ],
   "rust_semantic_reductions": [

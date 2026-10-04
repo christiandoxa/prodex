@@ -57,6 +57,7 @@ pub enum KiroKernelOperation {
     ResponseHasToolCalls = 50,
     RawResponsesItemsFromChatMessage = 51,
     ResponseFinalEvent = 52,
+    PromptFromChatMessages = 53,
 }
 
 /// Inputs for one bounded Kiro JSON or text transformation.
@@ -397,6 +398,7 @@ fn operation_code(operation: KiroKernelOperation) -> i64 {
         KiroKernelOperation::ResponseHasToolCalls => 50,
         KiroKernelOperation::RawResponsesItemsFromChatMessage => 51,
         KiroKernelOperation::ResponseFinalEvent => 52,
+        KiroKernelOperation::PromptFromChatMessages => 53,
     }
 }
 

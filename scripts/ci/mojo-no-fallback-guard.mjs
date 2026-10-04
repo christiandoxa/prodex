@@ -370,6 +370,7 @@ const PROMOTED_FILES = [
   "crates/prodex-provider-core/src/translators/deepseek/stream/shaping_tests.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
+  "crates/prodex-provider-core/src/translators/kiro/request/messages.rs",
   "crates/prodex-provider-core/src/translators/kiro/request/semantics_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/stream.rs",
   "crates/prodex-provider-core/src/translators/kiro/response.rs",
@@ -547,6 +548,7 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-provider-core/src/chat_tools_bridge/mojo.rs",
   "crates/prodex-provider-core/src/translators/deepseek/stream/mojo_tests.rs",
   "crates/prodex-provider-core/src/translators/kiro/request.rs",
+  "crates/prodex-provider-core/src/translators/kiro/request/messages.rs",
   "crates/prodex-provider-core/src/translators/kiro/stream.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat.rs",
   "crates/prodex-provider-core/src/translators/openai_chat_compat_params.rs",
@@ -831,6 +833,9 @@ const DEEPSEEK_REASONING_FILE = "crates/prodex-provider-core/src/deepseek_bridge
 const DEEPSEEK_METADATA_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_params/metadata.rs";
 const DEEPSEEK_SIMPLE_REQUEST_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs";
 const KIRO_CHAT_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/kiro/response.rs";
+const KIRO_MESSAGES_FILE = "crates/prodex-provider-core/src/translators/kiro/request/messages.rs";
+const KIRO_LOCAL_REWRITE_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs";
+const KIRO_PROMPT_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/kiro_prompt.rs";
 const KIRO_STREAM_FILE = "crates/prodex-provider-core/src/translators/kiro/stream.rs";
 const KIRO_FINAL_STREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/stream.rs";
 const KIRO_ACP_FILE = "crates/prodex-provider-core/src/translators/kiro/acp.rs";
@@ -1394,6 +1399,43 @@ export function findViolations(files) {
       violations.push(`${filePath}: contains restored Rust Kiro ACP shaping semantics`);
     }
     return violations;
+  });
+  const kiroMessageShapeViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === KIRO_MESSAGES_FILE) {
+      const required = [
+        "KiroKernelOperation::PromptFromChatMessages",
+        "KiroKernelOperation::LegacyFunctionTool",
+        "KiroKernelOperation::LegacyToolChoice",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Kiro message shaping must use ${marker}`);
+      if (
+        /message\.get\(|function\.get\(|kiro_provider_core_prompt_(?:section|message_text|array_text|object_text|role_label)\s*\(/u.test(contents)
+        || /\.trim\(\)/u.test(contents)
+      ) {
+        violations.push(`${filePath}: contains replaced Rust Kiro prompt or legacy-function semantics`);
+      }
+      return violations;
+    }
+    if (filePath === KIRO_LOCAL_REWRITE_FILE) {
+      return contents.includes(
+        "kiro_provider_core_prompt_from_chat_messages as runtime_kiro_prompt_from_messages",
+      ) && contents.includes("runtime_kiro_prompt_from_messages(&translated.messages)")
+        ? []
+        : [`${filePath}: local Kiro chat rewrite must reach the Mojo-backed prompt adapter`];
+    }
+    if (filePath === KIRO_PROMPT_ABI_TEST_FILE) {
+      const required = [
+        "KiroKernelOperation::PromptFromChatMessages",
+        "kiro_prompt_recursively_applies_text_content_output_precedence_and_unicode_trim",
+        "kiro_prompt_joins_only_nonempty_sections_and_uses_empty_fallback",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Kiro prompt ABI tests must retain ${marker}`);
+    }
+    return [];
   });
   const deepseekStrictSchemaViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === DEEPSEEK_STRICT_TOOLS_FILE) {
@@ -4028,6 +4070,7 @@ export function findViolations(files) {
     ...kiroStreamPlanViolations,
     ...kiroResponseHelperViolations,
     ...kiroAcpViolations,
+    ...kiroMessageShapeViolations,
     ...deepseekStrictSchemaViolations,
     ...quotaModelPolicyViolations, ...quotaDisplayPolicyViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
@@ -4362,6 +4405,31 @@ function selfTest() {
       if status == "failed" { rust_event() }
     }
   `).join("\n"), /must use Mojo final event plan/u);
+  const kiroPromptMarkers = `
+    KiroKernelOperation::PromptFromChatMessages;
+    KiroKernelOperation::LegacyFunctionTool;
+    KiroKernelOperation::LegacyToolChoice;
+  `;
+  const kiroPromptLocalRewrite = `
+    kiro_provider_core_prompt_from_chat_messages as runtime_kiro_prompt_from_messages;
+    runtime_kiro_prompt_from_messages(&translated.messages);
+  `;
+  const kiroPromptAbiTests = `
+    KiroKernelOperation::PromptFromChatMessages;
+    kiro_prompt_recursively_applies_text_content_output_precedence_and_unicode_trim;
+    kiro_prompt_joins_only_nonempty_sections_and_uses_empty_fallback;
+  `;
+  assert.deepEqual(findViolations([
+    [KIRO_MESSAGES_FILE, kiroPromptMarkers],
+    [KIRO_LOCAL_REWRITE_FILE, kiroPromptLocalRewrite],
+    [KIRO_PROMPT_ABI_TEST_FILE, kiroPromptAbiTests],
+  ]), []);
+  assert.match(findViolations([[KIRO_MESSAGES_FILE,
+    kiroPromptMarkers + "\nmessage.get(\"content\").and_then(Value::as_str).trim()"]]).join("\n"),
+  /contains replaced Rust Kiro prompt or legacy-function semantics/u);
+  assert.match(findViolations([[KIRO_LOCAL_REWRITE_FILE,
+    "fn local_rewrite_kiro() {}"]]).join("\n"),
+  /must reach the Mojo-backed prompt adapter/u);
   assert.match(findViolations([[DEEPSEEK_STRICT_TOOLS_FILE, "fn strict_schema() {}"]]).join("\n"),
     /strict schema normalization must use Mojo/u);
   assert.match(findViolations([[DEEPSEEK_STRICT_SCHEMA_FILE,
