@@ -1202,6 +1202,16 @@
           "runtime_live_log_json_fallback",
           "runtime_live_log_plain_text_truncation"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/operational_metrics.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_operational_histogram_bucket_planning"
+        ]
       }
     ],
     "removed": [
@@ -5166,6 +5176,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "bounded byte buffer allocation and UTF-8 string ownership"
+    },
+    {
+      "name": "runtime_operational_histogram_bucket_planning",
+      "domain": "runtime-observability/metrics",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust metric-name suffix classification and fixed histogram bounds",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_operational_histogram_bounds_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/operational_metrics.mojo",
+      "consumer": "crates/prodex-observability/src/lib.rs",
+      "consumer_marker": "prodex_mojo_core::operational_metrics::histogram_bucket_bounds",
+      "production_consumers": [
+        "crates/prodex-observability/src/lib.rs",
+        "crates/prodex-app/src/runtime_operational_metrics.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/operational_metrics.rs",
+      "rust_owner_before": "metric-name suffix selection between millisecond and microsecond histogram buckets",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; required-Mojo ABI and registry-boundary tests cover suffix selection, exact limits, and observed bucket counts",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "typed Mojo result re-export, histogram state mutation, and metric emission"
     }
   ],
   "rust_semantic_reductions": [
