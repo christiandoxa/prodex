@@ -47,7 +47,7 @@ const REQUIRED_HEALTH_SNIPPETS = Object.freeze([
 const REQUIRED_SECRET_SNIPPETS = Object.freeze([
   "pub struct SecretRef",
   "pub fn is_well_formed(&self) -> bool",
-  "fn secret_ref_part_is_well_formed(value: &str) -> bool",
+  "prodex_mojo_core::secret_policy::secret_reference_is_well_formed(",
   'f.write_str("<redacted-secret-ref>")',
 ]);
 const REQUIRED_LIB_SNIPPETS = Object.freeze([
@@ -232,9 +232,10 @@ pub fn plan_health_probe_response(snapshot: HealthSnapshot) -> HealthProbeRespon
       `
 pub struct SecretRef {}
 impl SecretRef {
-    pub fn is_well_formed(&self) -> bool { true }
+    pub fn is_well_formed(&self) -> bool {
+        prodex_mojo_core::secret_policy::secret_reference_is_well_formed("", "", None).unwrap()
+    }
 }
-fn secret_ref_part_is_well_formed(value: &str) -> bool { !value.is_empty() }
 impl fmt::Display for SecretRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("<redacted-secret-ref>")
