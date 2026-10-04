@@ -15,6 +15,9 @@ pub const RUNTIME_ERROR_MODE_TEXT_RATE: i64 = 8;
 pub const RUNTIME_ERROR_MODE_TEXT_PROFILE: i64 = 9;
 pub const RUNTIME_ERROR_MODE_TEXT_OVERLOAD: i64 = 10;
 pub const RUNTIME_ERROR_MODE_TEXT_WORKSPACE: i64 = 11;
+pub const RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: i64 = 15;
+pub const RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES: usize = 67_108_864;
+const RUNTIME_ERROR_CLASS_QUOTA: i64 = 1;
 pub const RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS: i64 = 0;
 pub const RUNTIME_RETRY_AFTER_MODE_DURATION_MILLIS: i64 = 1;
 pub const RUNTIME_RETRY_AFTER_MODE_DURATION_SECONDS: i64 = 2;
@@ -27,6 +30,13 @@ pub const PREVIOUS_RESPONSE_ERROR_CLASS_INVALID_ID: i64 = 2;
 pub const PREVIOUS_RESPONSE_ERROR_CLASS_TOOL_CONTEXT: i64 = 3;
 const PREVIOUS_RESPONSE_ERROR_MAX_BYTES: usize = 65_536;
 pub const PREVIOUS_RESPONSE_PLAN_OUTPUT_COUNT: usize = 10;
+
+/// Identifies the input representation for session usage-limit detection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeUsageLimitInputFormat {
+    PlainText,
+    Json,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PreviousResponsePlanInput {
@@ -309,13 +319,29 @@ impl MojoError {
     ) -> Result<(i64, i64, String), Self> {
         ensure_rich_abi()?;
         const MAX_RUNTIME_ERROR_BYTES: usize = 65_536;
-        let body = if body.len() <= MAX_RUNTIME_ERROR_BYTES && std::str::from_utf8(body).is_ok() {
+        let session_usage_limit = operation == RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT;
+        if session_usage_limit
+            && (body.len() > RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES
+                || std::str::from_utf8(body).is_err())
+        {
+            return Err(Self::InvalidInput);
+        }
+        let body = if session_usage_limit
+            || body.len() <= MAX_RUNTIME_ERROR_BYTES && std::str::from_utf8(body).is_ok()
+        {
             body
         } else {
             &[]
         };
         let mut records = [RichFallbackRecord::default()];
-        let mut output = vec![0_u8; body.len().saturating_add(256).max(256)];
+        let mut output = vec![
+            0_u8;
+            if session_usage_limit {
+                1
+            } else {
+                body.len().saturating_add(256).max(256)
+            }
+        ];
         let mut result = RichFallbackResult::default();
         let status = unsafe {
             prodex_mojo_rich_runtime_error_policy_v1(
@@ -361,6 +387,24 @@ impl MojoError {
             .to_string();
         Ok((record.source_kind, record.input_index, message))
     }
+}
+
+/// Classifies a parsed session event or the legacy plain-text usage marker.
+pub fn runtime_session_usage_limit_marker(
+    input: &str,
+    format: RuntimeUsageLimitInputFormat,
+) -> Result<bool, MojoError> {
+    let status = match format {
+        RuntimeUsageLimitInputFormat::PlainText => 0,
+        RuntimeUsageLimitInputFormat::Json => 1,
+    };
+    MojoError::rich_runtime_error_policy(
+        RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT,
+        status,
+        0,
+        input.as_bytes(),
+    )
+    .map(|(class, _, _)| class == RUNTIME_ERROR_CLASS_QUOTA)
 }
 
 pub fn model_fallback_chain(provider: &str, model: &str) -> Result<Vec<String>, MojoError> {
@@ -501,4 +545,68 @@ pub fn model_fallback_plan(provider: &str, models: &[&str]) -> Result<Vec<String
                 .to_string())
         })
         .collect()
+}
+
+#[cfg(test)]
+mod session_usage_limit_tests {
+    use super::{RuntimeUsageLimitInputFormat, runtime_session_usage_limit_marker};
+
+    fn json_marker(input: &str) -> bool {
+        runtime_session_usage_limit_marker(input, RuntimeUsageLimitInputFormat::Json).unwrap()
+    }
+
+    #[test]
+    fn session_usage_limit_marker_requires_error_context() {
+        assert!(runtime_session_usage_limit_marker(
+            "\u{2003}You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:08 PM.\u{3000}",
+            RuntimeUsageLimitInputFormat::PlainText,
+        )
+        .unwrap());
+        assert!(
+            !runtime_session_usage_limit_marker(
+                "usage limit reached",
+                RuntimeUsageLimitInputFormat::PlainText,
+            )
+            .unwrap()
+        );
+
+        for input in [
+            r#"{"type":"error","error":{"code":"RESOURCE_EXHAUSTED"}}"#,
+            r#"{"type":"response.failed","error":{"code":"usage_limit_reached"}}"#,
+            r#"{"type":"error","payload":{"message":"You've hit your usage limit. Try again later."}}"#,
+            r#"{"type":"event_msg","payload":{"type":"error","error":{"type":"usage_not_included"}}}"#,
+            r#"{"type":"event_msg","payload":{"type":"error","message":"Quota unavailable","codex_error_info":"usage_limit_exceeded"}}"#,
+            r#"{"error":{"code":"insufficient_quota"}}"#,
+            r#"{"type":"event_msg","payload":{"type":"error","message":"Your workspace is out of credits. Retry later."}}"#,
+            r#"{"type":"event_msg","payload":{"message":"You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:08 PM."}}"#,
+        ] {
+            assert!(json_marker(input), "{input}");
+        }
+    }
+
+    #[test]
+    fn session_usage_limit_marker_ignores_conversation_and_non_error_text() {
+        for input in [
+            r#"{"messages":[{"role":"user","code":"usage_limit_reached","message":"You've hit your usage limit"}]}"#,
+            r#"{"type":"event_msg","payload":{"type":"user_message","code":"usage_limit_reached","message":"You've hit your usage limit"}}"#,
+            r#"{"type":"event_msg","payload":{"type":"model_reroute","message":"You've hit your usage limit"}}"#,
+            r#"{"type":"event_msg","payload":{"message":"You've hit your usage limit; details follow"}}"#,
+            r#"{"error":{"message":"the docs say usage_limit_reached"}}"#,
+            r#"{"error":{"content":{"code":"usage_limit_reached"}}}"#,
+        ] {
+            assert!(!json_marker(input), "{input}");
+        }
+    }
+
+    #[test]
+    fn session_usage_limit_marker_preserves_the_2048_node_scan_limit() {
+        for (empty_objects, expected) in [(2_045, true), (2_046, false)] {
+            let mut input = String::from(r#"{"error":["#);
+            for _ in 0..empty_objects {
+                input.push_str("{},");
+            }
+            input.push_str(r#"{"code":"usage_limit_reached"}]}"#);
+            assert_eq!(json_marker(&input), expected);
+        }
+    }
 }

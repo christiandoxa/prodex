@@ -5111,3 +5111,22 @@ Validation passes:
 - `npm run test:changed -- --base origin/main`, workspace Clippy with all targets/features, `cargo fmt --all -- --check`, `npm run docs`, and `git diff --check` passed.
 - The no-fallback guard and self-test, authority guard, ownership check, and size guard passed. Ownership reports 161 authoritative operations.
 - `node scripts/ci/mojo-production-share.mjs --check` reports 82,068 Mojo LOC and 204,312 Rust LOC (**28.66% Mojo**); the 7% release floor and ownership non-regression pass. The 75% project target remains in progress.
+## Session usage-limit marker classification migration
+
+The resume monitor's deterministic usage-limit marker classifier now calls
+operation 15 of the existing rich runtime-error kernel in
+`rich_fallback.mojo`. Mojo owns exact legacy-marker matching, event/error
+context rules, structured quota-code and message classification, ignored
+conversation-object filtering, and the bounded 2,048-value scan. Rust retains
+Serde JSON parsing and canonicalization, session file reads, session identity,
+workflow evidence, and retry orchestration. The rich ABI rejects inputs above
+the existing 64 MiB session-record ceiling and returns errors directly; no Rust
+classification fallback remains.
+
+The removed Rust block contains 156 non-empty semantic lines in the active
+monitor module. That module was introduced after the frozen ownership baseline,
+so this cleanup earns no frozen-volume credit. The existing `runtime_error_policy` export carries the
+new operation ID without changing the ABI layout. Direct required-Mojo tests
+cover exact and structured markers, ignored conversation text, and both sides
+of the 2,048-value boundary. App caller regressions cover marker recognition
+and post-child profile rotation.
