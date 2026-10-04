@@ -16,6 +16,24 @@ pub struct ConfigOverrideSelection {
     pub normalized_value: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelProviderSource {
+    CliOverride,
+    ProfileV2ConfigFile,
+    ConfigFile,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelProviderPlan {
+    ReadProfileV2Config,
+    ReadConfigFile,
+    Selected {
+        source: ModelProviderSource,
+        provider_id: String,
+    },
+    NoProvider,
+}
+
 unsafe extern "C" {
     fn prodex_codex_config_normalize_value_v1(
         abi_version: i64,
@@ -42,6 +60,16 @@ unsafe extern "C" {
         count: i64,
         key_address: u64,
         key_length: i64,
+        result_address: u64,
+    ) -> i64;
+
+    fn prodex_codex_config_model_provider_plan_v1(
+        abi_version: i64,
+        arguments_address: u64,
+        count: i64,
+        profile_config_path_present: i64,
+        profile_config_loaded: i64,
+        config_file_loaded: i64,
         result_address: u64,
     ) -> i64;
 }
@@ -182,6 +210,53 @@ pub fn config_override(
     }))
 }
 
+pub fn model_provider_plan(
+    model_provider_override: Option<&str>,
+    profile_provider: Option<&str>,
+    config_provider: Option<&str>,
+    profile_config_path_present: bool,
+    profile_config_loaded: bool,
+    config_file_loaded: bool,
+) -> Result<ModelProviderPlan, MojoError> {
+    let arguments = [model_provider_override, profile_provider, config_provider];
+    let views = views(&arguments)?;
+    let mut result = [-1_i64, 0_i64, 0_i64];
+    let status = unsafe {
+        prodex_codex_config_model_provider_plan_v1(
+            ABI_VERSION,
+            views.as_ptr() as usize as u64,
+            i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(u8::from(profile_config_path_present)),
+            i64::from(u8::from(profile_config_loaded)),
+            i64::from(u8::from(config_file_loaded)),
+            result.as_mut_ptr() as usize as u64,
+        )
+    };
+    validate_status(status)?;
+    match result[0] {
+        0 => Ok(ModelProviderPlan::ReadProfileV2Config),
+        1 => Ok(ModelProviderPlan::ReadConfigFile),
+        2..=4 => {
+            let (source, argument_index) = match result[0] {
+                2 => (ModelProviderSource::CliOverride, 0),
+                3 => (ModelProviderSource::ProfileV2ConfigFile, 1),
+                4 => (ModelProviderSource::ConfigFile, 2),
+                _ => return Err(MojoError::InvalidOutput),
+            };
+            let provider_id = slice(&arguments, argument_index, result[1], result[2])?;
+            if provider_id.is_empty() {
+                return Err(MojoError::InvalidOutput);
+            }
+            Ok(ModelProviderPlan::Selected {
+                source,
+                provider_id,
+            })
+        }
+        5 => Ok(ModelProviderPlan::NoProvider),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -190,6 +265,11 @@ mod tests {
     fn codex_config_kernel_smoke() {
         assert!(profile_name_valid("team_2").unwrap());
         assert!(!profile_name_valid("../evil").unwrap());
+        assert_eq!(
+            normalize_value("  ' cli-provider ' ").unwrap().as_deref(),
+            Some("cli-provider")
+        );
+        assert_eq!(normalize_value("  '  '  ").unwrap(), None);
         assert_eq!(
             profile_v2_name(&[Some("exec"), Some("--profile"), Some("local_1-prod"),])
                 .unwrap()
@@ -213,6 +293,58 @@ mod tests {
                 raw_value: "'last'".to_string(),
                 normalized_value: Some("last".to_string()),
             }
+        );
+    }
+
+    #[test]
+    fn codex_model_provider_plan_kernel_smoke() {
+        assert_eq!(
+            model_provider_plan(Some("cli-provider"), None, None, true, false, false).unwrap(),
+            ModelProviderPlan::ReadProfileV2Config
+        );
+        assert_eq!(
+            model_provider_plan(
+                Some("cli-provider"),
+                Some("profile-provider"),
+                None,
+                true,
+                true,
+                false,
+            )
+            .unwrap(),
+            ModelProviderPlan::Selected {
+                source: ModelProviderSource::CliOverride,
+                provider_id: "cli-provider".to_string(),
+            }
+        );
+        assert_eq!(
+            model_provider_plan(None, Some("profile-provider"), None, true, true, false).unwrap(),
+            ModelProviderPlan::Selected {
+                source: ModelProviderSource::ProfileV2ConfigFile,
+                provider_id: "profile-provider".to_string(),
+            }
+        );
+        assert_eq!(
+            model_provider_plan(None, None, None, true, true, false).unwrap(),
+            ModelProviderPlan::ReadConfigFile
+        );
+        assert_eq!(
+            model_provider_plan(None, None, Some("config-provider"), true, true, true).unwrap(),
+            ModelProviderPlan::Selected {
+                source: ModelProviderSource::ConfigFile,
+                provider_id: "config-provider".to_string(),
+            }
+        );
+        assert_eq!(
+            model_provider_plan(None, None, Some("config-provider"), false, false, true).unwrap(),
+            ModelProviderPlan::Selected {
+                source: ModelProviderSource::ConfigFile,
+                provider_id: "config-provider".to_string(),
+            }
+        );
+        assert_eq!(
+            model_provider_plan(None, None, None, false, false, true).unwrap(),
+            ModelProviderPlan::NoProvider
         );
     }
 }
