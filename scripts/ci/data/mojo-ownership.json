@@ -889,7 +889,8 @@
         "operations": [
           "runtime_lineage_classification",
           "runtime_lineage_key_build",
-          "runtime_lineage_response_parts"
+          "runtime_lineage_response_parts",
+          "local_rewrite_binding_candidate_policy"
         ]
       },
       {
@@ -3001,6 +3002,30 @@
       "rust_owner_before": "response-turn-state length-prefix parsing and validated response/turn-state slice recovery",
       "rust_test_oracle": "deleted; runtime-store continuation tests cover lineage round-trip, compaction and malformed/unbounded identity behavior",
       "rust_adapter_scope": "Rust reconstructs borrowed string slices from validated Mojo byte offsets"
+    },
+    {
+      "name": "local_rewrite_binding_candidate_policy",
+      "domain": "runtime-state/lineage",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust-authoritative",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_lineage_binding_candidate_allowed_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_lineage.mojo",
+      "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_lineage::local_rewrite_candidate_allowed",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage/binding_candidate.rs",
+      "rust_owner_before": "local rewrite credential admission by exact profile, provider, credential, endpoint, and optional profile identity, plus dispatch-time bound provider and identity validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI tests cover exact and mismatched identities, while the Kiro Responses continuation route covers real dispatch and credential admission",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust resolves and persists bindings and computes secret-free identity digests; Mojo decides candidate eligibility; Rust maps typed dispatch outcomes to provider errors"
     },
     {
       "name": "session_report_metadata_policy",
