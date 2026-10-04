@@ -723,8 +723,9 @@ fn compact_capacity_saturation_retries_across_epoch_until_profile_relieves() {
         .pop()
         .expect("one compact permit should be releasable");
     let release = thread::spawn(move || {
-        // Test builds use a 1.5s capacity epoch. This crosses that old terminal boundary.
-        thread::sleep(Duration::from_millis(1_700));
+        // Test builds use a 1.5s capacity epoch. Crossing two historical epochs proves
+        // local saturation is backpressure rather than a terminal deadline.
+        thread::sleep(Duration::from_millis(3_200));
         drop(released_guard);
     });
     let request = RuntimeProxyRequest {
@@ -749,12 +750,16 @@ fn compact_capacity_saturation_retries_across_epoch_until_profile_relieves() {
         "the relieved profile should serve the compact request"
     );
     assert!(
-        log.contains("local_capacity_retry_epoch route=compact"),
-        "the request must renew the old bounded capacity epoch instead of returning 503: {log}"
+        log.contains("local_capacity_wait_continued")
+            && log.contains("route=compact")
+            && log.contains("mode=backpressure"),
+        "the request must keep waiting across old bounded capacity epochs: {log}"
     );
     assert!(
-        !body.contains("local_capacity_timeout"),
-        "local capacity timeout must not leak while a profile still has quota: {body}"
+        !log.contains("local_capacity_wait_timeout")
+            && !body.contains("local_capacity_timeout")
+            && !body.contains("local capacity remained saturated"),
+        "local capacity saturation must not leak while a profile still has quota: {body}"
     );
 
     release.join().expect("compact permit release should finish");

@@ -192,11 +192,6 @@ fn runtime_noncompact_budget_action(
     pressure_mode: bool,
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
 ) -> Result<RuntimeNoncompactBudgetAction> {
-    if loop_state.local_capacity_wait_timed_out {
-        return Ok(RuntimeNoncompactBudgetAction::Return(
-            build_runtime_proxy_text_response(503, runtime_proxy_local_capacity_timeout_message()),
-        ));
-    }
     if !loop_state.budget_exhausted(
         shared,
         RuntimeRouteKind::Standard,
@@ -241,25 +236,16 @@ fn wait_after_runtime_noncompact_inflight_saturation(
     session_profile: &Option<String>,
 ) -> Result<()> {
     loop_state.record_inflight_saturation();
-    if matches!(
-        runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
-            request_id,
-            shared,
-            excluded_profiles: &loop_state.excluded_profiles,
-            route_kind: RuntimeRouteKind::Standard,
-            selection_started_at: loop_state.selection_started_at,
-            continuation: session_profile.is_some(),
-            wait_affinity_owner: session_profile.as_deref(),
-            selected_profile: None,
-        })?,
-        RuntimeInflightReliefWaitResult::DeadlineExpired
-    ) {
-        if runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Standard)? {
-            loop_state.selection_started_at = std::time::Instant::now();
-        } else {
-            loop_state.record_local_capacity_wait_timeout();
-        }
-    }
+    let _ = runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        request_id,
+        shared,
+        excluded_profiles: &loop_state.excluded_profiles,
+        route_kind: RuntimeRouteKind::Standard,
+        selection_started_at: loop_state.selection_started_at,
+        continuation: session_profile.is_some(),
+        wait_affinity_owner: session_profile.as_deref(),
+        selected_profile: None,
+    })?;
     Ok(())
 }
 
@@ -397,20 +383,6 @@ fn runtime_noncompact_next_action(
         selected_profile: None,
     })? {
         RuntimeInflightReliefWaitResult::Relieved => {
-            return Ok(RuntimePrecommitLoopAction::Continue);
-        }
-        RuntimeInflightReliefWaitResult::DeadlineExpired => {
-            if runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Standard)? {
-                loop_state.selection_started_at = std::time::Instant::now();
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http local_capacity_retry_epoch route=standard"
-                    ),
-                );
-            } else {
-                loop_state.record_local_capacity_wait_timeout();
-            }
             return Ok(RuntimePrecommitLoopAction::Continue);
         }
         RuntimeInflightReliefWaitResult::NotWaitable => {}
@@ -567,20 +539,6 @@ fn runtime_noncompact_candidate_saturated(
     })? {
         RuntimeInflightReliefWaitResult::Relieved
         | RuntimeInflightReliefWaitResult::NotWaitable => Ok(true),
-        RuntimeInflightReliefWaitResult::DeadlineExpired => {
-            if runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Standard)? {
-                loop_state.selection_started_at = std::time::Instant::now();
-                runtime_proxy_log(
-                    shared,
-                    format!(
-                        "request={request_id} transport=http local_capacity_retry_epoch route=standard"
-                    ),
-                );
-            } else {
-                loop_state.record_local_capacity_wait_timeout();
-            }
-            Ok(true)
-        }
     }
 }
 

@@ -111,18 +111,10 @@ pub fn runtime_websocket_error_payload_is_previous_response_not_found(
 }
 
 pub fn runtime_proxy_final_retryable_failure_message(
-    saw_inflight_saturation: bool,
+    _saw_inflight_saturation: bool,
     local_selection_failure_message: &'static str,
 ) -> &'static str {
-    if saw_inflight_saturation {
-        runtime_proxy_local_capacity_timeout_message()
-    } else {
-        local_selection_failure_message
-    }
-}
-
-pub fn runtime_proxy_local_capacity_timeout_message() -> &'static str {
-    "Runtime proxy local capacity remained saturated until the request deadline. Retry the request."
+    local_selection_failure_message
 }
 
 #[cfg(test)]

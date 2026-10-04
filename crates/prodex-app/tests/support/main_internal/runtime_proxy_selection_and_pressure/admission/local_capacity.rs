@@ -95,9 +95,9 @@ fn responses_keep_waiting_after_capacity_epoch_while_quota_remains_positive() {
         .pop()
         .expect("one permit should be releasable");
     let release = thread::spawn(move || {
-        // Test builds use a 1.5s capacity epoch. Releasing after that boundary proves
-        // a fresh request starts another wait epoch instead of surfacing local 503.
-        thread::sleep(Duration::from_millis(1_700));
+        // Test builds use a 1.5s capacity epoch. Releasing after more than two old
+        // epochs proves saturation is pure backpressure rather than a request deadline.
+        thread::sleep(Duration::from_millis(3_200));
         drop(released_guard);
     });
 
@@ -134,12 +134,15 @@ fn responses_keep_waiting_after_capacity_epoch_while_quota_remains_positive() {
     assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(
-        log.contains("local_capacity_retry_epoch route=responses"),
-        "the request must cross and renew the old capacity timeout boundary: {log}"
+        log.contains("local_capacity_wait_continued")
+            && log.contains("mode=backpressure"),
+        "the request must keep waiting across old capacity timeout boundaries: {log}"
     );
     assert!(
-        !log.contains("\"local_capacity_timeout\""),
-        "positive quota must not surface a local capacity timeout response: {log}"
+        !log.contains("local_capacity_wait_timeout")
+            && !body.contains("local_capacity_timeout")
+            && !body.contains("local capacity remained saturated"),
+        "positive quota must never surface a local capacity timeout response: {log}"
     );
 
     release.join().expect("permit release should finish");

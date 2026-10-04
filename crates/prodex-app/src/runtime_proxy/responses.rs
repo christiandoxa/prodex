@@ -163,15 +163,6 @@ fn run_runtime_responses_loop(
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
 ) -> Result<RuntimeResponsesReply> {
     loop {
-        if loop_state.local_capacity_wait_timed_out {
-            return Ok(RuntimeResponsesReply::Buffered(
-                build_runtime_proxy_json_error_parts(
-                    503,
-                    "local_capacity_timeout",
-                    runtime_proxy_local_capacity_timeout_message(),
-                ),
-            ));
-        }
         if let Some(control) = handle_runtime_responses_budget_exhausted(
             context,
             affinity_state,
@@ -317,21 +308,6 @@ fn runtime_responses_candidate_saturated(
     })? {
         RuntimeInflightReliefWaitResult::Relieved
         | RuntimeInflightReliefWaitResult::NotWaitable => Ok(true),
-        RuntimeInflightReliefWaitResult::DeadlineExpired => {
-            if runtime_route_has_retryable_profile(context.shared, RuntimeRouteKind::Responses)? {
-                loop_state.selection_started_at = std::time::Instant::now();
-                runtime_proxy_log(
-                    context.shared,
-                    format!(
-                        "request={} transport=http local_capacity_retry_epoch route=responses",
-                        context.request_id
-                    ),
-                );
-            } else {
-                loop_state.record_local_capacity_wait_timeout();
-            }
-            Ok(true)
-        }
     }
 }
 
@@ -462,26 +438,6 @@ fn handle_runtime_responses_candidate_exhausted(
     })? {
         RuntimeInflightReliefWaitResult::Relieved => {
             return Ok(RuntimeResponsesLoopControl::Continue);
-        }
-        RuntimeInflightReliefWaitResult::DeadlineExpired => {
-            if runtime_route_has_retryable_profile(context.shared, RuntimeRouteKind::Responses)? {
-                loop_state.selection_started_at = std::time::Instant::now();
-                runtime_proxy_log(
-                    context.shared,
-                    format!(
-                        "request={} transport=http local_capacity_retry_epoch route=responses",
-                        context.request_id
-                    ),
-                );
-                return Ok(RuntimeResponsesLoopControl::Continue);
-            }
-            return Ok(RuntimeResponsesLoopControl::Return(Box::new(
-                RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-                    503,
-                    "local_capacity_timeout",
-                    runtime_proxy_local_capacity_timeout_message(),
-                )),
-            )));
         }
         RuntimeInflightReliefWaitResult::NotWaitable => {}
     }

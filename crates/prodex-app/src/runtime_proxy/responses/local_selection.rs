@@ -23,14 +23,6 @@ pub(super) fn runtime_responses_local_selection_failure_reply() -> RuntimeRespon
     ))
 }
 
-fn runtime_responses_local_capacity_timeout_reply() -> RuntimeResponsesReply {
-    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
-        503,
-        "local_capacity_timeout",
-        runtime_proxy_local_capacity_timeout_message(),
-    ))
-}
-
 pub(super) struct RuntimeResponsesLocalSelectionBlocked<'a> {
     pub(super) request_id: u64,
     pub(super) shared: &'a RuntimeRotationProxyShared,
@@ -72,30 +64,19 @@ pub(super) fn handle_runtime_responses_local_selection_blocked(
         ),
     );
     if reason == "profile_inflight_saturated" {
-        return Ok(Some(
-            match runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-                RuntimeInflightReliefWait {
-                    request_id,
-                    shared,
-                    excluded_profiles,
-                    route_kind: RuntimeRouteKind::Responses,
-                    selection_started_at,
-                    continuation: affinity_state
-                        .has_continuation_priority(previous_response_id, request_turn_state),
-                    wait_affinity_owner: affinity_state.wait_affinity_owner(),
-                    selected_profile: None,
-                },
-            )? {
-                RuntimeInflightReliefWaitResult::Relieved
-                | RuntimeInflightReliefWaitResult::NotWaitable => return Ok(None),
-                RuntimeInflightReliefWaitResult::DeadlineExpired => {
-                    if runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Responses)? {
-                        return Ok(None);
-                    }
-                    runtime_responses_local_capacity_timeout_reply()
-                }
-            },
-        ));
+        let _ =
+            runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+                request_id,
+                shared,
+                excluded_profiles,
+                route_kind: RuntimeRouteKind::Responses,
+                selection_started_at,
+                continuation: affinity_state
+                    .has_continuation_priority(previous_response_id, request_turn_state),
+                wait_affinity_owner: affinity_state.wait_affinity_owner(),
+                selected_profile: None,
+            })?;
+        return Ok(None);
     }
     if reason != "profile_inflight_saturated" {
         mark_runtime_profile_retry_backoff(shared, &profile_name)?;

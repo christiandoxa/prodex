@@ -123,7 +123,8 @@ fn active_request_guard_drop_records_underflow_without_wrapping() {
 }
 
 #[test]
-fn response_lane_limit_still_rejects_fresh_request() {
+fn response_lane_limit_backpressures_fresh_request_until_capacity_returns() {
+    let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(5, 5);
     let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
         "main",
         "main-account",
@@ -133,34 +134,84 @@ fn response_lane_limit_still_rejects_fresh_request() {
     .build();
     let shared = harness.shared();
     let limit = shared.lane_admission.limit(RuntimeRouteKind::Responses);
-    shared
+    let lane_counter = shared
         .lane_admission
-        .active_counter(RuntimeRouteKind::Responses)
-        .store(limit, Ordering::SeqCst);
+        .active_counter(RuntimeRouteKind::Responses);
+    lane_counter.store(limit, Ordering::SeqCst);
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/responses".to_string(),
         headers: Vec::new(),
         body: br#"{"input":"fresh"}"#.to_vec(),
     };
+    let lane_admission = shared.lane_admission.clone();
+    let release = thread::spawn(move || {
+        thread::sleep(Duration::from_millis(25));
+        lane_counter.store(limit.saturating_sub(1), Ordering::SeqCst);
+        let (mutex, condvar) = lane_admission.wait();
+        let guard = mutex
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        condvar.notify_all();
+        drop(guard);
+    });
 
-    assert!(matches!(
-        acquire_runtime_proxy_active_request_slot_with_wait_for_request(
-            shared,
-            "http",
-            "/backend-api/codex/responses",
-            Some(&request),
-        ),
-        Err(RuntimeProxyAdmissionRejection::LaneLimit(
-            RuntimeRouteKind::Responses
-        ))
-    ));
+    let guard = acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+        shared,
+        "http",
+        "/backend-api/codex/responses",
+        Some(&request),
+    )
+    .expect("fresh request should wait instead of returning a local saturation error");
+    release.join().expect("capacity release should join");
+
     let wait = shared
         .lane_admission
         .admission_wait_metric_counters()
         .snapshot();
     assert_eq!(wait.wait_count, 1);
     assert!(wait.wait_total_ns > 0);
+    drop(guard);
+}
+
+#[test]
+fn active_request_admission_accepts_more_than_sixteen_parallel_callers_without_saturation_error() {
+    let _budget_guard = ci_runtime_proxy_admission_wait_budget_guard(5, 5);
+    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
+        "main",
+        "main-account",
+        "main@example.com",
+    )
+    .active_request_limit(1)
+    .build();
+    let shared = harness.shared();
+    let completed = AtomicUsize::new(0);
+
+    thread::scope(|scope| {
+        for _ in 0..32 {
+            scope.spawn(|| {
+                let guard = acquire_runtime_proxy_active_request_slot_with_wait(
+                    shared,
+                    "http",
+                    "/backend-api/codex/responses",
+                )
+                .expect("parallel caller should backpressure instead of being rejected");
+                thread::sleep(Duration::from_millis(2));
+                completed.fetch_add(1, Ordering::SeqCst);
+                drop(guard);
+            });
+        }
+    });
+
+    assert_eq!(completed.load(Ordering::SeqCst), 32);
+    let wait = shared
+        .lane_admission
+        .admission_wait_metric_counters()
+        .snapshot();
+    assert!(
+        wait.wait_count > 0,
+        "parallel callers should exercise the backpressure path"
+    );
 }
 
 #[test]
@@ -445,13 +496,16 @@ fn long_lived_queue_wait_metrics_record_each_started_wait_once() {
     ));
     assert_eq!(wait_count(), 3);
 
-    assert!(matches!(
-        wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| Err((
-            RuntimeProxyQueueRejection::Full,
-            item,
-        ))),
-        Err((RuntimeProxyQueueRejection::Full, ()))
-    ));
+    let mut attempts = 0;
+    wait_for_runtime_proxy_queue_capacity((), shared, "http", path, |item| {
+        attempts += 1;
+        if attempts <= 4 {
+            Err((RuntimeProxyQueueRejection::Full, item))
+        } else {
+            Ok(())
+        }
+    })
+    .expect("queue saturation should keep waiting across old timeout epochs");
     assert_eq!(wait_count(), 4);
 
     assert!(matches!(
@@ -504,17 +558,6 @@ fn response_lane_limit_retry_bypasses_owned_previous_response_affinity() {
         headers: Vec::new(),
         body: br#"{"previous_response_id":"resp-owned","input":"continue"}"#.to_vec(),
     };
-
-    assert!(matches!(
-        acquire_runtime_proxy_active_request_slot_with_wait(
-            shared,
-            "http",
-            "/backend-api/codex/responses",
-        ),
-        Err(RuntimeProxyAdmissionRejection::LaneLimit(
-            RuntimeRouteKind::Responses
-        ))
-    ));
 
     let guard = acquire_runtime_proxy_active_request_slot_with_wait_for_request(
         shared,
