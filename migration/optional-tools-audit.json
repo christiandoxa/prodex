@@ -6,13 +6,13 @@
     {
       "id": "caveman",
       "repository": "https://github.com/JuliusBrussee/caveman",
-      "latest_stable": "3.0.0",
-      "release": "v3.0.0",
-      "tag_object": "c5f0137cbc12b2a06d4ae113c2ce36222b690f89",
-      "commit": "b33a39554ed06cbc7d7d3198ff90c171e8043b69",
-      "git_tree": "8935a19149638894ea45fbdbf01062bc25e37594",
-      "source_archive_sha256": "6d7064c3cd3744bb67d997aa1f9d738fd367ada3bac80beeef37e0726e3d3a00",
-      "prodex_tree_sha256": "a297ba8affb43a79db0b0ffe2a0874d3a1351877cc1894ef449fa8d289bdbccf",
+      "latest_stable": "3.1.0",
+      "release": "v3.1.0",
+      "tag_object": "63767f5e0e25368fbdbb16e416af1615d2efa6dc",
+      "commit": "8af1f1b9b1346bca0722a1556f119b4e6675cc96",
+      "git_tree": "ecb79dbbb6b20d6ccd8067ef43beb0b75d1d19c8",
+      "source_archive_sha256": "676ae2e9bd2ee23c9fa216056d6ad38b97b49ac8f5f838c29f8a23f37a861564",
+      "prodex_tree_sha256": "2ca3549a88da2fc49b2abda20c90a1a8701f56833e2b19e60bdcede3ce68b316",
       "license": "Apache-2.0",
       "runtime": "Node.js >=18; externally managed immutable checkout",
       "platforms": [
@@ -21,7 +21,7 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "v3.0.0 is the latest stable release; the exact annotated tag, commit, Git tree, source archive, required plugin/skill files, and complete Prodex tree digest were revalidated from the tagged source. Upstream documents CLI and agent-hook telemetry as enabled by default, while the skill-only integration sends no telemetry. Prodex retains the vetted 2.7.0 legacy-manifest compatibility path."
+      "notes": "v3.1.0 is the latest stable release; the exact annotated tag, commit, Git tree, source archive, required plugin/skill files, and complete Prodex tree digest were revalidated from the tagged source. Prodex retains exact validation for the vetted 3.0.0 release and the 2.7.0 legacy-manifest compatibility path."
     },
     {
       "id": "rtk",
