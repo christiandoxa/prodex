@@ -482,11 +482,15 @@ impl RuntimeCompactSelectionContext<'_> {
     }
 
     fn wait_for_overload_recovery(&mut self) -> Result<bool> {
+        let force_reselection_after_wait = !(self.saw_overload_failure
+            || self.saw_rate_limit_failure
+            || self.saw_transport_failure);
         wait_for_compact_overload_recovery(
             self.request_id,
             self.shared,
             &mut self.excluded_profiles,
             &mut self.recovery_sweeps,
+            force_reselection_after_wait,
         )
     }
 

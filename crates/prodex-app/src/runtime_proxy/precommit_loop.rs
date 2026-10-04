@@ -135,6 +135,7 @@ impl<F> RuntimePrecommitLoopState<F> {
         shared: &RuntimeRotationProxyShared,
         route_kind: RuntimeRouteKind,
     ) -> Result<bool> {
+        let force_reselection_after_wait = !self.saw_transient_failure();
         if !runtime_route_has_retryable_profile(shared, route_kind)? {
             return Ok(false);
         }
@@ -243,7 +244,7 @@ impl<F> RuntimePrecommitLoopState<F> {
                 ],
             ),
         );
-        Ok(recovered > 0)
+        Ok(recovered > 0 || force_reselection_after_wait)
     }
 }
 
