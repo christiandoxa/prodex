@@ -5028,3 +5028,29 @@ Validation passed:
 - `node scripts/ci/mojo-no-fallback-guard.mjs --self-test`, `node scripts/ci/mojo-authority-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, `node scripts/ci/size-guard.mjs`, and `git diff --check` passed; ownership reports 154 authoritative operations.
 - The primary gate was mutated from `>= 100` to `> 100`; the direct test failed on the 100% case as expected. The original Mojo source was restored byte-for-byte, with SHA-256 `f50493c4ff9f58e5260533260c1cf9511e77d791ce20fa633b591fb09b8d4127` before and after.
 - `node scripts/ci/mojo-production-share.mjs --check` — 81,355 Mojo LOC and 203,718 Rust LOC, or **28.54% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
+
+## Live runtime-log record bounding migration
+
+The focused `live_log_record.mojo` kernel now owns the live-record byte limit,
+nested JSON string clip boundaries, compact metadata fallback selection, and
+plain-text truncation prefix and tail. It preserves the 128 KiB record limit,
+8 KiB nested string limit, selected `timestamp`/`pid`/`event` fields, and exact
+truncation markers. Mojo writes the plain-text tail into a caller-bounded output
+buffer and reports insufficient capacity.
+
+Rust keeps `serde_json` parsing, recursive value traversal, string ownership,
+JSON serialization/materialization, and live-store mutex/state. Rust applies
+each checked Mojo string boundary and uses the Mojo JSON plan to materialize the
+selected fallback fields. A Mojo error propagates from the live-store append;
+the disk logger still attempts to write the original line, with no Rust
+truncation policy fallback.
+
+Validation passed:
+
+- `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/live_log_record_test.mojo`.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-runtime-log --lib` — 23 passed.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-mojo-core --features mojo-runtime --lib live_log_record::tests -- --test-threads=1` — 2 passed.
+- A mutation changed the Mojo record limit from 128 KiB to 127 KiB. The direct test failed at the exact-boundary assertion. Restoration matched byte-for-byte; SHA-256 before and after was `a324b159574d094734903dc4b6b3c46a0f6e9a4856c7934110bd7ea762130831`.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` and `cargo fmt --all -- --check` passed.
+- `npm run docs` and `npm run test:changed` passed. `node scripts/ci/mojo-no-fallback-guard.mjs --self-test`, the no-fallback guard, `node scripts/ci/mojo-authority-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, and `node scripts/ci/size-guard.mjs` passed; ownership reports 157 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` — 81,456 Mojo LOC and 203,809 Rust LOC, or **28.55% Mojo**. The 7% release floor and Mojo non-regression pass; the 75% project target remains unmet.

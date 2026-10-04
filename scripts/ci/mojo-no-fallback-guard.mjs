@@ -36,7 +36,15 @@ const CLI_DEFAULT_RUN_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/launch_args
 const CLI_DEFAULT_RUN_CALLER_TEST_FILE = "crates/prodex-cli/tests/src/shortcuts.rs";
 const DEEPSEEK_INPUT_HISTORY_FILE = "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs";
 const PRESIDIO_LOCAL_REDACTION_FILE = "crates/prodex-app/src/runtime_proxy/presidio/local.rs";
+const LIVE_LOG_RECORD_FILE = "crates/prodex-runtime-log/src/live.rs";
+const LIVE_LOG_RECORD_ADAPTER_FILE = "crates/prodex-mojo-core/src/live_log_record.rs";
+const LIVE_LOG_RECORD_MOJO_FILE = "mojo/prodex_core/live_log_record.mojo";
+const LIVE_LOG_RECORD_DIRECT_TEST_FILE = "mojo/tests/live_log_record_test.mojo";
 const PROMOTED_FILES = [
+  LIVE_LOG_RECORD_FILE,
+  LIVE_LOG_RECORD_ADAPTER_FILE,
+  LIVE_LOG_RECORD_MOJO_FILE,
+  LIVE_LOG_RECORD_DIRECT_TEST_FILE,
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
   "crates/prodex-mojo-core/src/log_throughput_policy.rs",
   "crates/prodex-runtime-log/src/retention.rs",
@@ -989,6 +997,24 @@ export function findViolations(files) {
       UNCONDITIONAL_MOJO_FILES.has(filePath) && FEATURE_OFF_RUST_PATH.test(contents),
     )
     .map(([filePath]) => `${filePath}: Mojo-owned operation cannot have a feature-off Rust path`);
+  const liveLogRecordViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== LIVE_LOG_RECORD_FILE) return [];
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const required = [
+      "record_exceeds_bound(line.len())?",
+      "nested_string_clip_end(text)?",
+      "json_plan(serialized.len())?",
+      "truncate_plain_text(line)",
+      "let line = bounded_live_log_line(line)?;",
+    ];
+    const missing = required.filter((marker) => !production.includes(marker));
+    if (missing.length > 0) {
+      return [`${filePath}: live-log record decisions must propagate through Mojo (${missing.join(", ")})`];
+    }
+    return /clip_json_strings|\.char_indices\s*\(|MAX_RUNTIME_LIVE_LOG_LINE_BYTES/u.test(production)
+      ? [`${filePath}: contains restored Rust live-log clipping or truncation policy`]
+      : [];
+  });
   const profileHealthCircuitViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== PROFILE_HEALTH_CIRCUIT_FILE) return [];
     const body = contents.match(
@@ -4129,7 +4155,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -4201,6 +4227,18 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  const liveLogRecordConsumer = [
+    "fn bounded_live_log_line(line: &str) -> Result<String, MojoError> {",
+    "record_exceeds_bound(line.len())?",
+    "nested_string_clip_end(text)?",
+    "json_plan(serialized.len())?",
+    "truncate_plain_text(line)",
+    "let line = bounded_live_log_line(line)?;",
+  ].join("\n");
+  assert.deepEqual(findViolations([[LIVE_LOG_RECORD_FILE, liveLogRecordConsumer]]), []);
+  assert.match(findViolations([[LIVE_LOG_RECORD_FILE,
+    liveLogRecordConsumer.replace("nested_string_clip_end(text)?", "clip_json_strings(value, 8192);")]])
+    .join("\n"), /restored Rust live-log clipping or truncation policy|must propagate through Mojo/u);
   assert.match(findViolations([["crates/prodex-domain/src/secrets.rs",
     "pub fn is_well_formed(&self) -> bool { true }\nfn secret_ref_part_is_well_formed() {}"]]).join("\n"),
   /SecretRef::is_well_formed must retain Mojo validation/u);

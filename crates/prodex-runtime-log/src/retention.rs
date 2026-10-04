@@ -254,9 +254,12 @@ pub(super) fn write_log_line(
     requested_path: &Path,
     line: &str,
 ) -> io::Result<()> {
-    inner.live.append(requested_path, line);
+    let live_result = inner
+        .live
+        .append(requested_path, line)
+        .map_err(|_| io::Error::other("Mojo live-log record bounding failed"));
     if !inner.policy.record_to_disk {
-        return Ok(());
+        return live_result;
     }
     let Some(log_dir) = requested_path.parent() else {
         return Err(io::Error::new(
@@ -300,7 +303,7 @@ pub(super) fn write_log_line(
             RUNTIME_LOG_FILE_PREFIX,
         );
     }
-    Ok(())
+    live_result
 }
 
 pub fn cleanup_runtime_log_directory(
