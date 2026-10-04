@@ -54,6 +54,10 @@ const UPDATE_NOTICE_VERSION_UPDATER_FILE = "crates/prodex-update-notice/src/upda
 const UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE = "crates/prodex-update-notice/src/release_version.rs";
 const UPDATE_NOTICE_VERSION_ADAPTER_FILE = "crates/prodex-mojo-core/src/update_notice_policy.rs";
 const UPDATE_NOTICE_VERSION_MOJO_FILE = "mojo/prodex_core/update_notice_policy.mojo";
+const SESSION_USAGE_LIMIT_CONSUMER_FILE = "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs";
+const SESSION_USAGE_LIMIT_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/fallback.rs";
+const SESSION_USAGE_LIMIT_FACADE_FILE = "crates/prodex-mojo-core/src/rich.rs";
+const SESSION_USAGE_LIMIT_MOJO_FILE = "mojo/prodex_core/rich_fallback.mojo";
 const PROMOTED_FILES = [
   LIVE_LOG_RECORD_FILE,
   LIVE_LOG_RECORD_ADAPTER_FILE,
@@ -137,6 +141,10 @@ const PROMOTED_FILES = [
   CLI_DEFAULT_RUN_MOJO_FILE,
   CLI_DEFAULT_RUN_ABI_TEST_FILE,
   CLI_DEFAULT_RUN_CALLER_TEST_FILE,
+  SESSION_USAGE_LIMIT_CONSUMER_FILE,
+  SESSION_USAGE_LIMIT_ADAPTER_FILE,
+  SESSION_USAGE_LIMIT_FACADE_FILE,
+  SESSION_USAGE_LIMIT_MOJO_FILE,
   "crates/prodex-session-store/src/session_selector.rs",
   "crates/prodex-session-store/src/report.rs",
   "crates/prodex-mojo-core/src/runtime_lineage.rs",
@@ -4050,6 +4058,41 @@ export function findViolations(files) {
     }
     return [];
   });
+  const sessionUsageLimitViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SESSION_USAGE_LIMIT_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const body = production.match(/\bfn goal_resume_line_has_usage_limit\([^]*?^\}/mu)?.[0];
+      const retiredRust = /\b(?:goal_resume_event_payload_usage_limit|goal_resume_structured_usage_limit|goal_resume_structured_object_usage_limit|goal_resume_ignored_structured_object|goal_resume_quota_code|goal_resume_usage_limit_text)\s*\(/u;
+      return body?.includes("runtime_session_usage_limit_marker(") && !retiredRust.test(production)
+        ? [] : [`${filePath}: session usage-limit detection must use Mojo without a Rust semantic copy`];
+    }
+    if (filePath === SESSION_USAGE_LIMIT_ADAPTER_FILE) {
+      const required = [
+        "RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: i64 = 15",
+        "pub fn runtime_session_usage_limit_marker(",
+        "RuntimeUsageLimitInputFormat::Json",
+        "RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES",
+      ];
+      return required.filter((item) => !contents.includes(item))
+        .map((item) => `${filePath}: session usage-limit adapter must retain ${item}`);
+    }
+    if (filePath === SESSION_USAGE_LIMIT_FACADE_FILE) {
+      return contents.includes("runtime_session_usage_limit_marker")
+        ? [] : [`${filePath}: session usage-limit Mojo adapter must be exported through rich facade`];
+    }
+    if (filePath === SESSION_USAGE_LIMIT_MOJO_FILE) {
+      const required = [
+        'comptime RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: Int64 = 15',
+        "RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES: Int64 = 2_048",
+        "def runtime_error_session_usage_limit_marker(",
+        "def runtime_error_session_usage_json_matches(",
+        "def runtime_error_session_usage_queue_children(",
+      ];
+      return required.filter((item) => !contents.includes(item))
+        .map((item) => `${filePath}: session usage-limit semantics must remain Mojo-owned (${item})`);
+    }
+    return [];
+  });
   const smartContextArtifactRefViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs") {
       const required = [
@@ -4431,7 +4474,7 @@ export function findViolations(files) {
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...doctorLastMarkerLineViolations, ...runtimeDoctorPlanInputViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
-    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
+    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...sessionUsageLimitViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,
@@ -4550,6 +4593,20 @@ function selfTest() {
   ]).join("\n"), /freshness and key decisions must use Mojo/u);
   assert.match(findViolations([[LOG_LOAD_ADAPTER_FILE, "fn adapter() {}"]]).join("\n"),
     /must retain the required Mojo ABI call/u);
+  const sessionUsageConsumer = `fn goal_resume_line_has_usage_limit(line: &str) -> bool {
+    runtime_session_usage_limit_marker(&input, format)
+}`;
+  assert.deepEqual(findViolations([
+    [SESSION_USAGE_LIMIT_CONSUMER_FILE, sessionUsageConsumer],
+    [SESSION_USAGE_LIMIT_ADAPTER_FILE,
+      "RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: i64 = 15\npub fn runtime_session_usage_limit_marker(\nRuntimeUsageLimitInputFormat::Json\nRUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES"],
+    [SESSION_USAGE_LIMIT_FACADE_FILE, "runtime_session_usage_limit_marker"],
+    [SESSION_USAGE_LIMIT_MOJO_FILE,
+      "comptime RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: Int64 = 15\nRUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES: Int64 = 2_048\ndef runtime_error_session_usage_limit_marker(\ndef runtime_error_session_usage_json_matches(\ndef runtime_error_session_usage_queue_children("],
+  ]), []);
+  assert.match(findViolations([[SESSION_USAGE_LIMIT_CONSUMER_FILE,
+    sessionUsageConsumer + "\nfn goal_resume_structured_usage_limit() {}"]]).join("\n"),
+  /session usage-limit detection must use Mojo without a Rust semantic copy/u);
   assert.match(findViolations([["crates/prodex-domain/src/secrets.rs",
     "pub fn is_well_formed(&self) -> bool { true }\nfn secret_ref_part_is_well_formed() {}"]]).join("\n"),
   /SecretRef::is_well_formed must retain Mojo validation/u);

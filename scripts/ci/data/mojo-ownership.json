@@ -561,6 +561,12 @@
           "runtime_candidate_decision_kernel",
           "quota_selection_policy"
         ]
+      },
+      "mojo/prodex_core/rich_fallback.mojo": {
+        "operations": [
+          "provider_model_fallback_parser",
+          "session_usage_limit_marker"
+        ]
       }
     },
     "additions": [
@@ -5294,6 +5300,32 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "GitHub redirect/tag acquisition, returned version strings, cache/network IO, typed comparison/error mapping, and ProdexUpdateDecision construction; Mojo failures propagate without semantic recomputation"
+    },
+    {
+      "name": "session_usage_limit_marker",
+      "domain": "runtime/session-usage-limit",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust recursively classified session usage-limit event and error markers, ignored conversational records, and enforced a 2,048-value scan bound",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_runtime_error_policy_v1",
+      "mojo_operation_ids": {
+        "session_usage_limit_marker": 15
+      },
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_fallback.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs",
+      "consumer_marker": "runtime_session_usage_limit_marker(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/fallback.rs",
+      "rust_owner_before": "Exact legacy quota message handling, event/error context checks, quota-code matching, ignored conversational-record filtering, recursive structured JSON scanning, and 2,048-value traversal cap",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; direct required-Mojo fixtures cover legacy markers, structured error aliases, ignored conversation text, and traversal boundaries; app caller tests cover public detection and rotation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON parsing/canonicalization, UTF-8 bounds, and versioned rich ABI invocation"
     }
   ],
   "rust_semantic_reductions": [

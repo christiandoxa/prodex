@@ -1,5 +1,12 @@
+from std.collections import Array
 from std.memory import Pointer
 
+from json_view import (
+    deepseek_json_byte,
+    deepseek_json_object_member,
+    deepseek_json_raw_equals,
+    deepseek_json_value_end,
+)
 from rich_text import (
     rich_copy_range,
     rich_hash_slice,
@@ -402,6 +409,9 @@ comptime RUNTIME_ERROR_MODE_TEXT_WORKSPACE: Int64 = 11
 comptime RUNTIME_ERROR_MODE_CODE_QUOTA: Int64 = 12
 comptime RUNTIME_ERROR_MODE_CODE_RATE: Int64 = 13
 comptime RUNTIME_ERROR_MODE_CODE_OVERLOAD: Int64 = 14
+comptime RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: Int64 = 15
+comptime RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES: Int64 = 67_108_864
+comptime RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES: Int64 = 2_048
 
 comptime RUNTIME_ERROR_CLASS_OTHER: Int64 = 0
 comptime RUNTIME_ERROR_CLASS_QUOTA: Int64 = 1
@@ -507,6 +517,329 @@ def runtime_error_contains(
         if matched:
             return True
     return False
+
+
+
+def runtime_error_resume_prefix_matches(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if start < 0 or end < start or end - start < length:
+        return False
+    var expected = literal.unsafe_ptr()
+    for offset in range(length):
+        var value = ptr[unsafe_offset=start + offset]
+        if value >= 65 and value <= 90:
+            value += 32
+        if value != expected[unsafe_offset=offset]:
+            return False
+    return True
+
+
+def runtime_error_resume_usage_text(view: ProdexRichStringView, start: Int64, end: Int64) -> Bool:
+    if start < 0 or end < start or end > Int64(view.len):
+        return False
+    var text = ProdexRichStringView(UInt(view.ptr + UInt(start)), UInt(end - start))
+    var bounds = rich_trim_bounds(text)
+    var ptr = rich_view_ptr(text)
+    return runtime_error_range_matches(ptr, bounds[0], bounds[1], StringSlice("you've hit your usage limit. upgrade to pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:08 pm."), True) or runtime_error_resume_prefix_matches(ptr, bounds[0], bounds[1], StringSlice("you've hit your usage limit")) or runtime_error_resume_prefix_matches(ptr, bounds[0], bounds[1], StringSlice("you have hit your usage limit")) or runtime_error_range_matches(ptr, bounds[0], bounds[1], StringSlice("the usage limit has been reached"), True) or runtime_error_range_matches(ptr, bounds[0], bounds[1], StringSlice("usage limit has been reached"), True) or runtime_error_resume_prefix_matches(ptr, bounds[0], bounds[1], StringSlice("your workspace is out of credits")) or runtime_error_resume_prefix_matches(ptr, bounds[0], bounds[1], StringSlice("you hit your spend cap"))
+def runtime_error_resume_json_string_equals(view: ProdexRichStringView, start: Int64, end: Int64, literal: StringSlice, folded: Bool) -> Bool:
+    if start < 0 or end <= start + 1:
+        return False
+    if folded:
+        return runtime_error_range_matches(rich_view_ptr(view), start + 1, end - 1, literal, True)
+    return deepseek_json_raw_equals(view, start, end, literal)
+def runtime_error_resume_object_ignored(view: ProdexRichStringView, object_start: Int64, object_end: Int64) -> Bool:
+    var role = deepseek_json_object_member(view, object_start, object_end, StringSlice("role"))
+    if role[0] >= 0:
+        return True
+    var kind = deepseek_json_object_member(view, object_start, object_end, StringSlice("type"))
+    return kind[0] >= 0 and deepseek_json_byte(view, kind[0]) == 34 and runtime_error_resume_type_ignored(view, kind[0], kind[1])
+def runtime_error_resume_type_ignored(view: ProdexRichStringView, start: Int64, end: Int64) -> Bool:
+    return deepseek_json_raw_equals(view, start, end, StringSlice("message")) or deepseek_json_raw_equals(view, start, end, StringSlice("user_message")) or deepseek_json_raw_equals(view, start, end, StringSlice("assistant_message")) or deepseek_json_raw_equals(view, start, end, StringSlice("agent_message")) or deepseek_json_raw_equals(view, start, end, StringSlice("response.output_text.delta")) or deepseek_json_raw_equals(view, start, end, StringSlice("response.output_text.done"))
+def runtime_error_resume_code_matches(view: ProdexRichStringView, start: Int64, end: Int64) -> Bool:
+    if start < 0 or end <= start + 1 or deepseek_json_byte(view, start) != 34:
+        return False
+    var text = ProdexRichStringView(UInt(view.ptr + UInt(start + 1)), UInt(end - start - 2))
+    var bounds = rich_trim_bounds(text)
+    var ptr = rich_view_ptr(text)
+    return runtime_error_code_class(ptr, bounds[0], bounds[1], RUNTIME_ERROR_MODE_CODE_QUOTA) == RUNTIME_ERROR_CLASS_QUOTA or runtime_error_range_matches(ptr, bounds[0], bounds[1], StringSlice("usage_limit_exceeded"), True)
+def runtime_error_resume_direct_quota_code(view: ProdexRichStringView, object_start: Int64, object_end: Int64) -> Bool:
+    var code = deepseek_json_object_member(view, object_start, object_end, StringSlice("code"))
+    var kind = deepseek_json_object_member(view, object_start, object_end, StringSlice("type"))
+    var status = deepseek_json_object_member(view, object_start, object_end, StringSlice("status"))
+    var reason = deepseek_json_object_member(view, object_start, object_end, StringSlice("reason"))
+    var error = deepseek_json_object_member(view, object_start, object_end, StringSlice("error"))
+    var info = deepseek_json_object_member(view, object_start, object_end, StringSlice("codex_error_info"))
+    return runtime_error_resume_code_matches(view, code[0], code[1]) or runtime_error_resume_code_matches(view, kind[0], kind[1]) or runtime_error_resume_code_matches(view, status[0], status[1]) or runtime_error_resume_code_matches(view, reason[0], reason[1]) or runtime_error_resume_code_matches(view, error[0], error[1]) or runtime_error_resume_code_matches(view, info[0], info[1])
+def runtime_error_resume_payload_usage_limit(view: ProdexRichStringView, payload_start: Int64, payload_end: Int64) -> Bool:
+    if payload_start < 0 or payload_end <= payload_start or deepseek_json_byte(view, payload_start) != 123:
+        return False
+    var payload_type = deepseek_json_object_member(view, payload_start, payload_end, StringSlice("type"))
+    var has_type = payload_type[0] >= 0 and deepseek_json_byte(view, payload_type[0]) == 34
+    var explicit_error = has_type and runtime_error_resume_json_string_equals(view, payload_type[0], payload_type[1], StringSlice("error"), True)
+    if has_type and not explicit_error:
+        return False
+    var message = deepseek_json_object_member(view, payload_start, payload_end, StringSlice("message"))
+    if message[0] >= 0 and deepseek_json_byte(view, message[0]) == 34 and (explicit_error and runtime_error_resume_usage_text(view, message[0] + 1, message[1] - 1) or not has_type and runtime_error_range_matches(rich_view_ptr(view), message[0] + 1, message[1] - 1, StringSlice("you've hit your usage limit. upgrade to pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:08 pm."), True)):
+        return True
+    var error = deepseek_json_object_member(view, payload_start, payload_end, StringSlice("error"))
+    if not (has_type or error[0] >= 0 or runtime_error_resume_direct_quota_code(view, payload_start, payload_end)):
+        return False
+    return runtime_error_session_usage_json_matches(view, payload_start, payload_end)
+def runtime_error_session_usage_json_matches(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> Bool:
+    var starts = Array[Int64, 4096](fill=0)
+    var ends = Array[Int64, 4096](fill=0)
+    var starts_ptr = Pointer(to=starts[0])
+    var ends_ptr = Pointer(to=ends[0])
+    starts_ptr[unsafe_offset=0] = start
+    ends_ptr[unsafe_offset=0] = end
+    var top: Int64 = 1
+    var visited: Int64 = 0
+    var ptr = rich_view_ptr(view)
+    while top > 0:
+        top -= 1
+        visited += 1
+        if visited > RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES:
+            return False
+        var node_start = starts_ptr[unsafe_offset=top]
+        var node_end = ends_ptr[unsafe_offset=top]
+        node_start = runtime_error_skip_space(ptr, node_start, node_end)
+        if node_start >= node_end:
+            return False
+        var kind = ptr[unsafe_offset=node_start]
+        if kind == 123:
+            var object_end = deepseek_json_value_end(
+                view, node_start, node_end, 0
+            )
+            if object_end < 0:
+                return False
+            if runtime_error_resume_object_ignored(
+                view, node_start, object_end
+            ):
+                continue
+            if runtime_error_session_usage_direct_object_match(
+                view, node_start, object_end
+            ):
+                return True
+            if not runtime_error_session_usage_queue_children(
+                view,
+                node_start,
+                object_end,
+                False,
+                starts_ptr,
+                ends_ptr,
+                Pointer(to=top),
+            ):
+                return False
+        elif kind == 91:
+            if not runtime_error_session_usage_queue_children(
+                view,
+                node_start,
+                node_end,
+                True,
+                starts_ptr,
+                ends_ptr,
+                Pointer(to=top),
+            ):
+                return False
+    return False
+
+
+def runtime_error_session_usage_direct_object_match(view: ProdexRichStringView, start: Int64, end: Int64) -> Bool:
+    if runtime_error_resume_direct_quota_code(view, start, end):
+        return True
+    var message = deepseek_json_object_member(view, start, end, StringSlice("message"))
+    var detail = deepseek_json_object_member(view, start, end, StringSlice("detail"))
+    var error = deepseek_json_object_member(view, start, end, StringSlice("error"))
+    return message[0] >= 0 and deepseek_json_byte(view, message[0]) == 34 and runtime_error_resume_usage_text(view, message[0] + 1, message[1] - 1) or detail[0] >= 0 and deepseek_json_byte(view, detail[0]) == 34 and runtime_error_resume_usage_text(view, detail[0] + 1, detail[1] - 1) or error[0] >= 0 and deepseek_json_byte(view, error[0]) == 34 and runtime_error_resume_usage_text(view, error[0] + 1, error[1] - 1)
+def runtime_error_session_usage_queue_children(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    is_array: Bool,
+    starts: Pointer[mut=True, Int64, _],
+    ends: Pointer[mut=True, Int64, _],
+    top: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var available = RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES - top[]
+    if available <= 0:
+        return True
+    var ptr = rich_view_ptr(view)
+    var child_count: Int64 = 0
+    var index = start + 1
+    if is_array:
+        while True:
+            index = runtime_error_skip_space(ptr, index, end - 1)
+            if index >= end or ptr[unsafe_offset=index] == 93:
+                break
+            var child_end = deepseek_json_value_end(view, index, end - 1, 0)
+            if child_end < 0:
+                return False
+            starts[
+                unsafe_offset=RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES
+                + child_count
+            ] = index
+            ends[
+                unsafe_offset=RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES
+                + child_count
+            ] = child_end
+            child_count += 1
+            if child_count == available:
+                break
+            index = runtime_error_skip_space(ptr, child_end, end - 1)
+            if index < end - 1 and ptr[unsafe_offset=index] == 44:
+                index += 1
+                continue
+            break
+        for offset in range(child_count):
+            var scratch = (
+                RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES
+                + child_count
+                - 1
+                - offset
+            )
+            starts[unsafe_offset=top[] + offset] = starts[unsafe_offset=scratch]
+            ends[unsafe_offset=top[] + offset] = ends[unsafe_offset=scratch]
+    else:
+        index = start + 1
+        while True:
+            index = runtime_error_skip_space(ptr, index, end - 1)
+            if index >= end or ptr[unsafe_offset=index] == 125:
+                break
+            var key_start = index + 1
+            var key_end = runtime_error_string_end(ptr, index, end - 1)
+            if key_end < 0:
+                return False
+            index = runtime_error_skip_space(ptr, key_end + 1, end - 1)
+            if index >= end - 1 or ptr[unsafe_offset=index] != 58:
+                return False
+            var value_start = runtime_error_skip_space(ptr, index + 1, end - 1)
+            var value_end = deepseek_json_value_end(
+                view, value_start, end - 1, 0
+            )
+            if value_end < 0:
+                return False
+            var skipped = (
+                runtime_error_range_matches(
+                    ptr, key_start, key_end, StringSlice("content"), False
+                )
+                or runtime_error_range_matches(
+                    ptr, key_start, key_end, StringSlice("text"), False
+                )
+                or runtime_error_range_matches(
+                    ptr, key_start, key_end, StringSlice("delta"), False
+                )
+            )
+            if not skipped and child_count < available:
+                var scratch = (
+                    RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES + child_count
+                )
+                starts[unsafe_offset=scratch] = value_start
+                ends[unsafe_offset=scratch] = value_end
+                child_count += 1
+            index = runtime_error_skip_space(ptr, value_end, end - 1)
+            if index < end - 1 and ptr[unsafe_offset=index] == 44:
+                index += 1
+                continue
+            if index == end - 1 and ptr[unsafe_offset=index] == 125:
+                break
+            return False
+        var retained = child_count
+        for offset in range(retained):
+            var scratch = (
+                RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES
+                + child_count
+                - 1
+                - offset
+            )
+            starts[unsafe_offset=top[] + offset] = starts[unsafe_offset=scratch]
+            ends[unsafe_offset=top[] + offset] = ends[unsafe_offset=scratch]
+    top[] += child_count
+    return True
+
+
+def runtime_error_session_usage_limit_marker(
+    view: ProdexRichStringView, input_is_json: Bool
+) -> ProdexRichFallbackRecord:
+    var ptr = rich_view_ptr(view)
+    if not input_is_json:
+        var bounds = rich_trim_bounds(view)
+        if runtime_error_range_matches(
+            ptr,
+            bounds[0],
+            bounds[1],
+            StringSlice(
+                "you've hit your usage limit. upgrade to pro"
+                " (https://chatgpt.com/explore/pro), visit"
+                " https://chatgpt.com/codex/settings/usage to purchase more"
+                " credits or try again at 5:08 pm."
+            ),
+            True,
+        ):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_QUOTA, -1, -1)
+        return runtime_error_none()
+
+    var start = runtime_error_skip_space(ptr, 0, Int64(view.len))
+    var end = runtime_error_trim_end(ptr, start, Int64(view.len))
+    if start >= end or ptr[unsafe_offset=start] != 123:
+        return runtime_error_none()
+    var object_end = deepseek_json_value_end(view, start, end, 0)
+    if object_end < 0 or runtime_error_skip_space(ptr, object_end, end) != end:
+        return runtime_error_none()
+    var kind = deepseek_json_object_member(
+        view, start, object_end, StringSlice("type")
+    )
+    var event_msg = kind[0] >= 0 and runtime_error_resume_json_string_equals(
+        view, kind[0], kind[1], StringSlice("event_msg"), False
+    )
+    if event_msg:
+        var payload = deepseek_json_object_member(
+            view, start, object_end, StringSlice("payload")
+        )
+        if payload[0] < 0:
+            return runtime_error_none()
+        if runtime_error_resume_payload_usage_limit(
+            view, payload[0], payload[1]
+        ):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_QUOTA, -1, -1)
+        return runtime_error_none()
+    var response_error = kind[0] >= 0 and (
+        runtime_error_resume_json_string_equals(
+            view, kind[0], kind[1], StringSlice("error"), False
+        )
+        or runtime_error_resume_json_string_equals(
+            view, kind[0], kind[1], StringSlice("response.failed"), False
+        )
+    )
+    var nested_error = deepseek_json_object_member(
+        view, start, object_end, StringSlice("error")
+    )
+    if response_error or nested_error[0] >= 0:
+        if runtime_error_session_usage_json_matches(view, start, object_end):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_QUOTA, -1, -1)
+        return runtime_error_none()
+    var payload = deepseek_json_object_member(
+        view, start, object_end, StringSlice("payload")
+    )
+    if payload[0] >= 0 and deepseek_json_byte(view, payload[0]) == 123:
+        var payload_type = deepseek_json_object_member(
+            view, payload[0], payload[1], StringSlice("type")
+        )
+        if (
+            payload_type[0] >= 0
+            and deepseek_json_byte(view, payload_type[0]) == 34
+        ):
+            if runtime_error_resume_type_ignored(
+                view, payload_type[0], payload_type[1]
+            ):
+                return runtime_error_none()
+    return runtime_error_none()
 
 
 def runtime_error_string_end(
@@ -990,6 +1323,8 @@ def runtime_error_is_transient_status(status: Int64) -> Bool:
 def runtime_error_scan_body(
     view: ProdexRichStringView, mode: Int64, status: Int64
 ) -> ProdexRichFallbackRecord:
+    if mode == RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT:
+        return runtime_error_session_usage_limit_marker(view, status == 1)
     if mode == RUNTIME_ERROR_MODE_TEXT_QUOTA or mode == RUNTIME_ERROR_MODE_TEXT_AUTHORITATIVE_QUOTA or mode == RUNTIME_ERROR_MODE_TEXT_RATE or mode == RUNTIME_ERROR_MODE_TEXT_PROFILE or mode == RUNTIME_ERROR_MODE_TEXT_OVERLOAD or mode == RUNTIME_ERROR_MODE_TEXT_WORKSPACE or mode == RUNTIME_ERROR_MODE_CODE_QUOTA or mode == RUNTIME_ERROR_MODE_CODE_RATE or mode == RUNTIME_ERROR_MODE_CODE_OVERLOAD:
         return runtime_error_text_record(view, mode)
 
@@ -1119,10 +1454,27 @@ def prodex_mojo_rich_runtime_error_policy_v1(
     result_ptr[].issue_kind = 0
     result_ptr[].issue_offset = -1
     result_ptr[].issue_length = 0
-    if abi_version != PRODEX_RICH_ABI_VERSION or operation < RUNTIME_ERROR_MODE_HTTP or operation > RUNTIME_ERROR_MODE_CODE_OVERLOAD or (phase != RUNTIME_ERROR_PHASE_PRECOMMIT and phase != RUNTIME_ERROR_PHASE_COMMITTED) or status < 0 or body_len < 0 or body_len > RUNTIME_ERROR_MAX_BYTES or record_capacity < 1 or output_capacity < 1 or output_records_address == 0 or output_address == 0 or body_address == 0 and body_len > 0:
+    var max_body_bytes = RUNTIME_ERROR_MAX_BYTES
+    if operation == RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT:
+        max_body_bytes = RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES
+    if (
+        abi_version != PRODEX_RICH_ABI_VERSION
+        or operation < RUNTIME_ERROR_MODE_HTTP
+        or operation > RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT
+        or (phase != RUNTIME_ERROR_PHASE_PRECOMMIT and phase != RUNTIME_ERROR_PHASE_COMMITTED)
+        or status < 0
+        or (operation == RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT and status > 1)
+        or body_len < 0
+        or body_len > max_body_bytes
+        or record_capacity < 1
+        or output_capacity < 1
+        or output_records_address == 0
+        or output_address == 0
+        or (body_address == 0 and body_len > 0)
+    ):
         return RICH_STATUS_INVALID
     var body = ProdexRichStringView(body_address, UInt(body_len))
-    if not rich_view_valid(body, RUNTIME_ERROR_MAX_BYTES):
+    if not rich_view_valid(body, max_body_bytes):
         return RICH_STATUS_UTF8
     var output_records = Pointer[
         mut=True, ProdexRichFallbackRecord, MutUntrackedOrigin
@@ -1131,6 +1483,13 @@ def prodex_mojo_rich_runtime_error_policy_v1(
         unsafe_from_address=Int(output_address)
     )
     var record = runtime_error_scan_body(body, operation, status)
+    if runtime_error_is_match(record) and operation == RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT:
+        output_records[unsafe_offset=0].model = ProdexRichSlice(0, 0)
+        output_records[unsafe_offset=0].source_kind = record.source_kind
+        output_records[unsafe_offset=0].input_index = runtime_error_action(record.source_kind, phase)
+        result_ptr[].records_written = 1
+        result_ptr[].required_records = 1
+        return RICH_STATUS_OK
     if not runtime_error_is_match(record):
         return RICH_STATUS_OK
     var written: Int64 = 0

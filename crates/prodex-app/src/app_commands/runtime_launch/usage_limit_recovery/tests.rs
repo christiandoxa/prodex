@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const SESSION_ID: &str = "019c9e3d-45a0-7ad0-a6ee-b194ac2d44f9";
+const OBSERVED_USAGE_LIMIT_MESSAGE: &str = "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:08 PM.";
 
 fn exit_status(code: i32) -> std::process::ExitStatus {
     #[cfg(unix)]
@@ -103,6 +104,18 @@ fn append_usage_limit(path: &Path) {
         file,
         "{{\"timestamp\":\"2026-08-29T01:00:01Z\",\"type\":\"event_msg\",\"payload\":{{\"message\":{}}}}}",
         serde_json::to_string(OBSERVED_USAGE_LIMIT_MESSAGE).unwrap()
+    )
+    .unwrap();
+}
+
+fn append_structured_usage_limit(path: &Path) {
+    writeln!(
+        fs::OpenOptions::new().append(true).open(path).unwrap(),
+        "{}",
+        serde_json::json!({
+            "type": "error",
+            "error": { "code": "usage_limit_reached" }
+        })
     )
     .unwrap();
 }
@@ -230,9 +243,8 @@ fn usage_limit_detection_accepts_error_envelopes_not_conversation_prose() {
         }),
         serde_json::json!({ "error": { "code": "insufficient_quota" } }),
     ] {
-        assert!(goal_resume_line_has_usage_limit(
-            &serde_json::to_string(&value).unwrap()
-        ));
+        let line = serde_json::to_string(&value).unwrap();
+        assert!(goal_resume_line_has_usage_limit(&line), "{line}");
     }
 
     for value in [
@@ -367,7 +379,7 @@ fn exact_post_child_usage_limit_rotates_and_old_bytes_are_not_replayed() {
     )
     .unwrap();
     append_user_event(&session_path);
-    append_usage_limit(&session_path);
+    append_structured_usage_limit(&session_path);
     let attempted = BTreeSet::new();
     let options = resume_options(&attempted, false, Some("a"));
 
@@ -379,7 +391,7 @@ fn exact_post_child_usage_limit_rotates_and_old_bytes_are_not_replayed() {
     monitor.prepare_for_resume();
     assert!(monitor.detect_usage_limit_after_child().unwrap().is_none());
     append_user_event(&session_path);
-    append_usage_limit(&session_path);
+    append_structured_usage_limit(&session_path);
     assert_eq!(
         monitor.detect_usage_limit_after_child().unwrap().as_deref(),
         Some(SESSION_ID)
