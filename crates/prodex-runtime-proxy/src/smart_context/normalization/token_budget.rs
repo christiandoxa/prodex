@@ -77,20 +77,29 @@ pub(in crate::smart_context) fn smart_context_select_memory_capsules_impl(
     capsules: impl IntoIterator<Item = SmartContextMemoryCapsule>,
     token_budget: usize,
 ) -> SmartContextMemoryCapsuleSelection {
-    let mut required = Vec::new();
-    let mut optional = Vec::new();
-    for capsule in capsules {
-        if capsule.required {
-            required.push(capsule);
-        } else {
-            optional.push(capsule);
-        }
+    let capsules = capsules.into_iter().collect::<Vec<_>>();
+    let order_inputs = capsules
+        .iter()
+        .map(
+            |capsule| prodex_mojo_core::rich::SmartContextCapsuleOrderInput {
+                id: &capsule.id,
+                relevance: capsule.relevance,
+                token_cost: capsule.token_cost,
+                required: capsule.required,
+            },
+        )
+        .collect::<Vec<_>>();
+    let order = prodex_mojo_core::rich::order_smart_context_capsules(&order_inputs)
+        .expect("Mojo Smart Context capsule ordering returned invalid output");
+    let mut capsule_slots = capsules.into_iter().map(Some).collect::<Vec<_>>();
+    let mut capsules = Vec::with_capacity(order.len());
+    for index in order {
+        capsules.push(
+            capsule_slots[index]
+                .take()
+                .expect("Mojo Smart Context capsule ordering returned a permutation"),
+        );
     }
-
-    required.sort_by(|left, right| left.id.cmp(&right.id));
-    optional.sort_by(smart_context_capsule_order);
-
-    let capsules = required.into_iter().chain(optional).collect::<Vec<_>>();
 
     let mut selected = Vec::with_capacity(capsules.len());
     let mut used_tokens = 0;
