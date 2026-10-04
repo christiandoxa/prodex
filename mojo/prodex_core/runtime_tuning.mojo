@@ -13,6 +13,9 @@ comptime RUNTIME_SCALAR_CONFIG_CLOCK_SOURCE: Int64 = 3
 comptime RUNTIME_SCALAR_CONFIG_OPENAI_PROVIDER: Int64 = 4
 comptime RUNTIME_SCALAR_CONFIG_LOG_RECORDING: Int64 = 5
 comptime RUNTIME_SCALAR_CONFIG_MAX_BYTES: Int64 = 9_223_372_036_854_775_807
+comptime RUNTIME_PROXY_PRESET_PLAN_ABI_VERSION: Int64 = 1
+comptime RUNTIME_PROXY_PRESET_PLAN_FIELD_COUNT: Int64 = 39
+comptime RUNTIME_PROXY_PRESET_PLAN_VALID_MASK: UInt64 = 549_755_813_887
 
 
 
@@ -186,14 +189,13 @@ def runtime_tuning_lane_limit(
     return value
 
 
-@export("prodex_runtime_proxy_preset_defaults_v1")
-def prodex_runtime_proxy_preset_defaults_v1(
+def runtime_proxy_preset_defaults(
     preset: Int64,
-    output: Pointer[mut=True, Int64, _],
-) abi("C") -> Int64:
+    output: Pointer[mut=True, UInt64, _],
+) -> Int64:
     if preset < 0 or preset > 3:
         return 1
-    for index in range(19):
+    for index in range(RUNTIME_PROXY_PRESET_PLAN_FIELD_COUNT):
         output[unsafe_offset=index] = 0
 
     if preset == 0:
@@ -209,13 +211,13 @@ def prodex_runtime_proxy_preset_defaults_v1(
         output[unsafe_offset=9] = 3
         output[unsafe_offset=10] = 8
         output[unsafe_offset=11] = 2
-        output[unsafe_offset=12] = 4
-        output[unsafe_offset=13] = 32
-        output[unsafe_offset=14] = 64
-        output[unsafe_offset=15] = 2
-        output[unsafe_offset=16] = 16
-        output[unsafe_offset=17] = 32
-        output[unsafe_offset=18] = 1
+        output[unsafe_offset=22] = 4
+        output[unsafe_offset=23] = 32
+        output[unsafe_offset=24] = 64
+        output[unsafe_offset=25] = 2
+        output[unsafe_offset=26] = 16
+        output[unsafe_offset=27] = 32
+        output[unsafe_offset=38] = 1
     elif preset == 2:
         output[unsafe_offset=0] = 12
         output[unsafe_offset=1] = 32
@@ -229,13 +231,13 @@ def prodex_runtime_proxy_preset_defaults_v1(
         output[unsafe_offset=9] = 8
         output[unsafe_offset=10] = 32
         output[unsafe_offset=11] = 8
-        output[unsafe_offset=12] = 12
-        output[unsafe_offset=13] = 96
-        output[unsafe_offset=14] = 384
-        output[unsafe_offset=15] = 6
-        output[unsafe_offset=16] = 48
-        output[unsafe_offset=17] = 96
-        output[unsafe_offset=18] = 2
+        output[unsafe_offset=22] = 12
+        output[unsafe_offset=23] = 96
+        output[unsafe_offset=24] = 384
+        output[unsafe_offset=25] = 6
+        output[unsafe_offset=26] = 48
+        output[unsafe_offset=27] = 96
+        output[unsafe_offset=38] = 2
     elif preset == 3:
         output[unsafe_offset=0] = 24
         output[unsafe_offset=1] = 96
@@ -249,13 +251,89 @@ def prodex_runtime_proxy_preset_defaults_v1(
         output[unsafe_offset=9] = 16
         output[unsafe_offset=10] = 96
         output[unsafe_offset=11] = 16
-        output[unsafe_offset=12] = 16
-        output[unsafe_offset=13] = 128
-        output[unsafe_offset=14] = 512
-        output[unsafe_offset=15] = 8
-        output[unsafe_offset=16] = 64
-        output[unsafe_offset=17] = 128
-        output[unsafe_offset=18] = 3
+        output[unsafe_offset=22] = 16
+        output[unsafe_offset=23] = 128
+        output[unsafe_offset=24] = 512
+        output[unsafe_offset=25] = 8
+        output[unsafe_offset=26] = 64
+        output[unsafe_offset=27] = 128
+        output[unsafe_offset=38] = 3
+    return 0
+
+
+@export("prodex_runtime_proxy_preset_plan_v1")
+def prodex_runtime_proxy_preset_plan_v1(
+    abi_version: Int64,
+    configured_preset: Int64,
+    environment_preset: Int64,
+    override_presence_mask: UInt64,
+    override_values_address: UInt,
+    override_critical_floor: Int64,
+    output_presence_mask_address: UInt,
+    output_values_address: UInt,
+    output_effective_preset_address: UInt,
+    output_critical_floor_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_PROXY_PRESET_PLAN_ABI_VERSION:
+        return -3
+    if (
+        configured_preset < -1
+        or configured_preset > 3
+        or environment_preset < -1
+        or environment_preset > 3
+        or override_presence_mask > RUNTIME_PROXY_PRESET_PLAN_VALID_MASK
+        or override_values_address == 0
+        or output_presence_mask_address == 0
+        or output_values_address == 0
+        or output_effective_preset_address == 0
+        or output_critical_floor_address == 0
+    ):
+        return -2
+
+    var output_presence_mask = Pointer[
+        mut=True, UInt64, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_presence_mask_address))
+    var output_values = Pointer[
+        mut=True, UInt64, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_values_address))
+    var output_effective_preset = Pointer[
+        mut=True, Int64, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_effective_preset_address))
+    var output_critical_floor = Pointer[
+        mut=True, Int64, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_critical_floor_address))
+    var override_values = Pointer[
+        mut=False, UInt64, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(override_values_address))
+
+    output_presence_mask[] = 0
+    output_effective_preset[] = -1
+    output_critical_floor[] = 0
+    for index in range(RUNTIME_PROXY_PRESET_PLAN_FIELD_COUNT):
+        output_values[unsafe_offset=index] = 0
+
+    var selected_preset = environment_preset
+    if selected_preset == -1:
+        selected_preset = configured_preset
+    if selected_preset != -1:
+        output_effective_preset[] = selected_preset
+        if runtime_proxy_preset_defaults(selected_preset, output_values) != 0:
+            return -2
+        var default_bit = UInt64(1)
+        for index in range(RUNTIME_PROXY_PRESET_PLAN_FIELD_COUNT):
+            if output_values[unsafe_offset=index] > 0:
+                output_presence_mask[] = output_presence_mask[] | default_bit
+            default_bit = default_bit * 2
+
+    var override_bit = UInt64(1)
+    for index in range(RUNTIME_PROXY_PRESET_PLAN_FIELD_COUNT):
+        if override_presence_mask & override_bit != 0:
+            output_presence_mask[] = output_presence_mask[] | override_bit
+            if index == 37:
+                output_critical_floor[] = override_critical_floor
+            else:
+                output_values[unsafe_offset=index] = override_values[unsafe_offset=index]
+        override_bit = override_bit * 2
     return 0
 
 

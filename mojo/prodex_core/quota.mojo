@@ -153,6 +153,65 @@ def prodex_quota_gemini_bucket_batch(
 comptime QUOTA_MAIN_AGGREGATION_MAX_COUNT: Int64 = 1_024
 
 
+@export("prodex_quota_reset_epoch_v1")
+def prodex_quota_reset_epoch_v1(
+    fields_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if fields_address == 0 or output_address == 0:
+        return 1
+
+    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+
+    # Version 1 is eight (value, present) pairs: top-level reset candidates,
+    # primary/secondary resets, then primary/secondary used percentages.
+    var index: Int64 = 0
+    while index < 8:
+        var present = fields[unsafe_offset=index * 2 + 1]
+        if present != 0 and present != 1:
+            return 2
+        index += 1
+
+    var reset_at: Int64 = 0
+    var reset_present: Int64 = 0
+    index = 0
+    while index < 4:
+        if fields[unsafe_offset=index * 2 + 1] == 1:
+            reset_at = fields[unsafe_offset=index * 2]
+            reset_present = 1
+            break
+        index += 1
+
+    if reset_present == 0:
+        var primary_used = fields[unsafe_offset=12]
+        var primary_used_present = fields[unsafe_offset=13]
+        var secondary_used = fields[unsafe_offset=14]
+        var secondary_used_present = fields[unsafe_offset=15]
+        if primary_used_present == 1 and primary_used >= 100:
+            if fields[unsafe_offset=9] == 1:
+                reset_at = fields[unsafe_offset=8]
+                reset_present = 1
+        elif secondary_used_present == 1 and secondary_used >= 100:
+            if fields[unsafe_offset=11] == 1:
+                reset_at = fields[unsafe_offset=10]
+                reset_present = 1
+        elif fields[unsafe_offset=9] == 1:
+            reset_at = fields[unsafe_offset=8]
+            reset_present = 1
+        elif fields[unsafe_offset=11] == 1:
+            reset_at = fields[unsafe_offset=10]
+            reset_present = 1
+
+    output[unsafe_offset=0] = reset_at
+    output[unsafe_offset=1] = reset_present
+    return 0
+
+
 def quota_saturating_add(left: Int64, right: Int64) -> Int64:
     if right > 0 and left > INT64_MAX - right:
         return INT64_MAX

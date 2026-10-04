@@ -1,3 +1,4 @@
+use prodex_mojo_core::{MojoError, live_log_record as mojo_live_log_record};
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -7,7 +8,6 @@ pub const DEFAULT_RUNTIME_LIVE_LOG_MAX_BYTES: usize = 2 * 1024 * 1024;
 const MAX_RUNTIME_LIVE_LOG_PATHS: usize = 64;
 const MAX_RUNTIME_LIVE_LOG_ENTRIES: usize = 2048;
 const MAX_RUNTIME_LIVE_LOG_BYTES: usize = 8 * 1024 * 1024;
-const MAX_RUNTIME_LIVE_LOG_LINE_BYTES: usize = 128 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeLiveLogEntry {
@@ -44,12 +44,12 @@ pub(super) struct RuntimeLiveLogStore {
 }
 
 impl RuntimeLiveLogStore {
-    pub(super) fn append(&self, path: &Path, line: &str) {
+    pub(super) fn append(&self, path: &Path, line: &str) -> Result<(), MojoError> {
         let mut state = self
             .state
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let line = bounded_live_log_line(line);
+        let line = bounded_live_log_line(line)?;
         let sequence = state.next_sequence.saturating_add(1);
         state.next_sequence = sequence;
         let path = path.to_path_buf();
@@ -102,6 +102,7 @@ impl RuntimeLiveLogStore {
                 state.total_bytes = state.total_bytes.saturating_sub(removed.bytes);
             }
         }
+        Ok(())
     }
 
     pub(super) fn snapshot_after(
@@ -140,67 +141,63 @@ impl RuntimeLiveLogStore {
     }
 }
 
-fn bounded_live_log_line(line: &str) -> String {
-    if line.len() <= MAX_RUNTIME_LIVE_LOG_LINE_BYTES {
-        return line.to_string();
+fn bounded_live_log_line(line: &str) -> Result<String, MojoError> {
+    if !mojo_live_log_record::record_exceeds_bound(line.len())? {
+        return Ok(line.to_string());
     }
 
     if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(line.trim_end()) {
-        clip_json_strings(&mut value, 8 * 1024);
-        if let Ok(serialized) = serde_json::to_string(&value)
-            && serialized.len() <= MAX_RUNTIME_LIVE_LOG_LINE_BYTES
-        {
-            return format!("{serialized}\n");
-        }
-        let mut compact = serde_json::Map::new();
-        for key in ["timestamp", "pid", "event"] {
-            if let Some(value) = value.get(key) {
-                compact.insert(key.to_string(), value.clone());
+        materialize_nested_string_clips(&mut value)?;
+        if let Ok(serialized) = serde_json::to_string(&value) {
+            let plan = mojo_live_log_record::json_plan(serialized.len())?;
+            if !plan.compact_metadata {
+                return Ok(format!("{serialized}\n"));
             }
-        }
-        compact.insert(
-            "message".to_string(),
-            serde_json::Value::String("[live log record truncated]".to_string()),
-        );
-        if let Ok(serialized) = serde_json::to_string(&compact) {
-            return format!("{serialized}\n");
+            let mut compact = serde_json::Map::new();
+            for (key, include) in [
+                ("timestamp", plan.timestamp),
+                ("pid", plan.pid),
+                ("event", plan.event),
+            ] {
+                if include && let Some(value) = value.get(key) {
+                    compact.insert(key.to_string(), value.clone());
+                }
+            }
+            compact.insert(
+                "message".to_string(),
+                serde_json::Value::String("[live log record truncated]".to_string()),
+            );
+            if let Ok(serialized) = serde_json::to_string(&compact) {
+                return Ok(format!("{serialized}\n"));
+            }
         }
     }
 
-    let end = line
-        .char_indices()
-        .take_while(|(index, _)| *index < MAX_RUNTIME_LIVE_LOG_LINE_BYTES.saturating_sub(32))
-        .map(|(index, ch)| index + ch.len_utf8())
-        .last()
-        .unwrap_or(0);
-    format!("{} …[truncated]\n", &line[..end])
+    mojo_live_log_record::truncate_plain_text(line)
 }
 
-fn clip_json_strings(value: &mut serde_json::Value, max_bytes: usize) {
+fn materialize_nested_string_clips(value: &mut serde_json::Value) -> Result<(), MojoError> {
     match value {
-        serde_json::Value::String(text) if text.len() > max_bytes => {
-            let end = text
-                .char_indices()
-                .take_while(|(index, _)| *index < max_bytes)
-                .map(|(index, ch)| index + ch.len_utf8())
-                .last()
-                .unwrap_or(0);
-            text.truncate(end);
-            text.push_str(" …[truncated]");
+        serde_json::Value::String(text) => {
+            let end = mojo_live_log_record::nested_string_clip_end(text)?;
+            if end < text.len() {
+                text.truncate(end);
+                text.push_str(" …[truncated]");
+            }
         }
         serde_json::Value::Array(values) => {
             for value in values {
-                clip_json_strings(value, max_bytes);
+                materialize_nested_string_clips(value)?;
             }
         }
         serde_json::Value::Object(values) => {
             for value in values.values_mut() {
-                clip_json_strings(value, max_bytes);
+                materialize_nested_string_clips(value)?;
             }
         }
         serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
-        serde_json::Value::String(_) => {}
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -223,7 +220,7 @@ mod tests {
         let append_store = Arc::clone(&store);
         let append_path = path.clone();
         let append_thread = thread::spawn(move || {
-            append_store.append(&append_path, "event\n");
+            append_store.append(&append_path, "event\n").unwrap();
             done_tx.send(()).unwrap();
         });
 
@@ -242,7 +239,7 @@ mod tests {
     fn snapshot_contention_waits_for_a_coherent_live_state() {
         let store = Arc::new(RuntimeLiveLogStore::default());
         let path = PathBuf::from("runtime.log");
-        store.append(&path, "before\n");
+        store.append(&path, "before\n").unwrap();
         let state = store.state.lock().unwrap();
         let (snapshot_tx, snapshot_rx) = sync_channel(0);
         let snapshot_store = Arc::clone(&store);
@@ -303,7 +300,7 @@ mod tests {
         let path = Path::new("runtime.log");
 
         for _ in 0..(DEFAULT_RUNTIME_LIVE_LOG_MAX_ENTRIES + 10) {
-            store.append(path, "event\n");
+            store.append(path, "event\n").unwrap();
         }
 
         let snapshot = store.snapshot_after(path, 0, usize::MAX);
@@ -317,7 +314,7 @@ mod tests {
         let store = RuntimeLiveLogStore::default();
         let path = Path::new("runtime.log");
         for index in 0..3 {
-            store.append(path, &format!("event-{index}\n"));
+            store.append(path, &format!("event-{index}\n")).unwrap();
         }
 
         let first = store.snapshot_after(path, 0, 2);
@@ -336,7 +333,7 @@ mod tests {
         let path = Path::new("runtime.log");
 
         for _ in 0..1_000_000 {
-            store.append(path, "load profile busy\n");
+            store.append(path, "load profile busy\n").unwrap();
         }
 
         let snapshot = store.snapshot_after(path, 0, usize::MAX);
@@ -350,18 +347,113 @@ mod tests {
     }
 
     #[test]
-    fn oversized_json_line_is_clipped_without_breaking_json() {
+    fn oversized_nested_json_clips_array_and_object_strings_at_utf8_boundaries() {
         let store = RuntimeLiveLogStore::default();
         let path = Path::new("runtime.log");
-        let line = format!(
-            "{{\"event\":\"payload\",\"message\":\"{}\"}}\n",
-            "x".repeat(MAX_RUNTIME_LIVE_LOG_LINE_BYTES)
+        let ascii = "a".repeat(70_000);
+        let unicode = format!("{}é{}", "u".repeat(8 * 1024 - 1), "x".repeat(70_000));
+        let value = serde_json::json!({
+            "event": "nested",
+            "entries": [{"ascii": ascii}, [{"unicode": unicode}]],
+        });
+        let line = format!("{}\n", serde_json::to_string(&value).unwrap());
+        assert!(line.len() > 128 * 1024);
+        store.append(path, &line).unwrap();
+
+        let snapshot = store.snapshot_after(path, 0, 1);
+        let clipped = serde_json::from_str::<serde_json::Value>(&snapshot.entries[0].line).unwrap();
+        assert_eq!(
+            clipped["entries"][0]["ascii"].as_str().unwrap(),
+            format!("{} …[truncated]", "a".repeat(8 * 1024))
         );
-        store.append(path, &line);
+        assert_eq!(
+            clipped["entries"][1][0]["unicode"].as_str().unwrap(),
+            format!("{}é …[truncated]", "u".repeat(8 * 1024 - 1))
+        );
+    }
+
+    #[test]
+    fn oversized_serialized_json_uses_compact_selected_metadata() {
+        let store = RuntimeLiveLogStore::default();
+        let path = Path::new("runtime.log");
+        let mut value = serde_json::Map::new();
+        value.insert(
+            "timestamp".to_string(),
+            serde_json::json!("2026-01-01T00:00:00Z"),
+        );
+        value.insert("pid".to_string(), serde_json::json!(42));
+        value.insert("event".to_string(), serde_json::json!("e".repeat(70_000)));
+        value.insert("extra".to_string(), serde_json::json!("discarded"));
+        value.insert(
+            "k".repeat(128 * 1024 + 1),
+            serde_json::json!("unclipped key"),
+        );
+        let line = format!("{}\n", serde_json::to_string(&value).unwrap());
+        assert!(line.len() > 128 * 1024);
+        store.append(path, &line).unwrap();
 
         let snapshot = store.snapshot_after(path, 0, 1);
         let stored = &snapshot.entries[0].line;
-        assert!(stored.len() <= MAX_RUNTIME_LIVE_LOG_LINE_BYTES);
-        assert!(serde_json::from_str::<serde_json::Value>(stored).is_ok());
+        let compact = serde_json::from_str::<serde_json::Value>(stored).unwrap();
+        assert_eq!(
+            compact,
+            serde_json::json!({
+                "timestamp": "2026-01-01T00:00:00Z",
+                "pid": 42,
+                "event": format!("{} …[truncated]", "e".repeat(8 * 1024)),
+                "message": "[live log record truncated]",
+            })
+        );
+    }
+
+    #[test]
+    fn oversized_ascii_plain_text_keeps_exact_prefix_marker_and_newline() {
+        let store = RuntimeLiveLogStore::default();
+        let path = Path::new("runtime.log");
+        let line = "a".repeat(128 * 1024 + 1);
+        store.append(path, &line).unwrap();
+
+        let snapshot = store.snapshot_after(path, 0, 1);
+        assert_eq!(
+            snapshot.entries[0].line,
+            format!("{} …[truncated]\n", "a".repeat(128 * 1024 - 32))
+        );
+    }
+
+    #[test]
+    fn oversized_unicode_plain_text_keeps_codepoint_crossing_prefix_limit() {
+        let store = RuntimeLiveLogStore::default();
+        let path = Path::new("runtime.log");
+        let prefix = "a".repeat(128 * 1024 - 33);
+        let line = format!("{prefix}é{}", "tail".repeat(100));
+        store.append(path, &line).unwrap();
+
+        let snapshot = store.snapshot_after(path, 0, 1);
+        assert_eq!(
+            snapshot.entries[0].line,
+            format!("{prefix}é …[truncated]\n")
+        );
+    }
+
+    #[test]
+    fn within_boundary_live_log_line_is_passed_through_exactly() {
+        let store = RuntimeLiveLogStore::default();
+        let path = Path::new("runtime.log");
+        let line = "x".repeat(128 * 1024);
+        store.append(path, &line).unwrap();
+
+        let snapshot = store.snapshot_after(path, 0, 1);
+        assert_eq!(snapshot.entries[0].line, line);
+    }
+
+    #[test]
+    fn within_boundary_non_json_text_preserves_original_newlines() {
+        let store = RuntimeLiveLogStore::default();
+        let path = Path::new("runtime.log");
+        let line = "plain log\n\n";
+        store.append(path, line).unwrap();
+
+        let snapshot = store.snapshot_after(path, 0, 1);
+        assert_eq!(snapshot.entries[0].line, line);
     }
 }

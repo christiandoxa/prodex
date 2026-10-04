@@ -95,6 +95,14 @@
         "crates/prodex-profile-identity/src/lib.rs",
         "crates/prodex-state/src/lib.rs"
       ]
+    },
+    "runtime_policy_proxy_preset_resolution": {
+      "expanded_in": "0.435.4",
+      "consumer": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+      "consumer_marker": "runtime_tuning_proxy_preset_plan",
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_policy_preset.rs",
+      "rust_owner_before": "runtime-proxy preset defaults, environment-over-config precedence, and explicit override merging",
+      "rust_adapter_scope": "encode typed preset and optional-field inputs, then map the Mojo plan into runtime settings"
     }
   },
   "classification_legend": {
@@ -487,7 +495,7 @@
         "operations": [
           "runtime_tuning_defaults_kernel",
           "runtime_tuning_capacity_defaults",
-          "runtime_policy_proxy_preset_defaults",
+          "runtime_policy_proxy_preset_resolution",
           "runtime_scalar_config_policy"
         ]
       },
@@ -543,7 +551,8 @@
         "operations": [
           "quota_aggregation_kernel",
           "quota_capacity_lane_planning",
-          "quota_model_policy"
+          "quota_model_policy",
+          "quota_reset_epoch_precedence"
         ]
       },
       "mojo/prodex_core/candidate_decision.mojo": {
@@ -943,7 +952,8 @@
         "operations": [
           "provider_usage_extraction",
           "provider_usage_cost",
-          "provider_usage_merged_total"
+          "provider_usage_merged_total",
+          "provider_usage_sse_latest_present_merge"
         ]
       },
       {
@@ -1177,6 +1187,19 @@
         "role": "semantic",
         "operations": [
           "gemini_internal_instruction_leak_detection"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/live_log_record.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_live_log_record_bound",
+          "runtime_live_log_nested_string_clipping",
+          "runtime_live_log_json_fallback",
+          "runtime_live_log_plain_text_truncation"
         ]
       }
     ],
@@ -1701,6 +1724,29 @@
       "rust_adapter_scope": "upstream usage acquisition and bounded record conversion"
     },
     {
+      "name": "quota_reset_epoch_precedence",
+      "domain": "quota/reset-epoch",
+      "introduced_in": "0.435.4",
+      "baseline_state": "candidate",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_reset_epoch_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "consumer": "crates/prodex-quota/src/render/windows.rs",
+      "consumer_marker": "prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(",
+      "production_consumers": [
+        "crates/prodex-quota/src/render/windows.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
+      "rust_owner_before": "valid JSON reset candidate precedence followed by primary/secondary used-percent gates and reset fallback",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo and prodex-quota caller tests cover precedence, missing values, gates, conversions, and duplicate keys",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "serde_json parsing, typed candidate extraction, case-insensitive header-key acquisition, and numeric/string conversion"
+    },
+    {
       "name": "quota_model_policy",
       "domain": "quota/model-policy",
       "introduced_in": "0.432.3",
@@ -1884,22 +1930,22 @@
       "rust_adapter_scope": "profile-state observation and validated name reconstruction"
     },
     {
-      "name": "runtime_policy_proxy_preset_defaults",
+      "name": "runtime_policy_proxy_preset_resolution",
       "domain": "runtime-policy/capacity",
       "introduced_in": "0.420.0",
       "baseline_state": "candidate",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_runtime_proxy_preset_defaults_v1",
+      "mojo_entry": "prodex_runtime_proxy_preset_plan_v1",
       "mojo_source": "mojo/prodex_core/runtime_tuning.mojo",
       "consumer": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
-      "consumer_marker": "runtime_tuning_proxy_preset_defaults",
-      "production_reachability_test": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
-      "rust_owner_before": "runtime-proxy preset default normalization",
+      "consumer_marker": "runtime_tuning_proxy_preset_plan",
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_policy_preset.rs",
+      "rust_owner_before": "runtime-proxy preset defaults, environment-over-config precedence, and explicit override merging",
       "rust_state_after": "adapter-only",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "typed preset selection and validated scalar mapping"
+      "rust_adapter_scope": "encode typed preset and optional-field inputs, then map the Mojo plan into runtime settings"
     },
     {
       "name": "runtime_log_level_classification",
@@ -3273,6 +3319,29 @@
       "rust_owner_before": "total-token precedence and saturating input/output total fallback",
       "rust_test_oracle": "deleted; fixed tests cover explicit total, missing input, default missing output and u64 saturation",
       "rust_adapter_scope": "ProviderTokenUsage DTO API and Option<u64> mapping"
+    },
+    {
+      "domain": "provider/usage",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust SSE observation merge policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/provider_usage.mojo",
+      "consumer": "crates/prodex-provider-core/src/usage.rs",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/usage.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/provider_usage.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "provider_usage_sse_latest_present_merge",
+      "mojo_entry": "prodex_provider_usage_merge_latest_present_v1",
+      "consumer_marker": "prodex_mojo_core::provider_usage::merge_latest_present",
+      "rust_owner_before": "latest-present input, output, and total token precedence across parsed SSE event summaries",
+      "rust_test_oracle": "deleted; direct Mojo and provider caller tests cover partial updates, malformed/non-usage frames, [DONE], and empty streams",
+      "rust_adapter_scope": "UTF-8 validation, SSE framing, serde_json event parsing, and typed usage DTO materialization"
     },
     {
       "domain": "super-expose/protocol",
@@ -4981,6 +5050,98 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON acquisition and serialization, bounded Kiro ABI invocation, and UTF-8/JSON decoding"
+    },
+    {
+      "name": "runtime_live_log_record_bound",
+      "domain": "runtime-log/live-record",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust live-log record byte-bound pass-through decision",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_live_log_record_over_limit_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/live_log_record.mojo",
+      "consumer": "crates/prodex-runtime-log/src/live.rs",
+      "consumer_marker": "mojo_live_log_record::record_exceeds_bound",
+      "production_consumers": [
+        "crates/prodex-runtime-log/src/live.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
+      "rust_owner_before": "bounded_live_log_line pass-through threshold at 128 KiB",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; Mojo and runtime-log caller tests cover exact-bound and over-bound records",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "record byte-length projection and bounded live-log state materialization"
+    },
+    {
+      "name": "runtime_live_log_nested_string_clipping",
+      "domain": "runtime-log/live-record",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust recursive JSON string clipping at UTF-8 character boundaries",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_live_log_string_clip_end_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/live_log_record.mojo",
+      "consumer": "crates/prodex-runtime-log/src/live.rs",
+      "consumer_marker": "mojo_live_log_record::nested_string_clip_end",
+      "production_consumers": [
+        "crates/prodex-runtime-log/src/live.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
+      "rust_owner_before": "clip_json_strings recursive 8 KiB UTF-8-safe prefix calculation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct Mojo and runtime-log caller tests cover ASCII, Unicode, arrays, and objects",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "serde_json traversal, clipped string ownership, and marker materialization"
+    },
+    {
+      "name": "runtime_live_log_json_fallback",
+      "domain": "runtime-log/live-record",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust serialized-size fallback and selected JSON metadata decision",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_live_log_json_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/live_log_record.mojo",
+      "consumer": "crates/prodex-runtime-log/src/live.rs",
+      "consumer_marker": "mojo_live_log_record::json_plan",
+      "production_consumers": [
+        "crates/prodex-runtime-log/src/live.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
+      "rust_owner_before": "serialized JSON 128 KiB comparison and timestamp/pid/event compact fallback selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct Mojo and runtime-log caller tests cover the serialized oversize fallback and selected fields",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "serde_json serialization, selected-field materialization, and compact JSON serialization"
+    },
+    {
+      "name": "runtime_live_log_plain_text_truncation",
+      "domain": "runtime-log/live-record",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust plain-text UTF-8 prefix length and truncation tail decision",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_live_log_plain_text_truncate_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/live_log_record.mojo",
+      "consumer": "crates/prodex-runtime-log/src/live.rs",
+      "consumer_marker": "mojo_live_log_record::truncate_plain_text",
+      "production_consumers": [
+        "crates/prodex-runtime-log/src/live.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-log/src/live.rs",
+      "rust_owner_before": "bounded_live_log_line Unicode-safe prefix at record limit minus 32 bytes and exact marker/newline tail",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct Mojo and runtime-log caller tests cover ASCII, Unicode, exact marker, and newline",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "bounded byte buffer allocation and UTF-8 string ownership"
     }
   ],
   "rust_semantic_reductions": [
@@ -5292,27 +5453,50 @@
     {
       "file": "crates/prodex-runtime-policy/src/types.rs",
       "symbol": "fn settings(self) -> RuntimePolicyProxySettings",
-      "operation": "runtime_policy_proxy_preset_defaults",
+      "operation": "runtime_policy_proxy_preset_resolution",
       "previous_responsibility": "runtime-proxy preset default normalization",
-      "final_state": "adapter-only",
       "rust_before": "crates/prodex-runtime-policy/src/types.rs::RuntimePolicyProxyPreset::settings",
-      "rust_after": "adapter-only wrapper; Mojo owns the preset default table",
-      "mojo_owner": "mojo/prodex_core/runtime_tuning.mojo::prodex_runtime_proxy_preset_defaults_v1",
+      "rust_after": "the Rust preset default table was deleted; Mojo returns typed preset defaults",
+      "mojo_owner": "mojo/prodex_core/runtime_tuning.mojo::prodex_runtime_proxy_preset_plan_v1",
       "mojo_source": "mojo/prodex_core/runtime_tuning.mojo",
-      "mojo_entry": "prodex_runtime_proxy_preset_defaults_v1",
+      "mojo_entry": "prodex_runtime_proxy_preset_plan_v1",
       "production_consumer": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
-      "parity_test": "crates/prodex-runtime-policy/tests/src/runtime_proxy.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/runtime_policy_preset.rs",
       "cleanup_loc": 78,
+      "final_state": "deleted",
       "cleanup_source": {
-        "kind": "collapsed-adapter",
+        "kind": "deleted",
         "baseline_range": {
           "start": 672,
           "end": 751
-        },
-        "release_symbol": "fn settings(self) -> RuntimePolicyProxySettings",
-        "release_marker": "self.resolve()"
+        }
       },
-      "cleanup_evidence": "The former Rust preset default table collapsed to settings() -> resolve(); resolve() delegates preset values to prodex_mojo_core::runtime::runtime_tuning_proxy_preset_defaults."
+      "cleanup_evidence": "Rust preset default values were removed; the versioned Mojo preset plan returns those defaults as part of the complete policy decision."
+    },
+    {
+      "file": "crates/prodex-runtime-policy/src/types.rs",
+      "symbol": "pub fn with_effective_preset(",
+      "operation": "runtime_policy_proxy_preset_resolution",
+      "previous_responsibility": "environment-over-config preset precedence and explicit runtime-proxy field override merging",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-runtime-policy/src/types.rs::RuntimePolicyProxySettings::with_effective_preset and apply_non_preset_overrides",
+      "rust_after": "typed Mojo plan input/output adapter",
+      "mojo_owner": "mojo/prodex_core/runtime_tuning.mojo::prodex_runtime_proxy_preset_plan_v1",
+      "mojo_source": "mojo/prodex_core/runtime_tuning.mojo",
+      "mojo_entry": "prodex_runtime_proxy_preset_plan_v1",
+      "production_consumer": "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+      "parity_test": "crates/prodex-runtime-policy/src/lib.rs",
+      "cleanup_loc": 66,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 832,
+          "end": 900
+        },
+        "release_symbol": "pub fn with_effective_preset(",
+        "release_marker": "runtime_proxy_preset::RuntimePolicyProxySettings::resolve_effective_preset("
+      },
+      "cleanup_evidence": "Rust preset precedence and field merging were deleted. The public policy entry delegates to a typed adapter whose plan and merge decisions come from Mojo."
     },
     {
       "file": "crates/prodex-context/src/command_output/log_stream.rs",
@@ -5808,6 +5992,22 @@
         }
       },
       "cleanup_evidence": "The Rust token normalizer is deleted and no production copy remains outside the checked Mojo ABI."
+    },
+    {
+      "file": "crates/prodex-quota/src/render/windows.rs",
+      "symbol": "quota_reset_at_from_json_message",
+      "operation": "quota_reset_epoch_precedence",
+      "previous_responsibility": "ordered JSON reset candidate selection and exhaustion-gated reset preference",
+      "migrated_semantic_loc": 1,
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-quota/src/render/windows.rs::quota_reset_at_from_json_message",
+      "rust_after": "Serde acquisition and typed candidate projection delegated to Mojo precedence",
+      "mojo_owner": "mojo/prodex_core/quota.mojo::prodex_quota_reset_epoch_v1",
+      "mojo_source": "mojo/prodex_core/quota.mojo",
+      "mojo_entry": "prodex_quota_reset_epoch_v1",
+      "production_consumer": "crates/prodex-quota/src/render/windows.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
+      "performance": "one scalar v1 ABI call per JSON reset message"
     }
   ],
   "deleted_authoritative_operations": [

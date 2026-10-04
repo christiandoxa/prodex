@@ -12,12 +12,16 @@ comptime PROVIDER_USAGE_ABI_VERSION: Int64 = 1
 comptime PROVIDER_USAGE_OK: Int64 = 0
 comptime PROVIDER_USAGE_INVALID: Int64 = 1
 
+
 def usage_root_bounds(view: ProdexRichStringView) -> Tuple[Int64, Int64]:
     var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
     var end = deepseek_json_value_end(view, start, Int64(view.len), 0)
-    if end < 0 or deepseek_json_skip_ws(view, end, Int64(view.len)) != Int64(view.len):
+    if end < 0 or deepseek_json_skip_ws(view, end, Int64(view.len)) != Int64(
+        view.len
+    ):
         return (-1, -1)
     return (start, end)
+
 
 def usage_parse_u64(
     view: ProdexRichStringView, start: Int64, end: Int64
@@ -56,14 +60,18 @@ def usage_parse_u64(
         value = value * UInt64(10) + digit
     return (True, value)
 
+
 def usage_member_u64(
     view: ProdexRichStringView,
     object_start: Int64,
     object_end: Int64,
     key: StringSlice,
 ) -> Tuple[Bool, UInt64]:
-    var bounds = deepseek_json_object_member(view, object_start, object_end, key)
+    var bounds = deepseek_json_object_member(
+        view, object_start, object_end, key
+    )
     return usage_parse_u64(view, bounds[0], bounds[1])
+
 
 def usage_selected_object(
     view: ProdexRichStringView, root_start: Int64, root_end: Int64
@@ -92,27 +100,21 @@ def usage_selected_object(
         if usage[0] >= 0:
             return (usage[0], usage[1])
     return (root_start, root_end)
+
+
 def usage_input_tokens(
     view: ProdexRichStringView, start: Int64, end: Int64
 ) -> Tuple[Bool, UInt64]:
-    var value = usage_member_u64(
-        view, start, end, StringSlice("input_tokens")
-    )
+    var value = usage_member_u64(view, start, end, StringSlice("input_tokens"))
     if value[0]:
         return value
-    value = usage_member_u64(
-        view, start, end, StringSlice("prompt_tokens")
-    )
+    value = usage_member_u64(view, start, end, StringSlice("prompt_tokens"))
     if value[0]:
         return value
-    value = usage_member_u64(
-        view, start, end, StringSlice("promptTokens")
-    )
+    value = usage_member_u64(view, start, end, StringSlice("promptTokens"))
     if value[0]:
         return value
-    value = usage_member_u64(
-        view, start, end, StringSlice("inputTokens")
-    )
+    value = usage_member_u64(view, start, end, StringSlice("inputTokens"))
     if value[0]:
         return value
     value = usage_member_u64(
@@ -120,43 +122,35 @@ def usage_input_tokens(
     )
     return value
 
+
 def usage_output_tokens(
     view: ProdexRichStringView, start: Int64, end: Int64
 ) -> Tuple[Bool, UInt64]:
-    var value = usage_member_u64(
-        view, start, end, StringSlice("output_tokens")
-    )
+    var value = usage_member_u64(view, start, end, StringSlice("output_tokens"))
     if value[0]:
         return value
-    value = usage_member_u64(
-        view, start, end, StringSlice("completion_tokens")
-    )
+    value = usage_member_u64(view, start, end, StringSlice("completion_tokens"))
     if value[0]:
         return value
-    value = usage_member_u64(
-        view, start, end, StringSlice("completionTokens")
-    )
+    value = usage_member_u64(view, start, end, StringSlice("completionTokens"))
     if value[0]:
         return value
-    value = usage_member_u64(
-        view, start, end, StringSlice("outputTokens")
-    )
+    value = usage_member_u64(view, start, end, StringSlice("outputTokens"))
     return value
+
 
 def usage_total_tokens(
     view: ProdexRichStringView, start: Int64, end: Int64
 ) -> Tuple[Bool, UInt64]:
-    var value = usage_member_u64(
-        view, start, end, StringSlice("total_tokens")
-    )
+    var value = usage_member_u64(view, start, end, StringSlice("total_tokens"))
     if value[0]:
         return value
-    return usage_member_u64(
-        view, start, end, StringSlice("totalTokens")
-    )
+    return usage_member_u64(view, start, end, StringSlice("totalTokens"))
+
 
 def usage_flag(value: Bool) -> UInt64:
     return UInt64(1) if value else UInt64(0)
+
 
 @export("prodex_provider_usage_extract_v1")
 def prodex_provider_usage_extract_v1(
@@ -212,6 +206,8 @@ def prodex_provider_usage_extract_v1(
     out[4] = usage_flag(total[0])
     out[5] = total[1]
     return PROVIDER_USAGE_OK
+
+
 def usage_saturating_mul(left: UInt64, right: UInt64) -> UInt64:
     if left == 0 or right == 0:
         return UInt64(0)
@@ -219,10 +215,12 @@ def usage_saturating_mul(left: UInt64, right: UInt64) -> UInt64:
         return UInt64(18446744073709551615)
     return left * right
 
+
 def usage_saturating_add(left: UInt64, right: UInt64) -> UInt64:
     if UInt64(18446744073709551615) - left < right:
         return UInt64(18446744073709551615)
     return left + right
+
 
 @export("prodex_provider_usage_cost_v1")
 def prodex_provider_usage_cost_v1(
@@ -258,7 +256,8 @@ def prodex_provider_usage_cost_v1(
     if output_present == 1 and output_rate_present == 1:
         total = usage_saturating_add(
             total,
-            usage_saturating_mul(output_tokens, output_rate) // UInt64(1_000_000),
+            usage_saturating_mul(output_tokens, output_rate)
+            // UInt64(1_000_000),
         )
         known = True
 
@@ -268,6 +267,7 @@ def prodex_provider_usage_cost_v1(
     result[0] = usage_flag(known)
     result[1] = total
     return PROVIDER_USAGE_OK
+
 
 @export("prodex_provider_usage_merged_total_v1")
 def prodex_provider_usage_merged_total_v1(
@@ -305,4 +305,75 @@ def prodex_provider_usage_merged_total_v1(
     )
     result[0] = usage_flag(known)
     result[1] = total
+    return PROVIDER_USAGE_OK
+
+
+def usage_latest_present_value(
+    previous_present: Int64,
+    previous_tokens: UInt64,
+    incoming_present: Int64,
+    incoming_tokens: UInt64,
+) -> Tuple[Bool, UInt64]:
+    if incoming_present == 1:
+        return (True, incoming_tokens)
+    return (previous_present == 1, previous_tokens)
+
+
+@export("prodex_provider_usage_merge_latest_present_v1")
+def prodex_provider_usage_merge_latest_present_v1(
+    abi_version: Int64,
+    previous_input_present: Int64,
+    previous_input_tokens: UInt64,
+    incoming_input_present: Int64,
+    incoming_input_tokens: UInt64,
+    previous_output_present: Int64,
+    previous_output_tokens: UInt64,
+    incoming_output_present: Int64,
+    incoming_output_tokens: UInt64,
+    previous_total_present: Int64,
+    previous_total_tokens: UInt64,
+    incoming_total_present: Int64,
+    incoming_total_tokens: UInt64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != PROVIDER_USAGE_ABI_VERSION
+        or result_address == 0
+        or (previous_input_present != 0 and previous_input_present != 1)
+        or (incoming_input_present != 0 and incoming_input_present != 1)
+        or (previous_output_present != 0 and previous_output_present != 1)
+        or (incoming_output_present != 0 and incoming_output_present != 1)
+        or (previous_total_present != 0 and previous_total_present != 1)
+        or (incoming_total_present != 0 and incoming_total_present != 1)
+    ):
+        return PROVIDER_USAGE_INVALID
+
+    var input = usage_latest_present_value(
+        previous_input_present,
+        previous_input_tokens,
+        incoming_input_present,
+        incoming_input_tokens,
+    )
+    var output = usage_latest_present_value(
+        previous_output_present,
+        previous_output_tokens,
+        incoming_output_present,
+        incoming_output_tokens,
+    )
+    var total = usage_latest_present_value(
+        previous_total_present,
+        previous_total_tokens,
+        incoming_total_present,
+        incoming_total_tokens,
+    )
+
+    var result = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[0] = usage_flag(input[0])
+    result[1] = input[1]
+    result[2] = usage_flag(output[0])
+    result[3] = output[1]
+    result[4] = usage_flag(total[0])
+    result[5] = total[1]
     return PROVIDER_USAGE_OK
