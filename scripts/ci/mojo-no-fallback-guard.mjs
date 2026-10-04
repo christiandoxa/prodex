@@ -34,6 +34,10 @@ const CLI_DEFAULT_RUN_ABI_FILE = "crates/prodex-mojo-core/src/launch.rs";
 const CLI_DEFAULT_RUN_MOJO_FILE = "mojo/prodex_core/launch_args.mojo";
 const CLI_DEFAULT_RUN_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/launch_args.rs";
 const CLI_DEFAULT_RUN_CALLER_TEST_FILE = "crates/prodex-cli/tests/src/shortcuts.rs";
+const SMART_CONTEXT_CAPSULE_ORDER_FILE = "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs";
+const SMART_CONTEXT_CAPSULE_ARTIFACTS_FILE = "crates/prodex-runtime-proxy/src/smart_context/normalization/artifacts.rs";
+const SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/smart_context_capsule_order.rs";
+const SMART_CONTEXT_CAPSULE_ORDER_MOJO_FILE = "mojo/prodex_core/smart_context_capsule_order.mojo";
 const DEEPSEEK_INPUT_HISTORY_FILE = "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs";
 const PRESIDIO_LOCAL_REDACTION_FILE = "crates/prodex-app/src/runtime_proxy/presidio/local.rs";
 const LIVE_LOG_RECORD_FILE = "crates/prodex-runtime-log/src/live.rs";
@@ -63,6 +67,9 @@ const PROMOTED_FILES = [
   LIVE_LOG_RECORD_ADAPTER_FILE,
   LIVE_LOG_RECORD_MOJO_FILE,
   LIVE_LOG_RECORD_DIRECT_TEST_FILE,
+  SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE,
+  SMART_CONTEXT_CAPSULE_ORDER_MOJO_FILE,
+  SMART_CONTEXT_CAPSULE_ARTIFACTS_FILE,
   "crates/prodex-app/src/app_commands/log_throughput_state.rs",
   "crates/prodex-mojo-core/src/log_throughput_policy.rs",
   "crates/prodex-runtime-log/src/retention.rs",
@@ -997,6 +1004,65 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const smartContextCapsuleOrderViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SMART_CONTEXT_CAPSULE_ORDER_FILE) {
+      const body = contents.match(
+        /\bpub\(in crate::smart_context\) fn smart_context_select_memory_capsules_impl\([^]*?^\}/mu,
+      )?.[0] ?? "";
+      const violations = [];
+      if (!body.includes("prodex_mojo_core::rich::order_smart_context_capsules(")) {
+        violations.push(`${filePath}: memory-capsule ordering must use Mojo`);
+      }
+      if (!body.includes(".chunks(65_536)")) {
+        violations.push(`${filePath}: memory-capsule admission must retain 65,536-item batches`);
+      }
+      if (FEATURE_OFF_RUST_PATH.test(body)) {
+        violations.push(`${filePath}: memory-capsule ordering cannot have a feature-off Rust path`);
+      }
+      if (/\.sort(?:_by_key|_unstable_by_key|_unstable|_by)?\s*\(|smart_context_capsule_order\s*\(/u.test(body)) {
+        violations.push(`${filePath}: contains restored Rust memory-capsule ordering policy`);
+      }
+      return violations;
+    }
+    if (filePath === SMART_CONTEXT_CAPSULE_ARTIFACTS_FILE &&
+        /\bfn\s+smart_context_capsule_order\s*\(/u.test(contents)) {
+      return [`${filePath}: contains restored Rust memory-capsule ordering policy`];
+    }
+    if (filePath === SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE) {
+      const violations = [];
+      if (!contents.includes("prodex_mojo_smart_context_capsule_order_v1(")) {
+        violations.push(`${filePath}: memory-capsule order adapter must call the versioned Mojo ABI`);
+      }
+      if (!contents.includes("input.id.as_ptr()") ||
+          !contents.includes("i64::try_from(input.id.len())") ||
+          !contents.includes("SMART_CONTEXT_CAPSULE_ORDER_MAX_COUNT")) {
+        violations.push(`${filePath}: memory-capsule ABI must use count-bounded per-ID pointers and checked lengths`);
+      }
+      if (/SMART_CONTEXT_CAPSULE_ORDER_MAX_ID_BYTES|4\s*\*\s*1024\s*\*\s*1024|4_?194_?304|\.as_bytes\s*\(/u.test(contents)) {
+        violations.push(`${filePath}: memory-capsule ABI must not cap or copy aggregate ID bytes`);
+      }
+      return violations;
+    }
+    if (filePath === SMART_CONTEXT_CAPSULE_ORDER_MOJO_FILE) {
+      const required = [
+        '@export("prodex_mojo_smart_context_capsule_order_v1")',
+        "def smart_context_capsule_order_before(",
+        "SMART_CONTEXT_CAPSULE_ORDER_MAX_COUNT: Int64 = 65_537",
+        "id_addresses_address: UInt",
+        "id_lengths_address: UInt",
+        "length < 0",
+        "(length > 0 and address == 0)",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: memory-capsule ordering must remain Mojo-owned (${marker})`);
+      if (/SMART_CONTEXT_CAPSULE_ORDER_MAX_ID_BYTES|4\s*\*\s*1024\s*\*\s*1024|4_?194_?304/u.test(contents)) {
+        violations.push(`${filePath}: memory-capsule ABI must not cap aggregate ID bytes`);
+      }
+      return violations;
+    }
+    return [];
+  });
   const markerViolations = [
     ...files.flatMap(([filePath, contents]) =>
       FORBIDDEN_MARKERS.filter((marker) => contents.includes(marker)).map(
@@ -4441,7 +4507,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -5430,6 +5496,52 @@ function selfTest() {
     ]]).join("\n"),
     /restored Rust SSE usage merge policy/u,
   );
+  const capsuleOrderBody = [
+    "pub(in crate::smart_context) fn smart_context_select_memory_capsules_impl(input: Vec<Capsule>) {",
+    "    let order = prodex_mojo_core::rich::order_smart_context_capsules(&inputs);",
+    "    for batch in capsules.chunks(65_536) {}",
+    "}",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SMART_CONTEXT_CAPSULE_ORDER_FILE, capsuleOrderBody]]), []);
+  assert.match(findViolations([[SMART_CONTEXT_CAPSULE_ORDER_FILE,
+    capsuleOrderBody.replace("order_smart_context_capsules", "capsules.sort_by") + "\n    capsules.sort_by(order);",
+  ]]).join("\n"), /restored Rust memory-capsule ordering policy/u);
+  assert.match(findViolations([[SMART_CONTEXT_CAPSULE_ORDER_FILE,
+    capsuleOrderBody.replace(
+      "let order = prodex_mojo_core::rich::order_smart_context_capsules(&inputs);",
+      '#[cfg(not(feature = "mojo"))] let order = rust_order(&inputs);',
+    ),
+  ]]).join("\n"), /feature-off Rust path/u);
+  assert.match(findViolations([[SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE,
+    "pub fn order_smart_context_capsules() {}"]]).join("\n"), /versioned Mojo ABI/u);
+  const capsuleOrderAdapter = [
+    "const SMART_CONTEXT_CAPSULE_ORDER_MAX_COUNT: usize = 65_537;",
+    "id_addresses.push(mojo_pointer_address(input.id.as_ptr()));",
+    "id_lengths.push(i64::try_from(input.id.len()).map_err(|_| MojoError::InvalidInput)?);",
+    "prodex_mojo_smart_context_capsule_order_v1(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE, capsuleOrderAdapter]]), []);
+  assert.match(findViolations([[SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE,
+    capsuleOrderAdapter.replace("input.id.as_ptr()", "input.id.as_bytes().as_ptr()"),
+  ]]).join("\n"), /must use count-bounded per-ID pointers and checked lengths/u);
+  assert.match(findViolations([[SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE,
+    `${capsuleOrderAdapter}\nconst SMART_CONTEXT_CAPSULE_ORDER_MAX_ID_BYTES = 4 * 1024 * 1024;`,
+  ]]).join("\n"), /must not cap or copy aggregate ID bytes/u);
+  const capsuleOrderMojo = [
+    '@export("prodex_mojo_smart_context_capsule_order_v1")',
+    "SMART_CONTEXT_CAPSULE_ORDER_MAX_COUNT: Int64 = 65_537",
+    "def smart_context_capsule_order_before(",
+    "id_addresses_address: UInt",
+    "id_lengths_address: UInt",
+    "length < 0",
+    "(length > 0 and address == 0)",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SMART_CONTEXT_CAPSULE_ORDER_MOJO_FILE, capsuleOrderMojo]]), []);
+  assert.match(findViolations([[SMART_CONTEXT_CAPSULE_ORDER_MOJO_FILE,
+    `${capsuleOrderMojo}\ncomptime SMART_CONTEXT_CAPSULE_ORDER_MAX_ID_BYTES = 4 * 1024 * 1024`,
+  ]]).join("\n"), /must not cap aggregate ID bytes/u);
+  assert.match(findViolations([[SMART_CONTEXT_CAPSULE_ORDER_MOJO_FILE,
+    '@export("prodex_mojo_smart_context_capsule_order_v1")']]).join("\n"), /must remain Mojo-owned/u);
 }
 
 async function main() {

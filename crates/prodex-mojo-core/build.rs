@@ -505,6 +505,7 @@ fn selected_sources() -> Vec<&'static str> {
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_RUNTIME").is_some()
     {
+        sources.push("../../mojo/prodex_core/smart_context_capsule_order.mojo");
         sources.push("../../mojo/prodex_core/smart_context_normalization.mojo");
         sources.push("../../mojo/prodex_core/smart_context_artifact_ref.mojo");
         sources.push("../../mojo/prodex_core/smart_context_markers.mojo");
