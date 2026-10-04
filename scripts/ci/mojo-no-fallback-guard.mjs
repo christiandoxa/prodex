@@ -890,7 +890,10 @@ const PROVIDER_PRECOMMIT_FILE = "crates/prodex-app/src/runtime_launch/proxy_star
 const PROVIDER_BRIDGE_METADATA_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs";
 const PROVIDER_BRIDGE_ROUTING_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs";
 const LOCAL_REWRITE_UPSTREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs";
+const LOCAL_REWRITE_PIPELINE_DISPATCH_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch.rs";
+const LOCAL_REWRITE_BINDING_CANDIDATE_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/binding_candidate.rs";
 const NATIVE_FIRST_ERROR_CLASS_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/error_class.rs";
+const LINEAGE_BINDING_CANDIDATE_FILE = "crates/prodex-mojo-core/src/runtime_lineage/binding_candidate.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
 const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
@@ -3797,6 +3800,36 @@ export function findViolations(files) {
     return [];
   });
   const runtimeLineageViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === LOCAL_REWRITE_UPSTREAM_FILE) {
+      const body = contents.match(/pub\(super\) fn\s+candidate_allowed\([^]*?^\}/mu)?.[0];
+      const violations = body?.includes("binding_candidate::candidate_allowed(")
+        ? []
+        : [filePath + ": local rewrite credential admission must delegate to the binding-candidate adapter"];
+      if (body?.includes("binding_identity.as_ref() == Some(identity)") || body?.includes("profile_name == RUNTIME_LOCAL_REWRITE_PROFILE")) {
+        violations.push(filePath + ": contains restored Rust local rewrite binding-candidate policy");
+      }
+      return violations;
+    }
+    if (filePath === LOCAL_REWRITE_BINDING_CANDIDATE_FILE) {
+      const body = contents.match(/pub\(super\) fn\s+candidate_allowed\([^]*?^\}/mu)?.[0];
+      const violations = body?.includes("runtime_lineage::local_rewrite_candidate_allowed(")
+        ? []
+        : [filePath + ": local rewrite credential admission must use the Mojo lineage candidate policy"];
+      if (body?.includes("binding_identity.as_ref() == Some(identity)") || body?.includes("profile_name == RUNTIME_LOCAL_REWRITE_PROFILE")) {
+        violations.push(filePath + ": contains restored Rust local rewrite binding-candidate policy");
+      }
+      return violations;
+    }
+    if (filePath === LOCAL_REWRITE_PIPELINE_DISPATCH_FILE) {
+      const body = contents.match(/fn\s+runtime_local_rewrite_validate_bound_provider\([^]*?^\}/mu)?.[0];
+      const violations = body?.includes("runtime_lineage::dispatch_binding_candidate_decision(")
+        ? []
+        : [filePath + ": dispatch hard-binding validation must use the Mojo lineage candidate policy"];
+      if (body?.includes("bound.provider() != selected_provider") || body?.includes("selected_identity.is_some_and(|selected| selected != bound)")) {
+        violations.push(filePath + ": contains restored Rust dispatch binding identity policy");
+      }
+      return violations;
+    }
     if (filePath === "crates/prodex-runtime-state/src/lineage.rs") {
       const required = [
         "prodex_mojo_core::runtime_lineage::component_valid(",
@@ -3825,10 +3858,25 @@ export function findViolations(files) {
         "prodex_runtime_lineage_classify_v1(",
         "prodex_runtime_lineage_build_v1(",
         "prodex_runtime_lineage_parts_v1(",
+        "pub use binding_candidate::{",
+        "local_rewrite_candidate_allowed,",
+        "dispatch_binding_candidate_decision,",
       ];
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": runtime lineage ABI adapter must retain " + call);
+    }
+    if (filePath === LINEAGE_BINDING_CANDIDATE_FILE) {
+      const required = [
+        "prodex_runtime_lineage_binding_candidate_allowed_v1(",
+        "pub fn local_rewrite_candidate_allowed(",
+        "pub fn dispatch_binding_candidate_decision(",
+        "fn local_rewrite_candidate_requires_exact_profile_and_identity()",
+        "fn dispatch_binding_preserves_provider_only_and_exact_identity_rules()",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": binding-candidate ABI adapter must retain " + call);
     }
     return [];
   });

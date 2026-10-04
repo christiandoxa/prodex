@@ -20,8 +20,8 @@ use super::super::local_rewrite_upstream::send_runtime_local_rewrite_upstream_re
 use super::super::local_rewrite_upstream::{
     RuntimeLocalRewriteAcceptedBinding, RuntimeLocalRewriteUpstreamResponse,
     RuntimeLocalRewriteUpstreamResult, runtime_local_rewrite_binding_recorder,
-    runtime_local_rewrite_previous_response_id, runtime_local_rewrite_request_bound_binding,
-    runtime_local_rewrite_route_kind,
+    runtime_local_rewrite_mojo_binding_identity, runtime_local_rewrite_previous_response_id,
+    runtime_local_rewrite_request_bound_binding, runtime_local_rewrite_route_kind,
 };
 use super::super::provider_bridge::{RuntimeProviderRouteKind, runtime_provider_route_kind};
 use super::super::provider_bridge::{
@@ -331,14 +331,24 @@ fn runtime_local_rewrite_validate_bound_provider(
     selected_provider: ProviderId,
     selected_identity: Option<&RuntimeProviderBindingIdentity>,
 ) -> Result<(), anyhow::Error> {
-    let Some(binding) = runtime_local_rewrite_request_bound_binding(shared, request)? else {
-        return Ok(());
-    };
-    if let Some(bound) = binding.binding_identity.as_ref() {
-        if bound.provider() != selected_provider {
+    let binding = runtime_local_rewrite_request_bound_binding(shared, request)?;
+    match prodex_mojo_core::runtime_lineage::dispatch_binding_candidate_decision(
+        prodex_mojo_core::runtime_lineage::RuntimeLineageDispatchBindingCandidate {
+            selected_provider_id: selected_provider as i64,
+            bound_identity: binding
+                .as_ref()
+                .and_then(|binding| binding.binding_identity.as_ref())
+                .map(runtime_local_rewrite_mojo_binding_identity),
+            selected_identity: selected_identity.map(runtime_local_rewrite_mojo_binding_identity),
+        },
+    )
+    .expect("Mojo dispatch binding-candidate policy returned invalid output")
+    {
+        prodex_mojo_core::runtime_lineage::RuntimeLineageDispatchBindingDecision::Allowed => {}
+        prodex_mojo_core::runtime_lineage::RuntimeLineageDispatchBindingDecision::ProviderUnavailable => {
             anyhow::bail!("bound continuation provider is unavailable");
         }
-        if selected_identity.is_some_and(|selected| selected != bound) {
+        prodex_mojo_core::runtime_lineage::RuntimeLineageDispatchBindingDecision::IdentityUnavailable => {
             anyhow::bail!("bound continuation provider identity is unavailable");
         }
     }
