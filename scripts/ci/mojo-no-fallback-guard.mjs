@@ -49,6 +49,11 @@ const OPERATIONAL_HISTOGRAM_CALLER_FILE = "crates/prodex-app/src/runtime_operati
 const OPERATIONAL_HISTOGRAM_ADAPTER_FILE = "crates/prodex-mojo-core/src/operational_metrics.rs";
 const OPERATIONAL_HISTOGRAM_MOJO_FILE = "mojo/prodex_core/operational_metrics.mojo";
 const OPERATIONAL_HISTOGRAM_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/operational_metrics.rs";
+const UPDATE_NOTICE_VERSION_CALLER_FILE = "crates/prodex-update-notice/src/lib.rs";
+const UPDATE_NOTICE_VERSION_UPDATER_FILE = "crates/prodex-update-notice/src/updater.rs";
+const UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE = "crates/prodex-update-notice/src/release_version.rs";
+const UPDATE_NOTICE_VERSION_ADAPTER_FILE = "crates/prodex-mojo-core/src/update_notice_policy.rs";
+const UPDATE_NOTICE_VERSION_MOJO_FILE = "mojo/prodex_core/update_notice_policy.mojo";
 const PROMOTED_FILES = [
   LIVE_LOG_RECORD_FILE,
   LIVE_LOG_RECORD_ADAPTER_FILE,
@@ -83,12 +88,15 @@ const PROMOTED_FILES = [
   "crates/prodex-mcp-stdio/src/lib.rs",
   "crates/prodex-shared-codex-fs/src/history.rs",
   "crates/prodex-mojo-core/src/shared_history_policy.rs",
-  "crates/prodex-update-notice/src/lib.rs",
+  UPDATE_NOTICE_VERSION_CALLER_FILE,
+  UPDATE_NOTICE_VERSION_UPDATER_FILE,
+  UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE,
   "crates/prodex-shared-codex-fs/src/image_attachments.rs",
   "crates/prodex-runtime-cookies/src/lib.rs",
   "crates/prodex-mojo-core/src/runtime_cookie_policy.rs",
   "crates/prodex-mojo-core/src/shared_attachment_policy.rs",
-  "crates/prodex-mojo-core/src/update_notice_policy.rs",
+  UPDATE_NOTICE_VERSION_ADAPTER_FILE,
+  UPDATE_NOTICE_VERSION_MOJO_FILE,
   "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
   "crates/prodex-mcp-stdio/src/lib.rs",
   "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
@@ -1253,11 +1261,14 @@ export function findViolations(files) {
     return [];
   });
   const updateNoticeMigrationViolations = files.flatMap(([filePath, contents]) => {
-    if (filePath === "crates/prodex-update-notice/src/lib.rs") {
+    if (filePath === UPDATE_NOTICE_VERSION_CALLER_FILE) {
       const required = [
         "update_notice_policy::should_emit_notice(",
         "update_notice_policy::install_channel(",
         "update_notice_policy::cache_is_fresh(",
+        "release_version_is_valid(",
+        "map_update_notice_mojo(",
+        "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -1266,14 +1277,61 @@ export function findViolations(files) {
         /replace\('\\\\',\s*"\/"\)/u.test(contents)
         || /normalized_path\.contains/u.test(contents)
         || /now\.saturating_sub\(cached_checked_at\)/u.test(contents)
+        || /semver::Version|Version::parse|parse_release_version|candidate\s*>\s*current/u.test(contents)
       ) {
         violations.push(filePath + ": contains restored Rust update-notice semantics");
       }
       return violations;
     }
-    if (filePath === "crates/prodex-mojo-core/src/update_notice_policy.rs" &&
-        !contents.includes("prodex_update_notice_policy_v1(")) {
-      return [filePath + ": update-notice ABI adapter must retain prodex_update_notice_policy_v1("];
+    if (filePath === UPDATE_NOTICE_VERSION_UPDATER_FILE) {
+      const required = [
+        "release_version_is_valid(",
+        "compare_release_versions(",
+        "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": release-version caller must retain " + call);
+      if (/semver::Version|Version::parse|parse_release_version|cmp_precedence/u.test(contents)) {
+        violations.push(filePath + ": contains restored Rust release-version semantics");
+      }
+      return violations;
+    }
+    if (filePath === UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE) {
+      const required = [
+        "update_notice_policy::release_version_is_valid(",
+        "update_notice_policy::compare_release_versions(",
+        "ReleaseVersionOrder::Total",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": release-version adapter must retain " + call);
+      if (/semver::Version|Version::parse|parse_release_version|cmp_precedence/u.test(contents)) {
+        violations.push(filePath + ": contains restored Rust release-version semantics");
+      }
+      return violations;
+    }
+    if (filePath === UPDATE_NOTICE_VERSION_ADAPTER_FILE) {
+      const required = [
+        "prodex_update_notice_policy_v1(",
+        "release_version_is_valid(",
+        "compare_release_versions(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": update-notice ABI adapter must retain " + call);
+    }
+    if (filePath === UPDATE_NOTICE_VERSION_MOJO_FILE) {
+      const required = [
+        '@export("prodex_update_notice_policy_v1")',
+        "update_notice_parse_release_version(",
+        "update_notice_release_version_compare(",
+        "UPDATE_NOTICE_RELEASE_VERSION_VALID",
+        "UPDATE_NOTICE_RELEASE_VERSION_COMPARE",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": Mojo release-version owner must retain " + call);
     }
     return [];
   });
@@ -4412,6 +4470,59 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  const updateNoticeVersionCaller = [
+    "update_notice_policy::should_emit_notice(",
+    "update_notice_policy::install_channel(",
+    "update_notice_policy::cache_is_fresh(",
+    "release_version_is_valid(",
+    "map_update_notice_mojo(",
+    "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
+  ].join("\n");
+  const updateNoticeVersionUpdater = [
+    "release_version_is_valid(",
+    "compare_release_versions(",
+    "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
+  ].join("\n");
+  const updateNoticeVersionAdapter = [
+    "prodex_update_notice_policy_v1(",
+    "release_version_is_valid(",
+    "compare_release_versions(",
+  ].join("\n");
+  const updateNoticeVersionAdapterModule = [
+    "update_notice_policy::release_version_is_valid(",
+    "update_notice_policy::compare_release_versions(",
+    "ReleaseVersionOrder::Total",
+  ].join("\n");
+  const updateNoticeVersionMojo = [
+    '@export("prodex_update_notice_policy_v1")',
+    "update_notice_parse_release_version(",
+    "update_notice_release_version_compare(",
+    "UPDATE_NOTICE_RELEASE_VERSION_VALID",
+    "UPDATE_NOTICE_RELEASE_VERSION_COMPARE",
+  ].join("\n");
+  const updateNoticeVersionFiles = [
+    [UPDATE_NOTICE_VERSION_CALLER_FILE, updateNoticeVersionCaller],
+    [UPDATE_NOTICE_VERSION_UPDATER_FILE, updateNoticeVersionUpdater],
+    [UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE, updateNoticeVersionAdapterModule],
+    [UPDATE_NOTICE_VERSION_ADAPTER_FILE, updateNoticeVersionAdapter],
+    [UPDATE_NOTICE_VERSION_MOJO_FILE, updateNoticeVersionMojo],
+  ];
+  assert.deepEqual(findViolations(updateNoticeVersionFiles), []);
+  assert.match(findViolations([[UPDATE_NOTICE_VERSION_CALLER_FILE,
+    updateNoticeVersionCaller + "\nVersion::parse(text)"]]).join("\n"),
+  /restored Rust update-notice semantics/u);
+  assert.match(findViolations([[UPDATE_NOTICE_VERSION_UPDATER_FILE,
+    updateNoticeVersionUpdater.replace(
+      "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
+      "Err(_) => return Ok(None)",
+    )]]).join("\n"),
+  /release-version caller must retain/u);
+  assert.match(findViolations([[UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE,
+    updateNoticeVersionAdapterModule.replace("compare_release_versions(", "old_compare(")]]).join("\n"),
+  /release-version adapter must retain/u);
+  assert.match(findViolations([[UPDATE_NOTICE_VERSION_MOJO_FILE,
+    updateNoticeVersionMojo.replace("update_notice_parse_release_version(", "old_rust_parser(")]]).join("\n"),
+  /Mojo release-version owner must retain/u);
   const liveLogRecordConsumer = [
     "fn bounded_live_log_line(line: &str) -> Result<String, MojoError> {",
     "record_exceeds_bound(line.len())?",
