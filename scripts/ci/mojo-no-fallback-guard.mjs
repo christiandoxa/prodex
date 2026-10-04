@@ -45,6 +45,10 @@ const RUNTIME_POLICY_PRESET_CALLER_FILE = "crates/prodex-runtime-policy/src/lib.
 const RUNTIME_POLICY_PRESET_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_decisions/preset.rs";
 const RUNTIME_POLICY_PRESET_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_policy_preset.rs";
 const RUNTIME_POLICY_PRESET_MOJO_FILE = "mojo/prodex_core/runtime_tuning.mojo";
+const OPERATIONAL_HISTOGRAM_CALLER_FILE = "crates/prodex-app/src/runtime_operational_metrics.rs";
+const OPERATIONAL_HISTOGRAM_ADAPTER_FILE = "crates/prodex-mojo-core/src/operational_metrics.rs";
+const OPERATIONAL_HISTOGRAM_MOJO_FILE = "mojo/prodex_core/operational_metrics.mojo";
+const OPERATIONAL_HISTOGRAM_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/operational_metrics.rs";
 const PROMOTED_FILES = [
   LIVE_LOG_RECORD_FILE,
   LIVE_LOG_RECORD_ADAPTER_FILE,
@@ -4313,6 +4317,29 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
+  const operationalHistogramViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === OPERATIONAL_HISTOGRAM_CALLER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      return production.includes("histogram_bucket_bounds(name)") &&
+        !/\bruntime_operational_histogram_bounds\s*\(/u.test(production) &&
+        !/\b120_000_000\b/u.test(production)
+        ? []
+        : [`${filePath}: histogram bucket planning must use Mojo without a Rust policy copy`];
+    }
+    if (filePath === OPERATIONAL_HISTOGRAM_ADAPTER_FILE &&
+        !contents.includes("prodex_mojo_operational_histogram_bounds_v1(")) {
+      return [`${filePath}: histogram bucket adapter must call the versioned Mojo ABI`];
+    }
+    if (filePath === OPERATIONAL_HISTOGRAM_MOJO_FILE &&
+        !contents.includes('@export("prodex_mojo_operational_histogram_bounds_v1")')) {
+      return [`${filePath}: histogram bucket planning must remain in Mojo`];
+    }
+    if (filePath === OPERATIONAL_HISTOGRAM_ABI_TEST_FILE &&
+        !contents.includes("operational_histogram_bucket_plan_is_mojo_owned")) {
+      return [`${filePath}: direct required-Mojo histogram bucket coverage is required`];
+    }
+    return [];
+  });
   return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
@@ -4353,7 +4380,7 @@ export function findViolations(files) {
     ...quotaWindowViolations, ...quotaResetEpochViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations, ...runtimeTuningViolations,
-    ...defaultFeatureViolations];
+    ...defaultFeatureViolations, ...operationalHistogramViolations];
 }
 
 async function promotedFiles() {

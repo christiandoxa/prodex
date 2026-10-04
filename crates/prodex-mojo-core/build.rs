@@ -547,6 +547,7 @@ fn selected_sources() -> Vec<&'static str> {
     {
         sources.push("../../mojo/prodex_core/observability_labels.mojo");
         sources.push("../../mojo/prodex_core/telemetry_label.mojo");
+        sources.push("../../mojo/prodex_core/operational_metrics.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_PROVIDER_CONSTRAINTS").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
