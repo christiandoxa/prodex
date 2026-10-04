@@ -1,11 +1,7 @@
 use crate::reports::InfoTokenUsageEvent;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
-
-const OUTPUT_THROUGHPUT_WINDOW: Duration = Duration::from_secs(2);
-const OUTPUT_THROUGHPUT_MAX_STREAMS: usize = 64;
-const OUTPUT_THROUGHPUT_MAX_OBSERVATIONS: usize = 256;
+use std::time::Instant;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 struct OutputThroughputKey {
@@ -75,38 +71,28 @@ impl OutputThroughput {
             profile: event.profile.clone(),
             request: event.request,
         };
-        let Some(generation_ms) = event.generation_ms.filter(|duration| *duration > 0) else {
-            return;
-        };
-        if event.output_tokens == 0 {
-            return;
-        }
-        let sample_plan = prodex_mojo_core::log_throughput_policy::sample_plan(
+        let observation = output_throughput_observation(event);
+        let duplicate_path = self.duplicate_observation_path(&observation, log_path);
+        let sample_plan = prodex_mojo_core::log_throughput_policy::observation_plan(
+            event.generation_ms,
             self.streams
                 .get(&key)
                 .and_then(|stream| stream.samples.back())
                 .map(|(_, previous_tokens, previous_generation_ms)| {
                     (*previous_tokens, *previous_generation_ms)
                 }),
+            duplicate_path.is_some(),
             event.output_tokens,
-            generation_ms,
         )
-        .expect("Mojo log-throughput sample policy returned invalid output");
+        .expect("Mojo log-throughput observation policy returned invalid output");
+        if !sample_plan.accepted || sample_plan.ignore_duplicate {
+            return;
+        }
         let counter_reset = sample_plan.counter_reset;
         if counter_reset {
             self.last_known_rates.remove(&key);
         }
-        if event.output_tokens > 0 {
-            let observation = output_throughput_observation(event);
-            if !counter_reset
-                && self
-                    .duplicate_observation_path(&observation, log_path)
-                    .is_some()
-            {
-                return;
-            }
-            self.remember_observation(observation, log_path);
-        }
+        self.remember_observation(observation, log_path);
         let rate = {
             let stream = self.stream(&key);
             stream.last_event_at = Some(observed_at);
@@ -116,9 +102,11 @@ impl OutputThroughput {
                 stream.last_known_rate = None;
             }
             if sample_plan.append_sample {
-                stream
-                    .samples
-                    .push_back((observed_at, event.output_tokens, generation_ms));
+                stream.samples.push_back((
+                    observed_at,
+                    event.output_tokens,
+                    event.generation_ms.unwrap_or_default(),
+                ));
             }
             prune_output_throughput_samples(stream, observed_at);
             output_throughput_stream_rate(stream)
@@ -156,11 +144,14 @@ impl OutputThroughput {
         let rate = {
             let stream = self.stream(&key);
             stream.active = false;
-            let rate = duplicate_rate
-                .or(stream.last_known_rate)
-                .or(keyed_rate)
-                .or_else(|| valid_output_rate(event));
-            if let Some(rate) = rate.filter(|rate| rate.is_finite() && *rate > 0.0) {
+            let rate = prodex_mojo_core::log_throughput_policy::finish_rate_candidate([
+                duplicate_rate,
+                stream.last_known_rate,
+                keyed_rate,
+                valid_output_rate(event),
+            ])
+            .expect("Mojo throughput finish-rate policy returned invalid output");
+            if let Some(rate) = rate {
                 stream.last_known_rate = Some(rate);
                 Some(rate)
             } else {
@@ -173,16 +164,21 @@ impl OutputThroughput {
     }
 
     pub(super) fn active_profile(&self) -> Option<String> {
-        self.streams
+        let now = Instant::now();
+        let entries = self.streams.iter().collect::<Vec<_>>();
+        let candidates = entries
             .iter()
-            .filter(|(_, stream)| {
-                stream.active
-                    && stream
-                        .last_event_at
-                        .is_some_and(|at| at.elapsed() <= OUTPUT_THROUGHPUT_WINDOW)
+            .map(|(_, stream)| {
+                (
+                    stream.active,
+                    stream.last_event_at.map(|at| monotonic_age_ns(now, at)),
+                )
             })
-            .max_by_key(|(_, stream)| stream.last_event_at)
-            .map(|(key, _)| key.profile.clone())
+            .collect::<Vec<_>>();
+        let selected =
+            prodex_mojo_core::log_throughput_policy::select_active_profile_candidate(&candidates)
+                .expect("Mojo log-throughput active-profile policy returned invalid output")?;
+        entries.get(selected).map(|(key, _)| key.profile.clone())
     }
 
     pub(super) fn active_rate_for_profile(
@@ -190,27 +186,24 @@ impl OutputThroughput {
         now: Instant,
         preferred_profile: Option<&str>,
     ) -> Option<f64> {
-        let mut active = Vec::new();
-        for (key, stream) in &mut self.streams {
-            if preferred_profile.is_some_and(|profile| profile != key.profile) {
-                continue;
-            }
-            if !stream.active
-                || !stream
-                    .last_event_at
-                    .is_some_and(|at| now.saturating_duration_since(at) <= OUTPUT_THROUGHPUT_WINDOW)
-            {
-                continue;
-            }
-            if let Some(rate) = stream.last_known_rate {
-                active.push((key.clone(), stream.last_event_at, rate));
-            }
-        }
-        let selected_key = active
-            .into_iter()
-            .max_by_key(|(_, last_event_at, _)| *last_event_at)
-            .map(|(key, _, _)| key)?;
-        let rate = self.streams.get(&selected_key)?.last_known_rate?;
+        let entries = self.streams.iter().collect::<Vec<_>>();
+        let candidates = entries
+            .iter()
+            .map(|(key, stream)| {
+                (
+                    stream.active,
+                    preferred_profile.is_none_or(|profile| profile == key.profile),
+                    stream.last_known_rate.is_some(),
+                    stream.last_event_at.map(|at| monotonic_age_ns(now, at)),
+                )
+            })
+            .collect::<Vec<_>>();
+        let selected =
+            prodex_mojo_core::log_throughput_policy::select_active_rate_candidate(&candidates)
+                .expect("Mojo log-throughput active-rate policy returned invalid output")?;
+        let (selected_key, stream) = entries.get(selected)?;
+        let selected_key = (*selected_key).clone();
+        let rate = stream.last_known_rate?;
         if rate.is_finite() && rate > 0.0 {
             self.record_rate(&selected_key, rate);
             Some(rate)
@@ -249,11 +242,17 @@ impl OutputThroughput {
         let Some(rate) = valid_output_rate(event) else {
             return;
         };
-        if self
-            .historical_rate_timestamps
-            .get(&event.profile)
-            .is_some_and(|timestamp| timestamp > &event.timestamp)
-        {
+        let stale_for_profile =
+            self.historical_rate_timestamps
+                .get(&event.profile)
+                .is_some_and(|timestamp| {
+                    prodex_mojo_core::log_throughput_policy::select_historical_identity_candidate(
+                        &[Some(timestamp), Some(&event.timestamp)],
+                    )
+                    .expect("Mojo historical-throughput timestamp policy returned invalid output")
+                        == Some(0)
+                });
+        if stale_for_profile {
             return;
         }
         let key = OutputThroughputKey {
@@ -266,10 +265,16 @@ impl OutputThroughput {
             stream.active = false;
             stream.last_known_rate = Some(rate);
         }
-        let global_latest = self
-            .historical_rate_timestamp
-            .as_deref()
-            .is_none_or(|timestamp| timestamp <= event.timestamp.as_str());
+        let global_latest =
+            self.historical_rate_timestamp
+                .as_deref()
+                .is_none_or(|timestamp| {
+                    prodex_mojo_core::log_throughput_policy::select_historical_identity_candidate(
+                        &[Some(timestamp), Some(&event.timestamp)],
+                    )
+                    .expect("Mojo historical-throughput timestamp policy returned invalid output")
+                        == Some(1)
+                });
         self.remember_observation(output_throughput_observation(event), log_path);
         self.last_known_rates.insert(key.clone(), rate);
         self.last_event_keys
@@ -292,8 +297,13 @@ impl OutputThroughput {
     }
 
     fn stream(&mut self, key: &OutputThroughputKey) -> &mut OutputThroughputStream {
-        if !self.streams.contains_key(key)
-            && self.streams.len() >= OUTPUT_THROUGHPUT_MAX_STREAMS
+        let already_present = self.streams.contains_key(key);
+        if prodex_mojo_core::log_throughput_policy::bounded_insert_needs_eviction(
+            prodex_mojo_core::log_throughput_policy::ThroughputBoundedState::Streams,
+            self.streams.len(),
+            already_present,
+        )
+        .expect("Mojo throughput stream-bound policy returned invalid output")
             && let Some(oldest) = self.streams.keys().next().cloned()
         {
             self.evict_stream(&oldest);
@@ -319,20 +329,29 @@ impl OutputThroughput {
 
     fn repair_global_identity(&mut self) {
         if self.historical_rate_timestamp.is_some() {
-            let replacement = self
-                .historical_rate_timestamps
+            let entries = self.historical_rate_timestamps.iter().collect::<Vec<_>>();
+            let candidates = entries
                 .iter()
-                .filter_map(|(profile, timestamp)| {
-                    let key = self.last_event_keys.get(profile)?;
-                    self.last_known_rates
-                        .contains_key(key)
-                        .then_some((timestamp, key))
+                .map(|(profile, timestamp)| {
+                    self.last_event_keys
+                        .get(*profile)
+                        .is_some_and(|key| self.last_known_rates.contains_key(key))
+                        .then_some(timestamp.as_str())
                 })
-                .max_by(|(left, _), (right, _)| left.cmp(right))
-                .map(|(timestamp, key)| (timestamp.clone(), key.clone()));
-            if let Some((timestamp, key)) = replacement {
-                self.last_event_key = Some(key);
-                self.historical_rate_timestamp = Some(timestamp);
+                .collect::<Vec<_>>();
+            let selected =
+                prodex_mojo_core::log_throughput_policy::select_historical_identity_candidate(
+                    &candidates,
+                )
+                .expect("Mojo historical-throughput identity policy returned invalid output");
+            if let Some((profile, timestamp)) = selected.and_then(|index| entries.get(index)) {
+                if let Some(key) = self.last_event_keys.get(*profile) {
+                    self.last_event_key = Some(key.clone());
+                    self.historical_rate_timestamp = Some((*timestamp).clone());
+                } else {
+                    self.last_event_key = None;
+                    self.historical_rate_timestamp = None;
+                }
             } else {
                 self.last_event_key = None;
                 self.historical_rate_timestamp = None;
@@ -340,25 +359,38 @@ impl OutputThroughput {
             return;
         }
 
-        self.last_event_key = self
-            .last_event_keys
-            .values()
-            .filter(|key| self.last_known_rates.contains_key(*key))
-            .filter(|key| self.streams.contains_key(*key))
-            .max_by_key(|key| {
-                self.streams
-                    .get(*key)
-                    .and_then(|stream| stream.last_event_at)
+        let entries = self.last_event_keys.values().collect::<Vec<_>>();
+        let now = Instant::now();
+        let candidates = entries
+            .iter()
+            .map(|key| {
+                let stream = self.streams.get(*key);
+                (
+                    self.last_known_rates.contains_key(*key) && stream.is_some(),
+                    stream
+                        .and_then(|stream| stream.last_event_at)
+                        .map(|at| monotonic_age_ns(now, at)),
+                )
             })
-            .cloned();
+            .collect::<Vec<_>>();
+        let selected =
+            prodex_mojo_core::log_throughput_policy::select_live_identity_candidate(&candidates)
+                .expect("Mojo live-throughput identity policy returned invalid output");
+        self.last_event_key =
+            selected.and_then(|index| entries.get(index).map(|key| (*key).clone()));
     }
 
     fn remember_observation(&mut self, observation: OutputThroughputObservation, log_path: &Path) {
-        if self.seen_observations.contains_key(&observation) {
+        let already_present = self.seen_observations.contains_key(&observation);
+        if already_present {
             return;
         }
-        // ponytail: keep the replay guard bounded; drop one key after 256 observations.
-        if self.seen_observations.len() >= OUTPUT_THROUGHPUT_MAX_OBSERVATIONS
+        if prodex_mojo_core::log_throughput_policy::bounded_insert_needs_eviction(
+            prodex_mojo_core::log_throughput_policy::ThroughputBoundedState::Observations,
+            self.seen_observations.len(),
+            already_present,
+        )
+        .expect("Mojo throughput observation-bound policy returned invalid output")
             && let Some(oldest) = self.seen_observations.keys().next().cloned()
         {
             self.seen_observations.remove(&oldest);
@@ -372,13 +404,14 @@ impl OutputThroughput {
         observation: &OutputThroughputObservation,
         log_path: &Path,
     ) -> Option<&Path> {
-        self.seen_observations
-            .get(observation)
-            .filter(|previous_path| {
-                previous_path.as_path() != log_path
-                    && is_live_log_path(previous_path.as_path()) != is_live_log_path(log_path)
-            })
-            .map(|path| path.as_path())
+        let previous_path = self.seen_observations.get(observation)?;
+        let is_duplicate = prodex_mojo_core::log_throughput_policy::duplicate_live_disk_replay(
+            previous_path.to_str(),
+            log_path.to_str(),
+            previous_path == log_path,
+        )
+        .expect("Mojo throughput replay policy returned invalid output");
+        is_duplicate.then_some(previous_path.as_path())
     }
 }
 
@@ -394,11 +427,6 @@ fn output_throughput_observation(event: &InfoTokenUsageEvent) -> OutputThroughpu
     }
 }
 
-fn is_live_log_path(path: &Path) -> bool {
-    path.to_str()
-        .is_some_and(|path| path.starts_with("broker:") || path.starts_with("direct:"))
-}
-
 fn valid_output_rate(event: &InfoTokenUsageEvent) -> Option<f64> {
     prodex_mojo_core::log_throughput_policy::completed_rate(
         event.output_tokens,
@@ -408,11 +436,19 @@ fn valid_output_rate(event: &InfoTokenUsageEvent) -> Option<f64> {
 }
 
 fn prune_output_throughput_samples(stream: &mut OutputThroughputStream, now: Instant) {
-    while stream.samples.front().is_some_and(|(sampled_at, _, _)| {
-        now.saturating_duration_since(*sampled_at) > OUTPUT_THROUGHPUT_WINDOW
-    }) {
+    while let Some((sampled_at, _, _)) = stream.samples.front()
+        && prodex_mojo_core::log_throughput_policy::sample_expired(monotonic_age_ns(
+            now,
+            *sampled_at,
+        ))
+        .expect("Mojo throughput sample-window policy returned invalid output")
+    {
         stream.samples.pop_front();
     }
+}
+
+fn monotonic_age_ns(now: Instant, then: Instant) -> u64 {
+    u64::try_from(now.saturating_duration_since(then).as_nanos()).unwrap_or(u64::MAX)
 }
 
 fn output_throughput_stream_rate(stream: &OutputThroughputStream) -> Option<f64> {
@@ -429,7 +465,7 @@ fn output_throughput_stream_rate(stream: &OutputThroughputStream) -> Option<f64>
 
 #[cfg(test)]
 mod tests {
-    use super::{InfoTokenUsageEvent, OUTPUT_THROUGHPUT_MAX_STREAMS, OutputThroughput};
+    use super::{InfoTokenUsageEvent, OutputThroughput};
     use std::path::Path;
     use std::time::{Duration, Instant};
 
@@ -620,19 +656,10 @@ mod tests {
             },
         );
 
-        assert_eq!(throughput.streams.len(), OUTPUT_THROUGHPUT_MAX_STREAMS);
-        assert_eq!(
-            throughput.last_known_rates.len(),
-            OUTPUT_THROUGHPUT_MAX_STREAMS
-        );
-        assert_eq!(
-            throughput.last_event_keys.len(),
-            OUTPUT_THROUGHPUT_MAX_STREAMS
-        );
-        assert_eq!(
-            throughput.historical_rate_timestamps.len(),
-            OUTPUT_THROUGHPUT_MAX_STREAMS
-        );
+        assert_eq!(throughput.streams.len(), 64);
+        assert_eq!(throughput.last_known_rates.len(), 64);
+        assert_eq!(throughput.last_event_keys.len(), 64);
+        assert_eq!(throughput.historical_rate_timestamps.len(), 64);
         assert_eq!(throughput.seen_observations.len(), 65);
         assert!(!throughput.last_event_keys.contains_key("profile-000"));
         assert!(

@@ -4916,3 +4916,30 @@ Validation passed:
 - The Mojo no-fallback guard and self-test, authority guard, and ownership check pass; ownership reports 147 authoritative operations.
 - `node scripts/ci/mojo-production-share.mjs --check` — 80,663 Mojo LOC and 203,573 Rust LOC, or **28.38% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
 - Targeted Markdown lint and `git diff --check` pass.
+
+## Live log-throughput state policy expansion
+
+The existing `log_throughput_policy.mojo` owner now decides accepted throughput
+observations, duplicate live/disk replay classification, candidate ordering,
+strict sample freshness, bounded-state insertion thresholds, and finish-rate
+precedence. Completed and streaming rate arithmetic remain Mojo-owned. Rust
+keeps event and path projection, `Instant` timestamps, `VecDeque` samples,
+profile maps, and TUI state. The state ABI adapter and its direct tests live in
+private `log_throughput_policy/state.rs`; the parent module re-exports the
+existing public call paths.
+
+The bounded-state kernel decides when an eviction is required and owns the 64
+stream/256 observation limits. Rust still selects `BTreeMap::keys().next()` as
+the victim because stream keys contain native `PathBuf` values whose ordering
+is platform-specific; Rust preserves that ordered-map behavior and applies the
+eviction.
+
+Validation passed:
+
+- `mojo format mojo/prodex_core/log_throughput_policy.mojo`, `cargo fmt --all -- --check`, and `git diff --check`.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -p prodex-mojo-core --features mojo-core --lib log_throughput_policy::state::tests::throughput_state_policy_preserves_replay_freshness_order_and_bounds -- --exact` — 1 passed on restored Mojo source.
+- The same strict test failed at `assertion failed: !sample_expired(2_000_000_000).unwrap()` after a temporary mutation changed the strict `>` freshness cutoff to `>=`; the original source bytes were restored exactly. SHA-256 before and after restoration: `32044bc181b2e0c54eae8a73cfb1f90253ab68e32508023ac908fc6bd1872bef`.
+- `cargo test --locked -q -p prodex-app --lib log_throughput -- --test-threads=1` — 17 passed. The separately moved freshness-boundary test passed 1/1 in the app test module.
+- `cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` passed.
+- Size guard, Mojo no-fallback self-test/check, authority guard, ownership check, and production-share check passed; ownership reports 152 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` — 80,944 Mojo LOC and 203,776 Rust LOC (28.43%). The 7% release floor and Mojo non-regression pass; the 75% project target remains unmet.
