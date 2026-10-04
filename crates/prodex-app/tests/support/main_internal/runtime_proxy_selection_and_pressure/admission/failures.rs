@@ -214,8 +214,6 @@ fn fresh_noncompact_cold_start_probe_wait_is_one_shot() {
         headers: Vec::new(),
         body: Vec::new(),
     };
-    let started_at = Instant::now();
-
     let response = proxy_runtime_standard_request(86, &request, shared)
         .expect("cold-start recovery should reselect the profile after its circuit clears");
     let (status, body) = tiny_http_response_status_and_body(response);
@@ -226,14 +224,20 @@ fn fresh_noncompact_cold_start_probe_wait_is_one_shot() {
         body.contains("second-account"),
         "recovered cold-start profile should serve the request: {body}"
     );
-    assert!(
-        started_at.elapsed() < Duration::from_secs(5),
-        "cold-start exhaustion should remain bounded after one recovery epoch: {log}"
+    let recovery_waits = log
+        .lines()
+        .filter(|line| {
+            line.contains("rotation_waiting_for_recovery")
+                && line.contains("route=standard")
+        })
+        .count();
+    assert_eq!(
+        recovery_waits, 1,
+        "temporarily unavailable cold-start profile should require exactly one recovery wait: {log}"
     );
     assert!(
-        log.contains("rotation_waiting_for_recovery")
-            && log.contains("route=standard"),
-        "a temporarily unavailable cold-start profile should be reselected after its recovery epoch: {log}"
+        !log.contains("precommit_budget_exhausted"),
+        "successful recovery must not leak or record terminal retry-budget exhaustion: {log}"
     );
 }
 
