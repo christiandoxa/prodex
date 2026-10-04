@@ -943,7 +943,8 @@
         "operations": [
           "provider_usage_extraction",
           "provider_usage_cost",
-          "provider_usage_merged_total"
+          "provider_usage_merged_total",
+          "provider_usage_sse_latest_present_merge"
         ]
       },
       {
@@ -3273,6 +3274,29 @@
       "rust_owner_before": "total-token precedence and saturating input/output total fallback",
       "rust_test_oracle": "deleted; fixed tests cover explicit total, missing input, default missing output and u64 saturation",
       "rust_adapter_scope": "ProviderTokenUsage DTO API and Option<u64> mapping"
+    },
+    {
+      "domain": "provider/usage",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust SSE observation merge policy",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/provider_usage.mojo",
+      "consumer": "crates/prodex-provider-core/src/usage.rs",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/usage.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/provider_usage.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "provider_usage_sse_latest_present_merge",
+      "mojo_entry": "prodex_provider_usage_merge_latest_present_v1",
+      "consumer_marker": "prodex_mojo_core::provider_usage::merge_latest_present",
+      "rust_owner_before": "latest-present input, output, and total token precedence across parsed SSE event summaries",
+      "rust_test_oracle": "deleted; direct Mojo and provider caller tests cover partial updates, malformed/non-usage frames, [DONE], and empty streams",
+      "rust_adapter_scope": "UTF-8 validation, SSE framing, serde_json event parsing, and typed usage DTO materialization"
     },
     {
       "domain": "super-expose/protocol",

@@ -4975,3 +4975,31 @@ Validation passed:
 - `cargo clippy --locked -q -p prodex-provider-core -p prodex-mojo-core --all-targets --all-features -- -D warnings`, `cargo fmt --all -- --check`, `npm run docs`, and `git diff --check` passed.
 - Mojo no-fallback self-test and guard, authority guard, and ownership check passed; combined ownership reports 153 authoritative operations.
 - `node scripts/ci/mojo-production-share.mjs --check` — 81,306 Mojo LOC and 203,673 Rust LOC, or **28.53% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
+
+## Provider usage SSE observation merge migration
+
+The existing `provider_usage.mojo` kernel now owns a versioned latest-present
+merge for input, output, and total token observations. Each field updates when
+the new parsed event summary supplies a value and retains its prior value when
+the field is absent. Rust continues UTF-8 validation, SSE framing and
+`[DONE]` handling, malformed-frame rejection, `serde_json` event parsing, and
+typed DTO materialization. The provider-core dependency already enables the
+`mojo-provider-constraints` build feature that selects this Mojo source; strict
+tests confirm the new export links through that production graph.
+
+Direct Mojo adapter and provider caller tests cover partial updates across
+events, malformed and non-usage frames, `[DONE]`, and empty streams. A
+sensitivity proof changed the operation to keep prior present values even
+when later values were present; the direct strict Mojo test failed with the
+expected input/output/total mismatch. Restoring the original source bytes
+produced the same SHA-256 before and after:
+`6f25c8d0ed2ada88b425991c21c2b47191e15934abf4dd2d56b6979e27bd3236`.
+
+Validation passed:
+
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-mojo-core --features mojo-provider-constraints --lib provider_usage::tests -- --test-threads=1` — 2 passed; the focused latest-present test passed again after mutation restoration.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-provider-core` — 373 unit tests and 7 integration tests passed.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo clippy --locked -q -p prodex-provider-core -p prodex-mojo-core --all-targets --all-features -- -D warnings` passed.
+- `npm run test:changed`, `npm run docs`, `cargo fmt --all -- --check`, `git diff --check`, and `node scripts/ci/size-guard.mjs` passed.
+- Mojo no-fallback self-test/guard, authority guard, and ownership check pass; ownership reports 154 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` — 81,354 Mojo LOC and 203,725 Rust LOC (28.54% Mojo); the 7% release floor and Mojo non-regression pass. The 75% project target remains unmet.
