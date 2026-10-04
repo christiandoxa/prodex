@@ -148,6 +148,126 @@ fn profile_import_lookup_parts(lookup: ProfileImportIdentityLookup<'_>) -> (i64,
     }
 }
 
+fn profile_import_status_step(
+    status: i64,
+    output: &[i64],
+    written: i64,
+    inputs: &[ProfileImportPlanInput<'_>],
+) -> Result<Option<ProfileImportPlanStep>, MojoError> {
+    let step = match status {
+        5 if inputs.is_empty() && written == 0 => ProfileImportPlanStep::Empty,
+        6 => ProfileImportPlanStep::DuplicateName(profile_import_status_index(
+            output,
+            written,
+            inputs.len(),
+        )?),
+        7 => ProfileImportPlanStep::ProviderMismatch(profile_import_status_index(
+            output,
+            written,
+            inputs.len(),
+        )?),
+        8 => {
+            let index = profile_import_status_index(output, written, inputs.len())?;
+            if !matches!(
+                inputs[index].identity_lookup,
+                ProfileImportIdentityLookup::Pending
+            ) {
+                return Err(MojoError::InvalidOutput);
+            }
+            ProfileImportPlanStep::LookupIdentity(index)
+        }
+        0 => return Ok(None),
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(Some(step))
+}
+
+fn profile_import_decode_action(
+    inputs: &[ProfileImportPlanInput<'_>],
+    output: &[i64],
+    source_index: usize,
+    staged_sources: &mut Vec<usize>,
+) -> Result<ProfileImportPlanAction, MojoError> {
+    let offset = source_index
+        .checked_mul(PROFILE_IMPORT_PLAN_OUTPUT_STRIDE)
+        .ok_or(MojoError::InvalidOutput)?;
+    let source = usize::try_from(*output.get(offset).ok_or(MojoError::InvalidOutput)?)
+        .map_err(|_| MojoError::InvalidOutput)?;
+    let action = *output.get(offset + 1).ok_or(MojoError::InvalidOutput)?;
+    let staged = *output.get(offset + 2).ok_or(MojoError::InvalidOutput)?;
+    let target_kind = *output.get(offset + 3).ok_or(MojoError::InvalidOutput)?;
+    let target_index = usize::try_from(*output.get(offset + 4).ok_or(MojoError::InvalidOutput)?)
+        .map_err(|_| MojoError::InvalidOutput)?;
+    if source != source_index || target_index >= inputs.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+
+    match action {
+        0 if staged == -1 && target_kind == 0 => Ok(ProfileImportPlanAction::UpdateExisting {
+            source_index,
+            target: ProfileImportPlanTarget::SourceProfile(target_index),
+        }),
+        0 if staged == -1 && target_kind == 1 => {
+            if !matches!(
+                inputs[target_index].identity_lookup,
+                ProfileImportIdentityLookup::Found(_)
+            ) {
+                return Err(MojoError::InvalidOutput);
+            }
+            Ok(ProfileImportPlanAction::UpdateExisting {
+                source_index,
+                target: ProfileImportPlanTarget::ExistingProfileLookup(target_index),
+            })
+        }
+        1 if target_kind == 0 && target_index == source_index => {
+            let staged_index = usize::try_from(staged).map_err(|_| MojoError::InvalidOutput)?;
+            if staged_index != staged_sources.len() {
+                return Err(MojoError::InvalidOutput);
+            }
+            staged_sources.push(source_index);
+            Ok(ProfileImportPlanAction::StageNew {
+                source_index,
+                staged_index,
+            })
+        }
+        2 if target_kind == 0 => {
+            let staged_index = usize::try_from(staged).map_err(|_| MojoError::InvalidOutput)?;
+            let target_source_index = *staged_sources
+                .get(staged_index)
+                .ok_or(MojoError::InvalidOutput)?;
+            if target_index != target_source_index {
+                return Err(MojoError::InvalidOutput);
+            }
+            Ok(ProfileImportPlanAction::RewriteStagedAuth {
+                source_index,
+                staged_index,
+                target_source_index,
+            })
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+fn profile_import_decode_actions(
+    inputs: &[ProfileImportPlanInput<'_>],
+    output: &[i64],
+) -> Result<Vec<ProfileImportPlanAction>, MojoError> {
+    let mut actions = Vec::with_capacity(inputs.len());
+    let mut staged_sources = Vec::with_capacity(inputs.len());
+    for source_index in 0..inputs.len() {
+        actions.push(profile_import_decode_action(
+            inputs,
+            output,
+            source_index,
+            &mut staged_sources,
+        )?);
+    }
+    Ok(actions)
+}
+
 /// Ask Mojo to advance the deterministic import plan using caller-owned lookup results.
 pub fn profile_import_plan_step(
     inputs: &[ProfileImportPlanInput<'_>],
@@ -207,102 +327,16 @@ pub fn profile_import_plan_step(
             (&mut written as *mut i64) as usize as u64,
         )
     };
-    match status {
-        5 if inputs.is_empty() && written == 0 => return Ok(ProfileImportPlanStep::Empty),
-        6 => {
-            return Ok(ProfileImportPlanStep::DuplicateName(
-                profile_import_status_index(&output, written, inputs.len())?,
-            ));
-        }
-        7 => {
-            return Ok(ProfileImportPlanStep::ProviderMismatch(
-                profile_import_status_index(&output, written, inputs.len())?,
-            ));
-        }
-        8 => {
-            let index = profile_import_status_index(&output, written, inputs.len())?;
-            if !matches!(
-                inputs[index].identity_lookup,
-                ProfileImportIdentityLookup::Pending
-            ) {
-                return Err(MojoError::InvalidOutput);
-            }
-            return Ok(ProfileImportPlanStep::LookupIdentity(index));
-        }
-        0 => {}
-        1 => return Err(MojoError::InvalidInput),
-        2 => return Err(MojoError::Capacity),
-        4 => return Err(MojoError::AbiMismatch),
-        _ => return Err(MojoError::InvalidOutput),
+    if let Some(step) = profile_import_status_step(status, &output, written, inputs)? {
+        return Ok(step);
     }
 
-    let expected_written = output_capacity;
-    if written != i64::try_from(expected_written).map_err(|_| MojoError::InvalidOutput)? {
+    if written != i64::try_from(output_capacity).map_err(|_| MojoError::InvalidOutput)? {
         return Err(MojoError::InvalidOutput);
     }
-    let mut actions = Vec::with_capacity(inputs.len());
-    let mut staged_sources = Vec::with_capacity(inputs.len());
-    for source_index in 0..inputs.len() {
-        let offset = source_index
-            .checked_mul(PROFILE_IMPORT_PLAN_OUTPUT_STRIDE)
-            .ok_or(MojoError::InvalidOutput)?;
-        let source = usize::try_from(*output.get(offset).ok_or(MojoError::InvalidOutput)?)
-            .map_err(|_| MojoError::InvalidOutput)?;
-        let action = *output.get(offset + 1).ok_or(MojoError::InvalidOutput)?;
-        let staged = *output.get(offset + 2).ok_or(MojoError::InvalidOutput)?;
-        let target_kind = *output.get(offset + 3).ok_or(MojoError::InvalidOutput)?;
-        let target_index =
-            usize::try_from(*output.get(offset + 4).ok_or(MojoError::InvalidOutput)?)
-                .map_err(|_| MojoError::InvalidOutput)?;
-        if source != source_index || target_index >= inputs.len() {
-            return Err(MojoError::InvalidOutput);
-        }
-        actions.push(match action {
-            0 if staged == -1 && target_kind == 0 => ProfileImportPlanAction::UpdateExisting {
-                source_index,
-                target: ProfileImportPlanTarget::SourceProfile(target_index),
-            },
-            0 if staged == -1 && target_kind == 1 => {
-                if !matches!(
-                    inputs[target_index].identity_lookup,
-                    ProfileImportIdentityLookup::Found(_)
-                ) {
-                    return Err(MojoError::InvalidOutput);
-                }
-                ProfileImportPlanAction::UpdateExisting {
-                    source_index,
-                    target: ProfileImportPlanTarget::ExistingProfileLookup(target_index),
-                }
-            }
-            1 if target_kind == 0 && target_index == source_index => {
-                let staged_index = usize::try_from(staged).map_err(|_| MojoError::InvalidOutput)?;
-                if staged_index != staged_sources.len() {
-                    return Err(MojoError::InvalidOutput);
-                }
-                staged_sources.push(source_index);
-                ProfileImportPlanAction::StageNew {
-                    source_index,
-                    staged_index,
-                }
-            }
-            2 if target_kind == 0 => {
-                let staged_index = usize::try_from(staged).map_err(|_| MojoError::InvalidOutput)?;
-                let target_source_index = *staged_sources
-                    .get(staged_index)
-                    .ok_or(MojoError::InvalidOutput)?;
-                if target_index != target_source_index {
-                    return Err(MojoError::InvalidOutput);
-                }
-                ProfileImportPlanAction::RewriteStagedAuth {
-                    source_index,
-                    staged_index,
-                    target_source_index,
-                }
-            }
-            _ => return Err(MojoError::InvalidOutput),
-        });
-    }
-    Ok(ProfileImportPlanStep::Complete(actions))
+    Ok(ProfileImportPlanStep::Complete(
+        profile_import_decode_actions(inputs, &output)?,
+    ))
 }
 
 fn profile_import_status_index(

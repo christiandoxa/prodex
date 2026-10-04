@@ -1,8 +1,9 @@
 use super::{deserialize_null_default, quota_admission_value};
 use prodex_mojo_core::quota::{
-    QuotaIndexedRateLimitInput, QuotaUsageAdmissionAliases, QuotaUsageMainRateLimitSource,
-    QuotaUsageMetadataSource, QuotaUsagePresenceAliases, QuotaUsageResponseInput,
-    QuotaUsageStringAliases, QuotaUsageTextSelection, QuotaUsageTextSource,
+    QuotaIndexedRateLimitInput, QuotaIndexedRateLimitPlan, QuotaUsageAdmissionAliases,
+    QuotaUsageMainRateLimitSource, QuotaUsageMetadataSource, QuotaUsagePresenceAliases,
+    QuotaUsageResponseInput, QuotaUsageResponsePlan, QuotaUsageStringAliases,
+    QuotaUsageTextSelection, QuotaUsageTextSource,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -17,6 +18,81 @@ pub struct UsageResponse {
     pub rate_limit_reset_credits: Option<RateLimitResetCreditsSummary>,
     #[serde(default, deserialize_with = "deserialize_null_default")]
     pub additional_rate_limits: Vec<AdditionalRateLimit>,
+}
+
+fn apply_main_rate_limit_plan(
+    pair: &mut WindowPair,
+    extra: &BTreeMap<String, serde_json::Value>,
+    plan: &QuotaUsageResponsePlan,
+) {
+    if plan.force_main_rate_limit_denied {
+        pair.allowed = Some(false);
+    }
+    if plan.preserve_ordinary_usage_allowed
+        && let Some(value) = usage_metadata_value(
+            extra,
+            plan.ordinary_usage_allowed_source,
+            "ordinary_usage_allowed",
+            "ordinaryUsageAllowed",
+        )
+    {
+        pair.extra
+            .insert("ordinaryUsageAllowed".to_string(), value.clone());
+    }
+    if let Some(value) = usage_metadata_value(
+        extra,
+        plan.rate_limit_upsell_source,
+        "rate_limit_upsell",
+        "rateLimitUpsell",
+    ) {
+        pair.extra
+            .insert("rateLimitUpsell".to_string(), value.clone());
+    }
+    if let Some(value) =
+        usage_metadata_value(extra, plan.account_id_source, "account_id", "accountId")
+    {
+        pair.extra.insert("accountId".to_string(), value.clone());
+    }
+}
+
+fn usage_plan_type(
+    plan_type: &mut Option<String>,
+    rate_limit: Option<&WindowPair>,
+    plan: &QuotaUsageResponsePlan,
+) -> std::result::Result<Option<String>, &'static str> {
+    if plan.plan_type_from_input {
+        return Ok(plan_type.take());
+    }
+    let Some(pair) = rate_limit else {
+        return Ok(None);
+    };
+    selected_usage_extra_text(
+        &pair.extra,
+        plan.plan_type_source,
+        plan.plan_type_start,
+        plan.plan_type_end,
+        "plan_type",
+        "planType",
+    )
+}
+
+fn append_indexed_additional_rate_limits(
+    additional_rate_limits: &mut Vec<AdditionalRateLimit>,
+    indexed_rate_limits: BTreeMap<String, WindowPair>,
+    plans: Vec<QuotaIndexedRateLimitPlan>,
+) -> std::result::Result<(), &'static str> {
+    for ((map_key, pair), item_plan) in indexed_rate_limits.into_iter().zip(plans) {
+        if item_plan.include_as_additional {
+            additional_rate_limits.push(additional_rate_limit_from_indexed_pair(
+                map_key,
+                pair,
+                item_plan.limit_id,
+                item_plan.limit_name,
+                item_plan.metered_feature,
+            )?);
+        }
+    }
+    Ok(())
 }
 
 impl<'de> Deserialize<'de> for UsageResponse {
@@ -84,72 +160,17 @@ impl<'de> Deserialize<'de> for UsageResponse {
             QuotaUsageMainRateLimitSource::RateLimits => raw.rate_limits.take(),
         };
         if let Some(pair) = rate_limit.as_mut() {
-            if plan.force_main_rate_limit_denied {
-                pair.allowed = Some(false);
-            }
-            if plan.preserve_ordinary_usage_allowed
-                && let Some(value) = usage_metadata_value(
-                    &raw.extra,
-                    plan.ordinary_usage_allowed_source,
-                    "ordinary_usage_allowed",
-                    "ordinaryUsageAllowed",
-                )
-            {
-                pair.extra
-                    .insert("ordinaryUsageAllowed".to_string(), value.clone());
-            }
-            if let Some(value) = usage_metadata_value(
-                &raw.extra,
-                plan.rate_limit_upsell_source,
-                "rate_limit_upsell",
-                "rateLimitUpsell",
-            ) {
-                pair.extra
-                    .insert("rateLimitUpsell".to_string(), value.clone());
-            }
-            if let Some(value) = usage_metadata_value(
-                &raw.extra,
-                plan.account_id_source,
-                "account_id",
-                "accountId",
-            ) {
-                pair.extra.insert("accountId".to_string(), value.clone());
-            }
+            apply_main_rate_limit_plan(pair, &raw.extra, &plan);
         }
-        let plan_type = if plan.plan_type_from_input {
-            raw.plan_type.take()
-        } else if let Some(pair) = rate_limit.as_ref() {
-            selected_usage_extra_text(
-                &pair.extra,
-                plan.plan_type_source,
-                plan.plan_type_start,
-                plan.plan_type_end,
-                "plan_type",
-                "planType",
-            )
-            .map_err(<D::Error as serde::de::Error>::custom)?
-        } else {
-            None
-        };
+        let plan_type = usage_plan_type(&mut raw.plan_type, rate_limit.as_ref(), &plan)
+            .map_err(<D::Error as serde::de::Error>::custom)?;
         let mut additional_rate_limits = std::mem::take(&mut raw.additional_rate_limits);
-        for ((map_key, pair), item_plan) in indexed_rate_limits
-            .into_iter()
-            .zip(plan.indexed_rate_limits)
-        {
-            if !item_plan.include_as_additional {
-                continue;
-            }
-            additional_rate_limits.push(
-                additional_rate_limit_from_indexed_pair(
-                    map_key,
-                    pair,
-                    item_plan.limit_id,
-                    item_plan.limit_name,
-                    item_plan.metered_feature,
-                )
-                .map_err(<D::Error as serde::de::Error>::custom)?,
-            );
-        }
+        append_indexed_additional_rate_limits(
+            &mut additional_rate_limits,
+            indexed_rate_limits,
+            plan.indexed_rate_limits,
+        )
+        .map_err(<D::Error as serde::de::Error>::custom)?;
 
         Ok(Self {
             email: raw.email,

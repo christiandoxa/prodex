@@ -225,51 +225,38 @@ struct RuntimeInflightWaitState {
     wake_source: RuntimeProfileInFlightWaitOutcome,
 }
 
-pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-    wait: RuntimeInflightReliefWait<'_>,
-) -> Result<RuntimeInflightReliefWaitResult> {
-    let RuntimeInflightReliefWait {
-        request_id,
-        shared,
-        excluded_profiles,
-        route_kind,
-        selection_started_at,
-        continuation,
-        wait_affinity_owner,
-        selected_profile,
-    } = wait;
-
+fn runtime_scoped_waitable_profiles(
+    wait: &RuntimeInflightReliefWait<'_>,
+) -> Result<BTreeSet<String>> {
     let mut waited_profiles = runtime_waitable_inflight_candidates_for_route(
-        shared,
-        excluded_profiles,
-        route_kind,
-        wait_affinity_owner,
+        wait.shared,
+        wait.excluded_profiles,
+        wait.route_kind,
+        wait.wait_affinity_owner,
     )?;
-    if let Some(selected_profile) = selected_profile {
+    if let Some(selected_profile) = wait.selected_profile {
         waited_profiles.retain(|profile| profile == selected_profile);
     }
-    if waited_profiles.is_empty() {
-        return Ok(RuntimeInflightReliefWaitResult::NotWaitable);
-    }
+    Ok(waited_profiles)
+}
 
-    let wait_epoch = if cfg!(test) {
-        Duration::from_millis(1_500)
-    } else {
-        Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
-    };
-
+fn log_runtime_inflight_wait_started(
+    wait: &RuntimeInflightReliefWait<'_>,
+    wait_epoch: Duration,
+    waited_profiles: &BTreeSet<String>,
+) {
     runtime_proxy_log(
-        shared,
+        wait.shared,
         runtime_proxy_structured_log_message(
             "inflight_wait_started",
             [
-                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("route", runtime_route_kind_label(wait.route_kind)),
+                runtime_proxy_log_field("request", wait.request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
                 runtime_proxy_log_field("wait_ms", wait_epoch.as_millis().to_string()),
                 runtime_proxy_log_field(
                     "selection_elapsed_ms",
-                    selection_started_at.elapsed().as_millis().to_string(),
+                    wait.selection_started_at.elapsed().as_millis().to_string(),
                 ),
                 runtime_proxy_log_field(
                     "eligible_candidate_count",
@@ -281,7 +268,7 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                 ),
                 runtime_proxy_log_field(
                     "waiter_priority",
-                    if continuation {
+                    if wait.continuation {
                         "continuation"
                     } else {
                         "normal"
@@ -292,97 +279,135 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
             ],
         ),
     );
-    let started_at = Instant::now();
-    let mut wait_state = RuntimeInflightWaitState {
-        observed_revision: runtime_profile_inflight_release_revision(shared),
-        observed_selection_revision: shared.lane_admission.selection_change_revision(),
-        signaled: false,
-        useful_relief: false,
-        wake_source: RuntimeProfileInFlightWaitOutcome::Timeout,
-    };
-    let mut no_longer_waitable = false;
+}
+
+fn refresh_runtime_inflight_wait_candidates(
+    wait: &RuntimeInflightReliefWait<'_>,
+    started_at: Instant,
+    state: &mut RuntimeInflightWaitState,
+) -> Result<Option<BTreeSet<String>>> {
+    let refreshed = runtime_scoped_waitable_profiles(wait)?;
+    if refreshed.is_empty() {
+        return Ok(None);
+    }
+    state.observed_revision = runtime_profile_inflight_release_revision(wait.shared);
+    state.observed_selection_revision = wait.shared.lane_admission.selection_change_revision();
+    runtime_proxy_log(
+        wait.shared,
+        runtime_proxy_structured_log_message(
+            "local_capacity_wait_continued",
+            [
+                runtime_proxy_log_field("route", runtime_route_kind_label(wait.route_kind)),
+                runtime_proxy_log_field("request", wait.request_id.to_string()),
+                runtime_proxy_log_field("waited_ms", started_at.elapsed().as_millis().to_string()),
+                runtime_proxy_log_field("eligible_candidate_count", refreshed.len().to_string()),
+                runtime_proxy_log_field("mode", "backpressure"),
+            ],
+        ),
+    );
+    Ok(Some(refreshed))
+}
+
+fn run_runtime_inflight_backpressure_wait(
+    wait: &RuntimeInflightReliefWait<'_>,
+    wait_epoch: Duration,
+    started_at: Instant,
+    waited_profiles: &mut BTreeSet<String>,
+    state: &mut RuntimeInflightWaitState,
+) -> Result<bool> {
     loop {
         let outcome = runtime_profile_inflight_wait_outcome_since_with_selection_revision(
-            shared,
+            wait.shared,
             wait_epoch,
-            wait_state.observed_revision,
-            wait_state.observed_selection_revision,
+            state.observed_revision,
+            state.observed_selection_revision,
         );
         if matches!(outcome, RuntimeProfileInFlightWaitOutcome::Timeout) {
-            let mut refreshed = runtime_waitable_inflight_candidates_for_route(
-                shared,
-                excluded_profiles,
-                route_kind,
-                wait_affinity_owner,
-            )?;
-            if let Some(selected_profile) = selected_profile {
-                refreshed.retain(|profile| profile == selected_profile);
-            }
-            if refreshed.is_empty() {
-                no_longer_waitable = true;
-                break;
-            }
-            waited_profiles = refreshed;
-            wait_state.observed_revision = runtime_profile_inflight_release_revision(shared);
-            wait_state.observed_selection_revision =
-                shared.lane_admission.selection_change_revision();
-            runtime_proxy_log(
-                shared,
-                runtime_proxy_structured_log_message(
-                    "local_capacity_wait_continued",
-                    [
-                        runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                        runtime_proxy_log_field("request", request_id.to_string()),
-                        runtime_proxy_log_field(
-                            "waited_ms",
-                            started_at.elapsed().as_millis().to_string(),
-                        ),
-                        runtime_proxy_log_field(
-                            "eligible_candidate_count",
-                            waited_profiles.len().to_string(),
-                        ),
-                        runtime_proxy_log_field("mode", "backpressure"),
-                    ],
-                ),
-            );
+            let Some(refreshed) =
+                refresh_runtime_inflight_wait_candidates(wait, started_at, state)?
+            else {
+                return Ok(false);
+            };
+            *waited_profiles = refreshed;
             continue;
         }
         if process_runtime_inflight_wait_outcome(
-            shared,
-            &waited_profiles,
-            route_kind,
-            request_id,
+            wait.shared,
+            waited_profiles,
+            wait.route_kind,
+            wait.request_id,
             started_at,
-            &mut wait_state,
+            state,
             outcome,
         )? {
-            break;
+            return Ok(true);
         }
     }
+}
+
+fn log_runtime_inflight_wait_finished(
+    wait: &RuntimeInflightReliefWait<'_>,
+    started_at: Instant,
+    state: &RuntimeInflightWaitState,
+) {
     runtime_proxy_log(
-        shared,
+        wait.shared,
         runtime_proxy_structured_log_message(
             "inflight_wait_finished",
             [
-                runtime_proxy_log_field("route", runtime_route_kind_label(route_kind)),
-                runtime_proxy_log_field("request", request_id.to_string()),
+                runtime_proxy_log_field("route", runtime_route_kind_label(wait.route_kind)),
+                runtime_proxy_log_field("request", wait.request_id.to_string()),
                 runtime_proxy_log_field("transport", "http"),
                 runtime_proxy_log_field("waited_ms", started_at.elapsed().as_millis().to_string()),
-                runtime_proxy_log_field("signaled", wait_state.signaled.to_string()),
-                runtime_proxy_log_field("useful", wait_state.useful_relief.to_string()),
+                runtime_proxy_log_field("signaled", state.signaled.to_string()),
+                runtime_proxy_log_field("useful", state.useful_relief.to_string()),
                 runtime_proxy_log_field(
                     "wake_source",
-                    runtime_profile_inflight_wait_outcome_label(wait_state.wake_source),
+                    runtime_profile_inflight_wait_outcome_label(state.wake_source),
                 ),
             ],
         ),
     );
-    if wait_state.useful_relief {
-        Ok(RuntimeInflightReliefWaitResult::Relieved)
-    } else if no_longer_waitable {
-        Ok(RuntimeInflightReliefWaitResult::NotWaitable)
+}
+
+pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+    wait: RuntimeInflightReliefWait<'_>,
+) -> Result<RuntimeInflightReliefWaitResult> {
+    let mut waited_profiles = runtime_scoped_waitable_profiles(&wait)?;
+    if waited_profiles.is_empty() {
+        return Ok(RuntimeInflightReliefWaitResult::NotWaitable);
+    }
+
+    let wait_epoch = if cfg!(test) {
+        Duration::from_millis(1_500)
     } else {
-        unreachable!("inflight backpressure wait exits only after relief or eligibility changes")
+        Duration::from_millis(runtime_proxy_crate::RUNTIME_PROXY_PRECOMMIT_RECOVERY_BUDGET_MS)
+    };
+    log_runtime_inflight_wait_started(&wait, wait_epoch, &waited_profiles);
+
+    let started_at = Instant::now();
+    let mut wait_state = RuntimeInflightWaitState {
+        observed_revision: runtime_profile_inflight_release_revision(wait.shared),
+        observed_selection_revision: wait.shared.lane_admission.selection_change_revision(),
+        signaled: false,
+        useful_relief: false,
+        wake_source: RuntimeProfileInFlightWaitOutcome::Timeout,
+    };
+    let remained_waitable = run_runtime_inflight_backpressure_wait(
+        &wait,
+        wait_epoch,
+        started_at,
+        &mut waited_profiles,
+        &mut wait_state,
+    )?;
+    log_runtime_inflight_wait_finished(&wait, started_at, &wait_state);
+
+    match (wait_state.useful_relief, remained_waitable) {
+        (true, _) => Ok(RuntimeInflightReliefWaitResult::Relieved),
+        (false, false) => Ok(RuntimeInflightReliefWaitResult::NotWaitable),
+        (false, true) => unreachable!(
+            "inflight backpressure wait exits only after relief or eligibility changes"
+        ),
     }
 }
 
