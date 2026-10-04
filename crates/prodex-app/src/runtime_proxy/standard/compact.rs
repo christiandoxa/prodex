@@ -479,9 +479,6 @@ impl RuntimeCompactSelectionContext<'_> {
         self.request_previous_response_id.is_none()
             && self.request_turn_state.is_none()
             && self.request_session_id.is_none()
-            && (self.saw_overload_failure
-                || self.saw_rate_limit_failure
-                || self.saw_transport_failure)
     }
 
     fn wait_for_overload_recovery(&mut self) -> Result<bool> {

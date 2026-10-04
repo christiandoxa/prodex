@@ -135,9 +135,7 @@ impl<F> RuntimePrecommitLoopState<F> {
         shared: &RuntimeRotationProxyShared,
         route_kind: RuntimeRouteKind,
     ) -> Result<bool> {
-        if !self.saw_transient_failure()
-            || !runtime_route_has_retryable_profile(shared, route_kind)?
-        {
+        if !runtime_route_has_retryable_profile(shared, route_kind)? {
             return Ok(false);
         }
         let recovered = clear_runtime_recovered_profiles(
@@ -247,6 +245,22 @@ impl<F> RuntimePrecommitLoopState<F> {
         );
         Ok(recovered > 0)
     }
+}
+
+#[cfg(test)]
+pub(crate) fn test_runtime_precommit_retryable_recovery_without_transient(
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    profile_name: &str,
+) -> Result<(bool, bool, usize)> {
+    let mut state = RuntimePrecommitLoopState::<()>::new();
+    state.excluded_profiles.insert(profile_name.to_string());
+    let recovered = state.maybe_wait_for_transient_recovery(9_996, shared, route_kind)?;
+    Ok((
+        recovered,
+        !state.excluded_profiles.contains(profile_name),
+        state.recovery_sweeps,
+    ))
 }
 
 #[cfg(test)]

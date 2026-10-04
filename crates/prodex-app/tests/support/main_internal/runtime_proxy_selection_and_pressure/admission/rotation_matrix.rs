@@ -95,6 +95,50 @@ fn quota_snapshot(
 }
 
 #[test]
+fn retryable_profile_recovery_does_not_require_a_transient_failure_flag() {
+    let ready = runtime_usage_snapshot(
+        quota_window_ready(87, 3_600),
+        quota_window_ready(91, 86_400),
+    );
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .profile_usage_snapshot("main", ready)
+        .build();
+    {
+        let mut runtime = harness.shared().runtime.lock().expect("runtime lock");
+        runtime
+            .profile_retry_backoff_until
+            .insert("main".to_string(), Local::now().timestamp() + 1);
+    }
+
+    let (recovered, exclusion_cleared, recovery_sweeps) =
+        test_runtime_precommit_retryable_recovery_without_transient(
+            harness.shared(),
+            RuntimeRouteKind::Responses,
+            "main",
+        )
+        .expect("retryable profile recovery should succeed without a transient-failure flag");
+
+    assert!(recovered, "viable profile should recover after its backoff");
+    assert!(
+        exclusion_cleared,
+        "recovered profile must become selectable again"
+    );
+    assert!(
+        recovery_sweeps >= 1,
+        "recovery should record a retry sweep after waiting for backoff"
+    );
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+    assert!(
+        log.contains("rotation_waiting_for_recovery")
+            && log.contains("route=responses"),
+        "production recovery path must wait instead of surfacing retry-budget 503: {log}"
+    );
+}
+
+#[test]
 fn fresh_responses_use_last_positive_quota_after_current_exhaustion() {
     let backend = RuntimeProxyBackend::start();
     let harness = RuntimeProxyProfileHarnessBuilder::new()
