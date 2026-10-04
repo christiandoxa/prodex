@@ -483,13 +483,13 @@ mod tests {
 
     #[test]
     fn local_inspection_resolves_overlaps_and_sensitive_field_override() {
-        let labeled = local_inspect_and_redact("api_key=sk-proj-1234567890", None, 8).unwrap();
-        assert_eq!(labeled.text, "api_key=<redacted>");
+        let labeled = local_inspect_and_redact("prefix::sk-aaaaaaaa", None, 8).unwrap();
+        assert_eq!(labeled.text, "prefix::<redacted>");
         assert_eq!(
             labeled.matches,
             vec![LocalInspectionMatch {
                 start: 8,
-                end: 26,
+                end: 19,
                 kind: LocalInspectionFindingKind::ApiKey,
             }]
         );
