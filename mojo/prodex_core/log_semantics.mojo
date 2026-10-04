@@ -1799,3 +1799,313 @@ def prodex_mojo_structured_log_location_strip_v1(
     )
     written[] = writer.written
     return PRODEX_STRUCTURED_LOG_STATUS_OK
+
+
+comptime PRODEX_LOG_LOAD_ABI_VERSION: Int64 = 1
+comptime PRODEX_LOG_LOAD_UPDATE: Int64 = 0
+comptime PRODEX_LOG_LOAD_SUMMARY: Int64 = 1
+comptime PRODEX_LOG_LOAD_MAX_RUNS: UInt64 = UInt64(256)
+comptime PRODEX_LOG_LOAD_MAX_EVENT_NAME_BYTES: UInt64 = UInt64(256)
+comptime PRODEX_LOG_LOAD_MAX_KEY_BYTES: UInt64 = UInt64(16384)
+comptime PRODEX_LOG_LOAD_MAX_RUN_ID_BYTES: UInt64 = UInt64(256)
+comptime PRODEX_LOG_LOAD_WINDOW_NS: UInt64 = UInt64(5000000000)
+comptime PRODEX_LOG_LOAD_UINT64_MAX: UInt64 = UInt64(0xFFFF_FFFF_FFFF_FFFF)
+
+
+def log_load_text_equal(
+    left_address: UInt,
+    left_length: UInt64,
+    right_address: UInt,
+    right_length: UInt64,
+) -> Bool:
+    if left_length != right_length:
+        return False
+    if left_length == 0:
+        return True
+    if left_address == 0 or right_address == 0:
+        return False
+    var left = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(left_address)
+    )
+    var right = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(right_address)
+    )
+    for index in range(Int(left_length)):
+        if left[unsafe_offset=index] != right[unsafe_offset=index]:
+            return False
+    return True
+
+
+def log_load_matches_literal(
+    address: UInt, length: UInt64, literal: StringSlice
+) -> Bool:
+    if length != UInt64(literal.byte_length()):
+        return False
+    if length == 0:
+        return True
+    if address == 0:
+        return False
+    var input = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    var expected = literal.unsafe_ptr()
+    for index in range(Int(length)):
+        if input[unsafe_offset=index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def log_load_update_impl(
+    input_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+) -> Int64:
+    if input_address == 0 or output_address == 0:
+        return 1
+    if output_capacity < 5:
+        return 2
+    var input = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var event_address = UInt(input[unsafe_offset=0])
+    var event_length = input[unsafe_offset=1]
+    var previous_key_address = UInt(input[unsafe_offset=2])
+    var previous_key_length = input[unsafe_offset=3]
+    var observation_key_address = UInt(input[unsafe_offset=4])
+    var observation_key_length = input[unsafe_offset=5]
+    var elapsed_ns = input[unsafe_offset=6]
+    var occurrences = input[unsafe_offset=7]
+    var previous_overflow = input[unsafe_offset=8]
+    var run_id_address = UInt(input[unsafe_offset=9])
+    var run_id_length = input[unsafe_offset=10]
+    var run_id_present = input[unsafe_offset=11]
+    var run_views_address = UInt(input[unsafe_offset=12])
+    var run_count = input[unsafe_offset=13]
+    var previous_present = input[unsafe_offset=14]
+    if (
+        event_length > PRODEX_LOG_LOAD_MAX_EVENT_NAME_BYTES
+        or observation_key_length > PRODEX_LOG_LOAD_MAX_KEY_BYTES
+        or (event_length > 0 and event_address == 0)
+        or (observation_key_length > 0 and observation_key_address == 0)
+        or previous_overflow > 1
+        or run_id_present > 1
+        or previous_present > 1
+        or run_count > PRODEX_LOG_LOAD_MAX_RUNS
+        or (run_id_length > PRODEX_LOG_LOAD_MAX_RUN_ID_BYTES)
+        or (run_id_length > 0 and run_id_address == 0)
+        or (run_id_present == 0 and run_id_length != 0)
+        or (run_count > 0 and run_views_address == 0)
+    ):
+        return 1
+    if previous_present == 0:
+        if (
+            previous_key_address != 0
+            or previous_key_length != 0
+            or occurrences != 0
+            or previous_overflow != 0
+            or run_count != 0
+        ):
+            return 1
+    elif (
+        occurrences == 0
+        or previous_key_length > PRODEX_LOG_LOAD_MAX_KEY_BYTES
+        or (previous_key_length > 0 and previous_key_address == 0)
+        or previous_overflow == 1 and run_count != PRODEX_LOG_LOAD_MAX_RUNS
+    ):
+        return 1
+
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var routine = (
+        log_load_matches_literal(
+            event_address, event_length, StringSlice("profile_inflight_saturated")
+        )
+        or log_load_matches_literal(
+            event_address,
+            event_length,
+            StringSlice("runtime_proxy_active_limit_reached"),
+        )
+        or log_load_matches_literal(
+            event_address,
+            event_length,
+            StringSlice("runtime_proxy_lane_limit_reached"),
+        )
+    )
+    if routine:
+        output[unsafe_offset=0] = UInt64(1)
+        output[unsafe_offset=1] = UInt64(0)
+        output[unsafe_offset=2] = UInt64(0)
+        output[unsafe_offset=3] = UInt64(0)
+        output[unsafe_offset=4] = UInt64(0)
+        return 0
+
+    var coalesce = (
+        previous_present == 1
+        and elapsed_ns <= PRODEX_LOG_LOAD_WINDOW_NS
+        and log_load_text_equal(
+            previous_key_address,
+            previous_key_length,
+            observation_key_address,
+            observation_key_length,
+        )
+    )
+    var next_occurrences = UInt64(1)
+    var next_overflow = UInt64(0)
+    var append_run = UInt64(0)
+    var tracked_runs = UInt64(0)
+    if coalesce:
+        next_occurrences = (
+            occurrences
+            if occurrences == PRODEX_LOG_LOAD_UINT64_MAX
+            else occurrences + UInt64(1)
+        )
+        next_overflow = previous_overflow
+        tracked_runs = run_count
+    if run_id_present == 1:
+        var run_seen = False
+        if coalesce:
+            var run_views = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+                unsafe_from_address=Int(run_views_address)
+            )
+            for index in range(Int(run_count)):
+                var base = index * 2
+                var current_address = UInt(run_views[unsafe_offset=base])
+                var current_length = run_views[unsafe_offset=base + 1]
+                if current_length > PRODEX_LOG_LOAD_MAX_RUN_ID_BYTES or (
+                    current_length > 0 and current_address == 0
+                ):
+                    return 1
+                if log_load_text_equal(
+                    run_id_address,
+                    run_id_length,
+                    current_address,
+                    current_length,
+                ):
+                    run_seen = True
+                    break
+        if not run_seen:
+            if tracked_runs >= PRODEX_LOG_LOAD_MAX_RUNS:
+                next_overflow = UInt64(1)
+            else:
+                append_run = UInt64(1)
+    output[unsafe_offset=0] = UInt64(0)
+    output[unsafe_offset=1] = UInt64(coalesce)
+    output[unsafe_offset=2] = next_occurrences
+    output[unsafe_offset=3] = append_run
+    output[unsafe_offset=4] = next_overflow
+    return 0
+
+
+def log_load_decimal_length(value: UInt64) -> Int64:
+    var length: Int64 = 1
+    var remaining = value
+    while remaining >= UInt64(10):
+        remaining = remaining / UInt64(10)
+        length += 1
+    return length
+
+
+def log_load_write_literal(
+    output: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    position: Int64,
+    literal: StringSlice,
+) -> Int64:
+    var source = literal.unsafe_ptr()
+    var length = Int64(literal.byte_length())
+    for index in range(length):
+        output[unsafe_offset=position + index] = source[unsafe_offset=index]
+    return position + length
+
+
+def log_load_write_decimal(
+    output: Pointer[mut=True, UInt8, MutUntrackedOrigin],
+    position: Int64,
+    value: UInt64,
+) -> Int64:
+    var divisor = UInt64(1)
+    while divisor <= value / UInt64(10):
+        divisor *= UInt64(10)
+    var written = position
+    while divisor > 0:
+        var digit = (value / divisor) % UInt64(10)
+        output[unsafe_offset=written] = UInt8(digit) + UInt8(48)
+        written += 1
+        divisor = divisor / UInt64(10)
+    return written
+
+
+def log_load_summary_impl(
+    input_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) -> Int64:
+    if input_address == 0 or written_address == 0 or output_capacity < 0:
+        return 1
+    if output_capacity > 0 and output_address == 0:
+        return 1
+    var input = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var occurrences = input[unsafe_offset=0]
+    var unique_runs = input[unsafe_offset=1]
+    var overflow = input[unsafe_offset=2]
+    if (
+        unique_runs > PRODEX_LOG_LOAD_MAX_RUNS
+        or overflow > 1
+        or overflow == 1 and unique_runs != PRODEX_LOG_LOAD_MAX_RUNS
+    ):
+        return 1
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var prefix = StringSlice(" · ×")
+    var separator = StringSlice(" · ")
+    var suffix = StringSlice(" runs")
+    var needed = (
+        Int64(prefix.byte_length())
+        + log_load_decimal_length(occurrences)
+        + Int64(separator.byte_length())
+        + log_load_decimal_length(unique_runs)
+        + Int64(suffix.byte_length())
+        + Int64(overflow)
+    )
+    if output_capacity < needed:
+        return 2
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var position = log_load_write_literal(output, 0, prefix)
+    position = log_load_write_decimal(output, position, occurrences)
+    position = log_load_write_literal(output, position, separator)
+    position = log_load_write_decimal(output, position, unique_runs)
+    if overflow == 1:
+        output[unsafe_offset=position] = UInt8(43)
+        position += 1
+    position = log_load_write_literal(output, position, suffix)
+    written[] = position
+    return 0
+
+
+@export("prodex_mojo_log_load_semantics_v1")
+def prodex_mojo_log_load_semantics_v1(
+    abi_version: Int64,
+    operation: Int64,
+    input_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_LOG_LOAD_ABI_VERSION:
+        return 4
+    if operation == PRODEX_LOG_LOAD_UPDATE:
+        if written_address != 0:
+            return 1
+        return log_load_update_impl(input_address, output_address, output_capacity)
+    if operation == PRODEX_LOG_LOAD_SUMMARY:
+        return log_load_summary_impl(
+            input_address, output_address, output_capacity, written_address
+        )
+    return 1

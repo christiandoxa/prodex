@@ -482,7 +482,8 @@
           "transcript_event_classification",
           "transcript_item_classification",
           "transcript_operation_value_policy",
-          "transcript_tool_name_policy"
+          "transcript_tool_name_policy",
+          "log_load_aggregation"
         ]
       },
       "mojo/prodex_core/profile_schedule.mojo": {
@@ -3724,6 +3725,35 @@
       "rust_owner_before": "96-character tool-name bounding and ASCII-safe character replacement with tool fallback",
       "rust_test_oracle": "deleted; direct ABI and log tests cover empty names, Unicode replacement, punctuation allowlist and overlong names",
       "rust_adapter_scope": "secret redaction and owned String materialization"
+    },
+    {
+      "name": "log_load_aggregation",
+      "domain": "app/log-load",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust routine-event classification and bounded load aggregation",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_log_load_semantics_v1",
+      "mojo_operation_ids": {
+        "update": 0,
+        "summary": 1
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_semantics.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_load.rs",
+      "consumer_marker": "prodex_mojo_core::log_load::aggregate_update",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_load.rs",
+        "crates/prodex-app/src/app_commands/log_stream.rs",
+        "crates/prodex-app/src/app_commands/log_command_tui.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/log_load.rs",
+      "rust_state_after": "adapter-only",
+      "rust_owner_before": "routine load-event classification, same-key five-second episode coalescing, saturating occurrence updates, bounded unique-run deduplication, overflow marking, and summary suffix formatting",
+      "rust_test_oracle": "none retained; strict required-Mojo ABI tests and app TUI caller regression cover exact classification, freshness, deduplication, saturation, overflow, and formatting",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Instant sampling, bounded Vec/String state projection, fixed-width ABI marshaling, transcript DTO construction, and TUI effects"
     },
     {
       "name": "super_expose_dispatch_validation_policy",

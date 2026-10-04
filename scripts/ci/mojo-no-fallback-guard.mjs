@@ -194,6 +194,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/rich/catalog_planner.rs",
   "crates/prodex-mojo-core/src/rich/context_plan.rs",
   "crates/prodex-mojo-core/src/log.rs",
+  "crates/prodex-mojo-core/src/log_load.rs",
   "crates/prodex-mojo-core/src/rich/routing.rs",
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-quota/src/render/gemini.rs",
@@ -212,6 +213,8 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/super_expose/openai_tunnel.rs",
   "crates/prodex-app/src/app_commands/log_event_source.rs",
   "crates/prodex-app/src/app_commands/log_stream.rs",
+  "crates/prodex-app/src/app_commands/log_load.rs",
+  "crates/prodex-app/src/app_commands/log_command_tui.rs",
   "crates/prodex-mojo-core/src/observability.rs",
   "crates/prodex-app/src/app_commands/ping.rs",
   "crates/prodex-app/src/app_commands/super_main_catalog.rs",
@@ -833,6 +836,9 @@ const SUPER_EXPOSE_TOOL_CONTRACT_FILE = "crates/prodex-app/src/super_expose/prot
 const SUPER_EXPOSE_RICH_FILE = "crates/prodex-mojo-core/src/rich/super_expose.rs";
 const LOG_TRANSCRIPT_FILE = "crates/prodex-app/src/app_commands/log_transcript.rs";
 const LOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/log.rs";
+const LOG_LOAD_APP_FILE = "crates/prodex-app/src/app_commands/log_load.rs";
+const LOG_LOAD_TUI_FILE = "crates/prodex-app/src/app_commands/log_command_tui.rs";
+const LOG_LOAD_ADAPTER_FILE = "crates/prodex-mojo-core/src/log_load.rs";
 const LOG_STREAM_FILE = "crates/prodex-app/src/app_commands/log_stream.rs";
 const LOG_EVENT_SOURCE_FILE = "crates/prodex-app/src/app_commands/log_event_source.rs";
 const OBSERVABILITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/observability.rs";
@@ -4109,6 +4115,55 @@ export function findViolations(files) {
     }
     return [];
   });
+  const logLoadPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === LOG_LOAD_APP_FILE) {
+      const required = [
+        "prodex_mojo_core::log_load::aggregate_update(",
+        "prodex_mojo_core::log_load::aggregate_summary(",
+        "prodex_mojo_core::log_load::is_routine_event(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: load aggregation must retain Mojo call ${call}`);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /matches!\s*\(\s*event_name/u.test(production)
+        || /saturating_add\s*\(\s*1\s*\)/u.test(production)
+        || /\.iter\(\)\.any\(\|current\|\s*current\s*==\s*&run_id\)/u.test(production)
+        || /format!\s*\(\s*"[^"]*×/u.test(production)
+        || production.includes("MAX_UNIQUE_RUNS")
+      ) {
+        violations.push(`${filePath}: contains restored Rust log-load classification, aggregation, or formatting semantics`);
+      }
+      return violations;
+    }
+    if (filePath === LOG_LOAD_TUI_FILE) {
+      const required = [
+        "LogLoadAggregate::plan_observation(",
+        "plan.coalesce",
+        "aggregate.apply_plan(",
+        "LogLoadAggregate::from_plan(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: TUI caller must apply Mojo aggregate plan ${call}`);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /aggregate\.key\s*==\s*key/u.test(production)
+        || /saturating_duration_since\(aggregate\.last_seen\)/u.test(production)
+        || production.includes("LOG_LOAD_COALESCE_WINDOW")
+      ) {
+        violations.push(`${filePath}: aggregate freshness and key decisions must use Mojo`);
+      }
+      return violations;
+    }
+    if (filePath === LOG_LOAD_ADAPTER_FILE) {
+      return contents.includes("prodex_mojo_log_load_semantics_v1(")
+        ? []
+        : [`${filePath}: load aggregate adapter must retain the required Mojo ABI call`];
+    }
+    return [];
+  });
   const deepseekCatalogPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_deepseek_config.rs") {
       const required = [
@@ -4210,7 +4265,7 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -4294,6 +4349,21 @@ function selfTest() {
   assert.match(findViolations([[LIVE_LOG_RECORD_FILE,
     liveLogRecordConsumer.replace("nested_string_clip_end(text)?", "clip_json_strings(value, 8192);")]])
     .join("\n"), /restored Rust live-log clipping or truncation policy|must propagate through Mojo/u);
+  assert.deepEqual(findViolations([
+    [LOG_LOAD_APP_FILE,
+      "prodex_mojo_core::log_load::is_routine_event(name); prodex_mojo_core::log_load::aggregate_update(input); prodex_mojo_core::log_load::aggregate_summary(1, 0, false);"],
+    [LOG_LOAD_TUI_FILE,
+      "LogLoadAggregate::plan_observation(previous, name, key, run, now); plan.coalesce; aggregate.apply_plan(...); LogLoadAggregate::from_plan(...);"],
+    [LOG_LOAD_ADAPTER_FILE, "prodex_mojo_log_load_semantics_v1("],
+  ]), []);
+  assert.match(findViolations([[LOG_LOAD_APP_FILE,
+    "fn is_routine_load_event(event_name: &str) { matches!(event_name, \"busy\"); }"],
+  ]).join("\n"), /restored Rust log-load classification/u);
+  assert.match(findViolations([[LOG_LOAD_TUI_FILE,
+    "aggregate.key == key && now.saturating_duration_since(aggregate.last_seen) <= window"],
+  ]).join("\n"), /freshness and key decisions must use Mojo/u);
+  assert.match(findViolations([[LOG_LOAD_ADAPTER_FILE, "fn adapter() {}"]]).join("\n"),
+    /must retain the required Mojo ABI call/u);
   assert.match(findViolations([["crates/prodex-domain/src/secrets.rs",
     "pub fn is_well_formed(&self) -> bool { true }\nfn secret_ref_part_is_well_formed() {}"]]).join("\n"),
   /SecretRef::is_well_formed must retain Mojo validation/u);
