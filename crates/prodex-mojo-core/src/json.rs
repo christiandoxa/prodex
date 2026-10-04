@@ -9,6 +9,10 @@ pub use self::session_report::{
     SessionReportOrderKey, SessionReportUpdatePlan, session_report_order,
     session_report_timestamp_sort_key, session_report_update_plan,
 };
+mod kiro_catalog;
+pub use self::kiro_catalog::{
+    KiroModelCatalogModel, KiroModelCatalogPlan, kiro_model_catalog_plan,
+};
 
 use crate::MojoError;
 

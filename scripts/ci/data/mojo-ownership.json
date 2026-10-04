@@ -697,6 +697,7 @@
           "kiro_response_shape_fallbacks",
           "kiro_acp_shape_fallbacks",
           "kiro_chat_message_prompt_construction",
+          "kiro_model_catalog_normalization",
           "deepseek_stream_shape_fallbacks",
           "deepseek_response_format_shape_policy",
           "deepseek_request_metadata_shape_policy",
@@ -779,6 +780,16 @@
           "kiro_response_shape_fallbacks",
           "kiro_acp_shape_fallbacks",
           "kiro_chat_message_prompt_construction"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/kiro_model_catalog.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "kiro_model_catalog_normalization"
         ]
       },
       {
@@ -5193,6 +5204,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON acquisition and serialization, bounded Kiro ABI invocation, and UTF-8/JSON decoding"
+    },
+    {
+      "name": "kiro_model_catalog_normalization",
+      "domain": "provider/kiro",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust selected model arrays and aliases, trimmed identifiers and names, chose optional metadata, normalized models, and used Mojo for identifier deduplication",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_kiro_catalog_normalize_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/kiro_model_catalog.mojo",
+      "consumer": "crates/prodex-provider-core/src/catalog/kiro.rs",
+      "consumer_marker": "kiro_model_catalog_plan(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/catalog/kiro.rs",
+        "crates/prodex-app/src/profile_commands/kiro/catalog.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/catalog/kiro.rs",
+      "rust_owner_before": "model-array precedence, alias selection, Unicode trimming, description and positive context-window selection, normalized model construction, and error classification",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; required-Mojo ABI and provider caller tests cover field precedence, Unicode trimming, metadata, deduplication, and typed error outcomes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde tree acquisition, checked span mapping, typed JSON materialization, Mojo identifier merging, and provider catalog limit validation"
     },
     {
       "name": "runtime_live_log_record_bound",

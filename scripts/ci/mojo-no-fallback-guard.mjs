@@ -914,6 +914,11 @@ const KIRO_PROMPT_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/kiro_prompt.rs"
 const KIRO_STREAM_FILE = "crates/prodex-provider-core/src/translators/kiro/stream.rs";
 const KIRO_FINAL_STREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/stream.rs";
 const KIRO_ACP_FILE = "crates/prodex-provider-core/src/translators/kiro/acp.rs";
+const KIRO_CATALOG_NORMALIZER_FILE = "crates/prodex-provider-core/src/catalog/kiro.rs";
+const KIRO_CATALOG_APP_ADAPTER_FILE = "crates/prodex-app/src/profile_commands/kiro/catalog.rs";
+const KIRO_CATALOG_ABI_FILE = "crates/prodex-mojo-core/src/json/kiro_catalog.rs";
+const KIRO_CATALOG_MOJO_FILE = "mojo/prodex_core/kiro_model_catalog.mojo";
+const KIRO_CATALOG_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/kiro_catalog.rs";
 const KIRO_ACP_OPERATIONS = [
   "KiroKernelOperation::AcpInitializeRequest",
   "KiroKernelOperation::AcpSessionNewRequest",
@@ -1680,6 +1685,58 @@ export function findViolations(files) {
       return required
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Kiro prompt ABI tests must retain ${marker}`);
+    }
+    return [];
+  });
+  const kiroCatalogViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === KIRO_CATALOG_NORMALIZER_FILE) {
+      const required = [
+        "kiro_model_catalog_plan(",
+        "KiroModelCatalogPlan::Ready",
+        "merge_catalog_ids(",
+        "merge_provider_model_catalog_json(ProviderId::Kiro",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Kiro catalog adapter must retain ${marker}`);
+      if (/(?:first_models_array|first_nonempty_array|first_nonempty_string|first_positive_u64)|\.trim\(\)/u.test(contents)) {
+        violations.push(`${filePath}: contains replaced Rust Kiro model-catalog decisions`);
+      }
+      return violations;
+    }
+    if (filePath === KIRO_CATALOG_APP_ADAPTER_FILE) {
+      const required = [
+        "prodex_provider_core::normalize_kiro_model_catalog(value)",
+        "prodex_provider_core::normalize_kiro_model_catalog_models(models)",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Kiro catalog caller must use ${marker}`);
+      if (/(?:first_models_array|first_nonempty_array|first_nonempty_string|first_positive_u64)|merge_catalog_ids|\.trim\(\)/u.test(contents)) {
+        violations.push(`${filePath}: contains replaced Rust Kiro model-catalog decisions`);
+      }
+      return violations;
+    }
+    if (filePath === KIRO_CATALOG_ABI_FILE) {
+      return contents.includes("fn prodex_mojo_kiro_catalog_normalize_v1(")
+        && contents.includes("pub fn kiro_model_catalog_plan(")
+        ? []
+        : [`${filePath}: Kiro catalog plan must use its versioned Mojo ABI`];
+    }
+    if (filePath === KIRO_CATALOG_MOJO_FILE) {
+      return contents.includes("KIRO_CATALOG_ABI_VERSION: Int64 = 1")
+        && contents.includes("def kiro_model_catalog_normalize_v1(")
+        ? []
+        : [`${filePath}: Kiro model-catalog planner must retain ABI v1`];
+    }
+    if (filePath === KIRO_CATALOG_ABI_TEST_FILE) {
+      const required = [
+        "kiro_model_catalog_plan_uses_alias_precedence_unicode_trim_and_stable_source_order",
+        "kiro_catalog_plan_returns_typed_missing_empty_and_limit_issues",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: required-Mojo Kiro catalog test must retain ${marker}`);
     }
     return [];
   });
@@ -4623,6 +4680,7 @@ export function findViolations(files) {
     ...kiroResponseHelperViolations,
     ...kiroAcpViolations,
     ...kiroMessageShapeViolations,
+    ...kiroCatalogViolations,
     ...deepseekStrictSchemaViolations,
     ...quotaModelPolicyViolations, ...quotaDisplayPolicyViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
@@ -5110,6 +5168,33 @@ function selfTest() {
   assert.match(findViolations([[KIRO_LOCAL_REWRITE_FILE,
     "fn local_rewrite_kiro() {}"]]).join("\n"),
   /must reach the Mojo-backed prompt adapter/u);
+  const kiroCatalogAdapter = `
+    kiro_model_catalog_plan(nodes, raw, PROVIDER_MODEL_CATALOG_HARD_LIMIT);
+    KiroModelCatalogPlan::Ready;
+    merge_catalog_ids(&[], &ids);
+    merge_provider_model_catalog_json(ProviderId::Kiro, &models);
+  `;
+  assert.deepEqual(findViolations([[KIRO_CATALOG_NORMALIZER_FILE, kiroCatalogAdapter]]), []);
+  assert.match(findViolations([[KIRO_CATALOG_NORMALIZER_FILE,
+    kiroCatalogAdapter + " first_nonempty_string(model, keys); model.trim()"]]).join("\n"),
+  /contains replaced Rust Kiro model-catalog decisions/u);
+  assert.deepEqual(findViolations([[KIRO_CATALOG_APP_ADAPTER_FILE, `
+    prodex_provider_core::normalize_kiro_model_catalog(value);
+    prodex_provider_core::normalize_kiro_model_catalog_models(models);
+  `]]), []);
+  assert.match(findViolations([[KIRO_CATALOG_APP_ADAPTER_FILE,
+    `prodex_provider_core::normalize_kiro_model_catalog(value); first_models_array(value);`]]).join("\n"),
+  /contains replaced Rust Kiro model-catalog decisions/u);
+  assert.deepEqual(findViolations([[KIRO_CATALOG_ABI_FILE,
+    `fn prodex_mojo_kiro_catalog_normalize_v1(
+     pub fn kiro_model_catalog_plan(
+     prodex_runtime_response_metadata_v1(
+     prodex_session_report_metadata_v1(
+     pub fn session_report_metadata(`]]), []);
+  assert.deepEqual(findViolations([[KIRO_CATALOG_MOJO_FILE,
+    "KIRO_CATALOG_ABI_VERSION: Int64 = 1\ndef kiro_model_catalog_normalize_v1("]]), []);
+  assert.deepEqual(findViolations([[KIRO_CATALOG_ABI_TEST_FILE,
+    "kiro_model_catalog_plan_uses_alias_precedence_unicode_trim_and_stable_source_order\nkiro_catalog_plan_returns_typed_missing_empty_and_limit_issues"]]), []);
   assert.match(findViolations([[DEEPSEEK_STRICT_TOOLS_FILE, "fn strict_schema() {}"]]).join("\n"),
     /strict schema normalization must use Mojo/u);
   assert.match(findViolations([[DEEPSEEK_STRICT_SCHEMA_FILE,

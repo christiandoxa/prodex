@@ -31,12 +31,13 @@ pub use bridge::{
     provider_core_split_flat_namespace_tool_name,
 };
 pub use catalog::{
-    PROVIDER_MODEL_CATALOG_HARD_LIMIT, ProviderCatalogEntry, ProviderCatalogFeatureFlags,
-    ProviderModelCatalogLimitError, ProviderModelChoice, ProviderModelReasoningError,
-    ProviderModelReasoningResolution, merge_provider_model_catalog_json, provider_catalog_entries,
-    provider_catalog_entries_for, provider_catalog_entry, provider_catalog_json,
-    provider_model_catalog_json, provider_model_json, provider_model_reasoning_resolution,
-    resolve_provider_model_choices,
+    KiroModelCatalogError, PROVIDER_MODEL_CATALOG_HARD_LIMIT, ProviderCatalogEntry,
+    ProviderCatalogFeatureFlags, ProviderModelCatalogLimitError, ProviderModelChoice,
+    ProviderModelReasoningError, ProviderModelReasoningResolution,
+    merge_provider_model_catalog_json, normalize_kiro_model_catalog,
+    normalize_kiro_model_catalog_models, provider_catalog_entries, provider_catalog_entries_for,
+    provider_catalog_entry, provider_catalog_json, provider_model_catalog_json,
+    provider_model_json, provider_model_reasoning_resolution, resolve_provider_model_choices,
 };
 pub use chat_tools_bridge::{
     provider_core_chat_request_body_without_web_search_options,

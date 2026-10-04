@@ -100,6 +100,12 @@ pub use reasoning::{
 mod serialization;
 pub use serialization::{provider_catalog_json, provider_model_catalog_json, provider_model_json};
 
+#[path = "catalog/kiro.rs"]
+mod kiro;
+pub use kiro::{
+    KiroModelCatalogError, normalize_kiro_model_catalog, normalize_kiro_model_catalog_models,
+};
+
 pub fn merge_provider_model_catalog_json<'a>(
     provider: ProviderId,
     additional_models: impl IntoIterator<Item = &'a serde_json::Value>,
