@@ -1139,6 +1139,26 @@
           "secret_reference_validation",
           "secret_rotation_policy_validation"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_internal_instruction.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_internal_instruction_leak_detection"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_internal_instruction_catalog.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_internal_instruction_leak_detection"
+        ]
       }
     ],
     "removed": [
@@ -4767,6 +4787,36 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "fixed-layout input construction, returned DTO validation, and typed status mapping"
+    },
+    {
+      "name": "gemini_internal_instruction_leak_detection",
+      "domain": "provider/gemini-guardrails",
+      "introduced_in": "0.435.2",
+      "baseline_state": "Rust-owned internal-instruction leak classification, safe-line retention, corpus normalization, and eight-word echo matching",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_internal_instruction_v1",
+      "mojo_operation_ids": {
+        "leak_text": 1,
+        "sanitize_text": 2,
+        "normalize_corpus": 3,
+        "text_echo": 4
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_internal_instruction.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/leaks.rs",
+      "consumer_marker": "prodex_mojo_core::gemini_internal_instruction",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/leaks.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/leaks.rs",
+      "rust_owner_before": "ASCII-insensitive prefix and marker classification, paragraph sanitation, system-instruction corpus normalization, and bounded eight-word echo detection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; required-Mojo provider caller tests cover classification, safe-line retention, paragraph handling, system-message corpus extraction, and the first-128-window limit",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON traversal, borrowed string views, caller-owned output allocation, and typed ABI error mapping"
     }
   ],
   "rust_semantic_reductions": [
@@ -5500,6 +5550,100 @@
         "release_symbol": "runtime_doctor_truncate_line",
         "release_marker": "prodex_mojo_core::rich::runtime_doctor_render("
       }
+    },
+    {
+      "file": "crates/prodex-provider-core/src/gemini_bridge/leaks/patterns.rs",
+      "symbol": "gemini_provider_core_internal_instruction_leak_text",
+      "operation": "gemini_internal_instruction_leak_detection",
+      "previous_responsibility": "Rust internal-instruction leak classification, optimizer and exact-output marker checks, and safe-status line classification",
+      "final_state": "deleted",
+      "rust_before": "crates/prodex-provider-core/src/gemini_bridge/leaks/patterns.rs",
+      "rust_after": "classifier and helper implementations deleted; public provider API delegates to the Mojo ABI",
+      "mojo_owner": "mojo/prodex_core/gemini_internal_instruction.mojo::gemini_instruction_text_is_leak",
+      "mojo_source": "mojo/prodex_core/gemini_internal_instruction.mojo",
+      "mojo_entry": "prodex_mojo_gemini_internal_instruction_v1 operations 1 and 2",
+      "production_consumer": "crates/prodex-provider-core/src/gemini_bridge/leaks.rs",
+      "parity_test": "crates/prodex-provider-core/src/gemini_bridge/leaks/tests.rs",
+      "cleanup_loc": 39,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 1,
+          "end": 46
+        }
+      },
+      "cleanup_evidence": "The frozen Rust classifier module is deleted, and the required-Mojo caller tests exercise leak classification and sanitation."
+    },
+    {
+      "file": "crates/prodex-provider-core/src/gemini_bridge/leaks/patterns/catalog.rs",
+      "symbol": "GEMINI_INTERNAL_INSTRUCTION_LEAK_PREFIXES",
+      "operation": "gemini_internal_instruction_leak_detection",
+      "previous_responsibility": "Rust-owned 160 leak prefixes and 60 leak markers",
+      "final_state": "deleted",
+      "rust_before": "crates/prodex-provider-core/src/gemini_bridge/leaks/patterns/catalog.rs",
+      "rust_after": "the ordered prefix and marker catalogs are owned by the compiled Mojo catalog module",
+      "mojo_owner": "mojo/prodex_core/gemini_internal_instruction_catalog.mojo",
+      "mojo_source": "mojo/prodex_core/gemini_internal_instruction_catalog.mojo",
+      "mojo_entry": "prodex_mojo_gemini_internal_instruction_v1 operations 1 and 2",
+      "production_consumer": "crates/prodex-provider-core/src/gemini_bridge/leaks.rs",
+      "parity_test": "crates/prodex-provider-core/src/gemini_bridge/leaks/tests.rs",
+      "cleanup_loc": 224,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 1,
+          "end": 226
+        }
+      },
+      "cleanup_evidence": "The frozen Rust catalogs are deleted; an exact source comparison verifies every original prefix and marker in order in the compiled Mojo owner."
+    },
+    {
+      "file": "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs",
+      "symbol": "gemini_provider_core_text_echoes_internal_instruction",
+      "operation": "gemini_internal_instruction_leak_detection",
+      "previous_responsibility": "Rust eight-word window creation, first-128-window bound, and corpus matching",
+      "final_state": "adapter-only",
+      "rust_before": "The provider bridge generated eight-word windows and searched the normalized instruction corpus",
+      "rust_after": "the provider bridge makes one checked call into the Mojo echo detector",
+      "mojo_owner": "mojo/prodex_core/gemini_internal_instruction.mojo::gemini_instruction_text_echoes",
+      "mojo_source": "mojo/prodex_core/gemini_internal_instruction.mojo",
+      "mojo_entry": "prodex_mojo_gemini_internal_instruction_v1 operation 4",
+      "production_consumer": "crates/prodex-provider-core/src/gemini_bridge/precommit/output.rs",
+      "parity_test": "crates/prodex-provider-core/src/gemini_bridge/leaks/tests.rs",
+      "cleanup_loc": 17,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "baseline_range": {
+          "start": 15,
+          "end": 31
+        },
+        "release_symbol": "pub fn gemini_provider_core_text_echoes_internal_instruction",
+        "release_marker": "prodex_mojo_core::gemini_internal_instruction::text_echoes("
+      },
+      "cleanup_evidence": "The Rust echo-window loop is deleted from the public bridge, which now delegates directly to Mojo."
+    },
+    {
+      "file": "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs",
+      "symbol": "gemini_provider_core_normalized_words",
+      "operation": "gemini_internal_instruction_leak_detection",
+      "previous_responsibility": "Rust ASCII tokenization, minimum token-length filtering, and lowercase normalization",
+      "final_state": "deleted",
+      "rust_before": "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs::gemini_provider_core_normalized_words",
+      "rust_after": "normalization is owned by prodex_mojo_gemini_internal_instruction_v1 operations 3 and 4",
+      "mojo_owner": "mojo/prodex_core/gemini_internal_instruction.mojo::gemini_instruction_normalize_corpus",
+      "mojo_source": "mojo/prodex_core/gemini_internal_instruction.mojo",
+      "mojo_entry": "prodex_mojo_gemini_internal_instruction_v1 operations 3 and 4",
+      "production_consumer": "crates/prodex-provider-core/src/gemini_bridge/leaks/echo.rs",
+      "parity_test": "crates/prodex-provider-core/src/gemini_bridge/leaks/tests.rs",
+      "cleanup_loc": 7,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 56,
+          "end": 62
+        }
+      },
+      "cleanup_evidence": "The Rust token normalizer is deleted and no production copy remains outside the checked Mojo ABI."
     }
   ],
   "deleted_authoritative_operations": [

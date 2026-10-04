@@ -9,25 +9,16 @@ pub fn gemini_provider_core_internal_instruction_corpus(messages: &[serde_json::
         gemini_provider_core_collect_text_for_echo_detection(message.get("content"), &mut text);
         text.push('\n');
     }
-    gemini_provider_core_normalized_words(&text).join(" ")
+    prodex_mojo_core::gemini_internal_instruction::normalize_corpus(&text)
+        .expect("Mojo Gemini instruction corpus normalizer returned invalid output")
 }
 
 pub fn gemini_provider_core_text_echoes_internal_instruction(
     text: &str,
     internal_instruction_corpus: &str,
 ) -> bool {
-    if internal_instruction_corpus.is_empty() {
-        return false;
-    }
-    let words = gemini_provider_core_normalized_words(text);
-    const ECHO_WORDS: usize = 8;
-    if words.len() < ECHO_WORDS {
-        return false;
-    }
-    words.windows(ECHO_WORDS).take(128).any(|window| {
-        let needle = window.join(" ");
-        internal_instruction_corpus.contains(&needle)
-    })
+    prodex_mojo_core::gemini_internal_instruction::text_echoes(text, internal_instruction_corpus)
+        .expect("Mojo Gemini instruction echo detector returned invalid output")
 }
 
 fn gemini_provider_core_collect_text_for_echo_detection(
@@ -51,12 +42,4 @@ fn gemini_provider_core_collect_text_for_echo_detection(
         }
         _ => {}
     }
-}
-
-fn gemini_provider_core_normalized_words(text: &str) -> Vec<String> {
-    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_' || ch == '-'))
-        .map(str::trim)
-        .filter(|word| word.len() >= 2)
-        .map(str::to_ascii_lowercase)
-        .collect()
 }

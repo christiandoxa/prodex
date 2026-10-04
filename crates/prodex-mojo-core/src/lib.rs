@@ -106,6 +106,8 @@ pub mod gemini_code_assist_policy;
 #[cfg(feature = "mojo-rich")]
 pub mod gemini_guardrails;
 #[cfg(feature = "mojo-rich")]
+pub mod gemini_internal_instruction;
+#[cfg(feature = "mojo-rich")]
 pub mod gemini_tooling_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod info_render;

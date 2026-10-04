@@ -1,3 +1,5 @@
+#![cfg(feature = "mojo-rich")]
+
 use prodex_mojo_core::log::{
     CHAIN_LOG_DEAD_UPSTREAM, CHAIN_LOG_RETRIED_OWNER, ChainLogRenderInput,
     ROUTE_AFFINITY_LOG_RECOMPUTE, RouteAffinityLogRenderInput, render_chain_log,

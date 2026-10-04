@@ -522,6 +522,8 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/rich_plan.mojo");
         sources.push("../../mojo/prodex_core/rich_catalog.mojo");
         sources.push("../../mojo/prodex_core/gemini_guardrails.mojo");
+        sources.push("../../mojo/prodex_core/gemini_internal_instruction.mojo");
+        sources.push("../../mojo/prodex_core/gemini_internal_instruction_catalog.mojo");
         sources.push("../../mojo/prodex_core/gemini_code_assist_policy.mojo");
         sources.push("../../mojo/prodex_core/gemini_tooling_policy.mojo");
         sources.push("../../mojo/prodex_core/log_semantics.mojo");

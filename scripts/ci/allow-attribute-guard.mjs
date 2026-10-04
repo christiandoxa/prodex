@@ -66,7 +66,7 @@ export const ALLOW_ATTRIBUTE_LOCATION_KEYS = Object.freeze([
   // ponytail: provider precommit eligibility mirrors the fixed Mojo scalar ABI; group inputs only if a second non-ABI caller appears.
   "clippy::too_many_arguments|crates/prodex-mojo-core/src/provider_constraints.rs|pub fn provider_precommit_should_prefetch(",
   // ponytail: quota report comparison forwards six sort modes and precomputed columns through one fixed Mojo ABI.
-  "clippy::too_many_arguments|crates/prodex-mojo-core/src/quota.rs|pub fn quota_report_compare(",
+  "clippy::too_many_arguments|crates/prodex-mojo-core/src/quota/report_sort.rs|pub fn quota_report_compare(",
   // ponytail: immutable live-reload inputs stay explicit; add a watcher context when another consumer appears.
   "clippy::type_complexity|crates/prodex-bench-support/src/lib.rs|pub fn run_runtime_proxy_hot_path_case_suite<",
 ]);
