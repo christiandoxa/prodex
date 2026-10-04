@@ -139,12 +139,13 @@ fn fresh_noncompact_transport_failure_rotates_through_ready_profiles() {
 
 #[test]
 fn fresh_noncompact_cold_start_probe_wait_is_one_shot() {
+    let backend = RuntimeProxyBackend::start();
     let harness = RuntimeProxyProfileHarnessBuilder::new()
         .openai_profile("main", "main-account", Some("main@example.com"))
         .openai_profile("second", "second-account", Some("second@example.com"))
         .active_profile("main")
         .current_profile("main")
-        .upstream_base_url("https://example.com/backend-api")
+        .upstream_base_url(backend.base_url())
         .profile_usage_snapshot(
             "main",
             runtime_usage_snapshot(
@@ -161,7 +162,7 @@ fn fresh_noncompact_cold_start_probe_wait_is_one_shot() {
         .profile_route_circuit_open_until
         .insert(
             runtime_profile_route_circuit_key("second", RuntimeRouteKind::Standard),
-            Local::now().timestamp() + 60,
+            Local::now().timestamp() + 1,
         );
     let request = RuntimeProxyRequest {
         method: "GET".to_string(),
@@ -172,14 +173,23 @@ fn fresh_noncompact_cold_start_probe_wait_is_one_shot() {
     let started_at = Instant::now();
 
     let response = proxy_runtime_standard_request(86, &request, shared)
-        .expect("cold-start exhaustion should fail locally");
-    let (status, _) = tiny_http_response_status_and_body(response);
+        .expect("cold-start recovery should reselect the profile after its circuit clears");
+    let (status, body) = tiny_http_response_status_and_body(response);
     let log = read_runtime_proxy_test_log(&shared.log_path);
 
-    assert_eq!(status, 503, "{log}");
+    assert_eq!(status, 200, "{body}\n{log}");
     assert!(
-        started_at.elapsed() < Duration::from_secs(2),
-        "cold-start exhaustion should not spin: {log}"
+        body.contains("second-account"),
+        "recovered cold-start profile should serve the request: {body}"
+    );
+    assert!(
+        started_at.elapsed() < Duration::from_secs(5),
+        "cold-start exhaustion should remain bounded after one recovery epoch: {log}"
+    );
+    assert!(
+        log.contains("rotation_waiting_for_recovery")
+            && log.contains("route=standard"),
+        "a temporarily unavailable cold-start profile should be reselected after its recovery epoch: {log}"
     );
 }
 

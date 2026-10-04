@@ -221,6 +221,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     fn wait_for_transient_recovery(&mut self) -> Result<bool> {
+        let force_reselection_after_wait = !(self.saw_overload_failure
+            || self.saw_rate_limit_failure
+            || self.saw_transport_failure);
         if self.has_continuation_priority()
             || !runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Websocket)?
         {
@@ -314,7 +317,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 ],
             ),
         );
-        Ok(recovered > 0)
+        Ok(recovered > 0 || force_reselection_after_wait)
     }
 
     pub(super) fn handle_precommit_budget_exhausted(

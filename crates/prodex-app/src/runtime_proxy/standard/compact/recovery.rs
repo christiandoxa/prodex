@@ -44,6 +44,7 @@ pub(super) fn wait_for_compact_overload_recovery(
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &mut BTreeSet<String>,
     recovery_sweeps: &mut usize,
+    force_reselection_after_wait: bool,
 ) -> Result<bool> {
     if !runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Compact)? {
         return Ok(false);
@@ -101,5 +102,5 @@ pub(super) fn wait_for_compact_overload_recovery(
             "request={request_id} transport=http rotation_sweep_start route=compact recovered_profiles={recovered} sweep={recovery_sweeps}"
         ),
     );
-    Ok(recovered > 0)
+    Ok(recovered > 0 || force_reselection_after_wait)
 }
