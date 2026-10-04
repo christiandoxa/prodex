@@ -48,6 +48,8 @@ use logging::{
 use recovery::{
     compact_profile_count, wait_for_compact_inflight_relief, wait_for_compact_overload_recovery,
 };
+#[cfg(test)]
+pub(crate) use retryable::test_runtime_compact_quota_fallback_exhausted;
 use retryable::{
     RuntimeProxyCompactRetryableFailure, handle_runtime_proxy_compact_retryable_failure,
 };

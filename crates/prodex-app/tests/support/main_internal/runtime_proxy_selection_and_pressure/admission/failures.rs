@@ -4,11 +4,13 @@ use super::{
     RuntimeProxyMarkerGuard, RuntimeProxyProfileHarnessBuilder, RuntimeProxyRequest,
     TestEnvVarGuard, closed_loopback_backend_base_url, proxy_runtime_standard_request,
     quota_window_ready, read_runtime_proxy_test_log, register_runtime_proxy_persistence_mode,
-    runtime_profile_route_circuit_key, runtime_usage_snapshot, RuntimeRouteKind,
+    runtime_has_route_eligible_quota_fallback_for_model, runtime_profile_route_circuit_key,
+    runtime_usage_snapshot, test_runtime_compact_quota_fallback_exhausted, RuntimeRouteKind,
     tiny_http_response_status_and_body,
 };
 use super::helpers::quota_window_exhausted;
 use chrono::Local;
+use std::collections::BTreeSet;
 use std::time::Instant;
 
 fn two_ready_profiles(backend: &RuntimeProxyBackend) -> RuntimeProxyProfileHarness {
@@ -26,6 +28,48 @@ fn two_ready_profiles(backend: &RuntimeProxyBackend) -> RuntimeProxyProfileHarne
         .profile_usage_snapshot("second", ready)
         .build()
 }
+
+#[test]
+fn compact_quota_fallback_respects_request_local_exclusions() {
+    let backend = RuntimeProxyBackend::start();
+    let ready = runtime_usage_snapshot(
+        quota_window_ready(80, 3_600),
+        quota_window_ready(80, 86_400),
+    );
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot("main", ready.clone())
+        .profile_usage_snapshot("second", ready)
+        .build();
+    let excluded = BTreeSet::from(["second".to_string()]);
+
+    assert!(
+        runtime_has_route_eligible_quota_fallback_for_model(
+            harness.shared(),
+            "main",
+            &BTreeSet::new(),
+            RuntimeRouteKind::Compact,
+            None,
+        )
+        .expect("global quota fallback lookup should succeed"),
+        "second profile should be globally eligible before request-local exclusion"
+    );
+    assert!(
+        test_runtime_compact_quota_fallback_exhausted(
+            harness.shared(),
+            "main",
+            &excluded,
+            None,
+        )
+        .expect("request-local quota fallback decision should succeed"),
+        "a profile already quota-failed in this request must make the compact fallback exhausted"
+    );
+}
+
 
 fn compact_request(session_id: Option<&str>) -> RuntimeProxyRequest {
     let mut headers = vec![

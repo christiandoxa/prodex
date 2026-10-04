@@ -119,6 +119,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         shared,
         overload,
         request_model_name,
+        excluded_profiles,
         RuntimeProxyCompactAttemptFailureLog {
             request_id,
             exit: "quota_fallback_exhausted",
@@ -437,17 +438,45 @@ fn runtime_compact_record_overload_penalty(
     );
 }
 
+#[cfg(test)]
+pub(crate) fn test_runtime_compact_quota_fallback_exhausted(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    excluded_profiles: &BTreeSet<String>,
+    requested_model: Option<&str>,
+) -> Result<bool> {
+    runtime_compact_quota_fallback_exhausted(
+        shared,
+        false,
+        requested_model,
+        excluded_profiles,
+        RuntimeProxyCompactAttemptFailureLog {
+            request_id: 9_997,
+            exit: "test_quota_fallback_exhausted",
+            reason: "quota",
+            selection_attempts: 0,
+            selection_started_at: Instant::now(),
+            pressure_mode: false,
+            last_failure: None,
+            saw_inflight_saturation: false,
+            saw_transport_failure: false,
+            profile_name,
+        },
+    )
+}
+
 fn runtime_compact_quota_fallback_exhausted(
     shared: &RuntimeRotationProxyShared,
     overload: bool,
     request_model_name: Option<&str>,
+    excluded_profiles: &BTreeSet<String>,
     failure: RuntimeProxyCompactAttemptFailureLog<'_>,
 ) -> Result<bool> {
     if overload
         || runtime_has_route_eligible_quota_fallback_for_model(
             shared,
             failure.profile_name,
-            &BTreeSet::new(),
+            excluded_profiles,
             RuntimeRouteKind::Compact,
             request_model_name,
         )?
