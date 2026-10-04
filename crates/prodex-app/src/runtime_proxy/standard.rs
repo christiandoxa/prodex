@@ -3,6 +3,8 @@ use super::*;
 mod attempts;
 mod compact;
 mod noncompact;
+#[cfg(test)]
+pub(crate) use compact::test_runtime_compact_quota_fallback_exhausted;
 
 pub(crate) fn proxy_runtime_standard_request(
     request_id: u64,
