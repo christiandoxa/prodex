@@ -122,6 +122,8 @@ pub mod log_throughput_policy;
 pub mod mcp_stdio_policy;
 #[cfg(feature = "mojo-observability")]
 pub mod observability;
+#[cfg(feature = "mojo-observability")]
+pub mod operational_metrics;
 #[cfg(feature = "mojo-runtime")]
 pub mod optional_tools_policy;
 #[cfg(feature = "mojo-runtime")]

@@ -2,7 +2,7 @@ use prodex_observability::TelemetryAttribute;
 use prodex_observability::{
     ApiAdmissionResult, ApiRouteKind, ApiStatusClass, InspectionMetricPlan, ProviderKind,
     ProviderResultClass, SecretProviderBackend, SecretProviderOperation, SecretProviderResult,
-    plan_api_admission_metric, plan_api_red_metric, plan_provider_metric,
+    histogram_bucket_bounds, plan_api_admission_metric, plan_api_red_metric, plan_provider_metric,
     plan_secret_provider_metric,
 };
 use std::collections::BTreeMap;
@@ -58,7 +58,8 @@ impl RuntimeOperationalMetricRegistry {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let histogram = histograms.entry(key).or_insert_with(|| {
-            let bucket_bounds = runtime_operational_histogram_bounds(name).to_vec();
+            let bucket_bounds = histogram_bucket_bounds(name)
+                .expect("Mojo operational histogram bucket planner returned invalid output");
             RuntimeOperationalHistogram {
                 bucket_counts: vec![0; bucket_bounds.len()],
                 bucket_bounds,
@@ -76,33 +77,6 @@ impl RuntimeOperationalMetricRegistry {
                 *count = count.saturating_add(1);
             }
         }
-    }
-}
-
-fn runtime_operational_histogram_bounds(name: &str) -> &'static [u64] {
-    if name.ends_with("_microseconds") {
-        &[
-            100,
-            250,
-            500,
-            1_000,
-            2_500,
-            5_000,
-            10_000,
-            25_000,
-            50_000,
-            100_000,
-            250_000,
-            500_000,
-            1_000_000,
-            5_000_000,
-            30_000_000,
-            120_000_000,
-        ]
-    } else {
-        &[
-            1, 2, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 120_000,
-        ]
     }
 }
 
@@ -200,4 +174,69 @@ pub(crate) fn record_runtime_provider_metric(
         plan.duration_ms,
         &labels,
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{RuntimeOperationalMetricKey, RuntimeOperationalMetricRegistry};
+
+    #[test]
+    fn runtime_histogram_bucket_plan_is_observable_at_the_registry_boundary() {
+        let registry = RuntimeOperationalMetricRegistry::default();
+        registry.observe_histogram("prodex_inspection_duration_microseconds", 501, &[]);
+        registry.observe_histogram("prodex_api_request_duration_ms", 501, &[]);
+
+        let histograms = registry
+            .histograms
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let micros = histograms
+            .get(&RuntimeOperationalMetricKey {
+                name: "prodex_inspection_duration_microseconds",
+                labels: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(
+            micros.bucket_bounds,
+            [
+                100,
+                250,
+                500,
+                1_000,
+                2_500,
+                5_000,
+                10_000,
+                25_000,
+                50_000,
+                100_000,
+                250_000,
+                500_000,
+                1_000_000,
+                5_000_000,
+                30_000_000,
+                120_000_000
+            ]
+        );
+        assert_eq!(
+            micros.bucket_counts,
+            [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+        );
+
+        let millis = histograms
+            .get(&RuntimeOperationalMetricKey {
+                name: "prodex_api_request_duration_ms",
+                labels: Vec::new(),
+            })
+            .unwrap();
+        assert_eq!(
+            millis.bucket_bounds,
+            [
+                1, 2, 5, 10, 25, 50, 100, 250, 500, 1_000, 2_500, 5_000, 10_000, 30_000, 120_000
+            ]
+        );
+        assert_eq!(
+            millis.bucket_counts,
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
+        );
+    }
 }
