@@ -184,24 +184,24 @@ Caveman is externally installed and validated; Smart Context is built into the C
 <details>
 <summary>Install and verify the Super tools</summary>
 
-Caveman (Prodex-vetted `3.0.0` checkout):
+Caveman (Prodex-vetted `3.1.0` checkout):
 
 ```bash
 export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
 install -d "$PRODEX_OPTIMIZERS_HOME/caveman"
 git clone --no-checkout https://github.com/JuliusBrussee/caveman \
-  "$PRODEX_OPTIMIZERS_HOME/caveman/3.0.0"
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/3.0.0" config core.autocrlf false
-git -C "$PRODEX_OPTIMIZERS_HOME/caveman/3.0.0" checkout --detach \
-  b33a39554ed06cbc7d7d3198ff90c171e8043b69
-cat >"$PRODEX_OPTIMIZERS_HOME/caveman/3.0.0/prodex-tool.json" <<'JSON'
+  "$PRODEX_OPTIMIZERS_HOME/caveman/3.1.0"
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/3.1.0" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/caveman/3.1.0" checkout --detach \
+  8af1f1b9b1346bca0722a1556f119b4e6675cc96
+cat >"$PRODEX_OPTIMIZERS_HOME/caveman/3.1.0/prodex-tool.json" <<'JSON'
 {
   "schema_version": 1,
   "id": "caveman",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "b33a39554ed06cbc7d7d3198ff90c171e8043b69",
-  "tree_sha256": "a297ba8affb43a79db0b0ffe2a0874d3a1351877cc1894ef449fa8d289bdbccf"
+  "commit": "8af1f1b9b1346bca0722a1556f119b4e6675cc96",
+  "tree_sha256": "2ca3549a88da2fc49b2abda20c90a1a8701f56833e2b19e60bdcede3ce68b316"
 }
 JSON
 
@@ -209,7 +209,7 @@ prodex capability super-doctor --json
 prodex caveman --dry-run
 ```
 
-The target directory must not already exist. Prodex validates the commit metadata and complete tree digest before activating Caveman. Caveman 3.0.0 documents telemetry as enabled by default for its CLI and agent hooks; its skill-only integration sends no telemetry. Use Caveman's documented `caveman telemetry off` or `DO_NOT_TRACK=1` controls when running its CLI/plugin hooks if telemetry is not desired.
+The target directory must not already exist. Prodex validates the commit metadata and complete tree digest before activating Caveman. Caveman 3.1.0 documents telemetry as enabled by default for its CLI and agent hooks; its skill-only integration sends no telemetry. Use Caveman's documented `caveman telemetry off` or `DO_NOT_TRACK=1` controls when running its CLI/plugin hooks if telemetry is not desired.
 
 RTK (latest stable `0.51.0`, externally managed):
 
