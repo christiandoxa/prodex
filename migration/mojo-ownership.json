@@ -1240,6 +1240,26 @@
         "operations": [
           "update_notice_release_version_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/smart_context_symbol_classification.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "smart_context_source_symbol_classification"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/smart_context_symbol_parser.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "smart_context_source_symbol_classification"
+        ]
       }
     ],
     "removed": [
@@ -5354,6 +5374,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON parsing/canonicalization, UTF-8 bounds, and versioned rich ABI invocation"
+    },
+    {
+      "name": "smart_context_source_symbol_classification",
+      "domain": "smart-context/source-symbols",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust-owned Rust/Python/JavaScript source declaration recognition, classification, naming, and Rust test-attribute labeling",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_smart_context_symbol_classify_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/smart_context_symbol_classification.mojo",
+      "consumer": "crates/prodex-app/src/runtime_state_shared/semantic_index.rs",
+      "consumer_marker": "prodex_mojo_core::smart_context_symbols::visit_classifications(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_state_shared/semantic_index.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/smart_context_symbols.rs",
+      "production_caller_test": "crates/prodex-app/src/runtime_state_shared/artifact_tests.rs",
+      "production_caller_test_marker": "runtime_smart_context_artifact_symbol_index_uses_mojo_classification",
+      "rust_owner_before": "source declaration recognition, Rust/Python/JavaScript classification, labels, names, fallback names, impl naming, and Rust test-attribute labeling",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "removed; direct required-Mojo tests cover declaration families, names, labels, styles and attributes; the artifact-store caller test checks persisted ranges, text and hashes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "line-span preparation, bounded ABI invocation, output validation and existing symbol DTO mapping; prefix attachment, Rust/Python/brace range planning, excerpt validation, deduplication and capacity remain Rust"
     }
   ],
   "rust_semantic_reductions": [

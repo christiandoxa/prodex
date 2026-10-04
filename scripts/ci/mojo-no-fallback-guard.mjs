@@ -40,6 +40,13 @@ const SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/ri
 const SMART_CONTEXT_CAPSULE_ORDER_MOJO_FILE = "mojo/prodex_core/smart_context_capsule_order.mojo";
 const DEEPSEEK_INPUT_HISTORY_FILE = "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs";
 const PRESIDIO_LOCAL_REDACTION_FILE = "crates/prodex-app/src/runtime_proxy/presidio/local.rs";
+const SMART_CONTEXT_SYMBOL_CLASSIFICATION_CONSUMER_FILE = "crates/prodex-app/src/runtime_state_shared/semantic_index.rs";
+const SMART_CONTEXT_SYMBOL_CLASSIFICATION_RANGE_FILE = "crates/prodex-app/src/runtime_state_shared/semantic_index/symbols.rs";
+const SMART_CONTEXT_SYMBOL_CLASSIFICATION_ADAPTER_FILE = "crates/prodex-mojo-core/src/smart_context_symbols.rs";
+const SMART_CONTEXT_SYMBOL_CLASSIFICATION_MOJO_FILE = "mojo/prodex_core/smart_context_symbol_classification.mojo";
+const SMART_CONTEXT_SYMBOL_CLASSIFICATION_PARSER_FILE = "mojo/prodex_core/smart_context_symbol_parser.mojo";
+const SMART_CONTEXT_SYMBOL_CLASSIFICATION_TEST_FILE = "crates/prodex-mojo-core/tests/smart_context_symbols.rs";
+const SMART_CONTEXT_SYMBOL_CLASSIFICATION_CALLER_TEST_FILE = "crates/prodex-app/src/runtime_state_shared/artifact_tests.rs";
 const LIVE_LOG_RECORD_FILE = "crates/prodex-runtime-log/src/live.rs";
 const LIVE_LOG_RECORD_ADAPTER_FILE = "crates/prodex-mojo-core/src/live_log_record.rs";
 const LIVE_LOG_RECORD_MOJO_FILE = "mojo/prodex_core/live_log_record.mojo";
@@ -122,6 +129,15 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/runtime_proxy/health_circuit.rs",
   "crates/prodex-mojo-core/src/smart_context_markers.rs",
   "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
+  SMART_CONTEXT_SYMBOL_CLASSIFICATION_CONSUMER_FILE,
+  SMART_CONTEXT_SYMBOL_CLASSIFICATION_RANGE_FILE,
+  SMART_CONTEXT_SYMBOL_CLASSIFICATION_ADAPTER_FILE,
+  SMART_CONTEXT_SYMBOL_CLASSIFICATION_MOJO_FILE,
+  SMART_CONTEXT_SYMBOL_CLASSIFICATION_PARSER_FILE,
+  SMART_CONTEXT_SYMBOL_CLASSIFICATION_TEST_FILE,
+  SMART_CONTEXT_SYMBOL_CLASSIFICATION_CALLER_TEST_FILE,
+  "crates/prodex-mojo-core/src/lib.rs",
+  "crates/prodex-mojo-core/build.rs",
   "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
@@ -455,6 +471,8 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
   "crates/prodex-mojo-core/src/smart_context_markers.rs",
   "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
+  SMART_CONTEXT_SYMBOL_CLASSIFICATION_CONSUMER_FILE,
+  SMART_CONTEXT_SYMBOL_CLASSIFICATION_ADAPTER_FILE,
   "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
@@ -4159,6 +4177,106 @@ export function findViolations(files) {
     }
     return [];
   });
+  const smartContextSymbolClassificationViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SMART_CONTEXT_SYMBOL_CLASSIFICATION_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const violations = production.includes("prodex_mojo_core::smart_context_symbols::visit_classifications(")
+        ? []
+        : [`${filePath}: source-symbol declaration classification must use the Mojo ABI`];
+      if (FEATURE_OFF_RUST_PATH.test(production)) {
+        violations.push(`${filePath}: source-symbol classification cannot have a feature-off Rust path`);
+      }
+      if (/runtime_smart_context_parse_symbol_line\s*\(/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust source-symbol classification`);
+      }
+      return violations;
+    }
+    if (filePath === SMART_CONTEXT_SYMBOL_CLASSIFICATION_RANGE_FILE) {
+      const required = [
+        "runtime_smart_context_symbol_range_bounds(",
+        "runtime_smart_context_symbol_prefix_start(",
+        "runtime_smart_context_brace_symbol_end(",
+        "runtime_smart_context_python_symbol_end(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: Rust must retain source-range planning (${call})`);
+      if (/runtime_smart_context_(?:parse_symbol_line|parse_symbol_declaration|parse_callable_symbol|has_rust_test_attribute|is_rust_test_attribute|parse_python_symbol|parse_js_function_symbol|parse_js_test_symbol|identifier_after_keyword|take_identifier)\s*\(/u.test(contents)) {
+        violations.push(`${filePath}: contains restored Rust source-symbol classification or naming`);
+      }
+      return violations;
+    }
+    if (filePath === SMART_CONTEXT_SYMBOL_CLASSIFICATION_ADAPTER_FILE) {
+      const required = [
+        "prodex_smart_context_symbol_classify_v1(",
+        "const ABI_VERSION: i64 = 1",
+        "pub fn visit_classifications(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: source-symbol adapter must retain ${call}`);
+    }
+    if (filePath === SMART_CONTEXT_SYMBOL_CLASSIFICATION_MOJO_FILE) {
+      const required = [
+        '@export("prodex_smart_context_symbol_classify_v1")',
+        "from smart_context_symbol_parser import (",
+        "symbol_parse_line,",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: source-symbol classification ABI must retain ${call}`);
+      if (/def symbol_(?:prefix_start|brace_end|python_end)\s*\(/u.test(contents)) {
+        violations.push(`${filePath}: source-range planning must remain Rust-owned in stage 1`);
+      }
+      return violations;
+    }
+    if (filePath === SMART_CONTEXT_SYMBOL_CLASSIFICATION_PARSER_FILE) {
+      const required = [
+        "SYMBOL_ABI_VERSION: Int64 = 1",
+        "def symbol_parse_declaration(",
+        "def symbol_has_rust_test_attribute(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: declaration classification must remain in the Mojo parser (${call})`);
+      if (/def symbol_(?:prefix_start|brace_end|python_end)\s*\(/u.test(contents)) {
+        violations.push(`${filePath}: source-range planning must remain Rust-owned in stage 1`);
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/lib.rs") {
+      return contents.includes("pub mod smart_context_symbols;")
+        ? []
+        : [`${filePath}: source-symbol ABI adapter must be production-reachable`];
+    }
+    if (filePath === "crates/prodex-mojo-core/build.rs") {
+      return contents.includes("../../mojo/prodex_core/smart_context_symbol_classification.mojo")
+        ? []
+        : [`${filePath}: source-symbol kernel must be linked into the production archive`];
+    }
+    if (filePath === SMART_CONTEXT_SYMBOL_CLASSIFICATION_TEST_FILE) {
+      const required = [
+        "mojo_classifies_rust_python_and_javascript_declaration_names",
+        "mojo_classifies_test_attributes_and_declaration_families",
+        "visit_classifications(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: direct required-Mojo declaration tests must retain ${call}`);
+    }
+    if (filePath === SMART_CONTEXT_SYMBOL_CLASSIFICATION_CALLER_TEST_FILE) {
+      const required = [
+        "runtime_smart_context_artifact_symbol_index_uses_mojo_classification",
+        "symbol_ranges",
+        "unicode 雪",
+        "content_hash",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: Smart Context artifact caller coverage must retain ${call}`);
+    }
+    return [];
+  });
   const smartContextArtifactRefViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs") {
       const required = [
@@ -4579,6 +4697,37 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  const symbolClassificationFiles = [
+    [SMART_CONTEXT_SYMBOL_CLASSIFICATION_CONSUMER_FILE,
+      "prodex_mojo_core::smart_context_symbols::visit_classifications(lines, |_| true);"],
+    [SMART_CONTEXT_SYMBOL_CLASSIFICATION_RANGE_FILE,
+      "runtime_smart_context_symbol_range_bounds() runtime_smart_context_symbol_prefix_start() runtime_smart_context_brace_symbol_end() runtime_smart_context_python_symbol_end()"],
+    [SMART_CONTEXT_SYMBOL_CLASSIFICATION_ADAPTER_FILE,
+      "prodex_smart_context_symbol_classify_v1() const ABI_VERSION: i64 = 1 pub fn visit_classifications()"],
+    [SMART_CONTEXT_SYMBOL_CLASSIFICATION_MOJO_FILE,
+      '@export("prodex_smart_context_symbol_classify_v1") from smart_context_symbol_parser import ( symbol_parse_line,'],
+    [SMART_CONTEXT_SYMBOL_CLASSIFICATION_PARSER_FILE,
+      "SYMBOL_ABI_VERSION: Int64 = 1 def symbol_parse_declaration() def symbol_has_rust_test_attribute()"],
+    ["crates/prodex-mojo-core/src/lib.rs", "pub mod smart_context_symbols;"],
+    ["crates/prodex-mojo-core/build.rs", "../../mojo/prodex_core/smart_context_symbol_classification.mojo"],
+    [SMART_CONTEXT_SYMBOL_CLASSIFICATION_TEST_FILE,
+      "mojo_classifies_rust_python_and_javascript_declaration_names mojo_classifies_test_attributes_and_declaration_families visit_classifications("],
+    [SMART_CONTEXT_SYMBOL_CLASSIFICATION_CALLER_TEST_FILE,
+      "runtime_smart_context_artifact_symbol_index_uses_mojo_classification symbol_ranges unicode 雪 content_hash"],
+  ];
+  assert.deepEqual(findViolations(symbolClassificationFiles), []);
+  assert.match(findViolations([[SMART_CONTEXT_SYMBOL_CLASSIFICATION_CONSUMER_FILE,
+    "runtime_smart_context_parse_symbol_line(lines, index)"]]).join("\n"),
+  /source-symbol declaration classification must use the Mojo ABI/u);
+  assert.match(findViolations([[SMART_CONTEXT_SYMBOL_CLASSIFICATION_RANGE_FILE,
+    "runtime_smart_context_parse_symbol_line(lines, index)"]]).join("\n"),
+  /contains restored Rust source-symbol classification or naming/u);
+  assert.match(findViolations([[SMART_CONTEXT_SYMBOL_CLASSIFICATION_PARSER_FILE,
+    "def symbol_prefix_start(): pass"]]).join("\n"),
+  /source-range planning must remain Rust-owned/u);
+  assert.match(findViolations([[SMART_CONTEXT_SYMBOL_CLASSIFICATION_CALLER_TEST_FILE,
+    "fn unrelated_test() {}"]]).join("\n"),
+  /Smart Context artifact caller coverage must retain/u);
   const updateNoticeVersionCaller = [
     "update_notice_policy::should_emit_notice(",
     "update_notice_policy::install_channel(",

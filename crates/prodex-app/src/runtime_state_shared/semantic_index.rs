@@ -111,9 +111,27 @@ pub(super) fn runtime_smart_context_artifact_semantic_line_index(
         }
     }
 
-    for (index, _) in lines.iter().enumerate() {
-        let Some(symbol) = runtime_smart_context_parse_symbol_line(lines, index) else {
-            continue;
+    prodex_mojo_core::smart_context_symbols::visit_classifications(lines, |classification| {
+        if remaining == 0 {
+            parts.symbol_complete = false;
+            return false;
+        }
+        let index = classification.line_index;
+        let symbol = RuntimeSmartContextParsedSymbolLine {
+            label: match classification.label {
+                prodex_mojo_core::smart_context_symbols::SymbolLabel::Function => "function",
+                prodex_mojo_core::smart_context_symbols::SymbolLabel::Test => "test_symbol",
+                prodex_mojo_core::smart_context_symbols::SymbolLabel::Symbol => "symbol",
+            },
+            symbol: classification.symbol,
+            style: match classification.style {
+                prodex_mojo_core::smart_context_symbols::SymbolStyle::Brace => {
+                    RuntimeSmartContextSymbolRangeStyle::Brace
+                }
+                prodex_mojo_core::smart_context_symbols::SymbolStyle::Python => {
+                    RuntimeSmartContextSymbolRangeStyle::Python
+                }
+            },
         };
         let (start, end) = runtime_smart_context_symbol_range_bounds(lines, index, symbol.style);
         let metadata = RuntimeSmartContextSemanticRangeMetadata {
@@ -131,7 +149,9 @@ pub(super) fn runtime_smart_context_artifact_semantic_line_index(
             end,
             metadata,
         );
-    }
+        true
+    })
+    .expect("Mojo smart-context symbol classifier returned invalid output");
 
     parts
 }

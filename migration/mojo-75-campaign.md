@@ -5162,3 +5162,8 @@ Validation passed:
 - `node scripts/ci/mojo-no-fallback-guard.mjs --self-test`, `node scripts/ci/mojo-authority-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, and `node scripts/ci/size-guard.mjs` passed. Ownership reports 154 authoritative operations; the new Mojo module is 198 lines.
 - `node scripts/ci/mojo-production-share.mjs --check` — 81,486 Mojo LOC and 203,748 Rust LOC, or **28.57% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
 - No commit or push was made.
+## Smart Context source-symbol migration, stage 1
+
+Stage 1 moves only declaration recognition, Rust/Python/JavaScript classification, labels, names, fallbacks, `impl` naming, and Rust test-attribute labeling into versioned ABI `prodex_smart_context_symbol_classify_v1`, linked through `prodex-mojo-core` from `smart_context_symbol_classification.mojo` and `smart_context_symbol_parser.mojo`. Rust retains prefix attachment, range planning, excerpts, deduplication, capacity, and DTO construction; no Rust classifier or feature-off fallback remains.
+
+Direct required-Mojo tests cover declaration families, names, labels, styles, and attributes; the artifact-store caller test checks persisted ranges, text, and hashes. Mutating the `fn ` recognizer failed the direct test. Byte-exact restoration matched SHA-256 `b3eb46d111a8c3f0e418013ff4315813e28b1e97cc374e2ec0f39caec176071c`. Direct tests pass 2/2 and app caller passes 1/1. Clippy, fmt, docs, changed-tests, authority, ownership, no-fallback, size, share, churn, and diff checks pass.
