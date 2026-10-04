@@ -4897,3 +4897,22 @@ Validation passed:
 - `PRODEX_MOJO_REQUIRED=1 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings`.
 - The no-fallback guard and self-test, authority guard, and ownership check pass; ownership reports 146 authoritative operations.
 - `node scripts/ci/mojo-production-share.mjs --check` — 79,996 Mojo LOC and 203,764 Rust LOC, or **28.19% Mojo**. The 7% release floor and ownership non-regression pass; the 75% target remains unmet.
+
+## Gemini internal-instruction leak detection migration
+
+Mojo now owns Gemini internal-instruction leak classification and sanitation,
+system-instruction corpus normalization, and bounded eight-word echo detection
+behind ABI v1. Rust retains JSON traversal, text ownership, and ABI error
+mapping. The original prefix and marker catalog remains exact in the Mojo
+catalog module; source comparison confirmed all 160 prefixes and 60 original
+markers in order, plus eight distinct helper markers and three safe-status
+markers. The Rust classifier and echo-window implementation are gone.
+
+Validation passed:
+
+- `mojo format mojo/prodex_core/gemini_internal_instruction.mojo mojo/prodex_core/gemini_internal_instruction_catalog.mojo` and `cargo fmt --all -- --check`.
+- `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-provider-core gemini_bridge::leaks::tests -- --test-threads=1` — 4 passed; the complete `prodex-provider-core` library suite passed 371 tests.
+- `PRODEX_MOJO_REQUIRED=1 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings` passed.
+- The Mojo no-fallback guard and self-test, authority guard, and ownership check pass; ownership reports 147 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` — 80,663 Mojo LOC and 203,573 Rust LOC, or **28.38% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
+- Targeted Markdown lint and `git diff --check` pass.
