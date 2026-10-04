@@ -1004,6 +1004,7 @@ export function findViolations(files) {
         "prodex_mojo_core::provider_usage::extract_json(",
         "prodex_mojo_core::provider_usage::calculate_cost(",
         "prodex_mojo_core::provider_usage::merged_total(",
+        "prodex_mojo_core::provider_usage::merge_latest_present(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -1016,6 +1017,9 @@ export function findViolations(files) {
       ) {
         violations.push(filePath + ": contains restored Rust provider-usage semantics");
       }
+      if (/if\s+\w+\.(input|output|total)_tokens\.is_some\(\)\s*\{\s*\w+\.\1_tokens\s*=/u.test(production)) {
+        violations.push(filePath + ": contains restored Rust SSE usage merge policy");
+      }
       return violations;
     }
     if (filePath === "crates/prodex-mojo-core/src/provider_usage.rs") {
@@ -1023,6 +1027,7 @@ export function findViolations(files) {
         "prodex_provider_usage_extract_v1(",
         "prodex_provider_usage_cost_v1(",
         "prodex_provider_usage_merged_total_v1(",
+        "prodex_provider_usage_merge_latest_present_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
@@ -4866,6 +4871,20 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
   ]])[0], /Mojo-owned operation cannot have a feature-off Rust path/u);
+  const providerUsageFile = "crates/prodex-provider-core/src/usage.rs";
+  const providerUsageCalls = [
+    "prodex_mojo_core::provider_usage::extract_json(",
+    "prodex_mojo_core::provider_usage::calculate_cost(",
+    "prodex_mojo_core::provider_usage::merged_total(",
+    "prodex_mojo_core::provider_usage::merge_latest_present(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[providerUsageFile, providerUsageCalls]]), []);
+  assert.match(
+    findViolations([[providerUsageFile,
+      providerUsageCalls + "\nif usage.input_tokens.is_some() { merged.input_tokens = usage.input_tokens; }",
+    ]]).join("\n"),
+    /restored Rust SSE usage merge policy/u,
+  );
 }
 
 async function main() {

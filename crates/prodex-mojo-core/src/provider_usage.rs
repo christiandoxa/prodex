@@ -38,6 +38,22 @@ unsafe extern "C" {
         output_tokens: u64,
         result_address: u64,
     ) -> i64;
+    fn prodex_provider_usage_merge_latest_present_v1(
+        abi_version: i64,
+        previous_input_present: i64,
+        previous_input_tokens: u64,
+        incoming_input_present: i64,
+        incoming_input_tokens: u64,
+        previous_output_present: i64,
+        previous_output_tokens: u64,
+        incoming_output_present: i64,
+        incoming_output_tokens: u64,
+        previous_total_present: i64,
+        previous_total_tokens: u64,
+        incoming_total_present: i64,
+        incoming_total_tokens: u64,
+        result_address: u64,
+    ) -> i64;
 }
 
 fn status(code: i64) -> Result<(), MojoError> {
@@ -127,6 +143,36 @@ pub fn merged_total(
     output_option(result[0], result[1])
 }
 
+pub fn merge_latest_present(
+    previous: ProviderUsagePlan,
+    incoming: ProviderUsagePlan,
+) -> Result<ProviderUsagePlan, MojoError> {
+    let mut output = [0_u64; 6];
+    status(unsafe {
+        prodex_provider_usage_merge_latest_present_v1(
+            ABI_VERSION,
+            option_flag(previous.input_tokens),
+            option_value(previous.input_tokens),
+            option_flag(incoming.input_tokens),
+            option_value(incoming.input_tokens),
+            option_flag(previous.output_tokens),
+            option_value(previous.output_tokens),
+            option_flag(incoming.output_tokens),
+            option_value(incoming.output_tokens),
+            option_flag(previous.total_tokens),
+            option_value(previous.total_tokens),
+            option_flag(incoming.total_tokens),
+            option_value(incoming.total_tokens),
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    Ok(ProviderUsagePlan {
+        input_tokens: output_option(output[0], output[1])?,
+        output_tokens: output_option(output[2], output[3])?,
+        total_tokens: output_option(output[4], output[5])?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,6 +206,46 @@ mod tests {
         assert_eq!(
             merged_total(None, Some(u64::MAX), Some(1)).unwrap(),
             Some(u64::MAX)
+        );
+    }
+
+    #[test]
+    fn provider_usage_latest_present_merge_updates_across_events() {
+        let first = merge_latest_present(
+            ProviderUsagePlan::default(),
+            ProviderUsagePlan {
+                input_tokens: Some(10),
+                output_tokens: Some(20),
+                total_tokens: Some(30),
+            },
+        )
+        .unwrap();
+        let second = merge_latest_present(
+            first,
+            ProviderUsagePlan {
+                input_tokens: Some(11),
+                output_tokens: None,
+                total_tokens: None,
+            },
+        )
+        .unwrap();
+        let third = merge_latest_present(
+            second,
+            ProviderUsagePlan {
+                input_tokens: None,
+                output_tokens: Some(22),
+                total_tokens: Some(33),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(
+            third,
+            ProviderUsagePlan {
+                input_tokens: Some(11),
+                output_tokens: Some(22),
+                total_tokens: Some(33),
+            }
         );
     }
 }
