@@ -2,84 +2,55 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.435.4 - 2026-10-04
+
+### Runtime
+
+- Keep retryable profiles alive past precommit budget (`0934e00`)
+# Prodex 0.435.4
+
+## New Features
+
+- No new user-facing feature surface; 0.435.4 is a runtime reliability patch.
+
+## Bug Fixes
+
+### Retryable profiles no longer die at the pre-commit budget boundary
+
+- Fresh Responses requests now enter profile recovery whenever at least one profile remains
+  retryable, even if no transient-failure flag was recorded before the retry budget expires.
+- Standard HTTP, compact, and WebSocket fresh-request recovery follow the same rule: profile
+  viability is authoritative, not the incidental presence of an overload/rate-limit/transport flag.
+- A temporarily backed-off profile remains internal backpressure/recovery work instead of leaking
+  the user-visible `pre-commit retry budget was exhausted` 503 while usable quota still exists.
+- Hard continuation affinity remains fail-closed where switching profiles would violate conversation
+  ownership semantics.
+- Fully exhausted pools remain bounded and terminal; known zero-quota accounts are still not sent
+  upstream.
+
+## Verification
+
+- Added a regression that places a quota-healthy profile into retry backoff with no transient-failure
+  flag and proves the production recovery path waits until the profile becomes selectable again.
+- Sensitivity check: temporarily restoring the old transient-flag gate makes the new regression fail;
+  restoring the correct implementation byte-for-byte makes it pass again.
+- Regression coverage also verifies last-positive quota draining, all-zero terminal behavior, compact
+  recovery, and WebSocket pool exhaustion.
+- Mojo no-fallback, Mojo authority, runtime manifest, hot-path, size, static guards, formatting, and
+  relevant Clippy checks pass locally.
+
+## Changelog
+
+- Keep retryable profiles alive past the pre-commit retry budget and prevent spurious 503s under
+  parallel workloads while viable accounts remain.
+
+Full Changelog: [0.435.3...0.435.4](https://github.com/christiandoxa/prodex/compare/0.435.3...0.435.4)
+
 ## 0.435.3 - 2026-10-04
 
 ### Runtime
 
 - Backpressure local saturation (`8aaf4e9`)
-# Prodex 0.435.3
-
-## New Features
-
-- No new user-facing command surface; 0.435.3 focuses on unbounded local
-  backpressure for high-parallelism Prodex workloads.
-
-## Bug Fixes
-
-### Local saturation no longer terminates parallel user workflows
-
-- Convert runtime active-request and lane admission saturation from a bounded
-  rejection into wait-and-resume backpressure. A large number of concurrent
-  Prodex processes now queue for local capacity instead of receiving a local
-  503 because a short admission budget expired.
-- Keep long-lived request queue saturation in backpressure mode across the old
-  queue-wait timeout epochs instead of returning a local overload response.
-- Make profile in-flight saturation wait across repeated capacity epochs while
-  the saturated profile remains eligible. The removed
-  `local_capacity_timeout` path can no longer terminate Responses, standard
-  HTTP, compact, or WebSocket work merely because other Prodex processes are
-  still using local capacity.
-- Re-evaluate profile eligibility after every capacity epoch. When an account
-  becomes quota-blocked or otherwise ineligible, selection continues to the
-  remaining profiles rather than waiting forever.
-- Preserve terminal behavior when the whole eligible account pool is
-  authoritatively exhausted; removing local saturation errors does not turn an
-  all-zero quota pool into an infinite retry loop.
-- Preserve bounded resource ownership internally: profile and lane limits still
-  control simultaneous work, but callers wait for a permit instead of being
-  rejected because of user parallelism.
-
-### Migration guard alignment
-
-- Update the domain-boundary guard to follow the current Mojo-owned
-  secret-reference validator instead of requiring the deleted Rust helper.
-
-## Compatibility Notes
-
-- Existing runtime tuning limits continue to act as concurrency/backpressure
-  controls; they no longer define a user-visible local saturation deadline.
-- Upstream provider errors, authentication failures, and authoritative quota
-  exhaustion remain distinct from local capacity pressure and may still produce
-  their documented terminal outcomes.
-- Rust remains responsible for host/runtime synchronization while deterministic
-  eligibility and admission planning continue through the existing Mojo
-  authority boundaries.
-
-## Verification
-
-- A 32-caller regression test with an active-request limit of one verifies that
-  callers serialize through backpressure without any `GlobalLimit` rejection.
-- A sensitivity mutation that temporarily restored the old admission timeout
-  made that 32-caller regression fail with `GlobalLimit`; restoring the patch
-  made it pass again.
-- Responses and compact regression tests hold profile capacity for more than
-  two historical test capacity epochs and verify eventual success without
-  `local_capacity_timeout` or the old "local capacity remained saturated"
-  message.
-- Regression coverage verifies that the last positive quota remains usable and
-  that an authoritatively all-zero pool still terminates instead of waiting
-  forever.
-- Runtime smoke, 358 `prodex-runtime-proxy` tests, Mojo no-fallback and
-  authority guards, runtime hot-path/manifest guards, static guards, formatting,
-  `git diff --check`, and relevant Clippy checks pass locally.
-
-## Changelog
-
-- Replace local saturation failures with wait-and-resume backpressure across
-  active admission, long-lived queues, and profile in-flight capacity.
-- Release high-parallelism runtime reliability fixes as Prodex 0.435.3.
-
-Full Changelog: [0.435.2...0.435.3](https://github.com/christiandoxa/prodex/compare/0.435.2...0.435.3)
 
 ## 0.435.2 - 2026-10-03
 
