@@ -1,7 +1,6 @@
 use std::{collections::BTreeMap, fmt};
 
 use anyhow::{Context, Result, bail};
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use serde::{Deserialize, Serialize};
 use zeroize::{Zeroize, ZeroizeOnDrop, Zeroizing};
 
@@ -230,59 +229,14 @@ pub fn copilot_platform_label_for(os: &str, arch: &str) -> &'static str {
 }
 
 pub fn copilot_user_api_origin(host: &str) -> Result<String> {
-    let trimmed = host.trim().trim_end_matches('/');
-    if trimmed.is_empty() {
-        bail!("invalid Copilot host '{}'", host);
-    }
-
-    let (scheme, rest) = if let Some((scheme, rest)) = trimmed.split_once("://") {
-        if scheme.is_empty() || rest.is_empty() {
-            bail!("invalid Copilot host '{}'", host);
-        }
-        (scheme, rest)
-    } else {
-        ("https", trimmed)
-    };
-
-    let authority = rest
-        .split(['/', '?', '#'])
-        .next()
-        .filter(|authority| !authority.is_empty())
-        .with_context(|| format!("invalid Copilot host '{}'", host))?;
-    let (hostname, has_explicit_port) = authority_host_and_port(authority)
-        .with_context(|| format!("invalid Copilot host '{}'", host))?;
-    let is_local = matches!(hostname, "localhost" | "127.0.0.1" | "::1");
-
-    let authority = if has_explicit_port || is_local || hostname.starts_with("api.") {
-        authority.to_string()
-    } else {
-        format!("api.{authority}")
-    };
-
-    Ok(format!("{scheme}://{authority}"))
+    prodex_mojo_core::profile_export::copilot_user_api_origin(host)
+        .map_err(|error| anyhow::anyhow!("Mojo Copilot user API origin failed: {error:?}"))?
+        .ok_or_else(|| anyhow::anyhow!("invalid Copilot host '{}'", host))
 }
 
 pub fn default_copilot_models_api_url(host: &str) -> String {
-    let normalized = host.trim().trim_end_matches('/');
-    if ascii_casefold_equal_exact(normalized, "https://github.com")
-        .expect("Mojo Copilot GitHub host comparison failed")
-        || ascii_casefold_equal_exact(normalized, "http://github.com")
-            .expect("Mojo Copilot GitHub host comparison failed")
-        || ascii_casefold_equal_exact(normalized, "github.com")
-            .expect("Mojo Copilot GitHub host comparison failed")
-    {
-        return "https://api.githubcopilot.com".to_string();
-    }
-
-    let fallback_host = normalized
-        .strip_prefix("https://")
-        .or_else(|| normalized.strip_prefix("http://"))
-        .unwrap_or(normalized);
-    if let Some(subdomain) = fallback_host.strip_suffix(".ghe.com") {
-        return format!("https://copilot-api.{subdomain}.ghe.com");
-    }
-
-    format!("https://api.{fallback_host}")
+    prodex_mojo_core::profile_export::copilot_models_api_url(host)
+        .expect("Mojo Copilot models API URL planner returned invalid output")
 }
 
 pub fn parse_copilot_user_info_json_response(
@@ -370,23 +324,4 @@ pub fn plan_copilot_profile_import_state(
         profile_name,
         activate,
     })
-}
-
-fn authority_host_and_port(authority: &str) -> Option<(&str, bool)> {
-    if let Some(rest) = authority.strip_prefix('[') {
-        let closing = rest.find(']')?;
-        let hostname = &rest[..closing];
-        let after = &rest[closing + 1..];
-        return Some((hostname, after.starts_with(':')));
-    }
-
-    let mut parts = authority.rsplitn(2, ':');
-    let last = parts.next()?;
-    let maybe_host = parts.next();
-    match maybe_host {
-        Some(host) if !host.is_empty() && last.chars().all(|ch| ch.is_ascii_digit()) => {
-            Some((host, true))
-        }
-        _ => Some((authority, false)),
-    }
 }

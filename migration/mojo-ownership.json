@@ -909,7 +909,9 @@
           "profile_import_active_profile_resolution",
           "profile_export_copilot_jsonc_normalization",
           "profile_export_copilot_version_parsing",
-          "profile_export_copilot_platform_mapping"
+          "profile_export_copilot_platform_mapping",
+          "profile_export_copilot_user_api_origin",
+          "profile_export_copilot_models_api_url"
         ]
       },
       {
@@ -3088,6 +3090,58 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "host OS/architecture acquisition, borrowed view construction, validated tag-to-static-label materialization"
+    },
+    {
+      "name": "profile_export_copilot_user_api_origin",
+      "domain": "profile/export-policy",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust trimmed Copilot host text, parsed an optional scheme and authority, classified explicit ports/local hosts/api-prefixed hosts, and constructed the user API origin",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_copilot_url_v1",
+      "mojo_operation_ids": {
+        "user_api_origin": 1
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/copilot.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::copilot_user_api_origin",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/copilot.rs"
+      ],
+      "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
+      "rust_owner_before": "Unicode trim plus trailing-slash removal, exact :// split, authority/path/query/fragment boundary detection, IPv6-bracket and numeric-port parsing, localhost/API-prefix classification, and origin construction",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo adapter coverage and profile-export caller regression cover default HTTPS, explicit schemes/ports, api-prefixed hosts, IPv6 loopback, invalid scheme boundaries, and legacy trailing-slash behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed host view construction, caller-owned output allocation, UTF-8 String materialization, and existing anyhow error text"
+    },
+    {
+      "name": "profile_export_copilot_models_api_url",
+      "domain": "profile/export-policy",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust normalized Copilot host text, matched GitHub aliases case-insensitively, stripped lowercase HTTP(S) prefixes, classified exact lowercase .ghe.com suffixes, and constructed the models API URL",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_copilot_url_v1",
+      "mojo_operation_ids": {
+        "models_api_url": 2
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/copilot.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::copilot_models_api_url",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/copilot.rs"
+      ],
+      "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
+      "rust_owner_before": "GitHub host alias recognition, case-sensitive HTTP(S) prefix stripping, exact .ghe.com suffix routing, and fallback API-host construction",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo adapter coverage and caller regression cover github.com aliases, uppercase GitHub matching, enterprise GHE routing, and case-sensitive GHE fallback behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed host view construction, caller-owned output allocation, UTF-8 String materialization, and provider-plan field ownership"
     },
     {
       "name": "profile_export_copilot_jsonc_normalization",
