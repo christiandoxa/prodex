@@ -1283,6 +1283,16 @@
           "runtime_doctor_log_value_absence_policy",
           "runtime_doctor_smart_context_fallback_reason_source"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_compact_snippet.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_compact_transcript_snippet_shaping"
+        ]
       }
     ],
     "removed": [
@@ -5762,6 +5772,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "event DTO ownership, BTreeMap counters, iteration over Mojo-selected reason values, and validated tag application"
+    },
+    {
+      "name": "gemini_compact_transcript_snippet_shaping",
+      "domain": "provider/gemini",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust classified compact transcript item shapes, selected message/tool/reasoning text, formatted labels, and applied UTF-8-safe byte truncation",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_compact_snippet_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_compact_snippet.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs",
+      "consumer_marker": "format_gemini_compact_snippet(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs",
+      "rust_owner_before": "Message/tool/reasoning/generic snippet classification and formatting, default labels, text selection, and UTF-8-safe max-byte truncation with exact marker",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo adapter coverage and provider-boundary tests cover all item shapes, defaults, suppression, Unicode, and truncation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON acquisition and content extraction, borrowed field views, typed ABI invocation, and Option/String materialization"
     }
   ],
   "rust_semantic_reductions": [
