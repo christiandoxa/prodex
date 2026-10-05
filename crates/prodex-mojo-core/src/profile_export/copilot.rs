@@ -27,6 +27,15 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_profile_export_copilot_import_state_v1(
+        abi_version: i64,
+        requested_address: u64,
+        existing_address: u64,
+        has_active_profile: i64,
+        activate_requested: i64,
+        requested_name_exists: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 pub fn strip_copilot_json_line_comments(raw: &str) -> Result<String, MojoError> {
@@ -144,6 +153,66 @@ pub fn copilot_models_api_url(host: &str) -> Result<String, MojoError> {
     copilot_url(2, host)?.ok_or(MojoError::InvalidOutput)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CopilotImportStateAction {
+    UpdateExisting,
+    AddRequested,
+    AddDefault,
+    AccountConflict,
+    RequestedNameExists,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CopilotImportStatePlan {
+    pub action: CopilotImportStateAction,
+    pub activate: bool,
+}
+
+pub fn copilot_import_state_plan(
+    requested_name: Option<&str>,
+    existing_profile_name: Option<&str>,
+    has_active_profile: bool,
+    activate_requested: bool,
+    requested_name_exists: bool,
+) -> Result<CopilotImportStatePlan, MojoError> {
+    ensure_rich_abi()?;
+    let requested = ProfileImportStringView::from(requested_name)?;
+    let existing = ProfileImportStringView::from(existing_profile_name)?;
+    let mut output = [-1_i64; 2];
+    let status = unsafe {
+        prodex_profile_export_copilot_import_state_v1(
+            ABI_VERSION,
+            (&requested as *const ProfileImportStringView) as usize as u64,
+            (&existing as *const ProfileImportStringView) as usize as u64,
+            i64::from(has_active_profile),
+            i64::from(activate_requested),
+            i64::from(requested_name_exists),
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            99 => MojoError::InvalidInput,
+            100 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    let action = match output[0] {
+        0 => CopilotImportStateAction::UpdateExisting,
+        1 => CopilotImportStateAction::AddRequested,
+        2 => CopilotImportStateAction::AddDefault,
+        3 => CopilotImportStateAction::AccountConflict,
+        4 => CopilotImportStateAction::RequestedNameExists,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let activate = match output[1] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(CopilotImportStatePlan { action, activate })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,6 +251,32 @@ mod tests {
         assert_eq!(
             copilot_models_api_url("https://enterprise.ghe.com").unwrap(),
             "https://copilot-api.enterprise.ghe.com"
+        );
+        assert_eq!(
+            copilot_import_state_plan(Some("main"), Some("main"), true, false, false).unwrap(),
+            CopilotImportStatePlan {
+                action: CopilotImportStateAction::UpdateExisting,
+                activate: false,
+            }
+        );
+        assert_eq!(
+            copilot_import_state_plan(Some("other"), Some("main"), true, true, false)
+                .unwrap()
+                .action,
+            CopilotImportStateAction::AccountConflict
+        );
+        assert_eq!(
+            copilot_import_state_plan(Some("new"), None, true, false, true)
+                .unwrap()
+                .action,
+            CopilotImportStateAction::RequestedNameExists
+        );
+        assert_eq!(
+            copilot_import_state_plan(None, None, false, false, false).unwrap(),
+            CopilotImportStatePlan {
+                action: CopilotImportStateAction::AddDefault,
+                activate: true,
+            }
         );
     }
 
