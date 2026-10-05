@@ -184,6 +184,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime_repo_map.rs",
   "crates/prodex-app/src/runtime_state_shared/line_index.rs",
   "crates/prodex-mojo-core/src/profile_export.rs",
+  "crates/prodex-mojo-core/src/profile_export/active_profile.rs",
   "mojo/prodex_core/profile_export_policy.mojo",
   "crates/prodex-profile-export/src/envelope.rs",
   "crates/prodex-profile-export/src/data_model.rs",
@@ -3995,25 +3996,45 @@ export function findViolations(files) {
     }
     if (filePath === "crates/prodex-profile-export/src/selection.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
-      const required = "prodex_mojo_core::profile_export::profile_export_selection_plan(&available, &requested)";
+      const required = [
+        "prodex_mojo_core::profile_export::profile_export_selection_plan(&available, &requested)",
+        "prodex_mojo_core::profile_export::profile_export_active_profile_selected(",
+        "prodex_mojo_core::profile_export::profile_import_active_profile_plan(",
+      ];
       const restoredRust = [
         "available_names.is_empty()",
         "requested_names.is_empty()",
         "seen.insert(",
         "available_names.contains(",
+        ".any(|name| name == active_profile)",
+        "existing_active_profile.map(ToOwned::to_owned).or_else",
+        "resolved_profile_names.get(active)",
       ];
-      return production.includes(required) && restoredRust.every((marker) => !production.includes(marker))
+      return required.every((marker) => production.includes(marker)) &&
+        restoredRust.every((marker) => !production.includes(marker))
         ? []
-        : [`${filePath}: requested profile selection must use Mojo without a Rust policy copy`];
+        : [`${filePath}: profile selection and active-profile resolution must use Mojo without a Rust policy copy`];
     }
     if (filePath === "crates/prodex-mojo-core/src/profile_export.rs") {
       const required = [
         "prodex_profile_export_selection_v1(",
         "pub fn profile_export_selection_plan(",
         "profile_export_selection_plan_is_mojo_owned",
+        '#[path = "profile_export/active_profile.rs"]',
+        "profile_active_selection_and_import_plan_are_mojo_owned",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: profile-export selection adapter must retain ${marker}`);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/profile_export/active_profile.rs") {
+      const required = [
+        "prodex_profile_export_active_profile_selected_v1(",
+        "pub fn profile_export_active_profile_selected(",
+        "prodex_profile_import_active_profile_plan_v1(",
+        "pub fn profile_import_active_profile_plan(",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: active-profile adapter must retain ${marker}`);
     }
     if (filePath === "mojo/prodex_core/profile_export_policy.mojo") {
       const required = [
@@ -4022,6 +4043,11 @@ export function findViolations(files) {
         "if requested_count == 0:",
         "if found < 0:",
         "if not duplicate:",
+        '@export("prodex_profile_export_active_profile_selected_v1")',
+        "profile_import_views_equal(active, selected",
+        '@export("prodex_profile_import_active_profile_plan_v1")',
+        "if existing.len > 0:",
+        "profile_import_views_equal(source, mapping_sources",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: requested profile selection must remain Mojo-owned (${marker})`);
@@ -4031,6 +4057,8 @@ export function findViolations(files) {
         "requested_profile_names_default_to_available_names",
         "requested_profile_names_deduplicate_and_preserve_request_order",
         "requested_profile_names_reject_missing_profiles",
+        "imported_active_profile_uses_existing_active_profile_first",
+        "export_active_profile_only_survives_when_selected",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: profile-export selection caller coverage must retain ${marker}`);
@@ -4873,15 +4901,22 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
-  const profileExportSelectionCaller =
-    "prodex_mojo_core::profile_export::profile_export_selection_plan(&available, &requested)";
+  const profileExportSelectionCaller = [
+    "prodex_mojo_core::profile_export::profile_export_selection_plan(&available, &requested)",
+    "prodex_mojo_core::profile_export::profile_export_active_profile_selected(",
+    "prodex_mojo_core::profile_export::profile_import_active_profile_plan(",
+  ].join("\n");
   assert.deepEqual(findViolations([[
     "crates/prodex-profile-export/src/selection.rs", profileExportSelectionCaller,
   ]]), []);
   assert.match(findViolations([[
     "crates/prodex-profile-export/src/selection.rs",
     profileExportSelectionCaller + "\nif available_names.is_empty() {}",
-  ]]).join("\n"), /requested profile selection must use Mojo/u);
+  ]]).join("\n"), /profile selection and active-profile resolution must use Mojo/u);
+  assert.match(findViolations([[
+    "crates/prodex-profile-export/src/selection.rs",
+    profileExportSelectionCaller + "\nselected.iter().any(|name| name == active_profile);",
+  ]]).join("\n"), /profile selection and active-profile resolution must use Mojo/u);
   const operationalHistogramCaller = [
     "histogram_bucket_bounds(name)",
     "prodex_mojo_core::operational_metrics::observe_histogram(",

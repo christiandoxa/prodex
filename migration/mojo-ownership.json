@@ -904,7 +904,9 @@
         "role": "semantic",
         "operations": [
           "profile_export_policy_limits",
-          "profile_export_requested_profile_selection"
+          "profile_export_requested_profile_selection",
+          "profile_export_active_profile_membership",
+          "profile_import_active_profile_resolution"
         ]
       },
       {
@@ -3031,6 +3033,55 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "BTreeSet acquisition/order, borrowed string views, output-index validation, String ownership, and stable user-facing error text"
+    },
+    {
+      "name": "profile_export_active_profile_membership",
+      "domain": "profile/export-policy",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust tested whether the current active profile appeared in the selected export profile names",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_active_profile_selected_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/selection.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::profile_export_active_profile_selected",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/selection.rs",
+        "crates/prodex-app/src/profile_commands/import_export/export.rs"
+      ],
+      "production_reachability_test": "crates/prodex-profile-export/src/selection.rs",
+      "rust_owner_before": "Exact active-profile membership across selected export names and absent-active handling",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo adapter test and profile-export caller regression cover selected, unselected, and absent active profiles",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed string-view construction, selected-name collection ownership, String materialization, and user-facing payload construction"
+    },
+    {
+      "name": "profile_import_active_profile_resolution",
+      "domain": "profile/export-policy",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust preserved an existing active profile, otherwise resolved the source active profile through the imported source-to-target name map",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_import_active_profile_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/selection.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::profile_import_active_profile_plan",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/selection.rs",
+        "crates/prodex-app/src/profile_commands/import_export/import.rs",
+        "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs"
+      ],
+      "production_reachability_test": "crates/prodex-profile-export/src/selection.rs",
+      "rust_owner_before": "Existing-active precedence and source-active lookup through resolved imported profile names",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo adapter test and profile-export caller regression cover existing-first, resolved-source, missing-source, and absent-source branches",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "BTreeMap iteration/order, borrowed string-view construction, output-index validation, and String materialization"
     },
     {
       "domain": "smart-context/repo-map",
