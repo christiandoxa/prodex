@@ -1270,7 +1270,9 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_doctor_smart_context_fallback_decision"
+          "runtime_doctor_smart_context_fallback_decision",
+          "runtime_doctor_log_value_absence_policy",
+          "runtime_doctor_smart_context_fallback_reason_source"
         ]
       }
     ],
@@ -5480,6 +5482,53 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "borrowed UTF-8 view construction, ABI status mapping, and diagnostic aggregation; Mojo failures do not trigger Rust semantic recomputation"
+    },
+    {
+      "name": "runtime_doctor_log_value_absence_policy",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust treated only the empty string and exact hyphen as absent runtime-doctor log values",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_log_value_is_ignored_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/log_fields.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_log_value_is_ignored",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/log_fields.rs",
+        "crates/prodex-runtime-doctor/src/smart_context.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
+      "rust_owner_before": "Exact empty-string or hyphen sentinel classification for parsed string/reason/facet fields",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo adapter coverage and runtime-doctor summary regression cover empty, hyphen, whitespace-padded hyphen, and ordinary values",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed UTF-8 view construction, ABI status mapping, BTreeMap lookup, parsing, cloning, and aggregation"
+    },
+    {
+      "name": "runtime_doctor_smart_context_fallback_reason_source",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust preferred explicit event reasons, then self_check for self_check_passthrough, then the decision label",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_smart_context_fallback_reason_source_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/smart_context.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_smart_context_fallback_reason_source",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/smart_context.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
+      "rust_owner_before": "Fallback-reason source precedence across explicit reasons, self-check passthrough detail, and decision label",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo adapter coverage and production summary regression exercise every source branch",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "event DTO ownership, BTreeMap counters, iteration over Mojo-selected reason values, and validated tag application"
     }
   ],
   "rust_semantic_reductions": [

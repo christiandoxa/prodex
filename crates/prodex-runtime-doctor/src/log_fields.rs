@@ -48,5 +48,6 @@ pub(crate) fn runtime_doctor_split_reason_field(
 }
 
 pub(crate) fn runtime_doctor_ignored_log_value(value: &str) -> bool {
-    value.is_empty() || value == "-"
+    prodex_mojo_core::rich::runtime_doctor_log_value_is_ignored(value)
+        .expect("Mojo runtime-doctor log-value policy returned invalid output")
 }

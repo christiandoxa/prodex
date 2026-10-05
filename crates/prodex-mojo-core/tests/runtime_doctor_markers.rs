@@ -1,8 +1,12 @@
 #![cfg(feature = "mojo-rich")]
 #![allow(unsafe_code)]
 use prodex_mojo_core::rich::{
+    RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_DECISION,
+    RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_EVENT_REASONS,
+    RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK, runtime_doctor_log_value_is_ignored,
     runtime_doctor_marker_known, runtime_doctor_marker_semantics,
     runtime_doctor_smart_context_decision_is_fallback,
+    runtime_doctor_smart_context_fallback_reason_source,
 };
 
 #[test]
@@ -11,6 +15,31 @@ fn smart_context_fallback_decision_uses_mojo_authority() {
     assert!(!runtime_doctor_smart_context_decision_is_fallback("pass_through").unwrap());
     assert!(runtime_doctor_smart_context_decision_is_fallback("self_check_passthrough").unwrap());
     assert!(runtime_doctor_smart_context_decision_is_fallback("require_exact").unwrap());
+}
+
+#[test]
+fn log_value_absence_policy_uses_mojo_authority() {
+    assert!(runtime_doctor_log_value_is_ignored("").unwrap());
+    assert!(runtime_doctor_log_value_is_ignored("-").unwrap());
+    assert!(!runtime_doctor_log_value_is_ignored(" - ").unwrap());
+    assert!(!runtime_doctor_log_value_is_ignored("value").unwrap());
+}
+
+#[test]
+fn smart_context_fallback_reason_source_uses_mojo_authority() {
+    assert_eq!(
+        runtime_doctor_smart_context_fallback_reason_source("require_exact", true, 1).unwrap(),
+        RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_EVENT_REASONS,
+    );
+    assert_eq!(
+        runtime_doctor_smart_context_fallback_reason_source("self_check_passthrough", true, 0,)
+            .unwrap(),
+        RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK,
+    );
+    assert_eq!(
+        runtime_doctor_smart_context_fallback_reason_source("require_exact", true, 0).unwrap(),
+        RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_DECISION,
+    );
 }
 
 #[test]
