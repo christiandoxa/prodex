@@ -78,15 +78,22 @@ fn merge_sse_usage_data(data_lines: &mut Vec<&str>, merged: &mut ProviderTokenUs
         return;
     };
     let usage = extract_usage_from_value(&value);
-    if usage.input_tokens.is_some() {
-        merged.input_tokens = usage.input_tokens;
-    }
-    if usage.output_tokens.is_some() {
-        merged.output_tokens = usage.output_tokens;
-    }
-    if usage.total_tokens.is_some() {
-        merged.total_tokens = usage.total_tokens;
-    }
+    let plan = prodex_mojo_core::provider_usage::merge_latest_present(
+        prodex_mojo_core::provider_usage::ProviderUsagePlan {
+            input_tokens: merged.input_tokens,
+            output_tokens: merged.output_tokens,
+            total_tokens: merged.total_tokens,
+        },
+        prodex_mojo_core::provider_usage::ProviderUsagePlan {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            total_tokens: usage.total_tokens,
+        },
+    )
+    .expect("Mojo provider usage SSE merge returned invalid output");
+    merged.input_tokens = plan.input_tokens;
+    merged.output_tokens = plan.output_tokens;
+    merged.total_tokens = plan.total_tokens;
 }
 
 pub fn calculate_cost_microusd(
@@ -220,6 +227,51 @@ mod tests {
                 total_tokens: Some(19),
             }
         );
+    }
+
+    #[test]
+    fn usage_parser_merges_latest_present_fields_across_sse_events() {
+        let usage = extract_usage_tokens(
+            concat!(
+                "data: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30}}}\n\n",
+                "data: {\"response\":{\"usage\":{\"input_tokens\":11}}}\n\n",
+                "data: {\"response\":{\"usage\":{\"output_tokens\":22,\"total_tokens\":33}}}\n\n",
+            )
+            .as_bytes(),
+        );
+
+        assert_eq!(
+            usage,
+            ProviderTokenUsage {
+                input_tokens: Some(11),
+                output_tokens: Some(22),
+                total_tokens: Some(33),
+            }
+        );
+    }
+
+    #[test]
+    fn usage_parser_ignores_malformed_non_usage_done_and_empty_sse_frames() {
+        let usage = extract_usage_tokens(
+            concat!(
+                "data: {\"response\":{\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"total_tokens\":30}}}\n\n",
+                "data: {malformed json}\n\n",
+                "data: {\"type\":\"response.output_text.delta\",\"delta\":\"text\"}\n\n",
+                "data: [DONE]\n\n",
+                "data: {\"response\":{\"usage\":{\"input_tokens\":11}}}\n\n",
+            )
+            .as_bytes(),
+        );
+
+        assert_eq!(
+            usage,
+            ProviderTokenUsage {
+                input_tokens: Some(11),
+                output_tokens: Some(20),
+                total_tokens: Some(30),
+            }
+        );
+        assert_eq!(extract_usage_tokens(b""), ProviderTokenUsage::default());
     }
 
     #[test]

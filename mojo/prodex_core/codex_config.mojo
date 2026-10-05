@@ -9,6 +9,12 @@ comptime CODEX_CONFIG_ABI_VERSION: Int64 = 1
 comptime CODEX_CONFIG_OK: Int64 = 0
 comptime CODEX_CONFIG_INVALID: Int64 = 1
 comptime CODEX_CONFIG_ABI: Int64 = 4
+comptime CODEX_PROVIDER_PLAN_READ_PROFILE: Int64 = 0
+comptime CODEX_PROVIDER_PLAN_READ_CONFIG: Int64 = 1
+comptime CODEX_PROVIDER_PLAN_CLI_OVERRIDE: Int64 = 2
+comptime CODEX_PROVIDER_PLAN_PROFILE_CONFIG: Int64 = 3
+comptime CODEX_PROVIDER_PLAN_CONFIG_FILE: Int64 = 4
+comptime CODEX_PROVIDER_PLAN_NO_PROVIDER: Int64 = 5
 
 @fieldwise_init
 struct CodexConfigArgView(Copyable, Movable):
@@ -360,4 +366,73 @@ def prodex_codex_config_override_v1(
                 result[3] = normalized_start
                 result[4] = normalized_length
         index += 1
+    return CODEX_CONFIG_OK
+
+
+@export("prodex_codex_config_model_provider_plan_v1")
+def prodex_codex_config_model_provider_plan_v1(
+    abi_version: Int64,
+    arguments_address: UInt,
+    count: Int64,
+    profile_config_path_present: Int64,
+    profile_config_loaded: Int64,
+    config_file_loaded: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != CODEX_CONFIG_ABI_VERSION
+        or count != 3
+        or arguments_address == 0
+        or profile_config_path_present < 0
+        or profile_config_path_present > 1
+        or profile_config_loaded < 0
+        or profile_config_loaded > 1
+        or config_file_loaded < 0
+        or config_file_loaded > 1
+        or result_address == 0
+    ):
+        return CODEX_CONFIG_INVALID
+
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[0] = CODEX_PROVIDER_PLAN_NO_PROVIDER
+    result[1] = 0
+    result[2] = 0
+
+    for index in range(count):
+        var argument = codex_config_arg(arguments_address, index)
+        if argument.valid_utf8 != 0 and argument.valid_utf8 != 1:
+            return CODEX_CONFIG_INVALID
+        if argument.valid_utf8 == 1 and not rich_view_valid(
+            codex_config_view(argument), Int64(argument.length)
+        ):
+            return CODEX_CONFIG_INVALID
+
+    var override = codex_config_arg(arguments_address, 0)
+    var profile = codex_config_arg(arguments_address, 1)
+    var config = codex_config_arg(arguments_address, 2)
+    if profile_config_path_present == 1 and profile_config_loaded == 0:
+        result[0] = CODEX_PROVIDER_PLAN_READ_PROFILE
+        return CODEX_CONFIG_OK
+
+    if profile_config_path_present == 1 and profile.valid_utf8 == 1:
+        if override.valid_utf8 == 1:
+            result[0] = CODEX_PROVIDER_PLAN_CLI_OVERRIDE
+            result[2] = Int64(override.length)
+        else:
+            result[0] = CODEX_PROVIDER_PLAN_PROFILE_CONFIG
+            result[2] = Int64(profile.length)
+        return CODEX_CONFIG_OK
+
+    if config_file_loaded == 0:
+        result[0] = CODEX_PROVIDER_PLAN_READ_CONFIG
+        return CODEX_CONFIG_OK
+
+    if override.valid_utf8 == 1:
+        result[0] = CODEX_PROVIDER_PLAN_CLI_OVERRIDE
+        result[2] = Int64(override.length)
+    elif config.valid_utf8 == 1:
+        result[0] = CODEX_PROVIDER_PLAN_CONFIG_FILE
+        result[2] = Int64(config.length)
     return CODEX_CONFIG_OK

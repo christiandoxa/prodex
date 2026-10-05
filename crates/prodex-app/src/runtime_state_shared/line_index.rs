@@ -60,7 +60,7 @@ pub(super) fn runtime_smart_context_artifact_line_index(
         });
     }
 
-    let semantic_index = runtime_smart_context_artifact_semantic_line_index(&lines);
+    let semantic_index = runtime_smart_context_artifact_semantic_line_index(text, &lines);
 
     RuntimeSmartContextArtifactLineIndex {
         complete: index_complete,

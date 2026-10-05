@@ -100,3 +100,92 @@ fn runtime_policy_enabled_for_current_process() -> bool {
 fn runtime_policy_enabled_for_current_process() -> bool {
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT_TEST_ROOT: AtomicU64 = AtomicU64::new(0);
+
+    struct TestPolicyRoot(PathBuf);
+
+    impl TestPolicyRoot {
+        fn new(policy: &str) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "prodex-runtime-policy-{}-{}",
+                std::process::id(),
+                NEXT_TEST_ROOT.fetch_add(1, Ordering::Relaxed),
+            ));
+            fs::create_dir(&root).expect("create isolated runtime-policy test root");
+            fs::write(runtime_policy_path(&root), policy)
+                .expect("write runtime-policy test config");
+            Self(root)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TestPolicyRoot {
+        fn drop(&mut self) {
+            invalidate_runtime_policy_cache_for(&self.0);
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn runtime_policy_proxy_caller_uses_mojo_preset_plan() {
+        let root = TestPolicyRoot::new(
+            r#"
+version = 1
+
+[runtime_proxy]
+preset = "low"
+worker_count = 7
+http_connect_timeout_ms = 0
+responses_critical_floor_percent = -5
+"#,
+        );
+
+        let effective = runtime_policy_proxy_from_root(
+            root.path(),
+            Some(RuntimePolicyProxyPreset::ManyTerminals),
+        )
+        .expect("configured runtime policy should resolve");
+
+        assert_eq!(
+            effective,
+            RuntimePolicyProxySettings {
+                preset: RuntimePolicyProxyPresetSelection::selected(
+                    RuntimePolicyProxyPreset::ManyTerminals,
+                ),
+                worker_count: Some(7),
+                long_lived_worker_count: Some(32),
+                probe_refresh_worker_count: Some(4),
+                async_worker_count: Some(4),
+                long_lived_queue_capacity: Some(512),
+                active_request_limit: Some(160),
+                profile_inflight_soft_limit: Some(4),
+                profile_inflight_hard_limit: Some(8),
+                responses_active_limit: Some(120),
+                compact_active_limit: Some(8),
+                websocket_active_limit: Some(32),
+                standard_active_limit: Some(8),
+                http_connect_timeout_ms: Some(0),
+                websocket_connect_worker_count: Some(12),
+                websocket_connect_queue_capacity: Some(96),
+                websocket_connect_overflow_capacity: Some(384),
+                websocket_dns_worker_count: Some(6),
+                websocket_dns_queue_capacity: Some(48),
+                websocket_dns_overflow_capacity: Some(96),
+                responses_critical_floor_percent: Some(-5),
+                startup_sync_probe_warm_limit: Some(2),
+                ..RuntimePolicyProxySettings::default()
+            }
+        );
+    }
+}

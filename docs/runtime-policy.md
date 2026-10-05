@@ -517,6 +517,7 @@ artifacts, and `enterprise_enforce` cannot be downgraded to observe or personal.
 
 `runtime_proxy.preset` selects a conservative preset before individual `runtime_proxy` keys are applied.
 Valid values are `low`, `default`, `many-terminals`, and `aggressive`; `PRODEX_RUNTIME_PROXY_PRESET` selects the preset from the environment.
+Mojo resolves the environment preset over the policy preset, preset defaults, and explicit `runtime_proxy` policy fields as one typed plan. Rust loads configuration and environment, then maps the plan into runtime settings.
 Specific environment overrides for individual keys still have highest priority.
 Unknown policy preset values are rejected when `policy.toml` is parsed. Unknown environment preset values are ignored so the configured policy or built-in defaults still apply.
 The preset changes only local concurrency and admission tuning; transport timeouts remain on their normal defaults unless configured directly.
