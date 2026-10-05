@@ -1261,6 +1261,16 @@
         "operations": [
           "smart_context_source_symbol_index"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_doctor_marker.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_doctor_smart_context_fallback_decision"
+        ]
       }
     ],
     "removed": [
@@ -5423,6 +5433,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "line-span preparation, ABI output validation, Rust string/hash materialization, and artifact DTO construction"
+    },
+    {
+      "name": "runtime_doctor_smart_context_fallback_decision",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust classified every Smart Context autopilot decision except rewritten and pass_through as fallback",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/smart_context.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_smart_context_decision_is_fallback",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/smart_context.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
+      "rust_owner_before": "Exact decision-label fallback classification implemented as !matches!(decision, \"rewritten\" | \"pass_through\")",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo adapter coverage and runtime-doctor summary regression cover rewritten, pass-through, and fallback decisions",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed UTF-8 view construction, ABI status mapping, and diagnostic aggregation; Mojo failures do not trigger Rust semantic recomputation"
     }
   ],
   "rust_semantic_reductions": [
