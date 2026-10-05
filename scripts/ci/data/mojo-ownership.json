@@ -903,7 +903,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "profile_export_policy_limits"
+          "profile_export_policy_limits",
+          "profile_export_requested_profile_selection"
         ]
       },
       {
@@ -3006,6 +3007,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde sequence ownership and error text mapping, secret bytes and auth JSON ownership, base64 decoding, password/salt/nonce/ciphertext zeroization, KDF execution and AES-GCM-SIV crypto remain Rust; only counts, byte lengths and numeric KDF metadata cross the ABI"
+    },
+    {
+      "name": "profile_export_requested_profile_selection",
+      "domain": "profile/export-policy",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust rejected an empty profile pool, defaulted empty requests to all profiles, rejected the first missing requested name, and deduplicated requested names while preserving request order",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_selection_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/selection.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::profile_export_selection_plan",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/selection.rs",
+        "crates/prodex-app/src/profile_commands/import_export/export.rs"
+      ],
+      "production_reachability_test": "crates/prodex-profile-export/src/selection.rs",
+      "rust_owner_before": "Available/requested profile membership, no-profile handling, default-all behavior, missing-name rejection, request-order deduplication, and selected ordering",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo direct adapter coverage plus profile-export caller tests cover default-all, request-order deduplication, and missing-profile rejection",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "BTreeSet acquisition/order, borrowed string views, output-index validation, String ownership, and stable user-facing error text"
     },
     {
       "domain": "smart-context/repo-map",

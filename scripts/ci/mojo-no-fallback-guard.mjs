@@ -184,8 +184,11 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime_repo_map.rs",
   "crates/prodex-app/src/runtime_state_shared/line_index.rs",
   "crates/prodex-mojo-core/src/profile_export.rs",
+  "mojo/prodex_core/profile_export_policy.mojo",
   "crates/prodex-profile-export/src/envelope.rs",
   "crates/prodex-profile-export/src/data_model.rs",
+  "crates/prodex-profile-export/src/selection.rs",
+  "crates/prodex-profile-export/tests/src/lib.rs",
   "crates/prodex-runtime-state/src/quota.rs",
   "crates/prodex-runtime-proxy/src/lib.rs",
   "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -3990,6 +3993,48 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === "crates/prodex-profile-export/src/selection.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = "prodex_mojo_core::profile_export::profile_export_selection_plan(&available, &requested)";
+      const restoredRust = [
+        "available_names.is_empty()",
+        "requested_names.is_empty()",
+        "seen.insert(",
+        "available_names.contains(",
+      ];
+      return production.includes(required) && restoredRust.every((marker) => !production.includes(marker))
+        ? []
+        : [`${filePath}: requested profile selection must use Mojo without a Rust policy copy`];
+    }
+    if (filePath === "crates/prodex-mojo-core/src/profile_export.rs") {
+      const required = [
+        "prodex_profile_export_selection_v1(",
+        "pub fn profile_export_selection_plan(",
+        "profile_export_selection_plan_is_mojo_owned",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: profile-export selection adapter must retain ${marker}`);
+    }
+    if (filePath === "mojo/prodex_core/profile_export_policy.mojo") {
+      const required = [
+        '@export("prodex_profile_export_selection_v1")',
+        "if available_count == 0:",
+        "if requested_count == 0:",
+        "if found < 0:",
+        "if not duplicate:",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: requested profile selection must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === "crates/prodex-profile-export/tests/src/lib.rs") {
+      const required = [
+        "requested_profile_names_default_to_available_names",
+        "requested_profile_names_deduplicate_and_preserve_request_order",
+        "requested_profile_names_reject_missing_profiles",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: profile-export selection caller coverage must retain ${marker}`);
+    }
     return [];
   });
   const sessionReportViolations = files.flatMap(([filePath, contents]) => {
@@ -4828,6 +4873,15 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  const profileExportSelectionCaller =
+    "prodex_mojo_core::profile_export::profile_export_selection_plan(&available, &requested)";
+  assert.deepEqual(findViolations([[
+    "crates/prodex-profile-export/src/selection.rs", profileExportSelectionCaller,
+  ]]), []);
+  assert.match(findViolations([[
+    "crates/prodex-profile-export/src/selection.rs",
+    profileExportSelectionCaller + "\nif available_names.is_empty() {}",
+  ]]).join("\n"), /requested profile selection must use Mojo/u);
   const operationalHistogramCaller = [
     "histogram_bucket_bounds(name)",
     "prodex_mojo_core::operational_metrics::observe_histogram(",

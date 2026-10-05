@@ -6,26 +6,38 @@ pub fn resolve_requested_profile_names(
     available_names: &BTreeSet<String>,
     requested_names: &[String],
 ) -> Result<Vec<String>> {
-    if available_names.is_empty() {
-        bail!("no profiles configured");
-    }
-
-    if requested_names.is_empty() {
-        return Ok(available_names.iter().cloned().collect());
-    }
-
-    let mut names = Vec::new();
-    let mut seen = BTreeSet::new();
-    for name in requested_names {
-        if !seen.insert(name.clone()) {
-            continue;
+    let available = available_names
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let requested = requested_names
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    match prodex_mojo_core::profile_export::profile_export_selection_plan(&available, &requested)
+        .map_err(|error| anyhow::anyhow!("Mojo profile-export selection failed: {error:?}"))?
+    {
+        prodex_mojo_core::profile_export::ProfileExportSelectionPlan::Selected(indices) => {
+            Ok(indices
+                .into_iter()
+                .map(|index| {
+                    available
+                        .get(index)
+                        .expect("validated Mojo profile-selection index")
+                        .to_string()
+                })
+                .collect())
         }
-        if !available_names.contains(name) {
-            bail!("profile '{}' does not exist", name);
+        prodex_mojo_core::profile_export::ProfileExportSelectionPlan::NoProfiles => {
+            bail!("no profiles configured")
         }
-        names.push(name.clone());
+        prodex_mojo_core::profile_export::ProfileExportSelectionPlan::MissingRequested(index) => {
+            let name = requested_names
+                .get(index)
+                .expect("validated Mojo missing-request index");
+            bail!("profile '{}' does not exist", name)
+        }
     }
-    Ok(names)
 }
 
 pub fn resolve_profile_export_active_profile<'a>(

@@ -499,3 +499,84 @@ def prodex_profile_export_password_plan_v1(
     if input0 == 1:
         return PROFILE_PASSWORD_ACTION_ERROR_EMPTY
     return PROFILE_PASSWORD_ACTION_VALID
+
+
+@export("prodex_profile_export_selection_v1")
+def prodex_profile_export_selection_v1(
+    abi_version: Int64,
+    available_address: UInt,
+    available_count: Int64,
+    requested_address: UInt,
+    requested_count: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    """Select available indices in request order; reject the first unknown name.
+
+    Available views arrive in host BTreeSet order. Status 1 means no profiles;
+    status 2 returns the missing request index in output[0]. No partial selection
+    is accepted on errors. Caller owns all views and output for the call lifetime.
+    """
+    if abi_version != 1:
+        return 100
+    var required_capacity = available_count
+    if requested_count > required_capacity:
+        required_capacity = requested_count
+    if required_capacity < 1:
+        required_capacity = 1
+    if (
+        available_count < 0 or requested_count < 0
+        or available_address == 0 or requested_address == 0
+        or output_address == 0 or written_address == 0
+        or output_capacity < required_capacity
+    ):
+        return 99
+    var available = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(available_address)
+    )
+    var requested = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(requested_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    for index in range(available_count):
+        if not profile_import_view_valid(available[unsafe_offset=index].copy(), False):
+            return 99
+    for index in range(requested_count):
+        if not profile_import_view_valid(requested[unsafe_offset=index].copy(), False):
+            return 99
+    written[] = 0
+    if available_count == 0:
+        return 1
+    if requested_count == 0:
+        for index in range(available_count):
+            output[unsafe_offset=index] = index
+        written[] = available_count
+        return 0
+    for index in range(requested_count):
+        var found: Int64 = -1
+        for candidate in range(available_count):
+            if profile_import_views_equal(
+                requested[unsafe_offset=index].copy(),
+                available[unsafe_offset=candidate].copy(),
+            ):
+                found = candidate
+                break
+        if found < 0:
+            output[0] = index
+            written[] = 1
+            return 2
+        var duplicate = False
+        for previous in range(written[]):
+            if output[unsafe_offset=previous] == found:
+                duplicate = True
+                break
+        if not duplicate:
+            output[unsafe_offset=written[]] = found
+            written[] += 1
+    return 0
