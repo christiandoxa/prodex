@@ -580,3 +580,108 @@ def prodex_profile_export_selection_v1(
             output[unsafe_offset=written[]] = found
             written[] += 1
     return 0
+
+
+@export("prodex_profile_export_active_profile_selected_v1")
+def prodex_profile_export_active_profile_selected_v1(
+    abi_version: Int64,
+    active_address: UInt,
+    selected_address: UInt,
+    selected_count: Int64,
+    is_selected_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 100
+    if (
+        active_address == 0
+        or selected_address == 0
+        or selected_count < 0
+        or is_selected_address == 0
+    ):
+        return 99
+    var active = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(active_address)
+    )[].copy()
+    if not profile_import_view_valid(active, True):
+        return 99
+    var selected = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(selected_address)
+    )
+    for index in range(selected_count):
+        if not profile_import_view_valid(selected[unsafe_offset=index].copy(), False):
+            return 99
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(is_selected_address)
+    )
+    output[] = 0
+    if active.len == 0:
+        return 0
+    for index in range(selected_count):
+        if profile_import_views_equal(active, selected[unsafe_offset=index].copy()):
+            output[] = 1
+            return 0
+    return 0
+
+
+comptime PROFILE_IMPORT_ACTIVE_NONE: Int64 = 0
+comptime PROFILE_IMPORT_ACTIVE_EXISTING: Int64 = 1
+comptime PROFILE_IMPORT_ACTIVE_RESOLVED: Int64 = 2
+
+
+@export("prodex_profile_import_active_profile_plan_v1")
+def prodex_profile_import_active_profile_plan_v1(
+    abi_version: Int64,
+    existing_address: UInt,
+    source_address: UInt,
+    mapping_sources_address: UInt,
+    mapping_targets_address: UInt,
+    mapping_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return 100
+    if (
+        existing_address == 0
+        or source_address == 0
+        or mapping_sources_address == 0
+        or mapping_targets_address == 0
+        or mapping_count < 0
+        or output_address == 0
+    ):
+        return 99
+    var existing = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(existing_address)
+    )[].copy()
+    var source = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(source_address)
+    )[].copy()
+    if not profile_import_view_valid(existing, True) or not profile_import_view_valid(source, True):
+        return 99
+    var mapping_sources = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(mapping_sources_address)
+    )
+    var mapping_targets = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(mapping_targets_address)
+    )
+    for index in range(mapping_count):
+        if (
+            not profile_import_view_valid(mapping_sources[unsafe_offset=index].copy(), False)
+            or not profile_import_view_valid(mapping_targets[unsafe_offset=index].copy(), False)
+        ):
+            return 99
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = PROFILE_IMPORT_ACTIVE_NONE
+    output[unsafe_offset=1] = -1
+    if existing.len > 0:
+        output[unsafe_offset=0] = PROFILE_IMPORT_ACTIVE_EXISTING
+        return 0
+    if source.len == 0:
+        return 0
+    for index in range(mapping_count):
+        if profile_import_views_equal(source, mapping_sources[unsafe_offset=index].copy()):
+            output[unsafe_offset=0] = PROFILE_IMPORT_ACTIVE_RESOLVED
+            output[unsafe_offset=1] = index
+            return 0
+    return 0

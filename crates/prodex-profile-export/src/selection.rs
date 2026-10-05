@@ -44,11 +44,17 @@ pub fn resolve_profile_export_active_profile<'a>(
     active_profile: Option<&str>,
     selected_profile_names: impl IntoIterator<Item = &'a str>,
 ) -> Option<String> {
-    let active_profile = active_profile?;
-    selected_profile_names
-        .into_iter()
-        .any(|name| name == active_profile)
-        .then(|| active_profile.to_string())
+    let selected = selected_profile_names.into_iter().collect::<Vec<_>>();
+    prodex_mojo_core::profile_export::profile_export_active_profile_selected(
+        active_profile,
+        &selected,
+    )
+    .expect("Mojo profile-export active-profile selection returned invalid output")
+    .then(|| {
+        active_profile
+            .expect("Mojo selected a missing active profile")
+            .to_string()
+    })
 }
 
 pub fn resolve_imported_active_profile(
@@ -56,7 +62,29 @@ pub fn resolve_imported_active_profile(
     source_active_profile: Option<&str>,
     resolved_profile_names: &BTreeMap<String, String>,
 ) -> Option<String> {
-    existing_active_profile.map(ToOwned::to_owned).or_else(|| {
-        source_active_profile.and_then(|active| resolved_profile_names.get(active).cloned())
-    })
+    let resolved = resolved_profile_names
+        .iter()
+        .map(|(source, target)| (source.as_str(), target.as_str()))
+        .collect::<Vec<_>>();
+    match prodex_mojo_core::profile_export::profile_import_active_profile_plan(
+        existing_active_profile,
+        source_active_profile,
+        &resolved,
+    )
+    .expect("Mojo profile-import active-profile plan returned invalid output")
+    {
+        prodex_mojo_core::profile_export::ProfileImportActiveProfilePlan::None => None,
+        prodex_mojo_core::profile_export::ProfileImportActiveProfilePlan::Existing => Some(
+            existing_active_profile
+                .expect("validated Mojo existing active-profile plan")
+                .to_string(),
+        ),
+        prodex_mojo_core::profile_export::ProfileImportActiveProfilePlan::Resolved(index) => Some(
+            resolved
+                .get(index)
+                .expect("validated Mojo resolved active-profile index")
+                .1
+                .to_string(),
+        ),
+    }
 }

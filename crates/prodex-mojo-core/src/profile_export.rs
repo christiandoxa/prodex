@@ -5,6 +5,13 @@ const PROFILE_IMPORT_PLAN_ABI_VERSION: i64 = 1;
 const PROFILE_IMPORT_PLAN_OUTPUT_STRIDE: usize = 5;
 const PROFILE_IMPORT_PLAN_SCRATCH_STRIDE: usize = 3;
 
+#[path = "profile_export/active_profile.rs"]
+mod active_profile;
+pub use active_profile::{
+    ProfileImportActiveProfilePlan, profile_export_active_profile_selected,
+    profile_import_active_profile_plan,
+};
+
 #[repr(i64)]
 #[derive(Clone, Copy)]
 enum ProfileExportPolicyMode {
@@ -667,6 +674,33 @@ mod tests {
         assert_eq!(
             profile_export_selection_plan(&[], &["main"]).unwrap(),
             ProfileExportSelectionPlan::NoProfiles
+        );
+    }
+
+    #[test]
+    fn profile_active_selection_and_import_plan_are_mojo_owned() {
+        assert!(profile_export_active_profile_selected(Some("main"), &["second", "main"]).unwrap());
+        assert!(
+            !profile_export_active_profile_selected(Some("other"), &["second", "main"]).unwrap()
+        );
+        assert!(!profile_export_active_profile_selected(None, &["main"]).unwrap());
+
+        let resolved = [("source", "target"), ("other", "other-target")];
+        assert_eq!(
+            profile_import_active_profile_plan(Some("current"), Some("source"), &resolved).unwrap(),
+            ProfileImportActiveProfilePlan::Existing,
+        );
+        assert_eq!(
+            profile_import_active_profile_plan(None, Some("source"), &resolved).unwrap(),
+            ProfileImportActiveProfilePlan::Resolved(0),
+        );
+        assert_eq!(
+            profile_import_active_profile_plan(None, Some("missing"), &resolved).unwrap(),
+            ProfileImportActiveProfilePlan::None,
+        );
+        assert_eq!(
+            profile_import_active_profile_plan(None, None, &resolved).unwrap(),
+            ProfileImportActiveProfilePlan::None,
         );
     }
 
