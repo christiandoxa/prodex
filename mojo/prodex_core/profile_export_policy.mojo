@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_view_ptr, rich_view_valid
+from rich_text import rich_view_matches_literal, rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
 
 comptime PROFILE_EXPORT_POLICY_ABI_VERSION: Int64 = 1
@@ -757,3 +757,106 @@ def prodex_profile_export_copilot_strip_json_line_comments_v1(
         written[] += 1
         index += 1
     return PROFILE_EXPORT_POLICY_OK
+
+
+comptime PROFILE_EXPORT_COPILOT_METADATA_VERSION: Int64 = 1
+comptime PROFILE_EXPORT_COPILOT_METADATA_PLATFORM: Int64 = 2
+
+
+def profile_export_copilot_version_part(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> UInt64:
+    var source = rich_view_ptr(view)
+    var value = UInt64(0)
+    var index = start
+    var saw_digit = False
+    var maximum = UInt64(18446744073709551615)
+    while index < end:
+        var byte = source[unsafe_offset=index]
+        if byte < UInt8(48) or byte > UInt8(57):
+            break
+        saw_digit = True
+        var digit = UInt64(byte - UInt8(48))
+        if value > (maximum - digit) // UInt64(10):
+            return UInt64(0)
+        value = value * UInt64(10) + digit
+        index += 1
+    return value if saw_digit else UInt64(0)
+
+
+def profile_export_copilot_version(
+    view: ProdexRichStringView, output: Pointer[mut=True, UInt64, _]
+):
+    var part = 0
+    var start: Int64 = 0
+    var index: Int64 = 0
+    var length = Int64(view.len)
+    var source = rich_view_ptr(view)
+    while part < 3:
+        var end = index
+        while end < length and source[unsafe_offset=end] != UInt8(46):
+            end += 1
+        output[unsafe_offset=part] = profile_export_copilot_version_part(view, start, end)
+        part += 1
+        if end >= length:
+            while part < 3:
+                output[unsafe_offset=part] = UInt64(0)
+                part += 1
+            return
+        index = end + 1
+        start = index
+
+
+def profile_export_copilot_platform(
+    os: ProdexRichStringView, arch: ProdexRichStringView
+) -> UInt64:
+    if rich_view_matches_literal["linux"](os, False):
+        if rich_view_matches_literal["aarch64"](arch, False):
+            return UInt64(1)
+        if rich_view_matches_literal["x86_64"](arch, False):
+            return UInt64(0)
+    elif rich_view_matches_literal["macos"](os, False):
+        if rich_view_matches_literal["aarch64"](arch, False):
+            return UInt64(3)
+        if rich_view_matches_literal["x86_64"](arch, False):
+            return UInt64(2)
+    elif rich_view_matches_literal["windows"](os, False):
+        if rich_view_matches_literal["aarch64"](arch, False):
+            return UInt64(5)
+        if rich_view_matches_literal["x86_64"](arch, False):
+            return UInt64(4)
+    return UInt64(0)
+
+
+@export("prodex_profile_export_copilot_metadata_v1")
+def prodex_profile_export_copilot_metadata_v1(
+    abi_version: Int64,
+    operation: Int64,
+    primary_address: UInt,
+    secondary_address: UInt,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return PROFILE_EXPORT_POLICY_ABI
+    if primary_address == 0 or secondary_address == 0 or output_address == 0:
+        return PROFILE_EXPORT_POLICY_INVALID
+    var primary = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(primary_address)
+    )[].copy()
+    var secondary = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(secondary_address)
+    )[].copy()
+    if not profile_import_view_valid(primary, True) or not profile_import_view_valid(secondary, True):
+        return PROFILE_EXPORT_POLICY_INVALID
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if operation == PROFILE_EXPORT_COPILOT_METADATA_VERSION:
+        profile_export_copilot_version(primary, output)
+        return PROFILE_EXPORT_POLICY_OK
+    if operation == PROFILE_EXPORT_COPILOT_METADATA_PLATFORM:
+        output[0] = profile_export_copilot_platform(primary, secondary)
+        output[1] = UInt64(0)
+        output[2] = UInt64(0)
+        return PROFILE_EXPORT_POLICY_OK
+    return PROFILE_EXPORT_POLICY_INVALID
