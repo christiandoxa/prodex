@@ -339,6 +339,258 @@ comptime LINEAGE_RESOLUTION_OWNED: Int64 = 1
 comptime LINEAGE_RESOLUTION_UNAVAILABLE: Int64 = 2
 comptime LINEAGE_RESOLUTION_CONFLICT: Int64 = 3
 
+comptime BINDING_CANDIDATE_LOCAL_REWRITE: Int64 = 0
+comptime BINDING_CANDIDATE_DISPATCH: Int64 = 1
+
+
+def binding_candidate_text_equal(
+    left_address: UInt,
+    left_length: Int64,
+    right_address: UInt,
+    right_length: Int64,
+) -> Bool:
+    if left_length < 0 or left_length != right_length:
+        return False
+    if left_length == 0:
+        return True
+    if left_address == 0 or right_address == 0:
+        return False
+    var left = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(left_address)
+    )
+    var right = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(right_address)
+    )
+    for index in range(left_length):
+        if left[unsafe_offset=index] != right[unsafe_offset=index]:
+            return False
+    return True
+
+
+def binding_candidate_identity_valid(
+    present: Int64,
+    provider: Int64,
+    credential_address: UInt,
+    credential_length: Int64,
+    endpoint_address: UInt,
+    endpoint_length: Int64,
+    profile_present: Int64,
+    profile_address: UInt,
+    profile_length: Int64,
+) -> Bool:
+    if present == 0:
+        return (
+            provider == 0
+            and credential_address == 0
+            and credential_length == 0
+            and endpoint_address == 0
+            and endpoint_length == 0
+            and profile_present == 0
+            and profile_address == 0
+            and profile_length == 0
+        )
+    if (
+        provider < 0
+        or provider > 6
+        or credential_length <= 0
+        or endpoint_length <= 0
+        or not valid_text(credential_address, credential_length, 4096)
+        or not valid_text(endpoint_address, endpoint_length, 4096)
+        or (profile_present != 0 and profile_present != 1)
+    ):
+        return False
+    if profile_present == 0:
+        return profile_address == 0 and profile_length == 0
+    return profile_length > 0 and valid_text(profile_address, profile_length, 4096)
+
+
+def binding_candidate_identities_equal(
+    left_provider: Int64,
+    left_credential_address: UInt,
+    left_credential_length: Int64,
+    left_endpoint_address: UInt,
+    left_endpoint_length: Int64,
+    left_profile_present: Int64,
+    left_profile_address: UInt,
+    left_profile_length: Int64,
+    right_provider: Int64,
+    right_credential_address: UInt,
+    right_credential_length: Int64,
+    right_endpoint_address: UInt,
+    right_endpoint_length: Int64,
+    right_profile_present: Int64,
+    right_profile_address: UInt,
+    right_profile_length: Int64,
+) -> Bool:
+    return (
+        left_provider == right_provider
+        and binding_candidate_text_equal(
+            left_credential_address,
+            left_credential_length,
+            right_credential_address,
+            right_credential_length,
+        )
+        and binding_candidate_text_equal(
+            left_endpoint_address,
+            left_endpoint_length,
+            right_endpoint_address,
+            right_endpoint_length,
+        )
+        and left_profile_present == right_profile_present
+        and (
+            left_profile_present == 0
+            or binding_candidate_text_equal(
+                left_profile_address,
+                left_profile_length,
+                right_profile_address,
+                right_profile_length,
+            )
+        )
+    )
+
+
+@export("prodex_runtime_lineage_binding_candidate_allowed_v1")
+def prodex_runtime_lineage_binding_candidate_allowed_v1(
+    abi_version: Int64,
+    mode: Int64,
+    expected_profile_address: UInt,
+    expected_profile_length: Int64,
+    bound_profile_present: Int64,
+    bound_profile_address: UInt,
+    bound_profile_length: Int64,
+    bound_identity_present: Int64,
+    bound_provider: Int64,
+    bound_credential_address: UInt,
+    bound_credential_length: Int64,
+    bound_endpoint_address: UInt,
+    bound_endpoint_length: Int64,
+    bound_profile_identity_present: Int64,
+    bound_profile_identity_address: UInt,
+    bound_profile_identity_length: Int64,
+    candidate_provider_present: Int64,
+    candidate_provider: Int64,
+    candidate_identity_present: Int64,
+    candidate_identity_provider: Int64,
+    candidate_credential_address: UInt,
+    candidate_credential_length: Int64,
+    candidate_endpoint_address: UInt,
+    candidate_endpoint_length: Int64,
+    candidate_profile_identity_present: Int64,
+    candidate_profile_identity_address: UInt,
+    candidate_profile_identity_length: Int64,
+) abi("C") -> Int64:
+    if abi_version != LINEAGE_ABI_VERSION:
+        return -4
+    if (
+        (mode != BINDING_CANDIDATE_LOCAL_REWRITE and mode != BINDING_CANDIDATE_DISPATCH)
+        or (bound_profile_present != 0 and bound_profile_present != 1)
+        or (bound_identity_present != 0 and bound_identity_present != 1)
+        or (candidate_provider_present != 0 and candidate_provider_present != 1)
+        or (candidate_identity_present != 0 and candidate_identity_present != 1)
+        or (bound_profile_identity_present != 0 and bound_profile_identity_present != 1)
+        or (candidate_profile_identity_present != 0 and candidate_profile_identity_present != 1)
+        or not binding_candidate_identity_valid(
+            bound_identity_present,
+            bound_provider,
+            bound_credential_address,
+            bound_credential_length,
+            bound_endpoint_address,
+            bound_endpoint_length,
+            bound_profile_identity_present,
+            bound_profile_identity_address,
+            bound_profile_identity_length,
+        )
+        or not binding_candidate_identity_valid(
+            candidate_identity_present,
+            candidate_identity_provider,
+            candidate_credential_address,
+            candidate_credential_length,
+            candidate_endpoint_address,
+            candidate_endpoint_length,
+            candidate_profile_identity_present,
+            candidate_profile_identity_address,
+            candidate_profile_identity_length,
+        )
+        or (
+            candidate_provider_present == 1
+            and (candidate_provider < 0 or candidate_provider > 6)
+        )
+        or (candidate_provider_present == 0 and candidate_provider != 0)
+        or (
+            mode == BINDING_CANDIDATE_LOCAL_REWRITE
+            and candidate_identity_present == 1
+            and candidate_provider != candidate_identity_provider
+        )
+    ):
+        return -1
+
+    if mode == BINDING_CANDIDATE_LOCAL_REWRITE:
+        if candidate_identity_present == 0:
+            return 0
+        if bound_profile_present == 0:
+            return 1
+        if (
+            expected_profile_length <= 0
+            or not valid_text(expected_profile_address, expected_profile_length, 1024)
+            or bound_profile_length < 0
+            or not valid_text(bound_profile_address, bound_profile_length, 1024)
+            or not binding_candidate_text_equal(
+                expected_profile_address,
+                expected_profile_length,
+                bound_profile_address,
+                bound_profile_length,
+            )
+            or bound_identity_present == 0
+        ):
+            return 0
+        return Int64(
+            binding_candidate_identities_equal(
+                bound_provider,
+                bound_credential_address,
+                bound_credential_length,
+                bound_endpoint_address,
+                bound_endpoint_length,
+                bound_profile_identity_present,
+                bound_profile_identity_address,
+                bound_profile_identity_length,
+                candidate_identity_provider,
+                candidate_credential_address,
+                candidate_credential_length,
+                candidate_endpoint_address,
+                candidate_endpoint_length,
+                candidate_profile_identity_present,
+                candidate_profile_identity_address,
+                candidate_profile_identity_length,
+            )
+        )
+
+    if bound_identity_present == 0:
+        return 0
+    if candidate_provider_present == 0 or bound_provider != candidate_provider:
+        return 1
+    if candidate_identity_present == 0:
+        return 0
+    if binding_candidate_identities_equal(
+            bound_provider,
+            bound_credential_address,
+            bound_credential_length,
+            bound_endpoint_address,
+            bound_endpoint_length,
+            bound_profile_identity_present,
+            bound_profile_identity_address,
+            bound_profile_identity_length,
+            candidate_identity_provider,
+            candidate_credential_address,
+            candidate_credential_length,
+            candidate_endpoint_address,
+            candidate_endpoint_length,
+            candidate_profile_identity_present,
+            candidate_profile_identity_address,
+            candidate_profile_identity_length,
+        ):
+        return 0
+    return 2
+
 
 @export("prodex_runtime_lineage_candidate_plan_v1")
 def prodex_runtime_lineage_candidate_plan_v1(

@@ -292,48 +292,73 @@ pub fn codex_non_openai_model_provider_with_profile_v2(
     model_provider_override: Option<&str>,
     profile_v2_name: Option<&str>,
 ) -> CodexConfigResult<Option<CodexModelProviderSetting>> {
-    let Some(provider) = model_provider_override
-        .and_then(|provider_id| {
-            normalize_model_provider_value(provider_id).map(|provider_id| {
-                CodexModelProviderSetting {
+    let model_provider_override = model_provider_override.and_then(normalize_model_provider_value);
+    let profile_config_path =
+        profile_v2_name.and_then(|name| codex_profile_v2_config_path(codex_home, name));
+    let mut profile_config_loaded = profile_config_path.is_none();
+    let mut profile_provider = None;
+    let mut config_file_loaded = false;
+    let mut config_provider = None;
+
+    loop {
+        match prodex_mojo_core::codex_config::model_provider_plan(
+            model_provider_override.as_deref(),
+            profile_provider.as_deref(),
+            config_provider.as_deref(),
+            profile_config_path.is_some(),
+            profile_config_loaded,
+            config_file_loaded,
+        )
+        .expect("Mojo Codex model-provider selection returned invalid output")
+        {
+            prodex_mojo_core::codex_config::ModelProviderPlan::ReadProfileV2Config => {
+                assert!(
+                    !profile_config_loaded,
+                    "Mojo Codex model-provider selection repeated profile config read",
+                );
+                let config_path = profile_config_path.as_deref().expect(
+                    "Mojo Codex model-provider selection requested unavailable profile config",
+                );
+                profile_provider = codex_config_file_value(config_path, "model_provider")?;
+                profile_config_loaded = true;
+            }
+            prodex_mojo_core::codex_config::ModelProviderPlan::ReadConfigFile => {
+                assert!(
+                    !config_file_loaded,
+                    "Mojo Codex model-provider selection repeated base config read",
+                );
+                config_provider = codex_configured_model_provider(codex_home)?;
+                config_file_loaded = true;
+            }
+            prodex_mojo_core::codex_config::ModelProviderPlan::Selected {
+                source,
+                provider_id,
+            } => {
+                let source = match source {
+                    prodex_mojo_core::codex_config::ModelProviderSource::CliOverride => {
+                        CodexModelProviderSource::CliOverride
+                    }
+                    prodex_mojo_core::codex_config::ModelProviderSource::ProfileV2ConfigFile => {
+                        CodexModelProviderSource::ProfileV2ConfigFile
+                    }
+                    prodex_mojo_core::codex_config::ModelProviderSource::ConfigFile => {
+                        CodexModelProviderSource::ConfigFile
+                    }
+                };
+                let provider = CodexModelProviderSetting {
                     provider_id,
-                    source: CodexModelProviderSource::CliOverride,
-                }
-            })
-        })
-        .map(Some)
-        .unwrap_or(codex_model_provider_setting_from_config(
-            codex_home,
-            profile_v2_name,
-        )?)
-    else {
-        return Ok(None);
-    };
-    Ok((!provider.is_openai()).then_some(provider))
+                    source,
+                };
+                return Ok((!provider.is_openai()).then_some(provider));
+            }
+            prodex_mojo_core::codex_config::ModelProviderPlan::NoProvider => return Ok(None),
+        }
+    }
 }
 
-fn codex_model_provider_setting_from_config(
-    codex_home: &Path,
-    profile_v2_name: Option<&str>,
-) -> CodexConfigResult<Option<CodexModelProviderSetting>> {
-    if let Some(provider_id) = profile_v2_name
-        .and_then(|profile_v2_name| codex_profile_v2_config_path(codex_home, profile_v2_name))
-        .map(|config_path| codex_config_file_value(&config_path, "model_provider"))
-        .transpose()?
-        .flatten()
-    {
-        return Ok(Some(CodexModelProviderSetting {
-            provider_id,
-            source: CodexModelProviderSource::ProfileV2ConfigFile,
-        }));
-    }
-
-    Ok(
-        codex_configured_model_provider(codex_home)?.map(|provider_id| CodexModelProviderSetting {
-            provider_id,
-            source: CodexModelProviderSource::ConfigFile,
-        }),
-    )
+fn normalize_model_provider_value(raw_value: &str) -> Option<String> {
+    prodex_mojo_core::codex_config::normalize_value(raw_value)
+        .expect("Mojo Codex model-provider normalization returned invalid output")
 }
 
 #[cfg(test)]
@@ -348,11 +373,6 @@ fn codex_non_openai_model_provider_for_args(
         model_provider_override.as_deref(),
         profile_v2_name.as_deref(),
     )
-}
-
-fn normalize_model_provider_value(raw_value: &str) -> Option<String> {
-    prodex_mojo_core::codex_config::normalize_value(raw_value)
-        .expect("Mojo Codex model-provider normalization returned invalid output")
 }
 
 #[cfg(test)]

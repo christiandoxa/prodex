@@ -1,6 +1,10 @@
 # Observability Mojo metric-name catalog
 
-The release Mojo path owns the stable metric-name strings. Rust keeps only typed plan construction and the feature-off compatibility literal.
+The release Mojo path owns the stable metric-name strings and operational histogram bucket plans. Rust keeps typed plan construction, metric state, and metric emission.
+
+## Operational histogram buckets
+
+`prodex_mojo_operational_histogram_bounds_v1` owns the metric-name suffix rule and bucket limits. Names ending in `_microseconds` use microsecond bounds; other names use millisecond bounds. Rust passes the metric name through `prodex_observability::histogram_bucket_bounds` and records observations using the returned limits.
 
 | Plan | Slot | Planner | Field | Metric |
 |---:|---:|---|---|---|

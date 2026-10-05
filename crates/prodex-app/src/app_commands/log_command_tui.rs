@@ -6,10 +6,9 @@ use super::{
     LogStreamItem, TranscriptEvent, bounded_followed_log_paths, collect_live_log_items,
     collect_new_runtime_log_stream_items,
     collect_new_runtime_log_stream_items_for_tui_with_throughput, collect_new_transcript_events,
-    followed_log_map, is_routine_load_event, latest_transcript_event, local_token_usage_event,
-    print_log_stream_item, print_token_usage_event, print_transcript_event,
-    print_upstream_payload_event, recent_session_log_paths, retain_followed_logs,
-    runtime_log_paths_for_follow,
+    followed_log_map, latest_transcript_event, local_token_usage_event, print_log_stream_item,
+    print_token_usage_event, print_transcript_event, print_upstream_payload_event,
+    recent_session_log_paths, retain_followed_logs, runtime_log_paths_for_follow,
 };
 use crate::app_commands::collect_recent_runtime_log_paths;
 use crate::app_commands::log_tui::{
@@ -38,7 +37,6 @@ mod render;
 const LOG_STREAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SESSION_PATH_RECONCILE_INTERVAL: Duration = Duration::from_secs(10);
 const LOG_TUI_EVENT_LIMIT: usize = 200;
-const LOG_LOAD_COALESCE_WINDOW: Duration = Duration::from_secs(5);
 
 pub(crate) fn handle_log(args: LogArgs) -> Result<()> {
     match args.mode {
@@ -490,25 +488,36 @@ fn push_log_stream_item(items: &mut VecDeque<LogStreamItem>, item: LogStreamItem
 }
 
 fn push_log_stream_item_at(items: &mut VecDeque<LogStreamItem>, item: LogStreamItem, now: Instant) {
-    if matches!(&item, LogStreamItem::LoadObservation(observation) if is_routine_load_event(&observation.event_name))
-    {
-        return;
-    }
     if let LogStreamItem::LoadObservation(observation) = item {
         let key = load_observation_key(&observation);
-        let event = observation.event;
-        let run_id = observation.run_id;
-        // ponytail: a bounded 5s projection episode with at most 256 run ids; replace the
-        // vector with a compact counter if higher-cardinality diagnostics become necessary.
-        if let Some(LogStreamItem::LoadAggregate(aggregate)) = items.back_mut()
-            && aggregate.key == key
-            && now.saturating_duration_since(aggregate.last_seen) <= LOG_LOAD_COALESCE_WINDOW
-        {
-            aggregate.observe(event, run_id, now);
+        let previous = match items.back() {
+            Some(LogStreamItem::LoadAggregate(aggregate)) => Some(aggregate),
+            _ => None,
+        };
+        let plan = LogLoadAggregate::plan_observation(
+            previous,
+            &observation.event_name,
+            &key,
+            observation.run_id.as_deref(),
+            now,
+        );
+        if plan.routine {
             return;
         }
-        items.push_back(LogStreamItem::LoadAggregate(LogLoadAggregate::new(
-            event, key, run_id, now,
+        // ponytail: keep run IDs in a bounded vector; use a counter if identity detail stops helping.
+        if plan.coalesce {
+            let Some(LogStreamItem::LoadAggregate(aggregate)) = items.back_mut() else {
+                panic!("Mojo log-load plan selected a missing aggregate");
+            };
+            aggregate.apply_plan(observation.event, key, observation.run_id, now, plan);
+            return;
+        }
+        items.push_back(LogStreamItem::LoadAggregate(LogLoadAggregate::from_plan(
+            observation.event,
+            key,
+            observation.run_id,
+            now,
+            plan,
         )));
     } else {
         items.push_back(item);
@@ -735,6 +744,45 @@ mod tests {
             LogStreamItem::LoadAggregate(aggregate)
                 if aggregate.key.starts_with("profile_inflight\u{1f}")
         ));
+    }
+
+    #[test]
+    fn mojo_load_plan_coalesces_at_boundary_and_restarts_after_freshness_window() {
+        let mut items = VecDeque::new();
+        let now = Instant::now();
+        let visible_event = |run_id| {
+            let mut item = load_event(run_id, "main", 8);
+            if let LogStreamItem::LoadObservation(observation) = &mut item {
+                observation.event_name = "profile_inflight".to_string();
+            }
+            item
+        };
+
+        push_log_stream_item_at(&mut items, visible_event(1), now);
+        push_log_stream_item_at(&mut items, visible_event(2), now + Duration::from_secs(5));
+        push_log_stream_item_at(
+            &mut items,
+            visible_event(3),
+            now + Duration::from_secs(10) + Duration::from_nanos(1),
+        );
+
+        assert_eq!(items.len(), 2);
+        let LogStreamItem::LoadAggregate(first) = &items[0] else {
+            panic!("expected first load aggregate episode");
+        };
+        let LogStreamItem::LoadAggregate(second) = &items[1] else {
+            panic!("expected second load aggregate episode");
+        };
+        assert_eq!(first.occurrences, 2);
+        assert_eq!(
+            first.unique_runs,
+            vec!["r0001".to_string(), "r0002".to_string()]
+        );
+        assert_eq!(
+            first.as_transcript().text,
+            "r0002  profile busy  profile=main · route=responses · ×2 · 2 runs"
+        );
+        assert_eq!(second.occurrences, 1);
     }
 
     #[test]

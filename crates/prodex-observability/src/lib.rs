@@ -10,6 +10,8 @@ pub use metric_label::{TelemetryAttribute, TelemetryAttributeError};
 
 mod mojo;
 
+pub use prodex_mojo_core::operational_metrics::histogram_bucket_bounds;
+
 fn metric_name(plan: usize, slot: usize) -> &'static str {
     mojo::metric_name(plan, slot)
 }

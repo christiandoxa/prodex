@@ -44,16 +44,3 @@ pub(in crate::runtime_state_shared) struct RuntimeSmartContextSemanticRangeMetad
     pub(super) code: Option<String>,
     pub(super) symbol: Option<String>,
 }
-
-#[derive(Debug, Clone)]
-pub(in crate::runtime_state_shared) struct RuntimeSmartContextParsedSymbolLine {
-    pub(super) label: &'static str,
-    pub(super) symbol: String,
-    pub(super) style: RuntimeSmartContextSymbolRangeStyle,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub(in crate::runtime_state_shared) enum RuntimeSmartContextSymbolRangeStyle {
-    Brace,
-    Python,
-}

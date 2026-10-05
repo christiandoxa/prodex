@@ -3,7 +3,6 @@ use chrono::Local;
 use prodex_cli::Commands;
 use prodex_core::AppPaths;
 use reqwest::blocking::Client;
-use semver::Version;
 use serde::{Deserialize, Serialize};
 use std::env;
 use std::fs::{self, OpenOptions};
@@ -15,8 +14,14 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use terminal_ui::{print_wrapped_stderr, section_header};
 
+mod release_version;
 mod updater;
 
+use release_version::{
+    is_update_notice_mojo_error, map_update_notice_mojo, release_version_is_valid,
+};
+
+pub use release_version::version_is_newer;
 pub use updater::{
     ProdexUpdateDecision, acquire_prodex_update_lock, latest_prodex_version_for_update,
     prodex_update_decision,
@@ -167,7 +172,7 @@ pub fn prodex_update_command_for_version(_latest_version: &str) -> String {
 
 pub fn prodex_version_status(paths: &AppPaths) -> Result<ProdexVersionStatus> {
     Ok(match latest_prodex_version(paths)? {
-        Some(latest_version) if version_is_newer(&latest_version, current_prodex_version()) => {
+        Some(latest_version) if version_is_newer(&latest_version, current_prodex_version())? => {
             ProdexVersionStatus::UpdateAvailable(latest_version)
         }
         Some(_) => ProdexVersionStatus::UpToDate,
@@ -181,7 +186,7 @@ pub fn format_info_codex_version(
 ) -> Result<String> {
     let latest_version = latest_codex_version(paths, current_version.unwrap_or("0.0.0"))?;
     Ok(match (current_version, latest_version) {
-        (Some(current), Some(latest)) if version_is_newer(&latest, current) => {
+        (Some(current), Some(latest)) if version_is_newer(&latest, current)? => {
             format!("{current} (update available: {latest})")
         }
         (Some(current), Some(_)) => format!("{current} (up to date)"),
@@ -193,17 +198,18 @@ pub fn format_info_codex_version(
 
 fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
     let source = current_prodex_release_source();
-    if let Some(latest_version) = cached_latest_prodex_version(paths, source) {
+    if let Some(latest_version) = cached_latest_prodex_version(paths, source)? {
         return Ok(Some(latest_version));
     }
 
     let _lock = acquire_update_check_lock(paths);
-    if let Some(latest_version) = cached_latest_prodex_version(paths, source) {
+    if let Some(latest_version) = cached_latest_prodex_version(paths, source)? {
         return Ok(Some(latest_version));
     }
 
     let latest_version = match fetch_latest_prodex_version(source) {
         Ok(version) => version,
+        Err(error) if is_update_notice_mojo_error(&error) => return Err(error),
         Err(_) => return Ok(None),
     };
     let mut cache = load_update_check_cache(paths)
@@ -217,31 +223,37 @@ fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
     Ok(Some(latest_version))
 }
 
-fn cached_latest_prodex_version(paths: &AppPaths, source: ProdexReleaseSource) -> Option<String> {
-    let cached = load_update_check_cache(paths).ok().flatten()?;
-    should_use_cached_update_version(
+fn cached_latest_prodex_version(
+    paths: &AppPaths,
+    source: ProdexReleaseSource,
+) -> Result<Option<String>> {
+    let Some(cached) = load_update_check_cache(paths).ok().flatten() else {
+        return Ok(None);
+    };
+    Ok(should_use_cached_update_version(
         cached.source,
         &cached.latest_version,
         cached.checked_at,
         source,
         current_prodex_version(),
         Local::now().timestamp(),
-    )
-    .then_some(cached.latest_version)
+    )?
+    .then_some(cached.latest_version))
 }
 
 fn latest_codex_version(paths: &AppPaths, current_version: &str) -> Result<Option<String>> {
-    if let Some(latest_version) = cached_latest_codex_version(paths, current_version) {
+    if let Some(latest_version) = cached_latest_codex_version(paths, current_version)? {
         return Ok(Some(latest_version));
     }
 
     let _lock = acquire_update_check_lock(paths);
-    if let Some(latest_version) = cached_latest_codex_version(paths, current_version) {
+    if let Some(latest_version) = cached_latest_codex_version(paths, current_version)? {
         return Ok(Some(latest_version));
     }
 
     let latest_version = match fetch_latest_codex_github_version() {
         Ok(version) => version,
+        Err(error) if is_update_notice_mojo_error(&error) => return Err(error),
         Err(_) => return Ok(None),
     };
     let mut cache = load_update_check_cache(paths)
@@ -254,13 +266,18 @@ fn latest_codex_version(paths: &AppPaths, current_version: &str) -> Result<Optio
     Ok(Some(latest_version))
 }
 
-fn cached_latest_codex_version(paths: &AppPaths, current_version: &str) -> Option<String> {
-    let cached = load_update_check_cache(paths).ok().flatten()?;
-    let latest_version = cached.codex_latest_version?;
-    let checked_at = cached.codex_checked_at?;
-    (Local::now().timestamp().saturating_sub(checked_at)
-        < update_check_cache_ttl_seconds(&latest_version, current_version))
-    .then_some(latest_version)
+fn cached_latest_codex_version(paths: &AppPaths, current_version: &str) -> Result<Option<String>> {
+    let Some(cached) = load_update_check_cache(paths).ok().flatten() else {
+        return Ok(None);
+    };
+    let (Some(latest_version), Some(checked_at)) =
+        (cached.codex_latest_version, cached.codex_checked_at)
+    else {
+        return Ok(None);
+    };
+    Ok((Local::now().timestamp().saturating_sub(checked_at)
+        < update_check_cache_ttl_seconds(&latest_version, current_version)?)
+    .then_some(latest_version))
 }
 
 pub fn should_use_cached_update_version(
@@ -270,21 +287,23 @@ pub fn should_use_cached_update_version(
     current_source: ProdexReleaseSource,
     current_version: &str,
     now: i64,
-) -> bool {
-    prodex_mojo_core::update_notice_policy::cache_is_fresh(
+) -> Result<bool> {
+    map_update_notice_mojo(prodex_mojo_core::update_notice_policy::cache_is_fresh(
         cached_source == current_source,
         now,
         cached_checked_at,
-        update_check_cache_ttl_seconds(cached_latest_version, current_version),
-    )
-    .expect("Mojo update-notice cache policy returned invalid output")
+        update_check_cache_ttl_seconds(cached_latest_version, current_version)?,
+    ))
 }
 
-pub fn update_check_cache_ttl_seconds(cached_latest_version: &str, current_version: &str) -> i64 {
-    if version_is_newer(cached_latest_version, current_version) {
-        UPDATE_CHECK_CACHE_TTL_SECONDS
+pub fn update_check_cache_ttl_seconds(
+    cached_latest_version: &str,
+    current_version: &str,
+) -> Result<i64> {
+    if version_is_newer(cached_latest_version, current_version)? {
+        Ok(UPDATE_CHECK_CACHE_TTL_SECONDS)
     } else {
-        UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS
+        Ok(UPDATE_CHECK_STALE_CURRENT_TTL_SECONDS)
     }
 }
 
@@ -468,9 +487,10 @@ fn latest_release_version_from_url(url: &reqwest::Url) -> Result<String> {
         .path()
         .strip_prefix("/christiandoxa/prodex/releases/tag/")
         .context("GitHub latest release redirect did not contain a version")?;
-    let version = tag.strip_prefix('v').unwrap_or(tag);
-    parse_release_version(version).context("invalid GitHub release version")?;
-    Ok(version.to_string())
+    if !release_version_is_valid(tag)? {
+        bail!("invalid GitHub release version");
+    }
+    Ok(tag.strip_prefix('v').unwrap_or(tag).to_string())
 }
 
 fn latest_codex_release_version_from_url(url: &reqwest::Url) -> Result<String> {
@@ -478,23 +498,10 @@ fn latest_codex_release_version_from_url(url: &reqwest::Url) -> Result<String> {
         .path()
         .strip_prefix("/openai/codex/releases/tag/rust-v")
         .context("GitHub latest Codex release redirect did not contain a version")?;
-    parse_release_version(version).context("invalid GitHub Codex release version")?;
-    Ok(version.to_string())
-}
-
-pub fn version_is_newer(candidate: &str, current: &str) -> bool {
-    match (
-        parse_release_version(candidate),
-        parse_release_version(current),
-    ) {
-        (Some(candidate), Some(current)) => candidate > current,
-        _ => false,
+    if !release_version_is_valid(version)? {
+        bail!("invalid GitHub Codex release version");
     }
-}
-
-fn parse_release_version(version: &str) -> Option<Version> {
-    let version = version.trim();
-    Version::parse(version.strip_prefix('v').unwrap_or(version)).ok()
+    Ok(version.to_string())
 }
 
 #[cfg(test)]
@@ -560,12 +567,19 @@ mod tests {
     }
 
     #[test]
-    fn version_comparison_uses_semver_and_rejects_invalid_versions() {
-        assert!(version_is_newer("v0.297.0", "0.296.0"));
-        assert!(version_is_newer("1.0.0", "1.0.0-rc.1"));
-        assert!(!version_is_newer("1.0.0-rc.1", "1.0.0"));
-        assert!(!version_is_newer("1.invalid.0", "1.0.0"));
-        assert!(!version_is_newer("1.0.0", "invalid"));
+    fn release_version_comparison_uses_mojo_total_order() {
+        assert!(version_is_newer("v0.297.0", "0.296.0").unwrap());
+        assert!(version_is_newer("1.10.0", "1.9.0").unwrap());
+        assert!(version_is_newer("1.0.0", "1.0.0-rc.1").unwrap());
+        assert!(version_is_newer("1.0.0-rc.10", "1.0.0-rc.2").unwrap());
+        assert!(!version_is_newer("1.0.0-rc.1", "1.0.0").unwrap());
+        assert!(version_is_newer("1.0.0+build.10", "1.0.0+build.2").unwrap());
+        assert!(!version_is_newer("1.0.0+build-a", "1.0.0+build-a").unwrap());
+        assert!(!version_is_newer("1.0.0+build-a", "1.0.0+build-b").unwrap());
+        assert!(!version_is_newer("vv1.0.0", "1.0.0").unwrap());
+        assert!(!version_is_newer("1.invalid.0", "1.0.0").unwrap());
+        assert!(!version_is_newer("1.0.0", "invalid").unwrap());
+        assert!(!version_is_newer("\u{2003}v1.0.0\u{3000}", "1.0.0").unwrap());
     }
 
     #[test]
@@ -590,13 +604,24 @@ mod tests {
             prodex_update_decision("0.418.0+build-a", "0.418.0+build-b").unwrap(),
             ProdexUpdateDecision::UpToDate
         );
+        assert_eq!(
+            prodex_update_decision("0.418.0+build-b", "0.418.0+build-a").unwrap(),
+            ProdexUpdateDecision::UpToDate
+        );
         assert!(prodex_update_decision("0.418", "0.418.0").is_err());
+        assert!(prodex_update_decision("vv0.418.0", "0.418.0").is_err());
     }
 
     #[test]
     fn cached_update_refreshes_within_five_minutes() {
-        assert_eq!(update_check_cache_ttl_seconds("0.3.1", "0.3.0"), 300);
-        assert_eq!(update_check_cache_ttl_seconds("0.3.0", "0.3.0"), 300);
+        assert_eq!(
+            update_check_cache_ttl_seconds("0.3.1", "0.3.0").unwrap(),
+            300
+        );
+        assert_eq!(
+            update_check_cache_ttl_seconds("0.3.0", "0.3.0").unwrap(),
+            300
+        );
     }
 
     #[test]
@@ -606,6 +631,15 @@ mod tests {
                 .unwrap();
 
         assert_eq!(latest_release_version_from_url(&url).unwrap(), "0.300.0");
+        assert!(
+            latest_release_version_from_url(
+                &reqwest::Url::parse(
+                    "https://github.com/christiandoxa/prodex/releases/tag/vv0.300.0"
+                )
+                .unwrap()
+            )
+            .is_err()
+        );
         assert!(
             latest_release_version_from_url(
                 &reqwest::Url::parse("https://github.com/christiandoxa/prodex/releases/latest")

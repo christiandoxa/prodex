@@ -40,7 +40,43 @@ const SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/ri
 const SMART_CONTEXT_CAPSULE_ORDER_MOJO_FILE = "mojo/prodex_core/smart_context_capsule_order.mojo";
 const DEEPSEEK_INPUT_HISTORY_FILE = "crates/prodex-provider-core/src/deepseek_bridge/input_items/history.rs";
 const PRESIDIO_LOCAL_REDACTION_FILE = "crates/prodex-app/src/runtime_proxy/presidio/local.rs";
+const SMART_CONTEXT_SYMBOLS_CONSUMER_FILE = "crates/prodex-app/src/runtime_state_shared/semantic_index.rs";
+const SMART_CONTEXT_SYMBOLS_RUST_FILE = "crates/prodex-app/src/runtime_state_shared/semantic_index/symbols.rs";
+const SMART_CONTEXT_SYMBOLS_ADAPTER_FILE = "crates/prodex-mojo-core/src/smart_context_symbols.rs";
+const SMART_CONTEXT_SYMBOLS_MOJO_FILE = "mojo/prodex_core/smart_context_symbols.mojo";
+const SMART_CONTEXT_SYMBOLS_TEST_FILE = "crates/prodex-mojo-core/tests/smart_context_symbols.rs";
+const SMART_CONTEXT_SYMBOLS_CALLER_TEST_FILE = "crates/prodex-app/src/runtime_state_shared/artifact_tests.rs";
+const LIVE_LOG_RECORD_FILE = "crates/prodex-runtime-log/src/live.rs";
+const LIVE_LOG_RECORD_ADAPTER_FILE = "crates/prodex-mojo-core/src/live_log_record.rs";
+const LIVE_LOG_RECORD_MOJO_FILE = "mojo/prodex_core/live_log_record.mojo";
+const LIVE_LOG_RECORD_DIRECT_TEST_FILE = "mojo/tests/live_log_record_test.mojo";
+const RUNTIME_POLICY_PRESET_CONSUMER_FILE = "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs";
+const RUNTIME_POLICY_PRESET_CALLER_FILE = "crates/prodex-runtime-policy/src/lib.rs";
+const RUNTIME_POLICY_PRESET_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_decisions/preset.rs";
+const RUNTIME_POLICY_PRESET_TEST_FILE = "crates/prodex-mojo-core/tests/runtime_policy_preset.rs";
+const RUNTIME_POLICY_PRESET_MOJO_FILE = "mojo/prodex_core/runtime_tuning.mojo";
+const OPERATIONAL_HISTOGRAM_CALLER_FILE = "crates/prodex-app/src/runtime_operational_metrics.rs";
+const OPERATIONAL_HISTOGRAM_ADAPTER_FILE = "crates/prodex-mojo-core/src/operational_metrics.rs";
+const OPERATIONAL_HISTOGRAM_MOJO_FILE = "mojo/prodex_core/operational_metrics.mojo";
+const OPERATIONAL_HISTOGRAM_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/operational_metrics.rs";
+const UPDATE_NOTICE_VERSION_CALLER_FILE = "crates/prodex-update-notice/src/lib.rs";
+const UPDATE_NOTICE_VERSION_UPDATER_FILE = "crates/prodex-update-notice/src/updater.rs";
+const UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE = "crates/prodex-update-notice/src/release_version.rs";
+const UPDATE_NOTICE_VERSION_ADAPTER_FILE = "crates/prodex-mojo-core/src/update_notice_policy.rs";
+const UPDATE_NOTICE_VERSION_MOJO_FILE = "mojo/prodex_core/update_notice_policy.mojo";
+const SESSION_USAGE_LIMIT_CONSUMER_FILE = "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs";
+const SESSION_USAGE_LIMIT_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/fallback.rs";
+const SESSION_USAGE_LIMIT_FACADE_FILE = "crates/prodex-mojo-core/src/rich.rs";
+const SESSION_USAGE_LIMIT_MOJO_FILE = "mojo/prodex_core/rich_fallback.mojo";
+const DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/smart_context.rs";
+const DOCTOR_SMART_CONTEXT_DECISION_ADAPTER_FILE = DOCTOR_MARKER_ABI_ADAPTER_FILE;
+const DOCTOR_SMART_CONTEXT_DECISION_MOJO_FILE = DOCTOR_MARKER_ABI_MOJO_FILE;
 const PROMOTED_FILES = [
+  DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE,
+  LIVE_LOG_RECORD_FILE,
+  LIVE_LOG_RECORD_ADAPTER_FILE,
+  LIVE_LOG_RECORD_MOJO_FILE,
+  LIVE_LOG_RECORD_DIRECT_TEST_FILE,
   SMART_CONTEXT_CAPSULE_ORDER_ADAPTER_FILE,
   SMART_CONTEXT_CAPSULE_ORDER_MOJO_FILE,
   SMART_CONTEXT_CAPSULE_ARTIFACTS_FILE,
@@ -73,12 +109,15 @@ const PROMOTED_FILES = [
   "crates/prodex-mcp-stdio/src/lib.rs",
   "crates/prodex-shared-codex-fs/src/history.rs",
   "crates/prodex-mojo-core/src/shared_history_policy.rs",
-  "crates/prodex-update-notice/src/lib.rs",
+  UPDATE_NOTICE_VERSION_CALLER_FILE,
+  UPDATE_NOTICE_VERSION_UPDATER_FILE,
+  UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE,
   "crates/prodex-shared-codex-fs/src/image_attachments.rs",
   "crates/prodex-runtime-cookies/src/lib.rs",
   "crates/prodex-mojo-core/src/runtime_cookie_policy.rs",
   "crates/prodex-mojo-core/src/shared_attachment_policy.rs",
-  "crates/prodex-mojo-core/src/update_notice_policy.rs",
+  UPDATE_NOTICE_VERSION_ADAPTER_FILE,
+  UPDATE_NOTICE_VERSION_MOJO_FILE,
   "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
   "crates/prodex-mcp-stdio/src/lib.rs",
   "crates/prodex-mojo-core/src/mcp_stdio_policy.rs",
@@ -93,6 +132,13 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/runtime_proxy/health_circuit.rs",
   "crates/prodex-mojo-core/src/smart_context_markers.rs",
   "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
+  SMART_CONTEXT_SYMBOLS_CONSUMER_FILE,
+  SMART_CONTEXT_SYMBOLS_ADAPTER_FILE,
+  SMART_CONTEXT_SYMBOLS_MOJO_FILE,
+  SMART_CONTEXT_SYMBOLS_TEST_FILE,
+  SMART_CONTEXT_SYMBOLS_CALLER_TEST_FILE,
+  "crates/prodex-mojo-core/src/lib.rs",
+  "crates/prodex-mojo-core/build.rs",
   "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
@@ -119,6 +165,10 @@ const PROMOTED_FILES = [
   CLI_DEFAULT_RUN_MOJO_FILE,
   CLI_DEFAULT_RUN_ABI_TEST_FILE,
   CLI_DEFAULT_RUN_CALLER_TEST_FILE,
+  SESSION_USAGE_LIMIT_CONSUMER_FILE,
+  SESSION_USAGE_LIMIT_ADAPTER_FILE,
+  SESSION_USAGE_LIMIT_FACADE_FILE,
+  SESSION_USAGE_LIMIT_MOJO_FILE,
   "crates/prodex-session-store/src/session_selector.rs",
   "crates/prodex-session-store/src/report.rs",
   "crates/prodex-mojo-core/src/runtime_lineage.rs",
@@ -147,12 +197,17 @@ const PROMOTED_FILES = [
   "crates/prodex-quota/src/auth.rs",
   "crates/prodex-quota/src/render/time.rs",
   "crates/prodex-quota/src/render/copilot.rs",
+  "crates/prodex-quota/src/render/windows.rs",
+  "crates/prodex-quota/tests/src/render/quota_reset_message.rs",
+  "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
+  "mojo/prodex_core/quota.mojo",
   "crates/prodex-profile-identity/src/lib.rs",
   "crates/prodex-mojo-core/src/profile_identity.rs",
   "crates/prodex-domain/src/governance/inspection.rs",
   "crates/prodex-mojo-core/build.rs",
   "crates/prodex-mojo-core/src/lib.rs",
   "crates/prodex-mojo-core/src/quota.rs",
+  "crates/prodex-mojo-core/src/quota/reset_epoch.rs",
   "crates/prodex-mojo-core/src/routing.rs",
   "crates/prodex-mojo-core/src/runtime.rs",
   "crates/prodex-mojo-core/src/runtime/candidate_plan.rs",
@@ -183,6 +238,7 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/rich/catalog_planner.rs",
   "crates/prodex-mojo-core/src/rich/context_plan.rs",
   "crates/prodex-mojo-core/src/log.rs",
+  "crates/prodex-mojo-core/src/log_load.rs",
   "crates/prodex-mojo-core/src/rich/routing.rs",
   "crates/prodex-context/src/critical_signal.rs",
   "crates/prodex-quota/src/render/gemini.rs",
@@ -201,6 +257,8 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/super_expose/openai_tunnel.rs",
   "crates/prodex-app/src/app_commands/log_event_source.rs",
   "crates/prodex-app/src/app_commands/log_stream.rs",
+  "crates/prodex-app/src/app_commands/log_load.rs",
+  "crates/prodex-app/src/app_commands/log_command_tui.rs",
   "crates/prodex-mojo-core/src/observability.rs",
   "crates/prodex-app/src/app_commands/ping.rs",
   "crates/prodex-app/src/app_commands/super_main_catalog.rs",
@@ -262,7 +320,11 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-quota/src/selection/scoring/profile_order.rs",
   "crates/prodex-runtime-launch/src/args.rs",
   "crates/prodex-runtime-launch/src/lib.rs",
-  "crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
+  RUNTIME_POLICY_PRESET_CONSUMER_FILE,
+  RUNTIME_POLICY_PRESET_CALLER_FILE,
+  RUNTIME_POLICY_PRESET_ADAPTER_FILE,
+  RUNTIME_POLICY_PRESET_TEST_FILE,
+  RUNTIME_POLICY_PRESET_MOJO_FILE,
   "crates/prodex-observability/src/lib.rs",
   "crates/prodex-observability/src/metric_label.rs",
   "crates/prodex-observability/src/mojo.rs",
@@ -410,6 +472,8 @@ const UNCONDITIONAL_MOJO_FILES = new Set([
   "crates/prodex-app/src/runtime_proxy/lineage/remember.rs",
   "crates/prodex-mojo-core/src/smart_context_markers.rs",
   "crates/prodex-app/src/runtime_state_shared/semantic_index/markers.rs",
+  SMART_CONTEXT_SYMBOLS_CONSUMER_FILE,
+  SMART_CONTEXT_SYMBOLS_ADAPTER_FILE,
   "crates/prodex-mojo-core/src/smart_context_artifact_ref.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_manifest.rs",
   "crates/prodex-app/src/runtime_proxy/smart_context/artifact_refs.rs",
@@ -576,6 +640,7 @@ const ANTHROPIC_SSE_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/a
 const ANTHROPIC_REQUEST_FALLBACK_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/request_fallback.rs";
 const ANTHROPIC_REQUEST_ORACLE_FILE = "crates/prodex-provider-core/src/translators/anthropic/messages/mojo_request_tests.rs";
 const REMOVED_ORACLE_FILES = [
+  SMART_CONTEXT_SYMBOLS_RUST_FILE,
   "crates/prodex-provider-core/src/deepseek_bridge/request_tools/strict_schema.rs",
   "crates/prodex-observability/src/rust.rs",
   "crates/prodex-observability/src/metric_label/mojo_parity_tests.rs",
@@ -804,6 +869,10 @@ const QUOTA_GEMINI_DISPLAY_FILE = "crates/prodex-quota/src/render/gemini.rs";
 const QUOTA_REPORTS_FILE = "crates/prodex-quota/src/render/reports.rs";
 const QUOTA_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
+const QUOTA_RESET_EPOCH_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota/reset_epoch.rs";
+const QUOTA_RESET_EPOCH_MOJO_FILE = "mojo/prodex_core/quota.mojo";
+const QUOTA_RESET_EPOCH_TEST_FILE = "crates/prodex-mojo-core/tests/quota_reset_epoch.rs";
+const QUOTA_RESET_EPOCH_CALLER_TEST_FILE = "crates/prodex-quota/tests/src/render/quota_reset_message.rs";
 const REHYDRATE_FILE = "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs";
 const SUPER_OVERRIDE_FILE = "crates/prodex-cli/src/runtime_args/super_tail_extract.rs";
 const SUPER_EXPOSE_FILE = "crates/prodex-cli/src/lib.rs";
@@ -814,6 +883,9 @@ const SUPER_EXPOSE_TOOL_CONTRACT_FILE = "crates/prodex-app/src/super_expose/prot
 const SUPER_EXPOSE_RICH_FILE = "crates/prodex-mojo-core/src/rich/super_expose.rs";
 const LOG_TRANSCRIPT_FILE = "crates/prodex-app/src/app_commands/log_transcript.rs";
 const LOG_ADAPTER_FILE = "crates/prodex-mojo-core/src/log.rs";
+const LOG_LOAD_APP_FILE = "crates/prodex-app/src/app_commands/log_load.rs";
+const LOG_LOAD_TUI_FILE = "crates/prodex-app/src/app_commands/log_command_tui.rs";
+const LOG_LOAD_ADAPTER_FILE = "crates/prodex-mojo-core/src/log_load.rs";
 const LOG_STREAM_FILE = "crates/prodex-app/src/app_commands/log_stream.rs";
 const LOG_EVENT_SOURCE_FILE = "crates/prodex-app/src/app_commands/log_event_source.rs";
 const OBSERVABILITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/observability.rs";
@@ -846,6 +918,11 @@ const KIRO_PROMPT_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/kiro_prompt.rs"
 const KIRO_STREAM_FILE = "crates/prodex-provider-core/src/translators/kiro/stream.rs";
 const KIRO_FINAL_STREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/stream.rs";
 const KIRO_ACP_FILE = "crates/prodex-provider-core/src/translators/kiro/acp.rs";
+const KIRO_CATALOG_NORMALIZER_FILE = "crates/prodex-provider-core/src/catalog/kiro.rs";
+const KIRO_CATALOG_APP_ADAPTER_FILE = "crates/prodex-app/src/profile_commands/kiro/catalog.rs";
+const KIRO_CATALOG_ABI_FILE = "crates/prodex-mojo-core/src/json/kiro_catalog.rs";
+const KIRO_CATALOG_MOJO_FILE = "mojo/prodex_core/kiro_model_catalog.mojo";
+const KIRO_CATALOG_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/kiro_catalog.rs";
 const KIRO_ACP_OPERATIONS = [
   "KiroKernelOperation::AcpInitializeRequest",
   "KiroKernelOperation::AcpSessionNewRequest",
@@ -880,7 +957,10 @@ const PROVIDER_PRECOMMIT_FILE = "crates/prodex-app/src/runtime_launch/proxy_star
 const PROVIDER_BRIDGE_METADATA_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge.rs";
 const PROVIDER_BRIDGE_ROUTING_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/provider_bridge_routing.rs";
 const LOCAL_REWRITE_UPSTREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs";
+const LOCAL_REWRITE_PIPELINE_DISPATCH_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch.rs";
+const LOCAL_REWRITE_BINDING_CANDIDATE_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/binding_candidate.rs";
 const NATIVE_FIRST_ERROR_CLASS_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream/error_class.rs";
+const LINEAGE_BINDING_CANDIDATE_FILE = "crates/prodex-mojo-core/src/runtime_lineage/binding_candidate.rs";
 const MODEL_SPEC_FILE = "crates/prodex-provider-core/src/surface/models.rs";
 const PROMPT_CACHE_SELECTION_FILE = "crates/prodex-runtime-proxy/src/selection_plan.rs";
 const FINGERPRINT_DELTA_FILE = "crates/prodex-runtime-proxy/src/smart_context/static_context.rs";
@@ -1046,6 +1126,60 @@ export function findViolations(files) {
       UNCONDITIONAL_MOJO_FILES.has(filePath) && FEATURE_OFF_RUST_PATH.test(contents),
     )
     .map(([filePath]) => `${filePath}: Mojo-owned operation cannot have a feature-off Rust path`);
+  const liveLogRecordViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== LIVE_LOG_RECORD_FILE) return [];
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const required = [
+      "record_exceeds_bound(line.len())?",
+      "nested_string_clip_end(text)?",
+      "json_plan(serialized.len())?",
+      "truncate_plain_text(line)",
+      "let line = bounded_live_log_line(line)?;",
+    ];
+    const missing = required.filter((marker) => !production.includes(marker));
+    if (missing.length > 0) {
+      return [`${filePath}: live-log record decisions must propagate through Mojo (${missing.join(", ")})`];
+    }
+    return /clip_json_strings|\.char_indices\s*\(|MAX_RUNTIME_LIVE_LOG_LINE_BYTES/u.test(production)
+      ? [`${filePath}: contains restored Rust live-log clipping or truncation policy`]
+      : [];
+  });
+  const runtimePolicyPresetViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_POLICY_PRESET_CONSUMER_FILE) {
+      const required = "runtime_tuning_proxy_preset_plan(";
+      const violations = contents.includes(required)
+        ? []
+        : [`${filePath}: runtime-proxy preset resolution must use the Mojo plan`];
+      if (/apply_non_preset_overrides|env_preset\.or_else\(\|\|\s*self\.preset\(\)\)/u.test(contents)) {
+        violations.push(`${filePath}: contains restored Rust preset precedence or override merging`);
+      }
+      return violations;
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_ADAPTER_FILE) {
+      return contents.includes("prodex_runtime_proxy_preset_plan_v1(") &&
+          contents.includes("RUNTIME_PROXY_PRESET_PLAN_ABI_VERSION")
+        ? []
+        : [`${filePath}: preset planning adapter must retain its versioned Mojo ABI`];
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_MOJO_FILE) {
+      return contents.includes('@export("prodex_runtime_proxy_preset_plan_v1")')
+        ? []
+        : [`${filePath}: runtime-proxy preset plan must be implemented in Mojo`];
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_TEST_FILE) {
+      return contents.includes("required_mojo_resolves_preset_precedence_and_all_overrides") &&
+          contents.includes("prodex_mojo_required")
+        ? []
+        : [`${filePath}: preset ABI needs direct required-Mojo regression coverage`];
+    }
+    if (filePath === RUNTIME_POLICY_PRESET_CALLER_FILE) {
+      return contents.includes("runtime_policy_proxy_caller_uses_mojo_preset_plan") &&
+          contents.includes("runtime_policy_proxy_from_root(")
+        ? []
+        : [`${filePath}: runtime-policy caller needs a preset-plan regression test`];
+    }
+    return [];
+  });
   const profileHealthCircuitViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== PROFILE_HEALTH_CIRCUIT_FILE) return [];
     const body = contents.match(
@@ -1070,6 +1204,7 @@ export function findViolations(files) {
         "prodex_mojo_core::provider_usage::extract_json(",
         "prodex_mojo_core::provider_usage::calculate_cost(",
         "prodex_mojo_core::provider_usage::merged_total(",
+        "prodex_mojo_core::provider_usage::merge_latest_present(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -1082,6 +1217,9 @@ export function findViolations(files) {
       ) {
         violations.push(filePath + ": contains restored Rust provider-usage semantics");
       }
+      if (/if\s+\w+\.(input|output|total)_tokens\.is_some\(\)\s*\{\s*\w+\.\1_tokens\s*=/u.test(production)) {
+        violations.push(filePath + ": contains restored Rust SSE usage merge policy");
+      }
       return violations;
     }
     if (filePath === "crates/prodex-mojo-core/src/provider_usage.rs") {
@@ -1089,6 +1227,7 @@ export function findViolations(files) {
         "prodex_provider_usage_extract_v1(",
         "prodex_provider_usage_cost_v1(",
         "prodex_provider_usage_merged_total_v1(",
+        "prodex_provider_usage_merge_latest_present_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
@@ -1221,11 +1360,14 @@ export function findViolations(files) {
     return [];
   });
   const updateNoticeMigrationViolations = files.flatMap(([filePath, contents]) => {
-    if (filePath === "crates/prodex-update-notice/src/lib.rs") {
+    if (filePath === UPDATE_NOTICE_VERSION_CALLER_FILE) {
       const required = [
         "update_notice_policy::should_emit_notice(",
         "update_notice_policy::install_channel(",
         "update_notice_policy::cache_is_fresh(",
+        "release_version_is_valid(",
+        "map_update_notice_mojo(",
+        "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -1234,14 +1376,61 @@ export function findViolations(files) {
         /replace\('\\\\',\s*"\/"\)/u.test(contents)
         || /normalized_path\.contains/u.test(contents)
         || /now\.saturating_sub\(cached_checked_at\)/u.test(contents)
+        || /semver::Version|Version::parse|parse_release_version|candidate\s*>\s*current/u.test(contents)
       ) {
         violations.push(filePath + ": contains restored Rust update-notice semantics");
       }
       return violations;
     }
-    if (filePath === "crates/prodex-mojo-core/src/update_notice_policy.rs" &&
-        !contents.includes("prodex_update_notice_policy_v1(")) {
-      return [filePath + ": update-notice ABI adapter must retain prodex_update_notice_policy_v1("];
+    if (filePath === UPDATE_NOTICE_VERSION_UPDATER_FILE) {
+      const required = [
+        "release_version_is_valid(",
+        "compare_release_versions(",
+        "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": release-version caller must retain " + call);
+      if (/semver::Version|Version::parse|parse_release_version|cmp_precedence/u.test(contents)) {
+        violations.push(filePath + ": contains restored Rust release-version semantics");
+      }
+      return violations;
+    }
+    if (filePath === UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE) {
+      const required = [
+        "update_notice_policy::release_version_is_valid(",
+        "update_notice_policy::compare_release_versions(",
+        "ReleaseVersionOrder::Total",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": release-version adapter must retain " + call);
+      if (/semver::Version|Version::parse|parse_release_version|cmp_precedence/u.test(contents)) {
+        violations.push(filePath + ": contains restored Rust release-version semantics");
+      }
+      return violations;
+    }
+    if (filePath === UPDATE_NOTICE_VERSION_ADAPTER_FILE) {
+      const required = [
+        "prodex_update_notice_policy_v1(",
+        "release_version_is_valid(",
+        "compare_release_versions(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": update-notice ABI adapter must retain " + call);
+    }
+    if (filePath === UPDATE_NOTICE_VERSION_MOJO_FILE) {
+      const required = [
+        '@export("prodex_update_notice_policy_v1")',
+        "update_notice_parse_release_version(",
+        "update_notice_release_version_compare(",
+        "UPDATE_NOTICE_RELEASE_VERSION_VALID",
+        "UPDATE_NOTICE_RELEASE_VERSION_COMPARE",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": Mojo release-version owner must retain " + call);
     }
     return [];
   });
@@ -1500,6 +1689,58 @@ export function findViolations(files) {
       return required
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Kiro prompt ABI tests must retain ${marker}`);
+    }
+    return [];
+  });
+  const kiroCatalogViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === KIRO_CATALOG_NORMALIZER_FILE) {
+      const required = [
+        "kiro_model_catalog_plan(",
+        "KiroModelCatalogPlan::Ready",
+        "merge_catalog_ids(",
+        "merge_provider_model_catalog_json(ProviderId::Kiro",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Kiro catalog adapter must retain ${marker}`);
+      if (/(?:first_models_array|first_nonempty_array|first_nonempty_string|first_positive_u64)|\.trim\(\)/u.test(contents)) {
+        violations.push(`${filePath}: contains replaced Rust Kiro model-catalog decisions`);
+      }
+      return violations;
+    }
+    if (filePath === KIRO_CATALOG_APP_ADAPTER_FILE) {
+      const required = [
+        "prodex_provider_core::normalize_kiro_model_catalog(value)",
+        "prodex_provider_core::normalize_kiro_model_catalog_models(models)",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Kiro catalog caller must use ${marker}`);
+      if (/(?:first_models_array|first_nonempty_array|first_nonempty_string|first_positive_u64)|merge_catalog_ids|\.trim\(\)/u.test(contents)) {
+        violations.push(`${filePath}: contains replaced Rust Kiro model-catalog decisions`);
+      }
+      return violations;
+    }
+    if (filePath === KIRO_CATALOG_ABI_FILE) {
+      return contents.includes("fn prodex_mojo_kiro_catalog_normalize_v1(")
+        && contents.includes("pub fn kiro_model_catalog_plan(")
+        ? []
+        : [`${filePath}: Kiro catalog plan must use its versioned Mojo ABI`];
+    }
+    if (filePath === KIRO_CATALOG_MOJO_FILE) {
+      return contents.includes("KIRO_CATALOG_ABI_VERSION: Int64 = 1")
+        && contents.includes("def kiro_model_catalog_normalize_v1(")
+        ? []
+        : [`${filePath}: Kiro model-catalog planner must retain ABI v1`];
+    }
+    if (filePath === KIRO_CATALOG_ABI_TEST_FILE) {
+      const required = [
+        "kiro_model_catalog_plan_uses_alias_precedence_unicode_trim_and_stable_source_order",
+        "kiro_catalog_plan_returns_typed_missing_empty_and_limit_issues",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: required-Mojo Kiro catalog test must retain ${marker}`);
     }
     return [];
   });
@@ -1848,6 +2089,7 @@ export function findViolations(files) {
       "prodex_mojo_core::codex_config::profile_v2_name(",
       "prodex_mojo_core::codex_config::config_override(",
       "prodex_mojo_core::codex_config::normalize_value(",
+      "prodex_mojo_core::codex_config::model_provider_plan(",
     ];
     const violations = required
       .filter((call) => !contents.includes(call))
@@ -1855,6 +2097,15 @@ export function findViolations(files) {
     if (/\bfn\s+(?:parse_config_override_string|parse_config_override_exact_string)\s*\(/u.test(contents) ||
         /while\s+index\s*<\s*args\.len\(\)/u.test(contents)) {
       violations.push(`${filePath}: contains retired Rust Codex config argument scanning semantics`);
+    }
+    const providerResolution = contents.match(
+      /\bpub fn codex_non_openai_model_provider_with_profile_v2\([^]*?^\}/mu,
+    )?.[0] ?? "";
+    if (!providerResolution.includes("prodex_mojo_core::codex_config::model_provider_plan(")) {
+      violations.push(`${filePath}: model-provider resolution must retain Mojo plan dispatch`);
+    }
+    if (/\bfn\s+codex_model_provider_setting_from_config\s*\(/u.test(contents)) {
+      violations.push(`${filePath}: contains restored Rust model-provider source selection`);
     }
     return violations;
   });
@@ -3620,6 +3871,69 @@ export function findViolations(files) {
     }
     return violations;
   });
+  const quotaResetEpochViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === QUOTA_WINDOWS_FILE) {
+      const required = [
+        "prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(",
+        "quota_json_i64_path(&value, &[\"resets_at\"])",
+        "quota_json_i64_path(&value, &[\"reset_at\"])",
+        "quota_json_i64_path(&value, &[\"error\", \"resets_at\"])",
+        "quota_json_i64_path(&value, &[\"error\", \"reset_at\"])",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: reset-epoch candidate acquisition must retain ${marker}`);
+      if (/\bif\s+primary_used\b|\bif\s+secondary_used\b|primary_reset\.or\(secondary_reset\)/u.test(contents) ||
+          /\bfn\s+quota_json_(?:reset|precedence)\w*\s*\(/u.test(contents)) {
+        violations.push(`${filePath}: contains Rust reset-epoch precedence policy`);
+      }
+      return violations;
+    }
+    if (filePath === QUOTA_RESET_EPOCH_ADAPTER_FILE) {
+      const required = [
+        "pub struct QuotaResetEpochInput",
+        "pub fn quota_reset_epoch_precedence(",
+        "prodex_quota_reset_epoch_v1(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: typed reset-epoch adapter must retain ${marker}`);
+    }
+    if (filePath === QUOTA_RESET_EPOCH_MOJO_FILE) {
+      const required = [
+        '@export("prodex_quota_reset_epoch_v1")',
+        "while index < 4:",
+        "primary_used >= 100",
+        "secondary_used >= 100",
+        "fields[unsafe_offset=9] == 1",
+        "fields[unsafe_offset=11] == 1",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: quota reset-epoch precedence must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === QUOTA_RESET_EPOCH_TEST_FILE) {
+      const required = [
+        "quota_reset_epoch_prefers_valid_candidates_in_declared_order",
+        "quota_reset_epoch_applies_used_percent_gates_and_missing_values",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: direct Mojo reset-epoch tests must retain ${marker}`);
+    }
+    if (filePath === QUOTA_RESET_EPOCH_CALLER_TEST_FILE) {
+      const required = [
+        "quota_reset_json_uses_top_level_then_nested_candidate_order",
+        "quota_reset_json_uses_used_percent_gates_and_header_fallback_order",
+        "quota_reset_json_preserves_serde_duplicate_key_behavior",
+        "quota_reset_json_ignores_malformed_and_non_object_values",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: quota caller-boundary tests must retain ${marker}`);
+    }
+    return [];
+  });
   const rehydrateViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== REHYDRATE_FILE) return [];
     const body = contents.match(/\bpub fn smart_context_auto_rehydrate_plan\([^]*?^fn smart_context_auto_rehydrate_plan_mojo/mu)?.[0];
@@ -3760,6 +4074,36 @@ export function findViolations(files) {
     return [];
   });
   const runtimeLineageViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === LOCAL_REWRITE_UPSTREAM_FILE) {
+      const body = contents.match(/pub\(super\) fn\s+candidate_allowed\([^]*?^\}/mu)?.[0];
+      const violations = body?.includes("binding_candidate::candidate_allowed(")
+        ? []
+        : [filePath + ": local rewrite credential admission must delegate to the binding-candidate adapter"];
+      if (body?.includes("binding_identity.as_ref() == Some(identity)") || body?.includes("profile_name == RUNTIME_LOCAL_REWRITE_PROFILE")) {
+        violations.push(filePath + ": contains restored Rust local rewrite binding-candidate policy");
+      }
+      return violations;
+    }
+    if (filePath === LOCAL_REWRITE_BINDING_CANDIDATE_FILE) {
+      const body = contents.match(/pub\(super\) fn\s+candidate_allowed\([^]*?^\}/mu)?.[0];
+      const violations = body?.includes("runtime_lineage::local_rewrite_candidate_allowed(")
+        ? []
+        : [filePath + ": local rewrite credential admission must use the Mojo lineage candidate policy"];
+      if (body?.includes("binding_identity.as_ref() == Some(identity)") || body?.includes("profile_name == RUNTIME_LOCAL_REWRITE_PROFILE")) {
+        violations.push(filePath + ": contains restored Rust local rewrite binding-candidate policy");
+      }
+      return violations;
+    }
+    if (filePath === LOCAL_REWRITE_PIPELINE_DISPATCH_FILE) {
+      const body = contents.match(/fn\s+runtime_local_rewrite_validate_bound_provider\([^]*?^\}/mu)?.[0];
+      const violations = body?.includes("runtime_lineage::dispatch_binding_candidate_decision(")
+        ? []
+        : [filePath + ": dispatch hard-binding validation must use the Mojo lineage candidate policy"];
+      if (body?.includes("bound.provider() != selected_provider") || body?.includes("selected_identity.is_some_and(|selected| selected != bound)")) {
+        violations.push(filePath + ": contains restored Rust dispatch binding identity policy");
+      }
+      return violations;
+    }
     if (filePath === "crates/prodex-runtime-state/src/lineage.rs") {
       const required = [
         "prodex_mojo_core::runtime_lineage::component_valid(",
@@ -3788,10 +4132,25 @@ export function findViolations(files) {
         "prodex_runtime_lineage_classify_v1(",
         "prodex_runtime_lineage_build_v1(",
         "prodex_runtime_lineage_parts_v1(",
+        "pub use binding_candidate::{",
+        "local_rewrite_candidate_allowed,",
+        "dispatch_binding_candidate_decision,",
       ];
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": runtime lineage ABI adapter must retain " + call);
+    }
+    if (filePath === LINEAGE_BINDING_CANDIDATE_FILE) {
+      const required = [
+        "prodex_runtime_lineage_binding_candidate_allowed_v1(",
+        "pub fn local_rewrite_candidate_allowed(",
+        "pub fn dispatch_binding_candidate_decision(",
+        "fn local_rewrite_candidate_requires_exact_profile_and_identity()",
+        "fn dispatch_binding_preserves_provider_only_and_exact_identity_rules()",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": binding-candidate ABI adapter must retain " + call);
     }
     return [];
   });
@@ -3839,6 +4198,122 @@ export function findViolations(files) {
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": smart-context marker ABI adapter must retain " + call);
+    }
+    return [];
+  });
+  const sessionUsageLimitViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SESSION_USAGE_LIMIT_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const body = production.match(/\bfn goal_resume_line_has_usage_limit\([^]*?^\}/mu)?.[0];
+      const retiredRust = /\b(?:goal_resume_event_payload_usage_limit|goal_resume_structured_usage_limit|goal_resume_structured_object_usage_limit|goal_resume_ignored_structured_object|goal_resume_quota_code|goal_resume_usage_limit_text)\s*\(/u;
+      return body?.includes("runtime_session_usage_limit_marker(") && !retiredRust.test(production)
+        ? [] : [`${filePath}: session usage-limit detection must use Mojo without a Rust semantic copy`];
+    }
+    if (filePath === SESSION_USAGE_LIMIT_ADAPTER_FILE) {
+      const required = [
+        "RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: i64 = 15",
+        "pub fn runtime_session_usage_limit_marker(",
+        "RuntimeUsageLimitInputFormat::Json",
+        "RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES",
+      ];
+      return required.filter((item) => !contents.includes(item))
+        .map((item) => `${filePath}: session usage-limit adapter must retain ${item}`);
+    }
+    if (filePath === SESSION_USAGE_LIMIT_FACADE_FILE) {
+      return contents.includes("runtime_session_usage_limit_marker")
+        ? [] : [`${filePath}: session usage-limit Mojo adapter must be exported through rich facade`];
+    }
+    if (filePath === SESSION_USAGE_LIMIT_MOJO_FILE) {
+      const required = [
+        'comptime RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: Int64 = 15',
+        "RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES: Int64 = 2_048",
+        "def runtime_error_session_usage_limit_marker(",
+        "def runtime_error_session_usage_json_matches(",
+        "def runtime_error_session_usage_queue_children(",
+      ];
+      return required.filter((item) => !contents.includes(item))
+        .map((item) => `${filePath}: session usage-limit semantics must remain Mojo-owned (${item})`);
+    }
+    return [];
+  });
+  const smartContextSymbolIndexViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === SMART_CONTEXT_SYMBOLS_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const violations = production.includes("prodex_mojo_core::smart_context_symbols::index(")
+        ? []
+        : [`${filePath}: source symbol indexing must use the Mojo planner`];
+      if (/\bruntime_smart_context_(?:parse_symbol_line|symbol_range_bounds|symbol_prefix_start|brace_symbol_end|python_symbol_end|parse_js_test_symbol|parse_js_function_symbol)\s*\(/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust source-symbol parsing semantics`);
+      }
+      if (production.includes("runtime_smart_context_line_excerpt(")) {
+        violations.push(`${filePath}: symbol range excerpt validity must remain Mojo-owned`);
+      }
+      if (FEATURE_OFF_RUST_PATH.test(production)) {
+        violations.push(`${filePath}: source symbol indexing cannot have a feature-off Rust path`);
+      }
+      return violations;
+    }
+    if (filePath === SMART_CONTEXT_SYMBOLS_RUST_FILE) {
+      return contents.trim()
+        ? [`${filePath}: replaced Rust source-symbol parser must remain deleted`]
+        : [];
+    }
+    if (filePath === SMART_CONTEXT_SYMBOLS_ADAPTER_FILE) {
+      const required = [
+        "prodex_smart_context_symbol_index_v1(",
+        "pub fn index(",
+        "const ABI_VERSION: i64 = 1",
+        "const MAX_INPUT_BYTES: usize = 64 * 1024 * 1024",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: source-symbol adapter must retain ${call}`);
+    }
+    if (filePath === SMART_CONTEXT_SYMBOLS_MOJO_FILE) {
+      const required = [
+        '@export("prodex_smart_context_symbol_index_v1")',
+        "SYMBOL_ABI_VERSION: Int64 = 1",
+        "SYMBOL_MAX_INPUT_BYTES: Int64 = 64 * 1024 * 1024",
+        "def symbol_parse_declaration(",
+        "def symbol_brace_end(",
+        "def symbol_python_end(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: source-symbol semantics must remain in the versioned Mojo kernel (${call})`);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/lib.rs") {
+      return contents.includes("pub mod smart_context_symbols;")
+        ? []
+        : [`${filePath}: source-symbol Mojo adapter must be reachable through mojo-runtime`];
+    }
+    if (filePath === "crates/prodex-mojo-core/build.rs") {
+      return contents.includes("../../mojo/prodex_core/smart_context_symbols.mojo")
+        ? []
+        : [`${filePath}: source-symbol Mojo kernel must be linked into the production archive`];
+    }
+    if (filePath === SMART_CONTEXT_SYMBOLS_TEST_FILE) {
+      const required = [
+        "source_symbol_ranges_cover_rust_python_and_javascript",
+        "source_symbol_ranges_preserve_function_type_and_fallback_names",
+        "symbol_index_reports_capacity_and_excerpt_truncation",
+        "symbol_index_accepts_large_multi_line_artifacts_with_bounded_lines",
+        "index(text, 16, 16 * 1024)",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: direct real-Mojo source-symbol coverage must retain ${call}`);
+    }
+    if (filePath === SMART_CONTEXT_SYMBOLS_CALLER_TEST_FILE) {
+      const required = [
+        "runtime_smart_context_artifact_symbol_index_uses_mojo_ranges",
+        "symbol_ranges",
+        "unicode 雪",
+        "content_hash",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: Smart Context artifact caller coverage must retain ${call}`);
     }
     return [];
   });
@@ -4017,6 +4492,55 @@ export function findViolations(files) {
     }
     return [];
   });
+  const logLoadPolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === LOG_LOAD_APP_FILE) {
+      const required = [
+        "prodex_mojo_core::log_load::aggregate_update(",
+        "prodex_mojo_core::log_load::aggregate_summary(",
+        "prodex_mojo_core::log_load::is_routine_event(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: load aggregation must retain Mojo call ${call}`);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /matches!\s*\(\s*event_name/u.test(production)
+        || /saturating_add\s*\(\s*1\s*\)/u.test(production)
+        || /\.iter\(\)\.any\(\|current\|\s*current\s*==\s*&run_id\)/u.test(production)
+        || /format!\s*\(\s*"[^"]*×/u.test(production)
+        || production.includes("MAX_UNIQUE_RUNS")
+      ) {
+        violations.push(`${filePath}: contains restored Rust log-load classification, aggregation, or formatting semantics`);
+      }
+      return violations;
+    }
+    if (filePath === LOG_LOAD_TUI_FILE) {
+      const required = [
+        "LogLoadAggregate::plan_observation(",
+        "plan.coalesce",
+        "aggregate.apply_plan(",
+        "LogLoadAggregate::from_plan(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: TUI caller must apply Mojo aggregate plan ${call}`);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /aggregate\.key\s*==\s*key/u.test(production)
+        || /saturating_duration_since\(aggregate\.last_seen\)/u.test(production)
+        || production.includes("LOG_LOAD_COALESCE_WINDOW")
+      ) {
+        violations.push(`${filePath}: aggregate freshness and key decisions must use Mojo`);
+      }
+      return violations;
+    }
+    if (filePath === LOG_LOAD_ADAPTER_FILE) {
+      return contents.includes("prodex_mojo_log_load_semantics_v1(")
+        ? []
+        : [`${filePath}: load aggregate adapter must retain the required Mojo ABI call`];
+    }
+    return [];
+  });
   const deepseekCatalogPolicyViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-app/src/runtime_deepseek_config.rs") {
       const required = [
@@ -4118,7 +4642,59 @@ export function findViolations(files) {
     return defaults?.match(/"[^"]+"/gu)?.includes(`"${required}"`)
       ? [] : [`${filePath}: default features must include ${required}`];
   });
-  return [...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  const operationalHistogramViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === OPERATIONAL_HISTOGRAM_CALLER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      return production.includes("histogram_bucket_bounds(name)") &&
+        !/\bruntime_operational_histogram_bounds\s*\(/u.test(production) &&
+        !/\b120_000_000\b/u.test(production)
+        ? []
+        : [`${filePath}: histogram bucket planning must use Mojo without a Rust policy copy`];
+    }
+    if (filePath === OPERATIONAL_HISTOGRAM_ADAPTER_FILE &&
+        !contents.includes("prodex_mojo_operational_histogram_bounds_v1(")) {
+      return [`${filePath}: histogram bucket adapter must call the versioned Mojo ABI`];
+    }
+    if (filePath === OPERATIONAL_HISTOGRAM_MOJO_FILE &&
+        !contents.includes('@export("prodex_mojo_operational_histogram_bounds_v1")')) {
+      return [`${filePath}: histogram bucket planning must remain in Mojo`];
+    }
+    if (filePath === OPERATIONAL_HISTOGRAM_ABI_TEST_FILE &&
+        !contents.includes("operational_histogram_bucket_plan_is_mojo_owned")) {
+      return [`${filePath}: direct required-Mojo histogram bucket coverage is required`];
+    }
+    return [];
+  });
+  const doctorSmartContextDecisionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = "prodex_mojo_core::rich::runtime_doctor_smart_context_decision_is_fallback(";
+      const restoredRust = /!matches!\s*\(\s*decision\s*,|decision\s*!=\s*"rewritten"|decision\s*==\s*"pass_through"/u;
+      return production.includes(required) && !restoredRust.test(production)
+        ? []
+        : [`${filePath}: Smart Context fallback decision classification must use Mojo without a Rust policy copy`];
+    }
+    if (filePath === DOCTOR_SMART_CONTEXT_DECISION_ADAPTER_FILE) {
+      const required = [
+        "prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1(",
+        "runtime_doctor_smart_context_decision_is_fallback(",
+        "runtime_doctor_smart_context_decision_fallback_classification_is_mojo_owned",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Smart Context decision adapter must retain ${marker}`);
+    }
+    if (filePath === DOCTOR_SMART_CONTEXT_DECISION_MOJO_FILE) {
+      const required = [
+        '@export("prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1")',
+        'rich_view_matches_literal["rewritten"]',
+        'rich_view_matches_literal["pass_through"]',
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Smart Context decision classification must remain Mojo-owned (${marker})`);
+    }
+    return [];
+  });
+  return [...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -4137,6 +4713,7 @@ export function findViolations(files) {
     ...kiroResponseHelperViolations,
     ...kiroAcpViolations,
     ...kiroMessageShapeViolations,
+    ...kiroCatalogViolations,
     ...deepseekStrictSchemaViolations,
     ...quotaModelPolicyViolations, ...quotaDisplayPolicyViolations, ...quotaPlannerViolations,
     ...anthropicResponseViolations,
@@ -4151,14 +4728,14 @@ export function findViolations(files) {
     ...nativeFirstErrorClassViolations, ...providerBridgeMetadataViolations, ...websocketProxyPolicyViolations, ...transportFailurePolicyViolations, ...providerPrecommitPolicyViolations, ...providerErrorMemberViolations,
     ...deepseekResponseToolCallViolations, ...chatToolViolations,
     ...previousResponseOutcomeLabelViolations, ...affinityChainLogRenderViolations, ...previousResponseLogRenderViolations, ...structuredLogPolicyViolations, ...candidateSkipReasonViolations, ...runtimeProxyObservabilityLabelViolations, ...websocketExecutorLabelViolations, ...infoRenderViolations, ...doctorMarkerViolations, ...doctorFailureClassViolations, ...doctorMarkerSummaryCountsViolations, ...doctorCompactExitCountsViolations, ...doctorTimelineDetailViolations, ...doctorLastMarkerLineViolations, ...runtimeDoctorPlanInputViolations, ...cliDefaultRunViolations, ...responseMetadataViolations, ...doctorMarkerAbiViolations, ...statusSummaryViolations,
-    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
+    ...geminiBufferedResponseViolations, ...fingerprintDeltaViolations, ...profileExportPolicyViolations, ...sessionReportViolations, ...runtimeLineageViolations, ...smartContextMarkerViolations, ...smartContextSymbolIndexViolations, ...sessionUsageLimitViolations, ...smartContextArtifactRefViolations, ...smartContextDuplicateTextViolations, ...runtimeRepoMapViolations,
     ...modelSpecViolations, ...catalogModelViolations,
     ...deepseekShapingViolations,
     ...deepseekStreamFallbackViolations,
-    ...quotaWindowViolations,
+    ...quotaWindowViolations, ...quotaResetEpochViolations,
     ...rehydrateViolations, ...budgetTierViolations, ...staticItemViolations, ...replacedClassifierViolations, ...cliDependencyViolations,
     ...doctorDependencyViolations, ...proxyDependencyViolations, ...runtimeTuningViolations,
-    ...defaultFeatureViolations];
+    ...defaultFeatureViolations, ...operationalHistogramViolations];
 }
 
 async function promotedFiles() {
@@ -4190,6 +4767,134 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  const smartContextSymbolConsumer = [
+    "fn runtime_smart_context_artifact_semantic_line_index() {",
+    "  prodex_mojo_core::smart_context_symbols::index(text, remaining, max_excerpt_bytes);",
+    "}",
+  ].join("\n");
+  const smartContextSymbolFiles = [
+    [SMART_CONTEXT_SYMBOLS_CONSUMER_FILE, smartContextSymbolConsumer],
+    [SMART_CONTEXT_SYMBOLS_ADAPTER_FILE,
+      "const ABI_VERSION: i64 = 1; const MAX_INPUT_BYTES: usize = 64 * 1024 * 1024; fn prodex_smart_context_symbol_index_v1() {} pub fn index() {}"],
+    [SMART_CONTEXT_SYMBOLS_MOJO_FILE,
+      '@export("prodex_smart_context_symbol_index_v1")\ncomptime SYMBOL_ABI_VERSION: Int64 = 1\ncomptime SYMBOL_MAX_INPUT_BYTES: Int64 = 64 * 1024 * 1024\ndef symbol_parse_declaration(): pass\ndef symbol_brace_end(): pass\ndef symbol_python_end(): pass'],
+    ["crates/prodex-mojo-core/src/lib.rs", "pub mod smart_context_symbols;"],
+    ["crates/prodex-mojo-core/build.rs", "../../mojo/prodex_core/smart_context_symbols.mojo"],
+    [SMART_CONTEXT_SYMBOLS_TEST_FILE,
+      "source_symbol_ranges_cover_rust_python_and_javascript source_symbol_ranges_preserve_function_type_and_fallback_names symbol_index_reports_capacity_and_excerpt_truncation symbol_index_accepts_large_multi_line_artifacts_with_bounded_lines index(text, 16, 16 * 1024)"],
+    [SMART_CONTEXT_SYMBOLS_CALLER_TEST_FILE,
+      "runtime_smart_context_artifact_symbol_index_uses_mojo_ranges symbol_ranges unicode 雪 content_hash"],
+  ];
+  assert.deepEqual(findViolations(smartContextSymbolFiles), []);
+  assert.match(findViolations([[SMART_CONTEXT_SYMBOLS_CONSUMER_FILE,
+    smartContextSymbolConsumer.replace("prodex_mojo_core::smart_context_symbols::index", "runtime_smart_context_parse_symbol_line")]]).join("\n"),
+  /source symbol indexing must use the Mojo planner/u);
+  assert.match(findViolations([[SMART_CONTEXT_SYMBOLS_CONSUMER_FILE,
+    smartContextSymbolConsumer + "\nruntime_smart_context_line_excerpt(lines, start, end);\n"]]).join("\n"),
+  /symbol range excerpt validity must remain Mojo-owned/u);
+  assert.match(findViolations([[SMART_CONTEXT_SYMBOLS_RUST_FILE,
+    "fn runtime_smart_context_parse_symbol_line() {}"]]).join("\n"),
+  /replaced Rust source-symbol parser must remain deleted/u);
+  assert.match(findViolations([[SMART_CONTEXT_SYMBOLS_MOJO_FILE,
+    "def symbol_parse_declaration(): pass"]]).join("\n"),
+  /source-symbol semantics must remain in the versioned Mojo kernel/u);
+  assert.match(findViolations([[SMART_CONTEXT_SYMBOLS_CALLER_TEST_FILE,
+    "fn unrelated_test() {}"]]).join("\n"),
+  /Smart Context artifact caller coverage must retain/u);
+  const updateNoticeVersionCaller = [
+    "update_notice_policy::should_emit_notice(",
+    "update_notice_policy::install_channel(",
+    "update_notice_policy::cache_is_fresh(",
+    "release_version_is_valid(",
+    "map_update_notice_mojo(",
+    "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
+  ].join("\n");
+  const updateNoticeVersionUpdater = [
+    "release_version_is_valid(",
+    "compare_release_versions(",
+    "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
+  ].join("\n");
+  const updateNoticeVersionAdapter = [
+    "prodex_update_notice_policy_v1(",
+    "release_version_is_valid(",
+    "compare_release_versions(",
+  ].join("\n");
+  const updateNoticeVersionAdapterModule = [
+    "update_notice_policy::release_version_is_valid(",
+    "update_notice_policy::compare_release_versions(",
+    "ReleaseVersionOrder::Total",
+  ].join("\n");
+  const updateNoticeVersionMojo = [
+    '@export("prodex_update_notice_policy_v1")',
+    "update_notice_parse_release_version(",
+    "update_notice_release_version_compare(",
+    "UPDATE_NOTICE_RELEASE_VERSION_VALID",
+    "UPDATE_NOTICE_RELEASE_VERSION_COMPARE",
+  ].join("\n");
+  const updateNoticeVersionFiles = [
+    [UPDATE_NOTICE_VERSION_CALLER_FILE, updateNoticeVersionCaller],
+    [UPDATE_NOTICE_VERSION_UPDATER_FILE, updateNoticeVersionUpdater],
+    [UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE, updateNoticeVersionAdapterModule],
+    [UPDATE_NOTICE_VERSION_ADAPTER_FILE, updateNoticeVersionAdapter],
+    [UPDATE_NOTICE_VERSION_MOJO_FILE, updateNoticeVersionMojo],
+  ];
+  assert.deepEqual(findViolations(updateNoticeVersionFiles), []);
+  assert.match(findViolations([[UPDATE_NOTICE_VERSION_CALLER_FILE,
+    updateNoticeVersionCaller + "\nVersion::parse(text)"]]).join("\n"),
+  /restored Rust update-notice semantics/u);
+  assert.match(findViolations([[UPDATE_NOTICE_VERSION_UPDATER_FILE,
+    updateNoticeVersionUpdater.replace(
+      "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
+      "Err(_) => return Ok(None)",
+    )]]).join("\n"),
+  /release-version caller must retain/u);
+  assert.match(findViolations([[UPDATE_NOTICE_VERSION_ADAPTER_MODULE_FILE,
+    updateNoticeVersionAdapterModule.replace("compare_release_versions(", "old_compare(")]]).join("\n"),
+  /release-version adapter must retain/u);
+  assert.match(findViolations([[UPDATE_NOTICE_VERSION_MOJO_FILE,
+    updateNoticeVersionMojo.replace("update_notice_parse_release_version(", "old_rust_parser(")]]).join("\n"),
+  /Mojo release-version owner must retain/u);
+  const liveLogRecordConsumer = [
+    "fn bounded_live_log_line(line: &str) -> Result<String, MojoError> {",
+    "record_exceeds_bound(line.len())?",
+    "nested_string_clip_end(text)?",
+    "json_plan(serialized.len())?",
+    "truncate_plain_text(line)",
+    "let line = bounded_live_log_line(line)?;",
+  ].join("\n");
+  assert.deepEqual(findViolations([[LIVE_LOG_RECORD_FILE, liveLogRecordConsumer]]), []);
+  assert.match(findViolations([[LIVE_LOG_RECORD_FILE,
+    liveLogRecordConsumer.replace("nested_string_clip_end(text)?", "clip_json_strings(value, 8192);")]])
+    .join("\n"), /restored Rust live-log clipping or truncation policy|must propagate through Mojo/u);
+  assert.deepEqual(findViolations([
+    [LOG_LOAD_APP_FILE,
+      "prodex_mojo_core::log_load::is_routine_event(name); prodex_mojo_core::log_load::aggregate_update(input); prodex_mojo_core::log_load::aggregate_summary(1, 0, false);"],
+    [LOG_LOAD_TUI_FILE,
+      "LogLoadAggregate::plan_observation(previous, name, key, run, now); plan.coalesce; aggregate.apply_plan(...); LogLoadAggregate::from_plan(...);"],
+    [LOG_LOAD_ADAPTER_FILE, "prodex_mojo_log_load_semantics_v1("],
+  ]), []);
+  assert.match(findViolations([[LOG_LOAD_APP_FILE,
+    "fn is_routine_load_event(event_name: &str) { matches!(event_name, \"busy\"); }"],
+  ]).join("\n"), /restored Rust log-load classification/u);
+  assert.match(findViolations([[LOG_LOAD_TUI_FILE,
+    "aggregate.key == key && now.saturating_duration_since(aggregate.last_seen) <= window"],
+  ]).join("\n"), /freshness and key decisions must use Mojo/u);
+  assert.match(findViolations([[LOG_LOAD_ADAPTER_FILE, "fn adapter() {}"]]).join("\n"),
+    /must retain the required Mojo ABI call/u);
+  const sessionUsageConsumer = `fn goal_resume_line_has_usage_limit(line: &str) -> bool {
+    runtime_session_usage_limit_marker(&input, format)
+}`;
+  assert.deepEqual(findViolations([
+    [SESSION_USAGE_LIMIT_CONSUMER_FILE, sessionUsageConsumer],
+    [SESSION_USAGE_LIMIT_ADAPTER_FILE,
+      "RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: i64 = 15\npub fn runtime_session_usage_limit_marker(\nRuntimeUsageLimitInputFormat::Json\nRUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES"],
+    [SESSION_USAGE_LIMIT_FACADE_FILE, "runtime_session_usage_limit_marker"],
+    [SESSION_USAGE_LIMIT_MOJO_FILE,
+      "comptime RUNTIME_ERROR_MODE_SESSION_USAGE_LIMIT: Int64 = 15\nRUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_NODES: Int64 = 2_048\ndef runtime_error_session_usage_limit_marker(\ndef runtime_error_session_usage_json_matches(\ndef runtime_error_session_usage_queue_children("],
+  ]), []);
+  assert.match(findViolations([[SESSION_USAGE_LIMIT_CONSUMER_FILE,
+    sessionUsageConsumer + "\nfn goal_resume_structured_usage_limit() {}"]]).join("\n"),
+  /session usage-limit detection must use Mojo without a Rust semantic copy/u);
   assert.match(findViolations([["crates/prodex-domain/src/secrets.rs",
     "pub fn is_well_formed(&self) -> bool { true }\nfn secret_ref_part_is_well_formed() {}"]]).join("\n"),
   /SecretRef::is_well_formed must retain Mojo validation/u);
@@ -4496,6 +5201,33 @@ function selfTest() {
   assert.match(findViolations([[KIRO_LOCAL_REWRITE_FILE,
     "fn local_rewrite_kiro() {}"]]).join("\n"),
   /must reach the Mojo-backed prompt adapter/u);
+  const kiroCatalogAdapter = `
+    kiro_model_catalog_plan(nodes, raw, PROVIDER_MODEL_CATALOG_HARD_LIMIT);
+    KiroModelCatalogPlan::Ready;
+    merge_catalog_ids(&[], &ids);
+    merge_provider_model_catalog_json(ProviderId::Kiro, &models);
+  `;
+  assert.deepEqual(findViolations([[KIRO_CATALOG_NORMALIZER_FILE, kiroCatalogAdapter]]), []);
+  assert.match(findViolations([[KIRO_CATALOG_NORMALIZER_FILE,
+    kiroCatalogAdapter + " first_nonempty_string(model, keys); model.trim()"]]).join("\n"),
+  /contains replaced Rust Kiro model-catalog decisions/u);
+  assert.deepEqual(findViolations([[KIRO_CATALOG_APP_ADAPTER_FILE, `
+    prodex_provider_core::normalize_kiro_model_catalog(value);
+    prodex_provider_core::normalize_kiro_model_catalog_models(models);
+  `]]), []);
+  assert.match(findViolations([[KIRO_CATALOG_APP_ADAPTER_FILE,
+    `prodex_provider_core::normalize_kiro_model_catalog(value); first_models_array(value);`]]).join("\n"),
+  /contains replaced Rust Kiro model-catalog decisions/u);
+  assert.deepEqual(findViolations([[KIRO_CATALOG_ABI_FILE,
+    `fn prodex_mojo_kiro_catalog_normalize_v1(
+     pub fn kiro_model_catalog_plan(
+     prodex_runtime_response_metadata_v1(
+     prodex_session_report_metadata_v1(
+     pub fn session_report_metadata(`]]), []);
+  assert.deepEqual(findViolations([[KIRO_CATALOG_MOJO_FILE,
+    "KIRO_CATALOG_ABI_VERSION: Int64 = 1\ndef kiro_model_catalog_normalize_v1("]]), []);
+  assert.deepEqual(findViolations([[KIRO_CATALOG_ABI_TEST_FILE,
+    "kiro_model_catalog_plan_uses_alias_precedence_unicode_trim_and_stable_source_order\nkiro_catalog_plan_returns_typed_missing_empty_and_limit_issues"]]), []);
   assert.match(findViolations([[DEEPSEEK_STRICT_TOOLS_FILE, "fn strict_schema() {}"]]).join("\n"),
     /strict schema normalization must use Mojo/u);
   assert.match(findViolations([[DEEPSEEK_STRICT_SCHEMA_FILE,
@@ -4544,6 +5276,68 @@ function selfTest() {
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
     'prodex_mojo_core::quota::quota_blocked_status_label(0);\nfn format_blocked_quota_status() {\n    #[cfg(not(feature = "mojo"))] rust();\n}']]).join("\n"),
     /feature-off Rust classifier/u);
+  const quotaResetEpochConsumer = [
+    "prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(",
+    'quota_json_i64_path(&value, &["resets_at"]);',
+    'quota_json_i64_path(&value, &["reset_at"]);',
+    'quota_json_i64_path(&value, &["error", "resets_at"]);',
+    'quota_json_i64_path(&value, &["error", "reset_at"]);',
+  ].join("\n");
+  const quotaResetEpochAdapter = [
+    "pub struct QuotaResetEpochInput",
+    "pub fn quota_reset_epoch_precedence(",
+    "prodex_quota_reset_epoch_v1(",
+  ].join("\n");
+  const quotaDisplayAdapter = [
+    "prodex_quota_display_label_v1(",
+    "prodex_quota_window_label_plan_v1(",
+    "prodex_quota_copilot_feature_key_v1(",
+    "prodex_quota_copilot_display_v1(",
+    "prodex_quota_copilot_main_remaining_percent_v1(",
+    "prodex_quota_ready_pool_remaining_v1(",
+    "prodex_quota_info_pool_remaining_v1(",
+    "prodex_quota_gemini_bucket_label_v1(",
+    "prodex_quota_gemini_bucket_summary_v1(",
+    "prodex_quota_gemini_display_v1(",
+    "prodex_quota_report_compare_v1(",
+    "prodex_quota_workspace_label_v1(",
+  ].join("\n");
+  const quotaResetEpochMojo = [
+    '@export("prodex_quota_reset_epoch_v1")',
+    "while index < 4:",
+    "primary_used >= 100",
+    "secondary_used >= 100",
+    "fields[unsafe_offset=9] == 1",
+    "fields[unsafe_offset=11] == 1",
+  ].join("\n");
+  const quotaResetEpochMojoTest = [
+    "quota_reset_epoch_prefers_valid_candidates_in_declared_order",
+    "quota_reset_epoch_applies_used_percent_gates_and_missing_values",
+  ].join("\n");
+  const quotaResetEpochCallerTest = [
+    "quota_reset_json_uses_top_level_then_nested_candidate_order",
+    "quota_reset_json_uses_used_percent_gates_and_header_fallback_order",
+    "quota_reset_json_preserves_serde_duplicate_key_behavior",
+    "quota_reset_json_ignores_malformed_and_non_object_values",
+  ].join("\n");
+  assert.deepEqual(findViolations([
+    [QUOTA_WINDOWS_FILE,
+      quotaResetEpochConsumer + "\nprodex_mojo_core::quota::quota_blocked_status_label(0);"],
+    [QUOTA_ADAPTER_FILE, quotaDisplayAdapter],
+    [QUOTA_RESET_EPOCH_ADAPTER_FILE, quotaResetEpochAdapter],
+    [QUOTA_RESET_EPOCH_MOJO_FILE, quotaResetEpochMojo],
+    [QUOTA_RESET_EPOCH_TEST_FILE, quotaResetEpochMojoTest],
+    [QUOTA_RESET_EPOCH_CALLER_TEST_FILE, quotaResetEpochCallerTest],
+  ]), []);
+  assert.match(findViolations([[QUOTA_WINDOWS_FILE,
+    quotaResetEpochConsumer + "\nprodex_mojo_core::quota::quota_blocked_status_label(0);\nif primary_used { return primary_reset; }"]]).join("\n"),
+  /contains Rust reset-epoch precedence policy/u);
+  assert.match(findViolations([[QUOTA_RESET_EPOCH_MOJO_FILE,
+    quotaResetEpochMojo.replace("primary_used >= 100", "primary_used > 100")]]).join("\n"),
+  /quota reset-epoch precedence must remain Mojo-owned/u);
+  assert.match(findViolations([[QUOTA_RESET_EPOCH_CALLER_TEST_FILE,
+    quotaResetEpochCallerTest.replace("quota_reset_json_preserves_serde_duplicate_key_behavior", "")]]).join("\n"),
+  /caller-boundary tests must retain quota_reset_json_preserves_serde_duplicate_key_behavior/u);
   assert.match(findViolations([["crates/prodex-quota/src/capacity.rs",
     '#[cfg(not(feature = "mojo"))] fn old_capacity() {}']]).join("\n"),
     /feature-off Rust path/u);
@@ -4871,7 +5665,12 @@ function selfTest() {
     'fn smart_context_stabilize_static_context_items_bounded() { #[cfg(not(feature = "mojo"))] old_sort(); }\nfn smart_context_reduce_static_context_items_mojo(']]).join("\n"),
     /static-item selection must use Mojo/u);
   assert.match(findViolations([["crates/prodex-runtime-policy/src/types/runtime_proxy_preset.rs",
-    "fn resolve_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+    "runtime_tuning_proxy_preset_plan(\n); fn resolve_rust() {}"]])[0], /Rust semantic oracle or copy/u);
+  const presetConsumer = "runtime_tuning_proxy_preset_plan(\n);";
+  assert.deepEqual(findViolations([[RUNTIME_POLICY_PRESET_CONSUMER_FILE, presetConsumer]]), []);
+  assert.match(findViolations([[RUNTIME_POLICY_PRESET_CONSUMER_FILE,
+    presetConsumer.replace("runtime_tuning_proxy_preset_plan(\n);", "apply_non_preset_overrides();")]]).join("\n"),
+  /must use the Mojo plan|restored Rust preset precedence or override merging/u);
   assert.match(findViolations([[PRECOMMIT_BUDGET_FILE,
     "fn runtime_proxy_precommit_budget_for_profile_count_rust() {}"]])[0],
     /Rust semantic oracle or copy/u);
@@ -4932,6 +5731,20 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/anthropic/messages/stream.rs",
     '#[cfg(not(feature = "mojo"))] fn existing_path() { Some("text") => () }',
   ]])[0], /Mojo-owned operation cannot have a feature-off Rust path/u);
+  const providerUsageFile = "crates/prodex-provider-core/src/usage.rs";
+  const providerUsageCalls = [
+    "prodex_mojo_core::provider_usage::extract_json(",
+    "prodex_mojo_core::provider_usage::calculate_cost(",
+    "prodex_mojo_core::provider_usage::merged_total(",
+    "prodex_mojo_core::provider_usage::merge_latest_present(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[providerUsageFile, providerUsageCalls]]), []);
+  assert.match(
+    findViolations([[providerUsageFile,
+      providerUsageCalls + "\nif usage.input_tokens.is_some() { merged.input_tokens = usage.input_tokens; }",
+    ]]).join("\n"),
+    /restored Rust SSE usage merge policy/u,
+  );
   const capsuleOrderBody = [
     "pub(in crate::smart_context) fn smart_context_select_memory_capsules_impl(input: Vec<Capsule>) {",
     "    let order = prodex_mojo_core::rich::order_smart_context_capsules(&inputs);",

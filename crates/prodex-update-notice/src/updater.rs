@@ -1,12 +1,11 @@
 use super::{
     acquire_update_check_lock, cached_latest_prodex_version, current_prodex_release_source,
-    fetch_latest_prodex_version, load_update_check_cache, parse_release_version,
-    save_update_check_cache,
+    fetch_latest_prodex_version, is_update_notice_mojo_error, load_update_check_cache,
+    map_update_notice_mojo, release_version_is_valid, save_update_check_cache,
 };
 use anyhow::{Context, Result};
 use chrono::Local;
 use prodex_core::AppPaths;
-use std::cmp::Ordering as VersionOrdering;
 use std::fs::{self, OpenOptions};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,17 +17,23 @@ pub enum ProdexUpdateDecision {
 
 pub fn latest_prodex_version_for_update(paths: &AppPaths) -> Result<String> {
     let source = current_prodex_release_source();
-    if let Some(latest_version) = cached_latest_prodex_version(paths, source) {
+    if let Some(latest_version) = cached_latest_prodex_version(paths, source)? {
         return Ok(latest_version);
     }
 
     let _lock = acquire_update_check_lock(paths);
-    if let Some(latest_version) = cached_latest_prodex_version(paths, source) {
+    if let Some(latest_version) = cached_latest_prodex_version(paths, source)? {
         return Ok(latest_version);
     }
 
-    let latest_version = fetch_latest_prodex_version(source)
-        .context("failed to resolve the latest Prodex release before updating")?;
+    let latest_version = match fetch_latest_prodex_version(source) {
+        Ok(version) => version,
+        Err(error) if is_update_notice_mojo_error(&error) => return Err(error),
+        Err(error) => {
+            return Err(error)
+                .context("failed to resolve the latest Prodex release before updating");
+        }
+    };
     let mut cache = load_update_check_cache(paths)
         .ok()
         .flatten()
@@ -44,14 +49,26 @@ pub fn prodex_update_decision(
     current_version: &str,
     target_version: &str,
 ) -> Result<ProdexUpdateDecision> {
-    let current = parse_release_version(current_version)
-        .with_context(|| format!("invalid installed Prodex version: {current_version}"))?;
-    let target = parse_release_version(target_version)
-        .with_context(|| format!("invalid target Prodex version: {target_version}"))?;
-    Ok(match current.cmp_precedence(&target) {
-        VersionOrdering::Less => ProdexUpdateDecision::UpdateAvailable(target_version.to_string()),
-        VersionOrdering::Equal => ProdexUpdateDecision::UpToDate,
-        VersionOrdering::Greater => ProdexUpdateDecision::LocalNewer(target_version.to_string()),
+    if !release_version_is_valid(current_version)? {
+        anyhow::bail!("invalid installed Prodex version: {current_version}");
+    }
+    if !release_version_is_valid(target_version)? {
+        anyhow::bail!("invalid target Prodex version: {target_version}");
+    }
+    let ordering = map_update_notice_mojo(
+        prodex_mojo_core::update_notice_policy::compare_release_versions(
+            current_version,
+            target_version,
+            prodex_mojo_core::update_notice_policy::ReleaseVersionOrder::Precedence,
+        ),
+    )?
+    .context("Mojo rejected previously validated Prodex versions")?;
+    Ok(match ordering {
+        std::cmp::Ordering::Less => {
+            ProdexUpdateDecision::UpdateAvailable(target_version.to_string())
+        }
+        std::cmp::Ordering::Equal => ProdexUpdateDecision::UpToDate,
+        std::cmp::Ordering::Greater => ProdexUpdateDecision::LocalNewer(target_version.to_string()),
     })
 }
 

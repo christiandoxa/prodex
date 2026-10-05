@@ -167,6 +167,67 @@ test result: FAILED. 0 passed; 1 failed";
     }
 
     #[test]
+    fn runtime_smart_context_artifact_symbol_index_uses_mojo_ranges() {
+        let text = "#[test]\nfn r#entry() {\n    enter();\n}\n\nasync def test_parse():\n    parse()\n\nit(\"unicode 雪\", () => {});\n";
+        let mut store = RuntimeSmartContextArtifactStore::default();
+        let artifact = store.insert_text(text).expect("artifact inserted");
+
+        let index = store
+            .line_index(&artifact.id)
+            .expect("new artifacts should carry a line index");
+
+        assert!(index.semantic_complete);
+        assert!(index.symbol_complete);
+        assert_eq!(
+            index
+                .symbol_ranges
+                .iter()
+                .map(|range| (
+                    range.start,
+                    range.end,
+                    range.label.as_deref(),
+                    range.line,
+                    range.symbol.as_deref(),
+                    range.text.as_str(),
+                ))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    1,
+                    4,
+                    Some("test_symbol"),
+                    Some(2),
+                    Some("entry"),
+                    "#[test]\nfn r#entry() {\n    enter();\n}"
+                ),
+                (
+                    5,
+                    8,
+                    Some("test_symbol"),
+                    Some(6),
+                    Some("test_parse"),
+                    "\nasync def test_parse():\n    parse()\n"
+                ),
+                (
+                    8,
+                    9,
+                    Some("test_symbol"),
+                    Some(9),
+                    Some("unicode 雪"),
+                    "\nit(\"unicode 雪\", () => {});"
+                ),
+            ]
+        );
+        for range in &index.symbol_ranges {
+            assert_eq!(range.byte_len, range.text.len());
+            assert_eq!(
+                range.content_hash,
+                runtime_proxy_crate::smart_context_hash_text(&range.text)
+            );
+        }
+    }
+
+    #[test]
     fn runtime_smart_context_artifact_semantic_line_index_is_bounded() {
         let text = (0..400)
             .map(|index| format!("src/file{index}.rs:{}:1: error[E0001]: failure", index + 1))

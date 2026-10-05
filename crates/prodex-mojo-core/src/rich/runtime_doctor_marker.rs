@@ -4,6 +4,7 @@ use super::{
 use crate::MojoError;
 
 const RUNTIME_DOCTOR_MARKER_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: i64 = 2;
 const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_MAX_BATCH: usize = 256;
@@ -26,6 +27,11 @@ const RUNTIME_DOCTOR_COMPACT_EXIT_COUNT_LABELS: [&str; 11] = [
 unsafe extern "C" {
     fn prodex_mojo_runtime_doctor_marker_known_v1(abi_version: i64, marker: u64, known: u64)
     -> i64;
+    fn prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1(
+        abi_version: i64,
+        decision: u64,
+        is_fallback: u64,
+    ) -> i64;
     fn prodex_mojo_runtime_doctor_marker_semantics_v2(
         abi_version: i64,
         marker: u64,
@@ -355,6 +361,29 @@ pub fn runtime_doctor_parse_message_offsets(
     Ok(RuntimeDoctorMessageParsePlan { event, fields })
 }
 
+/// Classify Smart Context autopilot decision labels through the Mojo authority.
+pub fn runtime_doctor_smart_context_decision_is_fallback(
+    decision: &str,
+) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    let decision = view(decision);
+    let mut is_fallback = 0_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1(
+            RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_ABI_VERSION,
+            mojo_pointer_address(&decision),
+            mojo_mut_pointer_address(&mut is_fallback),
+        )
+    };
+    match (status, is_fallback) {
+        (0, 0) => Ok(false),
+        (0, 1) => Ok(true),
+        (1, _) => Err(MojoError::InvalidInput),
+        (2, _) => Err(MojoError::InvalidOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 pub fn runtime_doctor_marker_known(marker: &str) -> Result<bool, MojoError> {
     ensure_rich_abi()?;
     let marker = view(marker);
@@ -378,6 +407,17 @@ pub fn runtime_doctor_marker_known(marker: &str) -> Result<bool, MojoError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_doctor_smart_context_decision_fallback_classification_is_mojo_owned() {
+        assert!(!runtime_doctor_smart_context_decision_is_fallback("rewritten").unwrap());
+        assert!(!runtime_doctor_smart_context_decision_is_fallback("pass_through").unwrap());
+        assert!(
+            runtime_doctor_smart_context_decision_is_fallback("self_check_passthrough").unwrap()
+        );
+        assert!(runtime_doctor_smart_context_decision_is_fallback("require_exact").unwrap());
+        assert!(runtime_doctor_smart_context_decision_is_fallback("").unwrap());
+    }
 
     #[test]
     fn runtime_doctor_marker_classifier_accepts_known_and_rejects_unknown() {

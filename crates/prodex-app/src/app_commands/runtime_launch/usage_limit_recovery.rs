@@ -1,7 +1,9 @@
 use crate::app_state::{AppStateIoExt, ProfileProviderExt};
 use crate::{AppPaths, AppState};
 use anyhow::{Context, Result};
-use prodex_mojo_core::rich::{ascii_casefold_equal_exact, ascii_casefold_starts_with};
+use prodex_mojo_core::rich::{
+    RuntimeUsageLimitInputFormat, ascii_casefold_equal_exact, runtime_session_usage_limit_marker,
+};
 use rusqlite::OptionalExtension;
 use std::fs::{self};
 use std::path::{Path, PathBuf};
@@ -32,8 +34,6 @@ use workflow::{
 
 const GOAL_USAGE_LIMIT_RETRY_INTERVAL: Duration = Duration::from_secs(5);
 pub(crate) const RUNTIME_SESSION_CONTINUATION_PROMPT: &str = "Continue the interrupted task from the persisted session. Preserve completed work and do not repeat completed tool calls.";
-const OBSERVED_USAGE_LIMIT_MESSAGE: &str = "You've hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/codex/settings/usage to purchase more credits or try again at 5:08 PM.";
-const GOAL_USAGE_LIMIT_JSON_SCAN_LIMIT: usize = 2_048;
 static RUNTIME_USAGE_LIMIT_MONITOR_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 pub(crate) struct GoalUsageLimitMonitor {
@@ -427,96 +427,19 @@ pub(crate) fn runtime_goal_session_offset_path(marker_path: &Path) -> PathBuf {
 }
 
 fn goal_resume_line_has_usage_limit(line: &str) -> bool {
+    if line.len() > prodex_mojo_core::rich::RUNTIME_ERROR_SESSION_USAGE_LIMIT_MAX_BYTES {
+        return false;
+    }
     let trimmed = line.trim();
-    if ascii_casefold_equal_exact(trimmed, OBSERVED_USAGE_LIMIT_MESSAGE)
-        .expect("Mojo usage-limit message comparison failed")
-    {
-        return true;
-    }
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(trimmed) else {
-        return false;
+    let (input, format) = match serde_json::from_str::<serde_json::Value>(trimmed) {
+        Ok(value) => (
+            serde_json::to_string(&value).expect("parsed Serde JSON value must serialize"),
+            RuntimeUsageLimitInputFormat::Json,
+        ),
+        Err(_) => (line.to_string(), RuntimeUsageLimitInputFormat::PlainText),
     };
-    let Some(object) = value.as_object() else {
-        return false;
-    };
-    match object.get("type").and_then(serde_json::Value::as_str) {
-        Some("event_msg") => object
-            .get("payload")
-            .is_some_and(goal_resume_event_payload_usage_limit),
-        Some("error" | "response.failed") => goal_resume_structured_usage_limit(&value),
-        _ if object.contains_key("error") => goal_resume_structured_usage_limit(&value),
-        _ => false,
-    }
-}
-
-fn goal_resume_event_payload_usage_limit(value: &serde_json::Value) -> bool {
-    let serde_json::Value::Object(object) = value else {
-        return false;
-    };
-    let explicit_type = object.get("type").and_then(serde_json::Value::as_str);
-    if explicit_type.is_some_and(|kind| {
-        !ascii_casefold_equal_exact(kind, "error").expect("Mojo usage-limit type comparison failed")
-    }) {
-        return false;
-    }
-    if object
-        .get("message")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|message| {
-            ascii_casefold_equal_exact(message.trim(), OBSERVED_USAGE_LIMIT_MESSAGE)
-                .expect("Mojo usage-limit message comparison failed")
-        })
-    {
-        return true;
-    }
-    let is_error = object
-        .get("type")
-        .and_then(serde_json::Value::as_str)
-        .is_some_and(|kind| {
-            ascii_casefold_equal_exact(kind, "error")
-                .expect("Mojo usage-limit type comparison failed")
-        })
-        || object.contains_key("error")
-        || ["code", "status", "reason", "codex_error_info"]
-            .into_iter()
-            .any(|key| {
-                object
-                    .get(key)
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(goal_resume_quota_code)
-            });
-    is_error && goal_resume_structured_usage_limit(value)
-}
-
-fn goal_resume_structured_usage_limit(value: &serde_json::Value) -> bool {
-    let mut stack = vec![value];
-    let mut visited = 0;
-    while let Some(value) = stack.pop() {
-        visited += 1;
-        if visited > GOAL_USAGE_LIMIT_JSON_SCAN_LIMIT {
-            return false;
-        }
-        if let serde_json::Value::Array(values) = value {
-            stack.extend(values.iter().rev());
-            continue;
-        }
-        let serde_json::Value::Object(object) = value else {
-            continue;
-        };
-        if goal_resume_ignored_structured_object(object) {
-            continue;
-        }
-        if goal_resume_structured_object_usage_limit(object) {
-            return true;
-        }
-        stack.extend(
-            object
-                .iter()
-                .filter(|(key, _)| !matches!(key.as_str(), "content" | "text" | "delta"))
-                .map(|(_, value)| value),
-        );
-    }
-    false
+    runtime_session_usage_limit_marker(&input, format)
+        .expect("Mojo session usage-limit classifier returned invalid output")
 }
 
 fn observe_usage_limit_scan_line(
@@ -542,50 +465,6 @@ fn observe_usage_limit_scan_line(
     *legacy_usage_limit
 }
 
-fn goal_resume_structured_object_usage_limit(
-    object: &serde_json::Map<String, serde_json::Value>,
-) -> bool {
-    let is_quota_code = |key: &str| {
-        object
-            .get(key)
-            .and_then(serde_json::Value::as_str)
-            .is_some_and(goal_resume_quota_code)
-    };
-    [
-        "code",
-        "type",
-        "status",
-        "reason",
-        "error",
-        "codex_error_info",
-    ]
-    .into_iter()
-    .any(is_quota_code)
-        || ["message", "detail", "error"].into_iter().any(|key| {
-            object
-                .get(key)
-                .and_then(serde_json::Value::as_str)
-                .is_some_and(goal_resume_usage_limit_text)
-        })
-}
-
-fn goal_resume_ignored_structured_object(
-    object: &serde_json::Map<String, serde_json::Value>,
-) -> bool {
-    object.contains_key("role")
-        || matches!(
-            object.get("type").and_then(serde_json::Value::as_str),
-            Some(
-                "message"
-                    | "user_message"
-                    | "assistant_message"
-                    | "agent_message"
-                    | "response.output_text.delta"
-                    | "response.output_text.done"
-            )
-        )
-}
-
 fn usage_limit_recovery_is_ready(
     saw_usage_limit: bool,
     legacy_usage_limit: bool,
@@ -596,31 +475,6 @@ fn usage_limit_recovery_is_ready(
     saw_usage_limit
         && (legacy_usage_limit && (session_goal_present || evidence.safe_to_resume())
             || workflow_class.is_some() && evidence.safe_to_resume())
-}
-
-fn goal_resume_quota_code(code: &str) -> bool {
-    runtime_proxy_crate::runtime_quota_payload_code(code)
-        || ascii_casefold_equal_exact(code.trim(), "usage_limit_exceeded")
-            .expect("Mojo usage-limit code comparison failed")
-}
-
-fn goal_resume_usage_limit_text(message: &str) -> bool {
-    let message = message.trim();
-    let exact = |expected| {
-        ascii_casefold_equal_exact(message, expected)
-            .expect("Mojo usage-limit message comparison failed")
-    };
-    let starts_with = |prefix| {
-        ascii_casefold_starts_with(message, prefix)
-            .expect("Mojo usage-limit message prefix comparison failed")
-    };
-    exact(OBSERVED_USAGE_LIMIT_MESSAGE)
-        || starts_with("you've hit your usage limit")
-        || starts_with("you have hit your usage limit")
-        || exact("the usage limit has been reached")
-        || exact("usage limit has been reached")
-        || starts_with("your workspace is out of credits")
-        || starts_with("you hit your spend cap")
 }
 
 pub(crate) fn goal_database_is_file(path: &Path) -> Result<bool> {

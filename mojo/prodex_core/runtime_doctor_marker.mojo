@@ -344,6 +344,30 @@ def runtime_doctor_marker_known(view: ProdexRichStringView) -> Bool:
         return True
     return False
 
+comptime RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_ABI_VERSION: Int64 = 1
+
+def runtime_doctor_smart_context_decision_is_fallback(view: ProdexRichStringView) -> Bool:
+    if rich_view_matches_literal["rewritten"](view, False):
+        return False
+    if rich_view_matches_literal["pass_through"](view, False):
+        return False
+    return True
+
+@export("prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1")
+def prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1(
+    abi_version: Int64, decision_address: UInt, fallback_address: UInt
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_ABI_VERSION or decision_address == 0 or fallback_address == 0:
+        return 1
+    var decision = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(decision_address)
+    )[].copy()
+    if not rich_view_valid(decision, 0x7FFFFFFFFFFFFFFF):
+        return 2
+    var fallback = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(fallback_address))
+    fallback[] = 1 if runtime_doctor_smart_context_decision_is_fallback(decision) else 0
+    return 0
+
 @export("prodex_mojo_runtime_doctor_marker_known_v1")
 def prodex_mojo_runtime_doctor_marker_known_v1(
     abi_version: Int64, marker_address: UInt, known_address: UInt

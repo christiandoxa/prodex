@@ -73,6 +73,14 @@ unsafe extern "C" {
     ) -> i64;
 }
 
+#[path = "runtime_lineage/binding_candidate.rs"]
+mod binding_candidate;
+pub use binding_candidate::{
+    RuntimeLineageDispatchBindingCandidate, RuntimeLineageDispatchBindingDecision,
+    RuntimeLineageLocalRewriteCandidate, RuntimeLineageProviderBindingIdentity,
+    dispatch_binding_candidate_decision, local_rewrite_candidate_allowed,
+};
+
 fn signed_len(value: &str) -> Result<i64, MojoError> {
     i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)
 }
