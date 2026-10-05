@@ -44,6 +44,17 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_mojo_gemini_compact_semantic_summary_v1(
+        abi_version: i64,
+        semantic_address: u64,
+        active_user_address: u64,
+        latest_tool_address: u64,
+        presence: i64,
+        maximum: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -161,6 +172,54 @@ pub fn format_gemini_local_compact_summary(
             mojo_pointer_address(snippet_views.as_ptr()),
             i64::try_from(snippet_views.len()).map_err(|_| MojoError::InvalidInput)?,
             i64::try_from(original_input_count).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(max_bytes).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::InvalidOutput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > max_bytes || written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn format_gemini_semantic_continuation_summary(
+    semantic_summary: &str,
+    active_user: Option<&str>,
+    latest_tool: Option<&str>,
+    max_bytes: usize,
+) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let semantic = view(semantic_summary);
+    let active_user_view = optional_view(active_user);
+    let latest_tool_view = optional_view(latest_tool);
+    let mut presence = 0_i64;
+    if active_user.is_some() {
+        presence |= 1;
+    }
+    if latest_tool.is_some() {
+        presence |= 2;
+    }
+    let output_capacity = max_bytes.checked_add(4).ok_or(MojoError::InvalidInput)?;
+    let mut output = vec![0_u8; output_capacity.max(4)];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_mojo_gemini_compact_semantic_summary_v1(
+            ABI_VERSION,
+            mojo_pointer_address(&semantic),
+            mojo_pointer_address(&active_user_view),
+            mojo_pointer_address(&latest_tool_view),
+            presence,
             i64::try_from(max_bytes).map_err(|_| MojoError::InvalidInput)?,
             mojo_mut_pointer_address(output.as_mut_ptr()),
             i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
@@ -332,6 +391,26 @@ mod tests {
         let empty = format_gemini_local_compact_summary(Some("   "), &[], 0, 24 * 1024).unwrap();
         assert!(empty.contains("Model: unknown"));
         assert!(empty.contains("- No parseable recent message or tool content was found."));
+    }
+
+    #[test]
+    fn gemini_semantic_continuation_summary_formatting_is_mojo_owned() {
+        let summary = format_gemini_semantic_continuation_summary(
+            "  semantic state  ",
+            Some("  finish this  "),
+            Some("  tool result  "),
+            24 * 1024,
+        )
+        .unwrap();
+        assert_eq!(
+            summary,
+            "Active user request that must still be completed:\nfinish this\n\nLatest tool result after the active request:\ntool result\n\nSemantic continuation summary:\nsemantic state\n\nContinue the active user request. Do not merely acknowledge repository, optimizer, or environment instructions."
+        );
+        let without_optional =
+            format_gemini_semantic_continuation_summary("semantic", Some("   "), None, 24 * 1024)
+                .unwrap();
+        assert!(!without_optional.contains("Active user request"));
+        assert!(without_optional.starts_with("Semantic continuation summary:\nsemantic"));
     }
 
     #[test]

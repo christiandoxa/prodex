@@ -38,11 +38,6 @@ pub(super) fn gemini_provider_core_local_compact_text_from_content(
     }
 }
 
-pub(super) fn gemini_provider_core_truncate_utf8(text: String, max_bytes: usize) -> String {
-    prodex_mojo_core::rich::truncate_gemini_compact_utf8(&text, max_bytes)
-        .expect("Mojo Gemini compact tail truncation returned invalid output")
-}
-
 pub(super) fn gemini_provider_core_truncate_utf8_edges(text: String, max_bytes: usize) -> String {
     prodex_mojo_core::rich::truncate_gemini_compact_utf8_edges(&text, max_bytes)
         .expect("Mojo Gemini compact edge truncation returned invalid output")
@@ -56,7 +51,8 @@ mod tests {
     fn truncation_limits_include_markers_and_preserve_utf8() {
         let text = "月".repeat(100);
         for max_bytes in [0, 1, 12, 64] {
-            let tail = gemini_provider_core_truncate_utf8(text.clone(), max_bytes);
+            let tail = prodex_mojo_core::rich::truncate_gemini_compact_utf8(&text, max_bytes)
+                .expect("Mojo Gemini compact tail truncation returned invalid output");
             let edges = gemini_provider_core_truncate_utf8_edges(text.clone(), max_bytes);
             assert!(tail.len() <= max_bytes);
             assert!(edges.len() <= max_bytes);

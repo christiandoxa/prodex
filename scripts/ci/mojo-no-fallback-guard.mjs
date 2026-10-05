@@ -76,6 +76,7 @@ const DOCTOR_SMART_CONTEXT_CALLER_TEST_FILE = "crates/prodex-runtime-doctor/test
 const GEMINI_COMPACT_SNIPPET_CONSUMER_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs";
 const GEMINI_COMPACT_TEXT_CONSUMER_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs";
 const GEMINI_COMPACT_SUMMARY_CONSUMER_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs";
+const GEMINI_COMPACT_SEMANTIC_CONSUMER_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs";
 const GEMINI_COMPACT_SNIPPET_REMOVED_RUST_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet/tool.rs";
 const GEMINI_COMPACT_SNIPPET_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/gemini_compact_snippet.rs";
 const GEMINI_COMPACT_SNIPPET_MOJO_FILE = "mojo/prodex_core/gemini_compact_snippet.mojo";
@@ -83,6 +84,7 @@ const PROMOTED_FILES = [
   GEMINI_COMPACT_SNIPPET_CONSUMER_FILE,
   GEMINI_COMPACT_TEXT_CONSUMER_FILE,
   GEMINI_COMPACT_SUMMARY_CONSUMER_FILE,
+  GEMINI_COMPACT_SEMANTIC_CONSUMER_FILE,
   GEMINI_COMPACT_SNIPPET_ADAPTER_FILE,
   GEMINI_COMPACT_SNIPPET_MOJO_FILE,
   OPERATIONAL_HISTOGRAM_CALLER_FILE,
@@ -4813,7 +4815,6 @@ export function findViolations(files) {
     if (filePath === GEMINI_COMPACT_TEXT_CONSUMER_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
-        "truncate_gemini_compact_utf8(&text, max_bytes)",
         "truncate_gemini_compact_utf8_edges(&text, max_bytes)",
       ];
       const restoredRust = [
@@ -4836,6 +4837,20 @@ export function findViolations(files) {
       return required.every((marker) => production.includes(marker)) && restoredRust.every((marker) => !production.includes(marker))
         ? [] : [`${filePath}: Gemini local compact summary formatting must use Mojo without a Rust semantic copy`];
     }
+    if (filePath === GEMINI_COMPACT_SEMANTIC_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "format_gemini_semantic_continuation_summary(",
+        "gemini_provider_core_truncate_utf8_edges(",
+      ];
+      const restoredRust = [
+        "let mut summary = String::new()",
+        "summary.push_str(",
+        ".filter(|text| !text.trim().is_empty())",
+      ];
+      return required.every((marker) => production.includes(marker)) && restoredRust.every((marker) => !production.includes(marker))
+        ? [] : [`${filePath}: Gemini semantic continuation formatting must use Mojo without a Rust semantic copy`];
+    }
     if (filePath === GEMINI_COMPACT_SNIPPET_ADAPTER_FILE) {
       const required = [
         "prodex_mojo_gemini_compact_snippet_v1(",
@@ -4848,6 +4863,9 @@ export function findViolations(files) {
         "prodex_mojo_gemini_compact_local_summary_v1(",
         "pub fn format_gemini_local_compact_summary(",
         "gemini_local_compact_summary_formatting_is_mojo_owned",
+        "prodex_mojo_gemini_compact_semantic_summary_v1(",
+        "pub fn format_gemini_semantic_continuation_summary(",
+        "gemini_semantic_continuation_summary_formatting_is_mojo_owned",
       ];
       return required.filter((marker) => !contents.includes(marker)).map((marker) => `${filePath}: Gemini compact adapter must retain ${marker}`);
     }
@@ -5052,10 +5070,7 @@ function selfTest() {
   const geminiCompactConsumer = "GeminiCompactSnippetInput {\nformat_gemini_compact_snippet(";
   assert.deepEqual(findViolations([[GEMINI_COMPACT_SNIPPET_CONSUMER_FILE, geminiCompactConsumer]]), []);
   assert.match(findViolations([[GEMINI_COMPACT_SNIPPET_CONSUMER_FILE, geminiCompactConsumer + "\ngemini_provider_core_truncate_utf8(text, 768);"]]).join("\n"), /Gemini compact snippet shaping must use Mojo/u);
-  const geminiCompactTextConsumer = [
-    "truncate_gemini_compact_utf8(&text, max_bytes)",
-    "truncate_gemini_compact_utf8_edges(&text, max_bytes)",
-  ].join("\n");
+  const geminiCompactTextConsumer = "truncate_gemini_compact_utf8_edges(&text, max_bytes)";
   assert.deepEqual(findViolations([[GEMINI_COMPACT_TEXT_CONSUMER_FILE, geminiCompactTextConsumer]]), []);
   assert.match(findViolations([[GEMINI_COMPACT_TEXT_CONSUMER_FILE, geminiCompactTextConsumer + "\ntext.is_char_boundary(end);"]]).join("\n"), /Gemini compact UTF-8 truncation must use Mojo/u);
   const geminiCompactSummaryConsumer = [
@@ -5064,6 +5079,12 @@ function selfTest() {
   ].join("\n");
   assert.deepEqual(findViolations([[GEMINI_COMPACT_SUMMARY_CONSUMER_FILE, geminiCompactSummaryConsumer]]), []);
   assert.match(findViolations([[GEMINI_COMPACT_SUMMARY_CONSUMER_FILE, geminiCompactSummaryConsumer + "\nsummary.push_str(\"restored\");"]]).join("\n"), /Gemini local compact summary formatting must use Mojo/u);
+  const geminiCompactSemanticConsumer = [
+    "gemini_provider_core_truncate_utf8_edges(",
+    "format_gemini_semantic_continuation_summary(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[GEMINI_COMPACT_SEMANTIC_CONSUMER_FILE, geminiCompactSemanticConsumer]]), []);
+  assert.match(findViolations([[GEMINI_COMPACT_SEMANTIC_CONSUMER_FILE, geminiCompactSemanticConsumer + "\nsummary.push_str(\"restored\");"]]).join("\n"), /Gemini semantic continuation formatting must use Mojo/u);
   const profileExportSelectionCaller = [
     "prodex_mojo_core::profile_export::profile_export_selection_plan(&available, &requested)",
     "prodex_mojo_core::profile_export::profile_export_active_profile_selected(",

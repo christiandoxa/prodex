@@ -931,3 +931,107 @@ def prodex_mojo_gemini_compact_local_summary_v1(
 
     gemini_compact_finalize(output, maximum, logical, written)
     return GEMINI_COMPACT_SNIPPET_STATUS_OK
+
+
+@export("prodex_mojo_gemini_compact_semantic_summary_v1")
+def prodex_mojo_gemini_compact_semantic_summary_v1(
+    abi_version: Int64,
+    semantic_address: UInt,
+    active_user_address: UInt,
+    latest_tool_address: UInt,
+    presence: Int64,
+    maximum: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_COMPACT_SNIPPET_ABI_VERSION:
+        return GEMINI_COMPACT_SNIPPET_STATUS_ABI
+    if (
+        semantic_address == 0
+        or active_user_address == 0
+        or latest_tool_address == 0
+        or maximum < 0
+        or output_address == 0
+        or output_capacity < maximum + 4
+        or written_address == 0
+    ):
+        return GEMINI_COMPACT_SNIPPET_STATUS_INVALID
+    var semantic = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(semantic_address)
+    )[].copy()
+    var active_user = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(active_user_address)
+    )[].copy()
+    var latest_tool = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(latest_tool_address)
+    )[].copy()
+    if (
+        not rich_view_valid(semantic, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(active_user, 0x7FFFFFFFFFFFFFFF)
+        or not rich_view_valid(latest_tool, 0x7FFFFFFFFFFFFFFF)
+    ):
+        return GEMINI_COMPACT_SNIPPET_STATUS_UTF8
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var copy_capacity = maximum + 4
+    var logical_limit = maximum + 1
+    var copied: Int64 = 0
+    var logical: Int64 = 0
+
+    if (presence & 1) != 0:
+        var active_bounds = rich_trim_bounds(active_user)
+        if active_bounds[0] < active_bounds[1]:
+            gemini_compact_append_literal(
+                StringSlice("Active user request that must still be completed:\n"),
+                output, copy_capacity, logical_limit, Pointer(to=copied), Pointer(to=logical),
+            )
+            var active_trimmed = ProdexRichStringView(
+                active_user.ptr + UInt(active_bounds[0]), UInt(active_bounds[1] - active_bounds[0])
+            )
+            gemini_compact_append_view(
+                active_trimmed, output, copy_capacity, logical_limit, Pointer(to=copied), Pointer(to=logical)
+            )
+            gemini_compact_append_literal(
+                StringSlice("\n\n"), output, copy_capacity, logical_limit, Pointer(to=copied), Pointer(to=logical)
+            )
+
+    if (presence & 2) != 0:
+        var tool_bounds = rich_trim_bounds(latest_tool)
+        if tool_bounds[0] < tool_bounds[1]:
+            gemini_compact_append_literal(
+                StringSlice("Latest tool result after the active request:\n"),
+                output, copy_capacity, logical_limit, Pointer(to=copied), Pointer(to=logical),
+            )
+            var tool_trimmed = ProdexRichStringView(
+                latest_tool.ptr + UInt(tool_bounds[0]), UInt(tool_bounds[1] - tool_bounds[0])
+            )
+            gemini_compact_append_view(
+                tool_trimmed, output, copy_capacity, logical_limit, Pointer(to=copied), Pointer(to=logical)
+            )
+            gemini_compact_append_literal(
+                StringSlice("\n\n"), output, copy_capacity, logical_limit, Pointer(to=copied), Pointer(to=logical)
+            )
+
+    gemini_compact_append_literal(
+        StringSlice("Semantic continuation summary:\n"),
+        output, copy_capacity, logical_limit, Pointer(to=copied), Pointer(to=logical),
+    )
+    var semantic_bounds = rich_trim_bounds(semantic)
+    if semantic_bounds[0] < semantic_bounds[1]:
+        var semantic_trimmed = ProdexRichStringView(
+            semantic.ptr + UInt(semantic_bounds[0]), UInt(semantic_bounds[1] - semantic_bounds[0])
+        )
+        gemini_compact_append_view(
+            semantic_trimmed, output, copy_capacity, logical_limit, Pointer(to=copied), Pointer(to=logical)
+        )
+    gemini_compact_append_literal(
+        StringSlice("\n\nContinue the active user request. Do not merely acknowledge repository, optimizer, or environment instructions."),
+        output, copy_capacity, logical_limit, Pointer(to=copied), Pointer(to=logical),
+    )
+    gemini_compact_finalize(output, maximum, logical, written)
+    return GEMINI_COMPACT_SNIPPET_STATUS_OK
