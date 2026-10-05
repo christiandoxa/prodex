@@ -1,11 +1,12 @@
-use super::RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES;
+use super::{
+    RUNTIME_SMART_CONTEXT_MAX_SEMANTIC_LINE_INDEX_RANGES,
+    RuntimeSmartContextArtifactSemanticLineRange,
+};
 
 #[path = "semantic_index/markers.rs"]
 mod markers;
 #[path = "semantic_index/ranges.rs"]
 mod ranges;
-#[path = "semantic_index/symbols.rs"]
-mod symbols;
 #[path = "semantic_index/types.rs"]
 mod types;
 #[path = "semantic_index/util.rs"]
@@ -13,11 +14,11 @@ mod util;
 
 pub(super) use markers::*;
 pub(super) use ranges::*;
-pub(super) use symbols::*;
 pub(super) use types::*;
 pub(super) use util::*;
 
 pub(super) fn runtime_smart_context_artifact_semantic_line_index(
+    text: &str,
     lines: &[&str],
 ) -> RuntimeSmartContextArtifactSemanticLineIndexParts {
     let mut parts = RuntimeSmartContextArtifactSemanticLineIndexParts {
@@ -111,47 +112,44 @@ pub(super) fn runtime_smart_context_artifact_semantic_line_index(
         }
     }
 
-    prodex_mojo_core::smart_context_symbols::visit_classifications(lines, |classification| {
-        if remaining == 0 {
-            parts.symbol_complete = false;
-            return false;
-        }
-        let index = classification.line_index;
-        let symbol = RuntimeSmartContextParsedSymbolLine {
-            label: match classification.label {
-                prodex_mojo_core::smart_context_symbols::SymbolLabel::Function => "function",
-                prodex_mojo_core::smart_context_symbols::SymbolLabel::Test => "test_symbol",
-                prodex_mojo_core::smart_context_symbols::SymbolLabel::Symbol => "symbol",
-            },
-            symbol: classification.symbol,
-            style: match classification.style {
-                prodex_mojo_core::smart_context_symbols::SymbolStyle::Brace => {
-                    RuntimeSmartContextSymbolRangeStyle::Brace
-                }
-                prodex_mojo_core::smart_context_symbols::SymbolStyle::Python => {
-                    RuntimeSmartContextSymbolRangeStyle::Python
-                }
-            },
-        };
-        let (start, end) = runtime_smart_context_symbol_range_bounds(lines, index, symbol.style);
-        let metadata = RuntimeSmartContextSemanticRangeMetadata {
-            label: Some(symbol.label.to_string()),
-            line: Some(index + 1),
-            symbol: Some(symbol.symbol),
-            ..Default::default()
-        };
-        runtime_smart_context_push_semantic_range(
-            &mut parts.symbol_ranges,
-            &mut remaining,
-            &mut parts.symbol_complete,
-            lines,
-            start,
-            end,
-            metadata,
-        );
-        true
-    })
-    .expect("Mojo smart-context symbol classifier returned invalid output");
+    let symbols = prodex_mojo_core::smart_context_symbols::index(
+        text,
+        remaining,
+        crate::runtime_state_shared::RUNTIME_SMART_CONTEXT_MAX_LINE_INDEX_EXCERPT_BYTES,
+    )
+    .expect("Mojo Smart Context symbol index returned invalid output");
+    parts.symbol_complete = symbols.complete;
+    for symbol in symbols.ranges {
+        let text = lines[symbol.start_line - 1..symbol.end_line].join("\n");
+        parts
+            .symbol_ranges
+            .push(RuntimeSmartContextArtifactSemanticLineRange {
+                start: symbol.start_line,
+                end: symbol.end_line,
+                byte_len: text.len(),
+                content_hash: runtime_proxy_crate::smart_context_hash_text(&text),
+                text,
+                label: Some(
+                    match symbol.label {
+                        prodex_mojo_core::smart_context_symbols::SymbolLabel::Function => {
+                            "function"
+                        }
+                        prodex_mojo_core::smart_context_symbols::SymbolLabel::Test => "test_symbol",
+                        prodex_mojo_core::smart_context_symbols::SymbolLabel::Symbol => "symbol",
+                    }
+                    .to_string(),
+                ),
+                line: Some(symbol.declaration_line),
+                symbol: Some(symbol.symbol),
+                path: None,
+                column: None,
+                old_start: None,
+                old_count: None,
+                new_start: None,
+                new_count: None,
+                code: None,
+            });
+    }
 
     parts
 }

@@ -2,8 +2,25 @@ use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
 const MAX_INPUT_BYTES: usize = 64 * 1024 * 1024;
-const MAX_NAME_BYTES: usize = 517;
+const MAX_SYMBOL_RANGES: usize = 256;
+const MAX_EXCERPT_BYTES: usize = 16 * 1024;
+const RECORD_WIDTH: usize = 7;
 const NONE: u64 = u64::MAX;
+
+unsafe extern "C" {
+    fn prodex_smart_context_symbol_index_v1(
+        abi_version: i64,
+        text_address: u64,
+        text_length: i64,
+        line_spans_address: u64,
+        line_count: i64,
+        max_ranges: i64,
+        max_excerpt_bytes: i64,
+        output_address: u64,
+        output_capacity: i64,
+        metadata_address: u64,
+    ) -> i64;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolLabel {
@@ -12,46 +29,69 @@ pub enum SymbolLabel {
     Symbol,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SymbolStyle {
-    Brace,
-    Python,
-}
-
-/// One Mojo-classified declaration. Rust owns source-range planning.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SymbolClassification {
-    pub line_index: usize,
+pub struct SymbolRangePlan {
+    pub start_line: usize,
+    pub end_line: usize,
+    pub declaration_line: usize,
     pub label: SymbolLabel,
     pub symbol: String,
-    pub style: SymbolStyle,
 }
 
-unsafe extern "C" {
-    fn prodex_smart_context_symbol_classify_v1(
-        abi_version: i64,
-        line_spans_address: u64,
-        line_count: i64,
-        start_index: i64,
-        output_address: u64,
-        output_capacity: i64,
-        metadata_address: u64,
-    ) -> i64;
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SymbolIndexPlan {
+    pub complete: bool,
+    pub ranges: Vec<SymbolRangePlan>,
 }
 
-fn classification(
-    lines: &[&str],
-    spans: &[u64],
-    start_index: usize,
-) -> Result<Option<SymbolClassification>, MojoError> {
-    let mut output = vec![0_u8; MAX_NAME_BYTES];
-    let mut metadata = [NONE; 4];
+/// Plans bounded source declaration ranges through the versioned Mojo kernel.
+///
+/// `text` is the borrowed UTF-8 source. Rust prepares line byte spans and
+/// materializes the validated Mojo plan; Mojo owns declaration recognition,
+/// range boundaries, completeness, and capacity decisions.
+pub fn index(
+    text: &str,
+    max_ranges: usize,
+    max_excerpt_bytes: usize,
+) -> Result<SymbolIndexPlan, MojoError> {
+    if text.len() > MAX_INPUT_BYTES
+        || max_ranges > MAX_SYMBOL_RANGES
+        || max_excerpt_bytes > MAX_EXCERPT_BYTES
+    {
+        return Err(MojoError::InvalidInput);
+    }
+
+    let lines = text.lines().collect::<Vec<_>>();
+    let mut line_spans = Vec::with_capacity(lines.len() * 2);
+    let text_address = text.as_ptr() as usize;
+    for line in &lines {
+        let start = (line.as_ptr() as usize)
+            .checked_sub(text_address)
+            .ok_or(MojoError::InvalidInput)?;
+        let end = start
+            .checked_add(line.len())
+            .ok_or(MojoError::InvalidInput)?;
+        if text.get(start..end) != Some(*line) {
+            return Err(MojoError::InvalidInput);
+        }
+        line_spans.push(u64::try_from(start).map_err(|_| MojoError::InvalidInput)?);
+        line_spans.push(u64::try_from(end).map_err(|_| MojoError::InvalidInput)?);
+    }
+
+    let output_capacity = max_ranges
+        .checked_mul(RECORD_WIDTH)
+        .ok_or(MojoError::InvalidInput)?;
+    let mut output = vec![0_u64; output_capacity];
+    let mut metadata = [NONE; 2];
     let status = unsafe {
-        prodex_smart_context_symbol_classify_v1(
+        prodex_smart_context_symbol_index_v1(
             ABI_VERSION,
-            spans.as_ptr() as usize as u64,
+            text.as_ptr() as usize as u64,
+            i64::try_from(text.len()).map_err(|_| MojoError::InvalidInput)?,
+            line_spans.as_ptr() as usize as u64,
             i64::try_from(lines.len()).map_err(|_| MojoError::InvalidInput)?,
-            i64::try_from(start_index).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(max_ranges).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(max_excerpt_bytes).map_err(|_| MojoError::InvalidInput)?,
             output.as_mut_ptr() as usize as u64,
             i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
             metadata.as_mut_ptr() as usize as u64,
@@ -64,71 +104,72 @@ fn classification(
         4 => return Err(MojoError::AbiMismatch),
         _ => return Err(MojoError::InvalidOutput),
     }
-    if metadata[0] == NONE {
-        return (metadata[1..] == [0, 0, 0])
-            .then_some(None)
-            .ok_or(MojoError::InvalidOutput);
-    }
-    let line_index = usize::try_from(metadata[0]).map_err(|_| MojoError::InvalidOutput)?;
-    if line_index < start_index || line_index >= lines.len() {
-        return Err(MojoError::InvalidOutput);
-    }
-    let label = match metadata[1] {
-        0 => SymbolLabel::Function,
-        1 => SymbolLabel::Test,
-        2 => SymbolLabel::Symbol,
+
+    let count = usize::try_from(metadata[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let complete = match metadata[1] {
+        0 => false,
+        1 => true,
         _ => return Err(MojoError::InvalidOutput),
     };
-    let style = match metadata[2] {
-        0 => SymbolStyle::Brace,
-        1 => SymbolStyle::Python,
-        _ => return Err(MojoError::InvalidOutput),
-    };
-    let written = usize::try_from(metadata[3]).map_err(|_| MojoError::InvalidOutput)?;
-    if written == 0 || written > output.len() {
+    if count > max_ranges
+        || count
+            .checked_mul(RECORD_WIDTH)
+            .is_none_or(|written| written > output.len())
+    {
         return Err(MojoError::InvalidOutput);
     }
-    let symbol =
-        String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)?;
-    Ok(Some(SymbolClassification {
-        line_index,
-        label,
-        symbol,
-        style,
-    }))
-}
 
-/// Visit declarations classified by the required Mojo ABI.
-///
-/// The callback returns `false` to stop scanning. No Rust classifier or
-/// feature-off implementation is used.
-pub fn visit_classifications(
-    lines: &[&str],
-    mut visit: impl FnMut(SymbolClassification) -> bool,
-) -> Result<(), MojoError> {
-    if lines.is_empty() {
-        return Ok(());
-    }
-    let input_bytes = lines
-        .iter()
-        .try_fold(0usize, |total, line| total.checked_add(line.len()))
-        .and_then(|total| total.checked_add(lines.len().saturating_sub(1)))
-        .ok_or(MojoError::InvalidInput)?;
-    if input_bytes > MAX_INPUT_BYTES || lines.len() > MAX_INPUT_BYTES.saturating_add(1) {
-        return Err(MojoError::InvalidInput);
-    }
-
-    let mut spans = Vec::with_capacity(lines.len().checked_mul(2).ok_or(MojoError::InvalidInput)?);
-    for line in lines {
-        spans.push(u64::try_from(line.as_ptr() as usize).map_err(|_| MojoError::InvalidInput)?);
-        spans.push(u64::try_from(line.len()).map_err(|_| MojoError::InvalidInput)?);
-    }
-    let mut start_index = 0;
-    while let Some(classification) = classification(lines, &spans, start_index)? {
-        start_index = classification.line_index + 1;
-        if !visit(classification) {
-            break;
+    let mut ranges = Vec::with_capacity(count);
+    for record in output.as_chunks::<RECORD_WIDTH>().0.iter().take(count) {
+        let start_line = usize::try_from(record[0]).map_err(|_| MojoError::InvalidOutput)?;
+        let end_line = usize::try_from(record[1]).map_err(|_| MojoError::InvalidOutput)?;
+        let declaration_line = usize::try_from(record[2]).map_err(|_| MojoError::InvalidOutput)?;
+        if start_line == 0
+            || start_line > declaration_line
+            || declaration_line > end_line
+            || end_line > lines.len()
+        {
+            return Err(MojoError::InvalidOutput);
         }
+        let label = match record[5] {
+            0 => SymbolLabel::Function,
+            1 => SymbolLabel::Test,
+            2 => SymbolLabel::Symbol,
+            _ => return Err(MojoError::InvalidOutput),
+        };
+        let symbol = match record[6] {
+            0 | 1 => {
+                let start = usize::try_from(record[3]).map_err(|_| MojoError::InvalidOutput)?;
+                let end = usize::try_from(record[4]).map_err(|_| MojoError::InvalidOutput)?;
+                let name = text.get(start..end).ok_or(MojoError::InvalidOutput)?;
+                if name.is_empty() || name.len() > 512 {
+                    return Err(MojoError::InvalidOutput);
+                }
+                if record[6] == 1 {
+                    if label != SymbolLabel::Symbol {
+                        return Err(MojoError::InvalidOutput);
+                    }
+                    format!("impl {name}")
+                } else {
+                    name.to_owned()
+                }
+            }
+            2 if label == SymbolLabel::Test && record[3] == NONE && record[4] == NONE => {
+                "test".to_owned()
+            }
+            3 if label == SymbolLabel::Test && record[3] == NONE && record[4] == NONE => {
+                "it".to_owned()
+            }
+            _ => return Err(MojoError::InvalidOutput),
+        };
+        ranges.push(SymbolRangePlan {
+            start_line,
+            end_line,
+            declaration_line,
+            label,
+            symbol,
+        });
     }
-    Ok(())
+
+    Ok(SymbolIndexPlan { complete, ranges })
 }
