@@ -1293,7 +1293,8 @@
         "operations": [
           "gemini_compact_transcript_snippet_shaping",
           "gemini_compact_utf8_truncation",
-          "gemini_local_compact_summary_formatting"
+          "gemini_local_compact_summary_formatting",
+          "gemini_semantic_continuation_summary_formatting"
         ]
       }
     ],
@@ -5812,10 +5813,9 @@
       "mojo_abi_version": 1,
       "mojo_source": "mojo/prodex_core/gemini_compact_snippet.mojo",
       "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
-      "consumer_marker": "truncate_gemini_compact_utf8",
+      "consumer_marker": "truncate_gemini_compact_utf8_edges",
       "production_consumers": [
         "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
-        "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs",
         "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs"
       ],
       "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
@@ -5825,7 +5825,7 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "String ownership, typed ABI invocation, output UTF-8 materialization, and caller-specific content extraction"
+      "rust_adapter_scope": "String ownership, typed ABI invocation for production edge truncation, output UTF-8 materialization, and direct tail-truncation test coverage; production tail truncation is internal to Mojo formatters"
     },
     {
       "name": "gemini_local_compact_summary_formatting",
@@ -5849,6 +5849,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde request parsing, input array cloning, snippet extraction, borrowed string-view construction, and final String ownership"
+    },
+    {
+      "name": "gemini_semantic_continuation_summary_formatting",
+      "domain": "provider/gemini",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust suppressed blank active/tool sections, trimmed section values, rendered semantic-continuation labels and suffix guidance, and applied the final compact-summary byte cap",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_compact_semantic_summary_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_compact_snippet.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs",
+      "consumer_marker": "format_gemini_semantic_continuation_summary(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs",
+      "rust_owner_before": "Blank-section suppression, trim-before-render, exact active-user/latest-tool/semantic labels, continuation guidance suffix, and final UTF-8-safe summary byte cap",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo coverage and provider-boundary regression assert exact section rendering, trim/suppression, and caller behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON parsing, item/index traversal, content extraction, Mojo edge-truncation calls, borrowed string views, and final String ownership"
     }
   ],
   "rust_semantic_reductions": [
