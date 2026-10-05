@@ -33,6 +33,17 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_mojo_gemini_compact_local_summary_v1(
+        abi_version: i64,
+        model_address: u64,
+        snippets_address: u64,
+        snippet_count: i64,
+        original_input_count: i64,
+        maximum: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -126,6 +137,49 @@ pub fn format_gemini_compact_snippet(
             .map_err(|_| MojoError::InvalidOutput),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+pub fn format_gemini_local_compact_summary(
+    model: Option<&str>,
+    snippets: &[String],
+    original_input_count: usize,
+    max_bytes: usize,
+) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let model = optional_view(model);
+    let snippet_views = snippets
+        .iter()
+        .map(|snippet| view(snippet))
+        .collect::<Vec<_>>();
+    let output_capacity = max_bytes.checked_add(4).ok_or(MojoError::InvalidInput)?;
+    let mut output = vec![0_u8; output_capacity.max(4)];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_mojo_gemini_compact_local_summary_v1(
+            ABI_VERSION,
+            mojo_pointer_address(&model),
+            mojo_pointer_address(snippet_views.as_ptr()),
+            i64::try_from(snippet_views.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(original_input_count).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(max_bytes).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::InvalidOutput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > max_bytes || written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
 fn truncate_gemini_compact_utf8_mode(
@@ -260,6 +314,24 @@ mod tests {
         assert!(snippet.len() <= 64);
         assert!(snippet.ends_with("\n[truncated]"));
         assert!(std::str::from_utf8(snippet.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn gemini_local_compact_summary_formatting_is_mojo_owned() {
+        let snippets = (0..26)
+            .map(|index| format!("snippet-{index}\nnext"))
+            .collect::<Vec<_>>();
+        let summary =
+            format_gemini_local_compact_summary(Some("  gemini-test  "), &snippets, 30, 24 * 1024)
+                .unwrap();
+        assert!(summary.starts_with("Local Prodex compact fallback summary.\n\nModel: gemini-test\nOriginal input items: 30\nRetained recent items: 24\n\nRecent conversation and tool state:\n"));
+        assert!(!summary.contains("- snippet-0\n"));
+        assert!(!summary.contains("- snippet-1\n"));
+        assert!(summary.contains("- snippet-2\n  next\n"));
+        assert!(summary.contains("- snippet-25\n  next\n"));
+        let empty = format_gemini_local_compact_summary(Some("   "), &[], 0, 24 * 1024).unwrap();
+        assert!(empty.contains("Model: unknown"));
+        assert!(empty.contains("- No parseable recent message or tool content was found."));
     }
 
     #[test]
