@@ -657,3 +657,277 @@ def prodex_mojo_gemini_compact_truncate_v1(
         )
         return GEMINI_COMPACT_SNIPPET_STATUS_OK
     return GEMINI_COMPACT_SNIPPET_STATUS_INVALID
+
+
+comptime GEMINI_COMPACT_LOCAL_MAX_SNIPPETS: Int64 = 24
+
+
+def gemini_compact_append_digit(
+    digit: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    copy_capacity: Int64,
+    logical_limit: Int64,
+    copied: Pointer[mut=True, Int64, _],
+    logical: Pointer[mut=True, Int64, _],
+):
+    if logical[] >= logical_limit:
+        return
+    if copied[] < copy_capacity:
+        output[unsafe_offset=copied[]] = UInt8(48 + digit)
+        copied[] += 1
+    logical[] += 1
+
+
+def gemini_compact_append_nonnegative_i64(
+    value: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    copy_capacity: Int64,
+    logical_limit: Int64,
+    copied: Pointer[mut=True, Int64, _],
+    logical: Pointer[mut=True, Int64, _],
+):
+    if value <= 0:
+        gemini_compact_append_digit(
+            0, output, copy_capacity, logical_limit, copied, logical
+        )
+        return
+    var divisor: Int64 = 1
+    while divisor <= value // 10:
+        divisor *= 10
+    while divisor > 0:
+        gemini_compact_append_digit(
+            (value // divisor) % 10,
+            output,
+            copy_capacity,
+            logical_limit,
+            copied,
+            logical,
+        )
+        divisor //= 10
+
+
+def gemini_compact_append_trimmed_view(
+    view: ProdexRichStringView,
+    output: Pointer[mut=True, UInt8, _],
+    copy_capacity: Int64,
+    logical_limit: Int64,
+    copied: Pointer[mut=True, Int64, _],
+    logical: Pointer[mut=True, Int64, _],
+):
+    var bounds = rich_trim_bounds(view)
+    if bounds[0] >= bounds[1]:
+        return
+    var trimmed = ProdexRichStringView(
+        view.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+    )
+    gemini_compact_append_view(
+        trimmed, output, copy_capacity, logical_limit, copied, logical
+    )
+
+
+def gemini_compact_append_indented_view(
+    view: ProdexRichStringView,
+    output: Pointer[mut=True, UInt8, _],
+    copy_capacity: Int64,
+    logical_limit: Int64,
+    copied: Pointer[mut=True, Int64, _],
+    logical: Pointer[mut=True, Int64, _],
+):
+    var source = rich_view_ptr(view)
+    var run_start: Int64 = 0
+    var index: Int64 = 0
+    var length = Int64(view.len)
+    while index < length:
+        if source[unsafe_offset=index] == UInt8(10):
+            gemini_compact_append_range(
+                source + run_start,
+                index - run_start,
+                output,
+                copy_capacity,
+                logical_limit,
+                copied,
+                logical,
+            )
+            gemini_compact_append_literal(
+                StringSlice("\n  "),
+                output,
+                copy_capacity,
+                logical_limit,
+                copied,
+                logical,
+            )
+            run_start = index + 1
+        index += 1
+    gemini_compact_append_range(
+        source + run_start,
+        length - run_start,
+        output,
+        copy_capacity,
+        logical_limit,
+        copied,
+        logical,
+    )
+
+
+@export("prodex_mojo_gemini_compact_local_summary_v1")
+def prodex_mojo_gemini_compact_local_summary_v1(
+    abi_version: Int64,
+    model_address: UInt,
+    snippets_address: UInt,
+    snippet_count: Int64,
+    original_input_count: Int64,
+    maximum: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_COMPACT_SNIPPET_ABI_VERSION:
+        return GEMINI_COMPACT_SNIPPET_STATUS_ABI
+    if (
+        model_address == 0
+        or snippets_address == 0
+        or snippet_count < 0
+        or original_input_count < 0
+        or maximum < 0
+        or output_address == 0
+        or output_capacity < maximum + 4
+        or written_address == 0
+    ):
+        return GEMINI_COMPACT_SNIPPET_STATUS_INVALID
+    var model = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(model_address)
+    )[].copy()
+    if not rich_view_valid(model, 0x7FFFFFFFFFFFFFFF):
+        return GEMINI_COMPACT_SNIPPET_STATUS_UTF8
+    var snippets = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(snippets_address)
+    )
+    for index in range(snippet_count):
+        if not rich_view_valid(
+            snippets[unsafe_offset=index].copy(), 0x7FFFFFFFFFFFFFFF
+        ):
+            return GEMINI_COMPACT_SNIPPET_STATUS_UTF8
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    var copy_capacity = maximum + 4
+    var logical_limit = maximum + 1
+    var copied: Int64 = 0
+    var logical: Int64 = 0
+    var retained = (
+        snippet_count if snippet_count
+        <= GEMINI_COMPACT_LOCAL_MAX_SNIPPETS else GEMINI_COMPACT_LOCAL_MAX_SNIPPETS
+    )
+    var start = snippet_count - retained
+
+    gemini_compact_append_literal(
+        StringSlice("Local Prodex compact fallback summary.\n\nModel: "),
+        output,
+        copy_capacity,
+        logical_limit,
+        Pointer(to=copied),
+        Pointer(to=logical),
+    )
+    var model_bounds = rich_trim_bounds(model)
+    if model_bounds[0] == model_bounds[1]:
+        gemini_compact_append_literal(
+            StringSlice("unknown"),
+            output,
+            copy_capacity,
+            logical_limit,
+            Pointer(to=copied),
+            Pointer(to=logical),
+        )
+    else:
+        gemini_compact_append_trimmed_view(
+            model,
+            output,
+            copy_capacity,
+            logical_limit,
+            Pointer(to=copied),
+            Pointer(to=logical),
+        )
+    gemini_compact_append_literal(
+        StringSlice("\nOriginal input items: "),
+        output,
+        copy_capacity,
+        logical_limit,
+        Pointer(to=copied),
+        Pointer(to=logical),
+    )
+    gemini_compact_append_nonnegative_i64(
+        original_input_count,
+        output,
+        copy_capacity,
+        logical_limit,
+        Pointer(to=copied),
+        Pointer(to=logical),
+    )
+    gemini_compact_append_literal(
+        StringSlice("\nRetained recent items: "),
+        output,
+        copy_capacity,
+        logical_limit,
+        Pointer(to=copied),
+        Pointer(to=logical),
+    )
+    gemini_compact_append_nonnegative_i64(
+        retained,
+        output,
+        copy_capacity,
+        logical_limit,
+        Pointer(to=copied),
+        Pointer(to=logical),
+    )
+    gemini_compact_append_literal(
+        StringSlice("\n\nRecent conversation and tool state:\n"),
+        output,
+        copy_capacity,
+        logical_limit,
+        Pointer(to=copied),
+        Pointer(to=logical),
+    )
+
+    if retained == 0:
+        gemini_compact_append_literal(
+            StringSlice(
+                "- No parseable recent message or tool content was found.\n"
+            ),
+            output,
+            copy_capacity,
+            logical_limit,
+            Pointer(to=copied),
+            Pointer(to=logical),
+        )
+    else:
+        for index in range(start, snippet_count):
+            gemini_compact_append_literal(
+                StringSlice("- "),
+                output,
+                copy_capacity,
+                logical_limit,
+                Pointer(to=copied),
+                Pointer(to=logical),
+            )
+            gemini_compact_append_indented_view(
+                snippets[unsafe_offset=index].copy(),
+                output,
+                copy_capacity,
+                logical_limit,
+                Pointer(to=copied),
+                Pointer(to=logical),
+            )
+            gemini_compact_append_literal(
+                StringSlice("\n"),
+                output,
+                copy_capacity,
+                logical_limit,
+                Pointer(to=copied),
+                Pointer(to=logical),
+            )
+
+    gemini_compact_finalize(output, maximum, logical, written)
+    return GEMINI_COMPACT_SNIPPET_STATUS_OK

@@ -1292,7 +1292,8 @@
         "role": "semantic",
         "operations": [
           "gemini_compact_transcript_snippet_shaping",
-          "gemini_compact_utf8_truncation"
+          "gemini_compact_utf8_truncation",
+          "gemini_local_compact_summary_formatting"
         ]
       }
     ],
@@ -5825,6 +5826,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "String ownership, typed ABI invocation, output UTF-8 materialization, and caller-specific content extraction"
+    },
+    {
+      "name": "gemini_local_compact_summary_formatting",
+      "domain": "provider/gemini",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust retained the last 24 parsed snippets, normalized the model label, rendered compact summary headers/counts, indented multiline snippets, emitted the empty-content fallback, and applied the final byte limit",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_compact_local_summary_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_compact_snippet.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs",
+      "consumer_marker": "format_gemini_local_compact_summary(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs",
+      "rust_owner_before": "24-item recent retention, trimmed/default model label, original/retained count rendering, multiline indentation, empty-snippet fallback text, and final UTF-8-safe byte truncation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo adapter coverage and provider-boundary regression cover retention, model trim/default, multiline indentation, empty summary, invalid-JSON caller behavior, and final byte budget",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde request parsing, input array cloning, snippet extraction, borrowed string-view construction, and final String ownership"
     }
   ],
   "rust_semantic_reductions": [
