@@ -5083,3 +5083,155 @@ Validation passed:
 - `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo clippy --locked -q -p prodex-config -p prodex-codex-config -p prodex-mojo-core --all-targets -- -D warnings` and `cargo fmt --all -- --check` passed.
 - `npm run docs`, `npm run test:changed -- --base HEAD`, and `git diff --check` passed. Plain `npm run test:changed` stopped before tests because its inherited `origin/main..HEAD + worktree` range contains 1,892 lines from earlier committed campaign changes; this worktree measures 410 changed lines, with a 132-line largest file.
 - `node scripts/ci/mojo-no-fallback-guard.mjs --self-test && node scripts/ci/mojo-no-fallback-guard.mjs`, `node scripts/ci/mojo-authority-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, `node scripts/ci/size-guard.mjs`, and `node scripts/ci/mojo-production-share.mjs --check` passed. Ownership reports 160 authoritative operations; the source report remains at **28.58% Mojo**, above the 7% release floor.
+
+## Update-notice release-version migration
+
+`update_notice_policy.mojo` now owns fetched-release validation and both release
+comparison contracts. It trims the same Unicode whitespace as Rust `str::trim`,
+accepts one optional lowercase `v`, validates strict SemVer identifiers and
+`u64` core components, and compares prerelease/build identifiers. Notice
+comparison preserves `semver::Version` total ordering, including build metadata;
+update decisions use SemVer precedence and ignore build metadata. Rust retains
+GitHub redirect/tag acquisition, version strings, cache/network IO, and typed
+result mapping. Invalid UTF-8 is rejected at the ABI boundary, and Mojo errors
+propagate without Rust recomputation. The existing ABI caps each input at
+1 MiB; larger version strings are rejected as invalid input.
+
+The required-Mojo ABI and `prodex-update-notice` caller tests cover equality,
+numeric and prerelease ordering, build metadata, leading zeros, overflow,
+missing components, extra `v`, Unicode whitespace, malformed text, and invalid
+UTF-8. They also verify the existing 1 MiB input boundary. The ownership ledger
+records the new release-version operation; the no-fallback guard requires the
+production Mojo calls and propagating error path.
+
+Validation passes:
+
+- The required-Mojo `prodex-mojo-core` ABI tests passed (4); all `prodex-update-notice` caller tests passed (11).
+- A mutation reversed minor-version ordering. The ABI test failed with `Less` instead of `Greater`; restoring the Mojo source returned SHA-256 `0c1995227cbd29426bc19b5e236cb530683dd830f7a389eafa0a8165ce78879c`.
+- `npm run test:changed -- --base origin/main`, workspace Clippy with all targets/features, `cargo fmt --all -- --check`, `npm run docs`, and `git diff --check` passed.
+- The no-fallback guard and self-test, authority guard, ownership check, and size guard passed. Ownership reports 161 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` reports 82,068 Mojo LOC and 204,312 Rust LOC (**28.66% Mojo**); the 7% release floor and ownership non-regression pass. The 75% project target remains in progress.
+## Session usage-limit marker classification migration
+
+The resume monitor's deterministic usage-limit marker classifier now calls
+operation 15 of the existing rich runtime-error kernel in
+`rich_fallback.mojo`. Mojo owns exact legacy-marker matching, event/error
+context rules, structured quota-code and message classification, ignored
+conversation-object filtering, and the bounded 2,048-value scan. Rust retains
+Serde JSON parsing and canonicalization, session file reads, session identity,
+workflow evidence, and retry orchestration. The rich ABI rejects inputs above
+the existing 64 MiB session-record ceiling and returns errors directly; no Rust
+classification fallback remains.
+
+The removed Rust block contains 156 non-empty semantic lines in the active
+monitor module. That module was introduced after the frozen ownership baseline,
+so this cleanup earns no frozen-volume credit. The existing `runtime_error_policy` export carries the
+new operation ID without changing the ABI layout. Direct required-Mojo tests
+cover exact and structured markers, ignored conversation text, and both sides
+of the 2,048-value boundary. App caller regressions cover marker recognition
+and post-child profile rotation.
+- `PRODEX_MOJO_REQUIRED=1 cargo clippy --locked -p prodex-mojo-core -p prodex-provider-core --all-targets --all-features -- -D warnings`, `cargo fmt --all -- --check`, and `git diff --check` passed.
+- Mojo no-fallback self-test and guard, authority guard, and ownership check passed; ownership reports 148 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` — 81,025 Mojo LOC and 203,351 Rust LOC, or **28.49% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
+
+## Smart Context memory-capsule ordering migration
+
+Mojo now owns required-first ordering and optional relevance-descending,
+token-cost-ascending, ID-ascending ordering through
+`prodex_mojo_smart_context_capsule_order_v1`. The stable merge sort compares
+borrowed UTF-8 ID byte spans and typed relevance, token-cost, and required
+keys. NaN relevance compares equal before token-cost and ID tie-breakers;
+equal keys retain input order. The v1 ABI bounds inputs to 65,537 capsules and
+passes each ID as a borrowed byte pointer with a checked length, then returns a
+permutation. The ABI copies no ID bytes and imposes no aggregate ID-byte limit.
+
+Rust retains every `String`, marshals count-bounded ID pointers, checked lengths,
+and typed keys, validates the full permutation, and moves capsules into that
+order. The existing Mojo admission planner still receives 65,536-item batches
+with the remaining token budget. Rust contains no capsule comparator or
+ordering fallback. Rust supplies permutation and scratch buffers, so the Mojo
+ordering kernel performs no heap allocation.
+
+Validation passed:
+
+- `mojo format mojo/prodex_core/smart_context_capsule_order.mojo mojo/tests/smart_context_capsule_order_test.mojo` and `mojo run -D ASSERT=all -I mojo/prodex_core mojo/tests/smart_context_capsule_order_test.mojo` passed.
+- The mutation proof inverted required-first ordering; the direct Mojo test failed at the expected permutation assertion. Restoring saved source bytes was byte-exact: SHA-256 before and after was `0567239cb15ec10ff2055660f963323612988c1db3f893fbeb2b7bf50b5ee426`.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-runtime-proxy --lib capsule_ -- --test-threads=1` — 7 passed, including NaN tie-breaks, 65,537-item batching, total ID bytes above 4 MiB, and per-ID span validation.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo clippy --locked -q -p prodex-mojo-core -p prodex-runtime-proxy --all-targets --all-features -- -D warnings` and `cargo fmt --all -- --check` passed.
+- `npm run docs`, `npm run test:changed`, and `git diff --check` passed.
+- `node scripts/ci/mojo-no-fallback-guard.mjs --self-test`, `node scripts/ci/mojo-authority-guard.mjs`, `node scripts/ci/mojo-ownership.mjs --check`, and `node scripts/ci/size-guard.mjs` passed. Ownership reports 154 authoritative operations; the new Mojo module is 198 lines.
+- `node scripts/ci/mojo-production-share.mjs --check` — 81,486 Mojo LOC and 203,748 Rust LOC, or **28.57% Mojo**. The 7% release floor and ownership non-regression pass; the 75% project target remains unmet.
+- No commit or push was made.
+## Smart Context source-symbol migration, stage 1
+
+Stage 1 moves only declaration recognition, Rust/Python/JavaScript classification, labels, names, fallbacks, `impl` naming, and Rust test-attribute labeling into versioned ABI `prodex_smart_context_symbol_classify_v1`, linked through `prodex-mojo-core` from `smart_context_symbol_classification.mojo` and `smart_context_symbol_parser.mojo`. Rust retains prefix attachment, range planning, excerpts, deduplication, capacity, and DTO construction; no Rust classifier or feature-off fallback remains.
+
+Direct required-Mojo tests cover declaration families, names, labels, styles, and attributes; the artifact-store caller test checks persisted ranges, text, and hashes. Mutating the `fn ` recognizer failed the direct test. Byte-exact restoration matched SHA-256 `b3eb46d111a8c3f0e418013ff4315813e28b1e97cc374e2ec0f39caec176071c`. Direct tests pass 2/2 and app caller passes 1/1. Clippy, fmt, docs, changed-tests, authority, ownership, no-fallback, size, share, churn, and diff checks pass.
+
+## Smart Context full source-symbol indexing migration
+
+The stage-1 source-symbol classifier is now superseded by the full versioned
+`prodex_smart_context_symbol_index_v1` planner. Mojo owns declaration
+recognition and naming plus prefix attachment, Rust/Python/JavaScript range
+boundaries, duplicate suppression, excerpt bounds, capacity completeness, and
+bounded symbol-index planning. Rust keeps borrowed line-span preparation,
+validated ABI output materialization, hashes, and artifact DTO construction.
+The old Rust `semantic_index/symbols.rs` parser and the stage-1 Mojo classifier
+and parser modules are deleted; no Rust or duplicate Mojo fallback remains.
+
+Validation passed:
+
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -p prodex-mojo-core --features mojo-runtime --test smart_context_symbols -- --list` listed 4 tests; all 4 passed.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -p prodex-app runtime_smart_context_artifact_symbol_index_uses_mojo_ranges -- --list` listed 1 production caller test; it passed.
+- Mojo no-fallback, authority, and ownership guards passed; ownership reports 167 authoritative operations and 95.10% Mojo in the frozen semantic ledger.
+- `node scripts/ci/mojo-production-share.mjs --check` reports 83,922 reachable Mojo LOC and 204,650 Rust production LOC, or **29.0818% Mojo**.
+## Kiro model-catalog normalization
+
+Kiro profile catalogs, ACP model lists, quota lookup, import validation, and
+dynamic provider configuration share one normalization path. The existing
+Kiro Mojo domain now selects root and nested model arrays, enforces the input
+entry cap, applies identifier/name alias precedence, trims strings with Rust
+Unicode whitespace rules, and selects optional description and positive
+context-window metadata. The versioned v1 ABI returns checked string spans and
+typed issue tags. Rust retains Serde tree acquisition and JSON materialization;
+the existing provider catalog service still owns canonical-ID merge and total
+catalog limit enforcement. Mojo failures return errors without Rust policy
+recomputation.
+
+The required-Mojo ABI test covers primary aliases, Unicode trim, fallback names,
+source order, missing arrays, empty catalogs, and limits. The provider-core
+caller test covers output shape, metadata, alias precedence, and dynamic
+deduplication. The app parser test covers all supported root and nested shapes.
+A mutation changed primary identifier precedence; both the direct ABI test and
+provider-core caller test failed. Restored Mojo source matched its pre-mutation
+SHA-256 exactly (`516ed644fd8f926849a98de95cd28d779216e08c57a10fa13f0525d25c78f2af`).
+
+Focused validation passed:
+
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-mojo-core --features mojo-rich --test kiro_catalog -- --test-threads=1` — 2 passed after restoration.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-provider-core kiro_model_catalog_uses_mojo_precedence_and_preserves_model_metadata -- --test-threads=1` — 1 passed after restoration.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-app --lib kiro_model_catalog -- --test-threads=1` — 4 passed, including supported root/nested shapes and the hard limit.
+- Formatting, docs, no-fallback, authority, ownership, and size checks pass; ownership reports 161 authoritative operations.
+- `node scripts/ci/mojo-production-share.mjs --check` — 81,976 reachable Mojo LOC and 204,388 Rust LOC (286,364 total), or **28.63% Mojo**. The 7% release floor and non-regression pass; the 75% project target remains unmet.
+
+The checkpoint-wide gates also pass: workspace Clippy with warnings denied,
+`cargo fmt --all -- --check`, `npm run docs`, `npm run test:changed -- --base HEAD`
+(16 changed paths, 341 tracked changed lines; 1,124 including new files), size guard, Mojo no-fallback
+self-test/check, authority and ownership checks, and `git diff --check`.
+
+## Runtime doctor Smart Context fallback-decision migration
+
+`runtime_doctor_marker.mojo` now owns Smart Context autopilot fallback-decision
+classification through `prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1`.
+Only `rewritten` and `pass_through` are non-fallback decisions; every other decision label
+is classified as fallback. The former Rust `!matches!(decision, "rewritten" | "pass_through")`
+production classifier was deleted. Rust retains log/JSON parsing, aggregation, reason counting,
+and report ownership; Mojo errors do not trigger Rust semantic recomputation.
+
+Verification includes a direct required-Mojo ABI integration test and the production
+runtime-doctor summary regression. Both targeted `-- --list` invocations report one test.
+A sensitivity mutation replaced the `pass_through` exemption with
+`self_check_passthrough`; the production caller regression failed with `fallback_count`
+`left: 1` versus `right: 2`. Restoring the Mojo source returned the exact pre-mutation
+SHA-256 `5be6e9fd8c8c4ccfa80ca24964fb1d990a80372f98ab797a8db18720aa641429`, and the
+caller regression passed again.

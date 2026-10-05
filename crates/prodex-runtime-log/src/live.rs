@@ -145,35 +145,48 @@ fn bounded_live_log_line(line: &str) -> Result<String, MojoError> {
     if !mojo_live_log_record::record_exceeds_bound(line.len())? {
         return Ok(line.to_string());
     }
+    if let Some(json_line) = bounded_live_log_json(line)? {
+        return Ok(json_line);
+    }
+    mojo_live_log_record::truncate_plain_text(line)
+}
 
-    if let Ok(mut value) = serde_json::from_str::<serde_json::Value>(line.trim_end()) {
-        materialize_nested_string_clips(&mut value)?;
-        if let Ok(serialized) = serde_json::to_string(&value) {
-            let plan = mojo_live_log_record::json_plan(serialized.len())?;
-            if !plan.compact_metadata {
-                return Ok(format!("{serialized}\n"));
-            }
-            let mut compact = serde_json::Map::new();
-            for (key, include) in [
-                ("timestamp", plan.timestamp),
-                ("pid", plan.pid),
-                ("event", plan.event),
-            ] {
-                if include && let Some(value) = value.get(key) {
-                    compact.insert(key.to_string(), value.clone());
-                }
-            }
-            compact.insert(
-                "message".to_string(),
-                serde_json::Value::String("[live log record truncated]".to_string()),
-            );
-            if let Ok(serialized) = serde_json::to_string(&compact) {
-                return Ok(format!("{serialized}\n"));
-            }
+fn bounded_live_log_json(line: &str) -> Result<Option<String>, MojoError> {
+    let Ok(mut value) = serde_json::from_str::<serde_json::Value>(line.trim_end()) else {
+        return Ok(None);
+    };
+    materialize_nested_string_clips(&mut value)?;
+    let Ok(serialized) = serde_json::to_string(&value) else {
+        return Ok(None);
+    };
+    let plan = mojo_live_log_record::json_plan(serialized.len())?;
+    if !plan.compact_metadata {
+        return Ok(Some(format!("{serialized}\n")));
+    }
+    Ok(serialize_compact_live_log_json(&value, plan))
+}
+
+fn serialize_compact_live_log_json(
+    value: &serde_json::Value,
+    plan: mojo_live_log_record::LiveLogJsonPlan,
+) -> Option<String> {
+    let mut compact = serde_json::Map::new();
+    for (key, include) in [
+        ("timestamp", plan.timestamp),
+        ("pid", plan.pid),
+        ("event", plan.event),
+    ] {
+        if include && let Some(value) = value.get(key) {
+            compact.insert(key.to_string(), value.clone());
         }
     }
-
-    mojo_live_log_record::truncate_plain_text(line)
+    compact.insert(
+        "message".to_string(),
+        serde_json::Value::String("[live log record truncated]".to_string()),
+    );
+    serde_json::to_string(&compact)
+        .ok()
+        .map(|serialized| format!("{serialized}\n"))
 }
 
 fn materialize_nested_string_clips(value: &mut serde_json::Value) -> Result<(), MojoError> {

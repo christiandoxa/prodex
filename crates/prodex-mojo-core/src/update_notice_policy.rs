@@ -1,9 +1,16 @@
+use std::cmp::Ordering;
+
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
 const INSTALL_CHANNEL: i64 = 0;
 const EMIT_NOTICE: i64 = 1;
 const CACHE_FRESH: i64 = 2;
+const RELEASE_VERSION_VALID: i64 = 3;
+const RELEASE_VERSION_COMPARE: i64 = 4;
+
+const RELEASE_VERSION_TOTAL_ORDER: i64 = 0;
+const RELEASE_VERSION_PRECEDENCE: i64 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateInstallChannelClass {
@@ -18,6 +25,12 @@ pub enum UpdateNoticeCommandClass {
     Doctor,
     Update,
     Quota,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseVersionOrder {
+    Total,
+    Precedence,
 }
 
 unsafe extern "C" {
@@ -56,6 +69,15 @@ struct PolicyInput {
 }
 
 fn call(operation: i64, text0: &str, text1: &str, input: PolicyInput) -> Result<i64, MojoError> {
+    call_bytes(operation, text0.as_bytes(), text1.as_bytes(), input)
+}
+
+fn call_bytes(
+    operation: i64,
+    text0: &[u8],
+    text1: &[u8],
+    input: PolicyInput,
+) -> Result<i64, MojoError> {
     let mut output = -1_i64;
     status(unsafe {
         prodex_update_notice_policy_v1(
@@ -74,6 +96,40 @@ fn call(operation: i64, text0: &str, text1: &str, input: PolicyInput) -> Result<
         )
     })?;
     Ok(output)
+}
+
+pub fn release_version_is_valid(version: &str) -> Result<bool, MojoError> {
+    match call(RELEASE_VERSION_VALID, version, "", PolicyInput::default())? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn compare_release_versions(
+    candidate: &str,
+    current: &str,
+    order: ReleaseVersionOrder,
+) -> Result<Option<Ordering>, MojoError> {
+    let result = call(
+        RELEASE_VERSION_COMPARE,
+        candidate,
+        current,
+        PolicyInput {
+            tag0: match order {
+                ReleaseVersionOrder::Total => RELEASE_VERSION_TOTAL_ORDER,
+                ReleaseVersionOrder::Precedence => RELEASE_VERSION_PRECEDENCE,
+            },
+            ..PolicyInput::default()
+        },
+    )?;
+    match result {
+        -2 => Ok(None),
+        -1 => Ok(Some(Ordering::Less)),
+        0 => Ok(Some(Ordering::Equal)),
+        1 => Ok(Some(Ordering::Greater)),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn install_channel(
@@ -190,5 +246,109 @@ mod tests {
         assert!(!cache_is_fresh(false, 100, 0, 300).unwrap());
         assert!(!cache_is_fresh(true, 300, 0, 300).unwrap());
         assert!(cache_is_fresh(true, i64::MIN, i64::MAX, 300).unwrap());
+    }
+
+    #[test]
+    fn release_version_abi_matches_strict_semver_validation_and_ordering() {
+        let valid_cases = [
+            ("1.2.3", true),
+            ("v1.2.3", true),
+            ("\u{2003}v1.2.3\u{3000}", true),
+            ("1.2.3-alpha.9", true),
+            ("1.2.3+build.01", true),
+            ("18446744073709551615.0.0", true),
+            ("01.2.3", false),
+            ("1.02.3", false),
+            ("1.2.03", false),
+            ("1.2.3-01", false),
+            ("18446744073709551616.0.0", false),
+            ("1.2", false),
+            ("1.2.3.4", false),
+            ("vv1.2.3", false),
+            ("V1.2.3", false),
+            ("1.2.3+", false),
+            ("1.2.3-α", false),
+        ];
+        for (version, expected) in valid_cases {
+            assert_eq!(
+                release_version_is_valid(version).unwrap(),
+                expected,
+                "{version}"
+            );
+        }
+
+        let compare = |candidate, current, order| {
+            compare_release_versions(candidate, current, order).unwrap()
+        };
+        assert_eq!(
+            compare("1.2.3", "1.2.3", ReleaseVersionOrder::Total),
+            Some(Ordering::Equal)
+        );
+        assert_eq!(
+            compare("1.10.0", "1.9.0", ReleaseVersionOrder::Precedence),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare("1.0.0-rc.10", "1.0.0-rc.2", ReleaseVersionOrder::Precedence),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare("1.0.0-rc.1", "1.0.0", ReleaseVersionOrder::Precedence),
+            Some(Ordering::Less)
+        );
+        assert_eq!(
+            compare(
+                "1.0.0+build.10",
+                "1.0.0+build.2",
+                ReleaseVersionOrder::Total
+            ),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare("1.0.0+001", "1.0.0+1", ReleaseVersionOrder::Total),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(
+            compare(
+                "1.0.0+build-b",
+                "1.0.0+build-a",
+                ReleaseVersionOrder::Precedence
+            ),
+            Some(Ordering::Equal)
+        );
+        assert_eq!(
+            compare("vv1.0.0", "1.0.0", ReleaseVersionOrder::Total),
+            None
+        );
+    }
+
+    #[test]
+    fn release_version_abi_rejects_invalid_utf8_views() {
+        let invalid_utf8 = [b'1', b'.', b'2', b'.', b'3', 0xff];
+        assert_eq!(
+            call_bytes(
+                RELEASE_VERSION_VALID,
+                &invalid_utf8,
+                b"",
+                PolicyInput::default(),
+            ),
+            Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn release_version_abi_enforces_the_existing_text_bound() {
+        const MAX_TEXT_BYTES: usize = 1_048_576;
+        let version = format!("1.2.3+{}", "a".repeat(MAX_TEXT_BYTES - 6));
+        assert!(release_version_is_valid(&version).unwrap());
+        assert_eq!(
+            call_bytes(
+                RELEASE_VERSION_VALID,
+                format!("{version}a").as_bytes(),
+                b"",
+                PolicyInput::default(),
+            ),
+            Err(MojoError::InvalidInput)
+        );
     }
 }

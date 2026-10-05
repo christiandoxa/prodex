@@ -49,6 +49,10 @@ use error_class::runtime_local_rewrite_native_first_event_error_class;
 
 const RUNTIME_LOCAL_REWRITE_STREAM_CHUNK_BYTES: usize = 64 * 1024;
 
+#[path = "local_rewrite_upstream/binding_candidate.rs"]
+mod binding_candidate;
+pub(super) use binding_candidate::runtime_local_rewrite_mojo_binding_identity;
+
 pub(super) struct RuntimeLocalRewriteUpstreamResult {
     pub(super) response: RuntimeLocalRewriteUpstreamResponse,
     pub(super) gemini_context: Option<RuntimeGeminiRequestContext>,
@@ -116,14 +120,7 @@ impl RuntimeLocalRewriteBindingContext {
         &self,
         identity: Option<&RuntimeProviderBindingIdentity>,
     ) -> bool {
-        match (&self.bound, identity) {
-            (None, Some(_)) => true,
-            (Some(binding), Some(identity)) => {
-                binding.profile_name == RUNTIME_LOCAL_REWRITE_PROFILE
-                    && binding.binding_identity.as_ref() == Some(identity)
-            }
-            _ => false,
-        }
+        binding_candidate::candidate_allowed(self, identity)
     }
 }
 

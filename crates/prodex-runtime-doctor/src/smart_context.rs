@@ -192,7 +192,11 @@ fn runtime_doctor_add_smart_context_autopilot_event(
         runtime_doctor_increment_string_count(&mut summary.decision_counts, decision);
         if decision == "rewritten" {
             summary.rewrite_count += 1;
-        } else if runtime_doctor_smart_context_decision_is_fallback(decision) {
+        } else if prodex_mojo_core::rich::runtime_doctor_smart_context_decision_is_fallback(
+            decision,
+        )
+        .expect("Smart Context decision classification must remain Mojo-owned")
+        {
             summary.fallback_count += 1;
             runtime_doctor_count_smart_context_fallback_reasons(summary, decision, &event);
         }
@@ -211,10 +215,6 @@ fn runtime_doctor_add_smart_context_autopilot_event(
     }
 
     summary.latest_event = Some(event);
-}
-
-fn runtime_doctor_smart_context_decision_is_fallback(decision: &str) -> bool {
-    !matches!(decision, "rewritten" | "pass_through")
 }
 
 fn runtime_doctor_count_smart_context_fallback_reasons(

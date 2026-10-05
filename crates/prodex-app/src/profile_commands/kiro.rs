@@ -437,11 +437,12 @@ mod tests {
             (
                 serde_json::json!({
                     "models": [
+                        {"id": "preferred-id", "model_id": "ignored-alias"},
                         {"model_id": "snake-id", "model_name": "Snake", "context_window_tokens": 123},
                         {"modelId": "camel-id", "modelName": "Camel", "contextWindowTokens": 456}
                     ]
                 }),
-                vec!["snake-id", "camel-id"],
+                vec!["preferred-id", "snake-id", "camel-id"],
             ),
             (
                 serde_json::json!({
