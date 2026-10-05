@@ -12,6 +12,10 @@ pub use active_profile::{
     profile_import_active_profile_plan,
 };
 
+#[path = "profile_export/copilot.rs"]
+mod copilot;
+pub use copilot::strip_copilot_json_line_comments;
+
 #[repr(i64)]
 #[derive(Clone, Copy)]
 enum ProfileExportPolicyMode {
@@ -675,6 +679,14 @@ mod tests {
             profile_export_selection_plan(&[], &["main"]).unwrap(),
             ProfileExportSelectionPlan::NoProfiles
         );
+    }
+
+    #[test]
+    fn copilot_jsonc_line_comment_stripping_is_mojo_owned() {
+        let input = "// lead\n{\"url\":\"https://example.test//inside\", // tail\n\"value\":\"slash//inside\"}\n";
+        let expected =
+            "\n{\"url\":\"https://example.test//inside\", \n\"value\":\"slash//inside\"}\n";
+        assert_eq!(strip_copilot_json_line_comments(input).unwrap(), expected);
     }
 
     #[test]

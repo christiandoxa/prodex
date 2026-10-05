@@ -175,70 +175,16 @@ pub fn parse_copilot_config_file(raw: &str) -> Result<CopilotConfigFile> {
     match serde_json::from_str(raw) {
         Ok(config) => Ok(config),
         Err(original_error) => {
-            let without_comments = Zeroizing::new(strip_json_line_comments(raw));
+            let without_comments = Zeroizing::new(
+                prodex_mojo_core::profile_export::strip_copilot_json_line_comments(raw).map_err(
+                    |error| anyhow::anyhow!("Mojo Copilot JSONC normalization failed: {error:?}"),
+                )?,
+            );
             if without_comments.as_str() == raw || without_comments.trim().is_empty() {
                 return Err(original_error).context("failed to parse Copilot config");
             }
             serde_json::from_str(without_comments.as_str())
                 .context("failed to parse Copilot config")
-        }
-    }
-}
-
-fn strip_json_line_comments(raw: &str) -> String {
-    let mut output = String::with_capacity(raw.len());
-    let mut chars = raw.chars().peekable();
-    let mut in_string = false;
-    let mut escaped = false;
-
-    while let Some(ch) = chars.next() {
-        if in_string {
-            append_json_string_char(&mut output, ch, &mut escaped, &mut in_string);
-            continue;
-        }
-
-        if ch == '"' {
-            in_string = true;
-            output.push(ch);
-            continue;
-        }
-
-        if ch == '/' && chars.peek() == Some(&'/') {
-            skip_json_line_comment(&mut chars, &mut output);
-            continue;
-        }
-
-        output.push(ch);
-    }
-
-    output
-}
-
-fn append_json_string_char(
-    output: &mut String,
-    ch: char,
-    escaped: &mut bool,
-    in_string: &mut bool,
-) {
-    output.push(ch);
-    if *escaped {
-        *escaped = false;
-    } else if ch == '\\' {
-        *escaped = true;
-    } else if ch == '"' {
-        *in_string = false;
-    }
-}
-
-fn skip_json_line_comment(
-    chars: &mut std::iter::Peekable<std::str::Chars<'_>>,
-    output: &mut String,
-) {
-    let _ = chars.next();
-    for comment_ch in chars.by_ref() {
-        if comment_ch == '\n' {
-            output.push('\n');
-            break;
         }
     }
 }

@@ -906,7 +906,8 @@
           "profile_export_policy_limits",
           "profile_export_requested_profile_selection",
           "profile_export_active_profile_membership",
-          "profile_import_active_profile_resolution"
+          "profile_import_active_profile_resolution",
+          "profile_export_copilot_jsonc_normalization"
         ]
       },
       {
@@ -3033,6 +3034,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "BTreeSet acquisition/order, borrowed string views, output-index validation, String ownership, and stable user-facing error text"
+    },
+    {
+      "name": "profile_export_copilot_jsonc_normalization",
+      "domain": "profile/export-policy",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust scanned Copilot config text, tracked JSON string and escape state, removed // line comments outside strings, and preserved newlines",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_copilot_strip_json_line_comments_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/copilot.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::strip_copilot_json_line_comments",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/copilot.rs"
+      ],
+      "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
+      "rust_owner_before": "Byte-preserving JSONC line-comment stripping with JSON quote/escape state and newline preservation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo adapter test and profile-export JSONC caller regression cover line comments and // inside string values",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "initial Serde parse, caller-owned output buffer, UTF-8 String materialization, Zeroizing ownership, and final Serde parse/error context"
     },
     {
       "name": "profile_export_active_profile_membership",

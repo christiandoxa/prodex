@@ -185,6 +185,7 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/runtime_state_shared/line_index.rs",
   "crates/prodex-mojo-core/src/profile_export.rs",
   "crates/prodex-mojo-core/src/profile_export/active_profile.rs",
+  "crates/prodex-mojo-core/src/profile_export/copilot.rs",
   "mojo/prodex_core/profile_export_policy.mojo",
   "crates/prodex-profile-export/src/envelope.rs",
   "crates/prodex-profile-export/src/data_model.rs",
@@ -4022,6 +4023,7 @@ export function findViolations(files) {
         "profile_export_selection_plan_is_mojo_owned",
         '#[path = "profile_export/active_profile.rs"]',
         "profile_active_selection_and_import_plan_are_mojo_owned",
+        "copilot_jsonc_line_comment_stripping_is_mojo_owned",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: profile-export selection adapter must retain ${marker}`);
@@ -4036,6 +4038,26 @@ export function findViolations(files) {
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: active-profile adapter must retain ${marker}`);
     }
+    if (filePath === "crates/prodex-mojo-core/src/profile_export/copilot.rs") {
+      const required = [
+        "prodex_profile_export_copilot_strip_json_line_comments_v1(",
+        "pub fn strip_copilot_json_line_comments(",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Copilot JSONC adapter must retain ${marker}`);
+    }
+    if (filePath === "crates/prodex-profile-export/src/copilot.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = "prodex_mojo_core::profile_export::strip_copilot_json_line_comments(raw)";
+      const restoredRust = [
+        "fn strip_json_line_comments(",
+        "fn append_json_string_char(",
+        "fn skip_json_line_comment(",
+      ];
+      return production.includes(required) && restoredRust.every((marker) => !production.includes(marker))
+        ? []
+        : [`${filePath}: Copilot JSONC line-comment normalization must use Mojo without a Rust parser copy`];
+    }
     if (filePath === "mojo/prodex_core/profile_export_policy.mojo") {
       const required = [
         '@export("prodex_profile_export_selection_v1")',
@@ -4048,6 +4070,9 @@ export function findViolations(files) {
         '@export("prodex_profile_import_active_profile_plan_v1")',
         "if existing.len > 0:",
         "profile_import_views_equal(source, mapping_sources",
+        '@export("prodex_profile_export_copilot_strip_json_line_comments_v1")',
+        "value == UInt8(47)",
+        "var in_string = False",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: requested profile selection must remain Mojo-owned (${marker})`);
@@ -4059,6 +4084,7 @@ export function findViolations(files) {
         "requested_profile_names_reject_missing_profiles",
         "imported_active_profile_uses_existing_active_profile_first",
         "export_active_profile_only_survives_when_selected",
+        "copilot_config_parser_accepts_copilot_jsonc_comments",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: profile-export selection caller coverage must retain ${marker}`);
@@ -4917,6 +4943,15 @@ function selfTest() {
     "crates/prodex-profile-export/src/selection.rs",
     profileExportSelectionCaller + "\nselected.iter().any(|name| name == active_profile);",
   ]]).join("\n"), /profile selection and active-profile resolution must use Mojo/u);
+  const profileCopilotJsoncCaller =
+    "prodex_mojo_core::profile_export::strip_copilot_json_line_comments(raw)";
+  assert.deepEqual(findViolations([[
+    "crates/prodex-profile-export/src/copilot.rs", profileCopilotJsoncCaller,
+  ]]), []);
+  assert.match(findViolations([[
+    "crates/prodex-profile-export/src/copilot.rs",
+    profileCopilotJsoncCaller + "\nfn strip_json_line_comments(raw: &str) {}",
+  ]]).join("\n"), /JSONC line-comment normalization must use Mojo/u);
   const operationalHistogramCaller = [
     "histogram_bucket_bounds(name)",
     "prodex_mojo_core::operational_metrics::observe_histogram(",

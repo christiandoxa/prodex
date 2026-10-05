@@ -685,3 +685,75 @@ def prodex_profile_import_active_profile_plan_v1(
             output[unsafe_offset=1] = index
             return 0
     return 0
+
+
+@export("prodex_profile_export_copilot_strip_json_line_comments_v1")
+def prodex_profile_export_copilot_strip_json_line_comments_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return PROFILE_EXPORT_POLICY_ABI
+    if (
+        input_length < 0
+        or (input_length > 0 and input_address == 0)
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+    ):
+        return PROFILE_EXPORT_POLICY_INVALID
+    if output_capacity < input_length:
+        return 2
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var index: Int64 = 0
+    var in_string = False
+    var escaped = False
+    while index < input_length:
+        var value = source[unsafe_offset=index]
+        if in_string:
+            output[unsafe_offset=written[]] = value
+            written[] += 1
+            if escaped:
+                escaped = False
+            elif value == UInt8(92):
+                escaped = True
+            elif value == UInt8(34):
+                in_string = False
+            index += 1
+            continue
+        if value == UInt8(34):
+            in_string = True
+            output[unsafe_offset=written[]] = value
+            written[] += 1
+            index += 1
+            continue
+        if (
+            value == UInt8(47)
+            and index + 1 < input_length
+            and source[unsafe_offset=index + 1] == UInt8(47)
+        ):
+            index += 2
+            while index < input_length and source[unsafe_offset=index] != UInt8(10):
+                index += 1
+            if index < input_length:
+                output[unsafe_offset=written[]] = UInt8(10)
+                written[] += 1
+                index += 1
+            continue
+        output[unsafe_offset=written[]] = value
+        written[] += 1
+        index += 1
+    return PROFILE_EXPORT_POLICY_OK
