@@ -14,7 +14,9 @@ pub use active_profile::{
 
 #[path = "profile_export/copilot.rs"]
 mod copilot;
-pub use copilot::strip_copilot_json_line_comments;
+pub use copilot::{
+    copilot_platform_label, copilot_version_triplet, strip_copilot_json_line_comments,
+};
 
 #[repr(i64)]
 #[derive(Clone, Copy)]
@@ -679,14 +681,6 @@ mod tests {
             profile_export_selection_plan(&[], &["main"]).unwrap(),
             ProfileExportSelectionPlan::NoProfiles
         );
-    }
-
-    #[test]
-    fn copilot_jsonc_line_comment_stripping_is_mojo_owned() {
-        let input = "// lead\n{\"url\":\"https://example.test//inside\", // tail\n\"value\":\"slash//inside\"}\n";
-        let expected =
-            "\n{\"url\":\"https://example.test//inside\", \n\"value\":\"slash//inside\"}\n";
-        assert_eq!(strip_copilot_json_line_comments(input).unwrap(), expected);
     }
 
     #[test]

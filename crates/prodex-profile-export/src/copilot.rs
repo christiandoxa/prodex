@@ -216,23 +216,8 @@ pub fn copilot_token_from_config(
 }
 
 pub fn parse_copilot_version(raw: &str) -> (u64, u64, u64) {
-    let mut parts = raw.split('.');
-    let parse_part = |value: Option<&str>| {
-        value
-            .and_then(|part| {
-                part.chars()
-                    .take_while(|ch| ch.is_ascii_digit())
-                    .collect::<String>()
-                    .parse::<u64>()
-                    .ok()
-            })
-            .unwrap_or(0)
-    };
-    (
-        parse_part(parts.next()),
-        parse_part(parts.next()),
-        parse_part(parts.next()),
-    )
+    prodex_mojo_core::profile_export::copilot_version_triplet(raw)
+        .expect("Mojo Copilot version parser returned invalid output")
 }
 
 pub fn copilot_platform_label() -> &'static str {
@@ -240,15 +225,8 @@ pub fn copilot_platform_label() -> &'static str {
 }
 
 pub fn copilot_platform_label_for(os: &str, arch: &str) -> &'static str {
-    match (os, arch) {
-        ("linux", "x86_64") => "linux-x64",
-        ("linux", "aarch64") => "linux-arm64",
-        ("macos", "x86_64") => "darwin-x64",
-        ("macos", "aarch64") => "darwin-arm64",
-        ("windows", "x86_64") => "win32-x64",
-        ("windows", "aarch64") => "win32-arm64",
-        _ => "linux-x64",
-    }
+    prodex_mojo_core::profile_export::copilot_platform_label(os, arch)
+        .expect("Mojo Copilot platform planner returned invalid output")
 }
 
 pub fn copilot_user_api_origin(host: &str) -> Result<String> {

@@ -4023,7 +4023,6 @@ export function findViolations(files) {
         "profile_export_selection_plan_is_mojo_owned",
         '#[path = "profile_export/active_profile.rs"]',
         "profile_active_selection_and_import_plan_are_mojo_owned",
-        "copilot_jsonc_line_comment_stripping_is_mojo_owned",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: profile-export selection adapter must retain ${marker}`);
@@ -4042,21 +4041,33 @@ export function findViolations(files) {
       const required = [
         "prodex_profile_export_copilot_strip_json_line_comments_v1(",
         "pub fn strip_copilot_json_line_comments(",
+        "prodex_profile_export_copilot_metadata_v1(",
+        "pub fn copilot_version_triplet(",
+        "pub fn copilot_platform_label(",
+        "copilot_jsonc_line_comment_stripping_is_mojo_owned",
+        "copilot_version_and_platform_metadata_are_mojo_owned",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Copilot JSONC adapter must retain ${marker}`);
     }
     if (filePath === "crates/prodex-profile-export/src/copilot.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
-      const required = "prodex_mojo_core::profile_export::strip_copilot_json_line_comments(raw)";
+      const required = [
+        "prodex_mojo_core::profile_export::strip_copilot_json_line_comments(raw)",
+        "prodex_mojo_core::profile_export::copilot_version_triplet(raw)",
+        "prodex_mojo_core::profile_export::copilot_platform_label(os, arch)",
+      ];
       const restoredRust = [
         "fn strip_json_line_comments(",
         "fn append_json_string_char(",
         "fn skip_json_line_comment(",
+        "raw.split('.')",
+        "match (os, arch)",
       ];
-      return production.includes(required) && restoredRust.every((marker) => !production.includes(marker))
+      return required.every((marker) => production.includes(marker)) &&
+        restoredRust.every((marker) => !production.includes(marker))
         ? []
-        : [`${filePath}: Copilot JSONC line-comment normalization must use Mojo without a Rust parser copy`];
+        : [`${filePath}: Copilot JSONC/version/platform policy must use Mojo without a Rust semantic copy`];
     }
     if (filePath === "mojo/prodex_core/profile_export_policy.mojo") {
       const required = [
@@ -4073,6 +4084,10 @@ export function findViolations(files) {
         '@export("prodex_profile_export_copilot_strip_json_line_comments_v1")',
         "value == UInt8(47)",
         "var in_string = False",
+        '@export("prodex_profile_export_copilot_metadata_v1")',
+        "profile_export_copilot_version_part(",
+        "profile_export_copilot_platform(",
+        'rich_view_matches_literal["windows"]',
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: requested profile selection must remain Mojo-owned (${marker})`);
@@ -4085,6 +4100,7 @@ export function findViolations(files) {
         "imported_active_profile_uses_existing_active_profile_first",
         "export_active_profile_only_survives_when_selected",
         "copilot_config_parser_accepts_copilot_jsonc_comments",
+        "copilot_url_helpers_match_import_expectations",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: profile-export selection caller coverage must retain ${marker}`);
@@ -4943,15 +4959,26 @@ function selfTest() {
     "crates/prodex-profile-export/src/selection.rs",
     profileExportSelectionCaller + "\nselected.iter().any(|name| name == active_profile);",
   ]]).join("\n"), /profile selection and active-profile resolution must use Mojo/u);
-  const profileCopilotJsoncCaller =
-    "prodex_mojo_core::profile_export::strip_copilot_json_line_comments(raw)";
+  const profileCopilotJsoncCaller = [
+    "prodex_mojo_core::profile_export::strip_copilot_json_line_comments(raw)",
+    "prodex_mojo_core::profile_export::copilot_version_triplet(raw)",
+    "prodex_mojo_core::profile_export::copilot_platform_label(os, arch)",
+  ].join("\n");
   assert.deepEqual(findViolations([[
     "crates/prodex-profile-export/src/copilot.rs", profileCopilotJsoncCaller,
   ]]), []);
   assert.match(findViolations([[
     "crates/prodex-profile-export/src/copilot.rs",
     profileCopilotJsoncCaller + "\nfn strip_json_line_comments(raw: &str) {}",
-  ]]).join("\n"), /JSONC line-comment normalization must use Mojo/u);
+  ]]).join("\n"), /JSONC\/version\/platform policy must use Mojo/u);
+  assert.match(findViolations([[
+    "crates/prodex-profile-export/src/copilot.rs",
+    profileCopilotJsoncCaller + "\nlet mut parts = raw.split('.');",
+  ]]).join("\n"), /JSONC\/version\/platform policy must use Mojo/u);
+  assert.match(findViolations([[
+    "crates/prodex-profile-export/src/copilot.rs",
+    profileCopilotJsoncCaller + "\nmatch (os, arch) { _ => {} }",
+  ]]).join("\n"), /JSONC\/version\/platform policy must use Mojo/u);
   const operationalHistogramCaller = [
     "histogram_bucket_bounds(name)",
     "prodex_mojo_core::operational_metrics::observe_histogram(",

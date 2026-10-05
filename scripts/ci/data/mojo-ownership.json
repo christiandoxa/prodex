@@ -907,7 +907,9 @@
           "profile_export_requested_profile_selection",
           "profile_export_active_profile_membership",
           "profile_import_active_profile_resolution",
-          "profile_export_copilot_jsonc_normalization"
+          "profile_export_copilot_jsonc_normalization",
+          "profile_export_copilot_version_parsing",
+          "profile_export_copilot_platform_mapping"
         ]
       },
       {
@@ -3034,6 +3036,58 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "BTreeSet acquisition/order, borrowed string views, output-index validation, String ownership, and stable user-facing error text"
+    },
+    {
+      "name": "profile_export_copilot_version_parsing",
+      "domain": "profile/export-policy",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust split Copilot CLI version text by dots, parsed leading ASCII digits in the first three components, mapped invalid/overflow components to zero, and defaulted missing components to zero",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_copilot_metadata_v1",
+      "mojo_operation_ids": {
+        "version": 1
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/copilot.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::copilot_version_triplet",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/copilot.rs"
+      ],
+      "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
+      "rust_owner_before": "Leading ASCII-digit Copilot version triplet parsing with u64 overflow-to-zero and missing-part defaults",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo adapter coverage and profile-export caller tests assert prerelease suffixes, missing components, and overflow behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed UTF-8 view construction, fixed-width output validation, and tuple materialization"
+    },
+    {
+      "name": "profile_export_copilot_platform_mapping",
+      "domain": "profile/export-policy",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust matched OS and architecture pairs to Copilot platform labels and defaulted unknown pairs to linux-x64",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_copilot_metadata_v1",
+      "mojo_operation_ids": {
+        "platform": 2
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/copilot.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::copilot_platform_label",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/copilot.rs"
+      ],
+      "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
+      "rust_owner_before": "Exact linux/macos/windows x86_64/aarch64 platform mapping and linux-x64 default",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo adapter coverage and profile-export caller tests assert supported and default platform labels",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "host OS/architecture acquisition, borrowed view construction, validated tag-to-static-label materialization"
     },
     {
       "name": "profile_export_copilot_jsonc_normalization",
