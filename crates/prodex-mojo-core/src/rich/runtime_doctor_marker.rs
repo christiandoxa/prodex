@@ -5,6 +5,8 @@ use crate::MojoError;
 
 const RUNTIME_DOCTOR_MARKER_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_LOG_VALUE_ABI_VERSION: i64 = 1;
+const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: i64 = 2;
 const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_MAX_BATCH: usize = 256;
@@ -31,6 +33,18 @@ unsafe extern "C" {
         abi_version: i64,
         decision: u64,
         is_fallback: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_log_value_is_ignored_v1(
+        abi_version: i64,
+        value: u64,
+        is_ignored: u64,
+    ) -> i64;
+    fn prodex_mojo_runtime_doctor_smart_context_fallback_reason_source_v1(
+        abi_version: i64,
+        decision: u64,
+        has_self_check: i64,
+        reason_count: i64,
+        source: u64,
     ) -> i64;
     fn prodex_mojo_runtime_doctor_marker_semantics_v2(
         abi_version: i64,
@@ -89,6 +103,10 @@ pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_CONTINUATION: i64 = 3;
 pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_PERSISTENCE: i64 = 4;
 pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_QUOTA: i64 = 5;
 pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_TRANSPORT: i64 = 6;
+
+pub const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_EVENT_REASONS: i64 = 1;
+pub const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK: i64 = 2;
+pub const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_DECISION: i64 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeDoctorMarkerSemantics {
@@ -361,6 +379,61 @@ pub fn runtime_doctor_parse_message_offsets(
     Ok(RuntimeDoctorMessageParsePlan { event, fields })
 }
 
+/// Decide whether a parsed runtime-doctor log value is semantically absent.
+pub fn runtime_doctor_log_value_is_ignored(value: &str) -> Result<bool, MojoError> {
+    ensure_rich_abi()?;
+    let value = view(value);
+    let mut is_ignored = 0_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_log_value_is_ignored_v1(
+            RUNTIME_DOCTOR_LOG_VALUE_ABI_VERSION,
+            mojo_pointer_address(&value),
+            mojo_mut_pointer_address(&mut is_ignored),
+        )
+    };
+    match (status, is_ignored) {
+        (0, 0) => Ok(false),
+        (0, 1) => Ok(true),
+        (1, _) => Err(MojoError::InvalidInput),
+        (2, _) => Err(MojoError::InvalidOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Select which parsed Smart Context field supplies fallback reason labels.
+pub fn runtime_doctor_smart_context_fallback_reason_source(
+    decision: &str,
+    has_self_check: bool,
+    reason_count: usize,
+) -> Result<i64, MojoError> {
+    ensure_rich_abi()?;
+    let decision = view(decision);
+    let reason_count = i64::try_from(reason_count).map_err(|_| MojoError::InvalidInput)?;
+    let mut source = 0_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_smart_context_fallback_reason_source_v1(
+            RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_ABI_VERSION,
+            mojo_pointer_address(&decision),
+            i64::from(has_self_check),
+            reason_count,
+            mojo_mut_pointer_address(&mut source),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            2 => MojoError::InvalidOutput,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    match source {
+        RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_EVENT_REASONS
+        | RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK
+        | RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_DECISION => Ok(source),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 /// Classify Smart Context autopilot decision labels through the Mojo authority.
 pub fn runtime_doctor_smart_context_decision_is_fallback(
     decision: &str,
@@ -407,6 +480,41 @@ pub fn runtime_doctor_marker_known(marker: &str) -> Result<bool, MojoError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_doctor_log_value_filter_is_mojo_owned() {
+        assert!(runtime_doctor_log_value_is_ignored("").unwrap());
+        assert!(runtime_doctor_log_value_is_ignored("-").unwrap());
+        assert!(!runtime_doctor_log_value_is_ignored(" - ").unwrap());
+        assert!(!runtime_doctor_log_value_is_ignored("value").unwrap());
+    }
+
+    #[test]
+    fn runtime_doctor_smart_context_fallback_reason_source_is_mojo_owned() {
+        assert_eq!(
+            runtime_doctor_smart_context_fallback_reason_source("self_check_passthrough", true, 1,)
+                .unwrap(),
+            RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_EVENT_REASONS,
+        );
+        assert_eq!(
+            runtime_doctor_smart_context_fallback_reason_source("self_check_passthrough", true, 0,)
+                .unwrap(),
+            RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK,
+        );
+        assert_eq!(
+            runtime_doctor_smart_context_fallback_reason_source("require_exact", true, 0).unwrap(),
+            RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_DECISION,
+        );
+        assert_eq!(
+            runtime_doctor_smart_context_fallback_reason_source(
+                "self_check_passthrough",
+                false,
+                0,
+            )
+            .unwrap(),
+            RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_DECISION,
+        );
+    }
 
     #[test]
     fn runtime_doctor_smart_context_decision_fallback_classification_is_mojo_owned() {

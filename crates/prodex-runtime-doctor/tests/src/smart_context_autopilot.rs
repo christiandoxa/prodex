@@ -156,3 +156,21 @@ fn runtime_doctor_tail_summary_counts_smart_context_marker_and_facets() {
         "pass_through_exact"
     );
 }
+#[test]
+fn runtime_doctor_smart_context_fallback_reason_source_is_mojo_owned_at_summary_boundary() {
+    let log = br#"
+[2026-10-05T00:00:00Z] smart_context_autopilot request=1 decision=self_check_passthrough reasons=- self_check=critical_signal_loss
+[2026-10-05T00:00:01Z] smart_context_autopilot request=2 decision=require_exact reasons=previous_response self_check=pass_through_exact
+[2026-10-05T00:00:02Z] smart_context_autopilot request=3 decision=quota_fallback reasons=- self_check=-
+"#;
+
+    let summary = runtime_doctor_summarize_smart_context_autopilot_tail(log);
+
+    assert_eq!(summary.event_count, 3);
+    assert_eq!(summary.fallback_count, 3);
+    assert_eq!(summary.fallback_reason_counts["critical_signal_loss"], 1);
+    assert_eq!(summary.fallback_reason_counts["previous_response"], 1);
+    assert_eq!(summary.fallback_reason_counts["quota_fallback"], 1);
+    assert!(!summary.fallback_reason_counts.contains_key("require_exact"));
+    assert!(!summary.self_check_counts.contains_key("-"));
+}

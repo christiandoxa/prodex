@@ -222,19 +222,30 @@ fn runtime_doctor_count_smart_context_fallback_reasons(
     decision: &str,
     event: &RuntimeDoctorSmartContextAutopilotEvent,
 ) {
-    if !event.reasons.is_empty() {
-        for reason in &event.reasons {
-            runtime_doctor_increment_string_count(&mut summary.fallback_reason_counts, reason);
+    let source = prodex_mojo_core::rich::runtime_doctor_smart_context_fallback_reason_source(
+        decision,
+        event.self_check.is_some(),
+        event.reasons.len(),
+    )
+    .expect("Mojo Smart Context fallback-reason policy returned invalid output");
+    match source {
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_EVENT_REASONS => {
+            for reason in &event.reasons {
+                runtime_doctor_increment_string_count(&mut summary.fallback_reason_counts, reason);
+            }
         }
-        return;
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK => {
+            let self_check = event
+                .self_check
+                .as_deref()
+                .expect("Mojo selected self-check fallback reason without a self-check value");
+            runtime_doctor_increment_string_count(&mut summary.fallback_reason_counts, self_check);
+        }
+        prodex_mojo_core::rich::RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_DECISION => {
+            runtime_doctor_increment_string_count(&mut summary.fallback_reason_counts, decision);
+        }
+        _ => unreachable!("validated Mojo fallback-reason source"),
     }
-    if decision == "self_check_passthrough"
-        && let Some(self_check) = event.self_check.as_deref()
-    {
-        runtime_doctor_increment_string_count(&mut summary.fallback_reason_counts, self_check);
-        return;
-    }
-    runtime_doctor_increment_string_count(&mut summary.fallback_reason_counts, decision);
 }
 
 fn runtime_doctor_increment_string_count(counts: &mut BTreeMap<String, usize>, value: &str) {

@@ -353,6 +353,83 @@ def runtime_doctor_smart_context_decision_is_fallback(view: ProdexRichStringView
         return False
     return True
 
+comptime RUNTIME_DOCTOR_LOG_VALUE_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_ABI_VERSION: Int64 = 1
+comptime RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_EVENT_REASONS: Int64 = 1
+comptime RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK: Int64 = 2
+comptime RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_DECISION: Int64 = 3
+
+
+def runtime_doctor_log_value_is_ignored(view: ProdexRichStringView) -> Bool:
+    if view.len == 0:
+        return True
+    return rich_view_matches_literal["-"](view, False)
+
+
+@export("prodex_mojo_runtime_doctor_log_value_is_ignored_v1")
+def prodex_mojo_runtime_doctor_log_value_is_ignored_v1(
+    abi_version: Int64, value_address: UInt, ignored_address: UInt
+) abi("C") -> Int64:
+    if (
+        abi_version != RUNTIME_DOCTOR_LOG_VALUE_ABI_VERSION
+        or value_address == 0
+        or ignored_address == 0
+    ):
+        return 1
+    var value = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(value_address)
+    )[].copy()
+    if not rich_view_valid(value, 0x7FFFFFFFFFFFFFFF):
+        return 2
+    var ignored = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(ignored_address)
+    )
+    ignored[] = 1 if runtime_doctor_log_value_is_ignored(value) else 0
+    return 0
+
+
+def runtime_doctor_smart_context_fallback_reason_source(
+    decision: ProdexRichStringView, has_self_check: Bool, reason_count: Int64
+) -> Int64:
+    if reason_count > 0:
+        return RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_EVENT_REASONS
+    if has_self_check and rich_view_matches_literal["self_check_passthrough"](
+        decision, False
+    ):
+        return RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK
+    return RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_DECISION
+
+
+@export("prodex_mojo_runtime_doctor_smart_context_fallback_reason_source_v1")
+def prodex_mojo_runtime_doctor_smart_context_fallback_reason_source_v1(
+    abi_version: Int64,
+    decision_address: UInt,
+    has_self_check: Int64,
+    reason_count: Int64,
+    source_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_ABI_VERSION
+        or decision_address == 0
+        or source_address == 0
+        or (has_self_check != 0 and has_self_check != 1)
+        or reason_count < 0
+    ):
+        return 1
+    var decision = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(decision_address)
+    )[].copy()
+    if not rich_view_valid(decision, 0x7FFFFFFFFFFFFFFF):
+        return 2
+    var source = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(source_address)
+    )
+    source[] = runtime_doctor_smart_context_fallback_reason_source(
+        decision, has_self_check == 1, reason_count
+    )
+    return 0
+
+
 @export("prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1")
 def prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1(
     abi_version: Int64, decision_address: UInt, fallback_address: UInt

@@ -5253,3 +5253,23 @@ Verification passed:
 - No-fallback self-test/check, authority guard, ownership check, size guard, formatting, and `git diff --check` passed; ownership reports 176 authoritative operations.
 - Sensitivity proof changed the authoritative cumulative comparison from `observation <= bounds[index]` to `<`. The direct required-Mojo test failed with bucket counts `[0, 1, 2]` instead of `[1, 1, 2]`. Restoring the source was byte-exact: SHA-256 before and after was `ded151abd8475c683e90b5452e03fd95de153a1942bd459fba7a8d483e87fdc6`; the targeted test passed again.
 - `node scripts/ci/mojo-production-share.mjs --check` reports 84,270 reachable Mojo LOC and 204,893 Rust production LOC, or **29.1427% Mojo**. The 7% release floor and Mojo non-regression pass; the 75% project target remains in progress.
+
+## Runtime doctor log-value and fallback-reason migration
+
+`runtime_doctor_marker.mojo` now owns two additional diagnostic decisions.
+`prodex_mojo_runtime_doctor_log_value_is_ignored_v1` classifies only the empty
+string and exact `-` sentinel as absent.
+`prodex_mojo_runtime_doctor_smart_context_fallback_reason_source_v1` selects the
+fallback-reason source with explicit event reasons first, then `self_check` for
+`self_check_passthrough`, then the decision label. Rust retains log/JSON parsing,
+DTO and BTreeMap ownership, iteration over the Mojo-selected source, and counter
+mutation. The prior Rust sentinel predicate and fallback-reason precedence chain
+were deleted; Mojo failures do not trigger Rust semantic recomputation.
+
+Verification passed:
+
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-mojo-core --features mojo-rich --test runtime_doctor_markers -- --list` listed 9 tests; all 9 passed.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-runtime-doctor runtime_doctor_smart_context_fallback_reason_source_is_mojo_owned_at_summary_boundary -- --list` listed 1 production caller test; it passed.
+- No-fallback self-test/check, authority guard, ownership check, and size guard passed; ownership reports 178 authoritative operations.
+- Sensitivity proof changed `reason_count > 0` to `reason_count > 1`. The production caller regression failed because the single explicit `previous_response` reason was no longer selected. Restoring the source was byte-exact with SHA-256 `96284d3a981fecf3b1a8a1f1162597d4d9ccc81e1edf97bcd0e332585f7e6493`; the caller regression passed again.
+- `node scripts/ci/mojo-production-share.mjs --check` reports 84,335 reachable Mojo LOC and 204,973 Rust production LOC, or **29.1506% Mojo**. The 7% release floor and Mojo non-regression pass; the 75% project target remains in progress.
