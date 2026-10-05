@@ -74,11 +74,13 @@ const DOCTOR_SMART_CONTEXT_DECISION_MOJO_FILE = DOCTOR_MARKER_ABI_MOJO_FILE;
 const DOCTOR_LOG_FIELDS_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/log_fields.rs";
 const DOCTOR_SMART_CONTEXT_CALLER_TEST_FILE = "crates/prodex-runtime-doctor/tests/src/smart_context_autopilot.rs";
 const GEMINI_COMPACT_SNIPPET_CONSUMER_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet.rs";
+const GEMINI_COMPACT_TEXT_CONSUMER_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs";
 const GEMINI_COMPACT_SNIPPET_REMOVED_RUST_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet/tool.rs";
 const GEMINI_COMPACT_SNIPPET_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/gemini_compact_snippet.rs";
 const GEMINI_COMPACT_SNIPPET_MOJO_FILE = "mojo/prodex_core/gemini_compact_snippet.mojo";
 const PROMOTED_FILES = [
   GEMINI_COMPACT_SNIPPET_CONSUMER_FILE,
+  GEMINI_COMPACT_TEXT_CONSUMER_FILE,
   GEMINI_COMPACT_SNIPPET_ADAPTER_FILE,
   GEMINI_COMPACT_SNIPPET_MOJO_FILE,
   OPERATIONAL_HISTOGRAM_CALLER_FILE,
@@ -4806,13 +4808,45 @@ export function findViolations(files) {
       return required.every((marker) => production.includes(marker)) && restoredRust.every((marker) => !production.includes(marker))
         ? [] : [`${filePath}: Gemini compact snippet shaping must use Mojo without a Rust semantic copy`];
     }
+    if (filePath === GEMINI_COMPACT_TEXT_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "truncate_gemini_compact_utf8(&text, max_bytes)",
+        "truncate_gemini_compact_utf8_edges(&text, max_bytes)",
+      ];
+      const restoredRust = [
+        "text.is_char_boundary(",
+        'const SUFFIX: &str = "\n[truncated]"',
+        'const SEPARATOR: &str = "\n[... middle truncated ...]\n"',
+      ];
+      return required.every((marker) => production.includes(marker)) && restoredRust.every((marker) => !production.includes(marker))
+        ? [] : [`${filePath}: Gemini compact UTF-8 truncation must use Mojo without a Rust semantic copy`];
+    }
     if (filePath === GEMINI_COMPACT_SNIPPET_ADAPTER_FILE) {
-      const required = ["prodex_mojo_gemini_compact_snippet_v1(", "pub fn format_gemini_compact_snippet(", "gemini_compact_snippet_formatting_is_mojo_owned"];
-      return required.filter((marker) => !contents.includes(marker)).map((marker) => `${filePath}: Gemini compact snippet adapter must retain ${marker}`);
+      const required = [
+        "prodex_mojo_gemini_compact_snippet_v1(",
+        "pub fn format_gemini_compact_snippet(",
+        "gemini_compact_snippet_formatting_is_mojo_owned",
+        "prodex_mojo_gemini_compact_truncate_v1(",
+        "pub fn truncate_gemini_compact_utf8(",
+        "pub fn truncate_gemini_compact_utf8_edges(",
+        "gemini_compact_utf8_truncation_is_mojo_owned",
+      ];
+      return required.filter((marker) => !contents.includes(marker)).map((marker) => `${filePath}: Gemini compact adapter must retain ${marker}`);
     }
     if (filePath === GEMINI_COMPACT_SNIPPET_MOJO_FILE) {
-      const required = ['@export("prodex_mojo_gemini_compact_snippet_v1")', 'rich_view_matches_literal["message"]', 'rich_view_matches_literal["function_call"]', 'rich_view_matches_literal["reasoning"]', 'StringSlice("\\n[truncated]")'];
-      return required.filter((marker) => !contents.includes(marker)).map((marker) => `${filePath}: Gemini compact snippet semantics must remain Mojo-owned (${marker})`);
+      const required = [
+        '@export("prodex_mojo_gemini_compact_snippet_v1")',
+        'rich_view_matches_literal["message"]',
+        'rich_view_matches_literal["function_call"]',
+        'rich_view_matches_literal["reasoning"]',
+        'StringSlice("\\n[truncated]")',
+        '@export("prodex_mojo_gemini_compact_truncate_v1")',
+        'StringSlice("\\n[... middle truncated ...]\\n")',
+        "gemini_compact_truncate_tail(",
+        "gemini_compact_truncate_edges(",
+      ];
+      return required.filter((marker) => !contents.includes(marker)).map((marker) => `${filePath}: Gemini compact semantics must remain Mojo-owned (${marker})`);
     }
     return [];
   });
@@ -4997,6 +5031,12 @@ function selfTest() {
   const geminiCompactConsumer = "GeminiCompactSnippetInput {\nformat_gemini_compact_snippet(";
   assert.deepEqual(findViolations([[GEMINI_COMPACT_SNIPPET_CONSUMER_FILE, geminiCompactConsumer]]), []);
   assert.match(findViolations([[GEMINI_COMPACT_SNIPPET_CONSUMER_FILE, geminiCompactConsumer + "\ngemini_provider_core_truncate_utf8(text, 768);"]]).join("\n"), /Gemini compact snippet shaping must use Mojo/u);
+  const geminiCompactTextConsumer = [
+    "truncate_gemini_compact_utf8(&text, max_bytes)",
+    "truncate_gemini_compact_utf8_edges(&text, max_bytes)",
+  ].join("\n");
+  assert.deepEqual(findViolations([[GEMINI_COMPACT_TEXT_CONSUMER_FILE, geminiCompactTextConsumer]]), []);
+  assert.match(findViolations([[GEMINI_COMPACT_TEXT_CONSUMER_FILE, geminiCompactTextConsumer + "\ntext.is_char_boundary(end);"]]).join("\n"), /Gemini compact UTF-8 truncation must use Mojo/u);
   const profileExportSelectionCaller = [
     "prodex_mojo_core::profile_export::profile_export_selection_plan(&available, &requested)",
     "prodex_mojo_core::profile_export::profile_export_active_profile_selected(",

@@ -5323,3 +5323,11 @@ Required-Mojo direct coverage and the production `copilot_state_plan_updates_exi
 Required-Mojo verification passed: `prodex-mojo-core --features mojo-core --lib gemini_compact_snippet_formatting_is_mojo_owned -- --list` enumerated 1 direct adapter test and it passed; `prodex-provider-core compact_snippet_shapes_are_mojo_owned_at_provider_boundary -- --list` enumerated 1 production caller test and it passed. The caller fixtures cover messages, default roles/names/call IDs, function/custom-tool calls, tool outputs, local shell, web search, reasoning suppression, generic values, Unicode, and truncation.
 
 Sensitivity proof changed the authoritative Mojo `function_call` prefix from `tool call ` to `TOOL call `. The production caller regression failed with `left: Some("TOOL call function (unknown): snow")` versus `right: Some("tool call function (unknown): snow")`. Restoring the Mojo source was byte-exact with SHA-256 `3a9bf76abe2b50881d9b8f5b209882286a180416a5b1454909bf9bec63e5b358`; the caller passed again.
+
+## Gemini compact UTF-8 truncation migration
+
+`gemini_compact_snippet.mojo` now also owns both compact text byte-budget algorithms through `prodex_mojo_gemini_compact_truncate_v1`: tail truncation with the exact `\n[truncated]` marker and head/tail edge truncation with the exact `\n[... middle truncated ...]\n` separator. Mojo owns byte-budget arithmetic and UTF-8 boundary adjustment. Rust retains String ownership and the typed ABI wrappers; the former Rust `is_char_boundary` loops and marker arithmetic were deleted without fallback recomputation.
+
+Required-Mojo verification passed: `prodex-mojo-core --features mojo-core --lib gemini_compact_utf8_truncation_is_mojo_owned -- --list` enumerated 1 direct adapter test and it passed; `prodex-provider-core truncation_limits_include_markers_and_preserve_utf8 -- --list` enumerated 1 provider-boundary test and it passed. The provider test now asserts the exact tail and middle markers in addition to byte limits and valid UTF-8.
+
+Sensitivity proof changed the authoritative middle separator text in Mojo. The provider regression failed because `\n[... middle truncated ...]\n` was no longer present. Restoring the source was byte-exact with SHA-256 `7e4da79551565ad0c4e89cb1de7c869adabe0c30d84d4d0d56e9a7a4a67528bd`; the provider test passed again.
