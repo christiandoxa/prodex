@@ -64,6 +64,16 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_profile_export_selection_v1(
+        abi_version: i64,
+        available_address: u64,
+        available_count: i64,
+        requested_address: u64,
+        requested_count: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
 }
 
 #[repr(C)]
@@ -354,6 +364,73 @@ fn profile_import_status_index(
         .ok_or(MojoError::InvalidOutput)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProfileExportSelectionPlan {
+    Selected(Vec<usize>),
+    NoProfiles,
+    MissingRequested(usize),
+}
+
+/// Select available profile indices in request order through the Mojo authority.
+pub fn profile_export_selection_plan(
+    available_names: &[&str],
+    requested_names: &[&str],
+) -> Result<ProfileExportSelectionPlan, MojoError> {
+    ensure_rich_abi()?;
+    let available = available_names
+        .iter()
+        .map(|name| ProfileImportStringView::from(Some(name)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let requested = requested_names
+        .iter()
+        .map(|name| ProfileImportStringView::from(Some(name)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let output_capacity = available.len().max(requested.len()).max(1);
+    let mut output = vec![0_i64; output_capacity];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_profile_export_selection_v1(
+            ABI_VERSION,
+            available.as_ptr() as usize as u64,
+            i64::try_from(available.len()).map_err(|_| MojoError::InvalidInput)?,
+            requested.as_ptr() as usize as u64,
+            i64::try_from(requested.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {
+            let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+            if written > output.len() {
+                return Err(MojoError::InvalidOutput);
+            }
+            let mut seen = std::collections::BTreeSet::new();
+            let mut selected = Vec::with_capacity(written);
+            for value in &output[..written] {
+                let index = usize::try_from(*value).map_err(|_| MojoError::InvalidOutput)?;
+                if index >= available_names.len() || !seen.insert(index) {
+                    return Err(MojoError::InvalidOutput);
+                }
+                selected.push(index);
+            }
+            Ok(ProfileExportSelectionPlan::Selected(selected))
+        }
+        1 if written == 0 => Ok(ProfileExportSelectionPlan::NoProfiles),
+        2 if written == 1 => {
+            let index = usize::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?;
+            if index >= requested_names.len() {
+                return Err(MojoError::InvalidOutput);
+            }
+            Ok(ProfileExportSelectionPlan::MissingRequested(index))
+        }
+        99 => Err(MojoError::InvalidInput),
+        100 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 /// Return the first duplicate profile-name index, if one exists.
 pub fn profile_import_duplicate_name_index(names: &[&str]) -> Result<Option<usize>, MojoError> {
     let inputs = names
@@ -571,6 +648,27 @@ pub fn validate_argon2(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn profile_export_selection_plan_is_mojo_owned() {
+        let available = ["main", "second"];
+        assert_eq!(
+            profile_export_selection_plan(&available, &[]).unwrap(),
+            ProfileExportSelectionPlan::Selected(vec![0, 1])
+        );
+        assert_eq!(
+            profile_export_selection_plan(&available, &["second", "main", "second"]).unwrap(),
+            ProfileExportSelectionPlan::Selected(vec![1, 0])
+        );
+        assert_eq!(
+            profile_export_selection_plan(&available, &["missing"]).unwrap(),
+            ProfileExportSelectionPlan::MissingRequested(0)
+        );
+        assert_eq!(
+            profile_export_selection_plan(&[], &["main"]).unwrap(),
+            ProfileExportSelectionPlan::NoProfiles
+        );
+    }
 
     #[test]
     fn profile_export_policy_kernel_smoke() {
