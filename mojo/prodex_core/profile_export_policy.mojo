@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_view_matches_literal, rich_view_ptr, rich_view_valid
+from rich_text import rich_trim_bounds, rich_view_matches_literal, rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
 
 comptime PROFILE_EXPORT_POLICY_ABI_VERSION: Int64 = 1
@@ -859,4 +859,286 @@ def prodex_profile_export_copilot_metadata_v1(
         output[1] = UInt64(0)
         output[2] = UInt64(0)
         return PROFILE_EXPORT_POLICY_OK
+    return PROFILE_EXPORT_POLICY_INVALID
+
+
+comptime PROFILE_EXPORT_COPILOT_URL_USER_ORIGIN: Int64 = 1
+comptime PROFILE_EXPORT_COPILOT_URL_MODELS: Int64 = 2
+comptime PROFILE_EXPORT_COPILOT_URL_INVALID_HOST: Int64 = 3
+
+
+def profile_export_copilot_write_literal(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    literal: StringSlice,
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if written[] < 0 or length > capacity - written[]:
+        return False
+    var source = literal.unsafe_ptr()
+    for index in range(length):
+        output[unsafe_offset=written[]] = source[unsafe_offset=index]
+        written[] += 1
+    return True
+
+
+def profile_export_copilot_write_range(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if (
+        start < 0
+        or end < start
+        or end > Int64(view.len)
+        or written[] < 0
+        or end - start > capacity - written[]
+    ):
+        return False
+    var source = rich_view_ptr(view)
+    for index in range(start, end):
+        output[unsafe_offset=written[]] = source[unsafe_offset=index]
+        written[] += 1
+    return True
+
+
+def profile_export_copilot_range_starts_with(
+    view: ProdexRichStringView, start: Int64, end: Int64, literal: StringSlice
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if start < 0 or end < start or end > Int64(view.len) or end - start < length:
+        return False
+    var source = rich_view_ptr(view)
+    var expected = literal.unsafe_ptr()
+    for index in range(length):
+        if source[unsafe_offset=start + index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def profile_export_copilot_range_ends_with(
+    view: ProdexRichStringView, start: Int64, end: Int64, literal: StringSlice
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if start < 0 or end < start or end > Int64(view.len) or end - start < length:
+        return False
+    var source = rich_view_ptr(view)
+    var expected = literal.unsafe_ptr()
+    var base = end - length
+    for index in range(length):
+        if source[unsafe_offset=base + index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def profile_export_copilot_trimmed_without_trailing_slashes(
+    view: ProdexRichStringView
+) -> Tuple[Int64, Int64]:
+    var bounds = rich_trim_bounds(view)
+    var end = bounds[1]
+    var source = rich_view_ptr(view)
+    while end > bounds[0] and source[unsafe_offset=end - 1] == UInt8(47):
+        end -= 1
+    return (bounds[0], end)
+
+
+def profile_export_copilot_subview(
+    view: ProdexRichStringView, start: Int64, end: Int64
+) -> ProdexRichStringView:
+    return ProdexRichStringView(view.ptr + UInt(start), UInt(end - start))
+
+
+def profile_export_copilot_user_origin(
+    host: ProdexRichStringView,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Int64:
+    var bounds = profile_export_copilot_trimmed_without_trailing_slashes(host)
+    var start = bounds[0]
+    var end = bounds[1]
+    if start >= end:
+        return PROFILE_EXPORT_COPILOT_URL_INVALID_HOST
+    var source = rich_view_ptr(host)
+    var scheme_start = start
+    var scheme_end = start
+    var rest_start = start
+    var separator: Int64 = -1
+    var cursor = start
+    while cursor + 2 < end:
+        if (
+            source[unsafe_offset=cursor] == UInt8(58)
+            and source[unsafe_offset=cursor + 1] == UInt8(47)
+            and source[unsafe_offset=cursor + 2] == UInt8(47)
+        ):
+            separator = cursor
+            break
+        cursor += 1
+    if separator >= 0:
+        scheme_end = separator
+        rest_start = separator + 3
+        if scheme_start == scheme_end or rest_start >= end:
+            return PROFILE_EXPORT_COPILOT_URL_INVALID_HOST
+    else:
+        scheme_start = -1
+        scheme_end = -1
+        rest_start = start
+
+    var authority_end = rest_start
+    while authority_end < end:
+        var value = source[unsafe_offset=authority_end]
+        if value == UInt8(47) or value == UInt8(63) or value == UInt8(35):
+            break
+        authority_end += 1
+    if authority_end == rest_start:
+        return PROFILE_EXPORT_COPILOT_URL_INVALID_HOST
+
+    var hostname_start = rest_start
+    var hostname_end = authority_end
+    var has_explicit_port = False
+    if source[unsafe_offset=rest_start] == UInt8(91):
+        var closing = rest_start + 1
+        while closing < authority_end and source[unsafe_offset=closing] != UInt8(93):
+            closing += 1
+        if closing >= authority_end:
+            return PROFILE_EXPORT_COPILOT_URL_INVALID_HOST
+        hostname_start = rest_start + 1
+        hostname_end = closing
+        has_explicit_port = closing + 1 < authority_end and source[unsafe_offset=closing + 1] == UInt8(58)
+    else:
+        var colon: Int64 = -1
+        var index = authority_end - 1
+        while index >= rest_start:
+            if source[unsafe_offset=index] == UInt8(58):
+                colon = index
+                break
+            index -= 1
+        if colon > rest_start:
+            var digits = colon + 1 < authority_end
+            var digit_index = colon + 1
+            while digits and digit_index < authority_end:
+                var byte = source[unsafe_offset=digit_index]
+                if byte < UInt8(48) or byte > UInt8(57):
+                    digits = False
+                digit_index += 1
+            if digits:
+                hostname_end = colon
+                has_explicit_port = True
+
+    if hostname_start >= hostname_end:
+        return PROFILE_EXPORT_COPILOT_URL_INVALID_HOST
+    var hostname = profile_export_copilot_subview(host, hostname_start, hostname_end)
+    var is_local = (
+        rich_view_matches_literal["localhost"](hostname, False)
+        or rich_view_matches_literal["127.0.0.1"](hostname, False)
+        or rich_view_matches_literal["::1"](hostname, False)
+    )
+    var hostname_source = rich_view_ptr(hostname)
+    var starts_api = (
+        hostname.len >= UInt(4)
+        and hostname_source[0] == UInt8(97)
+        and hostname_source[1] == UInt8(112)
+        and hostname_source[2] == UInt8(105)
+        and hostname_source[3] == UInt8(46)
+    )
+    written[] = 0
+    if scheme_start >= 0:
+        if not profile_export_copilot_write_range(host, scheme_start, scheme_end, output, capacity, written):
+            return 2
+    else:
+        if not profile_export_copilot_write_literal(output, capacity, written, StringSlice("https")):
+            return 2
+    if not profile_export_copilot_write_literal(output, capacity, written, StringSlice("://")):
+        return 2
+    if not has_explicit_port and not is_local and not starts_api:
+        if not profile_export_copilot_write_literal(output, capacity, written, StringSlice("api.")):
+            return 2
+    if not profile_export_copilot_write_range(host, rest_start, authority_end, output, capacity, written):
+        return 2
+    return PROFILE_EXPORT_POLICY_OK
+
+
+def profile_export_copilot_models_url(
+    host: ProdexRichStringView,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Int64:
+    var bounds = profile_export_copilot_trimmed_without_trailing_slashes(host)
+    var start = bounds[0]
+    var end = bounds[1]
+    var normalized = profile_export_copilot_subview(host, start, end)
+    written[] = 0
+    if (
+        rich_view_matches_literal["https://github.com"](normalized, True)
+        or rich_view_matches_literal["http://github.com"](normalized, True)
+        or rich_view_matches_literal["github.com"](normalized, True)
+    ):
+        if not profile_export_copilot_write_literal(
+            output, capacity, written, StringSlice("https://api.githubcopilot.com")
+        ):
+            return 2
+        return PROFILE_EXPORT_POLICY_OK
+
+    var fallback_start = start
+    if profile_export_copilot_range_starts_with(host, start, end, StringSlice("https://")):
+        fallback_start += 8
+    elif profile_export_copilot_range_starts_with(host, start, end, StringSlice("http://")):
+        fallback_start += 7
+    if profile_export_copilot_range_ends_with(
+        host, fallback_start, end, StringSlice(".ghe.com")
+    ):
+        var subdomain_end = end - 8
+        if not profile_export_copilot_write_literal(
+            output, capacity, written, StringSlice("https://copilot-api.")
+        ):
+            return 2
+        if not profile_export_copilot_write_range(
+            host, fallback_start, subdomain_end, output, capacity, written
+        ):
+            return 2
+        if not profile_export_copilot_write_literal(
+            output, capacity, written, StringSlice(".ghe.com")
+        ):
+            return 2
+        return PROFILE_EXPORT_POLICY_OK
+    if not profile_export_copilot_write_literal(output, capacity, written, StringSlice("https://api.")):
+        return 2
+    if not profile_export_copilot_write_range(host, fallback_start, end, output, capacity, written):
+        return 2
+    return PROFILE_EXPORT_POLICY_OK
+
+
+@export("prodex_profile_export_copilot_url_v1")
+def prodex_profile_export_copilot_url_v1(
+    abi_version: Int64,
+    operation: Int64,
+    host_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return PROFILE_EXPORT_POLICY_ABI
+    if host_address == 0 or output_address == 0 or output_capacity < 0 or written_address == 0:
+        return PROFILE_EXPORT_POLICY_INVALID
+    var host = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(host_address)
+    )[].copy()
+    if not profile_import_view_valid(host, True):
+        return PROFILE_EXPORT_POLICY_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    if operation == PROFILE_EXPORT_COPILOT_URL_USER_ORIGIN:
+        return profile_export_copilot_user_origin(host, output, output_capacity, written)
+    if operation == PROFILE_EXPORT_COPILOT_URL_MODELS:
+        return profile_export_copilot_models_url(host, output, output_capacity, written)
     return PROFILE_EXPORT_POLICY_INVALID

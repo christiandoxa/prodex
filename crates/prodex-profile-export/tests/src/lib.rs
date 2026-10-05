@@ -591,6 +591,28 @@ fn copilot_url_helpers_match_import_expectations() {
         default_copilot_models_api_url("https://enterprise.ghe.com"),
         "https://copilot-api.enterprise.ghe.com"
     );
+    assert_eq!(
+        copilot_user_api_origin("https://api.example.test/path?x=1").unwrap(),
+        "https://api.example.test"
+    );
+    assert_eq!(
+        copilot_user_api_origin("https://example.test:8443/path").unwrap(),
+        "https://example.test:8443"
+    );
+    assert_eq!(
+        copilot_user_api_origin("http://[::1]:1234/path").unwrap(),
+        "http://[::1]:1234"
+    );
+    assert_eq!(
+        copilot_user_api_origin("https://").unwrap(),
+        "https://api.https:"
+    );
+    assert!(copilot_user_api_origin("://host").is_err());
+    assert!(copilot_user_api_origin("   ").is_err());
+    assert_eq!(
+        default_copilot_models_api_url("https://Enterprise.GHE.com"),
+        "https://api.Enterprise.GHE.com"
+    );
 }
 
 #[test]

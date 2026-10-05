@@ -15,7 +15,8 @@ pub use active_profile::{
 #[path = "profile_export/copilot.rs"]
 mod copilot;
 pub use copilot::{
-    copilot_platform_label, copilot_version_triplet, strip_copilot_json_line_comments,
+    copilot_models_api_url, copilot_platform_label, copilot_user_api_origin,
+    copilot_version_triplet, strip_copilot_json_line_comments,
 };
 
 #[repr(i64)]
