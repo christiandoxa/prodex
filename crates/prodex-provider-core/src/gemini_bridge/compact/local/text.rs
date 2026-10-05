@@ -38,43 +38,14 @@ pub(super) fn gemini_provider_core_local_compact_text_from_content(
     }
 }
 
-pub(super) fn gemini_provider_core_truncate_utf8(mut text: String, max_bytes: usize) -> String {
-    if text.len() <= max_bytes {
-        return text;
-    }
-    const SUFFIX: &str = "\n[truncated]";
-    if max_bytes <= SUFFIX.len() {
-        return SUFFIX[..max_bytes].to_string();
-    }
-    let mut end = max_bytes - SUFFIX.len();
-    while end > 0 && !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    text.truncate(end);
-    text.push_str(SUFFIX);
-    text
+pub(super) fn gemini_provider_core_truncate_utf8(text: String, max_bytes: usize) -> String {
+    prodex_mojo_core::rich::truncate_gemini_compact_utf8(&text, max_bytes)
+        .expect("Mojo Gemini compact tail truncation returned invalid output")
 }
 
 pub(super) fn gemini_provider_core_truncate_utf8_edges(text: String, max_bytes: usize) -> String {
-    if text.len() <= max_bytes {
-        return text;
-    }
-    const SEPARATOR: &str = "\n[... middle truncated ...]\n";
-    if max_bytes <= SEPARATOR.len() {
-        return SEPARATOR[..max_bytes].to_string();
-    }
-    let retained_bytes = max_bytes - SEPARATOR.len();
-    let head_bytes = retained_bytes / 3;
-    let tail_bytes = retained_bytes - head_bytes;
-    let mut head_end = head_bytes.min(text.len());
-    while head_end > 0 && !text.is_char_boundary(head_end) {
-        head_end -= 1;
-    }
-    let mut tail_start = text.len().saturating_sub(tail_bytes);
-    while tail_start < text.len() && !text.is_char_boundary(tail_start) {
-        tail_start += 1;
-    }
-    format!("{}{}{}", &text[..head_end], SEPARATOR, &text[tail_start..])
+    prodex_mojo_core::rich::truncate_gemini_compact_utf8_edges(&text, max_bytes)
+        .expect("Mojo Gemini compact edge truncation returned invalid output")
 }
 
 #[cfg(test)]
@@ -91,6 +62,10 @@ mod tests {
             assert!(edges.len() <= max_bytes);
             assert!(std::str::from_utf8(tail.as_bytes()).is_ok());
             assert!(std::str::from_utf8(edges.as_bytes()).is_ok());
+            if max_bytes == 64 {
+                assert!(tail.ends_with("\n[truncated]"));
+                assert!(edges.contains("\n[... middle truncated ...]\n"));
+            }
         }
     }
 }

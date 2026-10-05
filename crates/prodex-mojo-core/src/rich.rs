@@ -79,7 +79,10 @@ pub use gemini_response::{
 };
 #[path = "rich/gemini_compact_snippet.rs"]
 mod gemini_compact_snippet;
-pub use gemini_compact_snippet::{GeminiCompactSnippetInput, format_gemini_compact_snippet};
+pub use gemini_compact_snippet::{
+    GeminiCompactSnippetInput, format_gemini_compact_snippet, truncate_gemini_compact_utf8,
+    truncate_gemini_compact_utf8_edges,
+};
 #[path = "rich/gemini_config.rs"]
 mod gemini_config;
 pub use gemini_config::{

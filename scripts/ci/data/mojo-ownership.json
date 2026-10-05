@@ -1291,7 +1291,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "gemini_compact_transcript_snippet_shaping"
+          "gemini_compact_transcript_snippet_shaping",
+          "gemini_compact_utf8_truncation"
         ]
       }
     ],
@@ -5795,6 +5796,35 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON acquisition and content extraction, borrowed field views, typed ABI invocation, and Option/String materialization"
+    },
+    {
+      "name": "gemini_compact_utf8_truncation",
+      "domain": "provider/gemini",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust performed tail and head/middle/tail UTF-8-safe byte truncation with exact compact markers",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_compact_truncate_v1",
+      "mojo_operation_ids": {
+        "tail": 1,
+        "edges": 2
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_compact_snippet.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
+      "consumer_marker": "truncate_gemini_compact_utf8",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs",
+        "crates/prodex-provider-core/src/gemini_bridge/compact/local/semantic.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/local/text.rs",
+      "rust_owner_before": "UTF-8-safe tail truncation with newline marker and one-third head/two-thirds tail edge truncation with middle marker",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo coverage and provider boundary test cover zero/small/Unicode/exact-bound behavior for both modes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "String ownership, typed ABI invocation, output UTF-8 materialization, and caller-specific content extraction"
     }
   ],
   "rust_semantic_reductions": [

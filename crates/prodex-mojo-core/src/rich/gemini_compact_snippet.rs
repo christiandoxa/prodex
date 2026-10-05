@@ -23,6 +23,16 @@ unsafe extern "C" {
         written_address: u64,
         emitted_address: u64,
     ) -> i64;
+    fn prodex_mojo_gemini_compact_truncate_v1(
+        abi_version: i64,
+        mode: i64,
+        input_address: u64,
+        input_length: i64,
+        maximum: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -118,6 +128,52 @@ pub fn format_gemini_compact_snippet(
     }
 }
 
+fn truncate_gemini_compact_utf8_mode(
+    text: &str,
+    max_bytes: usize,
+    mode: i64,
+) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = vec![0_u8; max_bytes.max(1)];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_mojo_gemini_compact_truncate_v1(
+            ABI_VERSION,
+            mode,
+            mojo_pointer_address(text.as_ptr()),
+            i64::try_from(text.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::try_from(max_bytes).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut written),
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::InvalidOutput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > max_bytes || written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn truncate_gemini_compact_utf8(text: &str, max_bytes: usize) -> Result<String, MojoError> {
+    truncate_gemini_compact_utf8_mode(text, max_bytes, 1)
+}
+
+pub fn truncate_gemini_compact_utf8_edges(
+    text: &str,
+    max_bytes: usize,
+) -> Result<String, MojoError> {
+    truncate_gemini_compact_utf8_mode(text, max_bytes, 2)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -204,5 +260,23 @@ mod tests {
         assert!(snippet.len() <= 64);
         assert!(snippet.ends_with("\n[truncated]"));
         assert!(std::str::from_utf8(snippet.as_bytes()).is_ok());
+    }
+
+    #[test]
+    fn gemini_compact_utf8_truncation_is_mojo_owned() {
+        let text = "月".repeat(100);
+        for maximum in [0, 1, 12, 64, 512] {
+            let tail = truncate_gemini_compact_utf8(&text, maximum).unwrap();
+            let edges = truncate_gemini_compact_utf8_edges(&text, maximum).unwrap();
+            assert!(tail.len() <= maximum);
+            assert!(edges.len() <= maximum);
+            assert!(std::str::from_utf8(tail.as_bytes()).is_ok());
+            assert!(std::str::from_utf8(edges.as_bytes()).is_ok());
+        }
+        assert_eq!(truncate_gemini_compact_utf8("abcdef", 6).unwrap(), "abcdef");
+        assert_eq!(
+            truncate_gemini_compact_utf8_edges("abcdef", 6).unwrap(),
+            "abcdef"
+        );
     }
 }

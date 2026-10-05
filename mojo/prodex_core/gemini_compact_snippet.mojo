@@ -521,3 +521,139 @@ def prodex_mojo_gemini_compact_snippet_v1(
     return gemini_compact_format(
         views, presence, maximum, output, output_capacity, written, emitted
     )
+
+
+comptime GEMINI_COMPACT_TRUNCATE_TAIL: Int64 = 1
+comptime GEMINI_COMPACT_TRUNCATE_EDGES: Int64 = 2
+
+
+def gemini_compact_copy_bytes(
+    source: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    written: Pointer[mut=True, Int64, _],
+):
+    for index in range(start, end):
+        output[unsafe_offset=written[]] = source[unsafe_offset=index]
+        written[] += 1
+
+
+def gemini_compact_copy_literal_prefix(
+    literal: StringSlice,
+    length: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    written: Pointer[mut=True, Int64, _],
+):
+    var source = literal.unsafe_ptr()
+    for index in range(length):
+        output[unsafe_offset=written[]] = source[unsafe_offset=index]
+        written[] += 1
+
+
+def gemini_compact_truncate_tail(
+    source: Pointer[mut=False, UInt8, _],
+    input_length: Int64,
+    maximum: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    written: Pointer[mut=True, Int64, _],
+):
+    written[] = 0
+    if input_length <= maximum:
+        gemini_compact_copy_bytes(source, 0, input_length, output, written)
+        return
+    var suffix = StringSlice("\n[truncated]")
+    var suffix_length = Int64(suffix.byte_length())
+    if maximum <= suffix_length:
+        gemini_compact_copy_literal_prefix(suffix, maximum, output, written)
+        return
+    var end = maximum - suffix_length
+    while end > 0 and rich_utf8_continuation(source[unsafe_offset=end]):
+        end -= 1
+    gemini_compact_copy_bytes(source, 0, end, output, written)
+    gemini_compact_copy_literal_prefix(suffix, suffix_length, output, written)
+
+
+def gemini_compact_truncate_edges(
+    source: Pointer[mut=False, UInt8, _],
+    input_length: Int64,
+    maximum: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    written: Pointer[mut=True, Int64, _],
+):
+    written[] = 0
+    if input_length <= maximum:
+        gemini_compact_copy_bytes(source, 0, input_length, output, written)
+        return
+    var separator = StringSlice("\n[... middle truncated ...]\n")
+    var separator_length = Int64(separator.byte_length())
+    if maximum <= separator_length:
+        gemini_compact_copy_literal_prefix(separator, maximum, output, written)
+        return
+    var retained = maximum - separator_length
+    var head_bytes = retained // 3
+    var tail_bytes = retained - head_bytes
+    var head_end = head_bytes if head_bytes <= input_length else input_length
+    while head_end > 0 and rich_utf8_continuation(
+        source[unsafe_offset=head_end]
+    ):
+        head_end -= 1
+    var tail_start = (
+        input_length - tail_bytes if tail_bytes <= input_length else 0
+    )
+    while tail_start < input_length and rich_utf8_continuation(
+        source[unsafe_offset=tail_start]
+    ):
+        tail_start += 1
+    gemini_compact_copy_bytes(source, 0, head_end, output, written)
+    gemini_compact_copy_literal_prefix(
+        separator, separator_length, output, written
+    )
+    gemini_compact_copy_bytes(source, tail_start, input_length, output, written)
+
+
+@export("prodex_mojo_gemini_compact_truncate_v1")
+def prodex_mojo_gemini_compact_truncate_v1(
+    abi_version: Int64,
+    mode: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    maximum: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_COMPACT_SNIPPET_ABI_VERSION:
+        return GEMINI_COMPACT_SNIPPET_STATUS_ABI
+    if (
+        input_length < 0
+        or maximum < 0
+        or (input_length > 0 and input_address == 0)
+        or output_address == 0
+        or output_capacity < maximum
+        or written_address == 0
+    ):
+        return GEMINI_COMPACT_SNIPPET_STATUS_INVALID
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return GEMINI_COMPACT_SNIPPET_STATUS_UTF8
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    if mode == GEMINI_COMPACT_TRUNCATE_TAIL:
+        gemini_compact_truncate_tail(
+            source, input_length, maximum, output, written
+        )
+        return GEMINI_COMPACT_SNIPPET_STATUS_OK
+    if mode == GEMINI_COMPACT_TRUNCATE_EDGES:
+        gemini_compact_truncate_edges(
+            source, input_length, maximum, output, written
+        )
+        return GEMINI_COMPACT_SNIPPET_STATUS_OK
+    return GEMINI_COMPACT_SNIPPET_STATUS_INVALID
