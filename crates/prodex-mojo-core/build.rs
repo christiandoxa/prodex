@@ -76,6 +76,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
             "../../mojo/prodex_core/rich_text.mojo",
             "../../mojo/prodex_core/openai_compat.mojo",
             "../../mojo/prodex_core/kiro.mojo",
+            "../../mojo/prodex_core/kiro_model_catalog.mojo",
             "../../mojo/prodex_core/deepseek.mojo",
             "../../mojo/prodex_core/json_view.mojo",
             "../../mojo/prodex_core/gemini_config.mojo",
@@ -505,10 +506,13 @@ fn selected_sources() -> Vec<&'static str> {
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_RUNTIME").is_some()
     {
+        sources.push("../../mojo/prodex_core/smart_context_capsule_order.mojo");
         sources.push("../../mojo/prodex_core/smart_context_normalization.mojo");
         sources.push("../../mojo/prodex_core/smart_context_artifact_ref.mojo");
         sources.push("../../mojo/prodex_core/smart_context_markers.mojo");
+        sources.push("../../mojo/prodex_core/smart_context_symbols.mojo");
         sources.push("../../mojo/prodex_core/rich_abi.mojo");
+        sources.push("../../mojo/prodex_core/kiro_model_catalog.mojo");
         sources.push("../../mojo/prodex_core/runtime_cookie_policy.mojo");
         sources.push("../../mojo/prodex_core/chat_tools.mojo");
         sources.push("../../mojo/prodex_core/openai_chat_request.mojo");

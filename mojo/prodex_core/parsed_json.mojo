@@ -101,7 +101,7 @@ def pj_is[value: StaticString](tree: ParsedJson, index: Int64) -> Bool:
     return pj_kind(tree, index) == JSON_STRING and rich_view_matches_literal[value](pj_text(tree, index), False)
 
 
-def pj_trim(view: ProdexRichStringView) -> ProdexRichStringView:
+def pj_trim_bounds(view: ProdexRichStringView) -> Array[Int64, 2]:
     var ptr = rich_view_ptr(view)
     var first: Int64 = 0
     var last: Int64 = 0
@@ -117,6 +117,16 @@ def pj_trim(view: ProdexRichStringView) -> ProdexRichStringView:
             leading = False
         if not space:
             last = cursor
+    var bounds = Array[Int64, 2](fill=0)
+    bounds[0] = first
+    bounds[1] = last
+    return bounds^
+
+
+def pj_trim(view: ProdexRichStringView) -> ProdexRichStringView:
+    var bounds = pj_trim_bounds(view)
+    var first = bounds[0]
+    var last = bounds[1]
     if last <= first:
         return ProdexRichStringView(0, 0)
     return ProdexRichStringView(view.ptr + UInt(first), UInt(last - first))

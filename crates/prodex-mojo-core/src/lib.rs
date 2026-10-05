@@ -116,6 +116,8 @@ pub mod live_log_record;
 #[cfg(feature = "mojo-routing")]
 #[cfg(feature = "mojo-rich")]
 pub mod log;
+#[cfg(feature = "mojo-rich")]
+pub mod log_load;
 #[cfg(feature = "mojo-runtime")]
 pub mod log_throughput_policy;
 #[cfg(feature = "mojo-runtime")]
@@ -178,6 +180,8 @@ pub mod shared_history_policy;
 pub mod smart_context_artifact_ref;
 #[cfg(feature = "mojo-runtime")]
 pub mod smart_context_markers;
+#[cfg(feature = "mojo-runtime")]
+pub mod smart_context_symbols;
 #[cfg(feature = "mojo-runtime")]
 pub mod state_policy;
 #[cfg(feature = "mojo-runtime")]

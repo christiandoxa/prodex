@@ -1,6 +1,5 @@
 use super::*;
 use sha2::{Digest as _, Sha256};
-use std::cmp::Ordering;
 use std::fmt::Write as _;
 
 pub fn smart_context_hash_text(text: &str) -> String {
@@ -21,18 +20,6 @@ pub fn smart_context_normalized_command_output_hash_text(text: &str) -> String {
         "scv:{:016x}",
         smart_context_fnv1a64(normalized.as_ref().as_bytes())
     )
-}
-
-pub(in crate::smart_context) fn smart_context_capsule_order(
-    left: &SmartContextMemoryCapsule,
-    right: &SmartContextMemoryCapsule,
-) -> Ordering {
-    right
-        .relevance
-        .partial_cmp(&left.relevance)
-        .unwrap_or(Ordering::Equal)
-        .then_with(|| left.token_cost.cmp(&right.token_cost))
-        .then_with(|| left.id.cmp(&right.id))
 }
 
 pub(in crate::smart_context) fn smart_context_fnv1a64(bytes: &[u8]) -> u64 {

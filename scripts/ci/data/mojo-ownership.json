@@ -482,7 +482,8 @@
           "transcript_event_classification",
           "transcript_item_classification",
           "transcript_operation_value_policy",
-          "transcript_tool_name_policy"
+          "transcript_tool_name_policy",
+          "log_load_aggregation"
         ]
       },
       "mojo/prodex_core/profile_schedule.mojo": {
@@ -560,6 +561,12 @@
           "runtime_candidate_decision_kernel",
           "quota_selection_policy"
         ]
+      },
+      "mojo/prodex_core/rich_fallback.mojo": {
+        "operations": [
+          "provider_model_fallback_parser",
+          "session_usage_limit_marker"
+        ]
       }
     },
     "additions": [
@@ -581,6 +588,16 @@
         "role": "semantic",
         "operations": [
           "smart_context_rehydration_plan"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/smart_context_capsule_order.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "smart_context_capsule_order"
         ]
       },
       {
@@ -680,6 +697,7 @@
           "kiro_response_shape_fallbacks",
           "kiro_acp_shape_fallbacks",
           "kiro_chat_message_prompt_construction",
+          "kiro_model_catalog_normalization",
           "deepseek_stream_shape_fallbacks",
           "deepseek_response_format_shape_policy",
           "deepseek_request_metadata_shape_policy",
@@ -762,6 +780,16 @@
           "kiro_response_shape_fallbacks",
           "kiro_acp_shape_fallbacks",
           "kiro_chat_message_prompt_construction"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/kiro_model_catalog.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "kiro_model_catalog_normalization"
         ]
       },
       {
@@ -898,7 +926,8 @@
         "operations": [
           "runtime_lineage_classification",
           "runtime_lineage_key_build",
-          "runtime_lineage_response_parts"
+          "runtime_lineage_response_parts",
+          "local_rewrite_binding_candidate_policy"
         ]
       },
       {
@@ -1212,6 +1241,36 @@
         "operations": [
           "runtime_operational_histogram_bucket_planning"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/update_notice_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "update_notice_release_version_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/smart_context_symbols.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "smart_context_source_symbol_index"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_doctor_marker.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_doctor_smart_context_fallback_decision"
+        ]
       }
     ],
     "removed": [
@@ -1442,6 +1501,24 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "artifact acquisition, ordering, and adapter"
+    },
+    {
+      "name": "smart_context_capsule_order",
+      "domain": "collections/ordering",
+      "introduced_in": "0.420.0",
+      "baseline_state": "rust-owned",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_smart_context_capsule_order_v1",
+      "mojo_source": "mojo/prodex_core/smart_context_capsule_order.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs",
+      "consumer_marker": "prodex_mojo_core::rich::order_smart_context_capsules",
+      "production_reachability_test": "crates/prodex-runtime-proxy/tests/src/smart_context/token_budget.rs",
+      "rust_owner_before": "required-first and optional relevance, token-cost, and ID ordering with Rust partial_cmp and stable-sort semantics",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "count-bounded per-ID pointer and checked-length projection, typed-key projection, validated permutation application, and existing admission batches"
     },
     {
       "name": "log_event_classification",
@@ -3045,6 +3122,30 @@
       "rust_adapter_scope": "Rust reconstructs borrowed string slices from validated Mojo byte offsets"
     },
     {
+      "name": "local_rewrite_binding_candidate_policy",
+      "domain": "runtime-state/lineage",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust-authoritative",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_lineage_binding_candidate_allowed_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_lineage.mojo",
+      "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_lineage::local_rewrite_candidate_allowed",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_pipeline_dispatch.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_lineage/binding_candidate.rs",
+      "rust_owner_before": "local rewrite credential admission by exact profile, provider, credential, endpoint, and optional profile identity, plus dispatch-time bound provider and identity validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI tests cover exact and mismatched identities, while the Kiro Responses continuation route covers real dispatch and credential admission",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Rust resolves and persists bindings and computes secret-free identity digests; Mojo decides candidate eligibility; Rust maps typed dispatch outcomes to provider errors"
+    },
+    {
       "name": "session_report_metadata_policy",
       "domain": "session/report-metadata",
       "introduced_in": "0.432.3",
@@ -3734,6 +3835,35 @@
       "rust_owner_before": "96-character tool-name bounding and ASCII-safe character replacement with tool fallback",
       "rust_test_oracle": "deleted; direct ABI and log tests cover empty names, Unicode replacement, punctuation allowlist and overlong names",
       "rust_adapter_scope": "secret redaction and owned String materialization"
+    },
+    {
+      "name": "log_load_aggregation",
+      "domain": "app/log-load",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust routine-event classification and bounded load aggregation",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_log_load_semantics_v1",
+      "mojo_operation_ids": {
+        "update": 0,
+        "summary": 1
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/log_semantics.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/log_load.rs",
+      "consumer_marker": "prodex_mojo_core::log_load::aggregate_update",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/log_load.rs",
+        "crates/prodex-app/src/app_commands/log_stream.rs",
+        "crates/prodex-app/src/app_commands/log_command_tui.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/log_load.rs",
+      "rust_state_after": "adapter-only",
+      "rust_owner_before": "routine load-event classification, same-key five-second episode coalescing, saturating occurrence updates, bounded unique-run deduplication, overflow marking, and summary suffix formatting",
+      "rust_test_oracle": "none retained; strict required-Mojo ABI tests and app TUI caller regression cover exact classification, freshness, deduplication, saturation, overflow, and formatting",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Instant sampling, bounded Vec/String state projection, fixed-width ABI marshaling, transcript DTO construction, and TUI effects"
     },
     {
       "name": "super_expose_dispatch_validation_policy",
@@ -5056,7 +5186,7 @@
       "rust_adapter_scope": "candidate projection and selected-rate reconstruction"
     },
     {
-"name": "kiro_chat_message_prompt_construction",
+      "name": "kiro_chat_message_prompt_construction",
       "domain": "provider/kiro",
       "introduced_in": "0.435.4",
       "baseline_state": "Rust recursively extracted chat content and formatted role, tool-call, section, and legacy function-tool prompt shapes",
@@ -5084,6 +5214,31 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON acquisition and serialization, bounded Kiro ABI invocation, and UTF-8/JSON decoding"
+    },
+    {
+      "name": "kiro_model_catalog_normalization",
+      "domain": "provider/kiro",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust selected model arrays and aliases, trimmed identifiers and names, chose optional metadata, normalized models, and used Mojo for identifier deduplication",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_kiro_catalog_normalize_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/kiro_model_catalog.mojo",
+      "consumer": "crates/prodex-provider-core/src/catalog/kiro.rs",
+      "consumer_marker": "kiro_model_catalog_plan(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/catalog/kiro.rs",
+        "crates/prodex-app/src/profile_commands/kiro/catalog.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/catalog/kiro.rs",
+      "rust_owner_before": "model-array precedence, alias selection, Unicode trimming, description and positive context-window selection, normalized model construction, and error classification",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; required-Mojo ABI and provider caller tests cover field precedence, Unicode trimming, metadata, deduplication, and typed error outcomes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde tree acquisition, checked span mapping, typed JSON materialization, Mojo identifier merging, and provider catalog limit validation"
     },
     {
       "name": "runtime_live_log_record_bound",
@@ -5200,6 +5355,107 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "typed Mojo result re-export, histogram state mutation, and metric emission"
+    },
+    {
+      "name": "update_notice_release_version_policy",
+      "domain": "update-notice/release-version",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust semver::Version::parse validation, total ordering, and SemVer precedence comparison",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_update_notice_policy_v1",
+      "mojo_operation_ids": {
+        "release_version_valid": 3,
+        "release_version_compare": 4
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/update_notice_policy.mojo",
+      "consumer": "crates/prodex-update-notice/src/release_version.rs",
+      "consumer_marker": "prodex_mojo_core::update_notice_policy::compare_release_versions",
+      "production_consumers": [
+        "crates/prodex-update-notice/src/lib.rs",
+        "crates/prodex-update-notice/src/updater.rs",
+        "crates/prodex-update-notice/src/release_version.rs"
+      ],
+      "production_reachability_test": "crates/prodex-update-notice/src/lib.rs",
+      "rust_owner_before": "Unicode-trimmed release-version validation after one optional lowercase v prefix, u64 core-number parsing, prerelease ordering, build metadata validation and total ordering",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct ABI and prodex-update-notice caller tests cover validation, total ordering, precedence ordering, boundaries, and malformed inputs",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "GitHub redirect/tag acquisition, returned version strings, cache/network IO, typed comparison/error mapping, and ProdexUpdateDecision construction; Mojo failures propagate without semantic recomputation"
+    },
+    {
+      "name": "session_usage_limit_marker",
+      "domain": "runtime/session-usage-limit",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust recursively classified session usage-limit event and error markers, ignored conversational records, and enforced a 2,048-value scan bound",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_rich_runtime_error_policy_v1",
+      "mojo_operation_ids": {
+        "session_usage_limit_marker": 15
+      },
+      "mojo_abi_version": 6,
+      "mojo_source": "mojo/prodex_core/rich_fallback.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs",
+      "consumer_marker": "runtime_session_usage_limit_marker(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/runtime_launch/usage_limit_recovery.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/rich/fallback.rs",
+      "rust_owner_before": "Exact legacy quota message handling, event/error context checks, quota-code matching, ignored conversational-record filtering, recursive structured JSON scanning, and 2,048-value traversal cap",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Deleted; direct required-Mojo fixtures cover legacy markers, structured error aliases, ignored conversation text, and traversal boundaries; app caller tests cover public detection and rotation",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON parsing/canonicalization, UTF-8 bounds, and versioned rich ABI invocation"
+    },
+    {
+      "name": "smart_context_source_symbol_index",
+      "domain": "smart-context/source-symbols",
+      "introduced_in": "0.435.4",
+      "baseline_state": "Rust-owned Rust/Python/JavaScript declaration recognition, naming, prefix attachment, and source-range planning",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_smart_context_symbol_index_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/smart_context_symbols.mojo",
+      "consumer": "crates/prodex-app/src/runtime_state_shared/semantic_index.rs",
+      "consumer_marker": "prodex_mojo_core::smart_context_symbols::index(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_state_shared/semantic_index.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/smart_context_symbols.rs",
+      "rust_owner_before": "source declaration classification, bounded symbol naming, Rust test-attribute tagging, declaration prefix handling, brace/Python range ends, duplicate suppression, excerpt caps, and symbol-index completeness",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo tests cover Rust/Python/JavaScript declarations, fallback names, Unicode names, capacity, and excerpt bounds; the artifact-store caller test verifies persisted range text and hashes",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "line-span preparation, ABI output validation, Rust string/hash materialization, and artifact DTO construction"
+    },
+    {
+      "name": "runtime_doctor_smart_context_fallback_decision",
+      "domain": "runtime/diagnostics",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust classified every Smart Context autopilot decision except rewritten and pass_through as fallback",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_doctor_marker.mojo",
+      "consumer": "crates/prodex-runtime-doctor/src/smart_context.rs",
+      "consumer_marker": "prodex_mojo_core::rich::runtime_doctor_smart_context_decision_is_fallback",
+      "production_consumers": [
+        "crates/prodex-runtime-doctor/src/smart_context.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_doctor_markers.rs",
+      "rust_owner_before": "Exact decision-label fallback classification implemented as !matches!(decision, \"rewritten\" | \"pass_through\")",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct required-Mojo adapter coverage and runtime-doctor summary regression cover rewritten, pass-through, and fallback decisions",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed UTF-8 view construction, ABI status mapping, and diagnostic aggregation; Mojo failures do not trigger Rust semantic recomputation"
     }
   ],
   "rust_semantic_reductions": [
@@ -5676,16 +5932,16 @@
     {
       "file": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
       "symbol": "smart_context_select_memory_capsules",
-      "operation": "smart_context_rehydration_plan",
-      "previous_responsibility": "required-first and relevance-ordered memory-capsule admission under a token budget",
+      "operation": "smart_context_capsule_order",
+      "previous_responsibility": "required-first and optional relevance, token-cost, and ID ordering before memory-capsule admission",
       "final_state": "adapter-only",
       "rust_before": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs::smart_context_select_memory_capsules",
-      "rust_after": "collapsed adapter delegating directly to the normalization owner",
-      "mojo_owner": "mojo/prodex_core/smart_context_normalization.mojo::prodex_mojo_smart_context_capsule_plan_v1",
-      "mojo_source": "mojo/prodex_core/smart_context_normalization.mojo",
-      "mojo_entry": "prodex_mojo_smart_context_capsule_plan_v1",
-      "production_consumer": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
-      "parity_test": "crates/prodex-runtime-proxy/src/smart_context/token_accounting.rs",
+      "rust_after": "public wrapper delegates to Mojo ordering and retains the existing bounded admission call",
+      "mojo_owner": "mojo/prodex_core/smart_context_capsule_order.mojo::prodex_mojo_smart_context_capsule_order_v1",
+      "mojo_source": "mojo/prodex_core/smart_context_capsule_order.mojo",
+      "mojo_entry": "prodex_mojo_smart_context_capsule_order_v1",
+      "production_consumer": "crates/prodex-runtime-proxy/src/smart_context/normalization/token_budget.rs",
+      "parity_test": "crates/prodex-runtime-proxy/tests/src/smart_context/token_budget.rs",
       "cleanup_loc": 32,
       "cleanup_source": {
         "kind": "collapsed-adapter",
@@ -5696,7 +5952,7 @@
         "release_symbol": "pub fn smart_context_select_memory_capsules",
         "release_marker": "super::normalization::smart_context_select_memory_capsules_impl"
       },
-      "cleanup_evidence": "The duplicated feature-gated wrappers collapsed to one adapter that delegates directly to the normalization owner; bounded capsule admission is not reimplemented here."
+      "cleanup_evidence": "The Rust required/optional partition and capsule comparators were removed. The public wrapper reaches the versioned Mojo ordering ABI before the existing bounded admission batches."
     },
     {
       "file": "crates/prodex-runtime-store/src/profile_backoff/score.rs",
@@ -6066,6 +6322,29 @@
       "production_consumer": "crates/prodex-quota/src/render/windows.rs",
       "parity_test": "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
       "performance": "one scalar v1 ABI call per JSON reset message"
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_state_shared/semantic_index/symbols.rs",
+      "symbol": "runtime_smart_context_parse_symbol_line",
+      "operation": "smart_context_source_symbol_index",
+      "previous_responsibility": "Rust source declaration recognition, language-specific symbol classification, prefix attachment, and bounded source-range planning",
+      "final_state": "deleted",
+      "rust_before": "crates/prodex-app/src/runtime_state_shared/semantic_index/symbols.rs::runtime_smart_context_parse_symbol_line and its declaration/range helpers",
+      "rust_after": "the Rust parser module and its helper types are deleted; semantic_index.rs materializes only the validated Mojo plan",
+      "mojo_owner": "mojo/prodex_core/smart_context_symbols.mojo::symbol_parse_declaration",
+      "mojo_source": "mojo/prodex_core/smart_context_symbols.mojo",
+      "mojo_entry": "prodex_smart_context_symbol_index_v1",
+      "production_consumer": "crates/prodex-app/src/runtime_state_shared/semantic_index.rs",
+      "parity_test": "crates/prodex-app/src/runtime_state_shared/artifact_tests.rs::runtime_smart_context_artifact_symbol_index_uses_mojo_ranges",
+      "cleanup_loc": 285,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 1,
+          "end": 314
+        }
+      },
+      "cleanup_evidence": "The full 314-line Rust parser module is deleted after replacing its 285 official semantic lines with the versioned Mojo operation. The file exists in the frozen tree but is absent from its counting inventory, so this is source-cleanup evidence rather than frozen migration-volume credit."
     }
   ],
   "deleted_authoritative_operations": [

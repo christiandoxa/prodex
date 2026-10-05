@@ -540,6 +540,11 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             mark_runtime_profile_retry_backoff(self.shared, &profile_name)?;
         }
         if !plan.continue_selection {
+            if reason != "profile_inflight_saturated"
+                && self.try_signal_quota_full_context_retry(&profile_name)?
+            {
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
             send_runtime_proxy_websocket_error(
                 &mut *self.local_socket,
                 503,
@@ -626,7 +631,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             self.previous_response_id.is_some(),
             self.request_session_id.is_some(),
             self.bound_profile.as_deref() == Some(profile_name),
-        ) || !self.prepare_quota_fallback(profile_name)?
+        ) || !self.prepare_full_context_quota_fallback(profile_name)?
         {
             return Ok(false);
         }
@@ -650,6 +655,24 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     }
 
     fn prepare_quota_fallback(&mut self, profile_name: &str) -> Result<bool> {
+        let has_context_constraint = self.previous_response_id.is_some()
+            || self.request_requires_previous_response_affinity
+            || self.request_turn_state.is_some()
+            || self.pinned_profile.is_some()
+            || self.turn_state_profile.is_some()
+            || self.compact_followup_profile.is_some();
+        self.prepare_quota_fallback_with_context(profile_name, has_context_constraint)
+    }
+
+    fn prepare_full_context_quota_fallback(&mut self, profile_name: &str) -> Result<bool> {
+        self.prepare_quota_fallback_with_context(profile_name, false)
+    }
+
+    fn prepare_quota_fallback_with_context(
+        &mut self,
+        profile_name: &str,
+        has_context_constraint: bool,
+    ) -> Result<bool> {
         let mut excluded_profiles = self.excluded_profiles.clone();
         excluded_profiles.insert(profile_name.to_string());
         let route_eligible_fallback = runtime_has_route_eligible_quota_fallback_for_model(
@@ -659,12 +682,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             RuntimeRouteKind::Websocket,
             runtime_smart_context_model_name_from_body(self.request_text.as_bytes()).as_deref(),
         )?;
-        let has_context_constraint = self.previous_response_id.is_some()
-            || self.request_requires_previous_response_affinity
-            || self.request_turn_state.is_some()
-            || self.pinned_profile.is_some()
-            || self.turn_state_profile.is_some()
-            || self.compact_followup_profile.is_some();
         match runtime_proxy_crate::runtime_websocket_quota_fallback_plan(
             route_eligible_fallback,
             has_context_constraint,
@@ -763,6 +780,11 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             mark_runtime_profile_retry_backoff(self.shared, &profile_name)?;
         }
         if !plan.continue_selection {
+            if reason != "profile_inflight_saturated"
+                && self.try_signal_quota_full_context_retry(&profile_name)?
+            {
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
             send_runtime_proxy_websocket_error(
                 &mut *self.local_socket,
                 503,

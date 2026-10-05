@@ -2,6 +2,76 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.435.5 - 2026-10-05
+
+### Runtime
+
+- Replay hard-affinity quota blocks (`6515c54`)
+
+### Docs
+
+- Record integrated Mojo migration validation (`6150fa1`)
+
+### Misc
+
+- Merge pull request #105 from christiandoxa/campaign/mojo-local-rewrite-policy-20261004 (`d1d7a32`)
+- Merge pull request #106 from christiandoxa/campaign/mojo-log-load-aggregate-20261004 (`2556f62`)
+- Merge pull request #102 from christiandoxa/campaign/mojo-wave-config-20261004 (`f546cec`)
+- Merge pull request #103 from christiandoxa/campaign/mojo-wave-policy-20261004 (`69d079b`)
+# Prodex 0.435.5
+
+## New Features
+
+- No new user-facing feature surface; 0.435.5 is a runtime reliability patch for quota-aware continuation recovery.
+
+## Bug Fixes
+
+### Hard-affinity quota blocks replay full context instead of leaking retry-budget 503
+
+- WebSocket continuation requests that are pinned to an exhausted owner no longer terminate with
+  `503 service_unavailable` and the internal `pre-commit retry budget was exhausted` message
+  while another OpenAI profile still has usable quota.
+- Pre-send quota/local-selection blocks now reuse Prodex's existing
+  `previous_response_not_found` recovery signal. Codex retries the request with full context,
+  allowing Prodex to release the exhausted owner and bind the replay to another healthy account.
+- The same recovery applies to both normal candidate selection and the direct-current-profile
+  fallback path.
+- Full-context replay is evaluated as a fresh request, so a quota-healthy fallback profile above
+  the soft inflight limit or behind a temporary route circuit can still receive the bounded
+  last-chance attempt instead of causing a spurious 503.
+- Hard inflight caps remain enforced. A genuinely unavailable or fully quota-exhausted pool still
+  terminates instead of retrying forever.
+
+## Compatibility Notes
+
+- Existing WebSocket continuation semantics are preserved: the current request ends with the
+  retryable `previous_response_not_found` signal, and the client performs the full-context replay.
+- This patch does not silently rewrite or transfer a non-replayable previous-response chain.
+  Rotation happens only through the existing full-context recovery contract.
+- Local hardware parallelism and soft admission pressure no longer justify surfacing the internal
+  retry-budget error when a viable account can still serve the replay.
+
+## Verification
+
+- Added candidate and direct-current regression tests that reproduce the old hard-affinity
+  pre-send quota path and assert `previous_response_not_found` is emitted instead of
+  `service_unavailable`.
+- Mutation sensitivity was proven by restoring the old constrained full-context fallback:
+  the regression failed with the exact user-visible 503
+  `pre-commit retry budget was exhausted`; restoring the fixed source byte-for-byte made it pass.
+- Regression coverage also verifies releasable affinity rotation, soft-load/circuit last-chance
+  fallback, hard inflight-cap enforcement, integration-level owned-quota replay, and terminal
+  behavior after the full WebSocket profile pool is exhausted.
+- Mojo no-fallback, Mojo authority, runtime manifest, size, static guards, formatting,
+  `git diff --check`, and relevant Clippy checks pass locally.
+
+## Changelog
+
+- Recover hard-affinity pre-send quota blocks with full-context replay and account rebinding instead
+  of leaking the internal pre-commit retry-budget 503 while usable quota remains.
+
+Full Changelog: [0.435.4...0.435.5](https://github.com/christiandoxa/prodex/compare/0.435.4...0.435.5)
+
 ## 0.435.4 - 2026-10-04
 
 ### Runtime
@@ -9,53 +79,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Honor request-local quota exclusions (`4f3e21a`)
 - Reselect profiles after recovery wait (`12d69a1`)
 - Keep retryable profiles alive past precommit budget (`0934e00`)
-# Prodex 0.435.4
-
-## New Features
-
-- No new user-facing feature surface; 0.435.4 is a runtime reliability patch.
-
-## Bug Fixes
-
-### Retryable profiles no longer die at the pre-commit budget boundary
-
-- Fresh Responses requests now enter profile recovery whenever at least one profile remains
-  retryable, even if no transient-failure flag was recorded before the retry budget expires.
-- Standard HTTP, compact, and WebSocket fresh-request recovery follow the same rule: profile
-  viability is authoritative, not the incidental presence of an overload/rate-limit/transport flag.
-- A temporarily backed-off profile remains internal backpressure/recovery work instead of leaking
-  the user-visible `pre-commit retry budget was exhausted` 503 while usable quota still exists.
-- This recovery rule applies to concurrent `prodex s ... exec` workloads as well: parallel callers
-  may queue or wait internally, but a still-viable account must not be converted into a retry-budget 503.
-- Hard continuation affinity remains fail-closed where switching profiles would violate conversation
-  ownership semantics.
-- Fully exhausted pools remain bounded and terminal; known zero-quota accounts are still not sent
-  upstream.
-
-## Compatibility Notes
-
-- The retry-budget change does not relax hard continuation affinity: requests that cannot legally
-  switch profile still preserve their ownership constraints.
-- Known zero-quota pools remain terminal and bounded; this patch only prevents retry-budget 503s
-  while a compatible profile is still semantically retryable.
-
-## Verification
-
-- Added a regression that places a quota-healthy profile into retry backoff with no transient-failure
-  flag and proves the production recovery path waits until the profile becomes selectable again.
-- Sensitivity check: temporarily restoring the old transient-flag gate makes the new regression fail;
-  restoring the correct implementation byte-for-byte makes it pass again.
-- Regression coverage also verifies last-positive quota draining, all-zero terminal behavior, compact
-  recovery, and WebSocket pool exhaustion.
-- Mojo no-fallback, Mojo authority, runtime manifest, hot-path, size, static guards, formatting, and
-  relevant Clippy checks pass locally.
-
-## Changelog
-
-- Keep retryable profiles alive past the pre-commit retry budget and prevent spurious 503s under
-  parallel workloads while viable accounts remain.
-
-Full Changelog: [0.435.3...0.435.4](https://github.com/christiandoxa/prodex/compare/0.435.3...0.435.4)
 
 ## 0.435.3 - 2026-10-04
 
