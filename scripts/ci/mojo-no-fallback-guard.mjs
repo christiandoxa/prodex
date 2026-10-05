@@ -68,7 +68,11 @@ const SESSION_USAGE_LIMIT_CONSUMER_FILE = "crates/prodex-app/src/app_commands/ru
 const SESSION_USAGE_LIMIT_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/fallback.rs";
 const SESSION_USAGE_LIMIT_FACADE_FILE = "crates/prodex-mojo-core/src/rich.rs";
 const SESSION_USAGE_LIMIT_MOJO_FILE = "mojo/prodex_core/rich_fallback.mojo";
+const DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/smart_context.rs";
+const DOCTOR_SMART_CONTEXT_DECISION_ADAPTER_FILE = DOCTOR_MARKER_ABI_ADAPTER_FILE;
+const DOCTOR_SMART_CONTEXT_DECISION_MOJO_FILE = DOCTOR_MARKER_ABI_MOJO_FILE;
 const PROMOTED_FILES = [
+  DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE,
   LIVE_LOG_RECORD_FILE,
   LIVE_LOG_RECORD_ADAPTER_FILE,
   LIVE_LOG_RECORD_MOJO_FILE,
@@ -4661,7 +4665,36 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  const doctorSmartContextDecisionViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = "prodex_mojo_core::rich::runtime_doctor_smart_context_decision_is_fallback(";
+      const restoredRust = /!matches!\s*\(\s*decision\s*,|decision\s*!=\s*"rewritten"|decision\s*==\s*"pass_through"/u;
+      return production.includes(required) && !restoredRust.test(production)
+        ? []
+        : [`${filePath}: Smart Context fallback decision classification must use Mojo without a Rust policy copy`];
+    }
+    if (filePath === DOCTOR_SMART_CONTEXT_DECISION_ADAPTER_FILE) {
+      const required = [
+        "prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1(",
+        "runtime_doctor_smart_context_decision_is_fallback(",
+        "runtime_doctor_smart_context_decision_fallback_classification_is_mojo_owned",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Smart Context decision adapter must retain ${marker}`);
+    }
+    if (filePath === DOCTOR_SMART_CONTEXT_DECISION_MOJO_FILE) {
+      const required = [
+        '@export("prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1")',
+        'rich_view_matches_literal["rewritten"]',
+        'rich_view_matches_literal["pass_through"]',
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Smart Context decision classification must remain Mojo-owned (${marker})`);
+    }
+    return [];
+  });
+  return [...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,

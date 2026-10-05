@@ -1,6 +1,17 @@
 #![cfg(feature = "mojo-rich")]
 #![allow(unsafe_code)]
-use prodex_mojo_core::rich::{runtime_doctor_marker_known, runtime_doctor_marker_semantics};
+use prodex_mojo_core::rich::{
+    runtime_doctor_marker_known, runtime_doctor_marker_semantics,
+    runtime_doctor_smart_context_decision_is_fallback,
+};
+
+#[test]
+fn smart_context_fallback_decision_uses_mojo_authority() {
+    assert!(!runtime_doctor_smart_context_decision_is_fallback("rewritten").unwrap());
+    assert!(!runtime_doctor_smart_context_decision_is_fallback("pass_through").unwrap());
+    assert!(runtime_doctor_smart_context_decision_is_fallback("self_check_passthrough").unwrap());
+    assert!(runtime_doctor_smart_context_decision_is_fallback("require_exact").unwrap());
+}
 
 #[test]
 fn long_unknown_marker_is_not_an_invalid_event() {

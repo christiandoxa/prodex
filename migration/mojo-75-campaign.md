@@ -5218,3 +5218,20 @@ The checkpoint-wide gates also pass: workspace Clippy with warnings denied,
 `cargo fmt --all -- --check`, `npm run docs`, `npm run test:changed -- --base HEAD`
 (16 changed paths, 341 tracked changed lines; 1,124 including new files), size guard, Mojo no-fallback
 self-test/check, authority and ownership checks, and `git diff --check`.
+
+## Runtime doctor Smart Context fallback-decision migration
+
+`runtime_doctor_marker.mojo` now owns Smart Context autopilot fallback-decision
+classification through `prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1`.
+Only `rewritten` and `pass_through` are non-fallback decisions; every other decision label
+is classified as fallback. The former Rust `!matches!(decision, "rewritten" | "pass_through")`
+production classifier was deleted. Rust retains log/JSON parsing, aggregation, reason counting,
+and report ownership; Mojo errors do not trigger Rust semantic recomputation.
+
+Verification includes a direct required-Mojo ABI integration test and the production
+runtime-doctor summary regression. Both targeted `-- --list` invocations report one test.
+A sensitivity mutation replaced the `pass_through` exemption with
+`self_check_passthrough`; the production caller regression failed with `fallback_count`
+`left: 1` versus `right: 2`. Restoring the Mojo source returned the exact pre-mutation
+SHA-256 `5be6e9fd8c8c4ccfa80ca24964fb1d990a80372f98ab797a8db18720aa641429`, and the
+caller regression passed again.
