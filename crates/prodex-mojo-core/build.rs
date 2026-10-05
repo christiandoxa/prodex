@@ -105,12 +105,6 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
             .join("../../mojo/prodex_core/runtime_math.mojo")
             .display()
     );
-    println!(
-        "cargo:rerun-if-changed={}",
-        manifest_dir
-            .join("../../mojo/prodex_core/smart_context_symbol_parser.mojo")
-            .display()
-    );
 }
 
 fn build_mojo_archive(sources: Vec<&'static str>, manifest_dir: PathBuf, strict: bool) {
@@ -515,7 +509,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/smart_context_normalization.mojo");
         sources.push("../../mojo/prodex_core/smart_context_artifact_ref.mojo");
         sources.push("../../mojo/prodex_core/smart_context_markers.mojo");
-        sources.push("../../mojo/prodex_core/smart_context_symbol_classification.mojo");
+        sources.push("../../mojo/prodex_core/smart_context_symbols.mojo");
         sources.push("../../mojo/prodex_core/rich_abi.mojo");
         sources.push("../../mojo/prodex_core/runtime_cookie_policy.mojo");
         sources.push("../../mojo/prodex_core/chat_tools.mojo");

@@ -1242,23 +1242,13 @@
         ]
       },
       {
-        "path": "mojo/prodex_core/smart_context_symbol_classification.mojo",
+        "path": "mojo/prodex_core/smart_context_symbols.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "smart_context_source_symbol_classification"
-        ]
-      },
-      {
-        "path": "mojo/prodex_core/smart_context_symbol_parser.mojo",
-        "language": "mojo",
-        "classification": "DETERMINISTIC_DOMAIN",
-        "production_reachable": true,
-        "role": "semantic",
-        "operations": [
-          "smart_context_source_symbol_classification"
+          "smart_context_source_symbol_index"
         ]
       }
     ],
@@ -5376,29 +5366,27 @@
       "rust_adapter_scope": "Serde JSON parsing/canonicalization, UTF-8 bounds, and versioned rich ABI invocation"
     },
     {
-      "name": "smart_context_source_symbol_classification",
+      "name": "smart_context_source_symbol_index",
       "domain": "smart-context/source-symbols",
       "introduced_in": "0.435.4",
-      "baseline_state": "Rust-owned Rust/Python/JavaScript source declaration recognition, classification, naming, and Rust test-attribute labeling",
+      "baseline_state": "Rust-owned Rust/Python/JavaScript declaration recognition, naming, prefix attachment, and source-range planning",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_smart_context_symbol_classify_v1",
+      "mojo_entry": "prodex_smart_context_symbol_index_v1",
       "mojo_abi_version": 1,
-      "mojo_source": "mojo/prodex_core/smart_context_symbol_classification.mojo",
+      "mojo_source": "mojo/prodex_core/smart_context_symbols.mojo",
       "consumer": "crates/prodex-app/src/runtime_state_shared/semantic_index.rs",
-      "consumer_marker": "prodex_mojo_core::smart_context_symbols::visit_classifications(",
+      "consumer_marker": "prodex_mojo_core::smart_context_symbols::index(",
       "production_consumers": [
         "crates/prodex-app/src/runtime_state_shared/semantic_index.rs"
       ],
       "production_reachability_test": "crates/prodex-mojo-core/tests/smart_context_symbols.rs",
-      "production_caller_test": "crates/prodex-app/src/runtime_state_shared/artifact_tests.rs",
-      "production_caller_test_marker": "runtime_smart_context_artifact_symbol_index_uses_mojo_classification",
-      "rust_owner_before": "source declaration recognition, Rust/Python/JavaScript classification, labels, names, fallback names, impl naming, and Rust test-attribute labeling",
+      "rust_owner_before": "source declaration classification, bounded symbol naming, Rust test-attribute tagging, declaration prefix handling, brace/Python range ends, duplicate suppression, excerpt caps, and symbol-index completeness",
       "rust_state_after": "adapter-only",
-      "rust_test_oracle": "removed; direct required-Mojo tests cover declaration families, names, labels, styles and attributes; the artifact-store caller test checks persisted ranges, text and hashes",
+      "rust_test_oracle": "deleted; direct required-Mojo tests cover Rust/Python/JavaScript declarations, fallback names, Unicode names, capacity, and excerpt bounds; the artifact-store caller test verifies persisted range text and hashes",
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "line-span preparation, bounded ABI invocation, output validation and existing symbol DTO mapping; prefix attachment, Rust/Python/brace range planning, excerpt validation, deduplication and capacity remain Rust"
+      "rust_adapter_scope": "line-span preparation, ABI output validation, Rust string/hash materialization, and artifact DTO construction"
     }
   ],
   "rust_semantic_reductions": [
@@ -6265,6 +6253,29 @@
       "production_consumer": "crates/prodex-quota/src/render/windows.rs",
       "parity_test": "crates/prodex-mojo-core/tests/quota_reset_epoch.rs",
       "performance": "one scalar v1 ABI call per JSON reset message"
+    },
+    {
+      "file": "crates/prodex-app/src/runtime_state_shared/semantic_index/symbols.rs",
+      "symbol": "runtime_smart_context_parse_symbol_line",
+      "operation": "smart_context_source_symbol_index",
+      "previous_responsibility": "Rust source declaration recognition, language-specific symbol classification, prefix attachment, and bounded source-range planning",
+      "final_state": "deleted",
+      "rust_before": "crates/prodex-app/src/runtime_state_shared/semantic_index/symbols.rs::runtime_smart_context_parse_symbol_line and its declaration/range helpers",
+      "rust_after": "the Rust parser module and its helper types are deleted; semantic_index.rs materializes only the validated Mojo plan",
+      "mojo_owner": "mojo/prodex_core/smart_context_symbols.mojo::symbol_parse_declaration",
+      "mojo_source": "mojo/prodex_core/smart_context_symbols.mojo",
+      "mojo_entry": "prodex_smart_context_symbol_index_v1",
+      "production_consumer": "crates/prodex-app/src/runtime_state_shared/semantic_index.rs",
+      "parity_test": "crates/prodex-app/src/runtime_state_shared/artifact_tests.rs::runtime_smart_context_artifact_symbol_index_uses_mojo_ranges",
+      "cleanup_loc": 285,
+      "cleanup_source": {
+        "kind": "deleted",
+        "baseline_range": {
+          "start": 1,
+          "end": 314
+        }
+      },
+      "cleanup_evidence": "The full 314-line Rust parser module is deleted after replacing its 285 official semantic lines with the versioned Mojo operation. The file exists in the frozen tree but is absent from its counting inventory, so this is source-cleanup evidence rather than frozen migration-volume credit."
     }
   ],
   "deleted_authoritative_operations": [

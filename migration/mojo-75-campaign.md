@@ -5167,3 +5167,21 @@ Validation passed:
 Stage 1 moves only declaration recognition, Rust/Python/JavaScript classification, labels, names, fallbacks, `impl` naming, and Rust test-attribute labeling into versioned ABI `prodex_smart_context_symbol_classify_v1`, linked through `prodex-mojo-core` from `smart_context_symbol_classification.mojo` and `smart_context_symbol_parser.mojo`. Rust retains prefix attachment, range planning, excerpts, deduplication, capacity, and DTO construction; no Rust classifier or feature-off fallback remains.
 
 Direct required-Mojo tests cover declaration families, names, labels, styles, and attributes; the artifact-store caller test checks persisted ranges, text, and hashes. Mutating the `fn ` recognizer failed the direct test. Byte-exact restoration matched SHA-256 `b3eb46d111a8c3f0e418013ff4315813e28b1e97cc374e2ec0f39caec176071c`. Direct tests pass 2/2 and app caller passes 1/1. Clippy, fmt, docs, changed-tests, authority, ownership, no-fallback, size, share, churn, and diff checks pass.
+
+## Smart Context full source-symbol indexing migration
+
+The stage-1 source-symbol classifier is now superseded by the full versioned
+`prodex_smart_context_symbol_index_v1` planner. Mojo owns declaration
+recognition and naming plus prefix attachment, Rust/Python/JavaScript range
+boundaries, duplicate suppression, excerpt bounds, capacity completeness, and
+bounded symbol-index planning. Rust keeps borrowed line-span preparation,
+validated ABI output materialization, hashes, and artifact DTO construction.
+The old Rust `semantic_index/symbols.rs` parser and the stage-1 Mojo classifier
+and parser modules are deleted; no Rust or duplicate Mojo fallback remains.
+
+Validation passed:
+
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -p prodex-mojo-core --features mojo-runtime --test smart_context_symbols -- --list` listed 4 tests; all 4 passed.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -p prodex-app runtime_smart_context_artifact_symbol_index_uses_mojo_ranges -- --list` listed 1 production caller test; it passed.
+- Mojo no-fallback, authority, and ownership guards passed; ownership reports 167 authoritative operations and 95.10% Mojo in the frozen semantic ledger.
+- `node scripts/ci/mojo-production-share.mjs --check` reports 83,922 reachable Mojo LOC and 204,650 Rust production LOC, or **29.0818% Mojo**.
