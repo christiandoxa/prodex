@@ -4047,6 +4047,8 @@ export function findViolations(files) {
         "prodex_profile_export_copilot_url_v1(",
         "pub fn copilot_user_api_origin(",
         "pub fn copilot_models_api_url(",
+        "prodex_profile_export_copilot_import_state_v1(",
+        "pub fn copilot_import_state_plan(",
         "copilot_jsonc_line_comment_stripping_is_mojo_owned",
         "copilot_metadata_and_url_policy_are_mojo_owned",
       ];
@@ -4061,6 +4063,7 @@ export function findViolations(files) {
         "prodex_mojo_core::profile_export::copilot_platform_label(os, arch)",
         "prodex_mojo_core::profile_export::copilot_user_api_origin(host)",
         "prodex_mojo_core::profile_export::copilot_models_api_url(host)",
+        "prodex_mojo_core::profile_export::copilot_import_state_plan(",
       ];
       const restoredRust = [
         "fn strip_json_line_comments(",
@@ -4072,6 +4075,9 @@ export function findViolations(files) {
         "trim_end_matches('/')",
         'format!("api.{authority}")',
         'format!("https://copilot-api.',
+        "let activate = !has_active_profile || activate_requested",
+        "requested_name != existing_name",
+        "if profile_name_exists(requested_name)",
       ];
       return required.every((marker) => production.includes(marker)) &&
         restoredRust.every((marker) => !production.includes(marker))
@@ -4102,6 +4108,11 @@ export function findViolations(files) {
         "profile_export_copilot_models_url(",
         'StringSlice("https://api.githubcopilot.com")',
         'StringSlice("https://copilot-api.")',
+        '@export("prodex_profile_export_copilot_import_state_v1")',
+        "PROFILE_EXPORT_COPILOT_STATE_UPDATE_EXISTING",
+        "PROFILE_EXPORT_COPILOT_STATE_ACCOUNT_CONFLICT",
+        "PROFILE_EXPORT_COPILOT_STATE_REQUESTED_EXISTS",
+        "has_active_profile == 0 or activate_requested != 0",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: requested profile selection must remain Mojo-owned (${marker})`);
@@ -4979,6 +4990,7 @@ function selfTest() {
     "prodex_mojo_core::profile_export::copilot_platform_label(os, arch)",
     "prodex_mojo_core::profile_export::copilot_user_api_origin(host)",
     "prodex_mojo_core::profile_export::copilot_models_api_url(host)",
+    "prodex_mojo_core::profile_export::copilot_import_state_plan(",
   ].join("\n");
   assert.deepEqual(findViolations([[
     "crates/prodex-profile-export/src/copilot.rs", profileCopilotJsoncCaller,
@@ -5001,6 +5013,7 @@ function selfTest() {
     "prodex_mojo_core::profile_export::copilot_platform_label(os, arch)",
     "prodex_mojo_core::profile_export::copilot_user_api_origin(host)",
     "prodex_mojo_core::profile_export::copilot_models_api_url(host)",
+    "prodex_mojo_core::profile_export::copilot_import_state_plan(",
   ].join("\n");
   assert.deepEqual(findViolations([[
     "crates/prodex-profile-export/src/copilot.rs", copilotPolicyCaller,
@@ -5008,6 +5021,10 @@ function selfTest() {
   assert.match(findViolations([[
     "crates/prodex-profile-export/src/copilot.rs",
     copilotPolicyCaller + "\nfn authority_host_and_port(authority: &str) {}",
+  ]]).join("\n"), /Copilot JSONC\/version\/platform policy must use Mojo/u);
+  assert.match(findViolations([[
+    "crates/prodex-profile-export/src/copilot.rs",
+    copilotPolicyCaller + "\nlet activate = !has_active_profile || activate_requested;",
   ]]).join("\n"), /Copilot JSONC\/version\/platform policy must use Mojo/u);
   const operationalHistogramCaller = [
     "histogram_bucket_bounds(name)",

@@ -911,7 +911,8 @@
           "profile_export_copilot_version_parsing",
           "profile_export_copilot_platform_mapping",
           "profile_export_copilot_user_api_origin",
-          "profile_export_copilot_models_api_url"
+          "profile_export_copilot_models_api_url",
+          "profile_export_copilot_import_state_planning"
         ]
       },
       {
@@ -3142,6 +3143,30 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "borrowed host view construction, caller-owned output allocation, UTF-8 String materialization, and provider-plan field ownership"
+    },
+    {
+      "name": "profile_export_copilot_import_state_planning",
+      "domain": "profile/export-policy",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust decided active-profile activation, update-existing versus add-new, requested-name conflict with an already imported account, requested-name duplication, and default-name fallback",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_export_copilot_import_state_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-profile-export/src/copilot.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::copilot_import_state_plan",
+      "production_consumers": [
+        "crates/prodex-profile-export/src/copilot.rs",
+        "crates/prodex-app/src/profile_commands/copilot.rs"
+      ],
+      "production_reachability_test": "crates/prodex-profile-export/src/copilot.rs",
+      "rust_owner_before": "Activation formula, existing-account/requested-name compatibility, add-vs-update selection, requested-name duplicate rejection, and default-name action selection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo adapter coverage plus profile-export caller regression cover update-existing, auto-activate add-default, requested-name conflict, and requested-name duplicate branches",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "profile-name existence callback execution, lazy default-name generation, String/error materialization, and application of validated Mojo action tags"
     },
     {
       "name": "profile_export_copilot_jsonc_normalization",

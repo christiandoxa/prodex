@@ -1142,3 +1142,59 @@ def prodex_profile_export_copilot_url_v1(
     if operation == PROFILE_EXPORT_COPILOT_URL_MODELS:
         return profile_export_copilot_models_url(host, output, output_capacity, written)
     return PROFILE_EXPORT_POLICY_INVALID
+
+
+comptime PROFILE_EXPORT_COPILOT_STATE_UPDATE_EXISTING: Int64 = 0
+comptime PROFILE_EXPORT_COPILOT_STATE_ADD_REQUESTED: Int64 = 1
+comptime PROFILE_EXPORT_COPILOT_STATE_ADD_DEFAULT: Int64 = 2
+comptime PROFILE_EXPORT_COPILOT_STATE_ACCOUNT_CONFLICT: Int64 = 3
+comptime PROFILE_EXPORT_COPILOT_STATE_REQUESTED_EXISTS: Int64 = 4
+
+
+@export("prodex_profile_export_copilot_import_state_v1")
+def prodex_profile_export_copilot_import_state_v1(
+    abi_version: Int64,
+    requested_address: UInt,
+    existing_address: UInt,
+    has_active_profile: Int64,
+    activate_requested: Int64,
+    requested_name_exists: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return PROFILE_EXPORT_POLICY_ABI
+    if requested_address == 0 or existing_address == 0 or output_address == 0:
+        return PROFILE_EXPORT_POLICY_INVALID
+    if (
+        (has_active_profile != 0 and has_active_profile != 1)
+        or (activate_requested != 0 and activate_requested != 1)
+        or (requested_name_exists != 0 and requested_name_exists != 1)
+    ):
+        return PROFILE_EXPORT_POLICY_INVALID
+    var requested = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(requested_address)
+    )[].copy()
+    var existing = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(existing_address)
+    )[].copy()
+    if not profile_import_view_valid(requested, True) or not profile_import_view_valid(existing, True):
+        return PROFILE_EXPORT_POLICY_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=1] = 1 if has_active_profile == 0 or activate_requested != 0 else 0
+    if existing.len > 0:
+        if requested.len > 0 and not profile_import_views_equal(requested, existing):
+            output[unsafe_offset=0] = PROFILE_EXPORT_COPILOT_STATE_ACCOUNT_CONFLICT
+        else:
+            output[unsafe_offset=0] = PROFILE_EXPORT_COPILOT_STATE_UPDATE_EXISTING
+        return PROFILE_EXPORT_POLICY_OK
+    if requested.len > 0:
+        output[unsafe_offset=0] = (
+            PROFILE_EXPORT_COPILOT_STATE_REQUESTED_EXISTS
+            if requested_name_exists != 0
+            else PROFILE_EXPORT_COPILOT_STATE_ADD_REQUESTED
+        )
+        return PROFILE_EXPORT_POLICY_OK
+    output[unsafe_offset=0] = PROFILE_EXPORT_COPILOT_STATE_ADD_DEFAULT
+    return PROFILE_EXPORT_POLICY_OK

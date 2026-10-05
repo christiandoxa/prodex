@@ -291,37 +291,45 @@ pub fn plan_copilot_profile_import_state(
     mut profile_name_exists: impl FnMut(&str) -> bool,
     default_profile_name: impl FnOnce() -> String,
 ) -> Result<CopilotProfileImportStatePlan> {
-    let activate = !has_active_profile || activate_requested;
+    let requested_name_exists =
+        existing_profile_name.is_none() && requested_name.is_some_and(&mut profile_name_exists);
+    let plan = prodex_mojo_core::profile_export::copilot_import_state_plan(
+        requested_name,
+        existing_profile_name,
+        has_active_profile,
+        activate_requested,
+        requested_name_exists,
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo Copilot import-state plan failed: {error:?}"))?;
 
-    if let Some(existing_name) = existing_profile_name {
-        if let Some(requested_name) = requested_name
-            && requested_name != existing_name
-        {
-            bail!(
-                "Copilot account '{}' is already imported as profile '{}'",
-                login,
-                existing_name
-            );
+    use prodex_mojo_core::profile_export::CopilotImportStateAction;
+    match plan.action {
+        CopilotImportStateAction::UpdateExisting => {
+            Ok(CopilotProfileImportStatePlan::UpdateExisting {
+                profile_name: existing_profile_name
+                    .expect("validated Mojo update-existing action")
+                    .to_string(),
+                activate: plan.activate,
+            })
         }
-
-        return Ok(CopilotProfileImportStatePlan::UpdateExisting {
-            profile_name: existing_name.to_string(),
-            activate,
-        });
+        CopilotImportStateAction::AddRequested => Ok(CopilotProfileImportStatePlan::AddNew {
+            profile_name: requested_name
+                .expect("validated Mojo add-requested action")
+                .to_string(),
+            activate: plan.activate,
+        }),
+        CopilotImportStateAction::AddDefault => Ok(CopilotProfileImportStatePlan::AddNew {
+            profile_name: default_profile_name(),
+            activate: plan.activate,
+        }),
+        CopilotImportStateAction::AccountConflict => bail!(
+            "Copilot account '{}' is already imported as profile '{}'",
+            login,
+            existing_profile_name.expect("validated Mojo account-conflict action")
+        ),
+        CopilotImportStateAction::RequestedNameExists => bail!(
+            "profile '{}' already exists",
+            requested_name.expect("validated Mojo requested-name-exists action")
+        ),
     }
-
-    let profile_name = match requested_name {
-        Some(requested_name) => {
-            if profile_name_exists(requested_name) {
-                bail!("profile '{}' already exists", requested_name);
-            }
-            requested_name.to_string()
-        }
-        None => default_profile_name(),
-    };
-
-    Ok(CopilotProfileImportStatePlan::AddNew {
-        profile_name,
-        activate,
-    })
 }
