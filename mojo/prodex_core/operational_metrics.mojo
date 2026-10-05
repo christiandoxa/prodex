@@ -94,3 +94,52 @@ def prodex_mojo_operational_histogram_bounds_v1(
         output[14] = 120_000
         output_count[] = 15
     return OPERATIONAL_METRICS_STATUS_OK
+
+
+# All histogram accumulation decisions live here; Rust owns synchronization and storage.
+def operational_histogram_saturating_add(left: UInt64, right: UInt64) -> UInt64:
+    var maximum = UInt64(18446744073709551615)
+    if right > maximum - left:
+        return maximum
+    return left + right
+
+
+@export("prodex_mojo_operational_histogram_observe_v1")
+def prodex_mojo_operational_histogram_observe_v1(
+    abi_version: Int64,
+    observation: UInt64,
+    bounds_address: UInt,
+    counts_address: UInt,
+    bucket_count: Int64,
+    count_address: UInt,
+    sum_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != OPERATIONAL_METRICS_ABI_VERSION:
+        return OPERATIONAL_METRICS_STATUS_ABI
+    if (
+        bounds_address == 0
+        or counts_address == 0
+        or bucket_count < 0
+        or bucket_count > 16
+        or count_address == 0
+        or sum_address == 0
+    ):
+        return OPERATIONAL_METRICS_STATUS_INVALID
+    var bounds = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(bounds_address)
+    )
+    var counts = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(counts_address)
+    )
+    var count = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(count_address)
+    )
+    var total = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(sum_address)
+    )
+    count[] = operational_histogram_saturating_add(count[], 1)
+    total[] = operational_histogram_saturating_add(total[], observation)
+    for index in range(bucket_count):
+        if observation <= bounds[index]:
+            counts[index] = operational_histogram_saturating_add(counts[index], 1)
+    return OPERATIONAL_METRICS_STATUS_OK

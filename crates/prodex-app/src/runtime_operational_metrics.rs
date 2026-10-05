@@ -66,17 +66,14 @@ impl RuntimeOperationalMetricRegistry {
                 ..Default::default()
             }
         });
-        histogram.count = histogram.count.saturating_add(1);
-        histogram.sum = histogram.sum.saturating_add(observation);
-        for (bound, count) in histogram
-            .bucket_bounds
-            .iter()
-            .zip(histogram.bucket_counts.iter_mut())
-        {
-            if observation <= *bound {
-                *count = count.saturating_add(1);
-            }
-        }
+        prodex_mojo_core::operational_metrics::observe_histogram(
+            observation,
+            &histogram.bucket_bounds,
+            &mut histogram.bucket_counts,
+            &mut histogram.count,
+            &mut histogram.sum,
+        )
+        .expect("Mojo operational histogram observation returned invalid output");
     }
 }
 
@@ -221,6 +218,8 @@ mod tests {
             micros.bucket_counts,
             [0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
         );
+        assert_eq!(micros.count, 1);
+        assert_eq!(micros.sum, 501);
 
         let millis = histograms
             .get(&RuntimeOperationalMetricKey {
@@ -238,5 +237,7 @@ mod tests {
             millis.bucket_counts,
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]
         );
+        assert_eq!(millis.count, 1);
+        assert_eq!(millis.sum, 501);
     }
 }

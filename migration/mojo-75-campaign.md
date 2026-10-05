@@ -5235,3 +5235,21 @@ A sensitivity mutation replaced the `pass_through` exemption with
 `left: 1` versus `right: 2`. Restoring the Mojo source returned the exact pre-mutation
 SHA-256 `5be6e9fd8c8c4ccfa80ca24964fb1d990a80372f98ab797a8db18720aa641429`, and the
 caller regression passed again.
+
+## Runtime operational histogram observation migration
+
+`operational_metrics.mojo` now owns per-observation histogram accumulation through
+`prodex_mojo_operational_histogram_observe_v1`. Mojo performs cumulative bucket
+comparison, saturating bucket increments, saturating sample count, and saturating
+sum updates. Rust retains the mutex-protected registry, metric-key construction,
+bucket/count storage, and the typed ABI call. The former Rust loop over bucket
+bounds plus Rust `saturating_add` updates for histogram count/sum were deleted; no
+Rust production fallback or recomputation remains.
+
+Verification passed:
+
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-mojo-core --features mojo-observability --test operational_metrics -- --list` listed 4 tests; all 4 passed.
+- `PRODEX_MOJO_REQUIRED=1 PRODEX_MOJO_VERSION=1.1.0 cargo test --locked -q -p prodex-app --lib runtime_histogram_bucket_plan_is_observable_at_the_registry_boundary -- --list` listed 1 production caller test; it passed.
+- No-fallback self-test/check, authority guard, ownership check, size guard, formatting, and `git diff --check` passed; ownership reports 176 authoritative operations.
+- Sensitivity proof changed the authoritative cumulative comparison from `observation <= bounds[index]` to `<`. The direct required-Mojo test failed with bucket counts `[0, 1, 2]` instead of `[1, 1, 2]`. Restoring the source was byte-exact: SHA-256 before and after was `ded151abd8475c683e90b5452e03fd95de153a1942bd459fba7a8d483e87fdc6`; the targeted test passed again.
+- `node scripts/ci/mojo-production-share.mjs --check` reports 84,270 reachable Mojo LOC and 204,893 Rust production LOC, or **29.1427% Mojo**. The 7% release floor and Mojo non-regression pass; the 75% project target remains in progress.

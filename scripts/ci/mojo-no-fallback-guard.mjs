@@ -72,6 +72,10 @@ const DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE = "crates/prodex-runtime-docto
 const DOCTOR_SMART_CONTEXT_DECISION_ADAPTER_FILE = DOCTOR_MARKER_ABI_ADAPTER_FILE;
 const DOCTOR_SMART_CONTEXT_DECISION_MOJO_FILE = DOCTOR_MARKER_ABI_MOJO_FILE;
 const PROMOTED_FILES = [
+  OPERATIONAL_HISTOGRAM_CALLER_FILE,
+  OPERATIONAL_HISTOGRAM_ADAPTER_FILE,
+  OPERATIONAL_HISTOGRAM_MOJO_FILE,
+  OPERATIONAL_HISTOGRAM_ABI_TEST_FILE,
   DOCTOR_SMART_CONTEXT_DECISION_CONSUMER_FILE,
   LIVE_LOG_RECORD_FILE,
   LIVE_LOG_RECORD_ADAPTER_FILE,
@@ -4645,23 +4649,45 @@ export function findViolations(files) {
   const operationalHistogramViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === OPERATIONAL_HISTOGRAM_CALLER_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
-      return production.includes("histogram_bucket_bounds(name)") &&
+      const required = [
+        "histogram_bucket_bounds(name)",
+        "prodex_mojo_core::operational_metrics::observe_histogram(",
+      ];
+      const restoredRust = /histogram\.(?:count|sum)\s*=|bucket_counts\.iter_mut\(\)|observation\s*<=\s*\*bound/u;
+      return required.every((marker) => production.includes(marker)) &&
         !/\bruntime_operational_histogram_bounds\s*\(/u.test(production) &&
-        !/\b120_000_000\b/u.test(production)
+        !/\b120_000_000\b/u.test(production) &&
+        !restoredRust.test(production)
         ? []
-        : [`${filePath}: histogram bucket planning must use Mojo without a Rust policy copy`];
+        : [`${filePath}: histogram bucket planning and observation must use Mojo without a Rust policy copy`];
     }
-    if (filePath === OPERATIONAL_HISTOGRAM_ADAPTER_FILE &&
-        !contents.includes("prodex_mojo_operational_histogram_bounds_v1(")) {
-      return [`${filePath}: histogram bucket adapter must call the versioned Mojo ABI`];
+    if (filePath === OPERATIONAL_HISTOGRAM_ADAPTER_FILE) {
+      const required = [
+        "prodex_mojo_operational_histogram_bounds_v1(",
+        "prodex_mojo_operational_histogram_observe_v1(",
+        "pub fn observe_histogram(",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: histogram adapter must retain ${marker}`);
     }
-    if (filePath === OPERATIONAL_HISTOGRAM_MOJO_FILE &&
-        !contents.includes('@export("prodex_mojo_operational_histogram_bounds_v1")')) {
-      return [`${filePath}: histogram bucket planning must remain in Mojo`];
+    if (filePath === OPERATIONAL_HISTOGRAM_MOJO_FILE) {
+      const required = [
+        '@export("prodex_mojo_operational_histogram_bounds_v1")',
+        '@export("prodex_mojo_operational_histogram_observe_v1")',
+        "operational_histogram_saturating_add(",
+        "observation <= bounds[index]",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: histogram semantics must remain Mojo-owned (${marker})`);
     }
-    if (filePath === OPERATIONAL_HISTOGRAM_ABI_TEST_FILE &&
-        !contents.includes("operational_histogram_bucket_plan_is_mojo_owned")) {
-      return [`${filePath}: direct required-Mojo histogram bucket coverage is required`];
+    if (filePath === OPERATIONAL_HISTOGRAM_ABI_TEST_FILE) {
+      const required = [
+        "operational_histogram_bucket_plan_is_mojo_owned",
+        "operational_histogram_observation_is_mojo_owned",
+        "operational_histogram_observation_saturates_and_rejects_shape_mismatch",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: direct required-Mojo histogram coverage must retain ${marker}`);
     }
     return [];
   });
@@ -4767,6 +4793,33 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  const operationalHistogramCaller = [
+    "histogram_bucket_bounds(name)",
+    "prodex_mojo_core::operational_metrics::observe_histogram(",
+  ].join("\n");
+  const operationalHistogramFiles = [
+    [OPERATIONAL_HISTOGRAM_CALLER_FILE, operationalHistogramCaller],
+    [OPERATIONAL_HISTOGRAM_ADAPTER_FILE, [
+      "prodex_mojo_operational_histogram_bounds_v1(",
+      "prodex_mojo_operational_histogram_observe_v1(",
+      "pub fn observe_histogram(",
+    ].join("\n")],
+    [OPERATIONAL_HISTOGRAM_MOJO_FILE, [
+      '@export("prodex_mojo_operational_histogram_bounds_v1")',
+      '@export("prodex_mojo_operational_histogram_observe_v1")',
+      "operational_histogram_saturating_add(",
+      "observation <= bounds[index]",
+    ].join("\n")],
+    [OPERATIONAL_HISTOGRAM_ABI_TEST_FILE, [
+      "operational_histogram_bucket_plan_is_mojo_owned",
+      "operational_histogram_observation_is_mojo_owned",
+      "operational_histogram_observation_saturates_and_rejects_shape_mismatch",
+    ].join("\n")],
+  ];
+  assert.deepEqual(findViolations(operationalHistogramFiles), []);
+  assert.match(findViolations([[OPERATIONAL_HISTOGRAM_CALLER_FILE,
+    operationalHistogramCaller + "\nhistogram.count = histogram.count.saturating_add(1);",
+  ]]).join("\n"), /histogram bucket planning and observation must use Mojo/u);
   const smartContextSymbolConsumer = [
     "fn runtime_smart_context_artifact_semantic_line_index() {",
     "  prodex_mojo_core::smart_context_symbols::index(text, remaining, max_excerpt_bytes);",

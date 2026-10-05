@@ -1239,7 +1239,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_operational_histogram_bucket_planning"
+          "runtime_operational_histogram_bucket_planning",
+          "runtime_operational_histogram_observation"
         ]
       },
       {
@@ -5355,6 +5356,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "typed Mojo result re-export, histogram state mutation, and metric emission"
+    },
+    {
+      "name": "runtime_operational_histogram_observation",
+      "domain": "runtime-observability/metrics",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust saturated histogram count and sum, scanned cumulative bucket bounds, and incremented matching bucket counts",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_operational_histogram_observe_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/operational_metrics.mojo",
+      "consumer": "crates/prodex-app/src/runtime_operational_metrics.rs",
+      "consumer_marker": "prodex_mojo_core::operational_metrics::observe_histogram",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_operational_metrics.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_operational_metrics.rs",
+      "rust_owner_before": "Per-observation saturating count/sum updates and cumulative bound comparison/increment loop",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; direct required-Mojo ABI tests and registry-boundary tests cover exact-bound inclusion, cumulative buckets, saturation, count, and sum",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "mutex-protected histogram storage, vector allocation, typed ABI invocation, and metric export"
     },
     {
       "name": "update_notice_release_version_policy",
