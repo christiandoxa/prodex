@@ -1,5 +1,5 @@
 #[test]
-fn runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fresh_fallback() {
+fn runtime_proxy_http_message_followup_with_session_quota_requests_full_context_replay() {
     let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start();
     let main_home = temp_dir.path.join("homes/main");
@@ -80,24 +80,16 @@ fn runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fre
 
     let status = response.status().as_u16();
     let body = response.text().expect("responses body should decode");
-    assert_eq!(
-        status, 200,
-        "quota SSE response should pass through from the owning profile: {body}"
-    );
-    assert!(
-        body.contains("insufficient_quota"),
-        "quota failure should pass through instead of becoming a fresh response: {body}"
-    );
-    assert!(
-        !body.contains("\"id\":\"resp-second\""),
-        "proxy must not replace quota-blocked message context with a fresh response: {body}"
-    );
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("previous_response_not_found"), "{body}");
+    assert!(!body.contains("insufficient_quota"), "{body}");
+    assert!(!body.contains("service_unavailable"), "{body}");
 
     let responses_accounts = backend.responses_accounts();
     assert_eq!(
         responses_accounts,
         vec!["main-account".to_string()],
-        "quota-blocked message follow-up should not rotate off previous_response owner"
+        "full-context replay signal must be emitted before another profile receives the replay"
     );
 
     let responses_bodies = backend.responses_bodies();

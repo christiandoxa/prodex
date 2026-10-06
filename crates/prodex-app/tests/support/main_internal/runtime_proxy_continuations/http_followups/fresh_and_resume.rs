@@ -244,7 +244,7 @@ fn runtime_proxy_http_quota_tries_every_profile_before_final_429() {
 }
 
 #[test]
-fn runtime_proxy_http_precommit_transport_keeps_previous_response_owner() {
+fn runtime_proxy_http_precommit_transport_requests_full_context_replay() {
     let fixture = start_runtime_continuation_fixture(
         RuntimeProxyBackend::start_http_reset_before_first_byte(),
         "main",
@@ -265,13 +265,14 @@ fn runtime_proxy_http_precommit_transport_keeps_previous_response_owner() {
         }),
     );
 
-    assert_eq!(response.status().as_u16(), 503);
+    assert_eq!(response.status().as_u16(), 400);
     let body = response.text().expect("error body should decode");
-    assert!(body.contains("service_unavailable"), "{body}");
+    assert!(body.contains("previous_response_not_found"), "{body}");
+    assert!(!body.contains("service_unavailable"), "{body}");
     assert_eq!(
         fixture.backend.responses_accounts(),
         vec!["main-account".to_string()],
-        "hard previous-response affinity must not rotate to another profile"
+        "failed owner must be the only upstream attempt before client full-context replay"
     );
     let log = fixture.wait_for_log(|log| {
         log.contains("responses_transport_failure profile=main")
