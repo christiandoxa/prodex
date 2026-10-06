@@ -8,31 +8,6 @@ use super::request::{
     gemini_continuation_metadata, gemini_tool_config_from_request, gemini_validate_openai_tools,
 };
 
-fn gemini_translator_validation_error(
-    plan: &crate::gemini_bridge::GeminiTranslatorValidationPlan,
-) -> Option<String> {
-    let index = plan.index.unwrap_or(0);
-    Some(match plan.tag {
-        0 | 1 | 16 => return None,
-        2 => "invalid_candidate_count: Gemini request fields `candidate_count` and `candidateCount` conflict".to_string(),
-        3 => "invalid_candidate_count: Gemini request field `candidate_count` must be omitted, null, or 1".to_string(),
-        4 => "invalid_candidate_count: Gemini request field `candidateCount` must be omitted, null, or 1".to_string(),
-        5 => "invalid_tool_declaration: Gemini request field `tools` must be an array".to_string(),
-        6 => format!("invalid_tool_declaration: Gemini request field `tools[{index}]` must be an object"),
-        7 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].function` must be an object"),
-        8 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].function.name` must be a non-empty string"),
-        9 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].name` must be a non-empty string"),
-        10 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].function.parameters` is required"),
-        11 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].parameters` is required"),
-        12 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].function.parameters` must be an object"),
-        13 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].parameters` must be an object"),
-        14 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].function.description` must be a string"),
-        15 => format!("invalid_tool_declaration: Gemini request field `tools[{index}].description` must be a string"),
-        17 => format!("Gemini response_format type `{}` is not supported", plan.detail.as_deref().unwrap_or_default()),
-        _ => "Gemini translator validation returned an unknown result".to_string(),
-    })
-}
-
 pub(super) fn gemini_transform_request(input: ProviderTransformInput) -> ProviderTransformResult {
     if super::gemini_passthrough_endpoint(input.endpoint) {
         return ProviderTransformResult::lossless(
@@ -167,7 +142,7 @@ fn gemini_validate_request_mojo(
             "Gemini translator does not support local media path inputs".to_string(),
         ));
     }
-    if let Some(reason) = gemini_translator_validation_error(&plan) {
+    if let Some(reason) = plan.reason.clone() {
         return Err(GeminiTransformIssue::Rejected(reason));
     }
     if plan.tag == 16
