@@ -53,6 +53,91 @@ def super_expose_method(view: ProdexRichStringView) -> Int64:
         return SUPER_EXPOSE_METHOD_NOTIFICATION
     return SUPER_EXPOSE_METHOD_UNKNOWN
 
+
+def super_expose_copy_label(
+    label: StringSlice,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) -> Int64:
+    var length = Int64(label.byte_length())
+    if length > output_capacity:
+        return 3
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = length
+    if length == 0:
+        return 0
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var source = label.unsafe_ptr()
+    for index in range(length):
+        output[unsafe_offset=index] = source[unsafe_offset=index]
+    return 0
+
+
+@export("prodex_mojo_super_expose_label_v1")
+def prodex_mojo_super_expose_label_v1(
+    abi_version: Int64,
+    label_kind: Int64,
+    value: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SUPER_EXPOSE_ABI_VERSION
+        or label_kind < 0
+        or label_kind > 1
+        or output_capacity < 0
+        or written_address == 0
+        or (output_capacity > 0 and output_address == 0)
+    ):
+        return 1
+    if label_kind == 0:
+        if value < SUPER_EXPOSE_METHOD_UNKNOWN or value > SUPER_EXPOSE_METHOD_SERVER_DISCOVER:
+            return 1
+        if value == SUPER_EXPOSE_METHOD_SERVER_DISCOVER:
+            return super_expose_copy_label(StringSlice("server_discover"), output_address, output_capacity, written_address)
+        if value == SUPER_EXPOSE_METHOD_INITIALIZE:
+            return super_expose_copy_label(StringSlice("initialize"), output_address, output_capacity, written_address)
+        if value == SUPER_EXPOSE_METHOD_PING:
+            return super_expose_copy_label(StringSlice("ping"), output_address, output_capacity, written_address)
+        if value == SUPER_EXPOSE_METHOD_TOOLS_LIST:
+            return super_expose_copy_label(StringSlice("tools_list"), output_address, output_capacity, written_address)
+        if value == SUPER_EXPOSE_METHOD_TOOLS_CALL:
+            return super_expose_copy_label(StringSlice("tools_call"), output_address, output_capacity, written_address)
+        if value == SUPER_EXPOSE_METHOD_NOTIFICATION:
+            return super_expose_copy_label(StringSlice("notification"), output_address, output_capacity, written_address)
+        return super_expose_copy_label(StringSlice("unknown"), output_address, output_capacity, written_address)
+
+    if value < SUPER_EXPOSE_TOOL_UNKNOWN or value > SUPER_EXPOSE_TOOL_SESSION_OUTPUT_READ:
+        return 1
+    if value == SUPER_EXPOSE_TOOL_START:
+        return super_expose_copy_label(StringSlice("start"), output_address, output_capacity, written_address)
+    if value == SUPER_EXPOSE_TOOL_STATUS:
+        return super_expose_copy_label(StringSlice("status"), output_address, output_capacity, written_address)
+    if value == SUPER_EXPOSE_TOOL_EVENTS:
+        return super_expose_copy_label(StringSlice("events"), output_address, output_capacity, written_address)
+    if value == SUPER_EXPOSE_TOOL_RESULT:
+        return super_expose_copy_label(StringSlice("result"), output_address, output_capacity, written_address)
+    if value == SUPER_EXPOSE_TOOL_CANCEL:
+        return super_expose_copy_label(StringSlice("cancel"), output_address, output_capacity, written_address)
+    if value == SUPER_EXPOSE_TOOL_LIST:
+        return super_expose_copy_label(StringSlice("list"), output_address, output_capacity, written_address)
+    if value == SUPER_EXPOSE_TOOL_EXEC:
+        return super_expose_copy_label(StringSlice("exec"), output_address, output_capacity, written_address)
+    if value == SUPER_EXPOSE_TOOL_SESSION_PROMPT_WRITE:
+        return super_expose_copy_label(StringSlice("session_prompt_write"), output_address, output_capacity, written_address)
+    if value == SUPER_EXPOSE_TOOL_SESSION_PREEMPT:
+        return super_expose_copy_label(StringSlice("session_preempt"), output_address, output_capacity, written_address)
+    if value == SUPER_EXPOSE_TOOL_SESSION_OUTPUT_READ:
+        return super_expose_copy_label(StringSlice("session_output_read"), output_address, output_capacity, written_address)
+    return super_expose_copy_label(StringSlice("unknown"), output_address, output_capacity, written_address)
+
+
 def super_expose_tool(view: ProdexRichStringView) -> Int64:
     if rich_view_matches_literal["prodex_super_start"](view, False):
         return SUPER_EXPOSE_TOOL_START

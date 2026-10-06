@@ -219,8 +219,18 @@ fn audit_dispatch_request(
         "super_expose_rpc",
         [
             crate::runtime_proxy_log_field("mode", context.mode.as_str()),
-            crate::runtime_proxy_log_field("method", method_kind.as_str()),
-            crate::runtime_proxy_log_field("tool", tool_kind.as_str()),
+            crate::runtime_proxy_log_field(
+                "method",
+                method_kind
+                    .label()
+                    .expect("Mojo Super expose method label returned invalid output"),
+            ),
+            crate::runtime_proxy_log_field(
+                "tool",
+                tool_kind
+                    .label()
+                    .expect("Mojo Super expose tool label returned invalid output"),
+            ),
             crate::runtime_proxy_log_field("body_bytes", body_bytes.to_string()),
         ],
     );
@@ -328,8 +338,18 @@ fn audit_dispatch_completion(
         "super_expose_rpc_completed",
         [
             crate::runtime_proxy_log_field("mode", context.mode.as_str()),
-            crate::runtime_proxy_log_field("method", method_kind.as_str()),
-            crate::runtime_proxy_log_field("tool", tool_kind.as_str()),
+            crate::runtime_proxy_log_field(
+                "method",
+                method_kind
+                    .label()
+                    .expect("Mojo Super expose method label returned invalid output"),
+            ),
+            crate::runtime_proxy_log_field(
+                "tool",
+                tool_kind
+                    .label()
+                    .expect("Mojo Super expose tool label returned invalid output"),
+            ),
             crate::runtime_proxy_log_field("success", success.to_string()),
         ],
     );
