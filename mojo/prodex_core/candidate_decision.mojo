@@ -1360,11 +1360,7 @@ def prodex_runtime_websocket_full_context_signal_v1(
         or owner_matches > 1
     ):
         return -1
-    return Int64(
-        previous_response_present == 1
-        and session_present == 1
-        and owner_matches == 1
-    )
+    return Int64(previous_response_present == 1 and owner_matches == 1)
 
 
 @export("prodex_runtime_websocket_quota_fallback_plan_v1")
@@ -1574,19 +1570,17 @@ def prodex_runtime_noncompact_failure_plan_v1(
         output[unsafe_offset=index] = 0
 
     if failure_kind == NONCOMPACT_FAILURE_RATE_LIMITED:
-        output[unsafe_offset=0] = session_owned
         output[unsafe_offset=1] = 1
-        output[unsafe_offset=3] = 1 - session_owned
-        output[unsafe_offset=4] = 1 - session_owned
+        output[unsafe_offset=2] = session_owned
+        output[unsafe_offset=3] = 1
+        output[unsafe_offset=4] = 1
         return 0
 
     if failure_kind == NONCOMPACT_FAILURE_UNAVAILABLE:
-        output[unsafe_offset=0] = session_owned
-        if session_owned == 0:
-            output[unsafe_offset=1] = 1
-            output[unsafe_offset=2] = 1
-            output[unsafe_offset=3] = 1
-            output[unsafe_offset=4] = 1
+        output[unsafe_offset=1] = 1
+        output[unsafe_offset=2] = session_owned
+        output[unsafe_offset=3] = 1
+        output[unsafe_offset=4] = 1
         return 0
 
     if failure_kind == NONCOMPACT_FAILURE_RETRYABLE:
@@ -1608,9 +1602,9 @@ def prodex_runtime_noncompact_failure_plan_v1(
         return 0
 
     if failure_kind == NONCOMPACT_FAILURE_TRANSPORT:
-        output[unsafe_offset=0] = session_owned
-        output[unsafe_offset=3] = 1 - session_owned
-        output[unsafe_offset=6] = 1 - session_owned
+        output[unsafe_offset=2] = session_owned
+        output[unsafe_offset=3] = 1
+        output[unsafe_offset=6] = 1
         return 0
 
     # local selection blocked

@@ -116,16 +116,41 @@ def shared_path_continues(view: ProdexRichStringView, index: Int64) -> Bool:
     return shared_path_byte(source[unsafe_offset=index])
 
 
+def shared_path_precedes(view: ProdexRichStringView, index: Int64) -> Bool:
+    var length = Int64(view.len)
+    if index < 0 or index >= length:
+        return False
+    var source = rich_view_ptr(view)
+    var byte = source[unsafe_offset=index]
+    if not shared_path_byte(byte):
+        return False
+    if (
+        byte == 98
+        or byte == 102
+        or byte == 110
+        or byte == 114
+        or byte == 116
+        or byte == 117
+    ):
+        var slash_start = index
+        while slash_start > 0 and source[unsafe_offset=slash_start - 1] == 92:
+            slash_start -= 1
+        if (index - slash_start) % 2 == 1:
+            return False
+    return True
+
+
 def shared_expand_path(
     view: ProdexRichStringView,
     marker_start: Int64,
     marker_length: Int64,
+    lower_bound: Int64,
 ) -> Tuple[Bool, Int64, Int64]:
-    var source = rich_view_ptr(view)
     var path_start = marker_start
-    while path_start > 0 and shared_path_byte(source[unsafe_offset=path_start - 1]):
+    while path_start > lower_bound and shared_path_precedes(view, path_start - 1):
         path_start -= 1
 
+    var source = rich_view_ptr(view)
     var path_end = marker_start + marker_length
     while path_end < Int64(view.len) and shared_path_continues(view, path_end):
         path_end += 1
@@ -263,7 +288,7 @@ def prodex_shared_attachment_policy_v1(
         if marker_start < 0:
             return SHARED_ATTACHMENT_OK
         var result = shared_expand_path(
-            view, marker_start, Int64(marker.byte_length())
+            view, marker_start, Int64(marker.byte_length()), cursor
         )
         output[0] = Int64(result[0])
         output[1] = result[1]
@@ -274,7 +299,7 @@ def prodex_shared_attachment_policy_v1(
         var marker = shared_attachment_marker(view, cursor)
         if not marker[0]:
             return SHARED_ATTACHMENT_OK
-        var result = shared_expand_path(view, marker[1], marker[2])
+        var result = shared_expand_path(view, marker[1], marker[2], cursor)
         output[0] = Int64(result[0])
         output[1] = result[1]
         output[2] = result[2]

@@ -1590,8 +1590,8 @@ mod tests {
     }
 
     #[test]
-    fn generic_429_body_is_not_retryable() {
-        assert!(!runtime_local_rewrite_retryable_429_body(
+    fn generic_429_body_is_retryable_before_commit() {
+        assert!(runtime_local_rewrite_retryable_429_body(
             b"too many requests"
         ));
         assert!(runtime_local_rewrite_retryable_429_body(

@@ -322,7 +322,7 @@ fn handle_runtime_responses_direct_quota(
 
 fn handle_runtime_responses_direct_overloaded(
     fallback: &RuntimeResponsesDirectCurrentFallback<'_>,
-    affinity_state: &RuntimeResponsesAffinityState,
+    affinity_state: &mut RuntimeResponsesAffinityState,
     excluded_profiles: &mut BTreeSet<String>,
     last_failure: &mut Option<(RuntimeUpstreamFailureResponse, bool)>,
     profile_name: String,
@@ -333,6 +333,12 @@ fn handle_runtime_responses_direct_overloaded(
         shared: fallback.shared,
         profile_name,
         response,
+        prompt_cache_key: fallback.prompt_cache_key,
+        previous_response_id: fallback.previous_response_id,
+        request_turn_state: fallback.request_turn_state,
+        request_session_id: fallback.request_session_id,
+        request_model_name: runtime_smart_context_model_name_from_body(&fallback.request.body)
+            .as_deref(),
         affinity_state,
         excluded_profiles,
         last_failure,

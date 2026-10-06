@@ -16,15 +16,30 @@ pub(super) fn runtime_noncompact_failure_plan(
     .expect("Mojo noncompact failure policy returned invalid output")
 }
 
+pub(super) struct RuntimeNoncompactRateLimitedContext<'a> {
+    pub(super) request_id: u64,
+    pub(super) shared: &'a RuntimeRotationProxyShared,
+    pub(super) request_session_id: Option<&'a str>,
+    pub(super) session_profile: &'a mut Option<String>,
+    pub(super) loop_state: &'a mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
+    pub(super) profile_name: String,
+    pub(super) response: tiny_http::ResponseBox,
+    pub(super) retry_after: Option<Duration>,
+}
+
 pub(super) fn handle_runtime_noncompact_rate_limited(
-    request_id: u64,
-    shared: &RuntimeRotationProxyShared,
-    session_profile: &mut Option<String>,
-    loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
-    profile_name: String,
-    response: tiny_http::ResponseBox,
-    retry_after: Option<Duration>,
+    context: RuntimeNoncompactRateLimitedContext<'_>,
 ) -> Result<Option<tiny_http::ResponseBox>> {
+    let RuntimeNoncompactRateLimitedContext {
+        request_id,
+        shared,
+        request_session_id,
+        session_profile,
+        loop_state,
+        profile_name,
+        response,
+        retry_after,
+    } = context;
     runtime_proxy_log(
         shared,
         format!(
@@ -32,6 +47,7 @@ pub(super) fn handle_runtime_noncompact_rate_limited(
             retry_after.map_or(0, |delay| delay.as_millis()),
         ),
     );
+    let session_owned = session_profile.as_deref() == Some(profile_name.as_str());
     let plan = runtime_noncompact_failure_plan(
         prodex_mojo_core::runtime::NoncompactFailureKind::RateLimited,
         session_profile,
@@ -47,6 +63,16 @@ pub(super) fn handle_runtime_noncompact_rate_limited(
     }
     loop_state.record_rate_limit_failure();
     if plan.clear_session {
+        if session_owned && let Some(session_id) = request_session_id {
+            let _ = release_runtime_retryable_failure_affinity(
+                shared,
+                &profile_name,
+                None,
+                None,
+                Some(session_id),
+                "standard_rate_limit",
+            )?;
+        }
         clear_noncompact_session_profile(session_profile, &profile_name);
     }
     if plan.exclude_profile {
@@ -72,6 +98,7 @@ pub(super) struct RuntimeNoncompactRetryableContext<'a> {
 pub(super) fn handle_runtime_noncompact_profile_unavailable(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,
+    request_session_id: Option<&str>,
     session_profile: &mut Option<String>,
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
     profile_name: String,
@@ -83,6 +110,7 @@ pub(super) fn handle_runtime_noncompact_profile_unavailable(
             "request={request_id} transport=http standard_profile_unavailable profile={profile_name}"
         ),
     );
+    let session_owned = session_profile.as_deref() == Some(profile_name.as_str());
     let plan = runtime_noncompact_failure_plan(
         prodex_mojo_core::runtime::NoncompactFailureKind::Unavailable,
         session_profile,
@@ -97,6 +125,16 @@ pub(super) fn handle_runtime_noncompact_profile_unavailable(
         mark_runtime_profile_retry_backoff(shared, &profile_name)?;
     }
     if plan.clear_session {
+        if session_owned && let Some(session_id) = request_session_id {
+            let _ = release_runtime_retryable_failure_affinity(
+                shared,
+                &profile_name,
+                None,
+                None,
+                Some(session_id),
+                "standard_profile_unavailable",
+            )?;
+        }
         clear_noncompact_session_profile(session_profile, &profile_name);
     }
     if plan.exclude_profile {
@@ -147,7 +185,14 @@ pub(super) fn handle_runtime_noncompact_retryable(
             RUNTIME_PROFILE_BAD_PAIRING_PENALTY,
             "standard_overload",
         );
-        false
+        release_runtime_retryable_failure_affinity(
+            shared,
+            &profile_name,
+            None,
+            None,
+            request_session_id,
+            "standard_overload",
+        )?
     } else {
         release_runtime_quota_blocked_affinity(
             shared,

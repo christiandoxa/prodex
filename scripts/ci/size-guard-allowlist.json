@@ -83,10 +83,5 @@
     "file": "crates/prodex-mojo-core/src/provider_constraints.rs",
     "maxLines": 870,
     "reason": "Provider-constraint Mojo ABI coverage currently spans the consolidated deterministic policy boundary; exact cap records current production LOC pending a focused adapter split."
-  },
-  {
-    "file": "crates/prodex-runtime-proxy/tests/src/error_policy.rs",
-    "maxLines": 864,
-    "reason": "Runtime error-policy parity tests cover HTTP, stream, quota, overload, retry-after, and payload classification in one focused suite; exact cap records the audited regression surface."
   }
 ]

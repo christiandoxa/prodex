@@ -2,6 +2,9 @@ use super::*;
 use runtime_proxy_crate::runtime_proxy_websocket_error_payload_text;
 use std::time::Duration;
 
+mod retry_recovery;
+mod retryable_failures;
+
 impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     pub(super) fn handle_direct_current_fallback_attempt(
         &mut self,
@@ -289,116 +292,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         Ok(RuntimeWebsocketMessageLoopAction::Finished)
     }
 
-    fn handle_rate_limited(
-        &mut self,
-        profile_name: String,
-        payload: RuntimeWebsocketErrorPayload,
-        retry_after: Option<Duration>,
-        via: &'static str,
-    ) -> Result<RuntimeWebsocketMessageLoopAction> {
-        runtime_proxy_log(
-            self.shared,
-            format!(
-                "request={} websocket_session={} rate_limited profile={} via={} retry_after_ms={}",
-                self.request_id,
-                self.session_id,
-                profile_name,
-                via,
-                retry_after.map_or(0, |delay| delay.as_millis()),
-            ),
-        );
-        mark_runtime_profile_retry_backoff_for_delay(self.shared, &profile_name, retry_after)?;
-        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
-            !self.candidate_has_hard_affinity(&profile_name),
-            false,
-        );
-        if !plan.continue_selection {
-            forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
-            return Ok(RuntimeWebsocketMessageLoopAction::Finished);
-        }
-        self.saw_rate_limit_failure = true;
-        if plan.exclude_profile {
-            self.excluded_profiles.insert(profile_name);
-        }
-        self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
-        Ok(RuntimeWebsocketMessageLoopAction::Continue)
-    }
-
-    fn handle_auth_failed(
-        &mut self,
-        profile_name: String,
-        payload: RuntimeWebsocketErrorPayload,
-        via: &'static str,
-    ) -> Result<RuntimeWebsocketMessageLoopAction> {
-        runtime_proxy_log(
-            self.shared,
-            format!(
-                "request={} websocket_session={} auth_failed profile={} via={}",
-                self.request_id, self.session_id, profile_name, via
-            ),
-        );
-        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
-            !self.candidate_has_hard_affinity(&profile_name),
-            false,
-        );
-        if !plan.continue_selection {
-            forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
-            return Ok(RuntimeWebsocketMessageLoopAction::Finished);
-        }
-        let _ = release_runtime_auth_failed_affinity(
-            self.shared,
-            &profile_name,
-            self.previous_response_id.as_deref(),
-            self.request_turn_state.as_deref(),
-            self.request_session_id.as_deref(),
-        )?;
-        self.clear_profile_affinity(&profile_name, true);
-        if plan.exclude_profile {
-            self.excluded_profiles.insert(profile_name);
-        }
-        self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), true));
-        Ok(RuntimeWebsocketMessageLoopAction::Continue)
-    }
-
-    pub(super) fn handle_direct_current_rate_limited(
-        &mut self,
-        profile_name: String,
-        payload: RuntimeWebsocketErrorPayload,
-        retry_after: Option<Duration>,
-    ) -> Result<RuntimeWebsocketMessageLoopAction> {
-        self.handle_rate_limited(
-            profile_name,
-            payload,
-            retry_after,
-            "direct_current_profile_fallback",
-        )
-    }
-
-    pub(super) fn handle_candidate_rate_limited(
-        &mut self,
-        profile_name: String,
-        payload: RuntimeWebsocketErrorPayload,
-        retry_after: Option<Duration>,
-    ) -> Result<RuntimeWebsocketMessageLoopAction> {
-        self.handle_rate_limited(profile_name, payload, retry_after, "candidate")
-    }
-
-    pub(super) fn handle_direct_current_auth_failed(
-        &mut self,
-        profile_name: String,
-        payload: RuntimeWebsocketErrorPayload,
-    ) -> Result<RuntimeWebsocketMessageLoopAction> {
-        self.handle_auth_failed(profile_name, payload, "direct_current_profile_fallback")
-    }
-
-    pub(super) fn handle_candidate_auth_failed(
-        &mut self,
-        profile_name: String,
-        payload: RuntimeWebsocketErrorPayload,
-    ) -> Result<RuntimeWebsocketMessageLoopAction> {
-        self.handle_auth_failed(profile_name, payload, "candidate")
-    }
-
     pub(super) fn handle_direct_current_transport_failed(
         &mut self,
         profile_name: String,
@@ -429,6 +322,24 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.request_id, self.session_id, profile_name, stage, via_suffix
             ),
         );
+        if self.candidate_has_hard_affinity(&profile_name)
+            && self.full_context_retry_available(&profile_name)?
+        {
+            let released_affinity = release_runtime_retryable_failure_affinity(
+                self.shared,
+                &profile_name,
+                self.previous_response_id.as_deref(),
+                self.request_turn_state.as_deref(),
+                self.request_session_id.as_deref(),
+                "transport_full_context_retry",
+            )?;
+            self.send_full_context_retry_signal(
+                &profile_name,
+                "transport_failure_full_context_retry_signal",
+                released_affinity,
+            )?;
+            return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+        }
         self.saw_transport_failure = true;
         self.excluded_profiles.insert(profile_name);
         self.last_failure = Some((
@@ -506,6 +417,22 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             false,
         );
         if !plan.continue_selection {
+            if self.full_context_retry_available(&profile_name)? {
+                let released_affinity = release_runtime_retryable_failure_affinity(
+                    self.shared,
+                    &profile_name,
+                    self.previous_response_id.as_deref(),
+                    self.request_turn_state.as_deref(),
+                    self.request_session_id.as_deref(),
+                    "overload_full_context_retry",
+                )?;
+                self.send_full_context_retry_signal(
+                    &profile_name,
+                    "upstream_overload_full_context_retry_signal",
+                    released_affinity,
+                )?;
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
             runtime_proxy_log(
                 self.shared,
                 format!(
@@ -626,93 +553,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
 
-    fn try_signal_quota_full_context_retry(&mut self, profile_name: &str) -> Result<bool> {
-        if !runtime_proxy_crate::runtime_websocket_full_context_signal_eligible(
-            self.previous_response_id.is_some(),
-            self.request_session_id.is_some(),
-            self.bound_profile.as_deref() == Some(profile_name),
-        ) || !self.prepare_full_context_quota_fallback(profile_name)?
-        {
-            return Ok(false);
-        }
-
-        let released_affinity = self.release_quota_blocked_affinity(profile_name)?;
-        self.clear_profile_affinity(profile_name, true);
-        runtime_proxy_log(
-            self.shared,
-            format!(
-                "request={} websocket_session={} quota_blocked_full_context_retry_signal profile={} affinity_released={released_affinity}",
-                self.request_id, self.session_id, profile_name
-            ),
-        );
-        send_runtime_proxy_websocket_error(
-            &mut *self.local_socket,
-            400,
-            "previous_response_not_found",
-            "Previous response was not found. Retrying the full request.",
-        )?;
-        Ok(true)
-    }
-
-    fn prepare_quota_fallback(&mut self, profile_name: &str) -> Result<bool> {
-        let has_context_constraint = self.previous_response_id.is_some()
-            || self.request_requires_previous_response_affinity
-            || self.request_turn_state.is_some()
-            || self.pinned_profile.is_some()
-            || self.turn_state_profile.is_some()
-            || self.compact_followup_profile.is_some();
-        self.prepare_quota_fallback_with_context(profile_name, has_context_constraint)
-    }
-
-    fn prepare_full_context_quota_fallback(&mut self, profile_name: &str) -> Result<bool> {
-        self.prepare_quota_fallback_with_context(profile_name, false)
-    }
-
-    fn prepare_quota_fallback_with_context(
-        &mut self,
-        profile_name: &str,
-        has_context_constraint: bool,
-    ) -> Result<bool> {
-        let mut excluded_profiles = self.excluded_profiles.clone();
-        excluded_profiles.insert(profile_name.to_string());
-        let route_eligible_fallback = runtime_has_route_eligible_quota_fallback_for_model(
-            self.shared,
-            profile_name,
-            &excluded_profiles,
-            RuntimeRouteKind::Websocket,
-            runtime_smart_context_model_name_from_body(self.request_text.as_bytes()).as_deref(),
-        )?;
-        match runtime_proxy_crate::runtime_websocket_quota_fallback_plan(
-            route_eligible_fallback,
-            has_context_constraint,
-        ) {
-            runtime_proxy_crate::RuntimeWebsocketQuotaFallbackPlan::Ready => Ok(true),
-            runtime_proxy_crate::RuntimeWebsocketQuotaFallbackPlan::Unavailable => Ok(false),
-            runtime_proxy_crate::RuntimeWebsocketQuotaFallbackPlan::LastChance => {
-                let Some(fallback_profile) = runtime_quota_last_chance_profile_for_route(
-                    self.shared,
-                    &excluded_profiles,
-                    RuntimeRouteKind::Websocket,
-                    self.prompt_cache_key.as_deref(),
-                    runtime_smart_context_model_name_from_body(self.request_text.as_bytes())
-                        .as_deref(),
-                )?
-                else {
-                    return Ok(false);
-                };
-                runtime_proxy_log(
-                    self.shared,
-                    format!(
-                        "request={} websocket_session={} quota_last_chance profile={} failed_profile={}",
-                        self.request_id, self.session_id, fallback_profile, profile_name
-                    ),
-                );
-                self.quota_last_chance_profile = Some(fallback_profile);
-                Ok(true)
-            }
-        }
-    }
-
     pub(super) fn handle_candidate_overloaded(
         &mut self,
         profile_name: String,
@@ -740,6 +580,22 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             false,
         );
         if !plan.continue_selection {
+            if self.full_context_retry_available(&profile_name)? {
+                let released_affinity = release_runtime_retryable_failure_affinity(
+                    self.shared,
+                    &profile_name,
+                    self.previous_response_id.as_deref(),
+                    self.request_turn_state.as_deref(),
+                    self.request_session_id.as_deref(),
+                    "overload_full_context_retry",
+                )?;
+                self.send_full_context_retry_signal(
+                    &profile_name,
+                    "upstream_overload_full_context_retry_signal",
+                    released_affinity,
+                )?;
+                return Ok(RuntimeWebsocketMessageLoopAction::Finished);
+            }
             runtime_proxy_log(
                 self.shared,
                 format!(

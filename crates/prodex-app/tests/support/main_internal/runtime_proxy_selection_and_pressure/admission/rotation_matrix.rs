@@ -3,6 +3,9 @@ use super::*;
 use std::io::Read;
 use std::sync::mpsc;
 
+#[path = "rotation_matrix/retryable_http.rs"]
+mod retryable_http;
+
 fn ready_profiles(backend: &RuntimeProxyBackend) -> RuntimeProxyProfileHarness {
     let ready = runtime_usage_snapshot(
         quota_window_ready(80, 3_600),
@@ -95,6 +98,59 @@ fn quota_snapshot(
 }
 
 #[test]
+fn responses_blocked_five_hour_or_weekly_rotates_to_ready_profile_without_user_error() {
+    for (label, blocked) in [
+        (
+            "blocked_5h",
+            runtime_usage_snapshot(
+                quota_window_exhausted(300),
+                quota_window_ready(80, 86_400),
+            ),
+        ),
+        (
+            "blocked_weekly",
+            runtime_usage_snapshot(
+                quota_window_ready(80, 3_600),
+                quota_window_exhausted(300),
+            ),
+        ),
+    ] {
+        let backend = RuntimeProxyBackend::start();
+        let ready = runtime_usage_snapshot(
+            quota_window_ready(80, 3_600),
+            quota_window_ready(80, 86_400),
+        );
+        let harness = RuntimeProxyProfileHarnessBuilder::new()
+            .openai_profile("main", "main-account", Some("main@example.com"))
+            .openai_profile("second", "second-account", Some("second@example.com"))
+            .active_profile("main")
+            .current_profile("main")
+            .upstream_base_url(backend.base_url())
+            .profile_usage_snapshot("main", blocked)
+            .profile_usage_snapshot("second", ready)
+            .build();
+
+        let reply = proxy_runtime_responses_request(103, &responses_request(br#"{"input":[]}"#), harness.shared())
+            .expect("a blocked account must rotate while another profile is ready");
+        let (status, body, profile) = consume_responses_reply(reply);
+        assert_eq!(status, 200, "{label}: {body}");
+        assert_eq!(profile.as_deref(), Some("second"), "{label}");
+        assert_eq!(backend.responses_accounts(), ["second-account"], "{label}");
+        let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+        assert!(
+            !body.contains("pre-commit retry budget was exhausted")
+                && !body.contains("local capacity remained saturated")
+                && !body.contains("usage limit"),
+            "{label}: retry internals must not leak to the user: {body}"
+        );
+        assert!(
+            !log.contains("precommit_budget_exhausted"),
+            "{label}: ready fallback should be selected before terminal retry-budget handling: {log}"
+        );
+    }
+}
+
+#[test]
 fn retryable_profile_recovery_does_not_require_a_transient_failure_flag() {
     let ready = runtime_usage_snapshot(
         quota_window_ready(87, 3_600),
@@ -132,8 +188,7 @@ fn retryable_profile_recovery_does_not_require_a_transient_failure_flag() {
     );
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(
-        log.contains("rotation_waiting_for_recovery")
-            && log.contains("route=responses"),
+        log.contains("rotation_waiting_for_recovery") && log.contains("route=responses"),
         "production recovery path must wait instead of surfacing retry-budget 503: {log}"
     );
 }
@@ -200,7 +255,9 @@ fn fresh_responses_drain_last_positive_profile_after_previous_profile_hits_zero(
         &responses_request(br#"{"input":[]}"#),
         harness.shared(),
     )
-    .expect("one account reaching authoritative zero must rotate to the remaining positive account");
+    .expect(
+        "one account reaching authoritative zero must rotate to the remaining positive account",
+    );
     let (status, body, profile) = consume_responses_reply(reply);
 
     assert_eq!(status, 200, "{body}");
@@ -341,173 +398,34 @@ fn fresh_responses_rotate_profile_unavailable_without_quota_quarantine() {
 
     assert_eq!(status, 200, "{body}");
     assert_eq!(profile.as_deref(), Some("second"));
-    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
+    assert_eq!(
+        backend.responses_accounts(),
+        ["main-account", "second-account"]
+    );
 
     let runtime = harness.shared().runtime.lock().expect("runtime lock");
     let main_snapshot = runtime
         .profile_usage_snapshots
         .get("main")
         .expect("main profile quota snapshot");
-    assert_eq!(main_snapshot.five_hour_status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(
+        main_snapshot.five_hour_status,
+        RuntimeQuotaWindowStatus::Ready
+    );
     assert_eq!(main_snapshot.five_hour_remaining_percent, 80);
     assert_eq!(main_snapshot.weekly_status, RuntimeQuotaWindowStatus::Ready);
     assert_eq!(main_snapshot.weekly_remaining_percent, 80);
 }
 
 #[test]
-fn fresh_responses_pass_through_generic_429_without_rotation() {
+fn fresh_responses_do_not_rotate_invalid_requests() {
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
-            RuntimeProxyBackendFaultStep::plain_429(
+            RuntimeProxyBackendFaultStep::invalid_request(
                 RuntimeProxyBackendFaultRoute::Responses,
                 "main-account",
             ),
         ]));
-    let harness = ready_profiles(&backend);
-
-    let reply = proxy_runtime_responses_request(
-        104,
-        &responses_request(br#"{"input":[]}"#),
-        harness.shared(),
-    )
-    .expect("generic 429 should be passed through");
-    let (status, body, profile) = consume_responses_reply(reply);
-
-    assert_eq!(status, 429);
-    assert_eq!(body, "Too Many Requests");
-    assert_eq!(profile, None);
-    assert_eq!(backend.responses_accounts(), ["main-account"]);
-}
-
-#[test]
-fn fresh_responses_rate_limit_rotates_without_overload_penalty() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
-        RuntimeProxyBackendFaultStep::rate_limited_429(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        ),
-    ]));
-    let harness = ready_profiles(&backend);
-
-    let reply = proxy_runtime_responses_request(
-        114,
-        &responses_request(br#"{"input":[]}"#),
-        harness.shared(),
-    )
-    .expect("explicit rate limit should rotate to the next profile");
-    let (status, body, profile) = consume_responses_reply(reply);
-
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(profile.as_deref(), Some("second"));
-    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
-    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
-    assert!(log.contains("rate_limited"), "rate-limit classification should be visible: {log}");
-    assert!(
-        !log.contains("upstream_overloaded route=responses profile=main"),
-        "rate limits must not receive overload health treatment: {log}"
-    );
-}
-
-#[test]
-fn fresh_responses_sse_rate_limit_rotates_without_overload_penalty() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
-        RuntimeProxyBackendFaultStep::sse_rate_limited(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        ),
-    ]));
-    let harness = ready_profiles(&backend);
-
-    let reply = proxy_runtime_responses_request(
-        115,
-        &responses_request(br#"{"input":[]}"#),
-        harness.shared(),
-    )
-    .expect("SSE rate limit should rotate to the next profile");
-    let (status, body, profile) = consume_responses_reply(reply);
-
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(profile.as_deref(), Some("second"));
-    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
-    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
-    assert!(log.contains("sse_rate_limited"), "SSE rate-limit classification should be visible: {log}");
-    assert!(
-        !log.contains("upstream_overloaded route=responses profile=main"),
-        "SSE rate limits must not receive overload health treatment: {log}"
-    );
-}
-
-#[test]
-fn compact_rate_limit_rotates_without_overload_penalty() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
-        RuntimeProxyBackendFaultStep::rate_limited_429(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "main-account",
-        ),
-    ]));
-    let harness = ready_profiles(&backend);
-
-    let response = proxy_runtime_standard_request(116, &compact_request(), harness.shared())
-        .expect("compact rate limit should rotate to the next profile");
-    let (status, body) = tiny_http_response_status_and_body(response);
-
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
-    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
-    assert!(log.contains("compact_rate_limited"), "compact rate-limit classification should be visible: {log}");
-    assert!(
-        !log.contains("compact_retryable_failure profile=main reason=overload"),
-        "compact rate limits must not receive overload handling: {log}"
-    );
-}
-
-#[test]
-fn compact_rate_limit_pool_recovery_retries_until_success() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
-        RuntimeProxyBackendFaultStep::rate_limited_429(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "main-account",
-        ),
-        RuntimeProxyBackendFaultStep::rate_limited_429(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "second-account",
-        ),
-        RuntimeProxyBackendFaultStep::success(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "main-account",
-        ),
-    ]));
-    let harness = ready_profiles(&backend);
-
-    let response = proxy_runtime_standard_request(117, &compact_request(), harness.shared())
-        .expect("compact temporary rate limits should recover while quota-positive profiles remain");
-    let (status, body) = tiny_http_response_status_and_body(response);
-
-    assert_eq!(status, 200, "{body}");
-    assert_eq!(
-        backend.responses_accounts(),
-        ["main-account", "second-account", "main-account"]
-    );
-    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
-    assert!(
-        log.contains("compact_rate_limited"),
-        "rate-limit classification must remain visible during recovery: {log}"
-    );
-    assert!(
-        log.contains("rotation_waiting_for_recovery")
-            || log.contains("rotation_sweep_start"),
-        "compact must wait for a retryable profile instead of surfacing temporary 429: {log}"
-    );
-}
-
-#[test]
-fn fresh_responses_do_not_rotate_invalid_requests() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
-        RuntimeProxyBackendFaultStep::invalid_request(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        ),
-    ]));
     let harness = ready_profiles(&backend);
 
     let reply = proxy_runtime_responses_request(
@@ -525,7 +443,7 @@ fn fresh_responses_do_not_rotate_invalid_requests() {
 }
 
 #[test]
-fn hard_continuation_keeps_quota_failure_on_bound_profile() {
+fn hard_continuation_quota_requests_full_context_replay_then_rotates() {
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
             RuntimeProxyBackendFaultStep::explicit_quota_429(
@@ -559,13 +477,32 @@ fn hard_continuation_keeps_quota_failure_on_bound_profile() {
         &responses_request(br#"{"previous_response_id":"resp-main","input":[]}"#),
         harness.shared(),
     )
-    .expect("bound continuation should preserve upstream quota response");
+    .expect("bound continuation quota should request full-context replay");
     let (status, body, profile) = consume_responses_reply(reply);
 
-    assert_eq!(status, 429, "{body}");
-    assert!(body.contains("insufficient_quota"), "{body}");
+    assert_eq!(status, 400, "{body}");
+    assert!(body.contains("previous_response_not_found"), "{body}");
+    assert!(!body.contains("insufficient_quota"), "{body}");
     assert_eq!(profile, None);
     assert_eq!(backend.responses_accounts(), ["main-account"]);
+    assert!(
+        !harness
+            .shared()
+            .runtime
+            .lock()
+            .expect("runtime lock")
+            .state
+            .response_profile_bindings
+            .contains_key("resp-main"),
+        "replay signal must release the exhausted continuation owner"
+    );
+
+    let replay = proxy_runtime_responses_request(1060, &responses_request(br#"{"input":[]}"#), harness.shared())
+        .expect("full-context replay should rotate to the healthy profile");
+    let (replay_status, replay_body, replay_profile) = consume_responses_reply(replay);
+    assert_eq!(replay_status, 200, "{replay_body}");
+    assert_eq!(replay_profile.as_deref(), Some("second"));
+    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
 }
 
 #[test]
@@ -608,14 +545,20 @@ fn compact_profile_unavailable_rotates_without_quota_quarantine() {
 
     assert_eq!(status, 200, "{body}");
     assert!(body.contains("output"), "{body}");
-    assert_eq!(backend.responses_accounts(), ["main-account", "second-account"]);
+    assert_eq!(
+        backend.responses_accounts(),
+        ["main-account", "second-account"]
+    );
 
     let runtime = harness.shared().runtime.lock().expect("runtime lock");
     let main_snapshot = runtime
         .profile_usage_snapshots
         .get("main")
         .expect("main profile quota snapshot");
-    assert_eq!(main_snapshot.five_hour_status, RuntimeQuotaWindowStatus::Ready);
+    assert_eq!(
+        main_snapshot.five_hour_status,
+        RuntimeQuotaWindowStatus::Ready
+    );
     assert_eq!(main_snapshot.five_hour_remaining_percent, 80);
     assert_eq!(main_snapshot.weekly_status, RuntimeQuotaWindowStatus::Ready);
     assert_eq!(main_snapshot.weekly_remaining_percent, 80);
@@ -623,24 +566,25 @@ fn compact_profile_unavailable_rotates_without_quota_quarantine() {
 
 #[test]
 fn compact_waits_for_transient_profiles_before_a_new_sweep() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
-        RuntimeProxyBackendFaultStep::overloaded_503(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "main-account",
-        ),
-        RuntimeProxyBackendFaultStep::overloaded_503(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "main-account",
-        ),
-        RuntimeProxyBackendFaultStep::overloaded_503(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "second-account",
-        ),
-        RuntimeProxyBackendFaultStep::success(
-            RuntimeProxyBackendFaultRoute::Compact,
-            "main-account",
-        ),
-    ]));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::overloaded_503(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+            ),
+            RuntimeProxyBackendFaultStep::overloaded_503(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+            ),
+            RuntimeProxyBackendFaultStep::overloaded_503(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "second-account",
+            ),
+            RuntimeProxyBackendFaultStep::success(
+                RuntimeProxyBackendFaultRoute::Compact,
+                "main-account",
+            ),
+        ]));
     let harness = ready_profiles(&backend);
 
     let response = proxy_runtime_standard_request(111, &compact_request(), harness.shared())
@@ -660,10 +604,12 @@ fn compact_waits_for_transient_profiles_before_a_new_sweep() {
     );
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(
-        log.contains("request=111 transport=http rotation_sweep_start route=compact recovered_profiles=")
-            && (log.contains("request=111 transport=http rotation_waiting_for_recovery route=compact")
-                || log.contains("request=111 transport=http compact_candidate_exhausted")
-                || log.contains("request=111 transport=http compact_precommit_budget_exhausted")),
+        log.contains(
+            "request=111 transport=http rotation_sweep_start route=compact recovered_profiles="
+        ) && (log
+            .contains("request=111 transport=http rotation_waiting_for_recovery route=compact")
+            || log.contains("request=111 transport=http compact_candidate_exhausted")
+            || log.contains("request=111 transport=http compact_precommit_budget_exhausted")),
         "compact recovery should wait or observe an already-ready profile before a new sweep: {log}"
     );
 }

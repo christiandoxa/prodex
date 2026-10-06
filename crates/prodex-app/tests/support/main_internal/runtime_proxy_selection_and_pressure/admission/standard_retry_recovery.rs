@@ -51,8 +51,7 @@ fn scripted_noncompact_pool_overload_recovers_after_every_profile_temporarily_fa
     );
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(
-        log.contains("rotation_waiting_for_recovery")
-            || log.contains("rotation_sweep_start"),
+        log.contains("rotation_waiting_for_recovery") || log.contains("rotation_sweep_start"),
         "pool-wide standard 503 should enter recovery instead of returning 503: {log}"
     );
 }

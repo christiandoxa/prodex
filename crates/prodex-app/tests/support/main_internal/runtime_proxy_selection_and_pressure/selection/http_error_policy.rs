@@ -1,17 +1,17 @@
 use super::*;
 
 #[test]
-fn runtime_http_error_policy_passes_generic_429_through() {
+fn runtime_http_error_policy_retries_generic_429_before_commit() {
     let policy = runtime_http_error_policy(
         429,
         br#"{"error":{"message":"Too Many Requests"}}"#,
         RuntimeHttpErrorPhase::PreCommit,
     );
 
-    assert_eq!(policy.class, RuntimeHttpErrorClass::Other);
-    assert_eq!(policy.action, RuntimeHttpErrorAction::PassThrough);
-    assert_eq!(policy.rule, None);
-    assert!(!policy.may_retry_or_rotate());
+    assert_eq!(policy.class, RuntimeHttpErrorClass::RateLimited);
+    assert_eq!(policy.action, RuntimeHttpErrorAction::RetryProfile);
+    assert_eq!(policy.rule, Some("rate_limited"));
+    assert!(policy.may_retry_or_rotate());
 }
 
 #[test]

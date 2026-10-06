@@ -24,24 +24,25 @@ fn compact_precommit_blocks_retired_spark_with_hard_affinity_even_when_bypass_al
                 method: "POST".to_string(),
                 path_and_query: "/backend-api/codex/responses/compact".to_string(),
                 headers: Vec::new(),
-                body: format!(
-                    r#"{{"model":"{model}","input":[],"instructions":"compact"}}"#
-                )
-                .into_bytes(),
+                body: format!(r#"{{"model":"{model}","input":[],"instructions":"compact"}}"#)
+                    .into_bytes(),
             };
 
-            assert!(matches!(
-                attempt_runtime_standard_request(
-                    1,
-                    &request,
-                    harness.shared(),
-                    "main",
-                    true,
-                    true,
-                )
-                .expect("compact attempt should succeed"),
-                RuntimeStandardAttempt::LocalSelectionBlocked { .. }
-            ), "retired {plan} {model} must be blocked before upstream");
+            assert!(
+                matches!(
+                    attempt_runtime_standard_request(
+                        1,
+                        &request,
+                        harness.shared(),
+                        "main",
+                        true,
+                        true,
+                    )
+                    .expect("compact attempt should succeed"),
+                    RuntimeStandardAttempt::LocalSelectionBlocked { .. }
+                ),
+                "retired {plan} {model} must be blocked before upstream"
+            );
         }
     }
 
@@ -53,10 +54,8 @@ fn compact_precommit_blocks_retired_spark_with_hard_affinity_even_when_bypass_al
 #[test]
 fn compact_precommit_preserves_valid_model_hard_affinity_quota_bypass() {
     let backend = RuntimeProxyBackend::start();
-    let mut snapshot = runtime_usage_snapshot(
-        quota_window_exhausted(300),
-        quota_window_ready(90, 86_400),
-    );
+    let mut snapshot =
+        runtime_usage_snapshot(quota_window_exhausted(300), quota_window_ready(90, 86_400));
     snapshot.plan_type = Some("pro".to_string());
     let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
         "main",
@@ -103,9 +102,8 @@ fn standard_precommit_blocks_retired_model_before_auto_redeem() {
         0,
     ))
     .expect("exhausted usage should parse");
-    usage.rate_limit_reset_credits = Some(prodex_quota::RateLimitResetCreditsSummary {
-        available_count: 1,
-    });
+    usage.rate_limit_reset_credits =
+        Some(prodex_quota::RateLimitResetCreditsSummary { available_count: 1 });
     let shared = harness.shared_mut();
     shared.auto_redeem_enabled = true;
     shared

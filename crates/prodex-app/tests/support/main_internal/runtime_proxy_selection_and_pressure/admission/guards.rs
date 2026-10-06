@@ -352,10 +352,7 @@ fn compact_lane_limit_does_not_override_owned_turn_state_lineage() {
         let request = RuntimeProxyRequest {
             method: "POST".to_string(),
             path_and_query: "/backend-api/codex/responses/compact".to_string(),
-            headers: vec![(
-                "x-codex-turn-state".to_string(),
-                "turn-owned".to_string(),
-            )],
+            headers: vec![("x-codex-turn-state".to_string(), "turn-owned".to_string())],
             body: br#"{"input":"continue"}"#.to_vec(),
         };
 
@@ -409,10 +406,7 @@ fn websocket_lane_limit_does_not_override_owned_turn_state_affinity() {
     let request = RuntimeProxyRequest {
         method: "GET".to_string(),
         path_and_query: "/backend-api/codex/responses".to_string(),
-        headers: vec![(
-            "x-codex-turn-state".to_string(),
-            "turn-owned".to_string(),
-        )],
+        headers: vec![("x-codex-turn-state".to_string(), "turn-owned".to_string())],
         body: Vec::new(),
     };
 

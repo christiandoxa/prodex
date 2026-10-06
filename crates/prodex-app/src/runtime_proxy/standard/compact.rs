@@ -23,6 +23,7 @@ use std::collections::BTreeSet;
 use std::time::Instant;
 mod admission;
 mod affinity;
+mod attempt_handling;
 mod auth;
 mod commit;
 mod fallback;
@@ -36,6 +37,7 @@ use admission::{
     log_runtime_compact_local_selection_blocked, runtime_compact_candidate_inflight_saturated,
 };
 use affinity::runtime_compact_route_candidate_has_hard_affinity;
+use attempt_handling::handle_runtime_compact_attempt;
 use auth::{RuntimeProxyCompactAuthFailure, handle_runtime_proxy_compact_auth_failure};
 use commit::commit_runtime_proxy_compact_success;
 use fallback::{
@@ -46,7 +48,9 @@ use logging::{
     RuntimeCompactFailureKind, RuntimeCompactLastFailure, log_runtime_proxy_compact_candidate,
 };
 use recovery::{
-    compact_profile_count, wait_for_compact_inflight_relief, wait_for_compact_overload_recovery,
+    RuntimeCompactHardAffinityRecovery, RuntimeCompactHardAffinityRecoveryRequest,
+    compact_profile_count, recover_runtime_compact_hard_affinity, wait_for_compact_inflight_relief,
+    wait_for_compact_overload_recovery,
 };
 #[cfg(test)]
 pub(crate) use retryable::test_runtime_compact_quota_fallback_exhausted;
@@ -447,6 +451,7 @@ impl RuntimeCompactSelectionContext<'_> {
                 shared: self.shared,
                 candidate_has_hard_affinity,
                 previous_response_profile: self.previous_response_profile.as_deref(),
+                request_previous_response_id: self.request_previous_response_id.as_deref(),
                 request_session_id: self.request_session_id.as_deref(),
                 request_turn_state: self.request_turn_state.as_deref(),
                 request_model_name: self.request_model_name.as_deref(),
@@ -532,6 +537,7 @@ struct RuntimeCompactAttemptContext<'a> {
     shared: &'a RuntimeRotationProxyShared,
     candidate_has_hard_affinity: bool,
     previous_response_profile: Option<&'a str>,
+    request_previous_response_id: Option<&'a str>,
     request_session_id: Option<&'a str>,
     request_turn_state: Option<&'a str>,
     request_model_name: Option<&'a str>,
@@ -549,183 +555,4 @@ struct RuntimeCompactAttemptContext<'a> {
     saw_transport_failure: &'a mut bool,
     saw_overload_failure: &'a mut bool,
     saw_rate_limit_failure: &'a mut bool,
-}
-
-fn handle_runtime_compact_attempt(
-    context: RuntimeCompactAttemptContext<'_>,
-    attempt: RuntimeStandardAttempt,
-) -> Result<Option<tiny_http::ResponseBox>> {
-    let RuntimeCompactAttemptContext {
-        request_id,
-        shared,
-        candidate_has_hard_affinity,
-        previous_response_profile,
-        request_session_id,
-        request_turn_state,
-        request_model_name,
-        current_profile,
-        compact_followup_profile,
-        session_profile,
-        auto_redeemed_profiles,
-        conservative_overload_retried_profiles,
-        excluded_profiles,
-        last_failure,
-        selection_attempts,
-        selection_started_at,
-        pressure_mode,
-        saw_inflight_saturation,
-        saw_transport_failure,
-        saw_overload_failure,
-        saw_rate_limit_failure,
-    } = context;
-    match attempt {
-        RuntimeStandardAttempt::Success {
-            profile_name,
-            response,
-        } => Ok(Some(commit_runtime_proxy_compact_success(
-            request_id,
-            shared,
-            profile_name,
-            response,
-        )?)),
-        RuntimeStandardAttempt::StaleContinuation { response } => Ok(Some(response)),
-        RuntimeStandardAttempt::RateLimited {
-            profile_name,
-            response,
-            retry_after,
-        } => {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http compact_rate_limited profile={profile_name} retry_after_ms={}",
-                    retry_after.map_or(0, |delay| delay.as_millis()),
-                ),
-            );
-            mark_runtime_profile_retry_backoff_for_delay(shared, &profile_name, retry_after)?;
-            if candidate_has_hard_affinity {
-                return Ok(Some(response));
-            }
-            *saw_rate_limit_failure = true;
-            excluded_profiles.insert(profile_name);
-            *last_failure = Some((response, RuntimeCompactFailureKind::RateLimited));
-            Ok(None)
-        }
-        RuntimeStandardAttempt::TransportFailed {
-            profile_name,
-            stage,
-        } => {
-            *saw_transport_failure = true;
-            match finish_runtime_proxy_compact_transport_failure(
-                RuntimeProxyCompactTransportFailure {
-                    request_id,
-                    shared,
-                    profile_name: &profile_name,
-                    stage,
-                    hard_affinity: candidate_has_hard_affinity,
-                    selection_attempts,
-                    selection_started_at,
-                    pressure_mode,
-                    last_failure: last_failure.as_ref(),
-                    saw_inflight_saturation: *saw_inflight_saturation,
-                    saw_transport_failure: *saw_transport_failure,
-                },
-            ) {
-                RuntimeCompactFailureFlow::Retry => {
-                    excluded_profiles.insert(profile_name);
-                    Ok(None)
-                }
-                RuntimeCompactFailureFlow::Return(response) => Ok(Some(response)),
-            }
-        }
-        RuntimeStandardAttempt::RetryableFailure {
-            profile_name,
-            response,
-            overload,
-        } => {
-            if overload {
-                *saw_overload_failure = true;
-            }
-            match handle_runtime_proxy_compact_retryable_failure(
-                RuntimeProxyCompactRetryableFailure {
-                    request_id,
-                    shared,
-                    profile_name,
-                    response,
-                    overload,
-                    previous_response_profile,
-                    request_session_id,
-                    request_turn_state,
-                    request_model_name,
-                    current_profile,
-                    compact_followup_profile,
-                    session_profile,
-                    auto_redeemed_profiles,
-                    conservative_overload_retried_profiles,
-                    excluded_profiles,
-                    last_failure,
-                    selection_attempts,
-                    selection_started_at,
-                    pressure_mode,
-                    saw_inflight_saturation: *saw_inflight_saturation,
-                    saw_transport_failure: *saw_transport_failure,
-                },
-            )? {
-                RuntimeCompactFailureFlow::Retry => Ok(None),
-                RuntimeCompactFailureFlow::Return(response) => Ok(Some(response)),
-            }
-        }
-        RuntimeStandardAttempt::ProfileUnavailable {
-            profile_name,
-            response,
-        } => {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http compact_profile_unavailable profile={profile_name}"
-                ),
-            );
-            if candidate_has_hard_affinity {
-                return Ok(Some(response));
-            }
-            mark_runtime_profile_retry_backoff(shared, &profile_name)?;
-            excluded_profiles.insert(profile_name);
-            *last_failure = Some((response, RuntimeCompactFailureKind::ProfileUnavailable));
-            *saw_transport_failure = true;
-            Ok(None)
-        }
-        RuntimeStandardAttempt::AuthFailed {
-            profile_name,
-            response,
-        } => match handle_runtime_proxy_compact_auth_failure(RuntimeProxyCompactAuthFailure {
-            request_id,
-            shared,
-            profile_name,
-            response,
-            hard_affinity: candidate_has_hard_affinity,
-            request_session_id,
-            request_turn_state,
-            compact_followup_profile,
-            session_profile,
-            excluded_profiles,
-            last_failure,
-            selection_attempts,
-            selection_started_at,
-            pressure_mode,
-            saw_inflight_saturation: *saw_inflight_saturation,
-            saw_transport_failure: *saw_transport_failure,
-        })? {
-            RuntimeCompactFailureFlow::Retry => Ok(None),
-            RuntimeCompactFailureFlow::Return(response) => Ok(Some(response)),
-        },
-        RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
-            log_runtime_compact_local_selection_blocked(request_id, shared, &profile_name);
-            excluded_profiles.insert(profile_name);
-            Ok(None)
-        }
-        RuntimeStandardAttempt::ProfileInflightSaturated { profile_name } => {
-            log_runtime_compact_inflight_saturated(request_id, shared, &profile_name);
-            *saw_inflight_saturation = true;
-            Ok(None)
-        }
-    }
 }

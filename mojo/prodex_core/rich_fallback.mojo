@@ -1236,6 +1236,22 @@ def runtime_error_workspace_text(
     return runtime_error_contains(ptr, start, end, StringSlice("workspace_member_credits_depleted")) or runtime_error_contains(ptr, start, end, StringSlice("workspace is out of credits")) or runtime_error_contains(ptr, start, end, StringSlice("out of credits")) and runtime_error_contains(ptr, start, end, StringSlice("workspace owner")) and runtime_error_contains(ptr, start, end, StringSlice("refill"))
 
 
+def runtime_error_nonretryable_429(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    if start >= end:
+        return False
+    return (
+        runtime_error_contains(ptr, start, end, StringSlice("invalid_prompt"))
+        or runtime_error_contains(ptr, start, end, StringSlice("bio_policy"))
+        or runtime_error_contains(ptr, start, end, StringSlice("cyber_policy"))
+        or runtime_error_contains(ptr, start, end, StringSlice("content_policy"))
+        or runtime_error_contains(ptr, start, end, StringSlice("invalid_request_error"))
+        or runtime_error_contains(ptr, start, end, StringSlice("invalid_request"))
+        or runtime_error_contains(ptr, start, end, StringSlice("context_length_exceeded"))
+    )
+
+
 def runtime_error_overload_text(
     ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
 ) -> Bool:
@@ -1338,9 +1354,22 @@ def runtime_error_scan_body(
         elif runtime_error_is_match(json_record):
             return json_record^
         else:
+            if (
+                mode == RUNTIME_ERROR_MODE_HTTP
+                and status == 429
+                and not runtime_error_nonretryable_429(ptr, start, end)
+            ):
+                return runtime_error_match(RUNTIME_ERROR_CLASS_RATE, start, end)
             if mode == RUNTIME_ERROR_MODE_HTTP and runtime_error_is_transient_status(status):
                 return runtime_error_match(RUNTIME_ERROR_CLASS_TRANSIENT, start, end)
             return json_record^
+        if (
+            mode == RUNTIME_ERROR_MODE_HTTP
+            and start < end
+            and status == 429
+            and not runtime_error_nonretryable_429(ptr, start, end)
+        ):
+            return runtime_error_match(RUNTIME_ERROR_CLASS_RATE, start, end)
         if mode == RUNTIME_ERROR_MODE_HTTP and start < end and runtime_error_is_transient_status(status):
             return runtime_error_match(RUNTIME_ERROR_CLASS_TRANSIENT, start, end)
     if mode == RUNTIME_ERROR_MODE_HTTP or mode == RUNTIME_ERROR_MODE_STREAM:
@@ -1355,7 +1384,14 @@ def runtime_error_scan_body(
             return profile_record^
         return runtime_error_text_record(view, RUNTIME_ERROR_MODE_TEXT_QUOTA)
     if status == 429:
-        return runtime_error_text_record(view, RUNTIME_ERROR_MODE_TEXT_AUTHORITATIVE_QUOTA)
+        var quota_record = runtime_error_text_record(view, RUNTIME_ERROR_MODE_TEXT_AUTHORITATIVE_QUOTA)
+        if runtime_error_is_match(quota_record):
+            return quota_record^
+        if runtime_error_nonretryable_429(ptr, start, end):
+            return runtime_error_none()
+        return runtime_error_match(
+            RUNTIME_ERROR_CLASS_RATE, start if start < end else -1, end if start < end else -1
+        )
     if runtime_error_is_transient_status(status):
         var overload_record = runtime_error_text_record(view, RUNTIME_ERROR_MODE_TEXT_OVERLOAD)
         if runtime_error_is_match(overload_record):

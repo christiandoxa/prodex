@@ -12,6 +12,7 @@ use super::{
     forward_runtime_proxy_websocket_error, handle_runtime_previous_response_not_found,
     mark_runtime_profile_quota_quarantine, mark_runtime_profile_retry_backoff,
     mark_runtime_profile_retry_backoff_for_delay, release_runtime_auth_failed_affinity,
+    release_runtime_retryable_failure_affinity,
     runtime_has_route_eligible_quota_fallback_for_model,
     runtime_proxy_local_selection_failure_message, runtime_proxy_log,
     runtime_proxy_log_chain_dead_upstream_confirmed, runtime_proxy_log_chain_retried_owner,

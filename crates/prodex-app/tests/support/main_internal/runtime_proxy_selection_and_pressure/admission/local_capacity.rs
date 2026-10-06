@@ -9,10 +9,8 @@ fn responses_rotate_around_saturated_current_when_another_profile_is_ready() {
         quota_window_ready(98, 3_600),
         quota_window_ready(98, 86_400),
     );
-    let second_ready = runtime_usage_snapshot(
-        quota_window_ready(9, 3_600),
-        quota_window_ready(86, 86_400),
-    );
+    let second_ready =
+        runtime_usage_snapshot(quota_window_ready(9, 3_600), quota_window_ready(86, 86_400));
     let harness = RuntimeProxyProfileHarnessBuilder::new()
         .openai_profile("main", "main-account", Some("main@example.com"))
         .openai_profile("second", "second-account", Some("second@example.com"))
@@ -74,10 +72,8 @@ fn responses_rotate_around_saturated_current_when_another_profile_is_ready() {
 fn responses_keep_waiting_after_capacity_epoch_while_quota_remains_positive() {
     let backend = RuntimeProxyBackend::start_http_buffered_json();
     let hard_limit = runtime_proxy_profile_inflight_hard_limit();
-    let ready = runtime_usage_snapshot(
-        quota_window_ready(7, 3_600),
-        quota_window_ready(81, 86_400),
-    );
+    let ready =
+        runtime_usage_snapshot(quota_window_ready(7, 3_600), quota_window_ready(81, 86_400));
     let harness = RuntimeProxyProfileHarnessBuilder::new()
         .openai_profile("main", "main-account", Some("main@example.com"))
         .active_profile("main")
@@ -86,9 +82,7 @@ fn responses_keep_waiting_after_capacity_epoch_while_quota_remains_positive() {
         .profile_usage_snapshot("main", ready)
         .build();
     let mut inflight_guards = (0..(hard_limit / runtime_profile_inflight_weight("responses_http")))
-        .map(|_| {
-            acquire_runtime_profile_inflight_guard(harness.shared(), "main", "responses_http")
-        })
+        .map(|_| acquire_runtime_profile_inflight_guard(harness.shared(), "main", "responses_http"))
         .collect::<Result<Vec<_>>>()
         .expect("positive-quota profile should be fully saturated");
     let released_guard = inflight_guards
@@ -131,11 +125,13 @@ fn responses_keep_waiting_after_capacity_epoch_while_quota_remains_positive() {
         status, 200,
         "local capacity timeout must stay internal while usable quota remains: {body}"
     );
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(
-        log.contains("local_capacity_wait_continued")
-            && log.contains("mode=backpressure"),
+        log.contains("local_capacity_wait_continued") && log.contains("mode=backpressure"),
         "the request must keep waiting across old capacity timeout boundaries: {log}"
     );
     assert!(
@@ -347,8 +343,7 @@ fn standard_fresh_request_rotates_around_saturated_current_profile() {
     );
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(
-        log.contains("profile_inflight_saturated")
-            && log.contains("profile=main"),
+        log.contains("profile_inflight_saturated") && log.contains("profile=main"),
         "standard selection must record the saturated current profile: {log}"
     );
     assert!(

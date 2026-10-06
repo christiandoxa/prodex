@@ -1,3 +1,9 @@
+use super::super::super::{
+    build_runtime_proxy_json_error_response, release_runtime_compact_lineage,
+    release_runtime_retryable_failure_affinity,
+    runtime_has_route_eligible_quota_fallback_for_model,
+    runtime_quota_last_chance_profile_for_route,
+};
 use super::{
     RuntimeInflightReliefWait, RuntimeInflightReliefWaitResult, RuntimeRotationProxyShared,
     RuntimeRouteKind, await_runtime_proxy_async_task, clear_runtime_recovered_profiles,
@@ -7,6 +13,165 @@ use super::{
 use anyhow::Result;
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
+
+pub(super) enum RuntimeCompactHardAffinityRecovery {
+    Unchanged,
+    Retry,
+    Return(tiny_http::ResponseBox),
+}
+
+pub(super) struct RuntimeCompactHardAffinityRecoveryRequest<'a> {
+    pub(super) request_id: u64,
+    pub(super) shared: &'a RuntimeRotationProxyShared,
+    pub(super) profile_name: &'a str,
+    pub(super) hard_affinity: bool,
+    pub(super) previous_response_profile: Option<&'a str>,
+    pub(super) previous_response_id: Option<&'a str>,
+    pub(super) request_session_id: Option<&'a str>,
+    pub(super) request_turn_state: Option<&'a str>,
+    pub(super) request_model_name: Option<&'a str>,
+    pub(super) compact_followup_profile: &'a mut Option<(String, &'static str)>,
+    pub(super) session_profile: &'a mut Option<String>,
+    pub(super) excluded_profiles: &'a BTreeSet<String>,
+    pub(super) reason: &'static str,
+}
+
+fn runtime_compact_retry_fallback_available(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    excluded_profiles: &BTreeSet<String>,
+    request_model_name: Option<&str>,
+) -> Result<bool> {
+    let mut excluded = excluded_profiles.clone();
+    excluded.insert(profile_name.to_string());
+    if runtime_has_route_eligible_quota_fallback_for_model(
+        shared,
+        profile_name,
+        &excluded,
+        RuntimeRouteKind::Compact,
+        request_model_name,
+    )? {
+        return Ok(true);
+    }
+    Ok(runtime_quota_last_chance_profile_for_route(
+        shared,
+        &excluded,
+        RuntimeRouteKind::Compact,
+        None,
+        request_model_name,
+    )?
+    .is_some())
+}
+
+pub(super) fn recover_runtime_compact_hard_affinity(
+    recovery: RuntimeCompactHardAffinityRecoveryRequest<'_>,
+) -> Result<RuntimeCompactHardAffinityRecovery> {
+    let RuntimeCompactHardAffinityRecoveryRequest {
+        request_id,
+        shared,
+        profile_name,
+        hard_affinity,
+        previous_response_profile,
+        previous_response_id,
+        request_session_id,
+        request_turn_state,
+        request_model_name,
+        compact_followup_profile,
+        session_profile,
+        excluded_profiles,
+        reason,
+    } = recovery;
+    if !hard_affinity
+        || !runtime_compact_retry_fallback_available(
+            shared,
+            profile_name,
+            excluded_profiles,
+            request_model_name,
+        )?
+    {
+        return Ok(RuntimeCompactHardAffinityRecovery::Unchanged);
+    }
+
+    let previous_response_owner = previous_response_profile == Some(profile_name);
+    if previous_response_owner {
+        if !runtime_proxy_crate::runtime_full_context_retry_signal_eligible(
+            previous_response_id.is_some(),
+            request_session_id.is_some(),
+            true,
+        ) {
+            return Ok(RuntimeCompactHardAffinityRecovery::Unchanged);
+        }
+        let released_affinity = release_runtime_retryable_failure_affinity(
+            shared,
+            profile_name,
+            previous_response_id,
+            request_turn_state,
+            request_session_id,
+            "compact_full_context_retry",
+        )?;
+        let released_lineage = release_runtime_compact_lineage(
+            shared,
+            profile_name,
+            request_session_id,
+            request_turn_state,
+            "compact_full_context_retry",
+        )?;
+        if session_profile.as_deref() == Some(profile_name) {
+            *session_profile = None;
+        }
+        if compact_followup_profile
+            .as_ref()
+            .is_some_and(|(owner, _)| owner == profile_name)
+        {
+            *compact_followup_profile = None;
+        }
+        runtime_proxy_log(
+            shared,
+            format!(
+                "request={request_id} transport=http compact_full_context_retry_signal profile={profile_name} reason={reason} affinity_released={released_affinity} lineage_released={released_lineage}"
+            ),
+        );
+        return Ok(RuntimeCompactHardAffinityRecovery::Return(
+            build_runtime_proxy_json_error_response(
+                400,
+                "previous_response_not_found",
+                "Previous response was not found. Retrying the full request.",
+            ),
+        ));
+    }
+
+    let released_affinity = release_runtime_retryable_failure_affinity(
+        shared,
+        profile_name,
+        None,
+        request_turn_state,
+        request_session_id,
+        reason,
+    )?;
+    let released_lineage = release_runtime_compact_lineage(
+        shared,
+        profile_name,
+        request_session_id,
+        request_turn_state,
+        reason,
+    )?;
+    if session_profile.as_deref() == Some(profile_name) {
+        *session_profile = None;
+    }
+    if compact_followup_profile
+        .as_ref()
+        .is_some_and(|(owner, _)| owner == profile_name)
+    {
+        *compact_followup_profile = None;
+    }
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http compact_affinity_recovered profile={profile_name} reason={reason} affinity_released={released_affinity} lineage_released={released_lineage}"
+        ),
+    );
+    Ok(RuntimeCompactHardAffinityRecovery::Retry)
+}
 
 pub(super) fn compact_profile_count(shared: &RuntimeRotationProxyShared) -> Result<usize> {
     Ok(shared

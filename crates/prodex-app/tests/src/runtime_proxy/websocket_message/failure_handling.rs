@@ -3,6 +3,7 @@ use super::super::test_support::{
     test_runtime_websocket_flow,
 };
 use super::*;
+use crate::read_runtime_proxy_test_log;
 
 fn ready_usage() -> prodex_quota::UsageResponse {
     let now = chrono::Local::now().timestamp();
@@ -238,7 +239,7 @@ fn candidate_usage_not_included_with_ready_fallback_rotates() {
 }
 
 #[test]
-fn workspace_credit_continuation_preserves_affinity_and_context() {
+fn workspace_credit_continuation_signals_full_context_retry_when_fallback_exists() {
     let _guard = acquire_test_runtime_lock();
     let shared = test_runtime_shared("failure-workspace-credit-fresh-retry");
     {
@@ -270,7 +271,7 @@ fn workspace_credit_continuation_preserves_affinity_and_context() {
             },
         );
     }
-    let (mut local_socket, _client_socket) = test_runtime_local_websocket_pair();
+    let (mut local_socket, mut client_socket) = test_runtime_local_websocket_pair();
     let mut websocket_session = RuntimeWebsocketSessionState::default();
     let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
     flow.request_text = r#"{"type":"response.create","previous_response_id":"resp_alpha","input":[{"type":"message","content":"again"}]}"#.to_string();
@@ -288,17 +289,20 @@ fn workspace_credit_continuation_preserves_affinity_and_context() {
                 r#"{"type":"error","status_code":429,"headers":{"X-Codex-Rate-Limit-Reached-Type":"workspace_member_credits_depleted"},"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}"#.to_string(),
             ),
         )
-        .expect("workspace-credit continuation should pass through");
+        .expect("workspace-credit continuation should request full-context replay");
 
     assert!(matches!(
         action,
         RuntimeWebsocketMessageLoopAction::Finished
     ));
+    let retry = read_runtime_websocket_text(&mut client_socket);
+    assert!(retry.contains("previous_response_not_found"), "{retry}");
+    assert!(!retry.contains("usage limit"), "{retry}");
+    assert!(!retry.contains("service_unavailable"), "{retry}");
     assert!(!flow.excluded_profiles.contains("alpha"));
     assert_eq!(flow.previous_response_id.as_deref(), Some("resp_alpha"));
-    assert_eq!(flow.pinned_profile.as_deref(), Some("alpha"));
-    assert_eq!(flow.bound_profile.as_deref(), Some("alpha"));
-    assert!(flow.trusted_previous_response_affinity);
+    assert!(flow.pinned_profile.is_none());
+    assert!(flow.bound_profile.is_none());
     assert!(flow.request_text.contains("previous_response_id"));
     assert!(flow.last_failure.is_none());
 }
@@ -510,4 +514,181 @@ fn direct_current_pre_send_quota_blocked_hard_affinity_signals_full_context_retr
     );
     assert!(flow.bound_profile.is_none());
     assert!(flow.pinned_profile.is_none());
+}
+
+fn configure_hard_affinity_full_context_replay(flow: &mut RuntimeWebsocketTextMessageFlow<'_>) {
+    flow.request_text = r#"{"type":"response.create","previous_response_id":"resp_alpha","input":[{"type":"message","content":"continue"}]}"#.to_string();
+    flow.previous_response_id = Some("resp_alpha".to_string());
+    flow.request_session_id = Some("session-alpha".to_string());
+    flow.previous_response_fresh_fallback_shape =
+        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation);
+    flow.request_requires_previous_response_affinity = true;
+    flow.trusted_previous_response_affinity = true;
+    flow.pinned_profile = Some("alpha".to_string());
+    flow.bound_profile = Some("alpha".to_string());
+}
+
+fn assert_full_context_retry_signal(
+    action: RuntimeWebsocketMessageLoopAction,
+    client_socket: &mut crate::RuntimeUpstreamWebSocket,
+    flow: &RuntimeWebsocketTextMessageFlow<'_>,
+) {
+    assert!(matches!(
+        action,
+        RuntimeWebsocketMessageLoopAction::Finished
+    ));
+    let retry = read_runtime_websocket_text(client_socket);
+    assert!(
+        retry.contains("previous_response_not_found"),
+        "hard-affinity retryable failure must request full-context replay: {retry}"
+    );
+    assert!(
+        !retry.contains("service_unavailable"),
+        "hard-affinity replay signal must not leak terminal 503: {retry}"
+    );
+    assert!(flow.bound_profile.is_none());
+    assert!(flow.pinned_profile.is_none());
+}
+
+#[test]
+fn candidate_overloaded_hard_affinity_signals_full_context_retry() {
+    let _guard = acquire_test_runtime_lock();
+    let mut shared = test_runtime_shared("failure-overloaded-hard-affinity-replay");
+    configure_quota_last_chance_profiles(&mut shared, 0, false);
+    let (mut local_socket, mut client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    configure_hard_affinity_full_context_replay(&mut flow);
+
+    let action = flow
+        .handle_candidate_overloaded(
+            "alpha".to_string(),
+            RuntimeWebsocketErrorPayload::Text(runtime_proxy_websocket_error_payload_text(
+                503,
+                "server_is_overloaded",
+                "Upstream Codex backend is currently overloaded.",
+            )),
+        )
+        .expect("hard-affinity overload should request full-context replay");
+
+    assert_full_context_retry_signal(action, &mut client_socket, &flow);
+    let log = read_runtime_proxy_test_log(&shared.log_path);
+    assert!(
+        log.contains("upstream_overload_full_context_retry_signal"),
+        "{log}"
+    );
+}
+
+#[test]
+fn candidate_rate_limited_hard_affinity_signals_full_context_retry() {
+    let _guard = acquire_test_runtime_lock();
+    let mut shared = test_runtime_shared("failure-rate-hard-affinity-replay");
+    configure_quota_last_chance_profiles(&mut shared, 0, false);
+    let (mut local_socket, mut client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    configure_hard_affinity_full_context_replay(&mut flow);
+
+    let action = flow
+        .handle_candidate_rate_limited(
+            "alpha".to_string(),
+            RuntimeWebsocketErrorPayload::Text(runtime_proxy_websocket_error_payload_text(
+                429,
+                "rate_limit_exceeded",
+                "Please try again in 1s.",
+            )),
+            Some(std::time::Duration::from_secs(1)),
+        )
+        .expect("hard-affinity rate limit should request full-context replay");
+
+    assert_full_context_retry_signal(action, &mut client_socket, &flow);
+    let log = read_runtime_proxy_test_log(&shared.log_path);
+    assert!(
+        log.contains("rate_limit_full_context_retry_signal"),
+        "{log}"
+    );
+}
+
+#[test]
+fn candidate_auth_failed_hard_affinity_signals_full_context_retry() {
+    let _guard = acquire_test_runtime_lock();
+    let mut shared = test_runtime_shared("failure-auth-hard-affinity-replay");
+    configure_quota_last_chance_profiles(&mut shared, 0, false);
+    let (mut local_socket, mut client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    configure_hard_affinity_full_context_replay(&mut flow);
+
+    let action = flow
+        .handle_candidate_auth_failed(
+            "alpha".to_string(),
+            RuntimeWebsocketErrorPayload::Text(runtime_proxy_websocket_error_payload_text(
+                401,
+                "unauthorized",
+                "Unauthorized",
+            )),
+        )
+        .expect("hard-affinity auth failure should request full-context replay");
+
+    assert_full_context_retry_signal(action, &mut client_socket, &flow);
+    let log = read_runtime_proxy_test_log(&shared.log_path);
+    assert!(
+        log.contains("auth_failed_full_context_retry_signal"),
+        "{log}"
+    );
+}
+
+#[test]
+fn candidate_transport_failed_hard_affinity_signals_full_context_retry() {
+    let _guard = acquire_test_runtime_lock();
+    let mut shared = test_runtime_shared("failure-transport-hard-affinity-replay");
+    configure_quota_last_chance_profiles(&mut shared, 0, false);
+    let (mut local_socket, mut client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    configure_hard_affinity_full_context_replay(&mut flow);
+
+    let action = flow
+        .handle_candidate_transport_failed("alpha".to_string(), "connect")
+        .expect("hard-affinity transport failure should request full-context replay");
+
+    assert_full_context_retry_signal(action, &mut client_socket, &flow);
+    let log = read_runtime_proxy_test_log(&shared.log_path);
+    assert!(
+        log.contains("transport_failure_full_context_retry_signal"),
+        "{log}"
+    );
+}
+
+#[test]
+fn candidate_overloaded_hard_affinity_without_fallback_remains_terminal() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = test_runtime_shared("failure-overloaded-hard-affinity-terminal");
+    let (mut local_socket, mut client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    configure_hard_affinity_full_context_replay(&mut flow);
+
+    let action = flow
+        .handle_candidate_overloaded(
+            "alpha".to_string(),
+            RuntimeWebsocketErrorPayload::Text(runtime_proxy_websocket_error_payload_text(
+                503,
+                "server_is_overloaded",
+                "Upstream Codex backend is currently overloaded.",
+            )),
+        )
+        .expect("no-fallback overload should remain terminal");
+
+    assert!(matches!(
+        action,
+        RuntimeWebsocketMessageLoopAction::Finished
+    ));
+    let terminal = read_runtime_websocket_text(&mut client_socket);
+    assert!(terminal.contains("server_is_overloaded"), "{terminal}");
+    assert!(
+        !terminal.contains("previous_response_not_found"),
+        "{terminal}"
+    );
+    assert_eq!(flow.bound_profile.as_deref(), Some("alpha"));
 }

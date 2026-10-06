@@ -35,7 +35,11 @@ use self::previous_response::{
     handle_runtime_responses_previous_response_attempt,
     runtime_responses_previous_response_not_found_context,
 };
-use self::quota_blocked::handle_runtime_responses_quota_attempt;
+use self::quota_blocked::{
+    RuntimeResponsesFullContextRetry, handle_runtime_responses_quota_attempt,
+    runtime_responses_full_context_retry_available, runtime_responses_full_context_retry_reply,
+    try_signal_runtime_responses_full_context_retry,
+};
 
 fn runtime_responses_stale_continuation_reply() -> RuntimeResponsesReply {
     RuntimeResponsesReply::Buffered(RuntimeHeapTrimmedBufferedResponseParts::from_crate_parts(
@@ -611,6 +615,33 @@ fn handle_runtime_responses_attempt(
                 ),
             );
             if hard_affinity {
+                if runtime_responses_full_context_retry_available(
+                    context.shared,
+                    &profile_name,
+                    context.prompt_cache_key,
+                    context.previous_response_id,
+                    context.request_session_id,
+                    context.request_model_name.as_deref(),
+                    &loop_state.excluded_profiles,
+                )? {
+                    let released_affinity = release_runtime_retryable_failure_affinity(
+                        context.shared,
+                        &profile_name,
+                        context.previous_response_id,
+                        context.request_turn_state,
+                        context.request_session_id,
+                        "transport_full_context_retry",
+                    )?;
+                    affinity_state.clear_profile_affinity(&profile_name, true);
+                    runtime_proxy_log(
+                        context.shared,
+                        format!(
+                            "request={} transport=http transport_failure_full_context_retry_signal profile={profile_name} stage={stage} affinity_released={released_affinity}",
+                            context.request_id
+                        ),
+                    );
+                    return Ok(Some(runtime_responses_full_context_retry_reply()));
+                }
                 return Ok(Some(runtime_responses_local_selection_failure_reply()));
             }
             loop_state.record_transport_failure_at(stage);
@@ -636,7 +667,7 @@ fn handle_runtime_responses_attempt(
 
 fn handle_runtime_responses_rate_limited_attempt(
     context: &RuntimeResponsesRequestContext<'_>,
-    affinity_state: &RuntimeResponsesAffinityState,
+    affinity_state: &mut RuntimeResponsesAffinityState,
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
     profile_name: String,
     response: RuntimeResponsesReply,
@@ -653,6 +684,33 @@ fn handle_runtime_responses_rate_limited_attempt(
     );
     mark_runtime_profile_retry_backoff_for_delay(context.shared, &profile_name, retry_after)?;
     if affinity_state.candidate_has_hard_affinity(&profile_name) {
+        if runtime_responses_full_context_retry_available(
+            context.shared,
+            &profile_name,
+            context.prompt_cache_key,
+            context.previous_response_id,
+            context.request_session_id,
+            context.request_model_name.as_deref(),
+            &loop_state.excluded_profiles,
+        )? {
+            let released_affinity = release_runtime_retryable_failure_affinity(
+                context.shared,
+                &profile_name,
+                context.previous_response_id,
+                context.request_turn_state,
+                context.request_session_id,
+                "rate_limit_full_context_retry",
+            )?;
+            affinity_state.clear_profile_affinity(&profile_name, true);
+            runtime_proxy_log(
+                context.shared,
+                format!(
+                    "request={} transport=http rate_limit_full_context_retry_signal profile={profile_name} affinity_released={released_affinity}",
+                    context.request_id
+                ),
+            );
+            return Ok(Some(runtime_responses_full_context_retry_reply()));
+        }
         return Ok(Some(response));
     }
     loop_state.record_rate_limit_failure();
@@ -677,6 +735,8 @@ fn handle_runtime_responses_local_selection_attempt(
         previous_response_id: context.previous_response_id,
         request_turn_state: context.request_turn_state,
         request_session_id: context.request_session_id,
+        prompt_cache_key: context.prompt_cache_key,
+        request_model_name: context.request_model_name.as_deref(),
         request_requires_previous_response_affinity: context
             .request_requires_previous_response_affinity,
         previous_response_fresh_fallback_shape: context.previous_response_fresh_fallback_shape,
