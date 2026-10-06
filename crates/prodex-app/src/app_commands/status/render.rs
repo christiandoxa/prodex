@@ -2,8 +2,8 @@ use super::{
     StatusOverview, StatusResourceHistory, StatusResourceSnapshot, format_info_load_summary,
     format_info_pool_remaining, format_info_runway, format_info_token_usage_summary,
 };
-use crate::reports::InfoTokenUsageSummary;
 use chrono::{Local, TimeZone};
+use prodex_mojo_core::info_render;
 use ratatui::Frame;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
@@ -169,7 +169,11 @@ fn render_token_panel(frame: &mut Frame<'_>, area: Rect, overview: Option<&Statu
     let lines = vec![
         Line::from(vec![
             Span::styled("total ", tui_secondary_style()),
-            Span::styled(human_count(total), tui_metric_style()),
+            Span::styled(
+                info_render::format_human_count(total)
+                    .expect("Mojo status human-count formatter returned invalid output"),
+                tui_metric_style(),
+            ),
             Span::styled(
                 format!(
                     "  {} event(s) / {} log(s)",
@@ -180,15 +184,24 @@ fn render_token_panel(frame: &mut Frame<'_>, area: Rect, overview: Option<&Statu
         ]),
         Line::from(format!(
             "in {}  cached {}  out {}  reasoning {}",
-            human_count(overview.token_summary.total.input_tokens),
-            human_count(overview.token_summary.total.cached_input_tokens),
-            human_count(overview.token_summary.total.output_tokens),
-            human_count(overview.token_summary.total.reasoning_tokens),
+            info_render::format_human_count(overview.token_summary.total.input_tokens)
+                .expect("Mojo status human-count formatter returned invalid output"),
+            info_render::format_human_count(overview.token_summary.total.cached_input_tokens)
+                .expect("Mojo status human-count formatter returned invalid output"),
+            info_render::format_human_count(overview.token_summary.total.output_tokens)
+                .expect("Mojo status human-count formatter returned invalid output"),
+            info_render::format_human_count(overview.token_summary.total.reasoning_tokens)
+                .expect("Mojo status human-count formatter returned invalid output"),
         )),
         Line::from(vec![
             Span::styled("token efficiency ", tui_secondary_style()),
             Span::styled(
-                token_efficiency(&overview.token_summary),
+                info_render::format_token_efficiency(
+                    overview.token_summary.total.input_tokens,
+                    overview.token_summary.total.cached_input_tokens,
+                    overview.token_summary.total.output_tokens,
+                )
+                .expect("Mojo status token-efficiency formatter returned invalid output"),
                 tui_accent_style(),
             ),
         ]),
@@ -251,21 +264,28 @@ fn render_resource_panel(
             .label(format!("{cpu:.1}% host capacity")),
         rows[0],
     );
-    let memory_percent = resource_memory_percent(resources);
+    let memory_percent =
+        info_render::format_memory_percent(resources.resident_bytes, resources.memory_total_bytes)
+            .expect("Mojo status memory-percent formatter returned invalid output");
     let details = vec![
         Line::from(format!(
-            "RAM {} ({memory_percent:.1}%) · {} proc / {} runtime",
-            human_bytes(resources.resident_bytes),
+            "RAM {} ({memory_percent}) · {} proc / {} runtime",
+            info_render::format_human_bytes(resources.resident_bytes)
+                .expect("Mojo status byte formatter returned invalid output"),
             resources.process_count,
             resources.runtime_process_count,
         )),
         Line::from(format!(
             "DISK R {}/s W {}/s · NET {} sockets RXq {} TXq {}",
-            human_bytes(resources.disk_read_bytes_per_second),
-            human_bytes(resources.disk_write_bytes_per_second),
+            info_render::format_human_bytes(resources.disk_read_bytes_per_second)
+                .expect("Mojo status byte formatter returned invalid output"),
+            info_render::format_human_bytes(resources.disk_write_bytes_per_second)
+                .expect("Mojo status byte formatter returned invalid output"),
             resources.socket_count,
-            human_bytes(resources.network_rx_queue_bytes),
-            human_bytes(resources.network_tx_queue_bytes),
+            info_render::format_human_bytes(resources.network_rx_queue_bytes)
+                .expect("Mojo status byte formatter returned invalid output"),
+            info_render::format_human_bytes(resources.network_tx_queue_bytes)
+                .expect("Mojo status byte formatter returned invalid output"),
         )),
     ];
     frame.render_widget(Paragraph::new(details), rows[1]);
@@ -414,13 +434,19 @@ pub(super) fn status_fields(
         ),
         (
             "Token efficiency".to_string(),
-            token_efficiency(&overview.token_summary),
+            info_render::format_token_efficiency(
+                overview.token_summary.total.input_tokens,
+                overview.token_summary.total.cached_input_tokens,
+                overview.token_summary.total.output_tokens,
+            )
+            .expect("Mojo status token-efficiency formatter returned invalid output"),
         ),
         (
             "Token history".to_string(),
             format!(
                 "{} {} → {}",
-                text_sparkline(&overview.token_history),
+                info_render::format_text_sparkline(&overview.token_history)
+                    .expect("Mojo status sparkline formatter returned invalid output"),
                 overview.token_first_at.as_deref().unwrap_or("-"),
                 overview.token_last_at.as_deref().unwrap_or("-")
             ),
@@ -445,9 +471,14 @@ pub(super) fn status_fields(
             "Memory".to_string(),
             if resources.available {
                 format!(
-                    "{} ({:.1}% host)",
-                    human_bytes(resources.resident_bytes),
-                    resource_memory_percent(resources)
+                    "{} ({} host)",
+                    info_render::format_human_bytes(resources.resident_bytes)
+                        .expect("Mojo status byte formatter returned invalid output"),
+                    info_render::format_memory_percent(
+                        resources.resident_bytes,
+                        resources.memory_total_bytes
+                    )
+                    .expect("Mojo status memory-percent formatter returned invalid output")
                 )
             } else {
                 "unavailable".to_string()
@@ -459,8 +490,10 @@ pub(super) fn status_fields(
                 format!(
                     "{} sockets; RX queue {}, TX queue {}",
                     resources.socket_count,
-                    human_bytes(resources.network_rx_queue_bytes),
-                    human_bytes(resources.network_tx_queue_bytes)
+                    info_render::format_human_bytes(resources.network_rx_queue_bytes)
+                        .expect("Mojo status byte formatter returned invalid output"),
+                    info_render::format_human_bytes(resources.network_tx_queue_bytes)
+                        .expect("Mojo status byte formatter returned invalid output")
                 )
             } else {
                 "unavailable".to_string()
@@ -471,10 +504,14 @@ pub(super) fn status_fields(
             if resources.available {
                 format!(
                     "read {} total ({}/s), write {} total ({}/s)",
-                    human_bytes(resources.disk_read_bytes),
-                    human_bytes(resources.disk_read_bytes_per_second),
-                    human_bytes(resources.disk_write_bytes),
-                    human_bytes(resources.disk_write_bytes_per_second)
+                    info_render::format_human_bytes(resources.disk_read_bytes)
+                        .expect("Mojo status byte formatter returned invalid output"),
+                    info_render::format_human_bytes(resources.disk_read_bytes_per_second)
+                        .expect("Mojo status byte formatter returned invalid output"),
+                    info_render::format_human_bytes(resources.disk_write_bytes)
+                        .expect("Mojo status byte formatter returned invalid output"),
+                    info_render::format_human_bytes(resources.disk_write_bytes_per_second)
+                        .expect("Mojo status byte formatter returned invalid output")
                 )
             } else {
                 "unavailable".to_string()
@@ -486,30 +523,6 @@ pub(super) fn status_fields(
         ),
         ("Updated".to_string(), overview.updated_at.clone()),
     ]
-}
-
-fn token_efficiency(summary: &InfoTokenUsageSummary) -> String {
-    let input = summary.total.input_tokens;
-    let output = summary.total.output_tokens;
-    let cache = if input == 0 {
-        0.0
-    } else {
-        summary.total.cached_input_tokens as f64 / input as f64 * 100.0
-    };
-    let output_share = if input.saturating_add(output) == 0 {
-        0.0
-    } else {
-        output as f64 / input.saturating_add(output) as f64 * 100.0
-    };
-    format!("cache hit {cache:.1}% · output share {output_share:.1}%")
-}
-
-fn resource_memory_percent(resources: &StatusResourceSnapshot) -> f64 {
-    if resources.memory_total_bytes == 0 {
-        0.0
-    } else {
-        resources.resident_bytes as f64 / resources.memory_total_bytes as f64 * 100.0
-    }
 }
 
 fn quota_color(remaining: f64) -> Color {
@@ -533,46 +546,4 @@ fn format_reset(reset_at: Option<i64>, now: i64) -> String {
         .map(|value| value.format("%m-%d %H:%M").to_string())
         .unwrap_or_else(|| reset_at.to_string());
     format!("reset in {relative} ({absolute})")
-}
-
-fn human_bytes(bytes: u64) -> String {
-    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
-    let mut value = bytes as f64;
-    let mut unit = 0;
-    while value >= 1024.0 && unit + 1 < UNITS.len() {
-        value /= 1024.0;
-        unit += 1;
-    }
-    if unit == 0 {
-        format!("{bytes} B")
-    } else {
-        format!("{value:.1} {}", UNITS[unit])
-    }
-}
-
-fn human_count(value: u64) -> String {
-    if value >= 1_000_000_000 {
-        format!("{:.1}B", value as f64 / 1_000_000_000.0)
-    } else if value >= 1_000_000 {
-        format!("{:.1}M", value as f64 / 1_000_000.0)
-    } else if value >= 1_000 {
-        format!("{:.1}K", value as f64 / 1_000.0)
-    } else {
-        value.to_string()
-    }
-}
-
-pub(super) fn text_sparkline(values: &[u64]) -> String {
-    const BARS: [char; 8] = ['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
-    let max = values.iter().copied().max().unwrap_or_default();
-    if max == 0 {
-        return "-".to_string();
-    }
-    values
-        .iter()
-        .map(|value| {
-            let index = ((*value as u128 * (BARS.len() - 1) as u128) / max as u128) as usize;
-            BARS[index]
-        })
-        .collect()
 }

@@ -3517,6 +3517,25 @@ export function findViolations(files) {
       }
       return violations;
     }
+    if (filePath === "crates/prodex-app/src/app_commands/status/render.rs") {
+      const required = [
+        "info_render::format_human_bytes(",
+        "info_render::format_human_count(",
+        "info_render::format_token_efficiency(",
+        "info_render::format_memory_percent(",
+        "info_render::format_text_sparkline(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": status rendering must retain Mojo call " + call);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /\bfn\s+(?:human_bytes|human_count|token_efficiency|resource_memory_percent|text_sparkline)\s*\(/u.test(production)
+      ) {
+        violations.push(filePath + ": contains restored Rust status formatting semantics");
+      }
+      return violations;
+    }
     if (filePath === "crates/prodex-terminal-ui/src/runtime_launch.rs") {
       const required = [
         "info_render::format_runtime_launch_scored_candidate(",
@@ -3537,9 +3556,35 @@ export function findViolations(files) {
       }
       return violations;
     }
-    if (filePath === "crates/prodex-mojo-core/src/info_render.rs" &&
-        !contents.includes("prodex_terminal_info_render_v1(")) {
-      return [filePath + ": terminal info ABI adapter must retain prodex_terminal_info_render_v1("];
+    if (filePath === "crates/prodex-mojo-core/src/info_render.rs") {
+      const required = [
+        "prodex_terminal_info_render_v1(",
+        "format_human_bytes(",
+        "format_human_count(",
+        "format_token_efficiency(",
+        "format_memory_percent(",
+        "format_text_sparkline(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": terminal info ABI adapter must retain " + marker);
+    }
+    if (filePath === "mojo/prodex_core/info_render.mojo") {
+      const required = [
+        "INFO_RENDER_HUMAN_BYTES",
+        "INFO_RENDER_HUMAN_COUNT",
+        "INFO_RENDER_TOKEN_EFFICIENCY",
+        "INFO_RENDER_MEMORY_PERCENT",
+        "INFO_RENDER_TEXT_SPARKLINE",
+        "info_render_human_bytes(",
+        "info_render_human_count(",
+        "info_render_token_efficiency(",
+        "info_render_memory_percent(",
+        "info_render_text_sparkline(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Mojo status formatter must retain " + marker);
     }
     return [];
   });

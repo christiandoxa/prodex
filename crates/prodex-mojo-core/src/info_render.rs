@@ -16,6 +16,11 @@ const RUNTIME_LAUNCH_SELECTION: i64 = 11;
 const RUNTIME_LAUNCH_WARNING: i64 = 12;
 const RUNTIME_PROVIDER_DIRECT: i64 = 13;
 const RUNTIME_QUOTA_HINT: i64 = 14;
+const HUMAN_BYTES: i64 = 15;
+const HUMAN_COUNT: i64 = 16;
+const TOKEN_EFFICIENCY: i64 = 17;
+const MEMORY_PERCENT: i64 = 18;
+const TEXT_SPARKLINE: i64 = 19;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InfoTokenUsageProfile<'a> {
@@ -200,6 +205,26 @@ pub fn format_token_usage_summary(
     render(TOKEN_USAGE, &[], &unsigned, &texts, 0)
 }
 
+pub fn format_human_bytes(value: u64) -> Result<String, MojoError> {
+    render(HUMAN_BYTES, &[], &[value], &[], 0)
+}
+
+pub fn format_human_count(value: u64) -> Result<String, MojoError> {
+    render(HUMAN_COUNT, &[], &[value], &[], 0)
+}
+
+pub fn format_token_efficiency(input: u64, cached: u64, output: u64) -> Result<String, MojoError> {
+    render(TOKEN_EFFICIENCY, &[], &[input, cached, output], &[], 0)
+}
+
+pub fn format_memory_percent(resident: u64, total: u64) -> Result<String, MojoError> {
+    render(MEMORY_PERCENT, &[], &[resident, total], &[], 0)
+}
+
+pub fn format_text_sparkline(values: &[u64]) -> Result<String, MojoError> {
+    render(TEXT_SPARKLINE, &[], values, &[], 0)
+}
+
 pub fn format_relative_duration(seconds: i64) -> Result<String, MojoError> {
     render(RELATIVE_DURATION, &[seconds], &[], &[], 0)
 }
@@ -321,6 +346,21 @@ mod tests {
         assert_eq!(
             format_pool_remaining(42, 0, Some("in 1h")).unwrap(),
             "Unavailable"
+        );
+        assert_eq!(format_human_bytes(999).unwrap(), "999 B");
+        assert_eq!(format_human_bytes(1536).unwrap(), "1.5 KiB");
+        assert_eq!(format_human_count(999).unwrap(), "999");
+        assert_eq!(format_human_count(1_500).unwrap(), "1.5K");
+        assert_eq!(
+            format_token_efficiency(200, 50, 100).unwrap(),
+            "cache hit 25.0% · output share 33.3%"
+        );
+        assert_eq!(format_memory_percent(512, 1024).unwrap(), "50.0%");
+        assert_eq!(format_text_sparkline(&[]).unwrap(), "-");
+        assert_eq!(format_text_sparkline(&[0, 0]).unwrap(), "-");
+        assert_eq!(
+            format_text_sparkline(&[1, 2, 3]).unwrap().chars().count(),
+            3
         );
 
         assert_eq!(

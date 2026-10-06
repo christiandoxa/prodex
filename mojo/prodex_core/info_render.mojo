@@ -24,6 +24,11 @@ comptime INFO_RENDER_RUNTIME_LAUNCH_SELECTION: Int64 = 11
 comptime INFO_RENDER_RUNTIME_LAUNCH_WARNING: Int64 = 12
 comptime INFO_RENDER_RUNTIME_PROVIDER_DIRECT: Int64 = 13
 comptime INFO_RENDER_RUNTIME_QUOTA_HINT: Int64 = 14
+comptime INFO_RENDER_HUMAN_BYTES: Int64 = 15
+comptime INFO_RENDER_HUMAN_COUNT: Int64 = 16
+comptime INFO_RENDER_TOKEN_EFFICIENCY: Int64 = 17
+comptime INFO_RENDER_MEMORY_PERCENT: Int64 = 18
+comptime INFO_RENDER_TEXT_SPARKLINE: Int64 = 19
 
 comptime INFO_RUNTIME_LAUNCH_STATUS_NONE: UInt64 = 0
 comptime INFO_RUNTIME_LAUNCH_STATUS_READY: UInt64 = 1
@@ -606,6 +611,152 @@ def info_render_runtime_provider_direct(
     )
 
 
+
+def info_put_one_decimal(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    tenths: UInt64,
+) -> Bool:
+    return (
+        info_put_u64(writer, tenths // UInt64(10))
+        and info_put_byte(writer, UInt8(46))
+        and info_put_byte(writer, UInt8(tenths % UInt64(10)) + UInt8(48))
+    )
+
+
+def info_round_nonnegative_tenths(value: Float64) -> UInt64:
+    if value <= 0.0:
+        return UInt64(0)
+    return UInt64(value * 10.0 + 0.5)
+
+
+def info_render_human_bytes(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+) -> Bool:
+    var bytes = info_unsigned(unsigned_address, 1, 0)
+    if bytes < UInt64(1024):
+        return info_put_u64(writer, bytes) and info_put_literal(writer, StringSlice(" B"))
+    var value = Float64(bytes)
+    var unit: Int64 = 0
+    while value >= 1024.0 and unit < 4:
+        value /= 1024.0
+        unit += 1
+    if not info_put_one_decimal(writer, info_round_nonnegative_tenths(value)):
+        return False
+    if unit == 1:
+        return info_put_literal(writer, StringSlice(" KiB"))
+    if unit == 2:
+        return info_put_literal(writer, StringSlice(" MiB"))
+    if unit == 3:
+        return info_put_literal(writer, StringSlice(" GiB"))
+    return info_put_literal(writer, StringSlice(" TiB"))
+
+
+def info_render_human_count(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+) -> Bool:
+    var value = info_unsigned(unsigned_address, 1, 0)
+    var divisor = UInt64(0)
+    var suffix = StringSlice("")
+    if value >= UInt64(1_000_000_000):
+        divisor = UInt64(1_000_000_000)
+        suffix = StringSlice("B")
+    elif value >= UInt64(1_000_000):
+        divisor = UInt64(1_000_000)
+        suffix = StringSlice("M")
+    elif value >= UInt64(1_000):
+        divisor = UInt64(1_000)
+        suffix = StringSlice("K")
+    else:
+        return info_put_u64(writer, value)
+    var scaled = Float64(value) / Float64(divisor)
+    return (
+        info_put_one_decimal(writer, info_round_nonnegative_tenths(scaled))
+        and info_put_literal(writer, suffix)
+    )
+
+
+def info_render_token_efficiency(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+) -> Bool:
+    var input = info_unsigned(unsigned_address, 3, 0)
+    var cached = info_unsigned(unsigned_address, 3, 1)
+    var output = info_unsigned(unsigned_address, 3, 2)
+    var cache_tenths = UInt64(0)
+    if input != 0:
+        cache_tenths = info_round_nonnegative_tenths(
+            Float64(cached) / Float64(input) * 100.0
+        )
+    var total = UInt64(18_446_744_073_709_551_615)
+    if input <= total - output:
+        total = input + output
+    var output_tenths = UInt64(0)
+    if total != 0:
+        output_tenths = info_round_nonnegative_tenths(
+            Float64(output) / Float64(total) * 100.0
+        )
+    return (
+        info_put_literal(writer, StringSlice("cache hit "))
+        and info_put_one_decimal(writer, cache_tenths)
+        and info_put_literal(writer, StringSlice("% · output share "))
+        and info_put_one_decimal(writer, output_tenths)
+        and info_put_byte(writer, UInt8(37))
+    )
+
+
+def info_render_memory_percent(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+) -> Bool:
+    var resident = info_unsigned(unsigned_address, 2, 0)
+    var total = info_unsigned(unsigned_address, 2, 1)
+    var tenths = UInt64(0)
+    if total != 0:
+        tenths = info_round_nonnegative_tenths(
+            Float64(resident) / Float64(total) * 100.0
+        )
+    return info_put_one_decimal(writer, tenths) and info_put_byte(writer, UInt8(37))
+
+
+
+def info_render_text_sparkline(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+    unsigned_count: Int64,
+) -> Bool:
+    if unsigned_count <= 0:
+        return info_put_byte(writer, UInt8(45))
+    var maximum = UInt64(0)
+    for index in range(unsigned_count):
+        var value = info_unsigned(unsigned_address, unsigned_count, index)
+        if value > maximum:
+            maximum = value
+    if maximum == 0:
+        return info_put_byte(writer, UInt8(45))
+    for index in range(unsigned_count):
+        var value = info_unsigned(unsigned_address, unsigned_count, index)
+        var scaled = UInt128(value) * UInt128(7) // UInt128(maximum)
+        if scaled == UInt128(0):
+            if not info_put_literal(writer, StringSlice("▁")): return False
+        elif scaled == UInt128(1):
+            if not info_put_literal(writer, StringSlice("▂")): return False
+        elif scaled == UInt128(2):
+            if not info_put_literal(writer, StringSlice("▃")): return False
+        elif scaled == UInt128(3):
+            if not info_put_literal(writer, StringSlice("▄")): return False
+        elif scaled == UInt128(4):
+            if not info_put_literal(writer, StringSlice("▅")): return False
+        elif scaled == UInt128(5):
+            if not info_put_literal(writer, StringSlice("▆")): return False
+        elif scaled == UInt128(6):
+            if not info_put_literal(writer, StringSlice("▇")): return False
+        else:
+            if not info_put_literal(writer, StringSlice("█")): return False
+    return True
+
+
 def info_render_runtime_quota_hint(
     writer: Pointer[mut=True, InfoRenderWriter, _],
     text_address: UInt,
@@ -640,7 +791,7 @@ def prodex_terminal_info_render_v1(
     if (
         abi_version != INFO_RENDER_ABI_VERSION
         or operation < INFO_RENDER_RELATIVE_DURATION
-        or operation > INFO_RENDER_RUNTIME_QUOTA_HINT
+        or operation > INFO_RENDER_TEXT_SPARKLINE
         or signed_count < 0
         or unsigned_count < 0
         or text_count < 0
@@ -691,6 +842,14 @@ def prodex_terminal_info_render_v1(
         required_text = 2
     elif operation == INFO_RENDER_RUNTIME_QUOTA_HINT:
         required_text = 1
+    elif operation == INFO_RENDER_HUMAN_BYTES or operation == INFO_RENDER_HUMAN_COUNT:
+        required_unsigned = 1
+    elif operation == INFO_RENDER_TOKEN_EFFICIENCY:
+        required_unsigned = 3
+    elif operation == INFO_RENDER_MEMORY_PERCENT:
+        required_unsigned = 2
+    elif operation == INFO_RENDER_TEXT_SPARKLINE:
+        required_unsigned = 0
     else:
         required_unsigned = 6
         if text_count > 4 or unsigned_count < 6 + text_count * 4:
@@ -754,6 +913,18 @@ def prodex_terminal_info_render_v1(
         ok = info_render_runtime_provider_direct(Pointer(to=writer), text_address)
     elif operation == INFO_RENDER_RUNTIME_QUOTA_HINT:
         ok = info_render_runtime_quota_hint(Pointer(to=writer), text_address)
+    elif operation == INFO_RENDER_HUMAN_BYTES:
+        ok = info_render_human_bytes(Pointer(to=writer), unsigned_address)
+    elif operation == INFO_RENDER_HUMAN_COUNT:
+        ok = info_render_human_count(Pointer(to=writer), unsigned_address)
+    elif operation == INFO_RENDER_TOKEN_EFFICIENCY:
+        ok = info_render_token_efficiency(Pointer(to=writer), unsigned_address)
+    elif operation == INFO_RENDER_MEMORY_PERCENT:
+        ok = info_render_memory_percent(Pointer(to=writer), unsigned_address)
+    elif operation == INFO_RENDER_TEXT_SPARKLINE:
+        ok = info_render_text_sparkline(
+            Pointer(to=writer), unsigned_address, unsigned_count
+        )
     else:
         ok = info_render_token_usage(
             Pointer(to=writer), unsigned_address, text_address, text_count
