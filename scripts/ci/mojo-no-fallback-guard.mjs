@@ -1040,6 +1040,9 @@ const GEMINI_GENERATION_CONFIG_FILE = "crates/prodex-provider-core/src/translato
 const GEMINI_THINKING_FILE = "crates/prodex-provider-core/src/translators/gemini/request/generation_config/thinking.rs";
 const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
   [/\bfn\s+anthropic_response_block_input\s*\(/u, "Rust response block classifier"],
+  [/\benum\s+ResponseBlockKind\b/u, "duplicate Rust response block kind"],
+  [/\benum\s+ResponsePlanKind\b/u, "duplicate Rust response plan kind"],
+  [/\bstruct\s+ResponsePlanItem\b/u, "duplicate Rust response plan item"],
   [/\bfn\s+plan_with_rust\s*\(/u, "Rust response planner"],
   [/\b(?:Some\s*\(\s*)?"(?:text|tool_use|server_tool_use|web_search_tool_result|thinking)"(?:\s*\))?\s*=>/u,
     "Rust response block classification"],
@@ -5470,6 +5473,9 @@ function selfTest() {
     "#[cfg(test)] mod tests { assert_eq!(plan, ResponsePlanItem { kind: ResponsePlanKind::Message }); }",
   ), []);
   assert.match(responseViolations("fn anthropic_response_block_input() {}")[0], /Rust response block classifier/u);
+  assert.match(responseViolations("enum ResponseBlockKind { Text }")[0], /duplicate Rust response block kind/u);
+  assert.match(responseViolations("enum ResponsePlanKind { Message }")[0], /duplicate Rust response plan kind/u);
+  assert.match(responseViolations("struct ResponsePlanItem { kind: usize }")[0], /duplicate Rust response plan item/u);
   assert.match(responseViolations("fn plan_with_rust() {}")[0], /Rust response planner/u);
   assert.match(responseViolations("#[cfg(test)] fn plan_with_rust() {}")[0], /Rust response planner/u);
   assert.match(responseViolations('match kind { Some("tool_use") => (), _ => () }')[0],
