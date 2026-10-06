@@ -10,6 +10,7 @@ from json_view import (
     deepseek_json_skip_ws,
     deepseek_json_value_end,
 )
+from kiro import kiro_raw_string_nonblank
 from rich_text import rich_trim_bounds, rich_view_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
 
@@ -18,6 +19,7 @@ comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime GEMINI_KERNEL_MAX_BYTES: Int64 = 4_194_304
 comptime GEMINI_BUFFERED_RESPONSE_ABI_VERSION: Int64 = 2
 comptime GEMINI_BUFFERED_RESPONSE_MAX_BYTES: Int64 = 16_777_216
+comptime GEMINI_RAW_RESPONSE_MAX_BYTES: Int64 = 67_108_864
 comptime GEMINI_KERNEL_STATUS_OK: Int64 = 0
 comptime GEMINI_KERNEL_STATUS_INVALID: Int64 = 1
 comptime GEMINI_KERNEL_STATUS_UTF8: Int64 = 2
@@ -73,6 +75,18 @@ comptime GEMINI_STREAM_EVENT_TRANSFORM: Int64 = 46
 comptime GEMINI_STREAM_COMPLETED_TOOL_CALL_ITEM: Int64 = 47
 comptime GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA_WITH_THOUGHT_SIGNATURE: Int64 = 48
 
+
+comptime GEMINI_RAW_RESPONSE_USAGE: Int64 = 49
+
+comptime GEMINI_RAW_RESPONSE_METADATA: Int64 = 50
+
+comptime GEMINI_STREAM_MODEL: Int64 = 51
+
+comptime GEMINI_STREAM_TOOL_CALL_IDS: Int64 = 52
+
+comptime GEMINI_STREAM_ADDED_TOOL_CALL_ITEM: Int64 = 53
+comptime GEMINI_STREAM_CHUNK_METADATA: Int64 = 54
+comptime GEMINI_RAW_FINISH_REASON: Int64 = 55
 
 @fieldwise_init
 struct ProdexGeminiResponseKernelInput(Copyable):
@@ -322,7 +336,7 @@ def gemini_views_valid(
 ) -> Bool:
     return (
         input.operation >= GEMINI_RESPONSE_CREATED
-        and input.operation <= GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA_WITH_THOUGHT_SIGNATURE
+        and input.operation <= GEMINI_RAW_FINISH_REASON
         and input.response_id_present >= 0
         and input.response_id_present <= 1
         and input.call_id_present >= 0
@@ -919,8 +933,9 @@ def gemini_put_stream_function_call_delta(
     var args = gemini_raw_member(source, root, StringSlice("args"))
     if not gemini_put_byte(writer, 123):
         return False
-    if input.call_id_present == 1:
-        if not gemini_put_literal(writer, StringSlice('"explicit_call_id":')) or not gemini_put_json_string(writer, input.call_id) or not gemini_put_byte(writer, 44):
+    var call_id = gemini_raw_member(source, root, StringSlice("id"))
+    if kiro_raw_string_nonblank(source, call_id):
+        if not gemini_put_literal(writer, StringSlice('"explicit_call_id":')) or not gemini_put_view_range(writer, source, call_id[0], call_id[1]) or not gemini_put_byte(writer, 44):
             return False
     if not gemini_put_literal(writer, StringSlice('"name":')):
         return False
@@ -1150,8 +1165,6 @@ def gemini_raw_put_usage(
     view: ProdexRichStringView,
     usage: Array[Int64, 2],
 ) -> Bool:
-    if not gemini_raw_bounds_present(usage) or deepseek_json_byte(view, usage[0]) != 123:
-        return gemini_put_literal(writer, StringSlice("{}"))
     var prompt = gemini_raw_u64(
         view, gemini_raw_member(view, usage, StringSlice("promptTokenCount")), 0
     )
@@ -1159,7 +1172,7 @@ def gemini_raw_put_usage(
         view, gemini_raw_member(view, usage, StringSlice("candidatesTokenCount")), 0
     )
     var total_bounds = gemini_raw_member(view, usage, StringSlice("totalTokenCount"))
-    var total = gemini_raw_u64(view, total_bounds, prompt + output)
+    var total = gemini_raw_u64(view, total_bounds, gemini_saturating_add(prompt, output))
     var cached = gemini_raw_u64(
         view, gemini_raw_member(view, usage, StringSlice("cachedContentTokenCount")), 0
     )
@@ -1774,7 +1787,10 @@ def gemini_write_operation(
         return gemini_put_tool_search_item(writer, input)
     if operation == GEMINI_CUSTOM_TOOL_CALL_ITEM:
         return gemini_put_custom_tool_item(writer, input)
-    if operation == GEMINI_ADDED_FUNCTION_CALL_ITEM:
+    if operation == GEMINI_STREAM_ADDED_TOOL_CALL_ITEM:
+        if gemini_view_equals(input.name, StringSlice("tool_search")) or gemini_view_equals(input.name, StringSlice("apply_patch")):
+            return gemini_put_literal(writer, StringSlice("null"))
+    if operation == GEMINI_ADDED_FUNCTION_CALL_ITEM or operation == GEMINI_STREAM_ADDED_TOOL_CALL_ITEM:
         if not gemini_put_literal(writer, StringSlice('{"type":"function_call","call_id":')):
             return False
         if not gemini_put_json_string(writer, input.call_id) or not gemini_put_literal(writer, StringSlice(',"name":')):
@@ -1856,6 +1872,60 @@ def gemini_write_operation(
         if gemini_view_equals(input.name, StringSlice("tool_search")) or gemini_view_equals(input.name, StringSlice("apply_patch")):
             return gemini_put_literal(writer, StringSlice("false"))
         return gemini_put_literal(writer, StringSlice("true"))
+    if operation == GEMINI_RAW_RESPONSE_USAGE:
+        var source = input.response.copy()
+        var start = deepseek_json_skip_ws(source, 0, Int64(source.len))
+        var bounds = Array[Int64, 2](fill=-1)
+        bounds[0] = start
+        bounds[1] = Int64(source.len)
+        return gemini_raw_put_usage(writer, source, bounds)
+    if operation == GEMINI_RAW_RESPONSE_METADATA:
+        return gemini_put_response_metadata_fields(writer, input.response)
+    if operation == GEMINI_RAW_FINISH_REASON:
+        var source = input.response.copy()
+        var root = gemini_raw_root(source)
+        var candidate = gemini_raw_first_array_item(source, gemini_raw_member(source, root, StringSlice("candidates")))
+        var reason = gemini_raw_member(source, candidate, StringSlice("finishReason"))
+        if kiro_raw_string_nonblank(source, reason):
+            return gemini_put_view_range(writer, source, reason[0], reason[1])
+        return gemini_put_literal(writer, StringSlice("null"))
+    if operation == GEMINI_STREAM_CHUNK_METADATA:
+        var field_input = input.copy()
+        if not gemini_put_literal(writer, StringSlice('{"response_id":')):
+            return False
+        field_input.operation = GEMINI_STREAM_RESPONSE_ID
+        if not gemini_write_operation(writer, field_input) or not gemini_put_literal(writer, StringSlice(',"model":')):
+            return False
+        field_input.operation = GEMINI_STREAM_MODEL
+        if not gemini_write_operation(writer, field_input) or not gemini_put_literal(writer, StringSlice(',"usage":')):
+            return False
+        var source = input.response.copy()
+        var root = gemini_raw_root(source)
+        var usage = gemini_raw_member(source, root, StringSlice("usageMetadata"))
+        if gemini_raw_bounds_present(usage):
+            if not gemini_raw_put_usage(writer, source, usage):
+                return False
+        elif not gemini_put_literal(writer, StringSlice("null")):
+            return False
+        if not gemini_put_literal(writer, StringSlice(',"response_metadata":')) or not gemini_put_response_metadata_fields(writer, source):
+            return False
+        field_input.operation = GEMINI_RAW_FINISH_REASON
+        return (
+            gemini_put_literal(writer, StringSlice(',"finish_reason":'))
+            and gemini_write_operation(writer, field_input)
+            and gemini_put_byte(writer, 125)
+        )
+    if operation == GEMINI_STREAM_MODEL:
+        var source = input.response.copy()
+        var root = gemini_raw_root(source)
+        var model = gemini_raw_member(source, root, StringSlice("modelVersion"))
+        if not gemini_raw_bounds_present(model):
+            model = gemini_raw_member(source, root, StringSlice("model"))
+        if gemini_raw_string_present(source, model):
+            return gemini_put_view_range(writer, source, model[0], model[1])
+        return gemini_put_literal(writer, StringSlice("null"))
+    if operation == GEMINI_STREAM_TOOL_CALL_IDS:
+        return gemini_put_stream_call_ids(writer, input.response)
     if operation == GEMINI_STREAM_RESPONSE_ID:
         if input.response.len == 0 or not gemini_view_starts_with(input.response_id, StringSlice("resp_gemini_")):
             return gemini_put_literal(writer, StringSlice("null"))
@@ -1930,19 +2000,93 @@ def gemini_buffered_response_kernel_v2(
         unsafe_from_address=Int(written_address)
     )
     written[] = 0
-    if input[].operation != GEMINI_BUFFERED_RESPONSE:
+    var operation = input[].operation
+    if (
+        operation != GEMINI_BUFFERED_RESPONSE
+        and operation != GEMINI_RAW_RESPONSE_USAGE
+        and operation != GEMINI_RAW_RESPONSE_METADATA
+        and operation != GEMINI_RAW_FINISH_REASON
+    ):
         return GEMINI_KERNEL_STATUS_INVALID
-    if not gemini_views_valid(input[].copy(), GEMINI_BUFFERED_RESPONSE_MAX_BYTES):
+    var maximum_bytes = (
+        GEMINI_BUFFERED_RESPONSE_MAX_BYTES
+        if operation == GEMINI_BUFFERED_RESPONSE
+        else GEMINI_RAW_RESPONSE_MAX_BYTES
+    )
+    if not gemini_views_valid(input[].copy(), maximum_bytes):
         return GEMINI_KERNEL_STATUS_UTF8
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
     var writer = GeminiResponseWriter(output, output_capacity, 0)
     var writer_ptr = Pointer(to=writer)
-    if not gemini_put_buffered_response(writer_ptr, input[].copy()):
+    var ok = (
+        gemini_put_buffered_response(writer_ptr, input[].copy())
+        if operation == GEMINI_BUFFERED_RESPONSE
+        else gemini_write_operation(writer_ptr, input[].copy())
+    )
+    if not ok:
         if writer.written >= output_capacity:
             written[] = writer.written
             return GEMINI_KERNEL_STATUS_CAPACITY
         return GEMINI_KERNEL_STATUS_INVALID
     written[] = writer.written
     return GEMINI_KERNEL_STATUS_OK
+
+
+# Serde supplies canonical JSON; Mojo owns field selection and null filtering.
+def gemini_put_response_metadata_fields(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    source: ProdexRichStringView,
+) -> Bool:
+    var root = gemini_raw_root(source)
+    var candidate = gemini_raw_first_array_item(source, gemini_raw_member(source, root, StringSlice("candidates")))
+    var first = True
+    for key in [StringSlice("promptFeedback"), StringSlice("usageMetadata"),
+        StringSlice("finishReason"), StringSlice("finishMessage"), StringSlice("safetyRatings"),
+        StringSlice("citationMetadata"), StringSlice("groundingMetadata"), StringSlice("urlContextMetadata"),
+        StringSlice("avgLogprobs"), StringSlice("logprobsResult")]:
+        var owner = candidate.copy()
+        if key == StringSlice("promptFeedback") or key == StringSlice("usageMetadata"):
+            owner = root.copy()
+        var field = gemini_raw_member(source, owner, key)
+        if not gemini_raw_bounds_present(field) or deepseek_json_byte(source, field[0]) == 110:
+            continue
+        if first:
+            if not gemini_put_literal(writer, StringSlice('{"gemini":{')):
+                return False
+            first = False
+        elif not gemini_put_byte(writer, 44):
+            return False
+        if not gemini_put_byte(writer, 34) or not gemini_put_literal(writer, key) or not gemini_put_literal(writer, StringSlice('":')) or not gemini_put_view_range(writer, source, field[0], field[1]):
+            return False
+    if first:
+        return gemini_put_literal(writer, StringSlice("null"))
+    return gemini_put_literal(writer, StringSlice("}}"))
+
+
+def gemini_put_stream_call_ids(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    source: ProdexRichStringView,
+) -> Bool:
+    if not gemini_put_byte(writer, 91):
+        return False
+    var cursor = deepseek_json_skip_ws(source, 1, Int64(source.len) - 1)
+    var first = True
+    while cursor < Int64(source.len) - 1:
+        var end = deepseek_json_value_end(source, cursor, Int64(source.len) - 1, 0)
+        if end < 0:
+            return False
+        var bounds = Array[Int64, 2](fill=-1)
+        bounds[0] = cursor
+        bounds[1] = end
+        if kiro_raw_string_nonblank(source, bounds):
+            if not first and not gemini_put_byte(writer, 44):
+                return False
+            if not gemini_put_view_range(writer, source, cursor, end):
+                return False
+            first = False
+        cursor = deepseek_json_skip_ws(source, end, Int64(source.len) - 1)
+        if cursor < Int64(source.len) - 1 and deepseek_json_byte(source, cursor) == 44:
+            cursor = deepseek_json_skip_ws(source, cursor + 1, Int64(source.len) - 1)
+    return gemini_put_byte(writer, 93)

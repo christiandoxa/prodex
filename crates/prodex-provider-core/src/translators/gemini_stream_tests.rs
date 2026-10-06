@@ -72,3 +72,73 @@ fn fixed_values_cover_precedence_and_unicode() {
         crate::translator::TransformStatus::Rejected { .. }
     ));
 }
+
+#[test]
+fn gemini_stream_shaping_preserves_presence_and_whitespace() {
+    let chunk = json!({
+        "responseId": null, "id": "ignored", "modelVersion": 7, "model": "ignored",
+        "usageMetadata": null,
+        "candidates": [{"finishReason": "\u{2003}"}, {"finishReason": "STOP"}]
+    });
+    let metadata = gemini_provider_core_stream_chunk_metadata("resp_gemini_1", &chunk);
+    assert_eq!(metadata.response_id, None);
+    assert_eq!(metadata.model, None);
+    assert_eq!(metadata.finish_reason, None);
+    assert_eq!(
+        metadata.response_metadata,
+        Some(json!({"gemini":{"finishReason":"\u{2003}"}}))
+    );
+    assert_eq!(
+        metadata.usage,
+        Some(json!({
+            "input_tokens": 0, "input_tokens_details": {"cached_tokens":0,"tool_tokens":0},
+            "output_tokens":0,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":0
+        }))
+    );
+    let chunk = json!({"id":"", "model":"", "candidates":[{"finishReason":" STOP "}]});
+    let metadata = gemini_provider_core_stream_chunk_metadata("resp_gemini_1", &chunk);
+    assert_eq!(metadata.response_id, Some(String::new()));
+    assert_eq!(metadata.model, Some(String::new()));
+    assert_eq!(metadata.finish_reason, Some(" STOP ".into()));
+    assert_eq!(
+        gemini_provider_core_stream_chunk_metadata("upstream", &chunk).response_id,
+        None
+    );
+    for id in [json!(null), json!(7), json!(""), json!("\u{2003}")] {
+        assert_eq!(
+            gemini_provider_core_stream_function_call_delta(&json!({"id":id})).explicit_call_id,
+            None
+        );
+    }
+    assert_eq!(
+        gemini_provider_core_stream_function_call_delta(&json!({"id":" id "})).explicit_call_id,
+        Some(" id ".into())
+    );
+    let calls = ["", "\u{2003}", " id ", " id "]
+        .map(|id| gemini_provider_core_stream_tool_call(1, 0, Some(id), Some("shell"), "{}", None));
+    // StreamToolCall supplies fallbacks for blank IDs; test filtering with explicit stored IDs.
+    let calls = calls
+        .into_iter()
+        .zip(["", "\u{2003}", " id ", " id "])
+        .map(|(mut call, id)| {
+            call.call_id = id.into();
+            call
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        gemini_provider_core_stream_tool_call_ids(&calls),
+        vec![" id ", " id "]
+    );
+    for name in ["apply_patch", "tool_search"] {
+        assert_eq!(
+            gemini_provider_core_stream_tool_call_added_item("call", name, Some("sig")),
+            None
+        );
+    }
+    assert_eq!(
+        gemini_provider_core_stream_tool_call_added_item("call", "ns--shell", Some("sig")),
+        Some(json!({
+            "type":"function_call", "call_id":"call", "namespace":"ns", "name":"shell", "gemini_thought_signature":"sig"
+        }))
+    );
+}

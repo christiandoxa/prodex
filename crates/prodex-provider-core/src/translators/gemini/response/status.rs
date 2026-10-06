@@ -15,13 +15,13 @@ pub(crate) fn gemini_prompt_feedback_failure(value: &Value) -> Option<(String, S
 }
 
 pub(crate) fn gemini_finish_reason(value: &Value) -> Option<String> {
-    value
-        .get("candidates")
-        .and_then(Value::as_array)
-        .and_then(|candidates| candidates.first())
-        .and_then(|candidate| candidate.get("finishReason"))
-        .and_then(Value::as_str)
-        .filter(|reason| !reason.trim().is_empty())
+    let raw = serde_json::to_string(value).expect("Gemini response serializes");
+    let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
+        prodex_mojo_core::rich::GeminiResponseKernelOperation::RawFinishReason,
+    );
+    input.response = Some(&raw);
+    super::super::stream::gemini_mojo_value(input)
+        .as_str()
         .map(str::to_string)
 }
 

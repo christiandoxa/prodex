@@ -89,15 +89,9 @@ pub fn gemini_provider_core_stream_fallback_tool_call_id(request_id: u64, index:
 pub fn gemini_provider_core_stream_function_call_delta(
     value: &Value,
 ) -> GeminiProviderCoreStreamFunctionCallDelta {
-    let explicit_call_id = value
-        .get("id")
-        .and_then(Value::as_str)
-        .filter(|id| !id.trim().is_empty())
-        .map(str::to_string);
     let raw = serde_json::to_string(value).expect("Gemini function call serializes");
     let mut input =
         GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamFunctionCallDelta);
-    input.call_id = explicit_call_id.as_deref();
     input.response = Some(&raw);
     let value = super::gemini_mojo_value(input);
     GeminiProviderCoreStreamFunctionCallDelta {
@@ -172,11 +166,16 @@ pub fn gemini_provider_core_stream_tool_call(
 pub fn gemini_provider_core_stream_tool_call_ids(
     tool_calls: &[GeminiProviderCoreStreamToolCall],
 ) -> Vec<String> {
-    tool_calls
+    let ids: Vec<&str> = tool_calls
         .iter()
-        .map(|tool_call| tool_call.call_id.clone())
-        .filter(|call_id| !call_id.trim().is_empty())
-        .collect()
+        .map(|call| call.call_id.as_str())
+        .collect();
+    let raw = serde_json::to_string(&ids).expect("Gemini call IDs serialize");
+    let mut input =
+        GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamToolCallIds);
+    input.response = Some(&raw);
+    serde_json::from_value(super::gemini_mojo_value(input))
+        .expect("Mojo Gemini call IDs must be strings")
 }
 
 pub fn gemini_provider_core_stream_should_emit_function_call_arguments_delta(name: &str) -> bool {
@@ -258,15 +257,13 @@ pub fn gemini_provider_core_stream_tool_call_added_item(
     name: &str,
     thought_signature: Option<&str>,
 ) -> Option<Value> {
-    if !gemini_provider_core_stream_should_emit_function_call_arguments_delta(name) {
-        return None;
-    }
     let mut input =
-        GeminiResponseKernelInput::new(GeminiResponseKernelOperation::AddedFunctionCallItem);
+        GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamAddedToolCallItem);
     input.call_id = Some(call_id);
     input.name = Some(name);
     input.signature = thought_signature;
-    Some(super::gemini_mojo_value(input))
+    let value = super::gemini_mojo_value(input);
+    (!value.is_null()).then_some(value)
 }
 
 pub fn gemini_provider_core_stream_response_id_from_chunk(
@@ -284,19 +281,13 @@ pub fn gemini_provider_core_stream_chunk_metadata(
     current_response_id: &str,
     value: &Value,
 ) -> GeminiProviderCoreStreamChunkMetadata {
-    GeminiProviderCoreStreamChunkMetadata {
-        response_id: gemini_provider_core_stream_response_id_from_chunk(current_response_id, value),
-        model: value
-            .get("modelVersion")
-            .or_else(|| value.get("model"))
-            .and_then(Value::as_str)
-            .map(str::to_string),
-        usage: value
-            .get("usageMetadata")
-            .and_then(super::super::gemini_responses_usage),
-        response_metadata: super::super::gemini_response_metadata(value),
-        finish_reason: super::super::gemini_finish_reason(value),
-    }
+    let raw = serde_json::to_string(value).expect("Gemini chunk serializes");
+    let mut input =
+        GeminiResponseKernelInput::new(GeminiResponseKernelOperation::StreamChunkMetadata);
+    input.response_id = Some(current_response_id);
+    input.response = Some(&raw);
+    serde_json::from_value(super::gemini_mojo_value(input))
+        .expect("Mojo Gemini chunk metadata must match the adapter contract")
 }
 
 pub fn gemini_provider_core_stream_candidate_parts(value: &Value) -> Option<&[Value]> {
