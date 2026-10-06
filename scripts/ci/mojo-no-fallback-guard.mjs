@@ -2667,6 +2667,9 @@ export function findViolations(files) {
     return [];
   });
   const geminiTranslatorHardReplacementViolations = files.flatMap(([filePath, contents]) => {
+    if (/\bgemini_translator_validation_error\b/u.test(contents)) {
+      return [`${filePath}: gemini translator validation errors must use the Mojo-produced reason`];
+    }
     if (filePath === GEMINI_REQUEST_TRANSFORM_FILE) {
       const required = [
         "gemini_bridge_validate_translator(",
@@ -2706,9 +2709,13 @@ export function findViolations(files) {
         /#\[cfg\(feature = "mojo"\)\]\s*pub\(crate\) use self::request::\{/u.test(contents)) {
       return [`${filePath}: Gemini translator bridge export must be unconditional`];
     }
-    if (filePath === GEMINI_BRIDGE_REQUEST_CONTENTS_FILE &&
-        /#\[cfg\(feature = "mojo"\)\]\s*(?:#\[[^\]]+\]\s*)?(?:pub\(crate\) struct GeminiTranslatorValidationPlan|pub\(crate\) fn gemini_bridge_(?:validate_translator|raw_translator_request))/u.test(contents)) {
-      return [`${filePath}: Gemini translator bridge helpers must be unconditional`];
+    if (filePath === GEMINI_BRIDGE_REQUEST_CONTENTS_FILE) {
+      if (/#\[cfg\(feature = "mojo"\)\]\s*(?:#\[[^\]]+\]\s*)?(?:pub\(crate\) struct GeminiTranslatorValidationPlan|pub\(crate\) fn gemini_bridge_(?:validate_translator|raw_translator_request))/u.test(contents)) {
+        return [`${filePath}: Gemini translator bridge helpers must be unconditional`];
+      }
+      if (!contents.includes('get("reason")')) {
+        return [`${filePath}: Gemini translator validation must retain the Mojo-produced reason`];
+      }
     }
     return [];
   });

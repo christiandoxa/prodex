@@ -6118,6 +6118,63 @@ def gemini_bridge_request_put_nonnegative_i64(
         divisor /= 10
     return True
 
+def gemini_bridge_validation_put_reason(
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+    source: GeminiRequestContentStringView,
+    tag: Int64,
+    index: Int64,
+    detail_start: Int64,
+    detail_end: Int64,
+) -> Bool:
+    if tag == GEMINI_TRANSLATOR_VALIDATION_OK or tag == GEMINI_TRANSLATOR_VALIDATION_LOCAL_MEDIA:
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_CANDIDATE_CONFLICT:
+        return gemini_request_content_put_literal(writer, StringSlice('"invalid_candidate_count: Gemini request fields `candidate_count` and `candidateCount` conflict"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_CANDIDATE_SNAKE:
+        return gemini_request_content_put_literal(writer, StringSlice('"invalid_candidate_count: Gemini request field `candidate_count` must be omitted, null, or 1"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_CANDIDATE_CAMEL:
+        return gemini_request_content_put_literal(writer, StringSlice('"invalid_candidate_count: Gemini request field `candidateCount` must be omitted, null, or 1"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_TOOLS_ARRAY:
+        return gemini_request_content_put_literal(writer, StringSlice('"invalid_tool_declaration: Gemini request field `tools` must be an array"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_RUST_TOOL_BRIDGE:
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+    var prefix = StringSlice('"invalid_tool_declaration: Gemini request field `tools[')
+    if not gemini_request_content_put_literal(writer, prefix) or not gemini_bridge_request_put_nonnegative_i64(writer, index):
+        return False
+    if tag == GEMINI_TRANSLATOR_VALIDATION_TOOL_OBJECT:
+        return gemini_request_content_put_literal(writer, StringSlice(']` must be an object"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_FUNCTION_OBJECT:
+        return gemini_request_content_put_literal(writer, StringSlice('].function` must be an object"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_FUNCTION_NAME_WRAPPED:
+        return gemini_request_content_put_literal(writer, StringSlice('].function.name` must be a non-empty string"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_FUNCTION_NAME_FLAT:
+        return gemini_request_content_put_literal(writer, StringSlice('].name` must be a non-empty string"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_REQUIRED_WRAPPED:
+        return gemini_request_content_put_literal(writer, StringSlice('].function.parameters` is required"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_REQUIRED_FLAT:
+        return gemini_request_content_put_literal(writer, StringSlice('].parameters` is required"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_OBJECT_WRAPPED:
+        return gemini_request_content_put_literal(writer, StringSlice('].function.parameters` must be an object"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_PARAMETERS_OBJECT_FLAT:
+        return gemini_request_content_put_literal(writer, StringSlice('].parameters` must be an object"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_DESCRIPTION_STRING_WRAPPED:
+        return gemini_request_content_put_literal(writer, StringSlice('].function.description` must be a string"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_DESCRIPTION_STRING_FLAT:
+        return gemini_request_content_put_literal(writer, StringSlice('].description` must be a string"'))
+    if tag == GEMINI_TRANSLATOR_VALIDATION_RESPONSE_FORMAT:
+        if not gemini_request_content_put_literal(writer, StringSlice('"Gemini response_format type `')):
+            return False
+        if (
+            detail_start >= 0
+            and detail_end > detail_start + 1
+            and not gemini_request_content_put_range(
+                writer, source, detail_start + 1, detail_end - 1
+            )
+        ):
+            return False
+        return gemini_request_content_put_literal(writer, StringSlice('` is not supported"'))
+    return gemini_request_content_put_literal(writer, StringSlice('"Gemini translator validation returned an unknown result"'))
+
 def gemini_bridge_validation_put_plan(
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
     source: GeminiRequestContentStringView,
@@ -6142,6 +6199,10 @@ def gemini_bridge_validation_put_plan(
         ):
             return False
     elif not gemini_request_content_put_literal(writer, StringSlice("null")):
+        return False
+    if not gemini_request_content_put_literal(writer, StringSlice(',"reason":')):
+        return False
+    if not gemini_bridge_validation_put_reason(writer, source, tag, index, detail_start, detail_end):
         return False
     return gemini_request_content_put_byte(writer, 125)
 

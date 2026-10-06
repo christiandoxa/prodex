@@ -23,8 +23,7 @@ fn gemini_bridge_request_value(input: GeminiBridgeRequestKernelInput<'_>) -> Res
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct GeminiTranslatorValidationPlan {
     pub tag: i64,
-    pub index: Option<usize>,
-    pub detail: Option<String>,
+    pub reason: Option<String>,
 }
 
 pub(crate) fn gemini_bridge_validate_translator(
@@ -41,15 +40,11 @@ pub(crate) fn gemini_bridge_validate_translator(
         .get("tag")
         .and_then(Value::as_i64)
         .ok_or_else(|| "Mojo Gemini translator validation returned an invalid tag".to_string())?;
-    let index = value
-        .get("index")
-        .and_then(Value::as_i64)
-        .and_then(|value| usize::try_from(value).ok());
-    let detail = value
-        .get("detail")
+    let reason = value
+        .get("reason")
         .and_then(Value::as_str)
         .map(str::to_string);
-    Ok(GeminiTranslatorValidationPlan { tag, index, detail })
+    Ok(GeminiTranslatorValidationPlan { tag, reason })
 }
 
 pub(crate) fn gemini_bridge_raw_translator_request(
