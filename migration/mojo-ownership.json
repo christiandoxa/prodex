@@ -2942,11 +2942,11 @@
       "introduced_in": "0.432.3",
       "baseline_state": "candidate",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_runtime_proxy_request_metadata_v1",
+      "mojo_entry": "prodex_runtime_proxy_request_shape_v1",
       "mojo_abi_version": 1,
       "mojo_source": "mojo/prodex_core/runtime_proxy_request.mojo",
       "consumer": "crates/prodex-runtime-proxy/src/lib.rs",
-      "consumer_marker": "prodex_mojo_core::json::runtime_proxy_request_metadata",
+      "consumer_marker": "prodex_mojo_core::json::runtime_proxy_request_shape",
       "production_consumers": [
         "crates/prodex-runtime-proxy/src/lib.rs"
       ],
@@ -2957,7 +2957,7 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "serde_json parsing/tree adaptation, caller-owned request mutation/serialization, header precedence and validated String reconstruction"
+      "rust_adapter_scope": "serde_json scalar string extraction/serialization, caller-owned request mutation/serialization, header precedence and validated fallback-shape tag reconstruction"
     },
     {
       "name": "runtime_proxy_path_policy",

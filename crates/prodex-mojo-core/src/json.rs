@@ -162,13 +162,12 @@ unsafe extern "C" {
         prefix_capacity: i64,
         output: u64,
     ) -> i64;
-    fn prodex_runtime_proxy_request_metadata_v1(
-        abi_version: i64,
-        nodes_address: u64,
-        nodes_count: i64,
-        raw_address: u64,
+    fn prodex_runtime_proxy_request_shape_v1(
+        abi: i64,
+        raw: u64,
         raw_length: i64,
-        output_address: u64,
+        session_present: i64,
+        output: u64,
     ) -> i64;
     fn prodex_runtime_response_metadata_v1(
         abi_version: i64,
@@ -317,20 +316,6 @@ pub fn gemini_grounding(
     Ok(output)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RuntimeProxyRequestMetadataPlan {
-    pub previous_response_id: Option<usize>,
-    pub session_id: Option<usize>,
-    pub prompt_cache_key: Option<usize>,
-    pub turn_state: Option<usize>,
-    pub turn_id: Option<usize>,
-    pub thread_id: Option<usize>,
-    pub window_id: Option<usize>,
-    pub requires_previous_response_affinity: bool,
-    pub fresh_fallback_shape: Option<i64>,
-    pub reconstructable_full_history: bool,
-}
-
 fn validated_optional_node_index(value: i64, count: usize) -> Result<Option<usize>, MojoError> {
     if value == -1 {
         return Ok(None);
@@ -341,19 +326,24 @@ fn validated_optional_node_index(value: i64, count: usize) -> Result<Option<usiz
         .ok_or(MojoError::InvalidOutput)
 }
 
-pub fn runtime_proxy_request_metadata(
-    nodes: &[JsonNode<'_>],
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeProxyRequestShapePlan {
+    pub requires_previous_response_affinity: bool,
+    pub fresh_fallback_shape: Option<i64>,
+    pub reconstructable_full_history: bool,
+}
+
+pub fn runtime_proxy_request_shape(
     raw: &str,
-) -> Result<RuntimeProxyRequestMetadataPlan, MojoError> {
-    let input = ffi_nodes(nodes, raw)?;
-    let mut output = [-1_i64; 10];
+    session_present: bool,
+) -> Result<RuntimeProxyRequestShapePlan, MojoError> {
+    let mut output = [-1_i64; 3];
     status(unsafe {
-        prodex_runtime_proxy_request_metadata_v1(
+        prodex_runtime_proxy_request_shape_v1(
             1,
-            input.as_ptr() as u64,
-            signed(input.len())?,
             raw.as_ptr() as u64,
             signed(raw.len())?,
+            i64::from(session_present),
             output.as_mut_ptr() as u64,
         )
     })?;
@@ -362,22 +352,15 @@ pub fn runtime_proxy_request_metadata(
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     };
-    let fresh_fallback_shape = match output[8] {
+    let fresh_fallback_shape = match output[1] {
         -1 => None,
-        0..=3 => Some(output[8]),
+        0..=3 => Some(output[1]),
         _ => return Err(MojoError::InvalidOutput),
     };
-    Ok(RuntimeProxyRequestMetadataPlan {
-        previous_response_id: validated_optional_node_index(output[0], nodes.len())?,
-        session_id: validated_optional_node_index(output[1], nodes.len())?,
-        prompt_cache_key: validated_optional_node_index(output[2], nodes.len())?,
-        turn_state: validated_optional_node_index(output[3], nodes.len())?,
-        turn_id: validated_optional_node_index(output[4], nodes.len())?,
-        thread_id: validated_optional_node_index(output[5], nodes.len())?,
-        window_id: validated_optional_node_index(output[6], nodes.len())?,
-        requires_previous_response_affinity: bool_output(output[7])?,
+    Ok(RuntimeProxyRequestShapePlan {
+        requires_previous_response_affinity: bool_output(output[0])?,
         fresh_fallback_shape,
-        reconstructable_full_history: bool_output(output[9])?,
+        reconstructable_full_history: bool_output(output[2])?,
     })
 }
 
