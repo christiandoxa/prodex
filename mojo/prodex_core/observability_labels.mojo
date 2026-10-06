@@ -1862,6 +1862,53 @@ def prodex_mojo_observability_label_v1(
             label = StringSlice("blocked_nonreplayable_without_affinity")
         else:
             return OBSERVABILITY_STATUS_INVALID
+    elif kind == 165:
+        if value == 0:
+            label = StringSlice("")
+        elif value == 1:
+            label = StringSlice("quota_windows_unavailable")
+        elif value == 2:
+            label = StringSlice("quota_exhausted_before_send")
+        elif value == 3:
+            label = StringSlice("quota_exhausted")
+        elif value == 4:
+            label = StringSlice("quota_healthy")
+        elif value == 5:
+            label = StringSlice("quota_thin")
+        elif value == 6:
+            label = StringSlice("quota_critical")
+        elif value == 7:
+            label = StringSlice("quota_unknown")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 166:
+        if value == 0:
+            label = StringSlice("")
+        elif value == 1:
+            label = StringSlice("hard_binding_conflict")
+        elif value == 2:
+            label = StringSlice("binding_identity_mismatch")
+        elif value == 3:
+            label = StringSlice("hard_binding_unavailable")
+        elif value == 4:
+            label = StringSlice("bound_profile_unavailable")
+        elif value == 5:
+            label = StringSlice("selection_backoff")
+        elif value == 6:
+            label = StringSlice("route_circuit_half_open_probe_wait")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
+    elif kind == 167:
+        if value == 0:
+            label = StringSlice("compact_followup")
+        elif value == 1:
+            label = StringSlice("pinned")
+        elif value == 2:
+            label = StringSlice("turn_state")
+        elif value == 3:
+            label = StringSlice("session")
+        else:
+            return OBSERVABILITY_STATUS_INVALID
     else:
         return OBSERVABILITY_STATUS_INVALID
     return observability_copy_label(label, output, output_capacity, output_length)
