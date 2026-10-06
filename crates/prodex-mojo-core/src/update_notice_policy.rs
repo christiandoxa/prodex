@@ -8,6 +8,7 @@ const EMIT_NOTICE: i64 = 1;
 const CACHE_FRESH: i64 = 2;
 const RELEASE_VERSION_VALID: i64 = 3;
 const RELEASE_VERSION_COMPARE: i64 = 4;
+const UPDATE_DECISION: i64 = 5;
 
 const RELEASE_VERSION_TOTAL_ORDER: i64 = 0;
 const RELEASE_VERSION_PRECEDENCE: i64 = 1;
@@ -181,6 +182,10 @@ pub fn should_emit_notice(
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+pub fn update_decision(current: &str, target: &str) -> Result<i64, MojoError> {
+    call(UPDATE_DECISION, current, target, PolicyInput::default())
 }
 
 pub fn cache_is_fresh(
