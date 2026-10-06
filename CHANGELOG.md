@@ -2,10 +2,17 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.435.7 - 2026-10-07
+
+### Runtime
+
+- Recover post-compaction quota affinity (`5f5eb4d`)
+
 ## 0.435.6 - 2026-10-06
 
 ### Runtime
 
+- Satisfy compact recovery clippy (`466175b`)
 - Close 0.435.6 CI regressions (`c0644d6`)
 - Keep usable profiles transparent (`ba72da5`)
 
@@ -23,69 +30,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Merge pull request #104 from christiandoxa/campaign/mojo-wave-observability-20261004 (`bc0690f`)
 - Merge pull request #108 from christiandoxa/dependabot/github_actions/github-actions-6de4297576 (`3c12233`)
 - Merge pull request #107 from christiandoxa/dependabot/cargo/cargo-bbe38bb5bb (`c3f5edb`)
-# Prodex 0.435.6
-
-## New Features
-
-- No new command surface; 0.435.6 focuses on transparent runtime recovery, login stability, and Codex 0.160.1 compatibility.
-
-## Bug Fixes
-
-### Usable quota no longer becomes a user-visible technical blocker
-
-- OpenAI profile rotation now treats account-local quota transitions as internal recovery while any compatible profile remains usable. A profile becoming blocked on the 5-hour or weekly window does not terminate the user flow when another profile can serve the request.
-- Responses HTTP, WebSocket, standard HTTP, and compact requests now recover consistently across pre-commit quota exhaustion, generic/rate-limit 429 responses, overload, authentication failure, profile unavailability, and transport failure.
-- Session-bound work releases failed ownership and rebinds to the profile that successfully commits the retry. Previous-response-bound work is not rotated blindly: Prodex emits the existing full-context replay control signal, releases the dead owner, and lets Codex replay the complete context on a healthy profile.
-- Hard-affinity replay is available even when the continuation has no explicit session id, as long as the previous-response owner is known and a viable fallback exists.
-- Generic HTTP 429 is retryable only before commit. Once output has committed, Prodex preserves the upstream result rather than replaying work that may already have produced user-visible output or tool side effects.
-- Local admission saturation remains backpressure rather than a terminal timeout. Retry-budget exhaustion stays internal while a profile remains retryable.
-- Terminal errors remain bounded and intentional when the compatible pool is genuinely exhausted, or when upstream connectivity/transport recovery cannot produce a usable profile.
-
-### OpenAI login no longer crashes during session attachment maintenance
-
-- Fixed a post-login panic in `prodex-shared-codex-fs` where the Mojo attachment scanner could search from a later cursor and then expand a subsequent path backward across an escaped JSON newline, returning a byte range that began before the cursor.
-- The Mojo scanner now skips JSON escape delimiters at the scan cursor and never rewinds below that cursor. Mixed Windows path separators remain valid, while the Rust adapter independently rejects non-monotonic ranges before they can reach string slicing.
-- A regression reproduces adjacent attachment paths separated by an escaped newline in a rollout JSON string and verifies both paths are rewritten without panic while preserving valid JSON.
-- Mutation sensitivity restores the old backward expansion and makes the regression fail; restoring the fixed Mojo source byte-for-byte makes it pass.
-
-## Compatibility Notes
-
-### Codex 0.160.1 compatibility
-
-- Advance the release-qualified Codex reference from `rust-v0.160.0` to `rust-v0.160.1`.
-- Codex 0.160.1 changes only workspace version metadata and remote stdio MCP environment handling. When explicit remote environment variables activate the allowlist, Codex now preserves `SYSTEMROOT`, `TEMP`, and `TMP` so a Unix orchestrator can launch MCP servers on a Windows executor without losing required startup environment.
-- Prodex adds critical-file and semantic guards for that contract while leaving model routing, auth, quota/failover, session continuity, provider catalogs, and app-server protocol behavior unchanged.
-- Exact 0.160.0-to-0.160.1 tagged-source comparison: 2 changed files, 24 additions, 1 deletion. All 62 critical-file groups and 65 semantic groups replay against the exact 0.160.1 tree with zero missing markers.
-- Official 0.160.1 Linux musl CLI and app-server assets match GitHub release digests. The CLI reports `codex-cli 0.160.1`, and an isolated app-server `initialize` with `experimentalApi=true` succeeds without credentials or a model turn.
-
-### Ponytail 4.13.0 release qualification
-
-- Refresh the release-qualified Ponytail reference from 4.10.3 to 4.13.0 after the upstream stable release landed during the 0.435.6 release window.
-- Pin exact release commit `08e952d7a8057a57ce561ff1330d093fd92eec67`, Git tree `b0a551a2dfad80063167798ba6469034f668ebe5`, and Prodex tree digest `4187a87a014975e268d1e6a0ea553382e7d53232a2f2ea741941c0b1c412dd2f`.
-- The clean v4.13.0 checkout retains the Codex hook and skills surfaces required by Prodex; existing stable 4.10.x managed installs remain compatible under the existing minimum-version and manifest-digest rules.
-
-## Verification
-
-- Local-capacity/backpressure regressions: 5/5 pass.
-- Hard-affinity Responses replay regressions: 10/10 pass.
-- Standard bound-session recovery regressions: 6/6 pass.
-- Quota/rotation matrix: 19/19 pass.
-- Compact recovery suite: 28/28 pass, including previous-response replay and session-bound transport/overload/auth/rate-limit/profile-unavailable recovery.
-- Pre-send admission: 16/16 pass; Responses overload recovery: 3/3 pass; standard retry recovery: 1/1 pass.
-- WebSocket failure handling: 16/16 pass.
-- Runtime HTTP error policy: 30/30 pass, including pre-commit generic 429 retry and post-commit non-replay behavior.
-- Integration-level tool-output quota recovery performs full-context replay and succeeds on the healthy account.
-- Runtime test manifest, Mojo no-fallback guard, Mojo authority guard, Mojo ownership check, size guard, formatting, and `git diff --check` pass locally.
-- Codex 0.160.1 baseline guard self-test passes with zero errors/warnings and exact tagged-tree marker replay has zero misses.
-- Ponytail 4.13.0 resolver tests: 5/5 pass; optional-tool freshness checkpoint B reports all six optional tools `latest`.
-
-## Changelog
-
-- Keep user workflows running transparently while any compatible profile still has usable quota or recoverable capacity.
-- Prevent the post-`prodex login openai` attachment-maintenance byte-range panic.
-- Qualify Prodex against Codex `rust-v0.160.1`.
-
-Full Changelog: [0.435.5...0.435.6](https://github.com/christiandoxa/prodex/compare/0.435.5...0.435.6)
 
 ## 0.435.5 - 2026-10-05
 
