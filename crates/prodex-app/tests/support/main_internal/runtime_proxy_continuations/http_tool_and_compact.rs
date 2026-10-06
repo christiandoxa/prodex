@@ -486,7 +486,7 @@ fn runtime_proxy_http_conflicting_response_and_turn_state_bindings_fail_before_u
 }
 
 #[test]
-fn runtime_proxy_http_tool_output_with_session_does_not_fresh_fallback() {
+fn runtime_proxy_http_tool_output_with_session_requests_full_context_replay() {
     let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_quota_then_tool_output_fresh_fallback_error();
     let main_home = temp_dir.path.join("homes/main");
@@ -562,22 +562,18 @@ fn runtime_proxy_http_tool_output_with_session_does_not_fresh_fallback() {
         .send()
         .expect("responses request should succeed");
 
-    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.status().as_u16(), 400);
     let body = response.text().expect("responses body should decode");
-    assert!(
-        body.contains("insufficient_quota"),
-        "quota failure should pass through instead of degrading into fresh tool-output retry: {body}"
-    );
-    assert!(
-        !body.contains("No tool call found"),
-        "proxy should not create a fresh tool-output request that loses call context: {body}"
-    );
+    assert!(body.contains("previous_response_not_found"), "{body}");
+    assert!(!body.contains("insufficient_quota"), "{body}");
+    assert!(!body.contains("service_unavailable"), "{body}");
+    assert!(!body.contains("No tool call found"), "{body}");
 
     let responses_accounts = backend.responses_accounts();
     assert_eq!(
         responses_accounts,
         vec!["main-account".to_string()],
-        "tool-output continuations must not rotate away from the owning profile: {responses_accounts:?}"
+        "tool-output delta must not be replayed by itself before the client resends full context: {responses_accounts:?}"
     );
 
     let responses_bodies = backend.responses_bodies();

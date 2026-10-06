@@ -337,7 +337,7 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
       {
         id: "continuation-http-session-quota",
         filter:
-          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fresh_fallback",
+          "main_internal_tests::runtime_proxy_continuations::http_followups::runtime_proxy_http_message_followup_with_session_quota_requests_full_context_replay",
         label: "session-quota",
       },
       {
@@ -630,7 +630,7 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
-    name: "runtime_proxy_http_message_followup_with_session_quota_does_not_rotate_or_fresh_fallback",
+    name: "runtime_proxy_http_message_followup_with_session_quota_requests_full_context_replay",
     tags: SERIALIZED_TAGS,
   },
   {

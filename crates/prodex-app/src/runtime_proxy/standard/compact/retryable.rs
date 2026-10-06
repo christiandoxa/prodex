@@ -116,7 +116,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         shared,
         format!(
             "request={request_id} transport=http compact_retryable_failure profile={profile_name} reason={}",
-            if overload { "overload" } else { "quota" }
+            runtime_compact_retryable_reason(overload)
         ),
     );
     mark_runtime_profile_retry_backoff(shared, &profile_name)?;
@@ -142,40 +142,23 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         return Ok(RuntimeCompactFailureFlow::Return(response));
     }
 
-    let hard_affinity = runtime_compact_candidate_has_hard_affinity(
-        &profile_name,
-        compact_followup_profile
-            .as_ref()
-            .map(|(profile_name, _)| profile_name.as_str()),
-        previous_response_profile,
-        session_profile.as_deref(),
-    );
-    if hard_affinity {
-        match recover_runtime_compact_hard_affinity(RuntimeCompactHardAffinityRecoveryRequest {
+    if let Some(retry) =
+        runtime_compact_retryable_full_context_recovery(RuntimeCompactRetryableRecoveryContext {
             request_id,
             shared,
             profile_name: &profile_name,
-            hard_affinity: true,
+            overload,
             previous_response_profile,
-            previous_response_id: request_previous_response_id,
+            request_previous_response_id,
             request_session_id,
             request_turn_state,
             request_model_name,
             compact_followup_profile,
             session_profile,
             excluded_profiles,
-            reason: if overload {
-                "compact_overload"
-            } else {
-                "compact_quota"
-            },
-        })? {
-            RuntimeCompactHardAffinityRecovery::Return(retry) => {
-                return Ok(RuntimeCompactFailureFlow::Return(retry));
-            }
-            RuntimeCompactHardAffinityRecovery::Retry
-            | RuntimeCompactHardAffinityRecovery::Unchanged => {}
-        }
+        })?
+    {
+        return Ok(RuntimeCompactFailureFlow::Return(retry));
     }
 
     if runtime_compact_previous_profile_hard_affinity_failure(
@@ -192,7 +175,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         RuntimeProxyCompactAttemptFailureLog {
             request_id,
             exit: "hard_affinity_retryable_failure",
-            reason: if overload { "overload" } else { "quota" },
+            reason: runtime_compact_retryable_reason(overload),
             selection_attempts,
             selection_started_at,
             pressure_mode,
@@ -227,7 +210,7 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
         RuntimeProxyCompactAttemptFailureLog {
             request_id,
             exit: "hard_affinity_retryable_failure",
-            reason: if overload { "overload" } else { "quota" },
+            reason: runtime_compact_retryable_reason(overload),
             selection_attempts,
             selection_started_at,
             pressure_mode,
@@ -253,6 +236,81 @@ pub(super) fn handle_runtime_proxy_compact_retryable_failure(
             last_failure,
         },
     ))
+}
+
+fn runtime_compact_retryable_reason(overload: bool) -> &'static str {
+    if overload { "overload" } else { "quota" }
+}
+
+fn runtime_compact_retryable_recovery_reason(overload: bool) -> &'static str {
+    if overload {
+        "compact_overload"
+    } else {
+        "compact_quota"
+    }
+}
+
+struct RuntimeCompactRetryableRecoveryContext<'a> {
+    request_id: u64,
+    shared: &'a RuntimeRotationProxyShared,
+    profile_name: &'a str,
+    overload: bool,
+    previous_response_profile: Option<&'a str>,
+    request_previous_response_id: Option<&'a str>,
+    request_session_id: Option<&'a str>,
+    request_turn_state: Option<&'a str>,
+    request_model_name: Option<&'a str>,
+    compact_followup_profile: &'a mut Option<(String, &'static str)>,
+    session_profile: &'a mut Option<String>,
+    excluded_profiles: &'a BTreeSet<String>,
+}
+
+fn runtime_compact_retryable_full_context_recovery(
+    context: RuntimeCompactRetryableRecoveryContext<'_>,
+) -> Result<Option<tiny_http::ResponseBox>> {
+    let RuntimeCompactRetryableRecoveryContext {
+        request_id,
+        shared,
+        profile_name,
+        overload,
+        previous_response_profile,
+        request_previous_response_id,
+        request_session_id,
+        request_turn_state,
+        request_model_name,
+        compact_followup_profile,
+        session_profile,
+        excluded_profiles,
+    } = context;
+    if !runtime_compact_candidate_has_hard_affinity(
+        profile_name,
+        compact_followup_profile
+            .as_ref()
+            .map(|(profile_name, _)| profile_name.as_str()),
+        previous_response_profile,
+        session_profile.as_deref(),
+    ) {
+        return Ok(None);
+    }
+    match recover_runtime_compact_hard_affinity(RuntimeCompactHardAffinityRecoveryRequest {
+        request_id,
+        shared,
+        profile_name,
+        hard_affinity: true,
+        previous_response_profile,
+        previous_response_id: request_previous_response_id,
+        request_session_id,
+        request_turn_state,
+        request_model_name,
+        compact_followup_profile,
+        session_profile,
+        excluded_profiles,
+        reason: runtime_compact_retryable_recovery_reason(overload),
+    })? {
+        RuntimeCompactHardAffinityRecovery::Return(retry) => Ok(Some(retry)),
+        RuntimeCompactHardAffinityRecovery::Retry
+        | RuntimeCompactHardAffinityRecovery::Unchanged => Ok(None),
+    }
 }
 
 struct RuntimeCompactRetryableFailureFinalization<'a> {

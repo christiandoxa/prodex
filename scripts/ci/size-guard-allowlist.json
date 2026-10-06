@@ -16,7 +16,7 @@
   },
   {
     "file": "crates/prodex-app/tests/support/main_internal/runtime_proxy_continuations/http_tool_and_compact.rs",
-    "maxLines": 1026,
+    "maxLines": 1022,
     "reason": "HTTP continuation, tool-output, compact session affinity, and hard binding identity regressions remain capped in the shared route harness."
   },
   {

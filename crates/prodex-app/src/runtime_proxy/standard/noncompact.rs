@@ -1,8 +1,10 @@
 use super::*;
 
 mod failure_handlers;
+mod failure_routing;
 
 use failure_handlers::*;
+use failure_routing::*;
 
 pub(super) fn proxy_runtime_noncompact_request(
     request_id: u64,
@@ -618,91 +620,34 @@ fn handle_runtime_noncompact_attempt(
             response,
         ),
         RuntimeStandardAttempt::LocalSelectionBlocked { profile_name } => {
-            runtime_proxy_log(
+            handle_runtime_noncompact_local_selection_blocked(
+                request_id,
                 shared,
-                format!(
-                    "request={request_id} transport=http local_selection_blocked profile={profile_name} route=standard reason=quota_exhausted_before_send"
-                ),
-            );
-            let session_owned = session_profile.as_deref() == Some(profile_name.as_str());
-            let plan = runtime_noncompact_failure_plan(
-                prodex_mojo_core::runtime::NoncompactFailureKind::LocalBlocked,
+                request_session_id,
                 session_profile,
-                &profile_name,
-                false,
-                false,
-            );
-            if plan.clear_session {
-                if session_owned && let Some(session_id) = request_session_id {
-                    let _ = release_runtime_quota_blocked_affinity(
-                        shared,
-                        &profile_name,
-                        None,
-                        None,
-                        Some(session_id),
-                    )?;
-                }
-                clear_noncompact_session_profile(session_profile, &profile_name);
-            }
-            if plan.exclude_profile {
-                loop_state.excluded_profiles.insert(profile_name);
-            }
-            Ok(None)
+                loop_state,
+                profile_name,
+            )
         }
         RuntimeStandardAttempt::ProfileInflightSaturated { profile_name } => {
-            runtime_proxy_log(
+            handle_runtime_noncompact_inflight_saturated(
+                request_id,
                 shared,
-                format!(
-                    "request={request_id} transport=http local_selection_blocked profile={profile_name} route=standard reason=profile_inflight_saturated"
-                ),
-            );
-            loop_state.record_inflight_saturation();
-            Ok(None)
+                loop_state,
+                profile_name,
+            )
         }
         RuntimeStandardAttempt::TransportFailed {
             profile_name,
             stage,
-        } => {
-            runtime_proxy_log(
-                shared,
-                format!(
-                    "request={request_id} transport=http standard_transport_failure profile={profile_name} stage={stage}"
-                ),
-            );
-            let session_owned = session_profile.as_deref() == Some(profile_name.as_str());
-            let plan = runtime_noncompact_failure_plan(
-                prodex_mojo_core::runtime::NoncompactFailureKind::Transport,
-                session_profile,
-                &profile_name,
-                false,
-                false,
-            );
-            if plan.terminal {
-                return Ok(Some(build_runtime_proxy_text_response(
-                    503,
-                    runtime_proxy_local_selection_failure_message(),
-                )));
-            }
-            if plan.clear_session {
-                if session_owned && let Some(session_id) = request_session_id {
-                    let _ = release_runtime_retryable_failure_affinity(
-                        shared,
-                        &profile_name,
-                        None,
-                        None,
-                        Some(session_id),
-                        "standard_transport",
-                    )?;
-                }
-                clear_noncompact_session_profile(session_profile, &profile_name);
-            }
-            if plan.record_transport_failure {
-                loop_state.record_transport_failure_at(stage);
-            }
-            if plan.exclude_profile {
-                loop_state.excluded_profiles.insert(profile_name);
-            }
-            Ok(None)
-        }
+        } => handle_runtime_noncompact_transport_failed(
+            request_id,
+            shared,
+            request_session_id,
+            session_profile,
+            loop_state,
+            profile_name,
+            stage,
+        ),
     }
 }
