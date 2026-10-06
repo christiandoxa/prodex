@@ -5,15 +5,6 @@ use crate::{
     RuntimeSelectionQuotaWindowStatus,
 };
 
-pub(super) fn route_kind_tag(route_kind: RuntimeRouteKind) -> i64 {
-    match route_kind {
-        RuntimeRouteKind::Responses => 0,
-        RuntimeRouteKind::Compact => 1,
-        RuntimeRouteKind::Websocket => 2,
-        RuntimeRouteKind::Standard => 3,
-    }
-}
-
 pub(super) fn quota_band_from_tag(
     band: i64,
 ) -> Result<RuntimeSelectionQuotaPressureBand, prodex_mojo_core::MojoError> {
@@ -37,7 +28,7 @@ pub(crate) fn pressure_band_for_route(
     quota_band_from_tag(prodex_mojo_core::runtime::pressure_band_for_route(
         five_hour,
         weekly,
-        route_kind_tag(route_kind),
+        route_kind as i64,
     )?)
 }
 
@@ -62,7 +53,7 @@ pub(crate) fn quota_score_batch(
             }
         })
         .collect::<Vec<_>>();
-    prodex_mojo_core::runtime::quota_score_batch(&inputs, route_kind_tag(route_kind))?
+    prodex_mojo_core::runtime::quota_score_batch(&inputs, route_kind as i64)?
         .into_iter()
         .map(|score| {
             Ok(RuntimeProxyQuotaScore {
@@ -149,7 +140,7 @@ pub(crate) fn runtime_response_candidate_plan_batch(
         fields.push(i64::from(candidate.auth_failure_active));
         fields.push(quota_status_tag(candidate.quota_summary.five_hour.status));
     }
-    let route_kind = route_kind_tag(options.route_kind);
+    let route_kind = options.route_kind as i64;
     let excluded = vec![0_i64; candidates.len()];
     prodex_mojo_core::runtime::runtime_candidate_plan_batch(
         &fields,

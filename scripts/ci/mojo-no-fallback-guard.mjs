@@ -1931,6 +1931,40 @@ export function findViolations(files) {
     }
     return violations;
   });
+  const routeTagMirrorFiles = new Set([
+    "crates/prodex-runtime-state/src/admission.rs",
+    "crates/prodex-runtime-proxy/src/selection_policy.rs",
+    "crates/prodex-runtime-proxy/src/selection_policy/mojo.rs",
+    "crates/prodex-runtime-proxy/src/quota/mojo.rs",
+    "crates/prodex-runtime-proxy/src/mojo.rs",
+    "crates/prodex-runtime-proxy/src/selection_plan.rs",
+    "crates/prodex-runtime-proxy/src/health/inflight.rs",
+    "crates/prodex-runtime-proxy/src/health/latency.rs",
+    "crates/prodex-runtime-quota/src/selection/scoring.rs",
+    "crates/prodex-quota/src/capacity.rs",
+  ]);
+  const routeTagMirrorViolations = files.flatMap(([filePath, contents]) => {
+    if (!routeTagMirrorFiles.has(filePath)) return [];
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const violations = [];
+    if (
+      /RuntimeRouteKind::Responses\s*=>\s*0/u.test(production)
+      || /RuntimeRouteKind::Compact\s*=>\s*1/u.test(production)
+      || /RuntimeRouteKind::Websocket\s*=>\s*2/u.test(production)
+      || /RuntimeRouteKind::Standard\s*=>\s*3/u.test(production)
+    ) {
+      violations.push(filePath + ": contains restored Rust RuntimeRouteKind numeric ABI mirror");
+    }
+    if (
+      /fn\s+(?:runtime_selection_)?route_kind_tag\s*\(/u.test(production)
+      || /fn\s+runtime_route_kind_tag\s*\(/u.test(production)
+      || /fn\s+route_kind_code\s*\(/u.test(production)
+    ) {
+      violations.push(filePath + ": contains restored Rust route-tag adapter");
+    }
+    return violations;
+  });
+
   const appSelectionPolicyMirrorViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-app/src/runtime_proxy/selection/policy.rs") return [];
     const violations = [];
@@ -5276,7 +5310,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -6323,6 +6357,10 @@ function selfTest() {
     "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
     "let static_models = provider.models();\npub(super) fn external_catalog_model_indices(ids: &[&str]) -> Vec<usize> { ids.iter().map(|id| id.to_ascii_lowercase()).collect() }",
   ]]).join("\n"), /catalog dedup must use Mojo/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/health/inflight.rs",
+    "fn f(route_kind: RuntimeRouteKind) { match route_kind { RuntimeRouteKind::Responses => 0, RuntimeRouteKind::Compact => 1, RuntimeRouteKind::Websocket => 2, RuntimeRouteKind::Standard => 3 } }"]]).join("\n"),
+  /RuntimeRouteKind numeric ABI mirror/u);
+
   assert.match(findViolations([[PROMPT_CACHE_SELECTION_FILE,
     '#[path = "selection_prompt_cache_rust.rs"] mod prompt_cache;']]).join("\n"),
     /replaced Rust semantic implementation/u);

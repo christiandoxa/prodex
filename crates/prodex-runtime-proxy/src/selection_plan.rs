@@ -179,18 +179,10 @@ fn optimistic_current_candidate_decision_mojo(
         .map(str::trim)
         .filter(|owner| !owner.is_empty())
         == Some(input.current_profile);
-    let quota_source = input.quota_source.map(|source| match source {
-        RuntimeSelectionQuotaSource::LiveProbe => 0,
-        RuntimeSelectionQuotaSource::PersistedSnapshot => 1,
-    });
+    let quota_source = input.quota_source.map(|source| source as i64);
     let result = prodex_mojo_core::runtime::optimistic_current_candidate_decision(
         prodex_mojo_core::runtime::OptimisticCandidateInput {
-            route_kind: match input.route_kind {
-                RuntimeRouteKind::Responses => 0,
-                RuntimeRouteKind::Compact => 1,
-                RuntimeRouteKind::Websocket => 2,
-                RuntimeRouteKind::Standard => 3,
-            },
+            route_kind: input.route_kind as i64,
             auth_failure_active: input.auth_failure_active,
             in_selection_backoff: input.in_selection_backoff,
             circuit_open: input.circuit_open,

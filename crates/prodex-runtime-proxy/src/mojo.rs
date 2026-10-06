@@ -9,7 +9,7 @@ mod common_quota;
 pub(crate) use common_quota::{
     pressure_band_for_route, quota_score_batch, runtime_response_candidate_plan_batch,
 };
-use common_quota::{quota_band_from_tag, quota_source_tag, quota_status_tag, route_kind_tag};
+use common_quota::{quota_band_from_tag, quota_source_tag, quota_status_tag};
 
 pub(crate) struct RuntimeQuotaSnapshotDecision {
     pub summary: RuntimeProxyQuotaSummary,
@@ -45,7 +45,7 @@ pub(crate) fn quota_snapshot_plan(
             weekly_status: quota_status_tag(snapshot.weekly_status),
             weekly_remaining: snapshot.weekly_remaining_percent,
             weekly_reset_at: snapshot.weekly_reset_at,
-            route_kind: route_kind_tag(route_kind),
+            route_kind: route_kind as i64,
             checked_at: snapshot.checked_at,
             now,
             stale_grace_seconds,
@@ -83,7 +83,7 @@ pub(crate) fn quota_gate_plan(
         five_hour_reset_at: summary.five_hour.reset_at,
         weekly_status: quota_status_tag(summary.weekly.status),
         weekly_reset_at: summary.weekly.reset_at,
-        route_kind: route_kind_tag(route_kind),
+        route_kind: route_kind as i64,
         source: quota_source_tag(source),
         has_continuation_context,
         has_alternative_quota_profile,

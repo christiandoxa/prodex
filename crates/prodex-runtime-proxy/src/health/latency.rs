@@ -7,12 +7,7 @@ pub fn runtime_profile_latency_penalty(
     route_kind: RuntimeRouteKind,
     stage: &str,
 ) -> u32 {
-    let route_kind = match route_kind {
-        RuntimeRouteKind::Responses => 0,
-        RuntimeRouteKind::Compact => 1,
-        RuntimeRouteKind::Websocket => 2,
-        RuntimeRouteKind::Standard => 3,
-    };
+    let route_kind = route_kind as i64;
     let stage_kind = match stage {
         "ttfb" => 1,
         "connect" => 2,

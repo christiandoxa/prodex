@@ -4,22 +4,21 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum RuntimeRouteKind {
-    Responses,
-    Compact,
-    Websocket,
-    Standard,
+    Responses = 0,
+    Compact = 1,
+    Websocket = 2,
+    Standard = 3,
 }
 
-fn runtime_route_kind_tag(route_kind: RuntimeRouteKind) -> u8 {
-    match route_kind {
-        RuntimeRouteKind::Responses => 0,
-        RuntimeRouteKind::Compact => 1,
-        RuntimeRouteKind::Websocket => 2,
-        RuntimeRouteKind::Standard => 3,
-    }
-}
+const _: () = {
+    assert!(RuntimeRouteKind::Responses as u8 == 0);
+    assert!(RuntimeRouteKind::Compact as u8 == 1);
+    assert!(RuntimeRouteKind::Websocket as u8 == 2);
+    assert!(RuntimeRouteKind::Standard as u8 == 3);
+};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RuntimeWaitDurationMetrics {
@@ -457,7 +456,7 @@ impl RuntimeProxyLaneAdmission {
 
     pub fn limit(&self, lane: RuntimeRouteKind) -> usize {
         prodex_mojo_core::runtime_state::lane_limit(
-            runtime_route_kind_tag(lane),
+            lane as u8,
             [
                 self.limits.responses,
                 self.limits.compact,
