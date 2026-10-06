@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use zeroize::Zeroizing;
 
 const OPENAI_TUNNEL_CLIENT_MINIMUM_VERSION: &str = "0.0.13";
-const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.15";
+const OPENAI_TUNNEL_CLIENT_LATEST_STABLE_REFERENCE: &str = "0.0.16";
 const OPENAI_TUNNEL_CLIENT_RELEASE_URL: &str =
     "https://github.com/openai/tunnel-client/releases/latest";
 const OPENAI_TUNNEL_CLIENT_READY_TIMEOUT: Duration = if cfg!(all(test, windows)) {
@@ -612,8 +612,12 @@ mod version_policy_tests {
                 "0.0.15",
             ),
             (
-                "0.0.16+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+                "0.0.16+5f99daabd4aa4a77049e6d81d54a0d8c18335397 (git sha: 5f99daabd4aa4a77049e6d81d54a0d8c18335397)",
                 "0.0.16",
+            ),
+            (
+                "0.0.17+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
+                "0.0.17",
             ),
         ] {
             assert_eq!(
