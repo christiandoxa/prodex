@@ -334,79 +334,25 @@ pub(super) fn runtime_smart_context_fallback_exact_reason(
     critical_signal_check: prodex_context::CriticalSignalSelfCheck,
     stats: &RuntimeSmartContextTransformStats,
 ) -> Option<&'static str> {
-    if critical_signal_check.has_loss() {
-        return Some("critical_signal_loss");
-    }
-    if runtime_smart_context_rewrite_is_rehydrate_only(stats) {
-        return None;
-    }
-    if regression_check.decision
-        == runtime_proxy_crate::SmartContextRegressionSelfCheckDecision::FallbackExact
-    {
-        return Some(runtime_smart_context_regression_reason_label(
-            &regression_check.reasons,
-        ));
-    }
-    None
-}
-
-pub(super) fn runtime_smart_context_rewrite_is_rehydrate_only(
-    stats: &RuntimeSmartContextTransformStats,
-) -> bool {
-    stats.rehydrated_refs > 0
-        && stats.tool_outputs_condensed == 0
-        && stats.duplicate_texts == 0
-        && stats.cross_turn_duplicate_texts == 0
-        && stats.repeat_tool_output_refs == 0
-        && stats.static_context_deltas == 0
-}
-
-pub(super) fn runtime_smart_context_regression_reason_label(
-    reasons: &[runtime_proxy_crate::SmartContextRegressionSelfCheckReason],
-) -> &'static str {
-    if reasons
+    let reason_bits = regression_check
+        .reasons
         .iter()
-        .any(|reason| matches!(reason, runtime_proxy_crate::SmartContextRegressionSelfCheckReason::CriticalSignalDropped))
-    {
-        "critical_signal_loss"
-    } else if reasons.iter().any(|reason| {
-        matches!(
-            reason,
-            runtime_proxy_crate::SmartContextRegressionSelfCheckReason::MissingRehydrateRefs
-        )
-    }) {
-        "missing_rehydrate_refs"
-    } else if reasons.iter().any(|reason| {
-        matches!(
-            reason,
-            runtime_proxy_crate::SmartContextRegressionSelfCheckReason::ExactnessRequiredButPayloadChanged
-        )
-    }) {
-        "exactness_required"
-    } else if reasons.iter().any(|reason| {
-        matches!(
-            reason,
-            runtime_proxy_crate::SmartContextRegressionSelfCheckReason::EmptyAfterPayload
-        )
-    }) {
-        "empty_after_payload"
-    } else if reasons.iter().any(|reason| {
-        matches!(
-            reason,
-            runtime_proxy_crate::SmartContextRegressionSelfCheckReason::TokenSavingsBelowSafetyMargin
-        )
-    }) {
-        "token_savings_below_safety_margin"
-    } else if reasons.iter().any(|reason| {
-        matches!(
-            reason,
-            runtime_proxy_crate::SmartContextRegressionSelfCheckReason::TokenizerEstimateNotEligible
-        )
-    }) {
-        "unsupported_tokenizer"
-    } else {
-        "token_budget_did_not_improve"
-    }
+        .fold(0_u64, |bits, reason| bits | (1_u64 << (*reason as u8)));
+    prodex_mojo_core::runtime_decisions::smart_context_rewrite_validation_reason(
+        critical_signal_check.has_loss(),
+        regression_check.decision
+            == runtime_proxy_crate::SmartContextRegressionSelfCheckDecision::FallbackExact,
+        reason_bits,
+        [
+            stats.rehydrated_refs,
+            stats.tool_outputs_condensed,
+            stats.duplicate_texts,
+            stats.cross_turn_duplicate_texts,
+            stats.repeat_tool_output_refs,
+            stats.static_context_deltas,
+        ],
+    )
+    .expect("Mojo Smart Context rewrite validation reason returned invalid output")
 }
 
 pub(super) fn runtime_smart_context_tier_label(

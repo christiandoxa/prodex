@@ -6,15 +6,16 @@ pub enum SmartContextRegressionSelfCheckDecision {
     FallbackExact,
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum SmartContextRegressionSelfCheckReason {
-    ExactnessRequiredButPayloadChanged,
-    TokenizerEstimateNotEligible,
-    TokenBudgetDidNotImprove,
-    TokenSavingsBelowSafetyMargin,
-    CriticalSignalDropped,
-    MissingRehydrateRefs,
-    EmptyAfterPayload,
+    ExactnessRequiredButPayloadChanged = 0,
+    TokenizerEstimateNotEligible = 1,
+    TokenBudgetDidNotImprove = 2,
+    TokenSavingsBelowSafetyMargin = 3,
+    CriticalSignalDropped = 4,
+    MissingRehydrateRefs = 5,
+    EmptyAfterPayload = 6,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

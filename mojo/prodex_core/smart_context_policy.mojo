@@ -232,6 +232,62 @@ def prodex_smart_context_regression_plan_v1(
     saved_tokens[] = net_saved
     return 0
 
+
+comptime SMART_CONTEXT_FALLBACK_REASON_NONE: Int64 = 0
+comptime SMART_CONTEXT_FALLBACK_REASON_CRITICAL_SIGNAL: Int64 = 1
+comptime SMART_CONTEXT_FALLBACK_REASON_MISSING_REHYDRATE_REFS: Int64 = 2
+comptime SMART_CONTEXT_FALLBACK_REASON_EXACTNESS_REQUIRED: Int64 = 3
+comptime SMART_CONTEXT_FALLBACK_REASON_EMPTY_AFTER_PAYLOAD: Int64 = 4
+comptime SMART_CONTEXT_FALLBACK_REASON_TOKEN_SAVINGS: Int64 = 5
+comptime SMART_CONTEXT_FALLBACK_REASON_UNSUPPORTED_TOKENIZER: Int64 = 6
+comptime SMART_CONTEXT_FALLBACK_REASON_TOKEN_BUDGET: Int64 = 7
+
+@export("prodex_smart_context_rewrite_validation_reason_v1")
+def prodex_smart_context_rewrite_validation_reason_v1(
+    critical_signal_loss: Int64,
+    fallback_exact: Int64,
+    reason_bits: UInt64,
+    rehydrated_refs: UInt64,
+    tool_outputs_condensed: UInt64,
+    duplicate_texts: UInt64,
+    cross_turn_duplicate_texts: UInt64,
+    repeat_tool_output_refs: UInt64,
+    static_context_deltas: UInt64,
+) abi("C") -> Int64:
+    if (
+        critical_signal_loss < 0
+        or critical_signal_loss > 1
+        or fallback_exact < 0
+        or fallback_exact > 1
+        or reason_bits > 127
+    ):
+        return -1
+    if critical_signal_loss == 1:
+        return SMART_CONTEXT_FALLBACK_REASON_CRITICAL_SIGNAL
+    var rehydrate_only = (
+        rehydrated_refs > 0
+        and tool_outputs_condensed == 0
+        and duplicate_texts == 0
+        and cross_turn_duplicate_texts == 0
+        and repeat_tool_output_refs == 0
+        and static_context_deltas == 0
+    )
+    if rehydrate_only or fallback_exact == 0:
+        return SMART_CONTEXT_FALLBACK_REASON_NONE
+    if reason_bits & UInt64(16):
+        return SMART_CONTEXT_FALLBACK_REASON_CRITICAL_SIGNAL
+    if reason_bits & UInt64(32):
+        return SMART_CONTEXT_FALLBACK_REASON_MISSING_REHYDRATE_REFS
+    if reason_bits & UInt64(1):
+        return SMART_CONTEXT_FALLBACK_REASON_EXACTNESS_REQUIRED
+    if reason_bits & UInt64(64):
+        return SMART_CONTEXT_FALLBACK_REASON_EMPTY_AFTER_PAYLOAD
+    if reason_bits & UInt64(8):
+        return SMART_CONTEXT_FALLBACK_REASON_TOKEN_SAVINGS
+    if reason_bits & UInt64(2):
+        return SMART_CONTEXT_FALLBACK_REASON_UNSUPPORTED_TOKENIZER
+    return SMART_CONTEXT_FALLBACK_REASON_TOKEN_BUDGET
+
 @export("prodex_smart_context_fingerprint_delta_plan_v1")
 def prodex_smart_context_fingerprint_delta_plan_v1(
     previous_keys_address: UInt,
