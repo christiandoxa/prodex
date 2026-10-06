@@ -1411,14 +1411,17 @@ export function findViolations(files) {
     }
     if (filePath === UPDATE_NOTICE_VERSION_UPDATER_FILE) {
       const required = [
-        "release_version_is_valid(",
-        "compare_release_versions(",
+        "update_notice_policy::update_decision(",
         "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": release-version caller must retain " + call);
-      if (/semver::Version|Version::parse|parse_release_version|cmp_precedence/u.test(contents)) {
+      if (
+        /semver::Version|Version::parse|parse_release_version|cmp_precedence/u.test(contents)
+        || contents.includes("release_version_is_valid(")
+        || contents.includes("compare_release_versions(")
+      ) {
         violations.push(filePath + ": contains restored Rust release-version semantics");
       }
       return violations;
@@ -1442,6 +1445,7 @@ export function findViolations(files) {
         "prodex_update_notice_policy_v1(",
         "release_version_is_valid(",
         "compare_release_versions(",
+        "update_decision(",
       ];
       return required
         .filter((call) => !contents.includes(call))
@@ -1454,6 +1458,7 @@ export function findViolations(files) {
         "update_notice_release_version_compare(",
         "UPDATE_NOTICE_RELEASE_VERSION_VALID",
         "UPDATE_NOTICE_RELEASE_VERSION_COMPARE",
+        "UPDATE_NOTICE_UPDATE_DECISION",
       ];
       return required
         .filter((call) => !contents.includes(call))
@@ -5240,14 +5245,14 @@ function selfTest() {
     "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
   ].join("\n");
   const updateNoticeVersionUpdater = [
-    "release_version_is_valid(",
-    "compare_release_versions(",
+    "update_notice_policy::update_decision(",
     "Err(error) if is_update_notice_mojo_error(&error) => return Err(error)",
   ].join("\n");
   const updateNoticeVersionAdapter = [
     "prodex_update_notice_policy_v1(",
     "release_version_is_valid(",
     "compare_release_versions(",
+    "update_decision(",
   ].join("\n");
   const updateNoticeVersionAdapterModule = [
     "update_notice_policy::release_version_is_valid(",
@@ -5260,6 +5265,7 @@ function selfTest() {
     "update_notice_release_version_compare(",
     "UPDATE_NOTICE_RELEASE_VERSION_VALID",
     "UPDATE_NOTICE_RELEASE_VERSION_COMPARE",
+    "UPDATE_NOTICE_UPDATE_DECISION",
   ].join("\n");
   const updateNoticeVersionFiles = [
     [UPDATE_NOTICE_VERSION_CALLER_FILE, updateNoticeVersionCaller],
