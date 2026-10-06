@@ -17,6 +17,74 @@ struct RuntimeResponseMetadata {
     event_type: Option<String>,
 }
 
+fn runtime_response_json_nodes<'a>(
+    value: &'a Value,
+) -> (
+    Vec<prodex_mojo_core::json::JsonNode<'a>>,
+    Vec<Option<String>>,
+) {
+    fn push<'a>(
+        nodes: &mut Vec<prodex_mojo_core::json::JsonNode<'a>>,
+        number_texts: &mut Vec<Option<String>>,
+        value: &'a Value,
+        key: &'a str,
+        parent: Option<usize>,
+    ) -> usize {
+        use prodex_mojo_core::json::{JsonKind, JsonNode};
+        let (kind, text) = match value {
+            Value::Null => (JsonKind::Null, ""),
+            Value::Bool(false) => (JsonKind::False, ""),
+            Value::Bool(true) => (JsonKind::True, ""),
+            Value::Number(_) => (JsonKind::Number, ""),
+            Value::String(value) => (JsonKind::String, value.as_str()),
+            Value::Array(_) => (JsonKind::Array, ""),
+            Value::Object(_) => (JsonKind::Object, ""),
+        };
+        let index = nodes.len();
+        nodes.push(JsonNode {
+            kind,
+            first_child: None,
+            next_sibling: None,
+            parent,
+            key,
+            text,
+            raw_start: 0,
+            raw_length: 0,
+        });
+        number_texts.push(value.as_number().map(ToString::to_string));
+
+        let mut previous: Option<usize> = None;
+        let mut append = |child: &'a Value, child_key: &'a str| {
+            let child_index = push(nodes, number_texts, child, child_key, Some(index));
+            if let Some(previous) = previous {
+                nodes[previous].next_sibling = Some(child_index);
+            } else {
+                nodes[index].first_child = Some(child_index);
+            }
+            previous = Some(child_index);
+        };
+        match value {
+            Value::Array(values) => {
+                for child in values {
+                    append(child, "");
+                }
+            }
+            Value::Object(map) => {
+                for (child_key, child) in map {
+                    append(child, child_key.as_str());
+                }
+            }
+            _ => {}
+        }
+        index
+    }
+
+    let mut nodes = Vec::new();
+    let mut number_texts = Vec::new();
+    push(&mut nodes, &mut number_texts, value, "", None);
+    (nodes, number_texts)
+}
+
 pub fn extract_runtime_response_ids_from_payload(payload: &str) -> Vec<String> {
     serde_json::from_str::<Value>(payload)
         .ok()
@@ -64,9 +132,7 @@ pub fn runtime_response_event_type_from_value(value: &Value) -> Option<String> {
 }
 
 fn runtime_response_metadata_from_value(value: &Value) -> RuntimeResponseMetadata {
-    let nodes = crate::runtime_request_json_nodes(value);
-    let mut number_texts = Vec::new();
-    runtime_response_metadata_number_texts(value, &mut number_texts);
+    let (nodes, number_texts) = runtime_response_json_nodes(value);
 
     let plan = prodex_mojo_core::json::runtime_response_metadata(&nodes, &number_texts)
         .expect("Mojo response metadata returned invalid output");
@@ -118,21 +184,4 @@ fn runtime_response_metadata_u64(text: &str) -> u64 {
     }
     text.parse()
         .expect("Mojo response metadata selected an invalid unsigned integer")
-}
-
-fn runtime_response_metadata_number_texts(value: &Value, number_texts: &mut Vec<Option<String>>) {
-    number_texts.push(value.as_number().map(ToString::to_string));
-    match value {
-        Value::Array(values) => {
-            for value in values {
-                runtime_response_metadata_number_texts(value, number_texts);
-            }
-        }
-        Value::Object(map) => {
-            for value in map.values() {
-                runtime_response_metadata_number_texts(value, number_texts);
-            }
-        }
-        _ => {}
-    }
 }

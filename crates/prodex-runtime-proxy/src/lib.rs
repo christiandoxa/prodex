@@ -122,107 +122,43 @@ struct RuntimeRequestSemanticPlan {
     reconstructable_full_history: bool,
 }
 
-fn runtime_request_json_node_kind_and_text(
-    value: &serde_json::Value,
-) -> (prodex_mojo_core::json::JsonKind, &str) {
-    use prodex_mojo_core::json::JsonKind;
-    match value {
-        serde_json::Value::Null => (JsonKind::Null, ""),
-        serde_json::Value::Bool(false) => (JsonKind::False, ""),
-        serde_json::Value::Bool(true) => (JsonKind::True, ""),
-        serde_json::Value::Number(_) => (JsonKind::Number, ""),
-        serde_json::Value::String(value) => (JsonKind::String, value.as_str()),
-        serde_json::Value::Array(_) => (JsonKind::Array, ""),
-        serde_json::Value::Object(_) => (JsonKind::Object, ""),
-    }
-}
-
-fn runtime_request_link_json_child(
-    nodes: &mut [prodex_mojo_core::json::JsonNode<'_>],
-    parent: usize,
-    previous: Option<usize>,
-    child: usize,
-) {
-    if let Some(previous) = previous {
-        nodes[previous].next_sibling = Some(child);
-    } else {
-        nodes[parent].first_child = Some(child);
-    }
-}
-
-fn runtime_request_push_json_node<'a>(
-    nodes: &mut Vec<prodex_mojo_core::json::JsonNode<'a>>,
-    value: &'a serde_json::Value,
-    key: &'a str,
-    parent: Option<usize>,
-) -> usize {
-    use prodex_mojo_core::json::JsonNode;
-
-    let (kind, text) = runtime_request_json_node_kind_and_text(value);
-    let index = nodes.len();
-    nodes.push(JsonNode {
-        kind,
-        first_child: None,
-        next_sibling: None,
-        parent,
-        key,
-        text,
-        raw_start: 0,
-        raw_length: 0,
-    });
-
-    let mut previous = None;
-    match value {
-        serde_json::Value::Array(values) => {
-            for child in values {
-                let child_index = runtime_request_push_json_node(nodes, child, "", Some(index));
-                runtime_request_link_json_child(nodes, index, previous, child_index);
-                previous = Some(child_index);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for (child_key, child) in map {
-                let child_index =
-                    runtime_request_push_json_node(nodes, child, child_key.as_str(), Some(index));
-                runtime_request_link_json_child(nodes, index, previous, child_index);
-                previous = Some(child_index);
-            }
-        }
-        _ => {}
-    }
-    index
-}
-
-fn runtime_request_json_nodes<'a>(
-    value: &'a serde_json::Value,
-) -> Vec<prodex_mojo_core::json::JsonNode<'a>> {
-    let mut nodes = Vec::new();
-    runtime_request_push_json_node(&mut nodes, value, "", None);
-    nodes
-}
-
 fn runtime_request_semantic_plan(value: &serde_json::Value) -> RuntimeRequestSemanticPlan {
-    let nodes = runtime_request_json_nodes(value);
-    let plan = prodex_mojo_core::json::runtime_proxy_request_metadata(&nodes, "")
-        .expect("Mojo runtime request metadata returned invalid output");
-    let string_at = |index: Option<usize>| index.map(|index| nodes[index].text.trim().to_string());
+    let string_field = |direct: &str, nested: Option<&str>| {
+        value
+            .get(direct)
+            .or_else(|| {
+                nested.and_then(|nested| {
+                    value
+                        .get("client_metadata")
+                        .and_then(|metadata| metadata.get(nested))
+                })
+            })
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_owned)
+    };
+    let session_id = string_field("session_id", Some("session_id"));
+    let raw = serde_json::to_string(value).expect("runtime request JSON serializes");
+    let semantics = prodex_mojo_core::json::runtime_proxy_request_shape(&raw, session_id.is_some())
+        .expect("Mojo runtime request shape returned invalid output");
     RuntimeRequestSemanticPlan {
-        previous_response_id: string_at(plan.previous_response_id),
-        session_id: string_at(plan.session_id),
-        prompt_cache_key: string_at(plan.prompt_cache_key),
-        turn_state: string_at(plan.turn_state),
-        turn_id: string_at(plan.turn_id),
-        thread_id: string_at(plan.thread_id),
-        window_id: string_at(plan.window_id),
-        requires_previous_response_affinity: plan.requires_previous_response_affinity,
-        fresh_fallback_shape: plan.fresh_fallback_shape.map(|shape| match shape {
+        previous_response_id: string_field("previous_response_id", None),
+        session_id,
+        prompt_cache_key: string_field("prompt_cache_key", None),
+        turn_state: string_field("x-codex-turn-state", Some("x-codex-turn-state")),
+        turn_id: string_field("turn_id", Some("turn_id")),
+        thread_id: string_field("thread_id", Some("thread_id")),
+        window_id: string_field("window_id", Some("x-codex-window-id")),
+        requires_previous_response_affinity: semantics.requires_previous_response_affinity,
+        fresh_fallback_shape: semantics.fresh_fallback_shape.map(|shape| match shape {
             0 => RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly,
             1 => RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation,
             2 => RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay,
             3 => RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly,
             _ => unreachable!("validated Mojo previous-response fallback shape"),
         }),
-        reconstructable_full_history: plan.reconstructable_full_history,
+        reconstructable_full_history: semantics.reconstructable_full_history,
     }
 }
 

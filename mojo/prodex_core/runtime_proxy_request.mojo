@@ -1,3 +1,4 @@
+from std.collections import Array
 from std.memory import Pointer
 
 from parsed_json import (
@@ -17,7 +18,20 @@ from parsed_json import (
     pj_trim,
     pj_valid,
 )
-from rich_text import rich_view_ptr, rich_view_valid
+from json_view import (
+    deepseek_json_byte,
+    deepseek_json_object_member,
+    deepseek_json_raw_equals,
+    deepseek_json_skip_ws,
+    deepseek_json_value_end,
+)
+from launch_args_common import launch_rust_space
+from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_view_ptr,
+    rich_view_valid,
+)
 from rich_types import ProdexRichStringView
 
 comptime RUNTIME_PROXY_REQUEST_ABI_VERSION: Int64 = 1
@@ -148,6 +162,319 @@ def runtime_proxy_input_shape(
         shape_out[] = FALLBACK_SESSION_SCOPED
     else:
         shape_out[] = FALLBACK_EMPTY_INPUT
+
+
+
+def runtime_proxy_raw_present(bounds: Array[Int64, 2]) -> Bool:
+    return bounds[0] >= 0 and bounds[1] > bounds[0]
+
+
+def runtime_proxy_raw_root(view: ProdexRichStringView) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
+    var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
+    var end = deepseek_json_value_end(view, start, Int64(view.len), 0)
+    if (
+        end < 0
+        or deepseek_json_skip_ws(view, end, Int64(view.len)) != Int64(view.len)
+        or start >= Int64(view.len)
+        or deepseek_json_byte(view, start) != 123
+    ):
+        return result^
+    result[0] = start
+    result[1] = end
+    return result^
+
+
+def runtime_proxy_raw_member(
+    view: ProdexRichStringView,
+    object: Array[Int64, 2],
+    name: StringSlice,
+) -> Array[Int64, 2]:
+    if not runtime_proxy_raw_present(object):
+        return Array[Int64, 2](fill=-1)^
+    return deepseek_json_object_member(view, object[0], object[1], name)
+
+
+def runtime_proxy_json_hex(value: UInt8) -> Int64:
+    if value >= 48 and value <= 57:
+        return Int64(value - 48)
+    if value >= 65 and value <= 70:
+        return Int64(value - 65 + 10)
+    if value >= 97 and value <= 102:
+        return Int64(value - 97 + 10)
+    return -1
+
+
+def runtime_proxy_raw_string_nonblank(
+    view: ProdexRichStringView,
+    bounds: Array[Int64, 2],
+) -> Bool:
+    if (
+        not runtime_proxy_raw_present(bounds)
+        or deepseek_json_byte(view, bounds[0]) != 34
+        or deepseek_json_byte(view, bounds[1] - 1) != 34
+    ):
+        return False
+    var ptr = rich_view_ptr(view)
+    var index = bounds[0] + 1
+    var end = bounds[1] - 1
+    while index < end:
+        var value = ptr[unsafe_offset=index]
+        var codepoint: Int64
+        if value == 92:
+            if index + 1 >= end:
+                return False
+            var escaped = ptr[unsafe_offset=index + 1]
+            if escaped == 116:
+                codepoint = 9
+                index += 2
+            elif escaped == 110:
+                codepoint = 10
+                index += 2
+            elif escaped == 114:
+                codepoint = 13
+                index += 2
+            elif escaped == 102:
+                codepoint = 12
+                index += 2
+            elif escaped == 98:
+                codepoint = 8
+                index += 2
+            elif escaped == 117:
+                if index + 5 >= end:
+                    return False
+                codepoint = 0
+                for offset in range(2, 6):
+                    var digit = runtime_proxy_json_hex(
+                        ptr[unsafe_offset=index + Int64(offset)]
+                    )
+                    if digit < 0:
+                        return False
+                    codepoint = codepoint * 16 + digit
+                index += 6
+            else:
+                return True
+        else:
+            var width = rich_codepoint_width(value)
+            if index + width > end:
+                return False
+            codepoint = rich_codepoint(ptr, index, width)
+            index += width
+        if not launch_rust_space(codepoint):
+            return True
+    return False
+
+
+def runtime_proxy_raw_string_ends_with(
+    view: ProdexRichStringView,
+    bounds: Array[Int64, 2],
+    suffix: StringSlice,
+) -> Bool:
+    if (
+        not runtime_proxy_raw_present(bounds)
+        or deepseek_json_byte(view, bounds[0]) != 34
+        or deepseek_json_byte(view, bounds[1] - 1) != 34
+    ):
+        return False
+    var suffix_length = Int64(suffix.byte_length())
+    var value_length = bounds[1] - bounds[0] - 2
+    if suffix_length > value_length:
+        return False
+    var source = rich_view_ptr(view)
+    var expected = suffix.unsafe_ptr()
+    var start = bounds[1] - 1 - suffix_length
+    for offset in range(suffix_length):
+        if source[unsafe_offset=start + offset] != expected[unsafe_offset=offset]:
+            return False
+    return True
+
+
+def runtime_proxy_raw_input_item_is_tool_output(
+    view: ProdexRichStringView,
+    item: Array[Int64, 2],
+) -> Bool:
+    if (
+        not runtime_proxy_raw_present(item)
+        or deepseek_json_byte(view, item[0]) != 123
+    ):
+        return False
+    var kind = runtime_proxy_raw_member(view, item, StringSlice("type"))
+    var call_id = runtime_proxy_raw_member(view, item, StringSlice("call_id"))
+    return (
+        runtime_proxy_raw_string_nonblank(view, call_id)
+        and runtime_proxy_raw_string_ends_with(
+            view, kind, StringSlice("_call_output")
+        )
+    )
+
+
+def runtime_proxy_raw_next_array_item(
+    view: ProdexRichStringView,
+    current_end: Int64,
+    array_end: Int64,
+) -> Int64:
+    var index = deepseek_json_skip_ws(view, current_end, array_end - 1)
+    if index >= array_end - 1:
+        return -1
+    if deepseek_json_byte(view, index) != 44:
+        return -1
+    index = deepseek_json_skip_ws(view, index + 1, array_end - 1)
+    return index if index < array_end - 1 else -1
+
+
+def runtime_proxy_raw_item_string_is(
+    view: ProdexRichStringView,
+    item: Array[Int64, 2],
+    field: StringSlice,
+    literal: StringSlice,
+) -> Bool:
+    var value = runtime_proxy_raw_member(view, item, field)
+    return (
+        runtime_proxy_raw_present(value)
+        and deepseek_json_raw_equals(view, value[0], value[1], literal)
+    )
+
+
+def runtime_proxy_raw_input_shape(
+    view: ProdexRichStringView,
+    root: Array[Int64, 2],
+    session_present: Bool,
+    output: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var previous = runtime_proxy_raw_member(
+        view, root, StringSlice("previous_response_id")
+    )
+    var previous_present = runtime_proxy_raw_string_nonblank(view, previous)
+    var input = runtime_proxy_raw_member(view, root, StringSlice("input"))
+    var has_array = (
+        runtime_proxy_raw_present(input)
+        and deepseek_json_byte(view, input[0]) == 91
+    )
+
+    var count: Int64 = 0
+    var tool_output_count: Int64 = 0
+    var context_dependent = False
+    var reconstructable = False
+
+    if has_array:
+        var cursor = deepseek_json_skip_ws(view, input[0] + 1, input[1] - 1)
+        while cursor < input[1] - 1:
+            var item_end = deepseek_json_value_end(
+                view, cursor, input[1] - 1, 0
+            )
+            if item_end < 0:
+                return False
+            var item = Array[Int64, 2](fill=-1)
+            item[0] = cursor
+            item[1] = item_end
+            if runtime_proxy_raw_input_item_is_tool_output(view, item):
+                tool_output_count += 1
+            else:
+                context_dependent = True
+
+            var next_item = runtime_proxy_raw_next_array_item(
+                view, item_end, input[1]
+            )
+            if (
+                runtime_proxy_raw_item_string_is(
+                    view, item, StringSlice("type"), StringSlice("compaction")
+                )
+                and next_item >= 0
+            ):
+                reconstructable = True
+
+            if runtime_proxy_raw_item_string_is(
+                view, item, StringSlice("role"), StringSlice("user")
+            ):
+                var later = next_item
+                while later >= 0:
+                    var later_end = deepseek_json_value_end(
+                        view, later, input[1] - 1, 0
+                    )
+                    if later_end < 0:
+                        return False
+                    var later_item = Array[Int64, 2](fill=-1)
+                    later_item[0] = later
+                    later_item[1] = later_end
+                    var later_next = runtime_proxy_raw_next_array_item(
+                        view, later_end, input[1]
+                    )
+                    if later_next >= 0 and (
+                        runtime_proxy_raw_item_string_is(
+                            view,
+                            later_item,
+                            StringSlice("role"),
+                            StringSlice("assistant"),
+                        )
+                        or runtime_proxy_raw_item_string_is(
+                            view,
+                            later_item,
+                            StringSlice("type"),
+                            StringSlice("function_call"),
+                        )
+                    ):
+                        reconstructable = True
+                        break
+                    later = later_next
+
+            count += 1
+            cursor = next_item
+            if cursor < 0:
+                break
+
+    output[unsafe_offset=0] = Int64(
+        previous_present and tool_output_count > 0
+    )
+    output[unsafe_offset=2] = Int64(reconstructable)
+
+    if not previous_present:
+        output[unsafe_offset=1] = -1
+    elif count > 0 and tool_output_count == count:
+        output[unsafe_offset=1] = FALLBACK_TOOL_OUTPUT_ONLY
+    elif context_dependent:
+        output[unsafe_offset=1] = FALLBACK_CONTEXT_DEPENDENT
+    elif session_present:
+        output[unsafe_offset=1] = FALLBACK_SESSION_SCOPED
+    else:
+        output[unsafe_offset=1] = FALLBACK_EMPTY_INPUT
+    return True
+
+
+@export("prodex_runtime_proxy_request_shape_v1")
+def prodex_runtime_proxy_request_shape_v1(
+    abi_version: Int64,
+    raw_address: UInt,
+    raw_length: Int64,
+    session_present: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != RUNTIME_PROXY_REQUEST_ABI_VERSION
+        or raw_length <= 0
+        or raw_address == 0
+        or output_address == 0
+        or (session_present != 0 and session_present != 1)
+    ):
+        return RUNTIME_PROXY_REQUEST_INVALID
+
+    var view = ProdexRichStringView(raw_address, UInt(raw_length))
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return RUNTIME_PROXY_REQUEST_INVALID
+    var root = runtime_proxy_raw_root(view)
+    if not runtime_proxy_raw_present(root):
+        return RUNTIME_PROXY_REQUEST_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = -1
+    output[unsafe_offset=2] = 0
+    if not runtime_proxy_raw_input_shape(
+        view, root, session_present == 1, output
+    ):
+        return RUNTIME_PROXY_REQUEST_INVALID
+    return RUNTIME_PROXY_REQUEST_OK
 
 
 @export("prodex_runtime_proxy_request_metadata_v1")

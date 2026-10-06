@@ -2026,13 +2026,13 @@ export function findViolations(files) {
   const runtimeProxyRootViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== RUNTIME_PROXY_ROOT_FILE) return [];
     const required = [
-      "prodex_mojo_core::json::runtime_proxy_request_metadata(",
+      "prodex_mojo_core::json::runtime_proxy_request_shape(",
       "prodex_mojo_core::rich::runtime_proxy_path_plan(",
     ];
     const violations = required
       .filter((call) => !contents.includes(call))
       .map((call) => filePath + ": runtime proxy root migration must retain Mojo call " + call);
-    if (/\bfn\s+(?:runtime_proxy_legacy_version_segment|runtime_request_value_previous_response_input_item_is_tool_output|runtime_input_is_reconstructable_full_history)\s*\(/u.test(contents)) {
+    if (/\bfn\s+(?:runtime_proxy_legacy_version_segment|runtime_request_value_previous_response_input_item_is_tool_output|runtime_input_is_reconstructable_full_history|runtime_request_json_node_kind_and_text|runtime_request_link_json_child|runtime_request_push_json_node|runtime_request_json_nodes)\s*\(/u.test(contents)) {
       violations.push(filePath + ": contains retired Rust runtime proxy path/request semantic helper");
     }
     if (/\.get\("previous_response_id"\)[^;]{0,500}previous_response_fresh_fallback_shape/su.test(contents)) {
