@@ -46,17 +46,12 @@ pub(super) fn render_sub_agent_overlay_for_spec(
         .map(SubAgentReasoningEffort::as_str)
         .unwrap_or("provider/model default");
     let task_path = spec.task_dir.join("task-001.txt");
-    let launcher = markdown_safe_value(&render_platform_launcher_command(
-        &spec.executable,
-        config_path,
-        &task_path,
-    ));
     let model = sub_agent
         .model
         .as_deref()
-        .map(|model| markdown_safe_value(&redaction::redaction_redact_secret_like_text(model)))
+        .map(redaction::redaction_redact_secret_like_text)
         .unwrap_or_else(|| "provider default".to_string());
-    let task_directory = markdown_safe_value(&spec.task_dir.display().to_string());
+    let task_directory = spec.task_dir.display().to_string();
     prodex_mojo_core::sub_agent_policy::render_overlay(
         &prodex_mojo_core::sub_agent_policy::SubAgentOverlayRender {
             provider: sub_agent.provider.label(),
@@ -68,47 +63,13 @@ pub(super) fn render_sub_agent_overlay_for_spec(
             task_directory: &task_directory,
             task_max_bytes: spec.task_max_bytes,
             recursion_marker: SUB_AGENT_RECURSION_MARKER,
-            launcher: &launcher,
+            executable: &spec.executable.display().to_string(),
+            config: &config_path.display().to_string(),
+            task: &task_path.display().to_string(),
+            powershell: cfg!(windows),
         },
     )
     .map_err(|error| anyhow::anyhow!("Mojo sub-agent overlay render failed: {error:?}"))
-}
-
-fn render_platform_launcher_command(executable: &Path, config: &Path, task: &Path) -> String {
-    #[cfg(windows)]
-    {
-        render_powershell_launcher_command(executable, config, task)
-    }
-    #[cfg(not(windows))]
-    {
-        render_posix_launcher_command(executable, config, task)
-    }
-}
-
-fn render_posix_launcher_command(executable: &Path, config: &Path, task: &Path) -> String {
-    [
-        shell_quote(&executable.display().to_string()),
-        shell_quote("__sub-agent-exec"),
-        shell_quote("--config"),
-        shell_quote(&config.display().to_string()),
-        shell_quote("--task-file"),
-        shell_quote(&task.display().to_string()),
-    ]
-    .join(" ")
-}
-
-#[cfg(any(windows, test))]
-fn render_powershell_launcher_command(executable: &Path, config: &Path, task: &Path) -> String {
-    let quote = |value: &str| format!("'{}'", value.replace('\'', "''"));
-    format!(
-        "& {} {} {} {} {} {}",
-        quote(&executable.display().to_string()),
-        quote("__sub-agent-exec"),
-        quote("--config"),
-        quote(&config.display().to_string()),
-        quote("--task-file"),
-        quote(&task.display().to_string()),
-    )
 }
 
 pub(crate) fn render_sub_agent_dry_run_report(
@@ -194,44 +155,10 @@ fn redact_super_session_arg(arg: &OsString) -> Option<OsString> {
     Some(OsString::from(redacted))
 }
 
-fn markdown_safe_value(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| {
-            if character.is_control() || character == '`' {
-                ' '
-            } else {
-                character
-            }
-        })
-        .collect()
-}
-
-fn shell_quote(value: &str) -> String {
-    format!("'{}'", value.replace('\'', "'\\''"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use prodex_cli::{SubAgentConfig, SuperLaunchTarget};
-
-    #[test]
-    fn launcher_rendering_quotes_posix_and_powershell_paths() {
-        let executable = Path::new("/opt/Prodex Binary/引用'prodex");
-        let config = Path::new("/tmp/config file.json");
-        let task = Path::new("/tmp/task 'one'.txt");
-        let posix = render_posix_launcher_command(executable, config, task);
-        assert!(posix.contains("'/opt/Prodex Binary/引用'\\''prodex'"));
-        let powershell = render_powershell_launcher_command(executable, config, task);
-        assert!(powershell.contains("'/opt/Prodex Binary/引用''prodex'"));
-        for rendered in [posix, powershell] {
-            assert!(rendered.contains("__sub-agent-exec"));
-            assert!(rendered.contains("--config"));
-            assert!(rendered.contains("--task-file"));
-            assert!(!rendered.contains("<task>"));
-        }
-    }
 
     #[test]
     fn overlay_has_bounded_english_rules_and_is_idempotent() {

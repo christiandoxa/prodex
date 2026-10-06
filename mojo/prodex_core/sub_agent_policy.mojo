@@ -118,6 +118,77 @@ def sub_agent_render_put_view(
             return False
     return True
 
+def sub_agent_render_put_safe_view(
+    writer: Pointer[mut=True, SubAgentRenderWriter, _],
+    value: ProdexRichStringView,
+) -> Bool:
+    var source = rich_view_ptr(value)
+    var index: Int64 = 0
+    while index < Int64(value.len):
+        var byte = source[unsafe_offset=index]
+        if byte == 96 or byte < 32 or byte == 127:
+            if not sub_agent_render_put_byte(writer, 32):
+                return False
+            index += 1
+            continue
+        # Rust char::is_control() also covers U+0080..U+009F.
+        if (
+            byte == 194
+            and index + 1 < Int64(value.len)
+            and source[unsafe_offset=index + 1] >= 128
+            and source[unsafe_offset=index + 1] <= 159
+        ):
+            if not sub_agent_render_put_byte(writer, 32):
+                return False
+            index += 2
+            continue
+        if not sub_agent_render_put_byte(writer, byte):
+            return False
+        index += 1
+    return True
+
+
+def sub_agent_render_put_shell_quote_view(
+    writer: Pointer[mut=True, SubAgentRenderWriter, _],
+    value: ProdexRichStringView,
+    powershell: Bool,
+) -> Bool:
+    if not sub_agent_render_put_byte(writer, 39):
+        return False
+    var source = rich_view_ptr(value)
+    for index in range(Int64(value.len)):
+        var byte = source[unsafe_offset=index]
+        if byte == 39:
+            if powershell:
+                if not sub_agent_render_put_literal(writer, StringSlice("''")):
+                    return False
+            elif not sub_agent_render_put_literal(writer, StringSlice("'\\''")):
+                return False
+        elif not sub_agent_render_put_byte(writer, byte):
+            return False
+    return sub_agent_render_put_byte(writer, 39)
+
+
+def sub_agent_render_put_shell_quote_literal(
+    writer: Pointer[mut=True, SubAgentRenderWriter, _],
+    value: StringSlice,
+    powershell: Bool,
+) -> Bool:
+    if not sub_agent_render_put_byte(writer, 39):
+        return False
+    var source = value.unsafe_ptr()
+    for index in range(Int64(value.byte_length())):
+        var byte = source[unsafe_offset=index]
+        if byte == 39:
+            if powershell:
+                if not sub_agent_render_put_literal(writer, StringSlice("''")):
+                    return False
+            elif not sub_agent_render_put_literal(writer, StringSlice("'\\''")):
+                return False
+        elif not sub_agent_render_put_byte(writer, byte):
+            return False
+    return sub_agent_render_put_byte(writer, 39)
+
 
 def sub_agent_render_put_u64(
     writer: Pointer[mut=True, SubAgentRenderWriter, _], value: UInt64
@@ -190,7 +261,7 @@ def sub_agent_render_overlay(
         sub_agent_render_put_literal(writer, StringSlice("# Prodex Sub-Agent Delegation\n\nThis file belongs to one temporary Prodex launch overlay.\n\n- Provider: "))
         and sub_agent_render_put_view(writer, sub_agent_render_text(text_address, 0))
         and sub_agent_render_put_literal(writer, StringSlice("\n- Model: "))
-        and sub_agent_render_put_view(writer, sub_agent_render_text(text_address, 1))
+        and sub_agent_render_put_safe_view(writer, sub_agent_render_text(text_address, 1))
         and sub_agent_render_put_literal(writer, StringSlice("\n- Reasoning effort: "))
         and sub_agent_render_put_view(writer, sub_agent_render_text(text_address, 2))
         and sub_agent_render_put_literal(writer, StringSlice("\n- Maximum active sub-agents: "))
@@ -202,11 +273,22 @@ def sub_agent_render_overlay(
         and sub_agent_render_put_literal(writer, StringSlice("\n- Recursion marker: `"))
         and sub_agent_render_put_view(writer, sub_agent_render_text(text_address, 5))
         and sub_agent_render_put_literal(writer, StringSlice("=1`\n\nWrite a narrow task to a new file under `"))
-        and sub_agent_render_put_view(writer, sub_agent_render_text(text_address, 4))
+        and sub_agent_render_put_safe_view(writer, sub_agent_render_text(text_address, 4))
         and sub_agent_render_put_literal(writer, StringSlice("` (maximum "))
         and sub_agent_render_put_u64(writer, UInt64(sub_agent_render_scalar(signed_address, 2)))
         and sub_agent_render_put_literal(writer, StringSlice(" bytes), then invoke\nthe official launcher. This example uses `task-001.txt`; choose a new name for each task:\n\n`"))
-        and sub_agent_render_put_view(writer, sub_agent_render_text(text_address, 6))
+        and (sub_agent_render_scalar(signed_address, 3) != 1 or sub_agent_render_put_literal(writer, StringSlice("& ")))
+        and sub_agent_render_put_shell_quote_view(writer, sub_agent_render_text(text_address, 6), sub_agent_render_scalar(signed_address, 3) == 1)
+        and sub_agent_render_put_literal(writer, StringSlice(" "))
+        and sub_agent_render_put_shell_quote_literal(writer, StringSlice("__sub-agent-exec"), sub_agent_render_scalar(signed_address, 3) == 1)
+        and sub_agent_render_put_literal(writer, StringSlice(" "))
+        and sub_agent_render_put_shell_quote_literal(writer, StringSlice("--config"), sub_agent_render_scalar(signed_address, 3) == 1)
+        and sub_agent_render_put_literal(writer, StringSlice(" "))
+        and sub_agent_render_put_shell_quote_view(writer, sub_agent_render_text(text_address, 7), sub_agent_render_scalar(signed_address, 3) == 1)
+        and sub_agent_render_put_literal(writer, StringSlice(" "))
+        and sub_agent_render_put_shell_quote_literal(writer, StringSlice("--task-file"), sub_agent_render_scalar(signed_address, 3) == 1)
+        and sub_agent_render_put_literal(writer, StringSlice(" "))
+        and sub_agent_render_put_shell_quote_view(writer, sub_agent_render_text(text_address, 8), sub_agent_render_scalar(signed_address, 3) == 1)
         and sub_agent_render_put_literal(writer, StringSlice("`\n\n## Rules\n\n"))
     ):
         return False
@@ -257,7 +339,7 @@ def sub_agent_render_enabled_dry_run(
         sub_agent_render_put_literal(writer, StringSlice("Sub-agent: enabled\nSub-agent provider: "))
         and sub_agent_render_put_view(writer, sub_agent_render_text(text_address, 0))
         and sub_agent_render_put_literal(writer, StringSlice("\nSub-agent model: "))
-        and sub_agent_render_put_view(writer, sub_agent_render_text(text_address, 1))
+        and sub_agent_render_put_safe_view(writer, sub_agent_render_text(text_address, 1))
         and sub_agent_render_put_literal(writer, StringSlice("\nSub-agent reasoning effort: "))
         and sub_agent_render_put_view(writer, sub_agent_render_text(text_address, 2))
         and sub_agent_render_put_literal(writer, StringSlice("\nMaximum active sub-agents: "))
@@ -273,7 +355,7 @@ def sub_agent_render_enabled_dry_run(
         and sub_agent_render_put_literal(writer, StringSlice("\nSub-agent local URL: "))
         and sub_agent_render_put_literal(writer, local_url)
         and sub_agent_render_put_literal(writer, StringSlice("\nSub-agent launch target: "))
-        and sub_agent_render_put_view(writer, sub_agent_render_text(text_address, 5))
+        and sub_agent_render_put_safe_view(writer, sub_agent_render_text(text_address, 5))
         and sub_agent_render_put_literal(writer, StringSlice(" (parent resume id is not inherited by children)\nSub-agent recursion disabled: "))
         and sub_agent_render_put_literal(writer, recursion_disabled)
         and sub_agent_render_put_literal(writer, StringSlice("\nSub-agent recursion marker: "))
@@ -328,8 +410,8 @@ def prodex_sub_agent_render_v1(
     var expected_signed: Int64 = 0
     var expected_text: Int64 = 0
     if operation == SUB_AGENT_RENDER_OVERLAY:
-        expected_signed = 3
-        expected_text = 7
+        expected_signed = 4
+        expected_text = 9
     elif operation == SUB_AGENT_RENDER_ENABLED_DRY_RUN:
         expected_signed = 5
         expected_text = 8
@@ -344,7 +426,8 @@ def prodex_sub_agent_render_v1(
         var maximum = sub_agent_render_scalar(signed_address, 0)
         var presidio = sub_agent_render_scalar(signed_address, 1)
         var task_max_bytes = sub_agent_render_scalar(signed_address, 2)
-        if maximum < 1 or maximum > 64 or (presidio != 0 and presidio != 1) or task_max_bytes < 1 or task_max_bytes > 65_536:
+        var powershell = sub_agent_render_scalar(signed_address, 3)
+        if maximum < 1 or maximum > 64 or (presidio != 0 and presidio != 1) or task_max_bytes < 1 or task_max_bytes > 65_536 or (powershell != 0 and powershell != 1):
             return SUB_AGENT_RENDER_INVALID
     elif operation == SUB_AGENT_RENDER_ENABLED_DRY_RUN:
         var maximum = sub_agent_render_scalar(signed_address, 0)
