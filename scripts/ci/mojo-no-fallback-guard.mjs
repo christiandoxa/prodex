@@ -1043,6 +1043,7 @@ const ANTHROPIC_RESPONSE_FORBIDDEN_PATTERNS = [
   [/\benum\s+ResponseBlockKind\b/u, "duplicate Rust response block kind"],
   [/\benum\s+ResponsePlanKind\b/u, "duplicate Rust response plan kind"],
   [/\bstruct\s+ResponsePlanItem\b/u, "duplicate Rust response plan item"],
+  [/\bstruct\s+ResponseBlockInput\b/u, "duplicate Rust response block input"],
   [/\bfn\s+plan_with_rust\s*\(/u, "Rust response planner"],
   [/\b(?:Some\s*\(\s*)?"(?:text|tool_use|server_tool_use|web_search_tool_result|thinking)"(?:\s*\))?\s*=>/u,
     "Rust response block classification"],
@@ -5476,6 +5477,7 @@ function selfTest() {
   assert.match(responseViolations("enum ResponseBlockKind { Text }")[0], /duplicate Rust response block kind/u);
   assert.match(responseViolations("enum ResponsePlanKind { Message }")[0], /duplicate Rust response plan kind/u);
   assert.match(responseViolations("struct ResponsePlanItem { kind: usize }")[0], /duplicate Rust response plan item/u);
+  assert.match(responseViolations("struct ResponseBlockInput { value: usize }")[0], /duplicate Rust response block input/u);
   assert.match(responseViolations("fn plan_with_rust() {}")[0], /Rust response planner/u);
   assert.match(responseViolations("#[cfg(test)] fn plan_with_rust() {}")[0], /Rust response planner/u);
   assert.match(responseViolations('match kind { Some("tool_use") => (), _ => () }')[0],

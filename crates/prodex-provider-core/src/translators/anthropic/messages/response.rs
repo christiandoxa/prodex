@@ -1,39 +1,22 @@
 use super::*;
 
 use prodex_mojo_core::rich::{
-    AnthropicRequestKernelInput, AnthropicRequestKernelOperation,
+    AnthropicRequestKernelInput, AnthropicRequestKernelOperation, AnthropicResponseBlock,
     AnthropicResponseBlockClassificationError, AnthropicResponseBlockClassificationInput,
     AnthropicResponseBlockKind, AnthropicResponsePlanItem, AnthropicResponsePlanKind,
     plan_anthropic_response_blocks,
 };
 
-#[derive(Debug, PartialEq)]
-struct ResponseBlockInput {
-    kind: AnthropicResponseBlockKind,
-    has_text: bool,
-    value: Option<Value>,
-}
-
-fn response_block_input(
-    block: &Value,
-    kind: AnthropicResponseBlockKind,
-    has_text: bool,
-) -> Result<ResponseBlockInput, String> {
-    let value = match kind {
-        AnthropicResponseBlockKind::ToolUse => Some(anthropic_tool_use_item(block)?),
-        AnthropicResponseBlockKind::WebSearchCall => Some(anthropic_web_search_call(block)?),
-        _ => None,
-    };
-    Ok(ResponseBlockInput {
-        kind,
-        has_text,
-        value,
-    })
-}
-
 fn response_plan_with_mojo(
     content: &[Value],
-) -> Result<(Vec<ResponseBlockInput>, Vec<AnthropicResponsePlanItem>), String> {
+) -> Result<
+    (
+        Vec<AnthropicResponseBlock>,
+        Vec<Option<Value>>,
+        Vec<AnthropicResponsePlanItem>,
+    ),
+    String,
+> {
     let classification_input = content
         .iter()
         .map(|block| AnthropicResponseBlockClassificationInput {
@@ -50,8 +33,10 @@ fn response_plan_with_mojo(
     let inputs = content
         .iter()
         .zip(&plan.blocks)
-        .map(|(block, classified)| {
-            response_block_input(block, classified.kind, classified.has_text)
+        .map(|(block, classified)| match classified.kind {
+            AnthropicResponseBlockKind::ToolUse => anthropic_tool_use_item(block).map(Some),
+            AnthropicResponseBlockKind::WebSearchCall => anthropic_web_search_call(block).map(Some),
+            _ => Ok(None),
         })
         .collect::<Result<Vec<_>, _>>()?;
     if let Some(error) = plan.issue {
@@ -85,7 +70,7 @@ fn response_plan_with_mojo(
             }
         });
     }
-    Ok((inputs, plan.items))
+    Ok((plan.blocks, inputs, plan.items))
 }
 
 fn render_response_message(blocks: &[Value]) -> Result<Value, String> {
@@ -105,7 +90,7 @@ fn render_response_reasoning(block: &Value) -> Result<Value, String> {
 }
 
 pub(super) fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>, String> {
-    let (inputs, plan) = response_plan_with_mojo(content)?;
+    let (_, inputs, plan) = response_plan_with_mojo(content)?;
 
     let mut output = Vec::new();
     for item in plan {
@@ -123,7 +108,7 @@ pub(super) fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>,
             AnthropicResponsePlanKind::ToolUse | AnthropicResponsePlanKind::WebSearchCall => {
                 let value = inputs
                     .get(item.input_index)
-                    .and_then(|input| input.value.clone())
+                    .and_then(Clone::clone)
                     .ok_or_else(|| "Anthropic response plan referenced invalid item".to_string())?;
                 output.push(value);
             }
@@ -159,11 +144,11 @@ mod tests {
             json!({"type": "thinking", "thinking": false}),
             json!({"type": "thinking"}),
         ];
-        let (actual_inputs, actual_plan) = response_plan_with_mojo(&valid).unwrap();
+        let (actual_blocks, _, actual_plan) = response_plan_with_mojo(&valid).unwrap();
         assert_eq!(
-            actual_inputs
+            actual_blocks
                 .iter()
-                .map(|input| (input.kind, input.has_text))
+                .map(|block| (block.kind, block.has_text))
                 .collect::<Vec<_>>(),
             vec![
                 (AnthropicResponseBlockKind::Text, true),
