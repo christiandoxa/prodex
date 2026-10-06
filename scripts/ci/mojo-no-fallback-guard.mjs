@@ -1916,6 +1916,20 @@ export function findViolations(files) {
     }
     return violations;
   });
+  const appSelectionPolicyMirrorViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath !== "crates/prodex-app/src/runtime_proxy/selection/policy.rs") return [];
+    const violations = [];
+    if (!contents.includes("RuntimeCandidateAffinity,")) {
+      violations.push(filePath + ": app selection policy must reuse canonical RuntimeCandidateAffinity");
+    }
+    if (contents.includes("pub(crate) struct RuntimeCandidateAffinity")) {
+      violations.push(filePath + ": contains restored app RuntimeCandidateAffinity mirror");
+    }
+    if (contents.includes("runtime_candidate_affinity_to_proxy(")) {
+      violations.push(filePath + ": contains restored RuntimeCandidateAffinity conversion mirror");
+    }
+    return violations;
+  });
   const runtimeStateBackgroundViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== RUNTIME_STATE_BACKGROUND_FILE) return [];
     const required = [
@@ -5225,7 +5239,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
