@@ -3,50 +3,25 @@ use super::*;
 use prodex_mojo_core::rich::{
     AnthropicRequestKernelInput, AnthropicRequestKernelOperation,
     AnthropicResponseBlockClassificationError, AnthropicResponseBlockClassificationInput,
-    AnthropicResponseBlockKind, AnthropicResponsePlanKind, plan_anthropic_response_blocks,
+    AnthropicResponseBlockKind, AnthropicResponsePlanItem, AnthropicResponsePlanKind,
+    plan_anthropic_response_blocks,
 };
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ResponseBlockKind {
-    Text,
-    ToolUse,
-    WebSearchCall,
-    WebSearchResult,
-    Thinking,
-}
 
 #[derive(Debug, PartialEq)]
 struct ResponseBlockInput {
-    kind: ResponseBlockKind,
+    kind: AnthropicResponseBlockKind,
     has_text: bool,
     value: Option<Value>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ResponsePlanKind {
-    Message,
-    ToolUse,
-    WebSearchCall,
-    WebSearchResult,
-    Reasoning,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ResponsePlanItem {
-    kind: ResponsePlanKind,
-    start: usize,
-    count: usize,
-    input_index: usize,
-}
-
 fn response_block_input(
     block: &Value,
-    kind: ResponseBlockKind,
+    kind: AnthropicResponseBlockKind,
     has_text: bool,
 ) -> Result<ResponseBlockInput, String> {
     let value = match kind {
-        ResponseBlockKind::ToolUse => Some(anthropic_tool_use_item(block)?),
-        ResponseBlockKind::WebSearchCall => Some(anthropic_web_search_call(block)?),
+        AnthropicResponseBlockKind::ToolUse => Some(anthropic_tool_use_item(block)?),
+        AnthropicResponseBlockKind::WebSearchCall => Some(anthropic_web_search_call(block)?),
         _ => None,
     };
     Ok(ResponseBlockInput {
@@ -58,7 +33,7 @@ fn response_block_input(
 
 fn response_plan_with_mojo(
     content: &[Value],
-) -> Result<(Vec<ResponseBlockInput>, Vec<ResponsePlanItem>), String> {
+) -> Result<(Vec<ResponseBlockInput>, Vec<AnthropicResponsePlanItem>), String> {
     let classification_input = content
         .iter()
         .map(|block| AnthropicResponseBlockClassificationInput {
@@ -72,19 +47,11 @@ fn response_plan_with_mojo(
         .collect::<Vec<_>>();
     let plan = plan_anthropic_response_blocks(&classification_input)
         .map_err(|error| format!("Anthropic Messages response plan failed: {error:?}"))?;
-
     let inputs = content
         .iter()
-        .zip(plan.blocks)
+        .zip(&plan.blocks)
         .map(|(block, classified)| {
-            let kind = match classified.kind {
-                AnthropicResponseBlockKind::Text => ResponseBlockKind::Text,
-                AnthropicResponseBlockKind::ToolUse => ResponseBlockKind::ToolUse,
-                AnthropicResponseBlockKind::WebSearchCall => ResponseBlockKind::WebSearchCall,
-                AnthropicResponseBlockKind::WebSearchResult => ResponseBlockKind::WebSearchResult,
-                AnthropicResponseBlockKind::Thinking => ResponseBlockKind::Thinking,
-            };
-            response_block_input(block, kind, classified.has_text)
+            response_block_input(block, classified.kind, classified.has_text)
         })
         .collect::<Result<Vec<_>, _>>()?;
     if let Some(error) = plan.issue {
@@ -118,23 +85,7 @@ fn response_plan_with_mojo(
             }
         });
     }
-    let items = plan
-        .items
-        .into_iter()
-        .map(|item| ResponsePlanItem {
-            kind: match item.kind {
-                AnthropicResponsePlanKind::Message => ResponsePlanKind::Message,
-                AnthropicResponsePlanKind::ToolUse => ResponsePlanKind::ToolUse,
-                AnthropicResponsePlanKind::WebSearchCall => ResponsePlanKind::WebSearchCall,
-                AnthropicResponsePlanKind::WebSearchResult => ResponsePlanKind::WebSearchResult,
-                AnthropicResponsePlanKind::Reasoning => ResponsePlanKind::Reasoning,
-            },
-            start: item.start,
-            count: item.count,
-            input_index: item.input_index,
-        })
-        .collect();
-    Ok((inputs, items))
+    Ok((inputs, plan.items))
 }
 
 fn render_response_message(blocks: &[Value]) -> Result<Value, String> {
@@ -159,7 +110,7 @@ pub(super) fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>,
     let mut output = Vec::new();
     for item in plan {
         match item.kind {
-            ResponsePlanKind::Message => {
+            AnthropicResponsePlanKind::Message => {
                 let end = item
                     .start
                     .checked_add(item.count)
@@ -169,20 +120,20 @@ pub(super) fn anthropic_response_output(content: &[Value]) -> Result<Vec<Value>,
                     .ok_or_else(|| "Anthropic response plan referenced invalid text".to_string())?;
                 output.push(render_response_message(blocks)?);
             }
-            ResponsePlanKind::ToolUse | ResponsePlanKind::WebSearchCall => {
+            AnthropicResponsePlanKind::ToolUse | AnthropicResponsePlanKind::WebSearchCall => {
                 let value = inputs
                     .get(item.input_index)
                     .and_then(|input| input.value.clone())
                     .ok_or_else(|| "Anthropic response plan referenced invalid item".to_string())?;
                 output.push(value);
             }
-            ResponsePlanKind::WebSearchResult => {
+            AnthropicResponsePlanKind::WebSearchResult => {
                 let block = content.get(item.input_index).ok_or_else(|| {
                     "Anthropic response plan referenced invalid result".to_string()
                 })?;
                 merge_anthropic_web_search_result(&mut output, block)?;
             }
-            ResponsePlanKind::Reasoning => {
+            AnthropicResponsePlanKind::Reasoning => {
                 let block = content.get(item.input_index).ok_or_else(|| {
                     "Anthropic response plan referenced invalid reasoning".to_string()
                 })?;
@@ -215,44 +166,44 @@ mod tests {
                 .map(|input| (input.kind, input.has_text))
                 .collect::<Vec<_>>(),
             vec![
-                (ResponseBlockKind::Text, true),
-                (ResponseBlockKind::ToolUse, false),
-                (ResponseBlockKind::WebSearchCall, false),
-                (ResponseBlockKind::WebSearchResult, false),
-                (ResponseBlockKind::Thinking, true),
-                (ResponseBlockKind::Thinking, false),
-                (ResponseBlockKind::Thinking, false),
+                (AnthropicResponseBlockKind::Text, true),
+                (AnthropicResponseBlockKind::ToolUse, false),
+                (AnthropicResponseBlockKind::WebSearchCall, false),
+                (AnthropicResponseBlockKind::WebSearchResult, false),
+                (AnthropicResponseBlockKind::Thinking, true),
+                (AnthropicResponseBlockKind::Thinking, false),
+                (AnthropicResponseBlockKind::Thinking, false),
             ]
         );
         assert_eq!(
             actual_plan,
             vec![
-                ResponsePlanItem {
-                    kind: ResponsePlanKind::Message,
+                AnthropicResponsePlanItem {
+                    kind: AnthropicResponsePlanKind::Message,
                     start: 0,
                     count: 1,
                     input_index: 0
                 },
-                ResponsePlanItem {
-                    kind: ResponsePlanKind::ToolUse,
+                AnthropicResponsePlanItem {
+                    kind: AnthropicResponsePlanKind::ToolUse,
                     start: 0,
                     count: 0,
                     input_index: 1
                 },
-                ResponsePlanItem {
-                    kind: ResponsePlanKind::WebSearchCall,
+                AnthropicResponsePlanItem {
+                    kind: AnthropicResponsePlanKind::WebSearchCall,
                     start: 0,
                     count: 0,
                     input_index: 2
                 },
-                ResponsePlanItem {
-                    kind: ResponsePlanKind::WebSearchResult,
+                AnthropicResponsePlanItem {
+                    kind: AnthropicResponsePlanKind::WebSearchResult,
                     start: 0,
                     count: 0,
                     input_index: 3
                 },
-                ResponsePlanItem {
-                    kind: ResponsePlanKind::Reasoning,
+                AnthropicResponsePlanItem {
+                    kind: AnthropicResponsePlanKind::Reasoning,
                     start: 0,
                     count: 0,
                     input_index: 4
