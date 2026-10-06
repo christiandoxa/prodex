@@ -96,13 +96,13 @@ Claude plugin hooks can use Caveman's documented `caveman telemetry off` or
 
 ## Ponytail
 
-Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/4.10.3/` with metadata:
+Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/4.13.0/` with metadata:
 
 - source: `https://github.com/DietrichGebert/ponytail`
-- commit: `ef8ca48fed2321ab6668b2a954f23b1af97d7f6d`
-- tree SHA-256: `fcd46adfb2846ce9afbb96d1c3fe8e51892f8e6ee5b59423a81b193d89342fbb`
+- commit: `08e952d7a8057a57ce561ff1330d093fd92eec67`
+- tree SHA-256: `4187a87a014975e268d1e6a0ea553382e7d53232a2f2ea741941c0b1c412dd2f`
 
-The 4.10.3 qualified reference requires its exact audited commit and complete tree digest. The previously qualified 4.10.0 checkout remains accepted with its audited tree and legacy-manifest compatibility rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
+The 4.13.0 qualified reference requires its exact audited commit and complete tree digest. Existing stable 4.10.x checkouts remain accepted through the minimum-version and manifest-digest compatibility rules, including the previously qualified 4.10.0 legacy-manifest rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
 
 RTK requires `0.46.0` or newer; `0.51.0` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
 `0.11.0` is the latest stable release validated for this Prodex release. Both resolve from
