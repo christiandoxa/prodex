@@ -2472,6 +2472,10 @@ export function findViolations(files) {
         "Act as lead and sole integrator:",
         "Each delegated task must request a concise structured result:",
         "Sub-agent concurrency enforcement: cross-process exclusive slot leases",
+        "fn markdown_safe_value(",
+        "fn shell_quote(",
+        "fn render_posix_launcher_command(",
+        "fn render_powershell_launcher_command(",
       ]) {
         if (production.includes(retired)) {
           violations.push(filePath + ": contains a replaced Rust sub-agent text template");

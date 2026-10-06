@@ -17,15 +17,11 @@ struct RenderStringView {
     len: u64,
 }
 
-/// Rust-prepared display fields for the temporary sub-agent overlay.
-///
-/// The caller owns path conversion, shell quoting, and redaction before passing
-/// values to Mojo. `model`, `task_directory`, and `launcher` must be safe for
-/// insertion into Markdown.
+/// Display fields for the temporary sub-agent overlay.
 pub struct SubAgentOverlayRender<'a> {
     /// Provider label selected by the caller.
     pub provider: &'a str,
-    /// Redacted and Markdown-safe model label.
+    /// Model label; Mojo applies display sanitization.
     pub model: &'a str,
     /// Display label for the configured reasoning effort.
     pub reasoning_effort: &'a str,
@@ -35,20 +31,19 @@ pub struct SubAgentOverlayRender<'a> {
     pub concurrency_source: &'a str,
     /// Whether Presidio is inherited by child launches.
     pub presidio_enabled: bool,
-    /// Markdown-safe task directory display path.
+    /// Task directory display path; Mojo applies display sanitization.
     pub task_directory: &'a str,
     /// Maximum number of bytes accepted in a task file.
     pub task_max_bytes: usize,
     /// Recursion marker name without its `=1` value.
     pub recursion_marker: &'a str,
-    /// Platform-quoted launcher command prepared by Rust.
-    pub launcher: &'a str,
+    pub executable: &'a str,
+    pub config: &'a str,
+    pub task: &'a str,
+    pub powershell: bool,
 }
 
-/// Rust-prepared display fields for the enabled sub-agent dry-run report.
-///
-/// The caller owns UUID and secret redaction. Fields containing paths or other
-/// caller text are reduced to safe display values before crossing the ABI.
+/// Display fields for the enabled sub-agent dry-run report.
 pub struct SubAgentDryRunRender<'a> {
     /// Provider label selected by the caller.
     pub provider: &'a str,
@@ -151,6 +146,7 @@ pub fn render_overlay(input: &SubAgentOverlayRender<'_>) -> Result<String, MojoE
             i64::from(input.max_concurrency),
             i64::from(input.presidio_enabled),
             i64::try_from(input.task_max_bytes).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(input.powershell),
         ],
         &[
             input.provider,
@@ -159,7 +155,9 @@ pub fn render_overlay(input: &SubAgentOverlayRender<'_>) -> Result<String, MojoE
             input.concurrency_source,
             input.task_directory,
             input.recursion_marker,
-            input.launcher,
+            input.executable,
+            input.config,
+            input.task,
         ],
     )
 }
@@ -245,7 +243,10 @@ mod tests {
             task_directory: "/tmp/tasks",
             task_max_bytes: 65_536,
             recursion_marker: "PRODEX_SUB_AGENT",
-            launcher: "'prodex' '__sub-agent-exec'",
+            executable: "prodex",
+            config: "/tmp/config",
+            task: "/tmp/task-001.txt",
+            powershell: false,
         })
         .unwrap();
         assert_eq!(
