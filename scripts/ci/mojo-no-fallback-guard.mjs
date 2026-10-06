@@ -2703,6 +2703,15 @@ export function findViolations(files) {
       if (/GeminiResponseKernelOperation::(?:RawFunctionCallItem|FunctionCallItem|ToolSearchCallItem|CustomToolCallItem|OutputMessageItem)\b/u.test(completedItem)) {
         violations.push(filePath + ": contains replaced Rust completed tool-call shaping branches");
       }
+      const deltaSignature = contents.match(
+        /\bpub fn gemini_provider_core_function_call_arguments_delta_event_with_thought_signature\([^]*?^\}/mu,
+      )?.[0] ?? "";
+      if (!deltaSignature.includes("GeminiResponseKernelOperation::FunctionCallArgumentsDeltaWithThoughtSignature")) {
+        violations.push(filePath + ": function-call delta thought-signature shaping must use the Gemini Mojo kernel");
+      }
+      if (/event\.get\(|object\.keys\(\)\.all|event\["thought_signature"\]/u.test(deltaSignature)) {
+        violations.push(filePath + ": contains restored Rust function-call delta thought-signature shaping");
+      }
       return violations;
     }
     if (filePath === GEMINI_BRIDGE_ROOT_FILE &&
@@ -6163,6 +6172,9 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
     "pub fn gemini_provider_core_stream_completed_tool_call_item() {\n  GeminiResponseKernelOperation::ToolSearchCallItem\n}"]]).join("\n"),
   /replaced Rust completed tool-call shaping branches/u);
+  assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+    "pub fn gemini_provider_core_function_call_arguments_delta_event_with_thought_signature(event: Value) {\n  event[\"thought_signature\"] = Value::String(\"x\".into());\n}"]]).join("\n"),
+  /thought-signature shaping must use the Gemini Mojo kernel|restored Rust function-call delta thought-signature shaping/u);
   assert.match(findViolations([[GEMINI_GENERATION_CONFIG_FILE,
     "fn gemini_generation_config_from_request() {}"]])[0], /duplicate Gemini generation-config adapter/u);
   assert.match(findViolations([[GEMINI_TOOL_RESPONSE_ORDER_FILE,

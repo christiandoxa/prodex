@@ -304,6 +304,39 @@ fn gemini_provider_core_shapes_stream_function_call_arguments_delta() {
             "thought_signature": "sig_delta",
         })
     );
+    assert_eq!(
+        gemini_provider_core_function_call_arguments_delta_event_with_thought_signature(
+            json!({
+                "type": "response.function_call_arguments.delta",
+                "sequence_number": "invalid",
+                "call_id": "call_1",
+                "delta": "{\"x\":1}",
+                "extra": true,
+            }),
+            Some("sig_fallback"),
+        ),
+        json!({
+            "type": "response.function_call_arguments.delta",
+            "sequence_number": "invalid",
+            "call_id": "call_1",
+            "delta": "{\"x\":1}",
+            "extra": true,
+            "thought_signature": "sig_fallback",
+        })
+    );
+    let unchanged = json!({
+        "type": "response.function_call_arguments.delta",
+        "sequence_number": 9,
+        "call_id": "call_2",
+        "delta": "{}",
+    });
+    assert_eq!(
+        gemini_provider_core_function_call_arguments_delta_event_with_thought_signature(
+            unchanged.clone(),
+            None,
+        ),
+        unchanged,
+    );
 }
 
 #[path = "gemini_tool_call_tests.rs"]

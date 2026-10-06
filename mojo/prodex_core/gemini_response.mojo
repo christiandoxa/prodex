@@ -6,6 +6,7 @@ from json_view import (
     deepseek_json_byte,
     deepseek_json_object_member,
     deepseek_json_raw_equals,
+    deepseek_json_string_end,
     deepseek_json_skip_ws,
     deepseek_json_value_end,
 )
@@ -70,6 +71,7 @@ comptime GEMINI_STREAM_RESPONSE_ID: Int64 = 44
 comptime GEMINI_RAW_TEXT_RESPONSE: Int64 = 45
 comptime GEMINI_STREAM_EVENT_TRANSFORM: Int64 = 46
 comptime GEMINI_STREAM_COMPLETED_TOOL_CALL_ITEM: Int64 = 47
+comptime GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA_WITH_THOUGHT_SIGNATURE: Int64 = 48
 
 
 @fieldwise_init
@@ -320,7 +322,7 @@ def gemini_views_valid(
 ) -> Bool:
     return (
         input.operation >= GEMINI_RESPONSE_CREATED
-        and input.operation <= GEMINI_STREAM_COMPLETED_TOOL_CALL_ITEM
+        and input.operation <= GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA_WITH_THOUGHT_SIGNATURE
         and input.response_id_present >= 0
         and input.response_id_present <= 1
         and input.call_id_present >= 0
@@ -1404,6 +1406,171 @@ def gemini_put_raw_stream_event_transform(
     )
 
 
+def gemini_raw_is_u64(
+    source: ProdexRichStringView,
+    bounds: Array[Int64, 2],
+) -> Bool:
+    if not gemini_raw_bounds_present(bounds):
+        return False
+    var value: UInt64 = 0
+    var index = bounds[0]
+    if index >= bounds[1]:
+        return False
+    while index < bounds[1]:
+        var byte = deepseek_json_byte(source, index)
+        if byte < 48 or byte > 57:
+            return False
+        var digit = UInt64(byte - 48)
+        if value > 1844674407370955161 or (
+            value == 1844674407370955161 and digit > 5
+        ):
+            return False
+        value = value * 10 + digit
+        index += 1
+    return True
+
+
+def gemini_put_event_with_thought_signature(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    source: ProdexRichStringView,
+    signature: ProdexRichStringView,
+) -> Bool:
+    var root = gemini_raw_root(source)
+    if (
+        not gemini_raw_bounds_present(root)
+        or deepseek_json_byte(source, root[0]) != 123
+        or deepseek_json_byte(source, root[1] - 1) != 125
+    ):
+        return gemini_put_view(writer, source)
+    if not gemini_put_byte(writer, 123):
+        return False
+    var wrote_member = False
+    var index = deepseek_json_skip_ws(source, root[0] + 1, root[1] - 1)
+    while index < root[1] - 1:
+        var key_start = index
+        var key_end = deepseek_json_string_end(source, key_start, root[1] - 1)
+        if key_end < 0:
+            return False
+        index = deepseek_json_skip_ws(source, key_end, root[1] - 1)
+        if index >= root[1] - 1 or deepseek_json_byte(source, index) != 58:
+            return False
+        var value_start = deepseek_json_skip_ws(source, index + 1, root[1] - 1)
+        var value_end = deepseek_json_value_end(source, value_start, root[1] - 1, 0)
+        if value_end < 0:
+            return False
+        if not deepseek_json_raw_equals(
+            source, key_start, key_end, StringSlice("thought_signature")
+        ):
+            if wrote_member and not gemini_put_byte(writer, 44):
+                return False
+            if (
+                not gemini_put_view_range(writer, source, key_start, key_end)
+                or not gemini_put_byte(writer, 58)
+                or not gemini_put_view_range(writer, source, value_start, value_end)
+            ):
+                return False
+            wrote_member = True
+        index = deepseek_json_skip_ws(source, value_end, root[1] - 1)
+        if index < root[1] - 1:
+            if deepseek_json_byte(source, index) != 44:
+                return False
+            index = deepseek_json_skip_ws(source, index + 1, root[1] - 1)
+    if wrote_member and not gemini_put_byte(writer, 44):
+        return False
+    return (
+        gemini_put_literal(writer, StringSlice('"thought_signature":'))
+        and gemini_put_json_string(writer, signature)
+        and gemini_put_byte(writer, 125)
+    )
+
+
+def gemini_put_function_call_delta_signature(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if input.response.len == 0 or input.signature_present == 0:
+        return gemini_put_view(writer, input.response)
+    var source = input.response.copy()
+    var root = gemini_raw_root(source)
+    if not gemini_raw_bounds_present(root):
+        return gemini_put_view(writer, source)
+    var kind = gemini_raw_member(source, root, StringSlice("type"))
+    var delta = gemini_raw_member(source, root, StringSlice("delta"))
+    var sequence = gemini_raw_member(source, root, StringSlice("sequence_number"))
+    var call_id = gemini_raw_member(source, root, StringSlice("call_id"))
+    var exact_shape = True
+    var index = deepseek_json_skip_ws(source, root[0] + 1, root[1] - 1)
+    while index < root[1] - 1:
+        var key_start = index
+        var key_end = deepseek_json_string_end(source, key_start, root[1] - 1)
+        if key_end < 0:
+            exact_shape = False
+            break
+        var allowed = (
+            deepseek_json_raw_equals(source, key_start, key_end, StringSlice("type"))
+            or deepseek_json_raw_equals(source, key_start, key_end, StringSlice("sequence_number"))
+            or deepseek_json_raw_equals(source, key_start, key_end, StringSlice("call_id"))
+            or deepseek_json_raw_equals(source, key_start, key_end, StringSlice("delta"))
+        )
+        if not allowed:
+            exact_shape = False
+            break
+        index = deepseek_json_skip_ws(source, key_end, root[1] - 1)
+        if index >= root[1] - 1 or deepseek_json_byte(source, index) != 58:
+            exact_shape = False
+            break
+        var value_end = deepseek_json_value_end(
+            source,
+            deepseek_json_skip_ws(source, index + 1, root[1] - 1),
+            root[1] - 1,
+            0,
+        )
+        if value_end < 0:
+            exact_shape = False
+            break
+        index = deepseek_json_skip_ws(source, value_end, root[1] - 1)
+        if index < root[1] - 1:
+            if deepseek_json_byte(source, index) != 44:
+                exact_shape = False
+                break
+            index = deepseek_json_skip_ws(source, index + 1, root[1] - 1)
+    if (
+        exact_shape
+        and gemini_raw_string_present(source, kind)
+        and gemini_raw_string_present(source, delta)
+        and deepseek_json_raw_equals(
+            source,
+            kind[0],
+            kind[1],
+            StringSlice("response.function_call_arguments.delta"),
+        )
+        and (sequence[0] < 0 or gemini_raw_is_u64(source, sequence))
+    ):
+        if not gemini_put_literal(
+            writer, StringSlice('{"type":"response.function_call_arguments.delta"')
+        ):
+            return False
+        if sequence[0] >= 0:
+            if (
+                not gemini_put_literal(writer, StringSlice(',"sequence_number":'))
+                or not gemini_put_view_range(writer, source, sequence[0], sequence[1])
+            ):
+                return False
+        if call_id[0] >= 0:
+            if (
+                not gemini_put_literal(writer, StringSlice(',"call_id":'))
+                or not gemini_put_view_range(writer, source, call_id[0], call_id[1])
+            ):
+                return False
+        return (
+            gemini_put_literal(writer, StringSlice(',"delta":'))
+            and gemini_put_view_range(writer, source, delta[0], delta[1])
+            and gemini_put_literal(writer, StringSlice(',"thought_signature":'))
+            and gemini_put_json_string(writer, input.signature)
+            and gemini_put_byte(writer, 125)
+        )
+    return gemini_put_event_with_thought_signature(writer, source, input.signature)
+
 def gemini_write_operation(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     input: ProdexGeminiResponseKernelInput,
@@ -1681,6 +1848,8 @@ def gemini_write_operation(
         return gemini_put_raw_text_response(writer, input)
     if operation == GEMINI_STREAM_EVENT_TRANSFORM:
         return gemini_put_raw_stream_event_transform(writer, input)
+    if operation == GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA_WITH_THOUGHT_SIGNATURE:
+        return gemini_put_function_call_delta_signature(writer, input)
     if operation == GEMINI_STREAM_COMPLETED_TOOL_CALL_ITEM:
         return gemini_put_stream_completed_tool_call_item(writer, input)
     return False
