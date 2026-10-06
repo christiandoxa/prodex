@@ -1,15 +1,12 @@
 use super::super_prompt;
 use crate::{canonical_sub_agent_efforts, effective_provider_model_catalog, provider_display_name};
 use prodex_cli::SubAgentReasoningEffort;
+
+const CATALOG_MAX_PRIORITY: u64 = i64::MAX as u64;
 use prodex_mojo_core::rich::{
     CatalogModel, CatalogPlanModel, ascii_casefold_equal_exact, merge_catalog_ids,
     plan_dynamic_catalog, resolve_catalog_model_exact,
 };
-
-const CATALOG_MAX_PRIORITY: u64 = i64::MAX as u64;
-const CATALOG_MAX_IDENTIFIER_BYTES: usize = 4_096;
-const CATALOG_MAX_QUERY_BYTES: usize = 65_536;
-const CATALOG_MAX_INPUT_MODELS: usize = 65_536;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct MainModelChoice {
@@ -351,49 +348,9 @@ fn catalog_entry_default_effort(entry: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
-fn dynamic_catalog_input_is_bounded(entries: &[serde_json::Value]) -> bool {
-    if entries.len() > prodex_provider_core::PROVIDER_MODEL_CATALOG_HARD_LIMIT {
-        return false;
-    }
-    let mut effort_count = 0_usize;
-    let mut alias_count = 0_usize;
-    for entry in entries {
-        if !catalog_entry_is_bounded(entry) {
-            return false;
-        }
-        effort_count = effort_count.saturating_add(
-            entry
-                .get("supported_reasoning_levels")
-                .and_then(serde_json::Value::as_array)
-                .map_or(0, Vec::len),
-        );
-        alias_count = alias_count.saturating_add(catalog_entry_aliases(entry).len());
-        if effort_count > CATALOG_MAX_INPUT_MODELS || alias_count > CATALOG_MAX_INPUT_MODELS {
-            return false;
-        }
-    }
-    true
-}
-
 pub(super) fn main_model_choices_from_catalog(
     entries: Vec<serde_json::Value>,
 ) -> Option<Vec<MainModelChoice>> {
-    main_model_choices_from_catalog_mojo(entries)
-}
-
-fn main_model_choices_from_catalog_mojo(
-    entries: Vec<serde_json::Value>,
-) -> Option<Vec<MainModelChoice>> {
-    if !dynamic_catalog_input_is_bounded(&entries)
-        || entries.iter().any(|entry| {
-            entry
-                .get("priority")
-                .and_then(serde_json::Value::as_u64)
-                .is_some_and(|priority| priority > CATALOG_MAX_PRIORITY)
-        })
-    {
-        return None;
-    }
     let owned = entries
         .into_iter()
         .map(dynamic_catalog_model)
@@ -438,15 +395,7 @@ fn main_model_choices_from_catalog_mojo(
         default_effort: None,
     }];
     for model in plan.models {
-        let source = owned
-            .iter()
-            .find(|entry| entry.id.trim() == model.id)
-            .or_else(|| {
-                owned.iter().find(|entry| {
-                    ascii_casefold_equal_exact(entry.id.trim(), &model.id)
-                        .expect("Mojo catalog source identity comparison failed")
-                })
-            })?;
+        let source = owned.iter().find(|entry| entry.id.trim() == model.id)?;
         choices.push(MainModelChoice {
             choice: prodex_provider_core::ProviderModelChoice::Model(model.id),
             label: model.label,
@@ -472,35 +421,6 @@ fn catalog_entry_model_id(entry: &serde_json::Value) -> &str {
         .map(str::trim)
         .filter(|model| !model.is_empty())
         .unwrap_or("")
-}
-
-fn catalog_entry_is_bounded(entry: &serde_json::Value) -> bool {
-    let model = catalog_entry_model_id(entry);
-    let label = ["display_name", "displayName"]
-        .into_iter()
-        .find_map(|key| entry.get(key).and_then(serde_json::Value::as_str))
-        .map(str::trim)
-        .filter(|label| !label.is_empty())
-        .unwrap_or(model);
-    model.len() <= CATALOG_MAX_IDENTIFIER_BYTES
-        && label.len() <= CATALOG_MAX_QUERY_BYTES
-        && catalog_entry_aliases(entry)
-            .iter()
-            .all(|alias| alias.len() <= CATALOG_MAX_IDENTIFIER_BYTES)
-        && catalog_entry_default_effort(entry)
-            .as_deref()
-            .is_none_or(|effort| effort.len() <= CATALOG_MAX_QUERY_BYTES)
-        && !entry
-            .get("supported_reasoning_levels")
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|levels| {
-                levels.iter().any(|level| {
-                    level
-                        .get("effort")
-                        .and_then(serde_json::Value::as_str)
-                        .is_some_and(|effort| effort.len() > CATALOG_MAX_QUERY_BYTES)
-                })
-            })
 }
 
 fn valid_default_effort(default_effort: Option<&str>, efforts: &[String]) -> Option<String> {
