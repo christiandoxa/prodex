@@ -66,6 +66,7 @@ fn http_previous_response_logs_keep_existing_fields() {
                 stale_continuation: false,
                 fresh_fallback_allowed: false,
                 fresh_fallback_blocked_without_affinity: true,
+                observability_outcome: Some("blocked_nonreplayable_without_affinity"),
             },
             Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation),
             "beta",

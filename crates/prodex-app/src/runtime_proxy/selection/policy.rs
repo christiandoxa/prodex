@@ -6,7 +6,7 @@ pub(crate) use runtime_proxy_crate::{
 };
 #[cfg(test)]
 pub(crate) use runtime_proxy_crate::{
-    RuntimePreviousResponseNotFoundFallbackRequest, RuntimePreviousResponseStaleContinuationPolicy,
+    RuntimePreviousResponseNotFoundFallbackRequest,
     runtime_previous_response_not_found_fallback_policy,
     runtime_websocket_previous_response_not_found_requires_stale_continuation,
 };

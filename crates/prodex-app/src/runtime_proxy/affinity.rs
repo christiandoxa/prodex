@@ -32,16 +32,13 @@ pub(crate) use runtime_proxy_crate::{
 };
 
 #[cfg(test)]
+pub(crate) use runtime_proxy_crate::runtime_previous_response_fresh_fallback_shape_allows_recovery;
+#[cfg(test)]
 pub(crate) use runtime_proxy_crate::runtime_previous_response_fresh_fallback_shape_label;
 #[cfg(test)]
 pub(crate) use runtime_proxy_crate::{
     RuntimePreviousResponseFreshFallbackPolicy, RuntimePreviousResponseFreshFallbackPolicyInput,
     runtime_previous_response_fresh_fallback_policy,
-};
-#[cfg(test)]
-pub(crate) use runtime_proxy_crate::{
-    RuntimePreviousResponseFreshFallbackPolicyShape,
-    runtime_previous_response_fresh_fallback_shape_allows_recovery,
 };
 pub(crate) use runtime_proxy_crate::{
     RuntimePreviousResponseFreshFallbackShape,

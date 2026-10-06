@@ -99,9 +99,7 @@ fn fresh_fallback_policy_keeps_existing_context_fail_closed() {
                 fresh_fallback_shape: None,
             },
         ),
-        RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
-            request_shape: RuntimePreviousResponseFreshFallbackPolicyShape::Unknown,
-        },
+        RuntimePreviousResponseFreshFallbackPolicy::FailClosed,
     );
     let policy = runtime_previous_response_fresh_fallback_policy(
         RuntimePreviousResponseFreshFallbackPolicyInput {
@@ -112,9 +110,7 @@ fn fresh_fallback_policy_keeps_existing_context_fail_closed() {
     );
     assert_eq!(
         policy,
-        RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
-            request_shape: RuntimePreviousResponseFreshFallbackPolicyShape::EmptyInputOnly,
-        },
+        RuntimePreviousResponseFreshFallbackPolicy::FailClosed,
     );
     assert!(!policy.allows_fresh_fallback());
 }
@@ -158,11 +154,8 @@ fn stale_previous_response_policy_uses_turn_state_or_fails_closed() {
     assert_eq!(
         runtime_previous_response_not_found_fallback_policy(request),
         RuntimePreviousResponseNotFoundFallbackPolicy {
-            stale_continuation: RuntimePreviousResponseStaleContinuationPolicy::FailClosed,
-            fresh_fallback: RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
-                request_shape:
-                    RuntimePreviousResponseFreshFallbackPolicyShape::ContextDependentContinuation,
-            },
+            stale_continuation: true,
+            fresh_fallback: RuntimePreviousResponseFreshFallbackPolicy::FailClosed,
         },
     );
     assert_eq!(
@@ -173,7 +166,7 @@ fn stale_previous_response_policy_uses_turn_state_or_fails_closed() {
             },
         )
         .stale_continuation,
-        RuntimePreviousResponseStaleContinuationPolicy::RetryWithTurnState,
+        false,
     );
 }
 

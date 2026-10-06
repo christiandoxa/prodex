@@ -77,10 +77,7 @@ fn runtime_previous_response_fresh_fallback_policy_is_explicitly_fail_closed() {
 
     assert_eq!(
         policy,
-        RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
-            request_shape:
-                RuntimePreviousResponseFreshFallbackPolicyShape::SessionScopedFreshReplay,
-        }
+        RuntimePreviousResponseFreshFallbackPolicy::FailClosed
     );
     assert!(!policy.allows_fresh_fallback());
 }
@@ -115,14 +112,11 @@ fn websocket_previous_response_not_found_fallback_policy_is_explicitly_fail_clos
 
     assert_eq!(
         policy.stale_continuation,
-        RuntimePreviousResponseStaleContinuationPolicy::FailClosed
+        true
     );
     assert_eq!(
         policy.fresh_fallback,
-        RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
-            request_shape:
-                RuntimePreviousResponseFreshFallbackPolicyShape::ContextDependentContinuation,
-        }
+        RuntimePreviousResponseFreshFallbackPolicy::FailClosed
     );
     assert!(policy.fresh_fallback.blocks_without_affinity(false, false));
 }
@@ -154,15 +148,12 @@ fn previous_response_not_found_fallback_matrix_fails_closed_for_context_dependen
 
                     assert_eq!(
                         policy.fresh_fallback,
-                        RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
-                            request_shape:
-                                RuntimePreviousResponseFreshFallbackPolicyShape::ContextDependentContinuation,
-                        },
+                        RuntimePreviousResponseFreshFallbackPolicy::FailClosed,
                         "{label}"
                     );
                     assert!(!policy.fresh_fallback.allows_fresh_fallback(), "{label}");
                     assert_eq!(
-                        policy.stale_continuation.requires_stale_continuation(),
+                        policy.stale_continuation,
                         previous_response_id.is_some() && !has_turn_state_retry,
                         "{label}"
                     );
