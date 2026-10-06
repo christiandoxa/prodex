@@ -60,7 +60,9 @@ impl RuntimeRouteDecisionReasonKind {
     }
 }
 
-fn runtime_route_reason_kind_from_tag(tag: u8) -> Option<RuntimeRouteDecisionReasonKind> {
+pub(crate) fn runtime_route_reason_kind_from_tag(
+    tag: u8,
+) -> Option<RuntimeRouteDecisionReasonKind> {
     const VALUES: &[RuntimeRouteDecisionReasonKind] = &[
         RuntimeRouteDecisionReasonKind::AuthFailureBackoff,
         RuntimeRouteDecisionReasonKind::SelectionBackoff,

@@ -3486,6 +3486,9 @@ export function findViolations(files) {
         "candidate_skip_reason_kind(tag)",
         "decision.ready_skip_reason",
         "decision.fallback_skip_reason",
+        "optimistic_current_candidate_decision(",
+        "optimistic_candidate_reason_include_quota(",
+        "runtime_route_reason_kind_from_tag",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -3495,6 +3498,10 @@ export function findViolations(files) {
         || contents.includes('Some("auth_failure_backoff")')
         || contents.includes('Some("quota_exhausted_before_send")')
         || contents.includes("mojo_candidate_quota_guard_reason")
+        || contents.includes("pub enum RuntimeOptimisticCurrentCandidateSkipReason")
+        || contents.includes("OPTIMISTIC_CANDIDATE_AUTH_FAILURE")
+        || contents.includes("OPTIMISTIC_CANDIDATE_QUOTA_THIN")
+        || contents.includes("QuotaPressureBand(")
       ) {
         violations.push(filePath + ": contains restored Rust candidate skip-reason semantics");
       }
@@ -6327,6 +6334,9 @@ function selfTest() {
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/selection_plan.rs",
     "fn runtime_optimistic_current_candidate_decision_rust() {}"]])[0],
     /Rust semantic oracle or copy/u);
+  assert.match(findViolations([["crates/prodex-runtime-proxy/src/selection_plan.rs",
+    "pub enum RuntimeOptimisticCurrentCandidateSkipReason { AuthFailureBackoff }\nOPTIMISTIC_CANDIDATE_AUTH_FAILURE"]]).join("\n"),
+    /restored Rust candidate skip-reason semantics/u);
   assert.match(findViolations([["crates/prodex-runtime-proxy/src/smart_context/normalization/static_context.rs",
     "fn smart_context_static_context_noise_key(key: &str) {}"]]).join("\n"),
     /replaced Rust semantic implementation/u);

@@ -441,6 +441,95 @@ def prodex_runtime_optimistic_current_candidate_decision(
     return OPTIMISTIC_CANDIDATE_KEEP
 
 
+def optimistic_candidate_reason_kind(decision: Int64) -> Int64:
+    if decision == OPTIMISTIC_CANDIDATE_AUTH_FAILURE:
+        return 0
+    if decision == OPTIMISTIC_CANDIDATE_SELECTION_BACKOFF:
+        return 1
+    if decision == OPTIMISTIC_CANDIDATE_ROUTE_CIRCUIT:
+        return 2
+    if decision == OPTIMISTIC_CANDIDATE_HEALTH:
+        return 4
+    if decision == OPTIMISTIC_CANDIDATE_PERFORMANCE:
+        return 5
+    if decision == OPTIMISTIC_CANDIDATE_QUOTA_PROBE:
+        return 6
+    if decision == OPTIMISTIC_CANDIDATE_STALE_PERSISTED_QUOTA:
+        return 7
+    if decision == OPTIMISTIC_CANDIDATE_QUOTA_THIN:
+        return 9
+    if decision == OPTIMISTIC_CANDIDATE_QUOTA_CRITICAL:
+        return 10
+    if decision == OPTIMISTIC_CANDIDATE_QUOTA_EXHAUSTED:
+        return 11
+    if decision == OPTIMISTIC_CANDIDATE_QUOTA_UNKNOWN:
+        return 12
+    if decision == OPTIMISTIC_CANDIDATE_INFLIGHT:
+        return 15
+    if decision == OPTIMISTIC_CANDIDATE_INCOMPATIBLE:
+        return 16
+    if decision == OPTIMISTIC_CANDIDATE_PROMPT_CACHE:
+        return 17
+    return -1
+
+
+@export("prodex_runtime_optimistic_current_candidate_plan_v2")
+def prodex_runtime_optimistic_current_candidate_plan_v2(
+    route_kind: Int64,
+    auth_failure_active: Int64,
+    in_selection_backoff: Int64,
+    circuit_open: Int64,
+    health_score: Int64,
+    performance_score: Int64,
+    current_profile_quota_compatible: Int64,
+    has_alternative_quota_compatible_profile: Int64,
+    quota_band: Int64,
+    quota_source_present: Int64,
+    quota_source: Int64,
+    inflight_count: Int64,
+    inflight_soft_limit: Int64,
+    prompt_cache_present: Int64,
+    prompt_cache_owner_matches: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if output_address == 0:
+        return 1
+    var decision = prodex_runtime_optimistic_current_candidate_decision(
+        route_kind,
+        auth_failure_active,
+        in_selection_backoff,
+        circuit_open,
+        health_score,
+        performance_score,
+        current_profile_quota_compatible,
+        has_alternative_quota_compatible_profile,
+        quota_band,
+        quota_source_present,
+        quota_source,
+        inflight_count,
+        inflight_soft_limit,
+        prompt_cache_present,
+        prompt_cache_owner_matches,
+    )
+    if decision < OPTIMISTIC_CANDIDATE_KEEP or decision > OPTIMISTIC_CANDIDATE_PROMPT_CACHE:
+        return 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = Int64(decision == OPTIMISTIC_CANDIDATE_KEEP)
+    output[unsafe_offset=1] = optimistic_candidate_reason_kind(decision)
+    return 0
+
+
+@export("prodex_runtime_optimistic_candidate_reason_include_quota_v1")
+def prodex_runtime_optimistic_candidate_reason_include_quota_v1(
+    reason_kind: Int64,
+) abi("C") -> Int64:
+    if reason_kind < 0 or reason_kind > 33:
+        return -1
+    return Int64(reason_kind != 16)
+
+
 comptime SOFT_AFFINITY_POLICY_ALLOWED: Int64 = 0
 comptime SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE: Int64 = 1
 comptime SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND: Int64 = 2
