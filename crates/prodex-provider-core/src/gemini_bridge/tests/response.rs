@@ -1,5 +1,5 @@
 use super::super::{
-    gemini_provider_core_runtime_responses_value,
+    gemini_provider_core_citation_text, gemini_provider_core_runtime_responses_value,
     gemini_provider_core_web_search_call_from_grounding,
 };
 
@@ -17,6 +17,87 @@ fn gemini_provider_core_web_search_call_from_grounding_opens_retrieved_context()
     let item = gemini_provider_core_web_search_call_from_grounding(&response, "resp_2").unwrap();
     assert_eq!(item["action"]["type"], "open_page");
     assert_eq!(item["action"]["url"], "https://context.example");
+}
+
+#[test]
+fn gemini_grounding_mojo_preserves_alias_dedupe_and_query_contracts() {
+    let response = serde_json::json!({
+        "candidates": [{
+            "finishReason": "STOP",
+            "groundingMetadata": {
+                "webSearchQueries": [7, "query", ""],
+                "groundingChunks": [
+                    {"web": {"uri": "   ", "url": "https://must-not-fallback.example"}},
+                    {"retrievedContext": {
+                        "retrievedUrl": "https://dup.example",
+                        "title": "First",
+                        "urlRetrievalStatus": "OK"
+                    }},
+                    {"web": {"url": "https://dup.example", "title": "Later"}}
+                ]
+            },
+            "citationMetadata": {
+                "citationSources": [{
+                    "retrieved_url": "https://citation.example",
+                    "title": " ",
+                    "url_retrieval_status": {"state": "ready"}
+                }]
+            },
+            "urlContextMetadata": {
+                "url_metadata": [{
+                    "url": "https://url.example",
+                    "status": 0
+                }]
+            }
+        }]
+    });
+    let item =
+        gemini_provider_core_web_search_call_from_grounding(&response, "resp_alias").unwrap();
+    assert_eq!(item["action"]["type"], "search");
+    assert_eq!(item["action"]["queries"], serde_json::json!(["query", ""]));
+    assert_eq!(
+        item["action"]["sources"],
+        serde_json::json!([
+            {
+                "type": "url",
+                "url": "https://dup.example",
+                "title": "First",
+                "status": "OK"
+            },
+            {
+                "type": "url",
+                "url": "https://citation.example",
+                "status": {"state": "ready"}
+            },
+            {
+                "type": "url",
+                "url": "https://url.example",
+                "status": 0
+            }
+        ])
+    );
+
+    let query_only = serde_json::json!({
+        "candidates": [{
+            "groundingMetadata": {"webSearchQueries": ["only query"]}
+        }]
+    });
+    let item =
+        gemini_provider_core_web_search_call_from_grounding(&query_only, "resp_query").unwrap();
+    assert_eq!(item["action"]["type"], "search");
+    assert_eq!(item["action"]["queries"], serde_json::json!(["only query"]));
+    assert_eq!(item["action"]["sources"], serde_json::json!([]));
+
+    assert_eq!(
+        gemini_provider_core_citation_text(&serde_json::json!({
+            "candidates": [{
+                "citationMetadata": {
+                    "citations": [{"uri": "https://citation.example"}]
+                }
+            }]
+        })),
+        None
+    );
 }
 
 #[test]
