@@ -4,30 +4,32 @@ use crate::MojoError;
 const SUPER_EXPOSE_ABI_VERSION: i64 = 1;
 const SUPER_EXPOSE_MAX_NAME_BYTES: usize = 128;
 
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperExposeMethod {
-    Unknown,
-    ServerDiscover,
-    Initialize,
-    Ping,
-    ToolsList,
-    ToolsCall,
-    Notification,
+    Unknown = 0,
+    Initialize = 1,
+    Ping = 2,
+    ToolsList = 3,
+    ToolsCall = 4,
+    Notification = 5,
+    ServerDiscover = 6,
 }
 
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SuperExposeTool {
-    Unknown,
-    Start,
-    Status,
-    Result,
-    Cancel,
-    List,
-    Exec,
-    Events,
-    SessionPromptWrite,
-    SessionPreempt,
-    SessionOutputRead,
+    Unknown = 0,
+    Start = 1,
+    Status = 2,
+    Result = 3,
+    Cancel = 4,
+    List = 5,
+    Exec = 6,
+    Events = 7,
+    SessionPromptWrite = 8,
+    SessionPreempt = 9,
+    SessionOutputRead = 10,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -44,6 +46,14 @@ unsafe extern "C" {
         tool_address: u64,
         tool_length: i64,
         output_address: u64,
+    ) -> i64;
+    fn prodex_mojo_super_expose_label_v1(
+        abi_version: i64,
+        label_kind: i64,
+        value: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
     ) -> i64;
     fn prodex_mojo_super_expose_tool_allowed_v1(
         abi_version: i64,
@@ -116,6 +126,45 @@ pub fn super_expose_route(method: &str, tool: Option<&str>) -> Result<SuperExpos
             _ => return Err(MojoError::InvalidOutput),
         },
     })
+}
+
+fn super_expose_label(label_kind: i64, value: i64) -> Result<String, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = [0_u8; 32];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_mojo_super_expose_label_v1(
+            SUPER_EXPOSE_ABI_VERSION,
+            label_kind,
+            value,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 | 2 => MojoError::InvalidInput,
+            3 => MojoError::Capacity,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    let bytes = output.get(..written).ok_or(MojoError::InvalidOutput)?;
+    String::from_utf8(bytes.to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+impl SuperExposeMethod {
+    pub fn label(self) -> Result<String, MojoError> {
+        super_expose_label(0, self as i64)
+    }
+}
+
+impl SuperExposeTool {
+    pub fn label(self) -> Result<String, MojoError> {
+        super_expose_label(1, self as i64)
+    }
 }
 
 pub fn super_expose_tool_allowed(exec_only: bool, tool: &str) -> Result<bool, MojoError> {
@@ -622,6 +671,60 @@ mod protocol_policy_tests {
                 .unwrap(),
             Ok
         );
+    }
+
+    #[test]
+    fn route_labels_are_mojo_owned_and_canonical() {
+        for (method, expected_kind, expected_label) in [
+            (
+                "server/discover",
+                SuperExposeMethod::ServerDiscover,
+                "server_discover",
+            ),
+            ("initialize", SuperExposeMethod::Initialize, "initialize"),
+            ("ping", SuperExposeMethod::Ping, "ping"),
+            ("tools/list", SuperExposeMethod::ToolsList, "tools_list"),
+            ("tools/call", SuperExposeMethod::ToolsCall, "tools_call"),
+            (
+                "notifications/initialized",
+                SuperExposeMethod::Notification,
+                "notification",
+            ),
+            ("unknown/method", SuperExposeMethod::Unknown, "unknown"),
+        ] {
+            let route = super_expose_route(method, None).unwrap();
+            assert_eq!(route.method, expected_kind);
+            assert_eq!(route.method.label().unwrap(), expected_label);
+        }
+        for (tool, expected_kind, expected_label) in [
+            ("prodex_super_start", SuperExposeTool::Start, "start"),
+            ("prodex_super_status", SuperExposeTool::Status, "status"),
+            ("prodex_super_events", SuperExposeTool::Events, "events"),
+            ("prodex_super_result", SuperExposeTool::Result, "result"),
+            ("prodex_super_cancel", SuperExposeTool::Cancel, "cancel"),
+            ("prodex_super_list", SuperExposeTool::List, "list"),
+            ("prodex_super_exec", SuperExposeTool::Exec, "exec"),
+            (
+                "prodex_session_prompt_write",
+                SuperExposeTool::SessionPromptWrite,
+                "session_prompt_write",
+            ),
+            (
+                "prodex_session_preempt",
+                SuperExposeTool::SessionPreempt,
+                "session_preempt",
+            ),
+            (
+                "prodex_session_output_read",
+                SuperExposeTool::SessionOutputRead,
+                "session_output_read",
+            ),
+            ("unknown", SuperExposeTool::Unknown, "unknown"),
+        ] {
+            let route = super_expose_route("tools/call", Some(tool)).unwrap();
+            assert_eq!(route.tool, expected_kind);
+            assert_eq!(route.tool.label().unwrap(), expected_label);
+        }
     }
 
     #[test]

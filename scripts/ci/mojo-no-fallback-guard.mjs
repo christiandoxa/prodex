@@ -2592,11 +2592,25 @@ export function findViolations(files) {
     .map(([filePath]) => `${filePath}: contains a Rust runtime-feature planner or oracle`);
   const superExposeProtocolViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === SUPER_EXPOSE_PROTOCOL_FILE) {
-      const required = "prodex_mojo_core::rich::super_expose_protocol_version_supported(";
-      const violations = contents.includes(required)
-        ? [] : [filePath + ": Super-expose initialize version policy must retain Mojo call " + required];
+      const required = [
+        "prodex_mojo_core::rich::super_expose_protocol_version_supported(",
+        "SuperExposeMethod as ExposeMethod",
+        "SuperExposeTool as ExposeTool",
+        "super_expose_route(method, tool)",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Super-expose protocol must retain Mojo-owned surface " + marker);
       if (contents.includes("MCP_PROTOCOL_VERSIONS.contains(&version)")) {
         violations.push(filePath + ": contains restored Rust MCP protocol-version membership semantics");
+      }
+      if (
+        /enum\s+ExposeMethod/u.test(contents)
+        || /enum\s+ExposeTool/u.test(contents)
+        || /impl\s+ExposeMethod/u.test(contents)
+        || /impl\s+ExposeTool/u.test(contents)
+      ) {
+        violations.push(filePath + ": contains restored Rust Super-expose route or label mirror");
       }
       return violations;
     }
@@ -2665,6 +2679,7 @@ export function findViolations(files) {
     }
     if (filePath === SUPER_EXPOSE_RICH_FILE) {
       const required = [
+        "prodex_mojo_super_expose_label_v1(",
         "prodex_mojo_super_expose_dispatch_validation_v1(",
         "prodex_mojo_super_expose_protocol_version_supported_v1(",
         "prodex_mojo_super_expose_protocol_metadata_v1(",
@@ -6378,6 +6393,9 @@ function selfTest() {
   assert.match(findViolations([[ANTHROPIC_MESSAGES_FILE,
     "Anthropic Messages web-search result translation requires Mojo support"]])[0],
   /feature-off rejection/u);
+  assert.match(findViolations([[SUPER_EXPOSE_PROTOCOL_FILE,
+    "enum ExposeMethod { Ping }\nenum ExposeTool { Exec }\nprodex_mojo_core::rich::super_expose_protocol_version_supported(\"x\");"]]).join("\n"),
+    /restored Rust Super-expose route or label mirror|must retain Mojo-owned surface/u);
   assert.match(findViolations([[CLI_RUNTIME_FEATURE_FILE, "fn rust_plan() {}"]])[0],
     /Rust runtime-feature planner or oracle/u);
   assert.match(findViolations([["crates/prodex-provider-core/src/fallback/chains/gemini.rs",

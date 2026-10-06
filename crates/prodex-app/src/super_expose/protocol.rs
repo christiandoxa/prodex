@@ -48,92 +48,12 @@ pub(super) struct McpRequestHeaders {
     pub(super) mcp_name: Option<String>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ExposeMethod {
-    Unknown,
-    ServerDiscover,
-    Initialize,
-    Ping,
-    ToolsList,
-    ToolsCall,
-    Notification,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ExposeTool {
-    Unknown,
-    Start,
-    Status,
-    Events,
-    Result,
-    Cancel,
-    List,
-    Exec,
-    SessionPromptWrite,
-    SessionPreempt,
-    SessionOutputRead,
-}
-
-impl ExposeMethod {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-            Self::ServerDiscover => "server_discover",
-            Self::Initialize => "initialize",
-            Self::Ping => "ping",
-            Self::ToolsList => "tools_list",
-            Self::ToolsCall => "tools_call",
-            Self::Notification => "notification",
-        }
-    }
-}
-
-impl ExposeTool {
-    const fn as_str(self) -> &'static str {
-        match self {
-            Self::Unknown => "unknown",
-            Self::Start => "start",
-            Self::Status => "status",
-            Self::Events => "events",
-            Self::Result => "result",
-            Self::Cancel => "cancel",
-            Self::List => "list",
-            Self::Exec => "exec",
-            Self::SessionPromptWrite => "session_prompt_write",
-            Self::SessionPreempt => "session_preempt",
-            Self::SessionOutputRead => "session_output_read",
-        }
-    }
-}
+use prodex_mojo_core::rich::{SuperExposeMethod as ExposeMethod, SuperExposeTool as ExposeTool};
 
 fn expose_route(method: &str, tool: Option<&str>) -> (ExposeMethod, ExposeTool) {
-    use prodex_mojo_core::rich::{SuperExposeMethod, SuperExposeTool};
     let route = prodex_mojo_core::rich::super_expose_route(method, tool)
         .expect("Mojo Super expose route planner returned invalid output");
-    (
-        match route.method {
-            SuperExposeMethod::Unknown => ExposeMethod::Unknown,
-            SuperExposeMethod::ServerDiscover => ExposeMethod::ServerDiscover,
-            SuperExposeMethod::Initialize => ExposeMethod::Initialize,
-            SuperExposeMethod::Ping => ExposeMethod::Ping,
-            SuperExposeMethod::ToolsList => ExposeMethod::ToolsList,
-            SuperExposeMethod::ToolsCall => ExposeMethod::ToolsCall,
-            SuperExposeMethod::Notification => ExposeMethod::Notification,
-        },
-        match route.tool {
-            SuperExposeTool::Unknown => ExposeTool::Unknown,
-            SuperExposeTool::Start => ExposeTool::Start,
-            SuperExposeTool::Status => ExposeTool::Status,
-            SuperExposeTool::Events => ExposeTool::Events,
-            SuperExposeTool::Result => ExposeTool::Result,
-            SuperExposeTool::Cancel => ExposeTool::Cancel,
-            SuperExposeTool::List => ExposeTool::List,
-            SuperExposeTool::Exec => ExposeTool::Exec,
-            SuperExposeTool::SessionPromptWrite => ExposeTool::SessionPromptWrite,
-            SuperExposeTool::SessionPreempt => ExposeTool::SessionPreempt,
-            SuperExposeTool::SessionOutputRead => ExposeTool::SessionOutputRead,
-        },
-    )
+    (route.method, route.tool)
 }
 
 fn tool_allowed(mode: SuperExposeMode, tool_name: &str) -> bool {
@@ -458,6 +378,15 @@ pub(super) fn json_response(status: u16, body: Value) -> Response<std::io::Curso
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expose_route_uses_canonical_mojo_types_and_labels() {
+        let (method, tool) = expose_route("tools/call", Some("prodex_super_events"));
+        assert_eq!(method, ExposeMethod::ToolsCall);
+        assert_eq!(tool, ExposeTool::Events);
+        assert_eq!(method.label().expect("method label"), "tools_call");
+        assert_eq!(tool.label().expect("tool label"), "events");
+    }
 
     #[test]
     fn full_mode_exposes_the_exact_preserved_tool_contract() {
