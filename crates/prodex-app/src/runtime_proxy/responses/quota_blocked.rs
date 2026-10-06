@@ -129,6 +129,12 @@ pub(super) fn try_signal_runtime_responses_full_context_retry(
     Ok(Some(runtime_responses_full_context_retry_reply()))
 }
 
+pub(super) enum RuntimeResponsesQuotaBlockedAction {
+    Continue,
+    ReplayWithoutTurnState,
+    Return(RuntimeResponsesReply),
+}
+
 pub(super) struct RuntimeResponsesQuotaBlocked<'a> {
     pub(super) request_id: u64,
     pub(super) shared: &'a RuntimeRotationProxyShared,
@@ -140,6 +146,7 @@ pub(super) struct RuntimeResponsesQuotaBlocked<'a> {
     pub(super) request_turn_state: Option<&'a str>,
     pub(super) request_session_id: Option<&'a str>,
     pub(super) request_requires_previous_response_affinity: bool,
+    pub(super) request_reconstructable_full_history: bool,
     pub(super) previous_response_fresh_fallback_shape:
         Option<RuntimePreviousResponseFreshFallbackShape>,
     pub(super) affinity_state: &'a mut RuntimeResponsesAffinityState,
@@ -151,7 +158,7 @@ pub(super) struct RuntimeResponsesQuotaBlocked<'a> {
 
 pub(super) fn handle_runtime_responses_quota_blocked(
     quota_blocked: RuntimeResponsesQuotaBlocked<'_>,
-) -> Result<Option<RuntimeResponsesReply>> {
+) -> Result<RuntimeResponsesQuotaBlockedAction> {
     let RuntimeResponsesQuotaBlocked {
         request_id,
         shared,
@@ -163,6 +170,7 @@ pub(super) fn handle_runtime_responses_quota_blocked(
         request_turn_state,
         request_session_id,
         request_requires_previous_response_affinity,
+        request_reconstructable_full_history,
         previous_response_fresh_fallback_shape,
         affinity_state,
         auto_redeemed_profiles,
@@ -192,7 +200,7 @@ pub(super) fn handle_runtime_responses_quota_blocked(
                 "request={request_id} transport=http quota_blocked_auto_redeemed_retry route=responses"
             ),
         );
-        return Ok(None);
+        return Ok(RuntimeResponsesQuotaBlockedAction::Continue);
     }
 
     let quota_message = extract_runtime_proxy_quota_message_from_response_reply(&response);
@@ -222,15 +230,58 @@ pub(super) fn handle_runtime_responses_quota_blocked(
                 reason: "upstream_quota",
             })?
         {
-            return Ok(Some(retry));
+            return Ok(RuntimeResponsesQuotaBlockedAction::Return(retry));
         }
+
+        let turn_state_full_context_replay = previous_response_id.is_none()
+            && request_turn_state.is_some()
+            && affinity_state.turn_state_profile() == Some(profile_name.as_str())
+            && affinity_state.compact_followup_profile_name().is_none()
+            && request_reconstructable_full_history
+            && runtime_responses_full_context_fallback_available(
+                shared,
+                &profile_name,
+                prompt_cache_key,
+                excluded_profiles,
+                request_model_name,
+            )?;
+        if turn_state_full_context_replay {
+            let released_affinity = release_runtime_quota_blocked_affinity(
+                shared,
+                &profile_name,
+                previous_response_id,
+                request_turn_state,
+                request_session_id,
+            )?;
+            affinity_state.clear_profile_affinity(&profile_name, true);
+            if prepare_runtime_responses_quota_fallback(
+                shared,
+                request_id,
+                &profile_name,
+                prompt_cache_key,
+                excluded_profiles,
+                quota_last_chance_profile,
+                request_model_name,
+            )? {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "request={request_id} transport=http quota_blocked_turn_state_full_context_replay profile={profile_name} affinity_released={released_affinity}"
+                    ),
+                );
+                *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
+                return Ok(RuntimeResponsesQuotaBlockedAction::ReplayWithoutTurnState);
+            }
+            return Ok(RuntimeResponsesQuotaBlockedAction::Return(response));
+        }
+
         runtime_proxy_log(
             shared,
             format!(
                 "request={request_id} transport=http upstream_usage_limit_passthrough route=responses profile={profile_name} reason=hard_affinity"
             ),
         );
-        return Ok(Some(response));
+        return Ok(RuntimeResponsesQuotaBlockedAction::Return(response));
     }
 
     let released_affinity = release_runtime_quota_blocked_affinity(
@@ -258,11 +309,11 @@ pub(super) fn handle_runtime_responses_quota_blocked(
         quota_last_chance_profile,
         request_model_name,
     )? {
-        return Ok(Some(response));
+        return Ok(RuntimeResponsesQuotaBlockedAction::Return(response));
     }
 
     *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
-    Ok(None)
+    Ok(RuntimeResponsesQuotaBlockedAction::Continue)
 }
 
 pub(super) fn prepare_runtime_responses_quota_fallback(
@@ -325,6 +376,8 @@ pub(super) fn handle_runtime_responses_quota_attempt(
         request_session_id: context.request_session_id,
         request_requires_previous_response_affinity: context
             .request_requires_previous_response_affinity,
+        request_reconstructable_full_history:
+            runtime_proxy_crate::runtime_request_has_reconstructable_full_history(&context.request),
         previous_response_fresh_fallback_shape: context.previous_response_fresh_fallback_shape,
         affinity_state,
         auto_redeemed_profiles,
@@ -332,5 +385,21 @@ pub(super) fn handle_runtime_responses_quota_attempt(
         excluded_profiles: &mut loop_state.excluded_profiles,
         last_failure: &mut loop_state.last_failure,
     })?;
-    Ok(result)
+    match result {
+        RuntimeResponsesQuotaBlockedAction::Continue => Ok(None),
+        RuntimeResponsesQuotaBlockedAction::Return(response) => Ok(Some(response)),
+        RuntimeResponsesQuotaBlockedAction::ReplayWithoutTurnState => {
+            context.request =
+                runtime_proxy_crate::runtime_request_without_turn_state(&context.request);
+            context.request_turn_state = None;
+            runtime_proxy_log(
+                context.shared,
+                format!(
+                    "request={} transport=http dead_turn_state_replay scrubbed=true",
+                    context.request_id
+                ),
+            );
+            Ok(None)
+        }
+    }
 }

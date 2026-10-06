@@ -20,6 +20,7 @@ use super::super::{
     runtime_request_turn_state, runtime_response_bound_profile,
     runtime_smart_context_effective_websocket_prompt_cache_key,
     runtime_smart_context_model_name_from_body, runtime_turn_state_affinity_profile,
+    runtime_turn_state_is_dead_recovery_token,
     runtime_websocket_request_requires_locked_previous_response_affinity,
     select_runtime_response_candidate_for_route_with_request,
     send_runtime_proxy_final_websocket_failure,
@@ -53,8 +54,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             shared,
             websocket_session,
         } = input;
-        let handshake_request = handshake_request.clone();
-        let request_text = request_text.to_string();
+        let mut handshake_request = handshake_request.clone();
+        let mut request_text = request_text.to_string();
         let request_requires_previous_response_affinity =
             request_metadata.requires_previous_response_affinity;
         let previous_response_id = request_metadata.previous_response_id.clone();
@@ -62,6 +63,24 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             .turn_state
             .clone()
             .or_else(|| runtime_request_turn_state(&handshake_request));
+        if let Some(turn_state) = request_turn_state.as_deref()
+            && runtime_turn_state_is_dead_recovery_token(shared, turn_state)?
+        {
+            handshake_request =
+                runtime_proxy_crate::runtime_request_without_turn_state(&handshake_request);
+            if let Some(rewritten) =
+                runtime_proxy_crate::runtime_request_text_without_turn_state(&request_text)
+            {
+                request_text = rewritten;
+            }
+            runtime_proxy_log(
+                shared,
+                format!(
+                    "request={request_id} websocket_session={session_id} dead_turn_state_replay scrubbed=true"
+                ),
+            );
+            request_turn_state = None;
+        }
         let explicit_request_session_id = runtime_request_explicit_session_id(&handshake_request);
         let request_session_id_header_present = explicit_request_session_id.is_some();
         let previous_response_fresh_fallback_shape =

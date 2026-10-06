@@ -70,17 +70,29 @@ pub(crate) fn proxy_runtime_responses_request(
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
 ) -> Result<RuntimeResponsesReply> {
+    let mut request = request.clone();
+    let mut request_turn_state = runtime_request_turn_state(&request);
+    if let Some(turn_state) = request_turn_state.as_deref()
+        && runtime_turn_state_is_dead_recovery_token(shared, turn_state)?
+    {
+        request = runtime_proxy_crate::runtime_request_without_turn_state(&request);
+        runtime_proxy_log(
+            shared,
+            format!("request={request_id} transport=http dead_turn_state_replay scrubbed=true"),
+        );
+        request_turn_state = None;
+    }
+
     let request_requires_previous_response_affinity =
-        runtime_request_requires_previous_response_affinity(request);
+        runtime_request_requires_previous_response_affinity(&request);
     let previous_response_fresh_fallback_shape =
-        runtime_request_previous_response_fresh_fallback_shape(request);
-    let previous_response_id = runtime_request_previous_response_id(request);
-    let mut request_turn_state = runtime_request_turn_state(request);
-    let explicit_request_session_id = runtime_request_explicit_session_id(request);
-    let request_session_id = runtime_request_session_id(request);
+        runtime_request_previous_response_fresh_fallback_shape(&request);
+    let previous_response_id = runtime_request_previous_response_id(&request);
+    let explicit_request_session_id = runtime_request_explicit_session_id(&request);
+    let request_session_id = runtime_request_session_id(&request);
     let request_model_name = runtime_smart_context_model_name_from_body(&request.body);
     let prompt_cache_key = runtime_smart_context_effective_prompt_cache_key(
-        request,
+        &request,
         shared,
         previous_response_id.is_none()
             && request_turn_state.is_none()
@@ -139,7 +151,7 @@ pub(crate) fn proxy_runtime_responses_request(
     let mut loop_state = RuntimePrecommitLoopState::<RuntimeUpstreamFailureResponse>::new();
     let mut context = RuntimeResponsesRequestContext {
         request_id,
-        request: request.clone(),
+        request,
         shared,
         request_requires_previous_response_affinity,
         previous_response_fresh_fallback_shape,

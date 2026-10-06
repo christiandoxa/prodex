@@ -198,6 +198,46 @@ fn locks_previous_response_affinity_for_tool_outputs() {
 }
 
 #[test]
+fn post_compaction_full_history_is_reconstructable_and_turn_state_can_be_scrubbed() {
+    let request_text = r#"{
+        "type":"response.create",
+        "model":"gpt-6-luna",
+        "input":[
+            {"type":"message","role":"user","content":"compacted history"},
+            {"type":"message","role":"assistant","content":"completed work"},
+            {"type":"message","role":"user","content":"continue"}
+        ],
+        "client_metadata":{"x-codex-turn-state":"turn-post-compact"}
+    }"#;
+    assert!(
+        runtime_request_text_has_reconstructable_full_history(request_text),
+        "post-compaction user/assistant/user history must be recognized as replayable"
+    );
+
+    let request = RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![
+            (
+                "x-codex-turn-state".to_string(),
+                "turn-post-compact".to_string(),
+            ),
+            ("Content-Type".to_string(), "application/json".to_string()),
+        ],
+        body: request_text.as_bytes().to_vec(),
+    };
+    assert!(runtime_request_has_reconstructable_full_history(&request));
+    let scrubbed = runtime_request_without_turn_state(&request);
+    assert!(runtime_request_turn_state(&scrubbed).is_none());
+    let body: serde_json::Value = serde_json::from_slice(&scrubbed.body).unwrap();
+    assert_eq!(
+        body.get("client_metadata")
+            .and_then(|value| value.get("x-codex-turn-state")),
+        None
+    );
+}
+
+#[test]
 fn explicit_session_header_wins_over_body_session() {
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),

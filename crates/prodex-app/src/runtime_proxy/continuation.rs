@@ -119,6 +119,25 @@ pub(crate) fn runtime_mark_continuation_status_dead(
     )
 }
 
+pub(crate) fn runtime_turn_state_is_dead_recovery_token(
+    shared: &RuntimeRotationProxyShared,
+    turn_state: &str,
+) -> Result<bool> {
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    if runtime.turn_state_bindings.contains_key(turn_state) {
+        return Ok(false);
+    }
+    Ok(runtime_continuation_status_map(
+        &runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::TurnState,
+    )
+    .get(turn_state)
+    .is_some_and(runtime_continuation_status_is_terminal))
+}
+
 pub(crate) fn runtime_continuation_status_recently_suspect(
     statuses: &RuntimeContinuationStatuses,
     kind: RuntimeContinuationBindingKind,

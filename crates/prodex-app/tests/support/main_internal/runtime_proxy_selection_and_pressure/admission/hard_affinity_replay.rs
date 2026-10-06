@@ -194,6 +194,180 @@ fn bind_hard_affinity_response(harness: &RuntimeProxyProfileHarness, response_id
     ));
 }
 
+fn bind_hard_affinity_turn_state(harness: &RuntimeProxyProfileHarness, turn_state: &str) {
+    let now = Local::now().timestamp();
+    let mut runtime = harness.shared().runtime.lock().expect("runtime lock");
+    runtime.turn_state_bindings.insert(
+        turn_state.to_string(),
+        ResponseProfileBinding {
+            binding_identity: None,
+            profile_name: "main".to_string(),
+            bound_at: now,
+        },
+    );
+    assert!(runtime_mark_continuation_status_verified(
+        &mut runtime.continuation_statuses,
+        RuntimeContinuationBindingKind::TurnState,
+        turn_state,
+        now,
+        Some(RuntimeRouteKind::Responses),
+    ));
+}
+
+fn turn_state_request(turn_state: &str, full_history: bool) -> RuntimeProxyRequest {
+    let input = if full_history {
+        serde_json::json!([
+            {"type":"message","role":"user","content":"compacted history"},
+            {"type":"message","role":"assistant","content":"completed work"},
+            {"type":"message","role":"user","content":"continue"},
+        ])
+    } else {
+        serde_json::json!([
+            {"type":"message","role":"user","content":"continue"},
+        ])
+    };
+    RuntimeProxyRequest {
+        method: "POST".to_string(),
+        path_and_query: "/backend-api/codex/responses".to_string(),
+        headers: vec![
+            ("Content-Type".to_string(), "application/json".to_string()),
+            ("x-codex-turn-state".to_string(), turn_state.to_string()),
+        ],
+        body: serde_json::json!({
+            "model": "gpt-6-luna",
+            "input": input,
+            "client_metadata": {"x-codex-turn-state": turn_state},
+        })
+        .to_string()
+        .into_bytes(),
+    }
+}
+
+#[test]
+fn responses_post_compaction_turn_state_usage_limit_replays_to_ready_profile_without_user_error() {
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::usage_limit_429(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+        ]));
+    let ready = runtime_usage_snapshot(
+        quota_window_ready(80, 3_600),
+        quota_window_ready(80, 86_400),
+    );
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot("main", ready.clone())
+        .profile_usage_snapshot("second", ready)
+        .build();
+    let turn_state = "turn-post-compact-http";
+    bind_hard_affinity_turn_state(&harness, turn_state);
+
+    let request = turn_state_request(turn_state, true);
+    assert!(
+        runtime_proxy_crate::runtime_request_has_reconstructable_full_history(&request),
+        "regression must exercise a replayable post-compaction full-history request"
+    );
+    let response = proxy_runtime_responses_request(95, &request, harness.shared())
+        .expect("post-compaction quota should replay on the healthy profile");
+    let (status, body) = match response {
+        RuntimeResponsesReply::Buffered(parts) => (
+            parts.status,
+            String::from_utf8(parts.body.into_vec()).expect("response body should decode"),
+        ),
+        RuntimeResponsesReply::Streaming(mut response) => {
+            let mut body = String::new();
+            response
+                .body
+                .read_to_string(&mut body)
+                .expect("streaming response should decode");
+            (response.status, body)
+        }
+    };
+
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        !body.contains("usage_limit_reached") && !body.contains("usage limit"),
+        "recoverable quota must not leak to the HTTP client: {body}"
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
+    );
+    let headers = backend.responses_headers();
+    assert_eq!(headers.len(), 2, "{headers:?}");
+    assert!(
+        !headers[1].contains_key("x-codex-turn-state"),
+        "rotated HTTP replay must scrub the dead sticky token: {headers:?}"
+    );
+    let bodies = backend.responses_bodies();
+    assert_eq!(bodies.len(), 2, "{bodies:?}");
+    let replay: serde_json::Value =
+        serde_json::from_str(&bodies[1]).expect("replay body should be JSON");
+    assert_eq!(
+        replay
+            .get("client_metadata")
+            .and_then(|metadata| metadata.get("x-codex-turn-state")),
+        None
+    );
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+    assert!(
+        log.contains("quota_blocked_turn_state_full_context_replay")
+            && !log.contains("upstream_usage_limit_passthrough"),
+        "{log}"
+    );
+}
+
+#[test]
+fn responses_turn_state_quota_without_full_history_stays_fail_closed() {
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::usage_limit_429(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+        ]));
+    let ready = runtime_usage_snapshot(
+        quota_window_ready(80, 3_600),
+        quota_window_ready(80, 86_400),
+    );
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot("main", ready.clone())
+        .profile_usage_snapshot("second", ready)
+        .build();
+    let turn_state = "turn-nonreplayable-http";
+    bind_hard_affinity_turn_state(&harness, turn_state);
+
+    let request = turn_state_request(turn_state, false);
+    assert!(
+        !runtime_proxy_crate::runtime_request_has_reconstructable_full_history(&request),
+        "negative control must remain context-dependent"
+    );
+    let response = proxy_runtime_responses_request(96, &request, harness.shared())
+        .expect("unsafe replay must return the real quota failure");
+    let RuntimeResponsesReply::Buffered(parts) = response else {
+        panic!("terminal quota failure should remain buffered");
+    };
+    let status = parts.status;
+    let body = String::from_utf8(parts.body.into_vec()).expect("quota body should decode");
+    assert_eq!(status, 429, "{body}");
+    assert!(body.contains("usage limit"), "{body}");
+    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
+    assert!(log.contains("upstream_usage_limit_passthrough"), "{log}");
+}
+
+
 fn hard_affinity_continuation_request(response_id: &str) -> RuntimeProxyRequest {
     RuntimeProxyRequest {
         method: "POST".to_string(),
