@@ -1899,6 +1899,21 @@ export function findViolations(files) {
         violations.push(`${filePath}: selection label adapter must retain ${marker}`);
       }
     }
+    if (!contents.includes("pub use prodex_mojo_core::runtime::{")) {
+      violations.push(`${filePath}: WebSocket selection result types must be re-exported from prodex-mojo-core`);
+    }
+    for (const localMirror of [
+      "pub enum RuntimeWebsocketTransportFailurePlan",
+      "pub struct RuntimeWebsocketFailureDispositionPlan",
+      "pub enum RuntimeWebsocketInvalidPreviousResponseAction",
+      "pub enum RuntimeWebsocketChainReuseReason",
+      "pub struct RuntimeWebsocketInvalidPreviousResponsePlan",
+      "pub enum RuntimeWebsocketQuotaFallbackPlan",
+    ]) {
+      if (contents.includes(localMirror)) {
+        violations.push(`${filePath}: contains restored Rust WebSocket selection type mirror ${localMirror}`);
+      }
+    }
     return violations;
   });
   const runtimeStateBackgroundViolations = files.flatMap(([filePath, contents]) => {
