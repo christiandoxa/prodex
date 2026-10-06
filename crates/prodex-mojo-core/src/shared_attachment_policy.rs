@@ -43,13 +43,18 @@ fn call(operation: i64, input: &str, cursor: usize) -> Result<[i64; 3], MojoErro
     Ok(output)
 }
 
-fn optional_range(output: [i64; 3], input: &str) -> Result<Option<(usize, usize)>, MojoError> {
+fn optional_range(
+    output: [i64; 3],
+    input: &str,
+    minimum_start: usize,
+) -> Result<Option<(usize, usize)>, MojoError> {
     match output[0] {
         0 => Ok(None),
         1 => {
             let start = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
             let end = usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?;
-            if start > end
+            if start < minimum_start
+                || start > end
                 || end > input.len()
                 || !input.is_char_boundary(start)
                 || !input.is_char_boundary(end)
@@ -71,21 +76,21 @@ fn bool_output(output: [i64; 3]) -> Result<bool, MojoError> {
 }
 
 pub fn image_tag_path_range(tag: &str) -> Result<Option<(usize, usize)>, MojoError> {
-    optional_range(call(IMAGE_TAG_RANGE, tag, 0)?, tag)
+    optional_range(call(IMAGE_TAG_RANGE, tag, 0)?, tag, 0)
 }
 
 pub fn next_clipboard_path(
     contents: &str,
     cursor: usize,
 ) -> Result<Option<(usize, usize)>, MojoError> {
-    optional_range(call(CLIPBOARD_RANGE, contents, cursor)?, contents)
+    optional_range(call(CLIPBOARD_RANGE, contents, cursor)?, contents, cursor)
 }
 
 pub fn next_attachment_path(
     contents: &str,
     cursor: usize,
 ) -> Result<Option<(usize, usize)>, MojoError> {
-    optional_range(call(ATTACHMENT_RANGE, contents, cursor)?, contents)
+    optional_range(call(ATTACHMENT_RANGE, contents, cursor)?, contents, cursor)
 }
 
 pub fn clipboard_file_name(file_name: &str) -> Result<bool, MojoError> {
@@ -124,6 +129,22 @@ mod tests {
         assert_eq!(
             &attachment[range.0..range.1],
             "/tmp/attachments/thread/image-a.png"
+        );
+
+        let adjacent_escaped =
+            r#"/tmp/attachments/first/image-1.png\n/tmp/attachments/second/image-2.png"#;
+        let first = next_attachment_path(adjacent_escaped, 0).unwrap().unwrap();
+        assert_eq!(
+            &adjacent_escaped[first.0..first.1],
+            "/tmp/attachments/first/image-1.png"
+        );
+        let second = next_attachment_path(adjacent_escaped, first.1)
+            .unwrap()
+            .unwrap();
+        assert!(second.0 >= first.1);
+        assert_eq!(
+            &adjacent_escaped[second.0..second.1],
+            "/tmp/attachments/second/image-2.png"
         );
 
         assert!(clipboard_file_name("codex-clipboard-a.png").unwrap());

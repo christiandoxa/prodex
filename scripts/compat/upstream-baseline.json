@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.160.0 release",
+      "baseline_source": "openai/codex rust-v0.160.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -933,6 +933,20 @@
             "environment_selections: None",
             "inherited_environments,",
             "resume_thread_with_history_with_source"
+          ]
+        },
+        {
+          "path": "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
+          "reason": "Codex 0.160.1 remote stdio MCP launchers with explicit remote environment variables must preserve Windows executor bootstrap and temporary-directory variables without broadening the allowlist to unrelated secrets.",
+          "required_contains": [
+            "fn remote_env_policy(remote_env_vars: &[String])",
+            "crate::utils::DEFAULT_ENV_VARS",
+            ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
+            "remote_env_vars.iter().cloned()",
+            "include_only,",
+            "env.get(\"SystemRoot\")",
+            "for name in [\"TEMP\", \"TMP\"]",
+            "env.get(\"REMOTE_TOKEN\")"
           ]
         }
       ],
@@ -2037,9 +2051,25 @@
             "inherited_environments,",
             "resume_thread_with_history_with_source"
           ]
+        },
+        {
+          "id": "rmcp.remote-stdio-windows-bootstrap-env",
+          "kind": "remote_mcp_environment",
+          "file": "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
+          "reason": "Remote stdio MCP allowlists must retain SYSTEMROOT/TEMP/TMP on Windows executors while still filtering unrequested environment variables.",
+          "file_contains_all": [
+            "fn remote_env_policy(remote_env_vars: &[String])",
+            "crate::utils::DEFAULT_ENV_VARS",
+            ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
+            "remote_env_vars.iter().cloned()",
+            "include_only,",
+            "env.get(\"SystemRoot\")",
+            "for name in [\"TEMP\", \"TMP\"]",
+            "env.get(\"REMOTE_TOKEN\")"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.160.0",
+      "tested_codex_release": "rust-v0.160.1",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -2358,6 +2388,22 @@
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.160.0 without changing Prodex model transport. Guard authoritative provider catalogs, provider/history restoration, projectless workspace defaults, saved permission restoration, and pending subagent environment inheritance while retaining the 0.159.3 authenticated security-reminder boundary.",
           "compatibility_evidence": "Exact 0.159.3 and 0.160.0 tagged source archives, 0.160.0 release/tag metadata, full critical/semantic marker replay with zero misses, official Linux musl CLI and app-server checksum/version verification, and isolated app-server initialize are recorded in migration/codex-rust-v0.160.0-audit.md."
+        },
+        {
+          "from": "rust-v0.160.0",
+          "to": "rust-v0.160.1",
+          "upstream_commit": "d27764b82f7118f674371e6d6e76271d9d606edb",
+          "upstream_tag_object": "c3e23d4c4385619ecec78408766e46b7fa7dd9ad",
+          "upstream_pr": "#51121",
+          "upstream_release_date": "2026-10-05T18:29:37Z",
+          "tree_comparison": "exact tagged source archives; 2 changed files, 24 additions, 1 deletion",
+          "runtime_changes": [
+            "Remote stdio MCP launchers that request explicit remote environment variables now preserve SYSTEMROOT, TEMP, and TMP alongside the default allowlist so a Unix orchestrator can launch MCP processes on a Windows executor.",
+            "The allowlist still excludes unrelated remote environment variables; the upstream regression proves an unrequested secret does not pass through.",
+            "Responses HTTP/WebSocket routing, model/provider catalogs, quota/error/session recovery, app-server protocol, security reminders, and 0.160.0 environment inheritance contracts are otherwise unchanged."
+          ],
+          "prodex_action": "Advance the tested Codex baseline to 0.160.1, guard the remote stdio MCP Windows bootstrap environment allowlist, and keep Prodex routing/auth/quota/session behavior unchanged.",
+          "compatibility_evidence": "Exact 0.160.0 and 0.160.1 tagged source archives, GitHub release/tag metadata, upstream remote-MCP semantic markers, official Linux musl CLI and app-server checksum/version verification, isolated app-server initialize, and Prodex compatibility guards are recorded in migration/codex-rust-v0.160.1-audit.md."
         }
       ],
       "app_server_protocol": {
@@ -2380,23 +2426,15 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.160.0",
-      "name": "0.160.0",
-      "published_at": "2026-10-01T20:19:13Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.160.0",
+      "tag_name": "rust-v0.160.1",
+      "name": "0.160.1",
+      "published_at": "2026-10-05T18:29:37Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.160.1",
       "body_head": [
-        "## New Features",
-        "- Browse older tasks in the agent command center with a keyboard-accessible “Show more” action. (#49106)",
-        "- Select transcript text and paste with middle-click in fullscreen mode on supported local Linux X11 terminals. (#49112)",
-        "- Start sessions outside a project with workspace defaults when policy permits, and restore saved permissions when resuming. (#49160)",
-        "- Added opt-in Guardian review capabilities to retrieve earlier user instructions and include context from agent handoffs. (#49036, #49057)",
         "## Bug Fixes",
-        "- Unsent queued messages now resume after reconnection once uncertain submissions are resolved, avoiding duplicate sends. (#49105)",
-        "- The terminal UI now preserves server provider, reasoning-summary, and verbosity settings and shows the correct sessions in resume and fork history. (#49144, #49161, #49171)",
-        "- Subagents now retain environments that are still starting and receive their configuration or preparation failure. (#49075)",
-        "- Explicit provider model catalogs no longer include unsupported bundled models or reuse stale entries after refresh failures. (#49135)",
+        "- Preserve `SYSTEMROOT`, `TEMP`, and `TMP` when launching remote stdio MCP servers with explicitly configured remote environment variables, allowing Unix hosts to retain the Windows executor's startup environment.",
         "## Changelog",
-        "Full Changelog: https://github.com/openai/codex/compare/rust-v0.159.0...rust-v0.160.0"
+        "- [#51121](https://github.com/openai/codex/pull/51121): Backport Windows remote MCP environment preservation to 0.160."
       ]
     }
   },

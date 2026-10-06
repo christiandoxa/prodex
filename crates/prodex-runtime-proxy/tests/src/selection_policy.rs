@@ -805,8 +805,11 @@ fn websocket_failure_disposition_is_mojo_authoritative() {
     assert!(runtime_websocket_full_context_signal_eligible(
         true, true, true
     ));
-    assert!(!runtime_websocket_full_context_signal_eligible(
+    assert!(runtime_websocket_full_context_signal_eligible(
         true, false, true
+    ));
+    assert!(!runtime_websocket_full_context_signal_eligible(
+        true, true, false
     ));
     assert_eq!(
         runtime_websocket_quota_fallback_plan(true, true),

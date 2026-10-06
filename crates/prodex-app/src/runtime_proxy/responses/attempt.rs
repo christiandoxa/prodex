@@ -149,7 +149,7 @@ pub(super) fn handle_runtime_responses_success(
 
 pub(super) fn handle_runtime_responses_overloaded_attempt(
     context: &RuntimeResponsesRequestContext<'_>,
-    affinity_state: &RuntimeResponsesAffinityState,
+    affinity_state: &mut RuntimeResponsesAffinityState,
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
     profile_name: String,
     response: RuntimeResponsesReply,
@@ -159,6 +159,11 @@ pub(super) fn handle_runtime_responses_overloaded_attempt(
         shared: context.shared,
         profile_name,
         response,
+        prompt_cache_key: context.prompt_cache_key,
+        previous_response_id: context.previous_response_id,
+        request_turn_state: context.request_turn_state,
+        request_session_id: context.request_session_id,
+        request_model_name: context.request_model_name.as_deref(),
         affinity_state,
         excluded_profiles: &mut loop_state.excluded_profiles,
         last_failure: &mut loop_state.last_failure,
@@ -184,6 +189,32 @@ pub(super) fn handle_runtime_responses_auth_failed(
         context.request_requires_previous_response_affinity,
         context.previous_response_fresh_fallback_shape,
     ) {
+        if runtime_responses_full_context_retry_available(
+            context.shared,
+            &profile_name,
+            context.prompt_cache_key,
+            context.previous_response_id,
+            context.request_session_id,
+            context.request_model_name.as_deref(),
+            &loop_state.excluded_profiles,
+        )? {
+            let released_affinity = release_runtime_auth_failed_affinity(
+                context.shared,
+                &profile_name,
+                context.previous_response_id,
+                context.request_turn_state,
+                context.request_session_id,
+            )?;
+            affinity_state.clear_profile_affinity(&profile_name, true);
+            runtime_proxy_log(
+                context.shared,
+                format!(
+                    "request={} transport=http auth_failed_full_context_retry_signal profile={profile_name} affinity_released={released_affinity}",
+                    context.request_id
+                ),
+            );
+            return Ok(Some(runtime_responses_full_context_retry_reply()));
+        }
         runtime_proxy_log(
             context.shared,
             format!(

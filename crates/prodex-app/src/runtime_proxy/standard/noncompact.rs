@@ -569,15 +569,16 @@ fn handle_runtime_noncompact_attempt(
             profile_name,
             response,
             retry_after,
-        } => handle_runtime_noncompact_rate_limited(
+        } => handle_runtime_noncompact_rate_limited(RuntimeNoncompactRateLimitedContext {
             request_id,
             shared,
+            request_session_id,
             session_profile,
             loop_state,
             profile_name,
             response,
             retry_after,
-        ),
+        }),
         RuntimeStandardAttempt::RetryableFailure {
             profile_name,
             response,
@@ -598,6 +599,7 @@ fn handle_runtime_noncompact_attempt(
         } => handle_runtime_noncompact_profile_unavailable(
             request_id,
             shared,
+            request_session_id,
             session_profile,
             loop_state,
             profile_name,
@@ -622,6 +624,7 @@ fn handle_runtime_noncompact_attempt(
                     "request={request_id} transport=http local_selection_blocked profile={profile_name} route=standard reason=quota_exhausted_before_send"
                 ),
             );
+            let session_owned = session_profile.as_deref() == Some(profile_name.as_str());
             let plan = runtime_noncompact_failure_plan(
                 prodex_mojo_core::runtime::NoncompactFailureKind::LocalBlocked,
                 session_profile,
@@ -630,6 +633,15 @@ fn handle_runtime_noncompact_attempt(
                 false,
             );
             if plan.clear_session {
+                if session_owned && let Some(session_id) = request_session_id {
+                    let _ = release_runtime_quota_blocked_affinity(
+                        shared,
+                        &profile_name,
+                        None,
+                        None,
+                        Some(session_id),
+                    )?;
+                }
                 clear_noncompact_session_profile(session_profile, &profile_name);
             }
             if plan.exclude_profile {
@@ -657,6 +669,7 @@ fn handle_runtime_noncompact_attempt(
                     "request={request_id} transport=http standard_transport_failure profile={profile_name} stage={stage}"
                 ),
             );
+            let session_owned = session_profile.as_deref() == Some(profile_name.as_str());
             let plan = runtime_noncompact_failure_plan(
                 prodex_mojo_core::runtime::NoncompactFailureKind::Transport,
                 session_profile,
@@ -669,6 +682,19 @@ fn handle_runtime_noncompact_attempt(
                     503,
                     runtime_proxy_local_selection_failure_message(),
                 )));
+            }
+            if plan.clear_session {
+                if session_owned && let Some(session_id) = request_session_id {
+                    let _ = release_runtime_retryable_failure_affinity(
+                        shared,
+                        &profile_name,
+                        None,
+                        None,
+                        Some(session_id),
+                        "standard_transport",
+                    )?;
+                }
+                clear_noncompact_session_profile(session_profile, &profile_name);
             }
             if plan.record_transport_failure {
                 loop_state.record_transport_failure_at(stage);

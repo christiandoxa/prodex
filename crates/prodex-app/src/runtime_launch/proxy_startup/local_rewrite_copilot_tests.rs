@@ -651,8 +651,8 @@ fn copilot_bound_endpoint_mismatch_fails_closed() {
 }
 
 #[test]
-fn copilot_generic_429_is_not_precommit_retryable() {
-    assert!(!runtime_copilot_provider_retry_precommit(
+fn copilot_generic_429_is_precommit_retryable() {
+    assert!(runtime_copilot_provider_retry_precommit(
         ProviderRetryCause::RotateCredential,
         RuntimeProviderErrorClass::RateLimit,
         429,

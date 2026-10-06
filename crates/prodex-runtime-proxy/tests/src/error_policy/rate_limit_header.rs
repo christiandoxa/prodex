@@ -56,16 +56,16 @@ fn official_workspace_limit_headers_are_quota_evidence() {
 }
 
 #[test]
-fn unknown_rate_limit_reached_header_remains_generic() {
+fn unknown_rate_limit_reached_header_falls_back_to_retryable_429() {
     let policy = runtime_http_error_policy_with_headers(
         429,
         br#"{"error":{"message":"Too Many Requests"}}"#,
         [("X-Codex-Rate-Limit-Reached-Type", b"future_kind".as_slice())],
         RuntimeHttpErrorPhase::PreCommit,
     );
-    assert_eq!(policy.class, RuntimeHttpErrorClass::Other);
-    assert_eq!(policy.action, RuntimeHttpErrorAction::PassThrough);
-    assert_eq!(policy.rule, None);
+    assert_eq!(policy.class, RuntimeHttpErrorClass::RateLimited);
+    assert_eq!(policy.action, RuntimeHttpErrorAction::RetryProfile);
+    assert_eq!(policy.rule, Some("rate_limited"));
 }
 
 #[test]
@@ -114,7 +114,7 @@ fn official_rate_limit_header_preserves_class_after_commit_without_retry() {
 }
 
 #[test]
-fn rate_limit_header_ignores_other_statuses_and_invalid_utf8() {
+fn rate_limit_header_ignores_invalid_values_without_disabling_base_429_retry() {
     for (status, value) in [
         (403, b"workspace_member_credits_depleted".as_slice()),
         (429, b"\xff".as_slice()),
@@ -125,13 +125,23 @@ fn rate_limit_header_ignores_other_statuses_and_invalid_utf8() {
             [("X-Codex-Rate-Limit-Reached-Type", value)],
             RuntimeHttpErrorPhase::PreCommit,
         );
-        assert_eq!(policy.class, RuntimeHttpErrorClass::Other, "{status}");
-        assert_eq!(
-            policy.action,
-            RuntimeHttpErrorAction::PassThrough,
-            "{status}"
-        );
-        assert_eq!(policy.rule, None, "{status}");
+        if status == 429 {
+            assert_eq!(policy.class, RuntimeHttpErrorClass::RateLimited, "{status}");
+            assert_eq!(
+                policy.action,
+                RuntimeHttpErrorAction::RetryProfile,
+                "{status}"
+            );
+            assert_eq!(policy.rule, Some("rate_limited"), "{status}");
+        } else {
+            assert_eq!(policy.class, RuntimeHttpErrorClass::Other, "{status}");
+            assert_eq!(
+                policy.action,
+                RuntimeHttpErrorAction::PassThrough,
+                "{status}"
+            );
+            assert_eq!(policy.rule, None, "{status}");
+        }
     }
 }
 

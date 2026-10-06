@@ -377,6 +377,7 @@ pub(crate) fn release_runtime_session_affinity(
 enum RuntimeAffinityReleaseReason {
     Quota,
     AuthFailed,
+    RetryableFailure(&'static str),
     SessionRotation,
 }
 
@@ -385,6 +386,7 @@ impl RuntimeAffinityReleaseReason {
         match self {
             Self::Quota => "quota",
             Self::AuthFailed => "auth_failed",
+            Self::RetryableFailure(reason) => reason,
             Self::SessionRotation => "session_rotation",
         }
     }
@@ -393,6 +395,9 @@ impl RuntimeAffinityReleaseReason {
         match self {
             Self::Quota => RuntimeStateMutation::QuotaRelease(profile_name.to_string()),
             Self::AuthFailed => RuntimeStateMutation::AuthFailedRelease(profile_name.to_string()),
+            Self::RetryableFailure(reason) => {
+                RuntimeStateMutation::SessionAffinityRelease(reason.to_string())
+            }
             Self::SessionRotation => {
                 RuntimeStateMutation::SessionAffinityRelease("selection_rotation".to_string())
             }
@@ -454,6 +459,24 @@ pub(crate) fn release_runtime_auth_failed_affinity(
         turn_state,
         session_id,
         RuntimeAffinityReleaseReason::AuthFailed,
+    )
+}
+
+pub(crate) fn release_runtime_retryable_failure_affinity(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    previous_response_id: Option<&str>,
+    turn_state: Option<&str>,
+    session_id: Option<&str>,
+    reason: &'static str,
+) -> Result<bool> {
+    release_runtime_profile_affinity(
+        shared,
+        profile_name,
+        previous_response_id,
+        turn_state,
+        session_id,
+        RuntimeAffinityReleaseReason::RetryableFailure(reason),
     )
 }
 

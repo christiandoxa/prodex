@@ -65,6 +65,7 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/tui/src/resume_permissions.rs",
   "codex-rs/core/src/session/environment.rs",
   "codex-rs/core/src/agent/control/spawn.rs",
+  "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -735,6 +736,16 @@ const REQUIRED_FILE_CONTAINS = {
     "environment_selections: None",
     "inherited_environments,",
     "resume_thread_with_history_with_source",
+  ],
+  "codex-rs/rmcp-client/src/stdio_server_launcher.rs": [
+    "fn remote_env_policy(remote_env_vars: &[String])",
+    "crate::utils::DEFAULT_ENV_VARS",
+    '.chain(["SYSTEMROOT", "TEMP", "TMP"].iter())',
+    "remote_env_vars.iter().cloned()",
+    "include_only,",
+    'env.get("SystemRoot")',
+    'for name in ["TEMP", "TMP"]',
+    'env.get("REMOTE_TOKEN")',
   ],
 
 };
@@ -1670,6 +1681,21 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "environment_selections: None",
       "inherited_environments,",
       "resume_thread_with_history_with_source",
+    ],
+  },
+  {
+    id: "rmcp.remote-stdio-windows-bootstrap-env",
+    kind: "remote_mcp_environment",
+    file: "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
+    file_contains_all: [
+      "fn remote_env_policy(remote_env_vars: &[String])",
+      "crate::utils::DEFAULT_ENV_VARS",
+      '.chain(["SYSTEMROOT", "TEMP", "TMP"].iter())',
+      "remote_env_vars.iter().cloned()",
+      "include_only,",
+      'env.get("SystemRoot")',
+      'for name in ["TEMP", "TMP"]',
+      'env.get("REMOTE_TOKEN")',
     ],
   },
 

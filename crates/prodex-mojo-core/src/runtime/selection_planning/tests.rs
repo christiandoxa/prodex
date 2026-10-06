@@ -222,9 +222,11 @@ mod noncompact_failure_plan_tests {
         let rate_owned =
             noncompact_failure_plan(NoncompactFailureKind::RateLimited, true, false, false)
                 .unwrap();
-        assert!(rate_owned.terminal);
+        assert!(!rate_owned.terminal);
         assert!(rate_owned.mark_backoff);
-        assert!(!rate_owned.exclude_profile);
+        assert!(rate_owned.clear_session);
+        assert!(rate_owned.exclude_profile);
+        assert!(rate_owned.store_last_failure);
 
         let retry_no_fallback =
             noncompact_failure_plan(NoncompactFailureKind::Retryable, false, false, false).unwrap();
@@ -240,7 +242,9 @@ mod noncompact_failure_plan_tests {
 
         let transport_owned =
             noncompact_failure_plan(NoncompactFailureKind::Transport, true, false, false).unwrap();
-        assert!(transport_owned.terminal);
-        assert!(!transport_owned.record_transport_failure);
+        assert!(!transport_owned.terminal);
+        assert!(transport_owned.clear_session);
+        assert!(transport_owned.exclude_profile);
+        assert!(transport_owned.record_transport_failure);
     }
 }

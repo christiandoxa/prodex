@@ -16,10 +16,7 @@ fn responses_hard_affinity_reaches_upstream_despite_persisted_exhaustion() {
         )
         .profile_usage_snapshot(
             "second",
-            runtime_usage_snapshot(
-                quota_window_ready(82, 3600),
-                quota_window_ready(83, 86_400),
-            ),
+            runtime_usage_snapshot(quota_window_ready(82, 3600), quota_window_ready(83, 86_400)),
         )
         .build();
     let request = RuntimeProxyRequest {
@@ -51,7 +48,10 @@ fn responses_hard_affinity_reaches_upstream_despite_persisted_exhaustion() {
         }
         _ => panic!("expected the upstream quota response"),
     }
-    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string()]
+    );
 }
 
 #[test]
@@ -167,10 +167,12 @@ fn response_affinity_touch_persists_recent_use_for_housekeeping() {
             .get("resp-main")
             .is_some_and(|binding| binding.bound_at > stale_touch)
     });
-    assert!(persisted
-        .response_profile_bindings
-        .get("resp-main")
-        .is_some_and(|binding| binding.bound_at > stale_touch));
+    assert!(
+        persisted
+            .response_profile_bindings
+            .get("resp-main")
+            .is_some_and(|binding| binding.bound_at > stale_touch)
+    );
 }
 
 #[test]
@@ -551,7 +553,7 @@ fn session_affinity_ignores_stale_verified_continuation_status_for_owner() {
                 "sess-main".to_string(),
                 ResponseProfileBinding {
                     binding_identity: None,
-                profile_name: "main".to_string(),
+                    profile_name: "main".to_string(),
                     bound_at: stale_at,
                 },
             )]),

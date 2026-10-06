@@ -315,7 +315,7 @@ fn compact_final_failure_logs_quota_terminal_reason() {
                 "sess-main".to_string(),
                 ResponseProfileBinding {
                     binding_identity: None,
-                profile_name: "main".to_string(),
+                    profile_name: "main".to_string(),
                     bound_at: Local::now().timestamp(),
                 },
             )]),
@@ -438,7 +438,7 @@ fn session_affinity_compact_quota_rotates_to_ready_profile() {
                 "sess-main".to_string(),
                 ResponseProfileBinding {
                     binding_identity: None,
-                profile_name: "main".to_string(),
+                    profile_name: "main".to_string(),
                     bound_at: Local::now().timestamp(),
                 },
             )]),
@@ -491,9 +491,11 @@ fn session_affinity_compact_quota_rotates_to_ready_profile() {
     );
     let runtime = shared.runtime.lock().expect("runtime state should lock");
     assert!(!runtime.turn_state_bindings.contains_key("turn-main"));
-    assert!(!runtime
-        .turn_state_bindings
-        .contains_key(&runtime_compact_turn_state_lineage_key("turn-main")));
+    assert!(
+        !runtime
+            .turn_state_bindings
+            .contains_key(&runtime_compact_turn_state_lineage_key("turn-main"))
+    );
     assert_eq!(
         runtime.session_id_bindings["sess-main"].profile_name,
         "second"
@@ -762,7 +764,9 @@ fn compact_capacity_saturation_retries_across_epoch_until_profile_relieves() {
         "local capacity saturation must not leak while a profile still has quota: {body}"
     );
 
-    release.join().expect("compact permit release should finish");
+    release
+        .join()
+        .expect("compact permit release should finish");
     drop(main_guards);
     drop(second_guards);
 }

@@ -147,6 +147,16 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         label: "admission-pre-send",
       },
       {
+        id: "admission-hard-affinity-replay",
+        filter: `${ADMISSION_PREFIX}hard_affinity_replay::`,
+        label: "admission-hard-affinity-replay",
+      },
+      {
+        id: "admission-standard-session-recovery",
+        filter: `${ADMISSION_PREFIX}standard_session_recovery::`,
+        label: "admission-standard-session-recovery",
+      },
+      {
         id: "admission-previous-response",
         filter: `${ADMISSION_PREFIX}previous_response::`,
         label: "admission-previous-response",
@@ -624,7 +634,7 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
-    name: "runtime_proxy_http_quota_does_not_fresh_fallback_tool_output_only_requests",
+    name: "runtime_proxy_http_quota_signals_full_context_replay_for_tool_output_only_requests",
     tags: SERIALIZED_TAGS,
   },
   {

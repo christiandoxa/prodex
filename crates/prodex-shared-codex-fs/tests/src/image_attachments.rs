@@ -783,6 +783,9 @@ fn persist_codex_session_attachment_paths_stop_at_escaped_json_newline() {
     assert!(!text.contains("deleted-overlay"), "{text}");
 }
 
+#[path = "image_attachments/scanner_regressions.rs"]
+mod scanner_regressions;
+
 #[test]
 fn persist_codex_session_pasted_text_rewrites_to_existing_stable_copy_when_source_is_gone() {
     let temp_dir = ImageAttachmentTestDir::new("pasted-text-source-gone");

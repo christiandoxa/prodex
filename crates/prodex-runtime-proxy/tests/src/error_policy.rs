@@ -1,6 +1,8 @@
 use super::*;
 use std::time::Duration;
 
+#[path = "error_policy/generic_429.rs"]
+mod generic_429_tests;
 #[path = "error_policy/rate_limit_header.rs"]
 mod rate_limit_header_tests;
 #[path = "error_policy/signal.rs"]
@@ -45,65 +47,6 @@ fn explicit_quota_payload(code: &str, message: &str, shape: u8) -> serde_json::V
             ],
         }),
         _ => unreachable!(),
-    }
-}
-
-#[test]
-fn generic_429_payload_corpus_never_rotates_without_explicit_quota_code() {
-    let cases = [
-        ("", None, None, ""),
-        ("Too Many Requests", None, None, "retry later"),
-        ("The usage limit has been reached", Some("quota"), None, ""),
-        (
-            "Quota exhausted",
-            Some("too_many_requests"),
-            Some("rate_limit"),
-            "plain rate limit type is not enough",
-        ),
-        ("rate limit exceeded words", None, Some("server_error"), ""),
-        (
-            "The docs mention rate_limit_exceeded and insufficient_quota.",
-            None,
-            None,
-            "non-error prose",
-        ),
-        (
-            "generic punctuation .,!?",
-            Some("usage_limit"),
-            Some("insufficient"),
-            "near misses",
-        ),
-    ];
-
-    for (message, code, error_type, detail) in cases {
-        let body = json_body(serde_json::json!({
-            "error": {
-                "code": code,
-                "type": error_type,
-                "message": message,
-                "detail": detail,
-            },
-        }));
-
-        for phase in [
-            RuntimeHttpErrorPhase::PreCommit,
-            RuntimeHttpErrorPhase::Committed,
-        ] {
-            let policy = runtime_http_error_policy(429, &body, phase);
-
-            assert_eq!(
-                policy.class,
-                RuntimeHttpErrorClass::Other,
-                "{message} {phase:?}"
-            );
-            assert_eq!(
-                policy.action,
-                RuntimeHttpErrorAction::PassThrough,
-                "{message} {phase:?}"
-            );
-            assert_eq!(policy.rule, None, "{message} {phase:?}");
-            assert_eq!(policy.message, None, "{message} {phase:?}");
-        }
     }
 }
 
@@ -160,9 +103,9 @@ fn explicit_quota_payload_corpus_rotates_only_before_commit_for_supported_status
                 let precommit =
                     runtime_http_error_policy(status, &body, RuntimeHttpErrorPhase::PreCommit);
                 if status == 429 && shape % 5 == 2 {
-                    assert_eq!(precommit.class, RuntimeHttpErrorClass::Other);
-                    assert_eq!(precommit.action, RuntimeHttpErrorAction::PassThrough);
-                    assert_eq!(precommit.rule, None);
+                    assert_eq!(precommit.class, RuntimeHttpErrorClass::RateLimited);
+                    assert_eq!(precommit.action, RuntimeHttpErrorAction::RetryProfile);
+                    assert_eq!(precommit.rule, Some("rate_limited"));
                     continue;
                 }
                 assert_eq!(precommit.class, RuntimeHttpErrorClass::Quota);
@@ -206,8 +149,8 @@ fn deactivated_workspace_rotates_only_before_commit_for_profile_statuses() {
     }
 
     let generic_429 = runtime_http_error_policy(429, &body, RuntimeHttpErrorPhase::PreCommit);
-    assert_eq!(generic_429.class, RuntimeHttpErrorClass::Other);
-    assert_eq!(generic_429.action, RuntimeHttpErrorAction::PassThrough);
+    assert_eq!(generic_429.class, RuntimeHttpErrorClass::RateLimited);
+    assert_eq!(generic_429.action, RuntimeHttpErrorAction::RetryProfile);
 }
 
 #[test]
@@ -296,127 +239,7 @@ fn http_error_policy_preserves_status_specific_rule_precedence() {
 }
 
 #[test]
-fn workspace_credit_message_does_not_make_a_generic_429_rotatable() {
-    let body = json_body(serde_json::json!({
-        "error": {
-            "message": "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
-        }
-    }));
-
-    for status in [402, 403] {
-        let precommit = runtime_http_error_policy(status, &body, RuntimeHttpErrorPhase::PreCommit);
-        assert_eq!(precommit.class, RuntimeHttpErrorClass::Quota, "{status}");
-        assert_eq!(
-            precommit.action,
-            RuntimeHttpErrorAction::RotateProfile,
-            "{status}"
-        );
-        assert_eq!(precommit.rule, Some("explicit_quota"), "{status}");
-        assert_eq!(
-            precommit.message.as_deref(),
-            Some(
-                "Your workspace is out of credits. Ask your workspace owner to refill in order to continue."
-            )
-        );
-
-        let committed = runtime_http_error_policy(status, &body, RuntimeHttpErrorPhase::Committed);
-        assert_eq!(committed.class, RuntimeHttpErrorClass::Quota, "{status}");
-        assert_eq!(
-            committed.action,
-            RuntimeHttpErrorAction::PassThrough,
-            "{status}"
-        );
-    }
-
-    for phase in [
-        RuntimeHttpErrorPhase::PreCommit,
-        RuntimeHttpErrorPhase::Committed,
-    ] {
-        let policy = runtime_http_error_policy(429, &body, phase);
-        assert_eq!(policy.class, RuntimeHttpErrorClass::Other);
-        assert_eq!(policy.action, RuntimeHttpErrorAction::PassThrough);
-        assert_eq!(policy.rule, None);
-    }
-}
-
-#[test]
-fn generic_429_passes_through_without_explicit_quota_code() {
-    let policy = runtime_http_error_policy(
-        429,
-        br#"{"error":{"message":"Too Many Requests"}}"#,
-        RuntimeHttpErrorPhase::PreCommit,
-    );
-
-    assert_eq!(policy.class, RuntimeHttpErrorClass::Other);
-    assert_eq!(policy.action, RuntimeHttpErrorAction::PassThrough);
-    assert_eq!(policy.rule, None);
-}
-
-#[test]
-fn generic_429_matrix_passes_through_without_explicit_quota_or_rate_limit_code() {
-    let bodies: [(&str, &[u8]); 11] = [
-        ("empty", b"" as &[u8]),
-        ("plain_too_many_requests", b"Too Many Requests" as &[u8]),
-        (
-            "json_too_many_requests",
-            br#"{"error":{"message":"Too Many Requests"}}"# as &[u8],
-        ),
-        (
-            "json_rate_limit_type_without_exceeded_code",
-            br#"{"error":{"type":"rate_limit","message":"Too Many Requests"}}"# as &[u8],
-        ),
-        (
-            "json_too_many_requests_code",
-            br#"{"error":{"code":"too_many_requests","message":"Too Many Requests"}}"# as &[u8],
-        ),
-        (
-            "json_quota_word_code",
-            br#"{"error":{"code":"quota","message":"Quota exhausted"}}"# as &[u8],
-        ),
-        (
-            "json_nested_generic_429",
-            br#"{"items":[{"error":{"status":429,"message":"Too Many Requests"}}]}"# as &[u8],
-        ),
-        ("plain_code_shaped_text", b"rate_limit_exceeded" as &[u8]),
-        (
-            "json_error_string",
-            br#"{"error":"rate_limit_exceeded"}"# as &[u8],
-        ),
-        (
-            "json_message_code_shaped_text",
-            br#"{"error":{"message":"insufficient_quota"}}"# as &[u8],
-        ),
-        (
-            "malformed_json_explicit_quota_code",
-            br#"{"error":{"code":"insufficient_quota"}"# as &[u8],
-        ),
-    ];
-
-    for phase in [
-        RuntimeHttpErrorPhase::PreCommit,
-        RuntimeHttpErrorPhase::Committed,
-    ] {
-        for (label, body) in bodies {
-            let policy = runtime_http_error_policy(429, body, phase);
-
-            assert_eq!(
-                policy.class,
-                RuntimeHttpErrorClass::Other,
-                "{label} {phase:?}"
-            );
-            assert_eq!(
-                policy.action,
-                RuntimeHttpErrorAction::PassThrough,
-                "{label} {phase:?}"
-            );
-            assert_eq!(policy.rule, None, "{label} {phase:?}");
-            assert_eq!(policy.message, None, "{label} {phase:?}");
-        }
-    }
-}
-
-#[test]
-fn usage_limit_message_rotates_before_commit_only_for_non_429_quota_statuses() {
+fn usage_limit_message_429_retries_precommit_when_not_authoritatively_classified() {
     let body = br#"{"error":{"message":"The usage limit has been reached"}}"#;
 
     for status in [402, 403] {
@@ -454,14 +277,21 @@ fn usage_limit_message_rotates_before_commit_only_for_non_429_quota_statuses() {
         RuntimeHttpErrorPhase::Committed,
     ] {
         let policy = runtime_http_error_policy(429, body, phase);
-        assert_eq!(policy.class, RuntimeHttpErrorClass::Other, "{phase:?}");
         assert_eq!(
-            policy.action,
-            RuntimeHttpErrorAction::PassThrough,
+            policy.class,
+            RuntimeHttpErrorClass::RateLimited,
             "{phase:?}"
         );
-        assert_eq!(policy.rule, None, "{phase:?}");
-        assert_eq!(policy.message, None, "{phase:?}");
+        assert_eq!(
+            policy.action,
+            if phase == RuntimeHttpErrorPhase::PreCommit {
+                RuntimeHttpErrorAction::RetryProfile
+            } else {
+                RuntimeHttpErrorAction::PassThrough
+            },
+            "{phase:?}"
+        );
+        assert_eq!(policy.rule, Some("rate_limited"), "{phase:?}");
     }
 }
 
@@ -502,7 +332,7 @@ fn explicit_quota_codes_rotate_only_before_commit() {
 }
 
 #[test]
-fn structured_sse_429_code_rotates_but_message_only_passes_through() {
+fn structured_sse_429_code_and_message_only_retry_before_commit() {
     let structured = br#"event: response.failed
 data: {"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","message":"Rate limit exceeded"}}}
 
@@ -518,8 +348,8 @@ data: {"type":"response.failed","response":{"error":{"message":"The usage limit 
 "#;
     let passthrough =
         runtime_http_error_policy(429, message_only, RuntimeHttpErrorPhase::PreCommit);
-    assert_eq!(passthrough.class, RuntimeHttpErrorClass::Other);
-    assert_eq!(passthrough.action, RuntimeHttpErrorAction::PassThrough);
+    assert_eq!(passthrough.class, RuntimeHttpErrorClass::RateLimited);
+    assert_eq!(passthrough.action, RuntimeHttpErrorAction::RetryProfile);
 }
 
 #[test]
@@ -754,8 +584,8 @@ fn failure_policy_is_transport_parity_safe_before_and_after_commit() {
             "generic_429",
             429,
             br#"{"error":{"message":"Too Many Requests"}}"#,
-            RuntimeHttpErrorClass::Other,
-            RuntimeHttpErrorAction::PassThrough,
+            RuntimeHttpErrorClass::RateLimited,
+            RuntimeHttpErrorAction::RetryProfile,
         ),
         (
             "explicit_quota",
@@ -799,19 +629,31 @@ fn failure_policy_is_transport_parity_safe_before_and_after_commit() {
                 | Surface::WebsocketHandshake => runtime_http_error_policy(status, body, phase),
             };
 
+            let statusless_stream_generic = label == "generic_429"
+                && matches!(surface, Surface::ResponsesSse | Surface::WebsocketMessage);
+            let expected_surface_class = if statusless_stream_generic {
+                RuntimeHttpErrorClass::Other
+            } else {
+                expected_class
+            };
+            let expected_surface_action = if statusless_stream_generic {
+                RuntimeHttpErrorAction::PassThrough
+            } else {
+                expected_precommit_action
+            };
             let precommit = classify(RuntimeHttpErrorPhase::PreCommit);
             assert_eq!(
-                precommit.class, expected_class,
+                precommit.class, expected_surface_class,
                 "{surface:?} {label} precommit class"
             );
             assert_eq!(
-                precommit.action, expected_precommit_action,
+                precommit.action, expected_surface_action,
                 "{surface:?} {label} precommit action"
             );
 
             let committed = classify(RuntimeHttpErrorPhase::Committed);
             assert_eq!(
-                committed.class, expected_class,
+                committed.class, expected_surface_class,
                 "{surface:?} {label} committed class"
             );
             assert_eq!(

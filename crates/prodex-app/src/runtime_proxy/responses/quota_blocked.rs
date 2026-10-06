@@ -2,6 +2,133 @@
 
 use super::*;
 
+pub(super) fn runtime_responses_full_context_retry_reply() -> RuntimeResponsesReply {
+    RuntimeResponsesReply::Buffered(build_runtime_proxy_json_error_parts(
+        400,
+        "previous_response_not_found",
+        "Previous response was not found. Retrying the full request.",
+    ))
+}
+
+fn runtime_responses_full_context_fallback_available(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    prompt_cache_key: Option<&str>,
+    excluded_profiles: &BTreeSet<String>,
+    request_model_name: Option<&str>,
+) -> Result<bool> {
+    let mut excluded_profiles = excluded_profiles.clone();
+    excluded_profiles.insert(profile_name.to_string());
+    if runtime_has_route_eligible_quota_fallback_for_model(
+        shared,
+        profile_name,
+        &excluded_profiles,
+        RuntimeRouteKind::Responses,
+        request_model_name,
+    )? {
+        return Ok(true);
+    }
+    Ok(runtime_quota_last_chance_profile_for_route(
+        shared,
+        &excluded_profiles,
+        RuntimeRouteKind::Responses,
+        prompt_cache_key,
+        request_model_name,
+    )?
+    .is_some())
+}
+
+pub(super) fn runtime_responses_full_context_retry_available(
+    shared: &RuntimeRotationProxyShared,
+    profile_name: &str,
+    prompt_cache_key: Option<&str>,
+    previous_response_id: Option<&str>,
+    request_session_id: Option<&str>,
+    request_model_name: Option<&str>,
+    excluded_profiles: &BTreeSet<String>,
+) -> Result<bool> {
+    let owner_matches = previous_response_id
+        .map(|response_id| {
+            runtime_response_bound_profile(shared, response_id, RuntimeRouteKind::Responses)
+                .map(|owner| owner.as_deref() == Some(profile_name))
+        })
+        .transpose()?
+        .unwrap_or(false);
+    if !runtime_proxy_crate::runtime_full_context_retry_signal_eligible(
+        previous_response_id.is_some(),
+        request_session_id.is_some(),
+        owner_matches,
+    ) {
+        return Ok(false);
+    }
+    runtime_responses_full_context_fallback_available(
+        shared,
+        profile_name,
+        prompt_cache_key,
+        excluded_profiles,
+        request_model_name,
+    )
+}
+
+pub(super) struct RuntimeResponsesFullContextRetry<'a> {
+    pub(super) request_id: u64,
+    pub(super) shared: &'a RuntimeRotationProxyShared,
+    pub(super) profile_name: &'a str,
+    pub(super) prompt_cache_key: Option<&'a str>,
+    pub(super) previous_response_id: Option<&'a str>,
+    pub(super) request_turn_state: Option<&'a str>,
+    pub(super) request_session_id: Option<&'a str>,
+    pub(super) request_model_name: Option<&'a str>,
+    pub(super) affinity_state: &'a mut RuntimeResponsesAffinityState,
+    pub(super) excluded_profiles: &'a BTreeSet<String>,
+    pub(super) reason: &'static str,
+}
+
+pub(super) fn try_signal_runtime_responses_full_context_retry(
+    retry: RuntimeResponsesFullContextRetry<'_>,
+) -> Result<Option<RuntimeResponsesReply>> {
+    let RuntimeResponsesFullContextRetry {
+        request_id,
+        shared,
+        profile_name,
+        prompt_cache_key,
+        previous_response_id,
+        request_turn_state,
+        request_session_id,
+        request_model_name,
+        affinity_state,
+        excluded_profiles,
+        reason,
+    } = retry;
+    if !runtime_responses_full_context_retry_available(
+        shared,
+        profile_name,
+        prompt_cache_key,
+        previous_response_id,
+        request_session_id,
+        request_model_name,
+        excluded_profiles,
+    )? {
+        return Ok(None);
+    }
+
+    let released_affinity = release_runtime_quota_blocked_affinity(
+        shared,
+        profile_name,
+        previous_response_id,
+        request_turn_state,
+        request_session_id,
+    )?;
+    affinity_state.clear_profile_affinity(profile_name, true);
+    runtime_proxy_log(
+        shared,
+        format!(
+            "request={request_id} transport=http quota_blocked_full_context_retry_signal profile={profile_name} reason={reason} affinity_released={released_affinity}"
+        ),
+    );
+    Ok(Some(runtime_responses_full_context_retry_reply()))
+}
+
 pub(super) struct RuntimeResponsesQuotaBlocked<'a> {
     pub(super) request_id: u64,
     pub(super) shared: &'a RuntimeRotationProxyShared,
@@ -80,6 +207,23 @@ pub(super) fn handle_runtime_responses_quota_blocked(
         request_requires_previous_response_affinity,
         previous_response_fresh_fallback_shape,
     ) {
+        if let Some(retry) =
+            try_signal_runtime_responses_full_context_retry(RuntimeResponsesFullContextRetry {
+                request_id,
+                shared,
+                profile_name: &profile_name,
+                prompt_cache_key,
+                previous_response_id,
+                request_turn_state,
+                request_session_id,
+                request_model_name,
+                affinity_state,
+                excluded_profiles,
+                reason: "upstream_quota",
+            })?
+        {
+            return Ok(Some(retry));
+        }
         runtime_proxy_log(
             shared,
             format!(

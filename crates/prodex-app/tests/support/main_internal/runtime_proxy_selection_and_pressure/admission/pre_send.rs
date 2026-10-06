@@ -34,7 +34,7 @@ fn attempt_runtime_responses_request_allows_weekly_exhausted_profile_before_send
             selection_attempt: 0,
         },
     )
-        .expect("responses attempt should succeed")
+    .expect("responses attempt should succeed")
     {
         RuntimeResponsesAttempt::LocalSelectionBlocked {
             profile_name,
@@ -70,7 +70,7 @@ fn attempt_runtime_responses_request_allows_weekly_exhausted_profile_before_send
 }
 
 #[test]
-fn scripted_backend_fault_plain_429_passes_through_without_rotation() {
+fn scripted_backend_fault_plain_429_rotates_to_ready_profile() {
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
             RuntimeProxyBackendFaultStep::plain_429(
@@ -78,32 +78,45 @@ fn scripted_backend_fault_plain_429_passes_through_without_rotation() {
                 "main-account",
             ),
         ]));
-    let harness = RuntimeProxyProfileHarnessBuilder::single_openai_profile(
-        "main",
-        "main-account",
-        "main@example.com",
-    )
-    .upstream_base_url(backend.base_url())
-    .build();
+    let ready = runtime_usage_snapshot(
+        quota_window_ready(80, 3_600),
+        quota_window_ready(80, 86_400),
+    );
+    let harness = RuntimeProxyProfileHarnessBuilder::new()
+        .openai_profile("main", "main-account", Some("main@example.com"))
+        .openai_profile("second", "second-account", Some("second@example.com"))
+        .active_profile("main")
+        .current_profile("main")
+        .upstream_base_url(backend.base_url())
+        .profile_usage_snapshot("main", ready.clone())
+        .profile_usage_snapshot("second", ready)
+        .build();
     let request = RuntimeProxyRequest {
         method: "POST".to_string(),
         path_and_query: "/backend-api/codex/responses".to_string(),
         headers: vec![("Content-Type".to_string(), "application/json".to_string())],
-        body: br#"{"input":[]}"#.to_vec(),
+        body: br#"{\"input\":[]}"#.to_vec(),
     };
 
     let response = proxy_runtime_responses_request(11, &request, harness.shared())
-        .expect("scripted plain 429 should pass through");
-    let RuntimeResponsesReply::Buffered(parts) = response else {
-        panic!("plain 429 should be returned as a buffered upstream response");
+        .expect("generic 429 should rotate to another ready profile before commit");
+    let (status, body) = match response {
+        RuntimeResponsesReply::Buffered(parts) => (
+            parts.status,
+            String::from_utf8(parts.body.into_vec()).expect("response body should decode"),
+        ),
+        RuntimeResponsesReply::Streaming(mut response) => {
+            let mut body = String::new();
+            response.body.read_to_string(&mut body).expect("response body should decode");
+            (response.status, body)
+        }
     };
-    let body = String::from_utf8(parts.body.into_vec()).expect("plain 429 body should decode");
 
-    assert_eq!(parts.status, 429);
-    assert_eq!(body, "Too Many Requests");
+    assert_eq!(status, 200, "{body}");
+    assert!(!body.contains("Too Many Requests"), "{body}");
     assert_eq!(
         backend.responses_accounts(),
-        vec!["main-account".to_string()]
+        vec!["main-account".to_string(), "second-account".to_string()]
     );
 }
 
@@ -204,12 +217,13 @@ fn scripted_noncompact_overload_rotates_fresh_request() {
 
 #[test]
 fn scripted_noncompact_success_commits_rotated_profile() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
-        RuntimeProxyBackendFaultStep::overloaded_503(
-            RuntimeProxyBackendFaultRoute::Status,
-            "main-account",
-        ),
-    ]));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::overloaded_503(
+                RuntimeProxyBackendFaultRoute::Status,
+                "main-account",
+            ),
+        ]));
     let harness = RuntimeProxyProfileHarnessBuilder::new()
         .openai_profile("main", "main-account", Some("main@example.com"))
         .openai_profile("second", "second-account", Some("second@example.com"))
@@ -258,7 +272,7 @@ fn noncompact_bound_session_success_does_not_promote_profile() {
         let mut runtime = harness.shared().runtime.lock().expect("runtime lock");
         let binding = ResponseProfileBinding {
             binding_identity: None,
-                profile_name: "main".to_string(),
+            profile_name: "main".to_string(),
             bound_at: Local::now().timestamp(),
         };
         runtime
@@ -344,8 +358,7 @@ fn standard_get_waits_for_ready_profile_inflight_relief() {
 
     assert_eq!(status, 200);
     release.join().expect("release thread should join");
-    let log =
-        read_runtime_proxy_test_log(&harness.shared().log_path);
+    let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(log.contains("inflight_wait_started route=standard"));
     assert!(log.contains("inflight_wait_finished route=standard"));
     assert!(log.contains("useful=true"));
@@ -409,9 +422,7 @@ fn scripted_backend_fault_explicit_quota_429_retries_ready_profile_past_soft_inf
         vec!["main-account".to_string(), "second-account".to_string()]
     );
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
-    assert!(log.contains(
-        "transport=http quota_last_chance profile=second failed_profile=main"
-    ));
+    assert!(log.contains("transport=http quota_last_chance profile=second failed_profile=main"));
     assert!(log.contains("transport=http committed profile=second"));
 }
 
@@ -534,7 +545,7 @@ fn sse_overload_does_not_bind_session_before_commit() {
 }
 
 #[test]
-fn scripted_responses_overload_keeps_hard_affinity_owner() {
+fn scripted_responses_overload_hard_affinity_requests_full_context_replay() {
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
             RuntimeProxyBackendFaultStep::overloaded_503(
@@ -576,17 +587,27 @@ fn scripted_responses_overload_keeps_hard_affinity_owner() {
     };
 
     let response = proxy_runtime_responses_request(14, &request, harness.shared())
-        .expect("hard-affinity overload should pass through");
+        .expect("hard-affinity overload should request full-context replay");
     let RuntimeResponsesReply::Buffered(parts) = response else {
-        panic!("hard-affinity overload should preserve the upstream HTTP response");
+        panic!("hard-affinity overload should return a buffered replay signal");
     };
     let body = String::from_utf8(parts.body.into_vec()).expect("overload body should decode");
 
-    assert_eq!(parts.status, 503);
-    assert!(body.contains("server_is_overloaded"), "{body}");
-    assert_eq!(
-        backend.responses_accounts(),
-        vec!["main-account".to_string()]
+    assert_eq!(parts.status, 400, "{body}");
+    assert!(body.contains("previous_response_not_found"), "{body}");
+    assert!(!body.contains("server_is_overloaded"), "{body}");
+    assert!(!body.contains("service_unavailable"), "{body}");
+    assert_eq!(backend.responses_accounts(), vec!["main-account".to_string()]);
+    assert!(
+        !harness
+            .shared()
+            .runtime
+            .lock()
+            .expect("runtime lock")
+            .state
+            .response_profile_bindings
+            .contains_key("resp-main"),
+        "replay signal must release the failed owner"
     );
 }
 
@@ -687,10 +708,7 @@ fn precommit_quota_gate_blocks_weekly_exhaustion_when_pool_fallback_exists() {
         )
         .profile_usage_snapshot(
             "second",
-            runtime_usage_snapshot(
-                quota_window_ready(82, 3600),
-                quota_window_ready(83, 86_400),
-            ),
+            runtime_usage_snapshot(quota_window_ready(82, 3600), quota_window_ready(83, 86_400)),
         )
         .build();
 
@@ -753,7 +771,10 @@ fn attempt_runtime_standard_request_reports_profile_inflight_saturation() {
     )
     .profile_usage_snapshot(
         "main",
-        runtime_usage_snapshot(quota_window_ready(300, 3600), quota_window_ready(90, 86_400)),
+        runtime_usage_snapshot(
+            quota_window_ready(300, 3600),
+            quota_window_ready(90, 86_400),
+        ),
     )
     .build();
     let _inflight = (0..runtime_proxy_profile_inflight_hard_limit())

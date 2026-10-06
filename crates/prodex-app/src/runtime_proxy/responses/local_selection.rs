@@ -32,6 +32,8 @@ pub(super) struct RuntimeResponsesLocalSelectionBlocked<'a> {
     pub(super) previous_response_id: Option<&'a str>,
     pub(super) request_turn_state: Option<&'a str>,
     pub(super) request_session_id: Option<&'a str>,
+    pub(super) prompt_cache_key: Option<&'a str>,
+    pub(super) request_model_name: Option<&'a str>,
     pub(super) request_requires_previous_response_affinity: bool,
     pub(super) previous_response_fresh_fallback_shape:
         Option<RuntimePreviousResponseFreshFallbackShape>,
@@ -51,6 +53,8 @@ pub(super) fn handle_runtime_responses_local_selection_blocked(
         previous_response_id,
         request_turn_state,
         request_session_id,
+        prompt_cache_key,
+        request_model_name,
         request_requires_previous_response_affinity,
         previous_response_fresh_fallback_shape,
         affinity_state,
@@ -89,6 +93,23 @@ pub(super) fn handle_runtime_responses_local_selection_blocked(
         ),
     ) {
         RuntimeResponsesLocalSelectionAction::ReturnServiceUnavailable => {
+            if let Some(retry) =
+                try_signal_runtime_responses_full_context_retry(RuntimeResponsesFullContextRetry {
+                    request_id,
+                    shared,
+                    profile_name: &profile_name,
+                    prompt_cache_key,
+                    previous_response_id,
+                    request_turn_state,
+                    request_session_id,
+                    request_model_name,
+                    affinity_state,
+                    excluded_profiles,
+                    reason,
+                })?
+            {
+                return Ok(Some(retry));
+            }
             return Ok(Some(runtime_responses_local_selection_failure_reply()));
         }
         RuntimeResponsesLocalSelectionAction::Rotate => {}

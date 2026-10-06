@@ -4,21 +4,22 @@ use std::io::Read;
 
 #[test]
 fn fresh_responses_keep_recovering_after_multiple_provider_overload_sweeps() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
-        RuntimeProxyBackendFaultStep::sse_overloaded(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        ),
-        RuntimeProxyBackendFaultStep::sse_overloaded(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "second-account",
-        ),
-        RuntimeProxyBackendFaultStep::sse_success(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-            "recovered-after-outage",
-        ),
-    ]));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::sse_overloaded(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+            RuntimeProxyBackendFaultStep::sse_overloaded(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "second-account",
+            ),
+            RuntimeProxyBackendFaultStep::sse_success(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+                "recovered-after-outage",
+            ),
+        ]));
     let ready = runtime_usage_snapshot(
         quota_window_ready(80, 3_600),
         quota_window_ready(80, 86_400),
@@ -60,29 +61,30 @@ fn fresh_responses_keep_recovering_after_multiple_provider_overload_sweeps() {
 
 #[test]
 fn fresh_responses_keep_recovering_past_old_two_sweep_limit() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
-        RuntimeProxyBackendFaultStep::sse_overloaded(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        ),
-        RuntimeProxyBackendFaultStep::sse_overloaded(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        ),
-        RuntimeProxyBackendFaultStep::sse_overloaded(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "second-account",
-        ),
-        RuntimeProxyBackendFaultStep::sse_overloaded(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "second-account",
-        ),
-        RuntimeProxyBackendFaultStep::sse_success(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-            "recovered-after-two-sweeps",
-        ),
-    ]));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::sse_overloaded(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+            RuntimeProxyBackendFaultStep::sse_overloaded(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+            RuntimeProxyBackendFaultStep::sse_overloaded(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "second-account",
+            ),
+            RuntimeProxyBackendFaultStep::sse_overloaded(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "second-account",
+            ),
+            RuntimeProxyBackendFaultStep::sse_success(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+                "recovered-after-two-sweeps",
+            ),
+        ]));
     let ready = runtime_usage_snapshot(
         quota_window_ready(80, 3_600),
         quota_window_ready(80, 86_400),
@@ -133,21 +135,22 @@ fn fresh_responses_keep_recovering_past_old_two_sweep_limit() {
 
 #[test]
 fn fresh_responses_wait_for_rate_limit_pool_recovery_instead_of_leaking_429() {
-    let backend = RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
-        RuntimeProxyBackendFaultStep::rate_limited_429(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-        ),
-        RuntimeProxyBackendFaultStep::rate_limited_429(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "second-account",
-        ),
-        RuntimeProxyBackendFaultStep::sse_success(
-            RuntimeProxyBackendFaultRoute::Responses,
-            "main-account",
-            "recovered-after-rate-limit",
-        ),
-    ]));
+    let backend =
+        RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([
+            RuntimeProxyBackendFaultStep::rate_limited_429(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+            ),
+            RuntimeProxyBackendFaultStep::rate_limited_429(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "second-account",
+            ),
+            RuntimeProxyBackendFaultStep::sse_success(
+                RuntimeProxyBackendFaultRoute::Responses,
+                "main-account",
+                "recovered-after-rate-limit",
+            ),
+        ]));
     let ready = runtime_usage_snapshot(
         quota_window_ready(15, 3_600),
         quota_window_ready(75, 86_400),
@@ -190,8 +193,7 @@ fn fresh_responses_wait_for_rate_limit_pool_recovery_instead_of_leaking_429() {
     );
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(
-        log.contains("rotation_waiting_for_recovery")
-            || log.contains("rotation_sweep_start"),
+        log.contains("rotation_waiting_for_recovery") || log.contains("rotation_sweep_start"),
         "pool-wide temporary rate limiting should enter recovery instead of terminating: {log}"
     );
 }

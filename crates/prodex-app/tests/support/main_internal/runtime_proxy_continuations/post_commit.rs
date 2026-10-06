@@ -426,7 +426,7 @@ fn runtime_proxy_websocket_previous_response_not_found_after_commit_passes_throu
 }
 
 #[test]
-fn runtime_proxy_http_quota_does_not_fresh_fallback_tool_output_only_requests() {
+fn runtime_proxy_http_quota_signals_full_context_replay_for_tool_output_only_requests() {
     let temp_dir = TestDir::isolated();
     let backend = RuntimeProxyBackend::start_http_quota_then_tool_output_fresh_fallback_error();
     let main_home = temp_dir.path.join("homes/main");
@@ -479,9 +479,8 @@ fn runtime_proxy_http_quota_does_not_fresh_fallback_tool_output_only_requests() 
 
     let proxy = start_runtime_rotation_proxy(&paths, &state, "main", backend.base_url(), false)
         .expect("runtime proxy should start");
-    let response = Client::builder()
-        .build()
-        .expect("client")
+    let client = Client::builder().build().expect("client");
+    let response = client
         .post(format!(
             "http://{}/backend-api/codex/responses",
             proxy.listen_addr
@@ -501,22 +500,18 @@ fn runtime_proxy_http_quota_does_not_fresh_fallback_tool_output_only_requests() 
         .send()
         .expect("responses request should succeed");
 
-    assert_eq!(response.status().as_u16(), 200);
+    assert_eq!(response.status().as_u16(), 400);
     let body = response.text().expect("responses body should decode");
-    assert!(
-        body.contains("insufficient_quota"),
-        "quota failure should pass through instead of degrading into a fresh tool-output retry: {body}"
-    );
-    assert!(
-        !body.contains("No tool call found"),
-        "non-replayable tool output should never be retried as a fresh request: {body}"
-    );
+    assert!(body.contains("previous_response_not_found"), "{body}");
+    assert!(!body.contains("insufficient_quota"), "{body}");
+    assert!(!body.contains("service_unavailable"), "{body}");
+    assert!(!body.contains("No tool call found"), "{body}");
 
     let responses_bodies = backend.responses_bodies();
     assert_eq!(
         responses_bodies.len(),
         1,
-        "proxy should not send a second fresh retry for tool-output-only payloads: {responses_bodies:?}"
+        "broker must not fresh-retry a tool-output delta by itself: {responses_bodies:?}"
     );
     assert!(
         responses_bodies[0].contains("\"previous_response_id\":\"resp-main\""),
@@ -526,14 +521,50 @@ fn runtime_proxy_http_quota_does_not_fresh_fallback_tool_output_only_requests() 
 
     let log_tail = wait_for_runtime_log_tail_until(
         || fs::read(&proxy.log_path).ok(),
-        |log| log.contains("quota_blocked_affinity_released") || log.contains("insufficient_quota"),
+        |log| log.contains("quota_blocked_full_context_retry_signal"),
         2_000,
         5_000,
         20,
     );
     let log = String::from_utf8_lossy(&log_tail);
     assert!(
-        !log.contains("previous_response_fresh_fallback reason=quota_blocked"),
-        "quota-blocked tool-output-only path should not drop previous_response_id: {log}"
+        log.contains("quota_blocked_full_context_retry_signal"),
+        "quota-blocked tool-output continuation should request client full-context replay: {log}"
+    );
+
+    let replay = client
+        .post(format!(
+            "http://{}/backend-api/codex/responses",
+            proxy.listen_addr
+        ))
+        .header(reqwest::header::CONTENT_TYPE, "application/json")
+        .body(
+            serde_json::json!({
+                "input": [
+                    {"type": "message", "role": "user", "content": "run the tool"},
+                    {"type": "function_call", "call_id": "call_custom_123", "name": "tool", "arguments": "{}"},
+                    {"type": "custom_tool_call_output", "call_id": "call_custom_123", "output": "ok"},
+                    {"type": "message", "role": "user", "content": "continue"}
+                ]
+            })
+            .to_string(),
+        )
+        .send()
+        .expect("full-context replay should be accepted");
+    assert_eq!(replay.status().as_u16(), 200);
+    let replay_body = replay.text().expect("replay body should decode");
+    assert!(!replay_body.contains("insufficient_quota"), "{replay_body}");
+    assert!(!replay_body.contains("No tool call found"), "{replay_body}");
+
+    let responses_bodies = backend.responses_bodies();
+    assert_eq!(responses_bodies.len(), 2, "{responses_bodies:?}");
+    assert!(
+        !responses_bodies[1].contains("previous_response_id"),
+        "client replay must carry full context without the dead response owner: {}",
+        responses_bodies[1]
+    );
+    assert_eq!(
+        backend.responses_accounts(),
+        vec!["main-account".to_string(), "second-account".to_string()]
     );
 }

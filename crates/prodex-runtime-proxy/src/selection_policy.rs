@@ -725,7 +725,7 @@ pub fn runtime_websocket_invalid_previous_response_plan(
     }
 }
 
-pub fn runtime_websocket_full_context_signal_eligible(
+pub fn runtime_full_context_retry_signal_eligible(
     previous_response_present: bool,
     session_present: bool,
     owner_matches: bool,
@@ -735,7 +735,19 @@ pub fn runtime_websocket_full_context_signal_eligible(
         session_present,
         owner_matches,
     )
-    .expect("Mojo websocket full-context retry policy returned an invalid result")
+    .expect("Mojo full-context retry policy returned an invalid result")
+}
+
+pub fn runtime_websocket_full_context_signal_eligible(
+    previous_response_present: bool,
+    session_present: bool,
+    owner_matches: bool,
+) -> bool {
+    runtime_full_context_retry_signal_eligible(
+        previous_response_present,
+        session_present,
+        owner_matches,
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
