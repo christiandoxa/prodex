@@ -511,6 +511,21 @@ pub fn runtime_previous_response_outcome_label(value: i64) -> Result<&'static st
     cached_fixed_label(164, value, 2, &LABELS)
 }
 
+pub fn runtime_soft_affinity_policy_reason_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(165, value, 8, &LABELS)
+}
+
+pub fn runtime_affinity_unavailable_reason_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(166, value, 7, &LABELS)
+}
+
+pub fn runtime_affinity_selection_kind_label(value: i64) -> Result<&'static str, MojoError> {
+    static LABELS: std::sync::OnceLock<Result<Vec<String>, MojoError>> = std::sync::OnceLock::new();
+    cached_fixed_label(167, value, 4, &LABELS)
+}
+
 /// Applies bounded privacy checks to borrowed metric key and value strings.
 ///
 /// The Mojo kernel only reads the strings and returns a validation tag. It

@@ -285,32 +285,15 @@ pub enum RuntimeSelectionQuotaSource {
 }
 
 fn runtime_selection_route_kind_tag(route_kind: RuntimeRouteKind) -> i64 {
-    match route_kind {
-        RuntimeRouteKind::Responses => 0,
-        RuntimeRouteKind::Compact => 1,
-        RuntimeRouteKind::Websocket => 2,
-        RuntimeRouteKind::Standard => 3,
-    }
+    route_kind as i64
 }
 
 fn runtime_selection_quota_window_status_tag(status: RuntimeSelectionQuotaWindowStatus) -> i64 {
-    match status {
-        RuntimeSelectionQuotaWindowStatus::Ready => 0,
-        RuntimeSelectionQuotaWindowStatus::Thin => 1,
-        RuntimeSelectionQuotaWindowStatus::Critical => 2,
-        RuntimeSelectionQuotaWindowStatus::Exhausted => 3,
-        RuntimeSelectionQuotaWindowStatus::Unknown => 4,
-    }
+    status as i64
 }
 
 fn runtime_selection_quota_pressure_band_tag(band: RuntimeSelectionQuotaPressureBand) -> i64 {
-    match band {
-        RuntimeSelectionQuotaPressureBand::Healthy => 0,
-        RuntimeSelectionQuotaPressureBand::Thin => 1,
-        RuntimeSelectionQuotaPressureBand::Critical => 2,
-        RuntimeSelectionQuotaPressureBand::Exhausted => 3,
-        RuntimeSelectionQuotaPressureBand::Unknown => 4,
-    }
+    band as i64
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -356,21 +339,9 @@ fn runtime_quota_summary_policy_code(
 }
 
 fn runtime_quota_policy_reason(code: i64) -> Option<&'static str> {
-    match code {
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE => {
-            Some("quota_windows_unavailable")
-        }
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND => {
-            Some("quota_exhausted_before_send")
-        }
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED => Some("quota_exhausted"),
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_HEALTHY => Some("quota_healthy"),
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_THIN => Some("quota_thin"),
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_CRITICAL => Some("quota_critical"),
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN => Some("quota_unknown"),
-        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_ALLOWED => None,
-        _ => None,
-    }
+    let label = prodex_mojo_core::observability::runtime_soft_affinity_policy_reason_label(code)
+        .expect("Mojo soft-affinity reason label returned invalid output");
+    (!label.is_empty()).then_some(label)
 }
 
 pub fn runtime_selection_quota_pressure_band_reason(
@@ -477,6 +448,7 @@ pub fn runtime_quota_soft_affinity_rejection_reason(
     .unwrap_or("quota_unknown")
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeAffinityLocalRejection {
     None,
@@ -504,11 +476,7 @@ pub enum RuntimeAffinityOutcome {
 }
 
 pub fn runtime_affinity_outcome(input: RuntimeAffinityOutcomeInput) -> RuntimeAffinityOutcome {
-    let local_rejection = match input.local_rejection {
-        RuntimeAffinityLocalRejection::None => 0,
-        RuntimeAffinityLocalRejection::SelectionBackoff => 1,
-        RuntimeAffinityLocalRejection::RouteCircuitHalfOpenProbeWait => 2,
-    };
+    let local_rejection = input.local_rejection as i64;
     let plan = prodex_mojo_core::runtime::affinity_outcome_plan(
         prodex_mojo_core::runtime::AffinityOutcomeInput {
             hard_binding_conflict: input.hard_binding_conflict,
@@ -522,21 +490,13 @@ pub fn runtime_affinity_outcome(input: RuntimeAffinityOutcomeInput) -> RuntimeAf
     )
     .expect("Mojo affinity outcome planning returned an invalid result");
     match plan.action {
-        0 => {
-            let reason = match plan.reason {
-                1 => "hard_binding_conflict",
-                2 => "binding_identity_mismatch",
-                3 => "hard_binding_unavailable",
-                4 => "bound_profile_unavailable",
-                5 => "selection_backoff",
-                6 => "route_circuit_half_open_probe_wait",
-                _ => unreachable!("validated Mojo unavailable affinity reason"),
-            };
-            RuntimeAffinityOutcome::Unavailable {
-                reason,
-                hard: plan.unavailable_hard,
-            }
-        }
+        0 => RuntimeAffinityOutcome::Unavailable {
+            reason: prodex_mojo_core::observability::runtime_affinity_unavailable_reason_label(
+                plan.reason,
+            )
+            .expect("Mojo affinity unavailable reason label returned invalid output"),
+            hard: plan.unavailable_hard,
+        },
         1 => RuntimeAffinityOutcome::SelectHard,
         2 => RuntimeAffinityOutcome::SelectSoft,
         3 => RuntimeAffinityOutcome::RejectSoftQuota,
@@ -544,6 +504,7 @@ pub fn runtime_affinity_outcome(input: RuntimeAffinityOutcomeInput) -> RuntimeAf
     }
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeAffinitySelectionKind {
     Strict,
@@ -554,12 +515,8 @@ pub enum RuntimeAffinitySelectionKind {
 
 impl RuntimeAffinitySelectionKind {
     pub fn skip_label(self) -> &'static str {
-        match self {
-            Self::Strict => "compact_followup",
-            Self::Pinned => "pinned",
-            Self::TurnState => "turn_state",
-            Self::Session => "session",
-        }
+        prodex_mojo_core::observability::runtime_affinity_selection_kind_label(self as i64)
+            .expect("Mojo affinity selection-kind label returned invalid output")
     }
 }
 
@@ -577,12 +534,7 @@ pub struct RuntimeSoftAffinityPolicyInput {
 fn runtime_soft_affinity_policy_mojo(input: RuntimeSoftAffinityPolicyInput) -> i64 {
     prodex_mojo_core::runtime::soft_affinity_policy(
         prodex_mojo_core::runtime::SoftAffinityPolicyInput {
-            affinity_kind: match input.affinity_kind {
-                RuntimeAffinitySelectionKind::Strict => 0,
-                RuntimeAffinitySelectionKind::Pinned => 1,
-                RuntimeAffinitySelectionKind::TurnState => 2,
-                RuntimeAffinitySelectionKind::Session => 3,
-            },
+            affinity_kind: input.affinity_kind as i64,
             route_kind: runtime_selection_route_kind_tag(input.route_kind),
             five_hour_status: runtime_selection_quota_window_status_tag(
                 input.quota_summary.five_hour.status,

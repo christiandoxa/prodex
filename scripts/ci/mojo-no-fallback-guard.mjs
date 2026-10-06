@@ -1890,6 +1890,15 @@ export function findViolations(files) {
     if (!contents.includes("prodex_mojo_core::runtime::quota_selection_policy(")) {
       violations.push(`${filePath}: quota selection adapter must call prodex-mojo-core`);
     }
+    for (const marker of [
+      "runtime_soft_affinity_policy_reason_label(",
+      "runtime_affinity_unavailable_reason_label(",
+      "runtime_affinity_selection_kind_label(",
+    ]) {
+      if (!contents.includes(marker)) {
+        violations.push(`${filePath}: selection label adapter must retain ${marker}`);
+      }
+    }
     return violations;
   });
   const runtimeStateBackgroundViolations = files.flatMap(([filePath, contents]) => {
