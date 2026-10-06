@@ -272,24 +272,24 @@ The browser install command above installs the Chrome channel used by Prodex's d
 
 Prodex preserves inherited `[mcp_servers.playwright]` entries. Add a custom entry to the base profile's `config.toml` to change flags, use a persistent/headed browser, or set `enabled = false`; the temporary Super overlay will not replace it.
 
-Ponytail (Prodex-vetted `4.10.3` checkout):
+Ponytail (Prodex-vetted `4.13.0` checkout):
 
 ```bash
 export PRODEX_OPTIMIZERS_HOME="${PRODEX_OPTIMIZERS_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/prodex-optimizers}"
 install -d "$PRODEX_OPTIMIZERS_HOME/ponytail"
 git clone --no-checkout https://github.com/DietrichGebert/ponytail \
-  "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.3"
-git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.3" config core.autocrlf false
-git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.3" checkout --detach \
-  ef8ca48fed2321ab6668b2a954f23b1af97d7f6d
-cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/4.10.3/prodex-tool.json" <<'JSON'
+  "$PRODEX_OPTIMIZERS_HOME/ponytail/4.13.0"
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.13.0" config core.autocrlf false
+git -C "$PRODEX_OPTIMIZERS_HOME/ponytail/4.13.0" checkout --detach \
+  08e952d7a8057a57ce561ff1330d093fd92eec67
+cat >"$PRODEX_OPTIMIZERS_HOME/ponytail/4.13.0/prodex-tool.json" <<'JSON'
 {
   "schema_version": 1,
   "id": "ponytail",
-  "version": "4.10.3",
+  "version": "4.13.0",
   "source": "https://github.com/DietrichGebert/ponytail",
-  "commit": "ef8ca48fed2321ab6668b2a954f23b1af97d7f6d",
-  "tree_sha256": "fcd46adfb2846ce9afbb96d1c3fe8e51892f8e6ee5b59423a81b193d89342fbb"
+  "commit": "08e952d7a8057a57ce561ff1330d093fd92eec67",
+  "tree_sha256": "4187a87a014975e268d1e6a0ea553382e7d53232a2f2ea741941c0b1c412dd2f"
 }
 JSON
 

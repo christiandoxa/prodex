@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "audited_at": "2026-10-01T03:04:05.320348Z",
+  "audited_at": "2026-10-06",
   "release": "0.434.3",
   "tools": [
     {
@@ -99,11 +99,11 @@
     {
       "id": "ponytail",
       "repository": "https://github.com/DietrichGebert/ponytail",
-      "latest_stable": "4.10.3",
-      "release": "v4.10.3",
-      "commit": "ef8ca48fed2321ab6668b2a954f23b1af97d7f6d",
-      "git_tree": "1998991dfc07a81be214bf90aa1b5c783bd4bf04",
-      "prodex_tree_sha256": "fcd46adfb2846ce9afbb96d1c3fe8e51892f8e6ee5b59423a81b193d89342fbb",
+      "latest_stable": "4.13.0",
+      "release": "v4.13.0",
+      "commit": "08e952d7a8057a57ce561ff1330d093fd92eec67",
+      "git_tree": "b0a551a2dfad80063167798ba6469034f668ebe5",
+      "prodex_tree_sha256": "4187a87a014975e268d1e6a0ea553382e7d53232a2f2ea741941c0b1c412dd2f",
       "license": "MIT",
       "runtime": "Node.js plugin; externally managed immutable checkout",
       "platforms": [
@@ -112,7 +112,7 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Latest stable release revalidated from a clean v4.10.3 checkout; the exact release commit, Git tree, plugin version, and complete Prodex tree digest are pinned. The previously qualified v4.10.0 checkout remains accepted with its audited compatibility metadata."
+      "notes": "Latest stable v4.13.0 was revalidated from the exact release tag: plugin version 4.13.0, required Codex hook/skills present, no symlinks, 175 files / 1,866,406 bytes under the Prodex tree policy, and complete Prodex tree digest pinned. Previously qualified 4.10.3 remains accepted through a self-consistent managed manifest; 4.10.0 retains its audited legacy-manifest compatibility rule."
     },
     {
       "id": "presidio",
