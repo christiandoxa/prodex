@@ -116,16 +116,7 @@ pub fn runtime_tuning_snapshot_from_input(
     input.into_snapshot()
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RuntimeTuningDefaults {
-    pub worker_count: usize,
-    pub long_lived_worker_count: usize,
-    pub probe_refresh_worker_count: usize,
-    pub async_worker_count: usize,
-    pub log_queue_capacity: usize,
-    pub websocket_connect_worker_count: usize,
-    pub websocket_dns_worker_count: usize,
-}
+pub use prodex_mojo_core::runtime::RuntimeTuningDefaults;
 
 pub fn runtime_tuning_defaults(parallelism: usize) -> RuntimeTuningDefaults {
     mojo::runtime_tuning_defaults(parallelism)
