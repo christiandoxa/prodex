@@ -2,6 +2,83 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.435.6 - 2026-10-06
+
+### Runtime
+
+- Keep usable profiles transparent (`ba72da5`)
+
+### Docs
+
+- Record runtime-doctor Mojo proof (`61fc70d`)
+
+### Deps
+
+- Bump tokio-rustls from 0.26.5 to 0.26.6 in the cargo group (`d122561`)
+
+### Misc
+
+- Merge pull request #101 from christiandoxa/campaign/mojo-capsule-order-split-20261004 (`07a1995`)
+- Merge pull request #104 from christiandoxa/campaign/mojo-wave-observability-20261004 (`bc0690f`)
+- Merge pull request #108 from christiandoxa/dependabot/github_actions/github-actions-6de4297576 (`3c12233`)
+- Merge pull request #107 from christiandoxa/dependabot/cargo/cargo-bbe38bb5bb (`c3f5edb`)
+# Prodex 0.435.6
+
+## New Features
+
+- No new command surface; 0.435.6 focuses on transparent runtime recovery, login stability, and Codex 0.160.1 compatibility.
+
+## Bug Fixes
+
+### Usable quota no longer becomes a user-visible technical blocker
+
+- OpenAI profile rotation now treats account-local quota transitions as internal recovery while any compatible profile remains usable. A profile becoming blocked on the 5-hour or weekly window does not terminate the user flow when another profile can serve the request.
+- Responses HTTP, WebSocket, standard HTTP, and compact requests now recover consistently across pre-commit quota exhaustion, generic/rate-limit 429 responses, overload, authentication failure, profile unavailability, and transport failure.
+- Session-bound work releases failed ownership and rebinds to the profile that successfully commits the retry. Previous-response-bound work is not rotated blindly: Prodex emits the existing full-context replay control signal, releases the dead owner, and lets Codex replay the complete context on a healthy profile.
+- Hard-affinity replay is available even when the continuation has no explicit session id, as long as the previous-response owner is known and a viable fallback exists.
+- Generic HTTP 429 is retryable only before commit. Once output has committed, Prodex preserves the upstream result rather than replaying work that may already have produced user-visible output or tool side effects.
+- Local admission saturation remains backpressure rather than a terminal timeout. Retry-budget exhaustion stays internal while a profile remains retryable.
+- Terminal errors remain bounded and intentional when the compatible pool is genuinely exhausted, or when upstream connectivity/transport recovery cannot produce a usable profile.
+
+### OpenAI login no longer crashes during session attachment maintenance
+
+- Fixed a post-login panic in `prodex-shared-codex-fs` where the Mojo attachment scanner could search from a later cursor and then expand a subsequent path backward across an escaped JSON newline, returning a byte range that began before the cursor.
+- The Mojo scanner now treats JSON escape tails as backward path boundaries and never rewinds below the requested cursor. The Rust adapter independently rejects non-monotonic ranges before they can reach string slicing.
+- A regression reproduces adjacent attachment paths separated by an escaped newline in a rollout JSON string and verifies both paths are rewritten without panic while preserving valid JSON.
+- Mutation sensitivity restores the old backward expansion and makes the regression fail; restoring the fixed Mojo source byte-for-byte makes it pass.
+
+## Compatibility Notes
+
+### Codex 0.160.1 compatibility
+
+- Advance the release-qualified Codex reference from `rust-v0.160.0` to `rust-v0.160.1`.
+- Codex 0.160.1 changes only workspace version metadata and remote stdio MCP environment handling. When explicit remote environment variables activate the allowlist, Codex now preserves `SYSTEMROOT`, `TEMP`, and `TMP` so a Unix orchestrator can launch MCP servers on a Windows executor without losing required startup environment.
+- Prodex adds critical-file and semantic guards for that contract while leaving model routing, auth, quota/failover, session continuity, provider catalogs, and app-server protocol behavior unchanged.
+- Exact 0.160.0-to-0.160.1 tagged-source comparison: 2 changed files, 24 additions, 1 deletion. All 62 critical-file groups and 65 semantic groups replay against the exact 0.160.1 tree with zero missing markers.
+- Official 0.160.1 Linux musl CLI and app-server assets match GitHub release digests. The CLI reports `codex-cli 0.160.1`, and an isolated app-server `initialize` with `experimentalApi=true` succeeds without credentials or a model turn.
+
+## Verification
+
+- Local-capacity/backpressure regressions: 5/5 pass.
+- Hard-affinity Responses replay regressions: 10/10 pass.
+- Standard bound-session recovery regressions: 6/6 pass.
+- Quota/rotation matrix: 19/19 pass.
+- Compact recovery suite: 28/28 pass, including previous-response replay and session-bound transport/overload/auth/rate-limit/profile-unavailable recovery.
+- Pre-send admission: 16/16 pass; Responses overload recovery: 3/3 pass; standard retry recovery: 1/1 pass.
+- WebSocket failure handling: 16/16 pass.
+- Runtime HTTP error policy: 30/30 pass, including pre-commit generic 429 retry and post-commit non-replay behavior.
+- Integration-level tool-output quota recovery performs full-context replay and succeeds on the healthy account.
+- Runtime test manifest, Mojo no-fallback guard, Mojo authority guard, Mojo ownership check, size guard, formatting, and `git diff --check` pass locally.
+- Codex 0.160.1 baseline guard self-test passes with zero errors/warnings and exact tagged-tree marker replay has zero misses.
+
+## Changelog
+
+- Keep user workflows running transparently while any compatible profile still has usable quota or recoverable capacity.
+- Prevent the post-`prodex login openai` attachment-maintenance byte-range panic.
+- Qualify Prodex against Codex `rust-v0.160.1`.
+
+Full Changelog: [0.435.5...0.435.6](https://github.com/christiandoxa/prodex/compare/0.435.5...0.435.6)
+
 ## 0.435.5 - 2026-10-05
 
 ### Runtime
@@ -18,59 +95,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Merge pull request #106 from christiandoxa/campaign/mojo-log-load-aggregate-20261004 (`2556f62`)
 - Merge pull request #102 from christiandoxa/campaign/mojo-wave-config-20261004 (`f546cec`)
 - Merge pull request #103 from christiandoxa/campaign/mojo-wave-policy-20261004 (`69d079b`)
-# Prodex 0.435.5
-
-## New Features
-
-- No new user-facing feature surface; 0.435.5 is a runtime reliability patch for quota-aware continuation recovery.
-
-## Bug Fixes
-
-### Hard-affinity quota blocks replay full context instead of leaking retry-budget 503
-
-- WebSocket continuation requests that are pinned to an exhausted owner no longer terminate with
-  `503 service_unavailable` and the internal `pre-commit retry budget was exhausted` message
-  while another OpenAI profile still has usable quota.
-- Pre-send quota/local-selection blocks now reuse Prodex's existing
-  `previous_response_not_found` recovery signal. Codex retries the request with full context,
-  allowing Prodex to release the exhausted owner and bind the replay to another healthy account.
-- The same recovery applies to both normal candidate selection and the direct-current-profile
-  fallback path.
-- Full-context replay is evaluated as a fresh request, so a quota-healthy fallback profile above
-  the soft inflight limit or behind a temporary route circuit can still receive the bounded
-  last-chance attempt instead of causing a spurious 503.
-- Hard inflight caps remain enforced. A genuinely unavailable or fully quota-exhausted pool still
-  terminates instead of retrying forever.
-
-## Compatibility Notes
-
-- Existing WebSocket continuation semantics are preserved: the current request ends with the
-  retryable `previous_response_not_found` signal, and the client performs the full-context replay.
-- This patch does not silently rewrite or transfer a non-replayable previous-response chain.
-  Rotation happens only through the existing full-context recovery contract.
-- Local hardware parallelism and soft admission pressure no longer justify surfacing the internal
-  retry-budget error when a viable account can still serve the replay.
-
-## Verification
-
-- Added candidate and direct-current regression tests that reproduce the old hard-affinity
-  pre-send quota path and assert `previous_response_not_found` is emitted instead of
-  `service_unavailable`.
-- Mutation sensitivity was proven by restoring the old constrained full-context fallback:
-  the regression failed with the exact user-visible 503
-  `pre-commit retry budget was exhausted`; restoring the fixed source byte-for-byte made it pass.
-- Regression coverage also verifies releasable affinity rotation, soft-load/circuit last-chance
-  fallback, hard inflight-cap enforcement, integration-level owned-quota replay, and terminal
-  behavior after the full WebSocket profile pool is exhausted.
-- Mojo no-fallback, Mojo authority, runtime manifest, size, static guards, formatting,
-  `git diff --check`, and relevant Clippy checks pass locally.
-
-## Changelog
-
-- Recover hard-affinity pre-send quota blocks with full-context replay and account rebinding instead
-  of leaking the internal pre-commit retry-budget 503 while usable quota remains.
-
-Full Changelog: [0.435.4...0.435.5](https://github.com/christiandoxa/prodex/compare/0.435.4...0.435.5)
 
 ## 0.435.4 - 2026-10-04
 
