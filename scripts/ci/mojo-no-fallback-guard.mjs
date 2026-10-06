@@ -998,6 +998,7 @@ const SMART_CONTEXT_CORE_FILE = "crates/prodex-runtime-proxy/src/smart_context/c
 const SMART_CONTEXT_DUPLICATE_VALIDATION_FILE = "crates/prodex-app/src/runtime_proxy/smart_context/rewrite_validation.rs";
 const SMART_CONTEXT_DUPLICATE_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_decisions/smart_context_policy.rs";
 const SMART_CONTEXT_DUPLICATE_MOJO_FILE = "mojo/prodex_core/smart_context.mojo";
+const SMART_CONTEXT_POLICY_MOJO_FILE = "mojo/prodex_core/smart_context_policy.mojo";
 const ADAPTIVE_BUDGET_FILE = "crates/prodex-runtime-proxy/src/smart_context/rewrite_policy/adaptive.rs";
 const DEEPSEEK_SHAPING_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs";
 const DEEPSEEK_STREAM_RESPONSE_VALUES_FILE = "crates/prodex-provider-core/src/translators/deepseek/stream/response_values.rs";
@@ -4713,6 +4714,7 @@ export function findViolations(files) {
       const required = [
         "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)",
         "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Probe)",
+        "smart_context_rewrite_validation_reason(",
       ];
       const violations = required
         .filter((call) => !production.includes(call))
@@ -4723,6 +4725,8 @@ export function findViolations(files) {
         "BTreeMap::<String, usize>",
         "BTreeMap::<String, Vec<(usize, &str)>>",
         "seen.entry(&hash)",
+        "fn runtime_smart_context_rewrite_is_rehydrate_only",
+        "fn runtime_smart_context_regression_reason_label",
       ]) {
         if (production.includes(restored)) {
           violations.push(filePath + ": contains restored Rust duplicate-text decision logic " + restored);
@@ -4732,8 +4736,12 @@ export function findViolations(files) {
       return violations;
     }
     if (filePath === SMART_CONTEXT_DUPLICATE_ADAPTER_FILE) {
-      return contents.includes("fn prodex_smart_context_duplicate_text_plan_v1(")
-        ? [] : [filePath + ": duplicate-text adapter must retain the Mojo planner ABI"];
+      return [
+        "fn prodex_smart_context_duplicate_text_plan_v1(",
+        "fn prodex_smart_context_rewrite_validation_reason_v1(",
+      ]
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": Smart Context adapter must retain " + marker);
     }
     if (filePath === SMART_CONTEXT_DUPLICATE_MOJO_FILE) {
       const required = [
@@ -4743,6 +4751,11 @@ export function findViolations(files) {
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": duplicate-text decision must remain Mojo-owned " + call);
+    }
+    if (filePath === SMART_CONTEXT_POLICY_MOJO_FILE) {
+      return contents.includes('@export("prodex_smart_context_rewrite_validation_reason_v1")')
+        ? []
+        : [filePath + ": rewrite-validation reason policy must remain Mojo-owned"];
     }
     return [];
   });

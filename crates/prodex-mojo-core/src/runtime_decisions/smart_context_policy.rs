@@ -132,6 +132,17 @@ unsafe extern "C" {
         exactness_reason_bits: u64,
         policy_reason_bits: u64,
     ) -> i64;
+    fn prodex_smart_context_rewrite_validation_reason_v1(
+        critical_signal_loss: i64,
+        fallback_exact: i64,
+        reason_bits: u64,
+        rehydrated_refs: u64,
+        tool_outputs_condensed: u64,
+        duplicate_texts: u64,
+        cross_turn_duplicate_texts: u64,
+        repeat_tool_output_refs: u64,
+        static_context_deltas: u64,
+    ) -> i64;
     fn prodex_smart_context_rollout_plan_v1(
         enabled: i64,
         explicit_exact_mode: i64,
@@ -207,6 +218,38 @@ pub fn smart_context_regression_plan(
         reason_bits,
         saved_tokens,
     })
+}
+
+pub fn smart_context_rewrite_validation_reason(
+    critical_signal_loss: bool,
+    fallback_exact: bool,
+    reason_bits: u64,
+    counts: [usize; 6],
+) -> Result<Option<&'static str>, crate::MojoError> {
+    let counts = counts.map(|value| u64::try_from(value).unwrap_or(u64::MAX));
+    match unsafe {
+        prodex_smart_context_rewrite_validation_reason_v1(
+            i64::from(critical_signal_loss),
+            i64::from(fallback_exact),
+            reason_bits,
+            counts[0],
+            counts[1],
+            counts[2],
+            counts[3],
+            counts[4],
+            counts[5],
+        )
+    } {
+        0 => Ok(None),
+        1 => Ok(Some("critical_signal_loss")),
+        2 => Ok(Some("missing_rehydrate_refs")),
+        3 => Ok(Some("exactness_required")),
+        4 => Ok(Some("empty_after_payload")),
+        5 => Ok(Some("token_savings_below_safety_margin")),
+        6 => Ok(Some("unsupported_tokenizer")),
+        7 => Ok(Some("token_budget_did_not_improve")),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
 }
 
 pub fn smart_context_affinity_rewrite_allowed(
