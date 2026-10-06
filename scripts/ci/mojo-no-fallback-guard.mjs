@@ -2712,6 +2712,24 @@ export function findViolations(files) {
       if (/event\.get\(|object\.keys\(\)\.all|event\["thought_signature"\]/u.test(deltaSignature)) {
         violations.push(filePath + ": contains restored Rust function-call delta thought-signature shaping");
       }
+      const functionDelta = contents.match(
+        /\bpub fn gemini_provider_core_stream_function_call_delta\([^]*?^\}/mu,
+      )?.[0] ?? "";
+      if (!functionDelta.includes("GeminiResponseKernelOperation::StreamFunctionCallDelta") || !functionDelta.includes("input.response = Some(&raw)")) {
+        violations.push(filePath + ": stream function-call extraction must stay Mojo-owned");
+      }
+      if (/\.get\("name"\)|\.get\("args"\)/u.test(functionDelta)) {
+        violations.push(filePath + ": contains restored Rust stream function-call extraction");
+      }
+      const responseId = contents.match(
+        /\bpub fn gemini_provider_core_stream_response_id_from_chunk\([^]*?^\}/mu,
+      )?.[0] ?? "";
+      if (!responseId.includes("GeminiResponseKernelOperation::StreamResponseId") || !responseId.includes("input.response = Some(&raw)")) {
+        violations.push(filePath + ": stream response-id extraction must stay Mojo-owned");
+      }
+      if (/\.get\("responseId"\)|\.get\("id"\)/u.test(responseId)) {
+        violations.push(filePath + ": contains restored Rust stream response-id extraction");
+      }
       return violations;
     }
     if (filePath === GEMINI_BRIDGE_ROOT_FILE &&
