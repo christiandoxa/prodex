@@ -3,8 +3,27 @@
 use prodex_mojo_core::log::{
     CHAIN_LOG_DEAD_UPSTREAM, CHAIN_LOG_RETRIED_OWNER, ChainLogRenderInput,
     ROUTE_AFFINITY_LOG_RECOMPUTE, RouteAffinityLogRenderInput, render_chain_log,
-    render_route_affinity_log, render_route_affinity_owner_logs,
+    render_log_event_name, render_route_affinity_log, render_route_affinity_owner_logs,
 };
+
+#[test]
+fn log_event_name_renderer_preserves_exact_and_fallback_labels() {
+    assert_eq!(
+        render_log_event_name("selection_pick").unwrap(),
+        "profile picked"
+    );
+    assert_eq!(render_log_event_name("mcp_tool_call").unwrap(), "MCP");
+    assert_eq!(
+        render_log_event_name("custom_sub_agent_event").unwrap(),
+        "sub-agent"
+    );
+    assert_eq!(
+        render_log_event_name("custom_event_name").unwrap(),
+        "custom event name"
+    );
+    assert_eq!(render_log_event_name("café_event").unwrap(), "café event");
+    assert_eq!(render_log_event_name("").unwrap(), "");
+}
 
 #[test]
 fn route_affinity_mojo_abi_preserves_http_flags_and_owner_order() {

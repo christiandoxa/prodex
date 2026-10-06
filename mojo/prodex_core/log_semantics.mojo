@@ -206,6 +206,242 @@ def prodex_mojo_log_level_classify_v1(
     return 0
 
 
+comptime PRODEX_LOG_EVENT_NAME_ABI_VERSION: Int64 = 1
+comptime PRODEX_LOG_EVENT_NAME_STATUS_OK: Int64 = 0
+comptime PRODEX_LOG_EVENT_NAME_STATUS_INVALID: Int64 = 1
+comptime PRODEX_LOG_EVENT_NAME_STATUS_CAPACITY: Int64 = 2
+comptime PRODEX_LOG_EVENT_NAME_STATUS_ABI: Int64 = 4
+
+
+def log_view_starts_literal(view: ProdexRichStringView, literal: StringSlice) -> Bool:
+    var length = Int64(literal.byte_length())
+    if view.ptr == 0 or length > Int64(view.len):
+        return False
+    var input = rich_view_ptr(view)
+    var expected = literal.unsafe_ptr()
+    for index in range(length):
+        if input[unsafe_offset=index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def log_view_contains_literal(view: ProdexRichStringView, literal: StringSlice) -> Bool:
+    var length = Int64(literal.byte_length())
+    if view.ptr == 0 or length <= 0 or length > Int64(view.len):
+        return False
+    var input = rich_view_ptr(view)
+    var expected = literal.unsafe_ptr()
+    for start in range(Int64(view.len) - length + 1):
+        var matched = True
+        for offset in range(length):
+            if input[unsafe_offset=start + offset] != expected[unsafe_offset=offset]:
+                matched = False
+                break
+        if matched:
+            return True
+    return False
+
+
+@export("prodex_mojo_log_event_name_v1")
+def prodex_mojo_log_event_name_v1(
+    abi_version: Int64,
+    event_address: UInt,
+    event_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_LOG_EVENT_NAME_ABI_VERSION:
+        return PRODEX_LOG_EVENT_NAME_STATUS_ABI
+    if (
+        event_length < 0
+        or output_capacity < 0
+        or written_address == 0
+        or (event_length > 0 and event_address == 0)
+        or (output_capacity > 0 and output_address == 0)
+    ):
+        return PRODEX_LOG_EVENT_NAME_STATUS_INVALID
+    var event = ProdexRichStringView(event_address, UInt(event_length))
+    if not rich_view_valid(event, event_length):
+        return PRODEX_LOG_EVENT_NAME_STATUS_INVALID
+
+    var label = StringSlice("")
+    if rich_view_matches_literal["request_captured"](event, False):
+        label = StringSlice("received request")
+    elif rich_view_matches_literal["route_decision"](event, False):
+        label = StringSlice("route decided")
+    elif rich_view_matches_literal["selection_plan"](event, False):
+        label = StringSlice("route planned")
+    elif rich_view_matches_literal["selection_pick"](event, False):
+        label = StringSlice("profile picked")
+    elif rich_view_matches_literal["selection_keep_affinity"](event, False):
+        label = StringSlice("owner kept")
+    elif rich_view_matches_literal["selection_keep_current"](event, False):
+        label = StringSlice("current profile kept")
+    elif rich_view_matches_literal["selection_skip_current"](event, False):
+        label = StringSlice("profile skipped")
+    elif rich_view_matches_literal["selection_skip_affinity"](event, False):
+        label = StringSlice("affinity skipped")
+    elif rich_view_matches_literal["selection_skip_sync_probe"](event, False):
+        label = StringSlice("quota probe skipped")
+    elif rich_view_matches_literal["local_selection_blocked"](event, False):
+        label = StringSlice("route blocked")
+    elif rich_view_matches_literal["profile_commit"](event, False):
+        label = StringSlice("profile committed")
+    elif rich_view_matches_literal["route_affinity_recompute"](event, False):
+        label = StringSlice("affinity recomputed")
+    elif rich_view_matches_literal["route_affinity_recompute_result"](event, False):
+        label = StringSlice("affinity resolved")
+    elif rich_view_matches_literal["previous_response_owner"](event, False):
+        label = StringSlice("continuation owner")
+    elif rich_view_matches_literal["previous_response_not_found"](event, False):
+        label = StringSlice("continuation missing")
+    elif rich_view_matches_literal["previous_response_negative_cache"](event, False):
+        label = StringSlice("continuation cached missing")
+    elif rich_view_matches_literal["previous_response_fresh_fallback"](event, False):
+        label = StringSlice("fresh fallback")
+    elif rich_view_matches_literal["previous_response_fresh_fallback_blocked"](event, False):
+        label = StringSlice("fallback blocked")
+    elif rich_view_matches_literal["previous_response_turn_state_rehydrated"](event, False):
+        label = StringSlice("turn state restored")
+    elif rich_view_matches_literal["session_rotation_release_affinity"](event, False):
+        label = StringSlice("session affinity released")
+    elif rich_view_matches_literal["binding_prompt_cache"](event, False):
+        label = StringSlice("prompt cache bound")
+    elif rich_view_matches_literal["upgrade"](event, False) or rich_view_matches_literal["upgraded"](event, False):
+        label = StringSlice("request upgraded")
+    elif rich_view_matches_literal["profile_quota_exhausted"](event, False) or rich_view_matches_literal["quota_exhausted"](event, False):
+        label = StringSlice("quota exhausted")
+    elif rich_view_matches_literal["quota_blocked"](event, False):
+        label = StringSlice("quota blocked")
+    elif rich_view_matches_literal["quota_critical_floor_before_send"](event, False):
+        label = StringSlice("quota floor blocked")
+    elif rich_view_matches_literal["profile_quota_quarantine"](event, False):
+        label = StringSlice("quota quarantine")
+    elif rich_view_matches_literal["profile_probe_refresh_start"](event, False):
+        label = StringSlice("quota refresh started")
+    elif rich_view_matches_literal["profile_probe_refresh_ok"](event, False):
+        label = StringSlice("quota refreshed")
+    elif rich_view_matches_literal["upstream_usage_limit_passthrough"](event, False):
+        label = StringSlice("upstream limit passed through")
+    elif rich_view_matches_literal["upstream_overload_passthrough"](event, False):
+        label = StringSlice("upstream overload passed through")
+    elif rich_view_matches_literal["profile_retry_backoff"](event, False):
+        label = StringSlice("retry backoff")
+    elif rich_view_matches_literal["compact_retryable_failure"](event, False):
+        label = StringSlice("compaction retry")
+    elif rich_view_matches_literal["compact_overload_conservative_retry"](event, False):
+        label = StringSlice("compaction retry (overload)")
+    elif rich_view_matches_literal["profile_transport_backoff"](event, False):
+        label = StringSlice("transport backoff")
+    elif rich_view_matches_literal["rotation_waiting_for_recovery"](event, False):
+        label = StringSlice("waiting for recovery")
+    elif rich_view_matches_literal["profile_circuit_open"](event, False):
+        label = StringSlice("circuit open")
+    elif rich_view_matches_literal["profile_circuit_half_open_probe"](event, False):
+        label = StringSlice("circuit probe")
+    elif rich_view_matches_literal["profile_transport_failure"](event, False):
+        label = StringSlice("transport failed")
+    elif rich_view_matches_literal["profile_health"](event, False):
+        label = StringSlice("health penalty")
+    elif rich_view_matches_literal["profile_bad_pairing"](event, False):
+        label = StringSlice("affinity penalty")
+    elif rich_view_matches_literal["upstream_start"](event, False) or rich_view_matches_literal["upstream_async_start"](event, False):
+        label = StringSlice("upstream request")
+    elif rich_view_matches_literal["upstream_response"](event, False) or rich_view_matches_literal["upstream_async_response"](event, False):
+        label = StringSlice("upstream response")
+    elif rich_view_matches_literal["upstream_connect_start"](event, False):
+        label = StringSlice("upstream connecting")
+    elif rich_view_matches_literal["upstream_connect_ok"](event, False):
+        label = StringSlice("upstream connected")
+    elif rich_view_matches_literal["upstream_connect_error"](event, False):
+        label = StringSlice("upstream connect failed")
+    elif rich_view_matches_literal["first_upstream_chunk"](event, False):
+        label = StringSlice("first upstream chunk")
+    elif rich_view_matches_literal["first_local_chunk"](event, False):
+        label = StringSlice("first local chunk")
+    elif rich_view_matches_literal["stream_complete"](event, False):
+        label = StringSlice("stream complete")
+    elif rich_view_matches_literal["buffered_response_complete"](event, False):
+        label = StringSlice("response complete")
+    elif rich_view_matches_literal["terminal_event"](event, False):
+        label = StringSlice("terminal event")
+    elif rich_view_matches_literal["runtime_proxy_queue_overloaded"](event, False):
+        label = StringSlice("proxy queue full")
+    elif rich_view_matches_literal["runtime_proxy_active_limit_reached"](event, False):
+        label = StringSlice("proxy busy")
+    elif rich_view_matches_literal["runtime_proxy_lane_limit_reached"](event, False):
+        label = StringSlice("lane full")
+    elif rich_view_matches_literal["profile_inflight_saturated"](event, False):
+        label = StringSlice("profile busy")
+    elif rich_view_matches_literal["smart_context_autopilot"](event, False):
+        label = StringSlice("Smart Context")
+    elif rich_view_matches_literal["smart_context_prepare_error"](event, False):
+        label = StringSlice("Smart Context failed")
+    elif rich_view_matches_literal["smart_context_prepare_fallback"](event, False):
+        label = StringSlice("Smart Context fallback")
+    elif rich_view_matches_literal["smart_context_disabled"](event, False):
+        label = StringSlice("Smart Context disabled")
+    elif rich_view_matches_literal["local_rewrite_request_detail"](event, False):
+        label = StringSlice("provider request")
+    elif rich_view_matches_literal["local_rewrite_provider_model_fallback"](event, False):
+        label = StringSlice("model fallback")
+    elif rich_view_matches_literal["local_rewrite_provider_auth_failure"](event, False):
+        label = StringSlice("provider auth failed")
+    elif rich_view_matches_literal["upstream_read_error"](event, False):
+        label = StringSlice("upstream read failed")
+    elif rich_view_matches_literal["upstream_send_error"](event, False):
+        label = StringSlice("upstream send failed")
+    elif rich_view_matches_literal["upstream_stream_error"](event, False):
+        label = StringSlice("upstream stream failed")
+    elif rich_view_matches_literal["upstream_close_before_completed"](event, False):
+        label = StringSlice("upstream closed early")
+    elif rich_view_matches_literal["upstream_connection_closed"](event, False):
+        label = StringSlice("upstream disconnected")
+    elif rich_view_matches_literal["stream_read_error"](event, False):
+        label = StringSlice("stream read failed")
+    elif rich_view_matches_literal["local_writer_error"](event, False):
+        label = StringSlice("terminal write failed")
+    elif rich_view_matches_literal["invalid_previous_response_id"](event, False):
+        label = StringSlice("continuation invalid")
+    elif rich_view_matches_literal["session_error"](event, False):
+        label = StringSlice("session failed")
+    elif rich_view_matches_literal["local_connection_closed"](event, False):
+        label = StringSlice("local connection closed")
+    elif rich_view_matches_literal["profile_probe_refresh_error"](event, False):
+        label = StringSlice("quota refresh failed")
+    elif rich_view_matches_literal["smart_context_token_calibration_save_error"](event, False):
+        label = StringSlice("Smart Context calibration failed")
+    elif log_view_contains_literal(event, StringSlice("compact")) or log_view_contains_literal(event, StringSlice("compaction")):
+        label = StringSlice("compaction")
+    elif log_view_contains_literal(event, StringSlice("mcp")) or log_view_starts_literal(event, StringSlice("expose_")):
+        label = StringSlice("MCP")
+    elif log_view_contains_literal(event, StringSlice("sub_agent")) or log_view_contains_literal(event, StringSlice("subagent")):
+        label = StringSlice("sub-agent")
+
+    var required = Int64(label.byte_length())
+    if required == 0:
+        required = event_length
+    if output_capacity < required:
+        return PRODEX_LOG_EVENT_NAME_STATUS_CAPACITY
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if label.byte_length() > 0:
+        var source = label.unsafe_ptr()
+        for index in range(required):
+            output[unsafe_offset=index] = source[unsafe_offset=index]
+    else:
+        var source = rich_view_ptr(event)
+        for index in range(event_length):
+            output[unsafe_offset=index] = UInt8(32) if source[unsafe_offset=index] == UInt8(95) else source[unsafe_offset=index]
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = required
+    return PRODEX_LOG_EVENT_NAME_STATUS_OK
+
+
 comptime PRODEX_TRANSCRIPT_ABI_VERSION: Int64 = 1
 comptime PRODEX_TRANSCRIPT_TOOL_NAME_CHARS: Int64 = 96
 comptime PRODEX_TRANSCRIPT_OPERATION_CHARS: Int64 = 192
