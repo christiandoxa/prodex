@@ -4080,18 +4080,17 @@ export function findViolations(files) {
   const quotaResetEpochViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === QUOTA_WINDOWS_FILE) {
       const required = [
-        "prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(",
-        "quota_json_i64_path(&value, &[\"resets_at\"])",
-        "quota_json_i64_path(&value, &[\"reset_at\"])",
-        "quota_json_i64_path(&value, &[\"error\", \"resets_at\"])",
-        "quota_json_i64_path(&value, &[\"error\", \"reset_at\"])",
+        "prodex_mojo_core::quota::reset_epoch::quota_reset_json_epoch(&canonical)",
       ];
       const violations = required
         .filter((marker) => !contents.includes(marker))
-        .map((marker) => `${filePath}: reset-epoch candidate acquisition must retain ${marker}`);
-      if (/\bif\s+primary_used\b|\bif\s+secondary_used\b|primary_reset\.or\(secondary_reset\)/u.test(contents) ||
-          /\bfn\s+quota_json_(?:reset|precedence)\w*\s*\(/u.test(contents)) {
-        violations.push(`${filePath}: contains Rust reset-epoch precedence policy`);
+        .map((marker) => `${filePath}: reset JSON extraction must retain ${marker}`);
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        /\bfn\s+quota_json_(?:i64|path|object_i64|reset|precedence)\w*\s*\(/u.test(production)
+        || production.includes("QuotaResetEpochInput {")
+      ) {
+        violations.push(`${filePath}: contains restored Rust reset JSON extraction or precedence policy`);
       }
       return violations;
     }
@@ -4100,6 +4099,8 @@ export function findViolations(files) {
         "pub struct QuotaResetEpochInput",
         "pub fn quota_reset_epoch_precedence(",
         "prodex_quota_reset_epoch_v1(",
+        "pub fn quota_reset_json_epoch(",
+        "prodex_quota_reset_json_epoch_v1(",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -4108,15 +4109,18 @@ export function findViolations(files) {
     if (filePath === QUOTA_RESET_EPOCH_MOJO_FILE) {
       const required = [
         '@export("prodex_quota_reset_epoch_v1")',
-        "while index < 4:",
+        '@export("prodex_quota_reset_json_epoch_v1")',
+        "quota_reset_epoch_plan(",
+        "quota_json_object_member_casefold_first(",
+        "quota_json_i64(",
         "primary_used >= 100",
         "secondary_used >= 100",
-        "fields[unsafe_offset=9] == 1",
-        "fields[unsafe_offset=11] == 1",
+        "fields[9] == 1",
+        "fields[11] == 1",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
-        .map((marker) => `${filePath}: quota reset-epoch precedence must remain Mojo-owned (${marker})`);
+        .map((marker) => `${filePath}: quota reset parsing and precedence must remain Mojo-owned (${marker})`);
     }
     if (filePath === QUOTA_RESET_EPOCH_TEST_FILE) {
       const required = [

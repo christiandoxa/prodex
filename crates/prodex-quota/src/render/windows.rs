@@ -1,7 +1,5 @@
 use super::*;
-use prodex_mojo_core::rich::{
-    ascii_casefold_contains, ascii_casefold_equal_exact, ascii_casefold_find,
-};
+use prodex_mojo_core::rich::{ascii_casefold_contains, ascii_casefold_find};
 
 pub fn required_main_window_snapshot(
     usage: &UsageResponse,
@@ -188,57 +186,9 @@ pub fn quota_reset_at_from_message(message: &str) -> Option<i64> {
 
 fn quota_reset_at_from_json_message(message: &str) -> Option<i64> {
     let value = serde_json::from_str::<serde_json::Value>(message.trim()).ok()?;
-    let headers = quota_json_path(&value, &["headers"]);
-    prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(
-        prodex_mojo_core::quota::reset_epoch::QuotaResetEpochInput {
-            resets_at: quota_json_i64_path(&value, &["resets_at"]),
-            reset_at: quota_json_i64_path(&value, &["reset_at"]),
-            error_resets_at: quota_json_i64_path(&value, &["error", "resets_at"]),
-            error_reset_at: quota_json_i64_path(&value, &["error", "reset_at"]),
-            primary_reset_at: headers
-                .and_then(|headers| quota_json_object_i64(headers, "X-Codex-Primary-Reset-At")),
-            secondary_reset_at: headers
-                .and_then(|headers| quota_json_object_i64(headers, "X-Codex-Secondary-Reset-At")),
-            primary_used_percent: headers
-                .and_then(|headers| quota_json_object_i64(headers, "X-Codex-Primary-Used-Percent")),
-            secondary_used_percent: headers.and_then(|headers| {
-                quota_json_object_i64(headers, "X-Codex-Secondary-Used-Percent")
-            }),
-        },
-    )
-    .expect("Mojo quota reset-epoch precedence returned an invalid result")
-}
-
-fn quota_json_i64_path(value: &serde_json::Value, path: &[&str]) -> Option<i64> {
-    quota_json_path(value, path).and_then(quota_json_i64)
-}
-
-fn quota_json_path<'a>(
-    value: &'a serde_json::Value,
-    path: &[&str],
-) -> Option<&'a serde_json::Value> {
-    let mut current = value;
-    for segment in path {
-        current = current.get(*segment)?;
-    }
-    Some(current)
-}
-
-fn quota_json_object_i64(value: &serde_json::Value, key: &str) -> Option<i64> {
-    let object = value.as_object()?;
-    object
-        .iter()
-        .find(|(candidate, _)| {
-            ascii_casefold_equal_exact(candidate, key)
-                .expect("Mojo quota JSON header-name comparison failed")
-        })
-        .and_then(|(_, value)| quota_json_i64(value))
-}
-
-fn quota_json_i64(value: &serde_json::Value) -> Option<i64> {
-    value
-        .as_i64()
-        .or_else(|| value.as_str()?.trim().parse::<i64>().ok())
+    let canonical = serde_json::to_string(&value).ok()?;
+    prodex_mojo_core::quota::reset_epoch::quota_reset_json_epoch(&canonical)
+        .expect("Mojo quota reset JSON parser returned an invalid result")
 }
 
 pub fn earliest_required_main_reset_epoch(usage: &UsageResponse) -> Option<i64> {
