@@ -1,7 +1,8 @@
 use super::*;
 
 pub(crate) use runtime_proxy_crate::{
-    RuntimeAffinitySelectionKind, runtime_websocket_previous_response_reuse_is_nonreplayable,
+    RuntimeAffinitySelectionKind, RuntimeCandidateAffinity,
+    runtime_websocket_previous_response_reuse_is_nonreplayable,
 };
 #[cfg(test)]
 pub(crate) use runtime_proxy_crate::{
@@ -15,35 +16,8 @@ pub(crate) use runtime_proxy_crate::{
     runtime_websocket_reuse_watchdog_previous_response_fresh_fallback_allowed,
 };
 
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct RuntimeCandidateAffinity<'a> {
-    pub(crate) route_kind: RuntimeRouteKind,
-    pub(crate) candidate_name: &'a str,
-    pub(crate) strict_affinity_profile: Option<&'a str>,
-    pub(crate) pinned_profile: Option<&'a str>,
-    pub(crate) turn_state_profile: Option<&'a str>,
-    pub(crate) session_profile: Option<&'a str>,
-    pub(crate) trusted_previous_response_affinity: bool,
-}
-
-fn runtime_candidate_affinity_to_proxy(
-    affinity: RuntimeCandidateAffinity<'_>,
-) -> runtime_proxy_crate::RuntimeCandidateAffinity<'_> {
-    runtime_proxy_crate::RuntimeCandidateAffinity {
-        route_kind: affinity.route_kind,
-        candidate_name: affinity.candidate_name,
-        strict_affinity_profile: affinity.strict_affinity_profile,
-        pinned_profile: affinity.pinned_profile,
-        turn_state_profile: affinity.turn_state_profile,
-        session_profile: affinity.session_profile,
-        trusted_previous_response_affinity: affinity.trusted_previous_response_affinity,
-    }
-}
-
 pub(crate) fn runtime_candidate_has_hard_affinity(affinity: RuntimeCandidateAffinity<'_>) -> bool {
-    runtime_proxy_crate::runtime_candidate_has_hard_affinity(runtime_candidate_affinity_to_proxy(
-        affinity,
-    ))
+    runtime_proxy_crate::runtime_candidate_has_hard_affinity(affinity)
 }
 
 pub(crate) fn runtime_quota_blocked_affinity_is_releasable(
@@ -52,7 +26,7 @@ pub(crate) fn runtime_quota_blocked_affinity_is_releasable(
     fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> bool {
     runtime_proxy_crate::runtime_quota_blocked_affinity_is_releasable(
-        runtime_candidate_affinity_to_proxy(affinity),
+        affinity,
         fresh_fallback_shape,
     )
 }
