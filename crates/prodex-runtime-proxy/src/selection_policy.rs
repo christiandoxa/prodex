@@ -191,7 +191,6 @@ pub fn runtime_websocket_previous_response_not_found_requires_stale_continuation
         },
     )
     .stale_continuation
-    .requires_stale_continuation()
 }
 
 pub fn runtime_proxy_has_continuation_priority(

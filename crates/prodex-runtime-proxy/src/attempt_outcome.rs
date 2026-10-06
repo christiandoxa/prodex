@@ -12,18 +12,7 @@ pub enum RuntimePreviousResponseFreshFallbackShape {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimePreviousResponseFreshFallbackPolicy {
     NotApplicable,
-    FailClosed {
-        request_shape: RuntimePreviousResponseFreshFallbackPolicyShape,
-    },
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RuntimePreviousResponseFreshFallbackPolicyShape {
-    Unknown,
-    ToolOutputOnly,
-    EmptyInputOnly,
-    SessionScopedFreshReplay,
-    ContextDependentContinuation,
+    FailClosed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,13 +32,13 @@ impl RuntimePreviousResponseFreshFallbackPolicy {
         has_turn_state_retry: bool,
         request_requires_locked_previous_response_affinity: bool,
     ) -> bool {
-        matches!(self, Self::FailClosed { .. })
+        matches!(self, Self::FailClosed)
             && !has_turn_state_retry
             && !request_requires_locked_previous_response_affinity
     }
 
     pub fn is_fail_closed(self) -> bool {
-        matches!(self, Self::FailClosed { .. })
+        matches!(self, Self::FailClosed)
     }
 }
 
@@ -69,33 +58,9 @@ pub fn runtime_previous_response_fresh_fallback_policy(
     )
     .expect("Mojo previous-response fallback planning returned an invalid result");
     if plan.fresh_fail_closed {
-        RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
-            request_shape: runtime_previous_response_fallback_policy_shape(
-                input.fresh_fallback_shape,
-            ),
-        }
+        RuntimePreviousResponseFreshFallbackPolicy::FailClosed
     } else {
         RuntimePreviousResponseFreshFallbackPolicy::NotApplicable
-    }
-}
-
-fn runtime_previous_response_fallback_policy_shape(
-    shape: Option<RuntimePreviousResponseFreshFallbackShape>,
-) -> RuntimePreviousResponseFreshFallbackPolicyShape {
-    match shape {
-        Some(RuntimePreviousResponseFreshFallbackShape::ToolOutputOnly) => {
-            RuntimePreviousResponseFreshFallbackPolicyShape::ToolOutputOnly
-        }
-        Some(RuntimePreviousResponseFreshFallbackShape::EmptyInputOnly) => {
-            RuntimePreviousResponseFreshFallbackPolicyShape::EmptyInputOnly
-        }
-        Some(RuntimePreviousResponseFreshFallbackShape::SessionScopedFreshReplay) => {
-            RuntimePreviousResponseFreshFallbackPolicyShape::SessionScopedFreshReplay
-        }
-        Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation) => {
-            RuntimePreviousResponseFreshFallbackPolicyShape::ContextDependentContinuation
-        }
-        None => RuntimePreviousResponseFreshFallbackPolicyShape::Unknown,
     }
 }
 
@@ -157,21 +122,8 @@ pub fn runtime_previous_response_fresh_fallback_shape_with_session(
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RuntimePreviousResponseNotFoundFallbackPolicy {
-    pub stale_continuation: RuntimePreviousResponseStaleContinuationPolicy,
+    pub stale_continuation: bool,
     pub fresh_fallback: RuntimePreviousResponseFreshFallbackPolicy,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RuntimePreviousResponseStaleContinuationPolicy {
-    NotApplicable,
-    RetryWithTurnState,
-    FailClosed,
-}
-
-impl RuntimePreviousResponseStaleContinuationPolicy {
-    pub fn requires_stale_continuation(self) -> bool {
-        matches!(self, Self::FailClosed)
-    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -201,27 +153,12 @@ pub fn runtime_previous_response_not_found_fallback_policy(
     )
     .expect("Mojo previous-response policy planning returned an invalid result");
     RuntimePreviousResponseNotFoundFallbackPolicy {
-        stale_continuation: runtime_previous_response_stale_policy_from_tag(plan.stale_policy),
+        stale_continuation: plan.stale_policy == 2,
         fresh_fallback: if plan.fresh_fail_closed {
-            RuntimePreviousResponseFreshFallbackPolicy::FailClosed {
-                request_shape: runtime_previous_response_fallback_policy_shape(
-                    request.fresh_fallback_shape,
-                ),
-            }
+            RuntimePreviousResponseFreshFallbackPolicy::FailClosed
         } else {
             RuntimePreviousResponseFreshFallbackPolicy::NotApplicable
         },
-    }
-}
-
-fn runtime_previous_response_stale_policy_from_tag(
-    policy: i64,
-) -> RuntimePreviousResponseStaleContinuationPolicy {
-    match policy {
-        0 => RuntimePreviousResponseStaleContinuationPolicy::NotApplicable,
-        1 => RuntimePreviousResponseStaleContinuationPolicy::RetryWithTurnState,
-        2 => RuntimePreviousResponseStaleContinuationPolicy::FailClosed,
-        _ => unreachable!("validated Mojo previous-response stale policy"),
     }
 }
 
@@ -261,6 +198,7 @@ pub struct RuntimePreviousResponseNotFoundDecision {
     pub stale_continuation: bool,
     pub fresh_fallback_allowed: bool,
     pub fresh_fallback_blocked_without_affinity: bool,
+    pub observability_outcome: Option<&'static str>,
 }
 
 #[derive(Clone, Copy)]
@@ -319,55 +257,36 @@ pub fn runtime_previous_response_not_found_decision(
     .expect("Mojo previous-response attempt planning returned an invalid result");
     RuntimePreviousResponseNotFoundDecision {
         retry_delay: plan.retry_delay_ms.map(Duration::from_millis),
-        retry_reason: match plan.retry_reason {
-            0 => None,
-            1 | 2 => Some(
-                prodex_mojo_core::observability::runtime_previous_response_retry_reason_label(
-                    plan.retry_reason - 1,
-                )
-                .expect("Mojo previous-response retry-reason label returned invalid output"),
-            ),
-            _ => unreachable!("validated Mojo previous-response retry reason"),
-        },
-        chain_retry_reason: match plan.chain_reason {
-            0 => None,
-            1 | 2 => Some(
-                prodex_mojo_core::observability::runtime_previous_response_chain_reason_label(
-                    plan.chain_reason - 1,
-                )
-                .expect("Mojo previous-response chain-reason label returned invalid output"),
-            ),
-            _ => unreachable!("validated Mojo previous-response chain reason"),
-        },
+        retry_reason: (plan.retry_reason > 0).then(|| {
+            prodex_mojo_core::observability::runtime_previous_response_retry_reason_label(
+                plan.retry_reason - 1,
+            )
+            .expect("Mojo previous-response retry-reason label returned invalid output")
+        }),
+        chain_retry_reason: (plan.chain_reason > 0).then(|| {
+            prodex_mojo_core::observability::runtime_previous_response_chain_reason_label(
+                plan.chain_reason - 1,
+            )
+            .expect("Mojo previous-response chain-reason label returned invalid output")
+        }),
         request_requires_locked_previous_response_affinity: plan.request_requires_locked_affinity,
         stale_continuation: plan.stale_policy == 2,
         fresh_fallback_allowed: false,
         fresh_fallback_blocked_without_affinity: plan.fresh_blocked_without_affinity,
+        observability_outcome: (plan.observability > 0).then(|| {
+            prodex_mojo_core::observability::runtime_previous_response_outcome_label(
+                plan.observability - 1,
+            )
+            .expect("Mojo previous-response outcome label returned invalid output")
+        }),
     }
 }
 
 pub fn runtime_previous_response_not_found_observability_outcome(
     decision: RuntimePreviousResponseNotFoundDecision,
-    fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
+    _fresh_fallback_shape: Option<RuntimePreviousResponseFreshFallbackShape>,
 ) -> Option<&'static str> {
-    if decision.fresh_fallback_blocked_without_affinity
-        && matches!(
-            fresh_fallback_shape,
-            Some(RuntimePreviousResponseFreshFallbackShape::ContextDependentContinuation)
-        )
-    {
-        Some(
-            prodex_mojo_core::observability::runtime_previous_response_outcome_label(1)
-                .expect("Mojo previous-response outcome label returned invalid output"),
-        )
-    } else if decision.fresh_fallback_blocked_without_affinity {
-        Some(
-            prodex_mojo_core::observability::runtime_previous_response_outcome_label(0)
-                .expect("Mojo previous-response outcome label returned invalid output"),
-        )
-    } else {
-        None
-    }
+    decision.observability_outcome
 }
 
 #[cfg(test)]

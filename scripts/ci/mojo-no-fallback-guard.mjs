@@ -3329,8 +3329,8 @@ export function findViolations(files) {
       "runtime_previous_response_fallback_shape_label(value)",
       "runtime_previous_response_retry_reason_label(",
       "runtime_previous_response_chain_reason_label(",
-      "runtime_previous_response_outcome_label(1)",
-      "runtime_previous_response_outcome_label(0)",
+      "runtime_previous_response_outcome_label(",
+      "observability_outcome: (plan.observability > 0).then(",
     ];
     const violations = required
       .filter((call) => !contents.includes(call))
@@ -3349,6 +3349,16 @@ export function findViolations(files) {
     for (const value of forbidden) {
       if (contents.includes(value)) {
         violations.push(filePath + ": contains restored Rust previous-response label semantic " + value);
+      }
+    }
+    for (const value of [
+      "RuntimePreviousResponseStaleContinuationPolicy",
+      "RuntimePreviousResponseFreshFallbackPolicyShape",
+      "runtime_previous_response_stale_policy_from_tag(",
+      "runtime_previous_response_fallback_policy_shape(",
+    ]) {
+      if (contents.includes(value)) {
+        violations.push(filePath + ": contains restored Rust previous-response policy mirror " + value);
       }
     }
     return violations;
