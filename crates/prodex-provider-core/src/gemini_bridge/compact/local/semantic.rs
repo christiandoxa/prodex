@@ -4,7 +4,9 @@ use super::GEMINI_PROVIDER_CORE_LOCAL_COMPACT_MAX_SUMMARY_BYTES;
 use super::text::{
     gemini_provider_core_local_compact_text_from_content, gemini_provider_core_truncate_utf8_edges,
 };
-use prodex_mojo_core::rich::format_gemini_semantic_continuation_summary;
+use prodex_mojo_core::rich::{
+    format_gemini_semantic_continuation_summary, plan_gemini_semantic_compact_indices,
+};
 
 const GEMINI_PROVIDER_CORE_SEMANTIC_COMPACT_ACTIVE_USER_MAX_BYTES: usize = 2 * 1024;
 const GEMINI_PROVIDER_CORE_SEMANTIC_COMPACT_LATEST_TOOL_MAX_BYTES: usize = 1024;
@@ -21,10 +23,17 @@ pub fn gemini_provider_core_semantic_compact_continuation_summary(
         .and_then(serde_json::Value::as_array)
         .map(Vec::as_slice)
         .unwrap_or_default();
-    let active_user_index = input.iter().rposition(|item| {
-        item.get("type").and_then(serde_json::Value::as_str) == Some("message")
-            && item.get("role").and_then(serde_json::Value::as_str) == Some("user")
-    });
+    let item_types = input
+        .iter()
+        .map(|item| item.get("type").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>();
+    let roles = input
+        .iter()
+        .map(|item| item.get("role").and_then(serde_json::Value::as_str))
+        .collect::<Vec<_>>();
+    let (active_user_index, latest_tool_index) =
+        plan_gemini_semantic_compact_indices(&item_types, &roles)
+            .expect("Mojo Gemini semantic compact index planner returned invalid output");
     let active_user = active_user_index
         .and_then(|index| {
             input[index]
@@ -37,19 +46,8 @@ pub fn gemini_provider_core_semantic_compact_continuation_summary(
                 GEMINI_PROVIDER_CORE_SEMANTIC_COMPACT_ACTIVE_USER_MAX_BYTES,
             )
         });
-    let latest_tool = active_user_index
-        .and_then(|index| {
-            input[(index + 1)..].iter().rev().find(|item| {
-                matches!(
-                    item.get("type").and_then(serde_json::Value::as_str),
-                    Some(
-                        "function_call_output"
-                            | "custom_tool_call_output"
-                            | "local_shell_call_output"
-                    )
-                )
-            })
-        })
+    let latest_tool = latest_tool_index
+        .and_then(|index| input.get(index))
         .and_then(|item| {
             item.get("output")
                 .or_else(|| item.get("content"))
@@ -79,9 +77,13 @@ mod tests {
     fn semantic_continuation_formatting_is_mojo_owned_at_provider_boundary() {
         let body = serde_json::to_vec(&serde_json::json!({
             "input": [
+                {"type":"function_call_output","output":"before-user"},
                 {"type":"message","role":"user","content":"older"},
+                {"type":"function_call_output","output":"after-older"},
                 {"type":"message","role":"user","content":"  finish this  "},
-                {"type":"function_call_output","output":"  tool result  "}
+                {"type":"function_call_output","output":"first-after-active"},
+                {"type":"message","role":"assistant","content":"assistant"},
+                {"type":"custom_tool_call_output","output":"  tool result  "}
             ]
         }))
         .unwrap();

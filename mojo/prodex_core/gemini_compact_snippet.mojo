@@ -1035,3 +1035,63 @@ def prodex_mojo_gemini_compact_semantic_summary_v1(
     )
     gemini_compact_finalize(output, maximum, logical, written)
     return GEMINI_COMPACT_SNIPPET_STATUS_OK
+
+
+@export("prodex_mojo_gemini_compact_semantic_indices_v1")
+def prodex_mojo_gemini_compact_semantic_indices_v1(
+    abi_version: Int64,
+    item_types_address: UInt,
+    roles_address: UInt,
+    item_count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_COMPACT_SNIPPET_ABI_VERSION:
+        return GEMINI_COMPACT_SNIPPET_STATUS_ABI
+    if (
+        item_types_address == 0
+        or roles_address == 0
+        or item_count < 0
+        or output_address == 0
+    ):
+        return GEMINI_COMPACT_SNIPPET_STATUS_INVALID
+    var item_types = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(item_types_address)
+    )
+    var roles = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(roles_address)
+    )
+    for index in range(item_count):
+        if (
+            not rich_view_valid(item_types[unsafe_offset=index].copy(), 0x7FFFFFFFFFFFFFFF)
+            or not rich_view_valid(roles[unsafe_offset=index].copy(), 0x7FFFFFFFFFFFFFFF)
+        ):
+            return GEMINI_COMPACT_SNIPPET_STATUS_UTF8
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = -1
+    output[unsafe_offset=1] = -1
+    for index in range(item_count):
+        if (
+            rich_view_matches_literal["message"](
+                item_types[unsafe_offset=index].copy(), False
+            )
+            and rich_view_matches_literal["user"](
+                roles[unsafe_offset=index].copy(), False
+            )
+        ):
+            output[unsafe_offset=0] = index
+    if output[unsafe_offset=0] < 0:
+        return GEMINI_COMPACT_SNIPPET_STATUS_OK
+    var index = item_count - 1
+    while index > output[unsafe_offset=0]:
+        var item_type = item_types[unsafe_offset=index].copy()
+        if (
+            rich_view_matches_literal["function_call_output"](item_type, False)
+            or rich_view_matches_literal["custom_tool_call_output"](item_type, False)
+            or rich_view_matches_literal["local_shell_call_output"](item_type, False)
+        ):
+            output[unsafe_offset=1] = index
+            break
+        index -= 1
+    return GEMINI_COMPACT_SNIPPET_STATUS_OK

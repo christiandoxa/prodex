@@ -4842,11 +4842,14 @@ export function findViolations(files) {
       const required = [
         "format_gemini_semantic_continuation_summary(",
         "gemini_provider_core_truncate_utf8_edges(",
+        "plan_gemini_semantic_compact_indices(",
       ];
       const restoredRust = [
         "let mut summary = String::new()",
         "summary.push_str(",
         ".filter(|text| !text.trim().is_empty())",
+        ".rposition(|item|",
+        ".iter().rev().find(|item|",
       ];
       return required.every((marker) => production.includes(marker)) && restoredRust.every((marker) => !production.includes(marker))
         ? [] : [`${filePath}: Gemini semantic continuation formatting must use Mojo without a Rust semantic copy`];
@@ -4866,6 +4869,9 @@ export function findViolations(files) {
         "prodex_mojo_gemini_compact_semantic_summary_v1(",
         "pub fn format_gemini_semantic_continuation_summary(",
         "gemini_semantic_continuation_summary_formatting_is_mojo_owned",
+        "prodex_mojo_gemini_compact_semantic_indices_v1(",
+        "pub fn plan_gemini_semantic_compact_indices(",
+        "gemini_semantic_compact_indices_are_mojo_owned",
       ];
       return required.filter((marker) => !contents.includes(marker)).map((marker) => `${filePath}: Gemini compact adapter must retain ${marker}`);
     }
@@ -4884,6 +4890,11 @@ export function findViolations(files) {
         "GEMINI_COMPACT_LOCAL_MAX_SNIPPETS",
         'StringSlice("Local Prodex compact fallback summary.',
         'No parseable recent message or tool content was found.',
+        '("prodex_mojo_gemini_compact_semantic_indices_v1")',
+        'rich_view_matches_literal["user"]',
+        'rich_view_matches_literal["function_call_output"]',
+        'rich_view_matches_literal["custom_tool_call_output"]',
+        'rich_view_matches_literal["local_shell_call_output"]',
       ];
       return required.filter((marker) => !contents.includes(marker)).map((marker) => `${filePath}: Gemini compact semantics must remain Mojo-owned (${marker})`);
     }
