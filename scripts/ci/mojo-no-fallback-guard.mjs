@@ -167,6 +167,8 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/runtime_decisions/smart_context_policy.rs",
   "mojo/prodex_core/smart_context.mojo",
   "crates/prodex-mojo-core/src/json.rs",
+  "mojo/prodex_core/gemini_response.mojo",
+  "mojo/prodex_core/rich_abi.mojo",
   RESPONSE_METADATA_FILE,
   RESPONSE_METADATA_MOJO_FILE,
   DOCTOR_MARKER_ABI_ADAPTER_FILE,
@@ -2744,6 +2746,74 @@ export function findViolations(files) {
         violations.push(filePath + ": explicit stream call-id selection must stay Mojo-owned");
       }
       return violations;
+    }
+    if (filePath === "crates/prodex-provider-core/src/translators/gemini/response/grounding.rs") {
+      const required = [
+        "Document::default()",
+        "gemini_grounding(",
+        "GeminiGroundingOperation::CitationText",
+        "GeminiGroundingOperation::WebSearchCall",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Gemini grounding adapter must retain ${marker}`);
+      for (const retired of [
+        "gemini_collect_grounding_chunk_sources",
+        "gemini_collect_citation_sources",
+        "gemini_collect_url_metadata_sources",
+        "gemini_url_source_from_metadata",
+        "gemini_push_unique_url_source",
+      ]) {
+        if (contents.includes(retired)) {
+          violations.push(`${filePath}: contains restored Rust Gemini grounding semantics (${retired})`);
+        }
+      }
+      if (/\.get\("(?:groundingMetadata|citationMetadata|urlContextMetadata|webSearchQueries|groundingChunks)"\)/u.test(contents)) {
+        violations.push(`${filePath}: contains restored Rust Gemini grounding JSON selection`);
+      }
+      return violations;
+    }
+    if (filePath === "crates/prodex-mojo-core/src/json.rs") {
+      const required = [
+        "prodex_mojo_gemini_grounding_v1(",
+        "pub enum GeminiGroundingOperation",
+        "pub fn gemini_grounding(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Gemini grounding ABI adapter must retain ${marker}`);
+    }
+    if (filePath === "mojo/prodex_core/gemini_response.mojo") {
+      const required = [
+        "def gemini_put_grounding_citation_text(",
+        "def gemini_put_grounding_web_search_call(",
+        "def gemini_grounding_v1(",
+        "gemini_grounding_source_duplicate(",
+        "gemini_citation_line_less(",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Mojo Gemini grounding owner must retain ${marker}`);
+      for (const retired of [
+        "GEMINI_CITATION_TEXT",
+        "GEMINI_WEB_SEARCH_CALL",
+        "def gemini_put_web_search_call(",
+        "def gemini_put_citation_text(",
+      ]) {
+        if (contents.includes(retired)) {
+          violations.push(`${filePath}: contains a duplicate legacy Gemini grounding semantic path (${retired})`);
+        }
+      }
+      return violations;
+    }
+    if (filePath === "mojo/prodex_core/rich_abi.mojo") {
+      const required = [
+        '@export("prodex_mojo_gemini_grounding_v1")',
+        "gemini_grounding_v1(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: Gemini grounding ABI export must retain ${marker}`);
     }
     if (filePath === GEMINI_BRIDGE_ROOT_FILE &&
         /#\[cfg\(feature = "mojo"\)\]\s*pub\(crate\) use self::request::\{/u.test(contents)) {

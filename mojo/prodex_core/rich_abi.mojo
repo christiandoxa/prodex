@@ -28,6 +28,7 @@ from rich_types import (
 )
 from gemini_response import (
     gemini_buffered_response_kernel_v2,
+    gemini_grounding_v1,
     gemini_response_kernel_v1,
 )
 from gemini_config import gemini_config_kernel_v1
@@ -427,6 +428,35 @@ def prodex_mojo_rich_gemini_response_part_plan_v1(
         suppress_visible_text,
         output_actions,
     )
+
+@export("prodex_mojo_gemini_grounding_v1")
+def prodex_mojo_gemini_grounding_v1(
+    abi_version: Int64,
+    operation: Int64,
+    nodes_address: UInt,
+    nodes_count: Int64,
+    raw_address: UInt,
+    raw_length: Int64,
+    response_id_address: UInt,
+    response_id_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    return gemini_grounding_v1(
+        abi_version,
+        operation,
+        nodes_address,
+        nodes_count,
+        raw_address,
+        raw_length,
+        response_id_address,
+        response_id_length,
+        output_address,
+        output_capacity,
+        written_address,
+    )
+
 
 @export("prodex_mojo_gemini_response_kernel_v1")
 def prodex_mojo_gemini_response_kernel_v1(

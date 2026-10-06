@@ -11,6 +11,22 @@ from json_view import (
     deepseek_json_value_end,
 )
 from kiro import kiro_raw_string_nonblank
+from parsed_json import (
+    JSON_ARRAY,
+    JSON_NULL,
+    JSON_STRING,
+    ParsedJson,
+    ParsedJsonNode,
+    pj_child,
+    pj_equal,
+    pj_field,
+    pj_kind,
+    pj_next,
+    pj_nonblank,
+    pj_string_field,
+    pj_text,
+    pj_valid,
+)
 from rich_text import rich_trim_bounds, rich_view_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
 
@@ -52,8 +68,6 @@ comptime GEMINI_STREAM_TEXT_DELTA: Int64 = 23
 comptime GEMINI_STREAM_REASONING_DELTA: Int64 = 24
 comptime GEMINI_FUNCTION_CALL_ARGUMENTS_DELTA_WITHOUT_SEQUENCE: Int64 = 25
 comptime GEMINI_BUFFERED_RESPONSE: Int64 = 26
-comptime GEMINI_CITATION_TEXT: Int64 = 27
-comptime GEMINI_WEB_SEARCH_CALL: Int64 = 28
 comptime GEMINI_STREAM_ASSISTANT_MESSAGE: Int64 = 29
 comptime GEMINI_STREAM_OUTPUT_ITEMS: Int64 = 30
 comptime GEMINI_TOOL_SEARCH_CALL_ITEM: Int64 = 31
@@ -744,31 +758,454 @@ def gemini_put_buffered_response(
     return gemini_put_byte(writer, 125)
 
 
-def gemini_put_web_search_call(
-    writer: Pointer[mut=True, GeminiResponseWriter, _],
-    input: ProdexGeminiResponseKernelInput,
+
+def gemini_grounding_first_candidate(tree: ParsedJson) -> Int64:
+    var candidates = pj_field(tree, 0, StringSlice("candidates"))
+    if pj_kind(tree, candidates) != JSON_ARRAY:
+        return -1
+    return pj_child(tree, candidates)
+
+
+def gemini_citation_uri_node(tree: ParsedJson, citation: Int64) -> Int64:
+    var uri = pj_string_field(tree, citation, StringSlice("uri"))
+    return uri if pj_nonblank(tree, uri) else -1
+
+
+def gemini_citation_title_node(tree: ParsedJson, citation: Int64) -> Int64:
+    var title = pj_string_field(tree, citation, StringSlice("title"))
+    return title if pj_nonblank(tree, title) else -1
+
+
+def gemini_citation_line_length(tree: ParsedJson, citation: Int64) -> Int64:
+    var uri = gemini_citation_uri_node(tree, citation)
+    if uri < 0:
+        return 0
+    var title = gemini_citation_title_node(tree, citation)
+    if title < 0:
+        return Int64(pj_text(tree, uri).len)
+    return Int64(pj_text(tree, title).len) + Int64(pj_text(tree, uri).len) + 3
+
+
+def gemini_citation_line_byte(
+    tree: ParsedJson, citation: Int64, index: Int64
+) -> UInt8:
+    var uri = gemini_citation_uri_node(tree, citation)
+    var title = gemini_citation_title_node(tree, citation)
+    if title < 0:
+        return rich_view_ptr(pj_text(tree, uri))[unsafe_offset=index]
+    var title_text = pj_text(tree, title)
+    var title_length = Int64(title_text.len)
+    if index == 0:
+        return 40
+    if index <= title_length:
+        return rich_view_ptr(title_text)[unsafe_offset=index - 1]
+    if index == title_length + 1:
+        return 41
+    if index == title_length + 2:
+        return 32
+    return rich_view_ptr(pj_text(tree, uri))[
+        unsafe_offset=index - title_length - 3
+    ]
+
+
+def gemini_citation_line_less(
+    tree: ParsedJson, left: Int64, right: Int64
 ) -> Bool:
-    if not gemini_put_literal(writer, StringSlice('{"type":"web_search_call","id":')):
+    var left_length = gemini_citation_line_length(tree, left)
+    var right_length = gemini_citation_line_length(tree, right)
+    var common = min(left_length, right_length)
+    for index in range(common):
+        var left_byte = gemini_citation_line_byte(tree, left, index)
+        var right_byte = gemini_citation_line_byte(tree, right, index)
+        if left_byte < right_byte:
+            return True
+        if left_byte > right_byte:
+            return False
+    return left_length < right_length
+
+
+def gemini_put_citation_line(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    tree: ParsedJson,
+    citation: Int64,
+) -> Bool:
+    var uri = gemini_citation_uri_node(tree, citation)
+    if uri < 0:
         return False
-    if not gemini_put_json_string_prefix(writer, StringSlice("ws_"), input.response_id):
-        return False
-    if not gemini_put_literal(writer, StringSlice(',"status":"completed","action":')):
-        return False
-    if input.delta.len > 0:
-        return (
-            gemini_put_literal(writer, StringSlice('{"type":"open_page","url":'))
-            and gemini_put_json_string(writer, input.delta)
-            and gemini_put_literal(writer, StringSlice(',"sources":'))
-            and gemini_put_view(writer, input.output)
-            and gemini_put_literal(writer, StringSlice("}}"))
-        )
-    return (
-        gemini_put_literal(writer, StringSlice('{"type":"search","queries":'))
-        and gemini_put_view(writer, input.content)
-        and gemini_put_literal(writer, StringSlice(',"sources":'))
-        and gemini_put_view(writer, input.output)
-        and gemini_put_literal(writer, StringSlice("}}"))
+    var title = gemini_citation_title_node(tree, citation)
+    if title >= 0:
+        if (
+            not gemini_put_byte(writer, 40)
+            or not gemini_put_json_escaped(writer, pj_text(tree, title))
+            or not gemini_put_literal(writer, StringSlice(") "))
+        ):
+            return False
+    return gemini_put_json_escaped(writer, pj_text(tree, uri))
+
+
+def gemini_put_grounding_citation_text(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    tree: ParsedJson,
+) -> Bool:
+    var candidate = gemini_grounding_first_candidate(tree)
+    var finish_reason = pj_string_field(
+        tree, candidate, StringSlice("finishReason")
     )
+    if not pj_nonblank(tree, finish_reason):
+        return gemini_put_literal(writer, StringSlice("null"))
+    var citation_metadata = pj_field(
+        tree, candidate, StringSlice("citationMetadata")
+    )
+    var citations = pj_field(
+        tree, citation_metadata, StringSlice("citations")
+    )
+    if pj_kind(tree, citations) != JSON_ARRAY:
+        return gemini_put_literal(writer, StringSlice("null"))
+
+    var previous: Int64 = -1
+    var wrote = False
+    while True:
+        var best: Int64 = -1
+        var citation = pj_child(tree, citations)
+        while citation >= 0:
+            if (
+                gemini_citation_uri_node(tree, citation) >= 0
+                and (
+                    previous < 0
+                    or gemini_citation_line_less(tree, previous, citation)
+                )
+                and (
+                    best < 0
+                    or gemini_citation_line_less(tree, citation, best)
+                )
+            ):
+                best = citation
+            citation = pj_next(tree, citation)
+        if best < 0:
+            break
+        if not wrote:
+            if not gemini_put_literal(writer, StringSlice('"Citations:\\n')):
+                return False
+            wrote = True
+        elif not gemini_put_literal(writer, StringSlice("\\n")):
+            return False
+        if not gemini_put_citation_line(writer, tree, best):
+            return False
+        previous = best
+
+    if not wrote:
+        return gemini_put_literal(writer, StringSlice("null"))
+    return gemini_put_byte(writer, 34)
+
+
+def gemini_grounding_preferred_array(
+    tree: ParsedJson,
+    parent: Int64,
+    primary: StringSlice,
+    fallback: StringSlice,
+) -> Int64:
+    var value = pj_field(tree, parent, primary)
+    if value < 0:
+        value = pj_field(tree, parent, fallback)
+    return value if pj_kind(tree, value) == JSON_ARRAY else -1
+
+
+def gemini_grounding_source_at(
+    tree: ParsedJson, candidate: Int64, target: Int64
+) -> Int64:
+    var ordinal: Int64 = 0
+    var grounding = pj_field(tree, candidate, StringSlice("groundingMetadata"))
+    var chunks = pj_field(tree, grounding, StringSlice("groundingChunks"))
+    if pj_kind(tree, chunks) == JSON_ARRAY:
+        var chunk = pj_child(tree, chunks)
+        while chunk >= 0:
+            var web = pj_field(tree, chunk, StringSlice("web"))
+            if web >= 0:
+                if ordinal == target:
+                    return web
+                ordinal += 1
+            var retrieved = pj_field(
+                tree, chunk, StringSlice("retrievedContext")
+            )
+            if retrieved >= 0:
+                if ordinal == target:
+                    return retrieved
+                ordinal += 1
+            chunk = pj_next(tree, chunk)
+
+    var citation_metadata = pj_field(
+        tree, candidate, StringSlice("citationMetadata")
+    )
+    var citation_sources = gemini_grounding_preferred_array(
+        tree,
+        citation_metadata,
+        StringSlice("citations"),
+        StringSlice("citationSources"),
+    )
+    if citation_sources >= 0:
+        var source = pj_child(tree, citation_sources)
+        while source >= 0:
+            if ordinal == target:
+                return source
+            ordinal += 1
+            source = pj_next(tree, source)
+
+    var url_context = pj_field(
+        tree, candidate, StringSlice("urlContextMetadata")
+    )
+    var url_sources = gemini_grounding_preferred_array(
+        tree,
+        url_context,
+        StringSlice("urlMetadata"),
+        StringSlice("url_metadata"),
+    )
+    if url_sources >= 0:
+        var source = pj_child(tree, url_sources)
+        while source >= 0:
+            if ordinal == target:
+                return source
+            ordinal += 1
+            source = pj_next(tree, source)
+    return -1
+
+
+def gemini_grounding_source_url(tree: ParsedJson, source: Int64) -> Int64:
+    for key in [
+        StringSlice("uri"),
+        StringSlice("url"),
+        StringSlice("retrievedUrl"),
+        StringSlice("retrieved_url"),
+    ]:
+        var node = pj_field(tree, source, key)
+        if node >= 0 and pj_kind(tree, node) == JSON_STRING:
+            return node if pj_nonblank(tree, node) else -1
+    return -1
+
+
+def gemini_grounding_source_title(tree: ParsedJson, source: Int64) -> Int64:
+    var title = pj_string_field(tree, source, StringSlice("title"))
+    return title if pj_nonblank(tree, title) else -1
+
+
+def gemini_grounding_source_status(tree: ParsedJson, source: Int64) -> Int64:
+    for key in [
+        StringSlice("urlRetrievalStatus"),
+        StringSlice("url_retrieval_status"),
+        StringSlice("status"),
+    ]:
+        var node = pj_field(tree, source, key)
+        if node >= 0:
+            return -1 if pj_kind(tree, node) == JSON_NULL else node
+    return -1
+
+
+def gemini_grounding_source_duplicate(
+    tree: ParsedJson,
+    candidate: Int64,
+    ordinal: Int64,
+    url: Int64,
+) -> Bool:
+    for previous in range(ordinal):
+        var source = gemini_grounding_source_at(tree, candidate, previous)
+        var previous_url = gemini_grounding_source_url(tree, source)
+        if (
+            previous_url >= 0
+            and pj_equal(pj_text(tree, previous_url), pj_text(tree, url))
+        ):
+            return True
+    return False
+
+
+def gemini_grounding_unique_source_count(
+    tree: ParsedJson, candidate: Int64
+) -> Int64:
+    var count: Int64 = 0
+    var ordinal: Int64 = 0
+    while True:
+        var source = gemini_grounding_source_at(tree, candidate, ordinal)
+        if source < 0:
+            break
+        var url = gemini_grounding_source_url(tree, source)
+        if (
+            url >= 0
+            and not gemini_grounding_source_duplicate(
+                tree, candidate, ordinal, url
+            )
+        ):
+            count += 1
+        ordinal += 1
+    return count
+
+
+def gemini_grounding_first_unique_source_url(
+    tree: ParsedJson, candidate: Int64
+) -> Int64:
+    var ordinal: Int64 = 0
+    while True:
+        var source = gemini_grounding_source_at(tree, candidate, ordinal)
+        if source < 0:
+            return -1
+        var url = gemini_grounding_source_url(tree, source)
+        if (
+            url >= 0
+            and not gemini_grounding_source_duplicate(
+                tree, candidate, ordinal, url
+            )
+        ):
+            return url
+        ordinal += 1
+
+
+def gemini_put_grounding_sources(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    tree: ParsedJson,
+    candidate: Int64,
+) -> Bool:
+    if not gemini_put_byte(writer, 91):
+        return False
+    var first = True
+    var ordinal: Int64 = 0
+    while True:
+        var source = gemini_grounding_source_at(tree, candidate, ordinal)
+        if source < 0:
+            break
+        var url = gemini_grounding_source_url(tree, source)
+        if (
+            url >= 0
+            and not gemini_grounding_source_duplicate(
+                tree, candidate, ordinal, url
+            )
+        ):
+            if not first and not gemini_put_byte(writer, 44):
+                return False
+            if (
+                not gemini_put_literal(
+                    writer, StringSlice('{"type":"url","url":')
+                )
+                or not gemini_put_json_string(writer, pj_text(tree, url))
+            ):
+                return False
+            var title = gemini_grounding_source_title(tree, source)
+            if title >= 0:
+                if (
+                    not gemini_put_literal(writer, StringSlice(',"title":'))
+                    or not gemini_put_json_string(writer, pj_text(tree, title))
+                ):
+                    return False
+            var status = gemini_grounding_source_status(tree, source)
+            if status >= 0:
+                var node = tree.nodes[unsafe_offset=status].copy()
+                if (
+                    not gemini_put_literal(writer, StringSlice(',"status":'))
+                    or not gemini_put_view_range(
+                        writer,
+                        tree.raw,
+                        node.raw_start,
+                        node.raw_start + node.raw_length,
+                    )
+                ):
+                    return False
+            if not gemini_put_byte(writer, 125):
+                return False
+            first = False
+        ordinal += 1
+    return gemini_put_byte(writer, 93)
+
+
+def gemini_grounding_queries(tree: ParsedJson, candidate: Int64) -> Int64:
+    var grounding = pj_field(tree, candidate, StringSlice("groundingMetadata"))
+    var queries = pj_field(tree, grounding, StringSlice("webSearchQueries"))
+    return queries if pj_kind(tree, queries) == JSON_ARRAY else -1
+
+
+def gemini_grounding_query_count(tree: ParsedJson, queries: Int64) -> Int64:
+    if queries < 0:
+        return 0
+    var count: Int64 = 0
+    var query = pj_child(tree, queries)
+    while query >= 0:
+        if pj_kind(tree, query) == JSON_STRING:
+            count += 1
+        query = pj_next(tree, query)
+    return count
+
+
+def gemini_put_grounding_queries(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    tree: ParsedJson,
+    queries: Int64,
+) -> Bool:
+    if not gemini_put_byte(writer, 91):
+        return False
+    var first = True
+    if queries >= 0:
+        var query = pj_child(tree, queries)
+        while query >= 0:
+            if pj_kind(tree, query) == JSON_STRING:
+                if not first and not gemini_put_byte(writer, 44):
+                    return False
+                if not gemini_put_json_string(writer, pj_text(tree, query)):
+                    return False
+                first = False
+            query = pj_next(tree, query)
+    return gemini_put_byte(writer, 93)
+
+
+def gemini_put_grounding_web_search_call(
+    writer: Pointer[mut=True, GeminiResponseWriter, _],
+    tree: ParsedJson,
+    response_id: ProdexRichStringView,
+) -> Bool:
+    var candidate = gemini_grounding_first_candidate(tree)
+    if candidate < 0:
+        return gemini_put_literal(writer, StringSlice("null"))
+    var queries = gemini_grounding_queries(tree, candidate)
+    var query_count = gemini_grounding_query_count(tree, queries)
+    var source_count = gemini_grounding_unique_source_count(tree, candidate)
+    if query_count == 0 and source_count == 0:
+        return gemini_put_literal(writer, StringSlice("null"))
+
+    if (
+        not gemini_put_literal(
+            writer, StringSlice('{"type":"web_search_call","id":')
+        )
+        or not gemini_put_json_string_prefix(
+            writer, StringSlice("ws_"), response_id
+        )
+        or not gemini_put_literal(
+            writer, StringSlice(',"status":"completed","action":')
+        )
+    ):
+        return False
+
+    if query_count == 0:
+        var first_url = gemini_grounding_first_unique_source_url(
+            tree, candidate
+        )
+        if (
+            first_url < 0
+            or not gemini_put_literal(
+                writer, StringSlice('{"type":"open_page","url":')
+            )
+            or not gemini_put_json_string(writer, pj_text(tree, first_url))
+            or not gemini_put_literal(writer, StringSlice(',"sources":'))
+            or not gemini_put_grounding_sources(writer, tree, candidate)
+            or not gemini_put_literal(writer, StringSlice("}}"))
+        ):
+            return False
+        return True
+
+    if (
+        not gemini_put_literal(
+            writer, StringSlice('{"type":"search","queries":')
+        )
+        or not gemini_put_grounding_queries(writer, tree, queries)
+        or not gemini_put_literal(writer, StringSlice(',"sources":'))
+        or not gemini_put_grounding_sources(writer, tree, candidate)
+        or not gemini_put_literal(writer, StringSlice("}}"))
+    ):
+        return False
+    return True
 
 
 def gemini_put_stream_assistant_message(
@@ -1756,10 +2193,6 @@ def gemini_write_operation(
         )
     if operation == GEMINI_BUFFERED_RESPONSE:
         return gemini_put_buffered_response(writer, input)
-    if operation == GEMINI_CITATION_TEXT:
-        return gemini_put_json_string_prefix(writer, StringSlice("Citations:\\n"), input.delta)
-    if operation == GEMINI_WEB_SEARCH_CALL:
-        return gemini_put_web_search_call(writer, input)
     if operation == GEMINI_STREAM_ASSISTANT_MESSAGE:
         return gemini_put_stream_assistant_message(writer, input)
     if operation == GEMINI_STREAM_OUTPUT_ITEMS:
@@ -1946,6 +2379,75 @@ def gemini_write_operation(
     if operation == GEMINI_STREAM_COMPLETED_TOOL_CALL_ITEM:
         return gemini_put_stream_completed_tool_call_item(writer, input)
     return False
+
+
+
+def gemini_grounding_v1(
+    abi_version: Int64,
+    operation: Int64,
+    nodes_address: UInt,
+    nodes_count: Int64,
+    raw_address: UInt,
+    raw_length: Int64,
+    response_id_address: UInt,
+    response_id_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != 1
+        or operation < 0
+        or operation > 1
+        or nodes_address == 0
+        or nodes_count <= 0
+        or raw_length < 0
+        or (raw_length > 0 and raw_address == 0)
+        or response_id_length < 0
+        or (response_id_length > 0 and response_id_address == 0)
+        or output_address == 0
+        or output_capacity <= 0
+        or written_address == 0
+    ):
+        return GEMINI_KERNEL_STATUS_INVALID
+    var tree = ParsedJson(
+        Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](
+            unsafe_from_address=Int(nodes_address)
+        ),
+        nodes_count,
+        ProdexRichStringView(raw_address, UInt(raw_length)),
+    )
+    var response_id = ProdexRichStringView(
+        response_id_address, UInt(response_id_length)
+    )
+    if (
+        not pj_valid(tree)
+        or not rich_view_valid(response_id, 0x7FFFFFFFFFFFFFFF)
+    ):
+        return GEMINI_KERNEL_STATUS_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var writer = GeminiResponseWriter(output, output_capacity, 0)
+    var writer_ptr = Pointer(to=writer)
+    var ok = (
+        gemini_put_grounding_citation_text(writer_ptr, tree)
+        if operation == 0
+        else gemini_put_grounding_web_search_call(
+            writer_ptr, tree, response_id
+        )
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = writer.written
+    if not ok:
+        return (
+            GEMINI_KERNEL_STATUS_CAPACITY
+            if writer.written >= output_capacity
+            else GEMINI_KERNEL_STATUS_INVALID
+        )
+    return GEMINI_KERNEL_STATUS_OK
 
 
 def gemini_response_kernel_v1(
