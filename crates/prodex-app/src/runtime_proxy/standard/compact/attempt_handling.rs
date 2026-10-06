@@ -250,12 +250,11 @@ impl RuntimeCompactAttemptContext<'_> {
         profile_name: String,
     ) -> Result<Option<tiny_http::ResponseBox>> {
         log_runtime_compact_local_selection_blocked(self.request_id, self.shared, &profile_name);
-        if self.candidate_has_hard_affinity {
-            if let RuntimeCompactHardAffinityRecovery::Return(retry) =
+        if self.candidate_has_hard_affinity
+            && let RuntimeCompactHardAffinityRecovery::Return(retry) =
                 self.recover_hard_affinity(&profile_name, "compact_local_selection")?
-            {
-                return Ok(Some(retry));
-            }
+        {
+            return Ok(Some(retry));
         }
         self.excluded_profiles.insert(profile_name);
         Ok(None)
