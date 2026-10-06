@@ -55,6 +55,13 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_mojo_gemini_compact_semantic_indices_v1(
+        abi_version: i64,
+        item_types_address: u64,
+        roles_address: u64,
+        item_count: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -191,6 +198,59 @@ pub fn format_gemini_local_compact_summary(
         return Err(MojoError::InvalidOutput);
     }
     String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+}
+
+pub fn plan_gemini_semantic_compact_indices(
+    item_types: &[Option<&str>],
+    roles: &[Option<&str>],
+) -> Result<(Option<usize>, Option<usize>), MojoError> {
+    ensure_rich_abi()?;
+    if item_types.len() != roles.len() {
+        return Err(MojoError::InvalidInput);
+    }
+    let item_type_views = item_types
+        .iter()
+        .map(|value| optional_view(*value))
+        .collect::<Vec<_>>();
+    let role_views = roles
+        .iter()
+        .map(|value| optional_view(*value))
+        .collect::<Vec<_>>();
+    let mut output = [-1_i64; 2];
+    let status = unsafe {
+        prodex_mojo_gemini_compact_semantic_indices_v1(
+            ABI_VERSION,
+            mojo_pointer_address(item_type_views.as_ptr()),
+            mojo_pointer_address(role_views.as_ptr()),
+            i64::try_from(item_types.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(output.as_mut_ptr()),
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::InvalidOutput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let decode = |value: i64| -> Result<Option<usize>, MojoError> {
+        if value == -1 {
+            return Ok(None);
+        }
+        let index = usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?;
+        if index >= item_types.len() {
+            return Err(MojoError::InvalidOutput);
+        }
+        Ok(Some(index))
+    };
+    let active_user = decode(output[0])?;
+    let latest_tool = decode(output[1])?;
+    if latest_tool.is_some() && active_user.is_none()
+        || matches!((active_user, latest_tool), (Some(active), Some(tool)) if tool <= active)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok((active_user, latest_tool))
 }
 
 pub fn format_gemini_semantic_continuation_summary(
@@ -391,6 +451,27 @@ mod tests {
         let empty = format_gemini_local_compact_summary(Some("   "), &[], 0, 24 * 1024).unwrap();
         assert!(empty.contains("Model: unknown"));
         assert!(empty.contains("- No parseable recent message or tool content was found."));
+    }
+
+    #[test]
+    fn gemini_semantic_compact_indices_are_mojo_owned() {
+        let item_types = [
+            Some("function_call_output"),
+            Some("message"),
+            Some("function_call_output"),
+            Some("message"),
+            Some("function_call_output"),
+            Some("custom_tool_call_output"),
+        ];
+        let roles = [None, Some("user"), None, Some("user"), None, None];
+        assert_eq!(
+            plan_gemini_semantic_compact_indices(&item_types, &roles).unwrap(),
+            (Some(3), Some(5))
+        );
+        assert_eq!(
+            plan_gemini_semantic_compact_indices(&[Some("message")], &[Some("assistant")]).unwrap(),
+            (None, None)
+        );
     }
 
     #[test]
