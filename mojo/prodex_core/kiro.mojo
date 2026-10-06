@@ -2870,11 +2870,11 @@ def kiro_raw_prompt_from_chat_messages(
         return kiro_put_literal(writer, StringSlice("User:\n"))
     return True
 
-def kiro_raw_legacy_function_tool(
+def kiro_raw_legacy_function_tool_bounds(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
+    root: Array[Int64, 2],
 ) -> Bool:
-    var root = kiro_raw_root(view)
     if not kiro_raw_present(root):
         return True
     var name = kiro_raw_member(view, root, StringSlice("name"))
@@ -2903,23 +2903,29 @@ def kiro_raw_legacy_function_tool(
             return False
     return kiro_put_literal(writer, StringSlice("}}"))
 
-def kiro_raw_legacy_tool_choice(
+
+def kiro_raw_legacy_function_tool(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     view: ProdexRichStringView,
 ) -> Bool:
-    var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
-    var end = deepseek_json_value_end(view, start, Int64(view.len), 0)
-    if start >= Int64(view.len) or end < 0 or deepseek_json_skip_ws(view, end, Int64(view.len)) != Int64(view.len):
-        return False
+    return kiro_raw_legacy_function_tool_bounds(writer, view, kiro_raw_root(view))
+
+
+def kiro_raw_legacy_tool_choice_bounds(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    root: Array[Int64, 2],
+) -> Bool:
+    if not kiro_raw_present(root):
+        return True
+    var start = root[0]
+    var end = root[1]
     if deepseek_json_byte(view, start) == 34:
         if deepseek_json_raw_equals(view, start, end, StringSlice("auto")) or deepseek_json_raw_equals(view, start, end, StringSlice("none")):
             return kiro_put_view_range(writer, view, start, end)
         return True
     if deepseek_json_byte(view, start) != 123:
         return True
-    var root = Array[Int64, 2](fill=-1)
-    root[0] = start
-    root[1] = end
     var name = kiro_raw_member(view, root, StringSlice("name"))
     var trimmed_name = kiro_raw_string_trimmed_bounds(view, name)
     if trimmed_name[0] < 0 or trimmed_name[1] <= trimmed_name[0]:
@@ -2930,6 +2936,25 @@ def kiro_raw_legacy_tool_choice(
         and kiro_put_literal(writer, StringSlice("}}"))
     )
 
+
+def kiro_raw_legacy_tool_choice(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
+    var end = deepseek_json_value_end(view, start, Int64(view.len), 0)
+    if (
+        start >= Int64(view.len)
+        or end < 0
+        or deepseek_json_skip_ws(view, end, Int64(view.len)) != Int64(view.len)
+    ):
+        return False
+    var root = Array[Int64, 2](fill=-1)
+    root[0] = start
+    root[1] = end
+    return kiro_raw_legacy_tool_choice_bounds(writer, view, root)
+
+
 def kiro_raw_item_prefix(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     first: Pointer[mut=True, Int64, _],
@@ -2938,6 +2963,73 @@ def kiro_raw_item_prefix(
         first[] = 0
         return True
     return kiro_put_byte(writer, 44)
+
+def kiro_raw_write_legacy_functions_member(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    functions: Array[Int64, 2],
+    first: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if (
+        not kiro_raw_present(functions)
+        or deepseek_json_byte(view, functions[0]) != 91
+    ):
+        return True
+    if not kiro_raw_item_prefix(writer, first):
+        return False
+    if not kiro_put_literal(writer, StringSlice('"tools":[')):
+        return False
+    var first_tool = True
+    var cursor = deepseek_json_skip_ws(view, functions[0] + 1, functions[1] - 1)
+    while cursor < functions[1] - 1:
+        var item_end = deepseek_json_value_end(view, cursor, functions[1] - 1, 0)
+        if item_end < 0:
+            return False
+        var prefix_written = writer[].written
+        if not first_tool and not kiro_put_byte(writer, 44):
+            return False
+        var item_start_written = writer[].written
+        var root = Array[Int64, 2](fill=-1)
+        root[0] = cursor
+        root[1] = item_end
+        if not kiro_raw_legacy_function_tool_bounds(writer, view, root):
+            return False
+        if writer[].written == item_start_written:
+            writer[].written = prefix_written
+        else:
+            first_tool = False
+        cursor = deepseek_json_skip_ws(view, item_end, functions[1] - 1)
+        if cursor < functions[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, functions[1] - 1)
+            continue
+        if cursor != functions[1] - 1:
+            return False
+        break
+    return kiro_put_byte(writer, 93)
+
+
+def kiro_raw_write_legacy_tool_choice_member(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    function_call: Array[Int64, 2],
+    first: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not kiro_raw_present(function_call):
+        return True
+    var saved = writer[].written
+    var first_saved = first[]
+    if not kiro_raw_item_prefix(writer, first):
+        return False
+    if not kiro_put_literal(writer, StringSlice('"tool_choice":')):
+        return False
+    var value_start = writer[].written
+    if not kiro_raw_legacy_tool_choice_bounds(writer, view, function_call):
+        return False
+    if writer[].written == value_start:
+        writer[].written = saved
+        first[] = first_saved
+    return True
+
 
 def kiro_raw_write_message_item(
     writer: Pointer[mut=True, KiroResponseWriter, _],
@@ -3199,6 +3291,8 @@ def kiro_raw_chat_drop_key(
     key_start: Int64,
     key_end: Int64,
     has_input: Bool,
+    has_tools: Bool,
+    has_tool_choice: Bool,
 ) -> Bool:
     if (
         kiro_raw_key_is(view, key_start, key_end, StringSlice("n"))
@@ -3211,9 +3305,18 @@ def kiro_raw_chat_drop_key(
         or kiro_raw_key_is(view, key_start, key_end, StringSlice("parallel_tool_calls"))
     ):
         return True
+    if has_input:
+        return False
+    if kiro_raw_key_is(view, key_start, key_end, StringSlice("messages")):
+        return True
+    if (
+        not has_tools
+        and kiro_raw_key_is(view, key_start, key_end, StringSlice("functions"))
+    ):
+        return True
     return (
-        not has_input
-        and kiro_raw_key_is(view, key_start, key_end, StringSlice("messages"))
+        not has_tool_choice
+        and kiro_raw_key_is(view, key_start, key_end, StringSlice("function_call"))
     )
 
 def kiro_raw_put_member(
@@ -3246,6 +3349,12 @@ def kiro_raw_rewrite_chat_request(
     var input = kiro_raw_member(view, root, StringSlice("input"))
     var has_input = kiro_raw_present(input)
     var messages = kiro_raw_member(view, root, StringSlice("messages"))
+    var tools = kiro_raw_member(view, root, StringSlice("tools"))
+    var functions = kiro_raw_member(view, root, StringSlice("functions"))
+    var tool_choice = kiro_raw_member(view, root, StringSlice("tool_choice"))
+    var function_call = kiro_raw_member(view, root, StringSlice("function_call"))
+    var has_tools = kiro_raw_present(tools)
+    var has_tool_choice = kiro_raw_present(tool_choice)
     if not has_input:
         if not kiro_raw_present(messages):
             issue[] = KIRO_CHAT_REWRITE_ISSUE_MISSING_MESSAGES
@@ -3272,7 +3381,7 @@ def kiro_raw_rewrite_chat_request(
         if value_end < 0:
             return False
         if not kiro_raw_chat_drop_key(
-            view, key_start, key_end, has_input
+            view, key_start, key_end, has_input, has_tools, has_tool_choice
         ):
             if not kiro_raw_put_member(
                 writer,
@@ -3299,6 +3408,14 @@ def kiro_raw_rewrite_chat_request(
         if (
             not kiro_put_literal(writer, StringSlice('"input":'))
             or not kiro_raw_write_chat_input(writer, view, messages)
+        ):
+            return False
+        if not has_tools and not kiro_raw_write_legacy_functions_member(
+            writer, view, functions, first_ptr
+        ):
+            return False
+        if not has_tool_choice and not kiro_raw_write_legacy_tool_choice_member(
+            writer, view, function_call, first_ptr
         ):
             return False
     return kiro_put_byte(writer, 125)

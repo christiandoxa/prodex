@@ -103,7 +103,6 @@ pub fn kiro_provider_core_chat_completions_request_body(
     .unwrap_or_else(|error| panic!("Mojo Kiro raw request validation failed: {error:?}"));
     kiro_validation_error(plan, object)?;
 
-    let had_input = object.contains_key("input");
     let rewritten = kiro_rewrite_chat_request_json(&canonical)
         .unwrap_or_else(|error| panic!("Mojo Kiro raw chat rewrite failed: {error:?}"));
     match rewritten.issue {
@@ -121,53 +120,8 @@ pub fn kiro_provider_core_chat_completions_request_body(
             ));
         }
     }
-    let mut rewritten: Value = serde_json::from_slice(&rewritten.body).map_err(|_| {
-        KiroProviderCoreRequestError::new(
-            "failed to serialize rewritten Kiro chat completions body",
-            "invalid_request_body",
-        )
-    })?;
-    let object = rewritten.as_object_mut().ok_or_else(|| {
-        KiroProviderCoreRequestError::new(
-            "failed to serialize rewritten Kiro chat completions body",
-            "invalid_request_body",
-        )
-    })?;
-    if !had_input {
-        kiro_rewrite_legacy_chat_tools(object);
-    }
-    let body = serde_json::to_vec(&rewritten).map_err(|_| {
-        KiroProviderCoreRequestError::new(
-            "failed to serialize rewritten Kiro chat completions body",
-            "invalid_request_body",
-        )
-    })?;
-    kiro_provider_core_responses_request_body(&body, false)
+    kiro_provider_core_responses_request_body(&rewritten.body, false)
 }
-fn kiro_rewrite_legacy_chat_tools(object: &mut serde_json::Map<String, Value>) {
-    if !object.contains_key("tools")
-        && let Some(functions) = object.remove("functions")
-        && let Some(functions) = functions.as_array()
-    {
-        object.insert(
-            "tools".to_string(),
-            Value::Array(
-                functions
-                    .iter()
-                    .filter_map(kiro_provider_core_tool_from_legacy_chat_function)
-                    .collect(),
-            ),
-        );
-    }
-    if !object.contains_key("tool_choice")
-        && let Some(function_call) = object.remove("function_call")
-        && let Some(tool_choice) =
-            kiro_provider_core_tool_choice_from_legacy_chat_function_call(&function_call)
-    {
-        object.insert("tool_choice".to_string(), tool_choice);
-    }
-}
-
 pub(super) fn kiro_provider_core_responses_request_body(
     body: &[u8],
     allow_token_limit: bool,
