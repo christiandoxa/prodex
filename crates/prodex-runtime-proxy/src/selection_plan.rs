@@ -1,10 +1,10 @@
 use std::cmp::Reverse;
 use std::collections::BTreeSet;
 
+use crate::runtime_route_reason_kind_from_tag;
 use crate::{
     RuntimeRouteDecisionReasonKind, RuntimeRouteKind, RuntimeSelectionQuotaPressureBand,
     RuntimeSelectionQuotaSource, RuntimeSelectionQuotaSummary,
-    runtime_selection_quota_pressure_band_reason,
 };
 
 #[path = "selection_prompt_cache_mojo.rs"]
@@ -147,63 +147,19 @@ pub enum RuntimeOptimisticCurrentCandidateDecision {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeOptimisticCurrentCandidateSkip {
-    pub reason: RuntimeOptimisticCurrentCandidateSkipReason,
+    pub reason: RuntimeRouteDecisionReasonKind,
 }
+
+pub type RuntimeOptimisticCurrentCandidateSkipReason = RuntimeRouteDecisionReasonKind;
 
 impl RuntimeOptimisticCurrentCandidateSkip {
     pub fn reason_label(self) -> &'static str {
-        self.reason.reason_label()
+        self.reason.as_str()
     }
 
     pub fn include_quota_fields(self) -> bool {
-        self.reason.include_quota_fields()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RuntimeOptimisticCurrentCandidateSkipReason {
-    AuthFailureBackoff,
-    SelectionBackoff,
-    RouteCircuitOpen,
-    ProfileHealth,
-    ProfilePerformance,
-    QuotaProbeUnavailable,
-    StalePersistedQuota,
-    QuotaPressureBand(RuntimeSelectionQuotaPressureBand),
-    ProfileInflightSoftLimit,
-    AuthNotQuotaCompatible,
-    PromptCacheAffinity,
-}
-
-impl RuntimeOptimisticCurrentCandidateSkipReason {
-    pub fn reason_label(self) -> &'static str {
-        match self {
-            Self::AuthFailureBackoff => RuntimeRouteDecisionReasonKind::AuthFailureBackoff.as_str(),
-            Self::SelectionBackoff => RuntimeRouteDecisionReasonKind::SelectionBackoff.as_str(),
-            Self::RouteCircuitOpen => RuntimeRouteDecisionReasonKind::RouteCircuitOpen.as_str(),
-            Self::ProfileHealth => RuntimeRouteDecisionReasonKind::ProfileHealth.as_str(),
-            Self::ProfilePerformance => RuntimeRouteDecisionReasonKind::ProfilePerformance.as_str(),
-            Self::QuotaProbeUnavailable => {
-                RuntimeRouteDecisionReasonKind::QuotaProbeUnavailable.as_str()
-            }
-            Self::StalePersistedQuota => {
-                RuntimeRouteDecisionReasonKind::StalePersistedQuota.as_str()
-            }
-            Self::QuotaPressureBand(band) => runtime_selection_quota_pressure_band_reason(band),
-            Self::ProfileInflightSoftLimit => {
-                RuntimeRouteDecisionReasonKind::ProfileInflightSoftLimit.as_str()
-            }
-            Self::AuthNotQuotaCompatible => {
-                RuntimeRouteDecisionReasonKind::AuthNotQuotaCompatible.as_str()
-            }
-            Self::PromptCacheAffinity => {
-                RuntimeRouteDecisionReasonKind::PromptCacheAffinity.as_str()
-            }
-        }
-    }
-
-    pub fn include_quota_fields(self) -> bool {
-        !matches!(self, Self::AuthNotQuotaCompatible)
+        prodex_mojo_core::runtime::optimistic_candidate_reason_include_quota(self.reason as u8)
+            .expect("Mojo optimistic candidate quota-field policy returned invalid output")
     }
 }
 
@@ -257,66 +213,18 @@ fn optimistic_current_candidate_decision_mojo(
             prompt_cache_owner_matches,
         },
     )?;
-    Ok(match result {
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_KEEP => {
-            RuntimeOptimisticCurrentCandidateDecision::Keep
-        }
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_AUTH_FAILURE => {
-            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::AuthFailureBackoff)
-        }
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_SELECTION_BACKOFF => {
-            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::SelectionBackoff)
-        }
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_ROUTE_CIRCUIT => {
-            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::RouteCircuitOpen)
-        }
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_HEALTH => {
-            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::ProfileHealth)
-        }
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_PERFORMANCE => {
-            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::ProfilePerformance)
-        }
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_QUOTA_PROBE => {
-            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::QuotaProbeUnavailable)
-        }
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_STALE_PERSISTED_QUOTA => {
-            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::StalePersistedQuota)
-        }
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_QUOTA_THIN => optimistic_skip(
-            RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
-                RuntimeSelectionQuotaPressureBand::Thin,
-            ),
-        ),
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_QUOTA_CRITICAL => optimistic_skip(
-            RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
-                RuntimeSelectionQuotaPressureBand::Critical,
-            ),
-        ),
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_QUOTA_EXHAUSTED => optimistic_skip(
-            RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
-                RuntimeSelectionQuotaPressureBand::Exhausted,
-            ),
-        ),
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_QUOTA_UNKNOWN => optimistic_skip(
-            RuntimeOptimisticCurrentCandidateSkipReason::QuotaPressureBand(
-                RuntimeSelectionQuotaPressureBand::Unknown,
-            ),
-        ),
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_INFLIGHT => {
-            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::ProfileInflightSoftLimit)
-        }
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_INCOMPATIBLE => {
-            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::AuthNotQuotaCompatible)
-        }
-        prodex_mojo_core::runtime::OPTIMISTIC_CANDIDATE_PROMPT_CACHE => {
-            optimistic_skip(RuntimeOptimisticCurrentCandidateSkipReason::PromptCacheAffinity)
-        }
-        _ => return Err(prodex_mojo_core::MojoError::InvalidOutput),
-    })
+    if result.keep {
+        return Ok(RuntimeOptimisticCurrentCandidateDecision::Keep);
+    }
+    let reason = result
+        .reason_kind
+        .and_then(runtime_route_reason_kind_from_tag)
+        .ok_or(prodex_mojo_core::MojoError::InvalidOutput)?;
+    Ok(optimistic_skip(reason))
 }
 
 fn optimistic_skip(
-    reason: RuntimeOptimisticCurrentCandidateSkipReason,
+    reason: RuntimeRouteDecisionReasonKind,
 ) -> RuntimeOptimisticCurrentCandidateDecision {
     RuntimeOptimisticCurrentCandidateDecision::Skip(RuntimeOptimisticCurrentCandidateSkip {
         reason,

@@ -140,22 +140,6 @@ pub const SMART_CONTEXT_ACCOUNTING_RISK_RESERVED_OUTPUT: u64 = 1 << 2;
 pub const SMART_CONTEXT_ACCOUNTING_RISK_UNKNOWN_INPUT: u64 = 1 << 3;
 pub const SMART_CONTEXT_ACCOUNTING_RISK_ALL: u64 = (1 << 4) - 1;
 
-pub const OPTIMISTIC_CANDIDATE_KEEP: i64 = 0;
-pub const OPTIMISTIC_CANDIDATE_AUTH_FAILURE: i64 = 1;
-pub const OPTIMISTIC_CANDIDATE_SELECTION_BACKOFF: i64 = 2;
-pub const OPTIMISTIC_CANDIDATE_ROUTE_CIRCUIT: i64 = 3;
-pub const OPTIMISTIC_CANDIDATE_HEALTH: i64 = 4;
-pub const OPTIMISTIC_CANDIDATE_PERFORMANCE: i64 = 5;
-pub const OPTIMISTIC_CANDIDATE_QUOTA_PROBE: i64 = 6;
-pub const OPTIMISTIC_CANDIDATE_STALE_PERSISTED_QUOTA: i64 = 7;
-pub const OPTIMISTIC_CANDIDATE_QUOTA_THIN: i64 = 8;
-pub const OPTIMISTIC_CANDIDATE_QUOTA_CRITICAL: i64 = 9;
-pub const OPTIMISTIC_CANDIDATE_QUOTA_EXHAUSTED: i64 = 10;
-pub const OPTIMISTIC_CANDIDATE_QUOTA_UNKNOWN: i64 = 11;
-pub const OPTIMISTIC_CANDIDATE_INFLIGHT: i64 = 12;
-pub const OPTIMISTIC_CANDIDATE_INCOMPATIBLE: i64 = 13;
-pub const OPTIMISTIC_CANDIDATE_PROMPT_CACHE: i64 = 14;
-
 pub const SMART_CONTEXT_REHYDRATE_MAX_COUNT: usize = 256;
 pub const SMART_CONTEXT_REHYDRATE_MINIMAL_TIER: i64 = 0;
 pub const SMART_CONTEXT_REHYDRATE_CONDENSED_TIER: i64 = 1;
@@ -165,6 +149,12 @@ pub const SMART_CONTEXT_REHYDRATE_ACTION_REHYDRATE: i64 = 0;
 pub const SMART_CONTEXT_REHYDRATE_ACTION_MISSING: i64 = 1;
 pub const SMART_CONTEXT_REHYDRATE_ACTION_BUDGET: i64 = 2;
 pub const SMART_CONTEXT_REHYDRATE_ACTION_MINIMAL: i64 = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OptimisticCandidateDecisionPlan {
+    pub keep: bool,
+    pub reason_kind: Option<u8>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OptimisticCandidateInput {
@@ -198,7 +188,7 @@ pub struct SmartContextRehydratePlan {
 }
 
 unsafe extern "C" {
-    fn prodex_runtime_optimistic_current_candidate_decision(
+    fn prodex_runtime_optimistic_current_candidate_plan_v2(
         route_kind: i64,
         auth_failure_active: i64,
         in_selection_backoff: i64,
@@ -214,7 +204,9 @@ unsafe extern "C" {
         inflight_soft_limit: i64,
         prompt_cache_present: i64,
         prompt_cache_owner_matches: i64,
+        output_address: u64,
     ) -> i64;
+    fn prodex_runtime_optimistic_candidate_reason_include_quota_v1(reason_kind: i64) -> i64;
     fn prodex_smart_context_rehydrate_plan_batch(
         token_costs: *const u64,
         required: *const i64,
@@ -721,13 +713,14 @@ pub fn smart_context_rewrite_telemetry_budget_decision(
 
 pub fn optimistic_current_candidate_decision(
     input: OptimisticCandidateInput,
-) -> Result<i64, crate::MojoError> {
+) -> Result<OptimisticCandidateDecisionPlan, crate::MojoError> {
     let inflight_count =
         i64::try_from(input.inflight_count).map_err(|_| crate::MojoError::InvalidInput)?;
     let inflight_soft_limit =
         i64::try_from(input.inflight_soft_limit).map_err(|_| crate::MojoError::InvalidInput)?;
-    let result = unsafe {
-        prodex_runtime_optimistic_current_candidate_decision(
+    let mut output = [-2_i64; 2];
+    let status = unsafe {
+        prodex_runtime_optimistic_current_candidate_plan_v2(
             input.route_kind,
             i64::from(input.auth_failure_active),
             i64::from(input.in_selection_backoff),
@@ -743,12 +736,39 @@ pub fn optimistic_current_candidate_decision(
             inflight_soft_limit,
             i64::from(input.prompt_cache_present),
             i64::from(input.prompt_cache_owner_matches),
+            output.as_mut_ptr() as usize as u64,
         )
     };
-    if (OPTIMISTIC_CANDIDATE_KEEP..=OPTIMISTIC_CANDIDATE_PROMPT_CACHE).contains(&result) {
-        Ok(result)
-    } else {
-        Err(crate::MojoError::InvalidOutput)
+    if status != 0 || !matches!(output[0], 0 | 1) {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    if output[0] == 1 {
+        return (output[1] == -1)
+            .then_some(OptimisticCandidateDecisionPlan {
+                keep: true,
+                reason_kind: None,
+            })
+            .ok_or(crate::MojoError::InvalidOutput);
+    }
+    let reason_kind = u8::try_from(output[1])
+        .ok()
+        .filter(|kind| *kind <= 33)
+        .ok_or(crate::MojoError::InvalidOutput)?;
+    Ok(OptimisticCandidateDecisionPlan {
+        keep: false,
+        reason_kind: Some(reason_kind),
+    })
+}
+
+pub fn optimistic_candidate_reason_include_quota(
+    reason_kind: u8,
+) -> Result<bool, crate::MojoError> {
+    match unsafe {
+        prodex_runtime_optimistic_candidate_reason_include_quota_v1(i64::from(reason_kind))
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
     }
 }
 
