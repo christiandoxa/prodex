@@ -1,5 +1,14 @@
 from std.memory import Pointer
 
+from json_view import (
+    deepseek_json_byte,
+    deepseek_json_fragment_valid,
+    deepseek_json_object_member,
+    deepseek_json_skip_ws,
+    deepseek_json_string_end,
+    deepseek_json_value_end,
+)
+
 from rich_text import rich_codepoint_width, rich_trim_bounds, rich_view_prefix, rich_view_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
 
@@ -153,6 +162,48 @@ def prodex_quota_gemini_bucket_batch(
 comptime QUOTA_MAIN_AGGREGATION_MAX_COUNT: Int64 = 1_024
 
 
+def quota_reset_epoch_plan(
+    fields: Array[Int64, 16],
+) -> Tuple[Int64, Int64, Int64]:
+    var index: Int64 = 0
+    while index < 8:
+        var present = fields[Int(index * 2 + 1)]
+        if present != 0 and present != 1:
+            return 2, 0, 0
+        index += 1
+
+    var reset_at: Int64 = 0
+    var reset_present: Int64 = 0
+    index = 0
+    while index < 4:
+        if fields[Int(index * 2 + 1)] == 1:
+            reset_at = fields[Int(index * 2)]
+            reset_present = 1
+            break
+        index += 1
+
+    if reset_present == 0:
+        var primary_used = fields[12]
+        var primary_used_present = fields[13]
+        var secondary_used = fields[14]
+        var secondary_used_present = fields[15]
+        if primary_used_present == 1 and primary_used >= 100:
+            if fields[9] == 1:
+                reset_at = fields[8]
+                reset_present = 1
+        elif secondary_used_present == 1 and secondary_used >= 100:
+            if fields[11] == 1:
+                reset_at = fields[10]
+                reset_present = 1
+        elif fields[9] == 1:
+            reset_at = fields[8]
+            reset_present = 1
+        elif fields[11] == 1:
+            reset_at = fields[10]
+            reset_present = 1
+    return 0, reset_at, reset_present
+
+
 @export("prodex_quota_reset_epoch_v1")
 def prodex_quota_reset_epoch_v1(
     fields_address: UInt,
@@ -160,55 +211,237 @@ def prodex_quota_reset_epoch_v1(
 ) abi("C") -> Int64:
     if fields_address == 0 or output_address == 0:
         return 1
-
-    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+    var source = Pointer[mut=False, Int64, ImmUntrackedOrigin](
         unsafe_from_address=Int(fields_address)
     )
+    var fields = Array[Int64, 16](fill=0)
+    for index in range(16):
+        fields[Int(index)] = source[unsafe_offset=index]
+    var plan = quota_reset_epoch_plan(fields)
+    if plan[0] != 0:
+        return plan[0]
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
+    output[unsafe_offset=0] = plan[1]
+    output[unsafe_offset=1] = plan[2]
+    return 0
 
-    # Version 1 is eight (value, present) pairs: top-level reset candidates,
-    # primary/secondary resets, then primary/secondary used percentages.
-    var index: Int64 = 0
-    while index < 8:
-        var present = fields[unsafe_offset=index * 2 + 1]
-        if present != 0 and present != 1:
-            return 2
+
+def quota_json_ascii_space(value: UInt8) -> Bool:
+    return value == 9 or value == 10 or value == 13 or value == 32
+
+
+def quota_json_i64(
+    view: ProdexRichStringView,
+    bounds: Array[Int64, 2],
+) -> Tuple[Bool, Int64]:
+    if bounds[0] < 0 or bounds[1] <= bounds[0]:
+        return False, 0
+    var start = bounds[0]
+    var end = bounds[1]
+    if deepseek_json_byte(view, start) == 34:
+        if end - start < 2 or deepseek_json_byte(view, end - 1) != 34:
+            return False, 0
+        start += 1
+        end -= 1
+        while start < end and quota_json_ascii_space(deepseek_json_byte(view, start)):
+            start += 1
+        while end > start and quota_json_ascii_space(deepseek_json_byte(view, end - 1)):
+            end -= 1
+    if start >= end:
+        return False, 0
+
+    var negative = False
+    var first = deepseek_json_byte(view, start)
+    if first == 45 or first == 43:
+        negative = first == 45
+        start += 1
+    if start >= end:
+        return False, 0
+
+    var limit: UInt64 = 9223372036854775807
+    if negative:
+        limit = 9223372036854775808
+    var magnitude: UInt64 = 0
+    var index = start
+    while index < end:
+        var byte = deepseek_json_byte(view, index)
+        if byte < 48 or byte > 57:
+            return False, 0
+        var digit = UInt64(byte - 48)
+        if magnitude > (limit - digit) // 10:
+            return False, 0
+        magnitude = magnitude * 10 + digit
         index += 1
+    if negative:
+        if magnitude == 9223372036854775808:
+            return True, INT64_MIN
+        return True, -Int64(magnitude)
+    return True, Int64(magnitude)
 
-    var reset_at: Int64 = 0
-    var reset_present: Int64 = 0
-    index = 0
-    while index < 4:
-        if fields[unsafe_offset=index * 2 + 1] == 1:
-            reset_at = fields[unsafe_offset=index * 2]
-            reset_present = 1
-            break
-        index += 1
 
-    if reset_present == 0:
-        var primary_used = fields[unsafe_offset=12]
-        var primary_used_present = fields[unsafe_offset=13]
-        var secondary_used = fields[unsafe_offset=14]
-        var secondary_used_present = fields[unsafe_offset=15]
-        if primary_used_present == 1 and primary_used >= 100:
-            if fields[unsafe_offset=9] == 1:
-                reset_at = fields[unsafe_offset=8]
-                reset_present = 1
-        elif secondary_used_present == 1 and secondary_used >= 100:
-            if fields[unsafe_offset=11] == 1:
-                reset_at = fields[unsafe_offset=10]
-                reset_present = 1
-        elif fields[unsafe_offset=9] == 1:
-            reset_at = fields[unsafe_offset=8]
-            reset_present = 1
-        elif fields[unsafe_offset=11] == 1:
-            reset_at = fields[unsafe_offset=10]
-            reset_present = 1
+def quota_json_key_casefold_equal(
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    expected: StringSlice,
+) -> Bool:
+    if start < 0 or end - start != Int64(expected.byte_length()) + 2:
+        return False
+    if deepseek_json_byte(view, start) != 34 or deepseek_json_byte(view, end - 1) != 34:
+        return False
+    var wanted = expected.unsafe_ptr()
+    for offset in range(Int64(expected.byte_length())):
+        if quota_ascii_lower(deepseek_json_byte(view, start + 1 + offset)) != quota_ascii_lower(
+            wanted[unsafe_offset=offset]
+        ):
+            return False
+    return True
 
-    output[unsafe_offset=0] = reset_at
-    output[unsafe_offset=1] = reset_present
+
+def quota_json_object_member_casefold_first(
+    view: ProdexRichStringView,
+    object_bounds: Array[Int64, 2],
+    expected: StringSlice,
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
+    if (
+        object_bounds[0] < 0
+        or object_bounds[1] <= object_bounds[0] + 1
+        or deepseek_json_byte(view, object_bounds[0]) != 123
+        or deepseek_json_byte(view, object_bounds[1] - 1) != 125
+    ):
+        return result^
+    var index = deepseek_json_skip_ws(view, object_bounds[0] + 1, object_bounds[1] - 1)
+    while index < object_bounds[1] - 1:
+        var key_start = index
+        var key_end = deepseek_json_string_end(view, key_start, object_bounds[1] - 1)
+        if key_end < 0:
+            return result^
+        index = deepseek_json_skip_ws(view, key_end, object_bounds[1] - 1)
+        if index >= object_bounds[1] - 1 or deepseek_json_byte(view, index) != 58:
+            return result^
+        var value_start = deepseek_json_skip_ws(view, index + 1, object_bounds[1] - 1)
+        var value_end = deepseek_json_value_end(view, value_start, object_bounds[1] - 1, 0)
+        if value_end < 0:
+            return result^
+        if quota_json_key_casefold_equal(view, key_start, key_end, expected):
+            result[0] = value_start
+            result[1] = value_end
+            return result^
+        index = deepseek_json_skip_ws(view, value_end, object_bounds[1] - 1)
+        if index < object_bounds[1] - 1 and deepseek_json_byte(view, index) == 44:
+            index = deepseek_json_skip_ws(view, index + 1, object_bounds[1] - 1)
+            continue
+        break
+    return result^
+
+
+def quota_reset_field(
+    fields: Pointer[mut=True, Int64, _],
+    field: Int64,
+    view: ProdexRichStringView,
+    bounds: Array[Int64, 2],
+):
+    var parsed = quota_json_i64(view, bounds)
+    if parsed[0]:
+        fields[unsafe_offset=field * 2] = parsed[1]
+        fields[unsafe_offset=field * 2 + 1] = 1
+
+
+@export("prodex_quota_reset_json_epoch_v1")
+def prodex_quota_reset_json_epoch_v1(
+    address: UInt,
+    length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if length < 0 or (length > 0 and address == 0) or output_address == 0:
+        return 1
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = 0
+    if length == 0:
+        return 0
+
+    var view = ProdexRichStringView(address, UInt(length))
+    if not rich_view_valid(view, 16 * 1024 * 1024) or not deepseek_json_fragment_valid(view):
+        return 0
+    var root_start = deepseek_json_skip_ws(view, 0, length)
+    var root_end = deepseek_json_value_end(view, root_start, length, 0)
+    if (
+        root_end < 0
+        or deepseek_json_byte(view, root_start) != 123
+        or deepseek_json_byte(view, root_end - 1) != 125
+    ):
+        return 0
+
+    var fields = Array[Int64, 16](fill=0)
+    var field_ptr = fields.unsafe_ptr()
+    quota_reset_field(
+        field_ptr, 0, view,
+        deepseek_json_object_member(view, root_start, root_end, StringSlice("resets_at")),
+    )
+    quota_reset_field(
+        field_ptr, 1, view,
+        deepseek_json_object_member(view, root_start, root_end, StringSlice("reset_at")),
+    )
+    var error_bounds = deepseek_json_object_member(
+        view, root_start, root_end, StringSlice("error")
+    )
+    if (
+        error_bounds[0] >= 0
+        and deepseek_json_byte(view, error_bounds[0]) == 123
+    ):
+        quota_reset_field(
+            field_ptr, 2, view,
+            deepseek_json_object_member(
+                view, error_bounds[0], error_bounds[1], StringSlice("resets_at")
+            ),
+        )
+        quota_reset_field(
+            field_ptr, 3, view,
+            deepseek_json_object_member(
+                view, error_bounds[0], error_bounds[1], StringSlice("reset_at")
+            ),
+        )
+
+    var headers = deepseek_json_object_member(
+        view, root_start, root_end, StringSlice("headers")
+    )
+    if headers[0] >= 0 and deepseek_json_byte(view, headers[0]) == 123:
+        quota_reset_field(
+            field_ptr, 4, view,
+            quota_json_object_member_casefold_first(
+                view, headers, StringSlice("X-Codex-Primary-Reset-At")
+            ),
+        )
+        quota_reset_field(
+            field_ptr, 5, view,
+            quota_json_object_member_casefold_first(
+                view, headers, StringSlice("X-Codex-Secondary-Reset-At")
+            ),
+        )
+        quota_reset_field(
+            field_ptr, 6, view,
+            quota_json_object_member_casefold_first(
+                view, headers, StringSlice("X-Codex-Primary-Used-Percent")
+            ),
+        )
+        quota_reset_field(
+            field_ptr, 7, view,
+            quota_json_object_member_casefold_first(
+                view, headers, StringSlice("X-Codex-Secondary-Used-Percent")
+            ),
+        )
+
+    var plan = quota_reset_epoch_plan(fields)
+    if plan[0] != 0:
+        return plan[0]
+    output[unsafe_offset=0] = plan[1]
+    output[unsafe_offset=1] = plan[2]
     return 0
 
 

@@ -1,5 +1,6 @@
 unsafe extern "C" {
     fn prodex_quota_reset_epoch_v1(fields_address: u64, output_address: u64) -> i64;
+    fn prodex_quota_reset_json_epoch_v1(address: u64, length: i64, output_address: u64) -> i64;
 }
 
 /// JSON reset candidates projected by the Rust parser for Mojo precedence.
@@ -45,6 +46,25 @@ pub fn quota_reset_epoch_precedence(
     let status = unsafe {
         prodex_quota_reset_epoch_v1(
             fields.as_ptr() as usize as u64,
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    if status == 1 || status == 2 {
+        return Err(crate::MojoError::InvalidInput);
+    }
+    if status != 0 || !matches!(output[1], 0 | 1) {
+        return Err(crate::MojoError::InvalidOutput);
+    }
+    Ok((output[1] == 1).then_some(output[0]))
+}
+
+/// Extract a quota reset epoch from canonical JSON in the Mojo quota kernel.
+pub fn quota_reset_json_epoch(canonical_json: &str) -> Result<Option<i64>, crate::MojoError> {
+    let mut output = [0_i64; 2];
+    let status = unsafe {
+        prodex_quota_reset_json_epoch_v1(
+            canonical_json.as_ptr() as usize as u64,
+            i64::try_from(canonical_json.len()).map_err(|_| crate::MojoError::InvalidInput)?,
             output.as_mut_ptr() as usize as u64,
         )
     };
