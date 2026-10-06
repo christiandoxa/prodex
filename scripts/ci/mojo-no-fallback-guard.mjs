@@ -2730,6 +2730,19 @@ export function findViolations(files) {
       if (/\.get\("responseId"\)|\.get\("id"\)/u.test(responseId)) {
         violations.push(filePath + ": contains restored Rust stream response-id extraction");
       }
+      for (const [symbol, operation, forbidden] of [
+        ["stream_chunk_metadata", "StreamChunkMetadata", /\.get\(|gemini_responses_usage|gemini_response_metadata|gemini_finish_reason/u],
+        ["stream_tool_call_ids", "StreamToolCallIds", /\.filter\(/u],
+        ["stream_tool_call_added_item", "StreamAddedToolCallItem", /name\s*==|matches!|AddedFunctionCallItem/u],
+      ]) {
+        const body = contents.match(new RegExp(`\\bpub fn gemini_provider_core_${symbol}\\([^]*?^\\}`, "mu"))?.[0] ?? "";
+        if (!body.includes(`GeminiResponseKernelOperation::${operation}`) || forbidden.test(body)) {
+          violations.push(`${filePath}: ${symbol} must stay Mojo-owned without Rust selection`);
+        }
+      }
+      if (/\.get\("id"\)|\.trim\(\)/u.test(functionDelta)) {
+        violations.push(filePath + ": explicit stream call-id selection must stay Mojo-owned");
+      }
       return violations;
     }
     if (filePath === GEMINI_BRIDGE_ROOT_FILE &&
@@ -6184,6 +6197,11 @@ function selfTest() {
   assert(findViolations([[GEMINI_BRIDGE_REQUEST_FILE,
     'pub fn gemini_provider_core_generate_content_body_value() {\n#[cfg(not(feature = "mojo"))]\nold_body();\n}']])
     .some((violation) => violation.includes("gemini_provider_core_generate_content_body_value must use Mojo")));
+  for (const symbol of ["stream_chunk_metadata", "stream_tool_call_ids", "stream_tool_call_added_item"]) {
+    assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
+      `pub fn gemini_provider_core_${symbol}() {\n old_rust_selection();\n}`]]).join("\n"),
+      /must stay Mojo-owned without Rust selection/u);
+  }
   assert.match(findViolations([["crates/prodex-provider-core/src/translators/gemini/stream/shaping.rs",
     '#[cfg(feature = "mojo")] fn gated_shape() {}']]).join("\n"),
     /stream shaping Mojo kernel must be unconditional/u);

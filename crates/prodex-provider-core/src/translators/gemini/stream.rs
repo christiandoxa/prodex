@@ -16,7 +16,7 @@ pub(super) fn gemini_mojo_value(input: GeminiResponseKernelInput<'_>) -> Value {
     })
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Deserialize)]
 pub struct GeminiProviderCoreStreamChunkMetadata {
     pub response_id: Option<String>,
     pub model: Option<String>,

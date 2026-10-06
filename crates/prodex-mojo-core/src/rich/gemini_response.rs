@@ -54,6 +54,13 @@ pub enum GeminiResponseKernelOperation {
     RawTextResponse = 45,
     StreamEventTransform = 46,
     StreamCompletedToolCallItem = 47,
+    RawResponseUsage = 49,
+    RawResponseMetadata = 50,
+    StreamModel = 51,
+    StreamToolCallIds = 52,
+    StreamAddedToolCallItem = 53,
+    StreamChunkMetadata = 54,
+    RawFinishReason = 55,
     FunctionCallArgumentsDeltaWithThoughtSignature = 48,
 }
 
@@ -181,6 +188,7 @@ const _: () = assert!(std::mem::size_of::<GeminiResponseKernelFfiInput>() == 448
 
 /// Input limit for the versioned buffered-response kernel.
 pub const GEMINI_BUFFERED_RESPONSE_MAX_INPUT_BYTES: usize = 16 * 1024 * 1024;
+const GEMINI_RAW_RESPONSE_MAX_INPUT_BYTES: usize = 64 * 1024 * 1024;
 const GEMINI_BUFFERED_RESPONSE_ABI_VERSION: i64 = 2;
 
 unsafe extern "C" {
@@ -255,6 +263,13 @@ fn gemini_kernel_operation(operation: GeminiResponseKernelOperation) -> i64 {
         GeminiResponseKernelOperation::RawTextResponse => 45,
         GeminiResponseKernelOperation::StreamEventTransform => 46,
         GeminiResponseKernelOperation::StreamCompletedToolCallItem => 47,
+        GeminiResponseKernelOperation::RawResponseUsage => 49,
+        GeminiResponseKernelOperation::RawResponseMetadata => 50,
+        GeminiResponseKernelOperation::StreamModel => 51,
+        GeminiResponseKernelOperation::StreamToolCallIds => 52,
+        GeminiResponseKernelOperation::StreamAddedToolCallItem => 53,
+        GeminiResponseKernelOperation::StreamChunkMetadata => 54,
+        GeminiResponseKernelOperation::RawFinishReason => 55,
         GeminiResponseKernelOperation::FunctionCallArgumentsDeltaWithThoughtSignature => 48,
     }
 }
@@ -333,12 +348,39 @@ pub fn gemini_buffered_response_kernel(
 /// Runs one bounded Gemini response/stream JSON builder in compiled Mojo.
 pub fn gemini_response_kernel(input: GeminiResponseKernelInput<'_>) -> Result<Vec<u8>, MojoError> {
     ensure_rich_abi()?;
-    let capacity = gemini_kernel_capacity(&input)?;
+    let input_bytes = gemini_kernel_input_bytes(&input)?;
+    if input_bytes <= GEMINI_KERNEL_MAX_BYTES {
+        let capacity = gemini_kernel_capacity(&input)?;
+        return gemini_kernel_run(
+            input,
+            capacity,
+            RICH_ABI_VERSION,
+            prodex_mojo_gemini_response_kernel_v1,
+        );
+    }
+    if input_bytes > GEMINI_RAW_RESPONSE_MAX_INPUT_BYTES
+        || !matches!(
+            input.operation,
+            GeminiResponseKernelOperation::RawResponseUsage
+                | GeminiResponseKernelOperation::RawResponseMetadata
+                | GeminiResponseKernelOperation::RawFinishReason
+        )
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let capacity = match input.operation {
+        GeminiResponseKernelOperation::RawResponseUsage
+        | GeminiResponseKernelOperation::RawFinishReason => 4 * 1024,
+        GeminiResponseKernelOperation::RawResponseMetadata => input_bytes
+            .checked_add(512)
+            .ok_or(MojoError::InvalidInput)?,
+        _ => unreachable!("validated raw-response operation"),
+    };
     gemini_kernel_run(
         input,
         capacity,
-        RICH_ABI_VERSION,
-        prodex_mojo_gemini_response_kernel_v1,
+        GEMINI_BUFFERED_RESPONSE_ABI_VERSION,
+        prodex_mojo_gemini_buffered_response_kernel_v2,
     )
 }
 
