@@ -201,42 +201,16 @@ pub fn gemini_provider_core_stream_should_emit_function_call_arguments_delta(nam
 }
 
 pub fn gemini_provider_core_function_call_arguments_delta_event_with_thought_signature(
-    mut event: Value,
+    event: Value,
     thought_signature: Option<&str>,
 ) -> Value {
-    if let Some(signature) = thought_signature
-        && event.get("type").and_then(Value::as_str)
-            == Some("response.function_call_arguments.delta")
-        && let Some(delta) = event.get("delta").and_then(Value::as_str)
-        && event.as_object().is_some_and(|object| {
-            object.keys().all(|key| {
-                matches!(
-                    key.as_str(),
-                    "type" | "sequence_number" | "call_id" | "delta"
-                )
-            })
-        })
-    {
-        let has_sequence_number = event.get("sequence_number").is_some();
-        let sequence_number = event.get("sequence_number").and_then(Value::as_u64);
-        if !has_sequence_number || sequence_number.is_some() {
-            let operation = if has_sequence_number {
-                GeminiResponseKernelOperation::FunctionCallArgumentsDelta
-            } else {
-                GeminiResponseKernelOperation::FunctionCallArgumentsDeltaWithoutSequence
-            };
-            let mut input = GeminiResponseKernelInput::new(operation);
-            input.sequence_number = sequence_number.unwrap_or_default();
-            input.call_id = event.get("call_id").and_then(Value::as_str);
-            input.delta = Some(delta);
-            input.signature = Some(signature);
-            return super::gemini_mojo_value(input);
-        }
-    }
-    if let Some(signature) = thought_signature {
-        event["thought_signature"] = Value::String(signature.to_string());
-    }
-    event
+    let serialized = serde_json::to_string(&event).expect("Gemini event serializes");
+    let mut input = GeminiResponseKernelInput::new(
+        GeminiResponseKernelOperation::FunctionCallArgumentsDeltaWithThoughtSignature,
+    );
+    input.response = Some(&serialized);
+    input.signature = thought_signature;
+    super::gemini_mojo_value(input)
 }
 
 pub fn gemini_provider_core_stream_completed_tool_call_arguments(

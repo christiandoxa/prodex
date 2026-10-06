@@ -54,6 +54,7 @@ pub enum GeminiResponseKernelOperation {
     RawTextResponse = 45,
     StreamEventTransform = 46,
     StreamCompletedToolCallItem = 47,
+    FunctionCallArgumentsDeltaWithThoughtSignature = 48,
 }
 
 /// Inputs for one bounded Gemini response or stream JSON shape.
@@ -254,6 +255,7 @@ fn gemini_kernel_operation(operation: GeminiResponseKernelOperation) -> i64 {
         GeminiResponseKernelOperation::RawTextResponse => 45,
         GeminiResponseKernelOperation::StreamEventTransform => 46,
         GeminiResponseKernelOperation::StreamCompletedToolCallItem => 47,
+        GeminiResponseKernelOperation::FunctionCallArgumentsDeltaWithThoughtSignature => 48,
     }
 }
 
