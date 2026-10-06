@@ -268,7 +268,7 @@ fn token_history_is_chronological_and_bounded() {
     };
     let events = vec![event("1", 10), event("2", 20), event("3", 30)];
     assert_eq!(token_history(&events, 2), vec![25, 35]);
-    assert_eq!(text_sparkline(&[1, 2, 3]).chars().count(), 3);
+    assert_eq!(text_sparkline(&[1, 2, 3]).unwrap().chars().count(), 3);
 }
 
 #[test]

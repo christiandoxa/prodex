@@ -33,7 +33,7 @@ mod render;
 mod resource;
 
 #[cfg(test)]
-use render::text_sparkline;
+use prodex_mojo_core::info_render::format_text_sparkline as text_sparkline;
 use render::{render_status_dashboard, status_fields};
 use resource::{collect_status_resource_counters, status_resource_snapshot};
 #[cfg(test)]
