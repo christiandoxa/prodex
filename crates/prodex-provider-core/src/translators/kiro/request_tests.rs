@@ -164,6 +164,45 @@ fn kiro_provider_core_validates_responses_shaped_chat_requests() {
 }
 
 #[test]
+fn kiro_chat_request_legacy_tools_are_rewritten_in_mojo() {
+    let error = kiro_provider_core_chat_completions_request_body(
+        serde_json::to_vec(&json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hello"}],
+            "functions": [{
+                "name": " read_file ",
+                "description": " Read a file ",
+                "parameters": {"type": "object"}
+            }]
+        }))
+        .unwrap()
+        .as_slice(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "unsupported_tools");
+    assert_eq!(
+        error.message,
+        "Kiro ACP owns its tool inventory and cannot execute external tools"
+    );
+
+    let error = kiro_provider_core_chat_completions_request_body(
+        serde_json::to_vec(&json!({
+            "model": "auto",
+            "messages": [{"role": "user", "content": "hello"}],
+            "function_call": {"name": " read_file "}
+        }))
+        .unwrap()
+        .as_slice(),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "unsupported_tool_choice");
+    assert_eq!(
+        error.message,
+        "Kiro ACP owns tool selection and cannot honor tool_choice"
+    );
+}
+
+#[test]
 fn kiro_provider_core_maps_chat_messages_and_legacy_functions() {
     let tool = kiro_provider_core_responses_items_from_chat_message(&json!({
         "role": "tool",

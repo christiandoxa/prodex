@@ -942,6 +942,7 @@ const DEEPSEEK_METADATA_FILE = "crates/prodex-provider-core/src/deepseek_bridge/
 const DEEPSEEK_SIMPLE_REQUEST_FILE = "crates/prodex-provider-core/src/deepseek_bridge/request_probe.rs";
 const KIRO_CHAT_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/kiro/response.rs";
 const KIRO_MESSAGES_FILE = "crates/prodex-provider-core/src/translators/kiro/request/messages.rs";
+const KIRO_REQUEST_FILE = "crates/prodex-provider-core/src/translators/kiro/request.rs";
 const KIRO_LOCAL_REWRITE_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs";
 const KIRO_PROMPT_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/kiro_prompt.rs";
 const KIRO_STREAM_FILE = "crates/prodex-provider-core/src/translators/kiro/stream.rs";
@@ -1695,6 +1696,20 @@ export function findViolations(files) {
     return violations;
   });
   const kiroMessageShapeViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === KIRO_REQUEST_FILE) {
+      const violations = contents.includes("kiro_rewrite_chat_request_json(")
+        ? []
+        : [`${filePath}: Kiro chat request rewrite must use the raw Mojo rewrite`];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (
+        production.includes("kiro_rewrite_legacy_chat_tools")
+        || production.includes('object.remove("functions")')
+        || production.includes('object.remove("function_call")')
+      ) {
+        violations.push(`${filePath}: contains restored Rust Kiro legacy chat-tool rewrite semantics`);
+      }
+      return violations;
+    }
     if (filePath === KIRO_MESSAGES_FILE) {
       const required = [
         "KiroKernelOperation::PromptFromChatMessages",
@@ -5867,6 +5882,12 @@ function selfTest() {
       if status == "failed" { rust_event() }
     }
   `).join("\n"), /must use Mojo final event plan/u);
+  assert.match(findViolations([[KIRO_REQUEST_FILE,
+    'fn kiro_provider_core_chat_completions_request_body() { kiro_rewrite_chat_request_json(); object.remove("functions"); }']]).join("\n"),
+  /restored Rust Kiro legacy chat-tool rewrite semantics/u);
+  assert.deepEqual(findViolations([[KIRO_REQUEST_FILE,
+    "fn kiro_provider_core_chat_completions_request_body() { kiro_rewrite_chat_request_json(); }"]]), []);
+
   const kiroPromptMarkers = `
     KiroKernelOperation::PromptFromChatMessages;
     KiroKernelOperation::LegacyFunctionTool;
