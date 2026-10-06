@@ -909,18 +909,34 @@ def gemini_put_stream_function_call_delta(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     input: ProdexGeminiResponseKernelInput,
 ) -> Bool:
+    if input.response.len == 0:
+        return False
+    var source = input.response.copy()
+    var root = gemini_raw_root(source)
+    if not gemini_raw_bounds_present(root):
+        return False
+    var name = gemini_raw_member(source, root, StringSlice("name"))
+    var args = gemini_raw_member(source, root, StringSlice("args"))
     if not gemini_put_byte(writer, 123):
         return False
     if input.call_id_present == 1:
         if not gemini_put_literal(writer, StringSlice('"explicit_call_id":')) or not gemini_put_json_string(writer, input.call_id) or not gemini_put_byte(writer, 44):
             return False
-    if not gemini_put_literal(writer, StringSlice('"name":')) or not gemini_put_stream_name(writer, input.name, input.reason_present == 1):
+    if not gemini_put_literal(writer, StringSlice('"name":')):
         return False
-    return (
-        gemini_put_literal(writer, StringSlice(',"arguments":'))
-        and gemini_put_json_string(writer, input.arguments)
-        and gemini_put_byte(writer, 125)
-    )
+    if gemini_raw_string_present(source, name):
+        if not gemini_put_view_range(writer, source, name[0], name[1]):
+            return False
+    elif not gemini_put_literal(writer, StringSlice('"tool_call"')):
+        return False
+    if not gemini_put_literal(writer, StringSlice(',"arguments":')):
+        return False
+    if gemini_raw_bounds_present(args):
+        if not gemini_put_json_string_range(writer, source, args[0], args[1]):
+            return False
+    elif not gemini_put_literal(writer, StringSlice('"{}"')):
+        return False
+    return gemini_put_byte(writer, 125)
 
 
 def gemini_put_stream_tool_call(
@@ -1841,8 +1857,15 @@ def gemini_write_operation(
             return gemini_put_literal(writer, StringSlice("false"))
         return gemini_put_literal(writer, StringSlice("true"))
     if operation == GEMINI_STREAM_RESPONSE_ID:
-        if input.call_id_present == 1 and gemini_view_starts_with(input.response_id, StringSlice("resp_gemini_")):
-            return gemini_put_json_string(writer, input.call_id)
+        if input.response.len == 0 or not gemini_view_starts_with(input.response_id, StringSlice("resp_gemini_")):
+            return gemini_put_literal(writer, StringSlice("null"))
+        var source = input.response.copy()
+        var root = gemini_raw_root(source)
+        var candidate = gemini_raw_member(source, root, StringSlice("responseId"))
+        if not gemini_raw_bounds_present(candidate):
+            candidate = gemini_raw_member(source, root, StringSlice("id"))
+        if gemini_raw_string_present(source, candidate):
+            return gemini_put_view_range(writer, source, candidate[0], candidate[1])
         return gemini_put_literal(writer, StringSlice("null"))
     if operation == GEMINI_RAW_TEXT_RESPONSE:
         return gemini_put_raw_text_response(writer, input)

@@ -201,6 +201,15 @@ fn gemini_provider_core_shapes_stream_tool_calls() {
     assert_eq!(defaults.name, "tool_call");
     assert_eq!(defaults.arguments, "{}");
 
+    let typed = gemini_provider_core_stream_function_call_delta(&json!({
+        "id": 7,
+        "name": false,
+        "args": "raw",
+    }));
+    assert_eq!(typed.explicit_call_id, None);
+    assert_eq!(typed.name, "tool_call");
+    assert_eq!(typed.arguments, "\"raw\"");
+
     let fallback = gemini_provider_core_stream_tool_call(9, 2, None, None, "not-json", Some("sig"));
     assert_eq!(fallback.call_id, "call_gemini_9_2");
     assert_eq!(fallback.name, "tool_call");
@@ -495,6 +504,20 @@ fn gemini_provider_core_shapes_stream_response_value() {
             &json!({"responseId": "resp_new"})
         ),
         None
+    );
+    assert_eq!(
+        gemini_provider_core_stream_response_id_from_chunk(
+            "resp_gemini_9",
+            &json!({"responseId": 7, "id": "resp_fallback"})
+        ),
+        None
+    );
+    assert_eq!(
+        gemini_provider_core_stream_response_id_from_chunk(
+            "resp_gemini_9",
+            &json!({"id": "resp_fallback"})
+        ),
+        Some("resp_fallback".to_string())
     );
     assert_eq!(
         gemini_provider_core_stream_response_value(
