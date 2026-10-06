@@ -45,7 +45,7 @@ pub(crate) fn quota_capacity_candidates_for_usage_at(
         ));
     }
 
-    let outputs = crate::mojo::quota_capacity_batch(&inputs, route_kind_code(route_kind))?;
+    let outputs = crate::mojo::quota_capacity_batch(&inputs, route_kind as i64)?;
     Ok(pairs
         .into_iter()
         .zip(outputs)
@@ -85,7 +85,7 @@ fn quota_capacity_output(
     input: prodex_mojo_core::quota::QuotaCapacityInput,
     route_kind: RuntimeRouteKind,
 ) -> Result<prodex_mojo_core::quota::QuotaCapacityOutput, prodex_mojo_core::MojoError> {
-    crate::mojo::quota_capacity_batch(&[input], route_kind_code(route_kind))?
+    crate::mojo::quota_capacity_batch(&[input], route_kind as i64)?
         .into_iter()
         .next()
         .ok_or(prodex_mojo_core::MojoError::InvalidOutput)
@@ -153,13 +153,4 @@ fn admission_value(
     key: &str,
 ) -> prodex_mojo_core::quota::QuotaAdmissionValue {
     crate::quota_admission_value(extra.get(key))
-}
-
-fn route_kind_code(route_kind: RuntimeRouteKind) -> i64 {
-    match route_kind {
-        RuntimeRouteKind::Responses => 0,
-        RuntimeRouteKind::Compact => 1,
-        RuntimeRouteKind::Websocket => 2,
-        RuntimeRouteKind::Standard => 3,
-    }
 }

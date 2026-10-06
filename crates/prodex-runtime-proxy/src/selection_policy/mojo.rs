@@ -12,15 +12,6 @@ unsafe extern "C" {
     ) -> i64;
 }
 
-fn route_kind_tag(route_kind: RuntimeRouteKind) -> i64 {
-    match route_kind {
-        RuntimeRouteKind::Responses => 0,
-        RuntimeRouteKind::Compact => 1,
-        RuntimeRouteKind::Websocket => 2,
-        RuntimeRouteKind::Standard => 3,
-    }
-}
-
 fn plan(
     input: prodex_mojo_core::runtime::AffinitySelectionInput,
 ) -> prodex_mojo_core::runtime::AffinitySelectionPlan {
@@ -32,7 +23,7 @@ fn affinity_input(
     affinity: RuntimeCandidateAffinity<'_>,
 ) -> prodex_mojo_core::runtime::AffinitySelectionInput {
     prodex_mojo_core::runtime::AffinitySelectionInput {
-        route_kind: route_kind_tag(affinity.route_kind),
+        route_kind: affinity.route_kind as i64,
         strict_candidate_match: affinity.strict_affinity_profile == Some(affinity.candidate_name),
         pinned_candidate_match: affinity.pinned_profile == Some(affinity.candidate_name),
         turn_state_candidate_match: affinity.turn_state_profile == Some(affinity.candidate_name),

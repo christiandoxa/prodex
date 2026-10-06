@@ -33,12 +33,7 @@ pub fn runtime_profile_inflight_soft_limit(
     pressure_mode: bool,
     base_limit: usize,
 ) -> usize {
-    let route_kind = match route_kind {
-        RuntimeRouteKind::Responses => 0,
-        RuntimeRouteKind::Compact => 1,
-        RuntimeRouteKind::Websocket => 2,
-        RuntimeRouteKind::Standard => 3,
-    };
+    let route_kind = route_kind as i64;
     prodex_mojo_core::runtime::profile_inflight_soft_limit(route_kind, pressure_mode, base_limit)
         .unwrap_or_else(|error| panic!("Mojo inflight soft limit failed: {error:?}"))
 }

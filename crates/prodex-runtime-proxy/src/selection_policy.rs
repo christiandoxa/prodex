@@ -293,10 +293,6 @@ pub enum RuntimeSelectionQuotaSource {
     PersistedSnapshot,
 }
 
-fn runtime_selection_route_kind_tag(route_kind: RuntimeRouteKind) -> i64 {
-    route_kind as i64
-}
-
 fn runtime_selection_quota_window_status_tag(status: RuntimeSelectionQuotaWindowStatus) -> i64 {
     status as i64
 }
@@ -318,7 +314,7 @@ fn runtime_quota_selection_policy_code(
     prodex_mojo_core::runtime::quota_selection_policy(
         mode,
         prodex_mojo_core::runtime::QuotaSelectionPolicyInput {
-            route_kind: runtime_selection_route_kind_tag(route_kind),
+            route_kind: route_kind as i64,
             five_hour_status: runtime_selection_quota_window_status_tag(five_hour_status),
             weekly_status: runtime_selection_quota_window_status_tag(weekly_status),
             quota_band: runtime_selection_quota_pressure_band_tag(band),
@@ -544,7 +540,7 @@ fn runtime_soft_affinity_policy_mojo(input: RuntimeSoftAffinityPolicyInput) -> i
     prodex_mojo_core::runtime::soft_affinity_policy(
         prodex_mojo_core::runtime::SoftAffinityPolicyInput {
             affinity_kind: input.affinity_kind as i64,
-            route_kind: runtime_selection_route_kind_tag(input.route_kind),
+            route_kind: input.route_kind as i64,
             five_hour_status: runtime_selection_quota_window_status_tag(
                 input.quota_summary.five_hour.status,
             ),

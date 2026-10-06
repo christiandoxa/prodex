@@ -162,12 +162,7 @@ fn ready_profile_score_for_route_at_mojo(
             weekly_reset_at: weekly.map_or(i64::MAX, |window| window.reset_at),
             five_hour_reset_at: five_hour.map_or(i64::MAX, |window| window.reset_at),
         }],
-        match route_kind {
-            RuntimeRouteKind::Responses => 0,
-            RuntimeRouteKind::Compact => 1,
-            RuntimeRouteKind::Websocket => 2,
-            RuntimeRouteKind::Standard => 3,
-        },
+        route_kind as i64,
     )
     .expect("Mojo runtime quota score returned invalid output")
     .into_iter()
@@ -206,12 +201,7 @@ pub fn runtime_quota_pressure_band_for_route_at(
     match prodex_mojo_core::runtime::pressure_band_for_route(
         Some((five_hour.remaining_percent, 1)),
         Some((weekly.remaining_percent, 1)),
-        match route_kind {
-            RuntimeRouteKind::Responses => 0,
-            RuntimeRouteKind::Compact => 1,
-            RuntimeRouteKind::Websocket => 2,
-            RuntimeRouteKind::Standard => 3,
-        },
+        route_kind as i64,
     )
     .expect("Mojo runtime quota pressure band returned invalid output")
     {
