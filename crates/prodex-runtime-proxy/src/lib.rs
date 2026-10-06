@@ -397,6 +397,52 @@ pub fn runtime_request_turn_state_from_value(value: &serde_json::Value) -> Optio
     runtime_request_semantic_plan(value).turn_state
 }
 
+fn remove_runtime_request_turn_state(value: &mut serde_json::Value) -> bool {
+    let Some(object) = value.as_object_mut() else {
+        return false;
+    };
+    let mut removed = object.remove("x-codex-turn-state").is_some();
+    if let Some(metadata) = object
+        .get_mut("client_metadata")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        removed |= metadata.remove("x-codex-turn-state").is_some();
+    }
+    removed
+}
+
+pub fn runtime_request_without_turn_state(request: &RuntimeProxyRequest) -> RuntimeProxyRequest {
+    let mut request = request.clone();
+    request.headers.retain(|(name, _)| {
+        !ascii_casefold_equal_exact(name, "x-codex-turn-state")
+            .expect("Mojo turn-state header comparison failed")
+    });
+    if let Ok(mut value) = serde_json::from_slice::<serde_json::Value>(&request.body)
+        && remove_runtime_request_turn_state(&mut value)
+        && let Ok(body) = serde_json::to_vec(&value)
+    {
+        request.body = body;
+    }
+    request
+}
+
+pub fn runtime_request_text_without_turn_state(request_text: &str) -> Option<String> {
+    let mut value = serde_json::from_str::<serde_json::Value>(request_text).ok()?;
+    remove_runtime_request_turn_state(&mut value).then(|| value.to_string())
+}
+
+pub fn runtime_request_has_reconstructable_full_history(request: &RuntimeProxyRequest) -> bool {
+    serde_json::from_slice::<serde_json::Value>(&request.body)
+        .map(|value| runtime_request_semantic_plan(&value).reconstructable_full_history)
+        .unwrap_or(false)
+}
+
+pub fn runtime_request_text_has_reconstructable_full_history(request_text: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(request_text)
+        .map(|value| runtime_request_semantic_plan(&value).reconstructable_full_history)
+        .unwrap_or(false)
+}
+
 pub fn runtime_request_session_id_from_value(value: &serde_json::Value) -> Option<String> {
     runtime_request_semantic_plan(value).session_id
 }

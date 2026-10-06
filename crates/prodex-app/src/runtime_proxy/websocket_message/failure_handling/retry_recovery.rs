@@ -13,6 +13,44 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         Ok(true)
     }
 
+    pub(super) fn try_rotate_quota_turn_state_full_context(
+        &mut self,
+        profile_name: &str,
+        payload: RuntimeWebsocketErrorPayload,
+    ) -> Result<bool> {
+        let replayable = self.previous_response_id.is_none()
+            && self.request_turn_state.is_some()
+            && self.turn_state_profile.as_deref() == Some(profile_name)
+            && self.compact_followup_profile.is_none()
+            && runtime_proxy_crate::runtime_request_text_has_reconstructable_full_history(
+                &self.request_text,
+            );
+        if !replayable || !self.prepare_full_context_fallback(profile_name)? {
+            return Ok(false);
+        }
+
+        let released_affinity = self.release_quota_blocked_affinity(profile_name)?;
+        self.clear_profile_affinity(profile_name, true);
+        self.handshake_request =
+            runtime_proxy_crate::runtime_request_without_turn_state(&self.handshake_request);
+        if let Some(rewritten) =
+            runtime_proxy_crate::runtime_request_text_without_turn_state(&self.request_text)
+        {
+            self.request_text = rewritten;
+        }
+        self.request_turn_state = None;
+        self.excluded_profiles.insert(profile_name.to_string());
+        self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), true));
+        runtime_proxy_log(
+            self.shared,
+            format!(
+                "request={} websocket_session={} quota_blocked_turn_state_full_context_replay profile={} affinity_released={released_affinity}",
+                self.request_id, self.session_id, profile_name
+            ),
+        );
+        Ok(true)
+    }
+
     pub(super) fn send_full_context_retry_signal(
         &mut self,
         profile_name: &str,

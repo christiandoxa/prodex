@@ -365,6 +365,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             &profile_name,
             self.request_requires_previous_response_affinity,
         ) {
+            if self.try_rotate_quota_turn_state_full_context(&profile_name, payload.clone())? {
+                return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+            }
             if self.try_signal_quota_full_context_retry(&profile_name)? {
                 return Ok(RuntimeWebsocketMessageLoopAction::Finished);
             }
@@ -520,6 +523,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             &profile_name,
             self.request_requires_previous_response_affinity,
         ) {
+            if self.try_rotate_quota_turn_state_full_context(&profile_name, payload.clone())? {
+                return Ok(RuntimeWebsocketMessageLoopAction::Continue);
+            }
             if self.try_signal_quota_full_context_retry(&profile_name)? {
                 return Ok(RuntimeWebsocketMessageLoopAction::Finished);
             }
