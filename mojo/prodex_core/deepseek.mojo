@@ -3102,6 +3102,63 @@ def deepseek_request_policy_v1(
     return DEEPSEEK_KERNEL_STATUS_OK if ok else DEEPSEEK_KERNEL_STATUS_INVALID
 
 
+def deepseek_put_response_metadata(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.response_present != 1 or not deepseek_json_fragment_valid(input.response):
+        return False
+    var view = input.response.copy()
+    var root = deepseek_raw_root(view)
+    if root[0] < 0:
+        return False
+    var choices = deepseek_raw_member(view, root, StringSlice("choices"))
+    var choice = Array[Int64, 2](fill=-1)
+    if deepseek_raw_present(choices) and deepseek_json_byte(view, choices[0]) == 91:
+        var start = deepseek_json_skip_ws(view, choices[0] + 1, choices[1] - 1)
+        var end = deepseek_json_value_end(view, start, choices[1] - 1, 0)
+        if start >= 0 and end > start and deepseek_json_byte(view, start) == 123:
+            choice[0] = start
+            choice[1] = end
+    var message = deepseek_raw_member(view, choice, StringSlice("message"))
+    # serde_json::Map serializes these keys lexicographically in the Rust path.
+    var sources = Array[Array[Int64, 2], 6](fill=Array[Int64, 2](fill=-1))
+    sources[0] = deepseek_raw_member(view, message, StringSlice("annotations"))
+    sources[1] = deepseek_raw_member(view, choice, StringSlice("finish_reason"))
+    sources[2] = deepseek_raw_member(view, choice, StringSlice("logprobs"))
+    sources[3] = deepseek_raw_member(view, message, StringSlice("reasoning_content"))
+    sources[4] = deepseek_raw_member(view, message, StringSlice("refusal"))
+    sources[5] = deepseek_raw_member(view, root, StringSlice("system_fingerprint"))
+    var present = Array[Bool, 6](fill=False)
+    for index in range(6):
+        present[index] = deepseek_raw_present(sources[index]) and not deepseek_json_is_null(view, sources[index])
+        if index == 0:
+            present[index] = present[index] and deepseek_json_bounds_is_kind(view, sources[index], 91) and sources[index][1] - sources[index][0] > 2
+        elif index == 1:
+            present[index] = present[index] and deepseek_json_bounds_is_kind(view, sources[index], 34)
+        elif index == 3 or index == 4 or index == 5:
+            present[index] = present[index] and deepseek_json_string_nonempty(view, sources[index])
+    var count: Int64 = 0
+    for index in range(6):
+        if present[index]: count += 1
+    if count == 0:
+        return deepseek_put_literal(writer, StringSlice("null"))
+    if not deepseek_put_literal(writer, StringSlice('{"deepseek":{')): return False
+    var emitted: Int64 = 0
+    for index in range(6):
+        if present[index]:
+            if emitted > 0 and not deepseek_put_byte(writer, 44): return False
+            var key = StringSlice('"system_fingerprint":')
+            if index == 0: key = StringSlice('"annotations":')
+            elif index == 1: key = StringSlice('"finish_reason":')
+            elif index == 2: key = StringSlice('"logprobs":')
+            elif index == 3: key = StringSlice('"reasoning_content":')
+            elif index == 4: key = StringSlice('"refusal":')
+            if not deepseek_put_literal(writer, key) or not deepseek_put_view_range(writer, view, sources[index][0], sources[index][1]): return False
+            emitted += 1
+    return deepseek_put_literal(writer, StringSlice("}}"))
+
+
 def deepseek_write_operation(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     input: ProdexDeepSeekKernelInput,
@@ -3370,13 +3427,7 @@ def deepseek_write_operation(
     if operation == DEEPSEEK_STREAM_RESPONSE_METADATA:
         return deepseek_put_stream_response_metadata(writer, input)
     if operation == DEEPSEEK_RESPONSE_METADATA:
-        return (
-            deepseek_put_literal(writer, StringSlice("{"))
-            and deepseek_put_json_string(writer, input.role)
-            and deepseek_put_byte(writer, 58)
-            and deepseek_put_view(writer, input.metadata)
-            and deepseek_put_byte(writer, 125)
-        )
+        return deepseek_put_response_metadata(writer, input)
     return False
 
 

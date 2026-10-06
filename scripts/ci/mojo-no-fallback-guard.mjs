@@ -3867,9 +3867,13 @@ export function findViolations(files) {
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: DeepSeek stream response hard replacement must retain ${marker}`);
     }
-    if (filePath === DEEPSEEK_RESPONSE_METADATA_FILE &&
-        !contents.includes("DeepSeekKernelOperation::ResponseMetadata")) {
-      return [`${filePath}: DeepSeek response metadata must use Mojo`];
+    if (filePath === DEEPSEEK_RESPONSE_METADATA_FILE) {
+      const violations = contents.includes("DeepSeekKernelOperation::ResponseMetadata") ? [] : [filePath + ": DeepSeek response metadata must use Mojo"];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      if (production.includes(".get(\"choices\")") || production.includes(".get(\"reasoning_content\")") || production.includes(".get(\"annotations\")") || production.includes(".get(\"finish_reason\")") || production.includes(".get(\"system_fingerprint\")") || production.includes("let mut metadata = serde_json::Map::new()")) {
+        violations.push(filePath + ": contains restored Rust DeepSeek response metadata extraction");
+      }
+      return violations;
     }
     return [];
   });

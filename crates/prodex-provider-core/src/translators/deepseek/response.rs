@@ -67,7 +67,7 @@ pub(super) fn deepseek_responses_value_from_chat_value(value: &Value) -> Result<
         .map(|value| serde_json::to_string(&value))
         .transpose()
         .map_err(|error| format!("failed to serialize DeepSeek response usage: {error}"))?;
-    let metadata = metadata::deepseek_response_metadata(value, message)
+    let metadata = metadata::deepseek_response_metadata(value)
         .map(|value| serde_json::to_string(&value))
         .transpose()
         .map_err(|error| format!("failed to serialize DeepSeek response metadata: {error}"))?;
