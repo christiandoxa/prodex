@@ -61,6 +61,12 @@ pub struct RuntimeTuningCapacityDefaults {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_tuning_capacity_default_v1(
+        version: i64,
+        operation: i64,
+        value: i64,
+        secondary: i64,
+    ) -> i64;
     fn prodex_runtime_scalar_config_policy_v1(
         abi_version: i64,
         operation: i64,
@@ -226,6 +232,22 @@ pub fn runtime_tuning_defaults(
         websocket_dns_worker_count: usize::try_from(values[6])
             .map_err(|_| crate::MojoError::InvalidOutput)?,
     })
+}
+
+pub fn runtime_tuning_capacity_default(
+    operation: i64,
+    value: usize,
+    secondary: usize,
+) -> Result<usize, crate::MojoError> {
+    let result = unsafe {
+        prodex_runtime_tuning_capacity_default_v1(
+            1,
+            operation,
+            i64::try_from(value).unwrap_or(i64::MAX),
+            i64::try_from(secondary).unwrap_or(i64::MAX),
+        )
+    };
+    usize::try_from(result).map_err(|_| crate::MojoError::InvalidOutput)
 }
 
 pub fn runtime_tuning_capacity_defaults(

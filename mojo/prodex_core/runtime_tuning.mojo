@@ -448,3 +448,29 @@ def prodex_runtime_tuning_capacity_defaults(
         standard_override, standard_fallback, bounded_global
     )
     return 0
+
+
+@export("prodex_runtime_tuning_capacity_default_v1")
+def prodex_runtime_tuning_capacity_default_v1(
+    version: Int64, operation: Int64, value: Int64, secondary: Int64
+) abi("C") -> Int64:
+    if version != 1:
+        return -3
+    if operation < 0 or operation > 6 or value < 0 or secondary < 0:
+        return -2
+    if operation == 0:
+        return runtime_tuning_clamp(runtime_tuning_saturating_mul(value, 8), 128, 1_024)
+    if operation == 1:
+        return runtime_tuning_clamp(runtime_tuning_saturating_add(value, runtime_tuning_saturating_mul(secondary, 3)), 64, 512)
+    if operation == 2:
+        return runtime_tuning_clamp(runtime_tuning_saturating_mul(value, 256), 1_024, 8_192)
+    if operation == 3:
+        return runtime_tuning_clamp(runtime_tuning_saturating_mul(runtime_tuning_clamp(value, 4, 16), 8), 32, 128)
+    if operation == 5:
+        return runtime_tuning_clamp(runtime_tuning_saturating_mul(value, 4), 16, 64)
+    var queue = secondary
+    if queue == 0:
+        queue = prodex_runtime_tuning_capacity_default_v1(1, operation - 1, value, 0)
+    if operation == 4:
+        return runtime_tuning_clamp(max(runtime_tuning_saturating_mul(queue, 4), runtime_tuning_clamp(value, 4, 16)), 32, 512)
+    return runtime_tuning_clamp(max(runtime_tuning_saturating_mul(queue, 2), value), 16, 128)
