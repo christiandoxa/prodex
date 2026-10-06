@@ -7,6 +7,15 @@ use crate::{
 
 mod mojo;
 
+pub use prodex_mojo_core::runtime::{
+    WebsocketChainReuseReason as RuntimeWebsocketChainReuseReason,
+    WebsocketFailureDispositionPlan as RuntimeWebsocketFailureDispositionPlan,
+    WebsocketInvalidPreviousResponseAction as RuntimeWebsocketInvalidPreviousResponseAction,
+    WebsocketInvalidPreviousResponsePlan as RuntimeWebsocketInvalidPreviousResponsePlan,
+    WebsocketQuotaFallbackPlan as RuntimeWebsocketQuotaFallbackPlan,
+    WebsocketTransportFailurePlan as RuntimeWebsocketTransportFailurePlan,
+};
+
 #[derive(Clone, Copy, Debug)]
 pub struct RuntimeCandidateAffinity<'a> {
     pub route_kind: RuntimeRouteKind,
@@ -562,79 +571,28 @@ pub fn runtime_soft_affinity_rejection_reason(
     runtime_quota_policy_reason(runtime_soft_affinity_policy_mojo(input)).unwrap_or("quota_unknown")
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RuntimeWebsocketTransportFailurePlan {
-    Error,
-    ReuseWatchdog,
-    RetryTransport,
-}
-
 pub fn runtime_websocket_transport_failure_plan(
     committed: bool,
     reuse_existing_session: bool,
     precommit_transport_retry_allowed: bool,
 ) -> RuntimeWebsocketTransportFailurePlan {
-    match prodex_mojo_core::runtime::websocket_transport_failure_plan(
+    prodex_mojo_core::runtime::websocket_transport_failure_plan(
         committed,
         reuse_existing_session,
         precommit_transport_retry_allowed,
     )
     .expect("Mojo websocket transport-failure planner returned an invalid result")
-    {
-        prodex_mojo_core::runtime::WebsocketTransportFailurePlan::Error => {
-            RuntimeWebsocketTransportFailurePlan::Error
-        }
-        prodex_mojo_core::runtime::WebsocketTransportFailurePlan::ReuseWatchdog => {
-            RuntimeWebsocketTransportFailurePlan::ReuseWatchdog
-        }
-        prodex_mojo_core::runtime::WebsocketTransportFailurePlan::RetryTransport => {
-            RuntimeWebsocketTransportFailurePlan::RetryTransport
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RuntimeWebsocketFailureDispositionPlan {
-    pub continue_selection: bool,
-    pub mark_backoff: bool,
-    pub exclude_profile: bool,
 }
 
 pub fn runtime_websocket_failure_disposition(
     affinity_releasable: bool,
     inflight_saturated: bool,
 ) -> RuntimeWebsocketFailureDispositionPlan {
-    let plan = prodex_mojo_core::runtime::websocket_failure_disposition_plan(
+    prodex_mojo_core::runtime::websocket_failure_disposition_plan(
         affinity_releasable,
         inflight_saturated,
     )
-    .expect("Mojo websocket failure disposition returned an invalid result");
-    RuntimeWebsocketFailureDispositionPlan {
-        continue_selection: plan.continue_selection,
-        mark_backoff: plan.mark_backoff,
-        exclude_profile: plan.exclude_profile,
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RuntimeWebsocketInvalidPreviousResponseAction {
-    PassThrough,
-    FullContextRetry,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RuntimeWebsocketChainReuseReason {
-    UpstreamReconnect,
-    BoundProfileAffinity,
-    UnboundPreviousResponse,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct RuntimeWebsocketInvalidPreviousResponsePlan {
-    pub recovery_signal: bool,
-    pub crossed_transport_generation: bool,
-    pub chain_reuse_reason: RuntimeWebsocketChainReuseReason,
-    pub action: RuntimeWebsocketInvalidPreviousResponseAction,
+    .expect("Mojo websocket failure disposition returned an invalid result")
 }
 
 pub fn runtime_websocket_invalid_previous_response_plan(
@@ -644,37 +602,14 @@ pub fn runtime_websocket_invalid_previous_response_plan(
     owner_generation_present: bool,
     owner_generation_matches: bool,
 ) -> RuntimeWebsocketInvalidPreviousResponsePlan {
-    let plan = prodex_mojo_core::runtime::websocket_invalid_previous_response_plan(
+    prodex_mojo_core::runtime::websocket_invalid_previous_response_plan(
         previous_response_present,
         session_present,
         owner_matches,
         owner_generation_present,
         owner_generation_matches,
     )
-    .expect("Mojo websocket invalid-previous-response policy returned invalid output");
-    RuntimeWebsocketInvalidPreviousResponsePlan {
-        recovery_signal: plan.recovery_signal,
-        crossed_transport_generation: plan.crossed_transport_generation,
-        chain_reuse_reason: match plan.chain_reuse_reason {
-            prodex_mojo_core::runtime::WebsocketChainReuseReason::UpstreamReconnect => {
-                RuntimeWebsocketChainReuseReason::UpstreamReconnect
-            }
-            prodex_mojo_core::runtime::WebsocketChainReuseReason::BoundProfileAffinity => {
-                RuntimeWebsocketChainReuseReason::BoundProfileAffinity
-            }
-            prodex_mojo_core::runtime::WebsocketChainReuseReason::UnboundPreviousResponse => {
-                RuntimeWebsocketChainReuseReason::UnboundPreviousResponse
-            }
-        },
-        action: match plan.action {
-            prodex_mojo_core::runtime::WebsocketInvalidPreviousResponseAction::PassThrough => {
-                RuntimeWebsocketInvalidPreviousResponseAction::PassThrough
-            }
-            prodex_mojo_core::runtime::WebsocketInvalidPreviousResponseAction::FullContextRetry => {
-                RuntimeWebsocketInvalidPreviousResponseAction::FullContextRetry
-            }
-        },
-    }
+    .expect("Mojo websocket invalid-previous-response policy returned invalid output")
 }
 
 pub fn runtime_full_context_retry_signal_eligible(
@@ -702,33 +637,15 @@ pub fn runtime_websocket_full_context_signal_eligible(
     )
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RuntimeWebsocketQuotaFallbackPlan {
-    Ready,
-    LastChance,
-    Unavailable,
-}
-
 pub fn runtime_websocket_quota_fallback_plan(
     route_eligible_fallback: bool,
     has_context_constraint: bool,
 ) -> RuntimeWebsocketQuotaFallbackPlan {
-    match prodex_mojo_core::runtime::websocket_quota_fallback_plan(
+    prodex_mojo_core::runtime::websocket_quota_fallback_plan(
         route_eligible_fallback,
         has_context_constraint,
     )
     .expect("Mojo websocket quota-fallback policy returned an invalid result")
-    {
-        prodex_mojo_core::runtime::WebsocketQuotaFallbackPlan::Ready => {
-            RuntimeWebsocketQuotaFallbackPlan::Ready
-        }
-        prodex_mojo_core::runtime::WebsocketQuotaFallbackPlan::LastChance => {
-            RuntimeWebsocketQuotaFallbackPlan::LastChance
-        }
-        prodex_mojo_core::runtime::WebsocketQuotaFallbackPlan::Unavailable => {
-            RuntimeWebsocketQuotaFallbackPlan::Unavailable
-        }
-    }
 }
 
 #[cfg(test)]
