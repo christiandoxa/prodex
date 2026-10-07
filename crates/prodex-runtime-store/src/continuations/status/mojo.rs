@@ -11,10 +11,6 @@ use prodex_mojo_core::runtime::{
 
 const WIDTH: usize = 12;
 
-fn state_tag(state: RuntimeContinuationBindingLifecycle) -> i64 {
-    state as i64
-}
-
 fn state_from_tag(tag: i64) -> RuntimeContinuationBindingLifecycle {
     match tag {
         0 => RuntimeContinuationBindingLifecycle::Warm,
@@ -27,7 +23,7 @@ fn state_from_tag(tag: i64) -> RuntimeContinuationBindingLifecycle {
 
 fn fields(status: &RuntimeContinuationBindingStatus) -> [i64; WIDTH] {
     [
-        state_tag(status.state),
+        status.state as i64,
         i64::from(status.confidence),
         i64::from(status.last_touched_at.is_some()),
         status.last_touched_at.unwrap_or(0),

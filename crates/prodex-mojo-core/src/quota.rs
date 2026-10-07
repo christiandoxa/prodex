@@ -87,13 +87,14 @@ pub struct MainQuotaAggregation {
 }
 
 /// Shape of an admission field preserved from the upstream quota payload.
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QuotaAdmissionValue {
-    Missing,
-    Null,
-    True,
-    False,
-    Other,
+    Missing = 0,
+    Null = 1,
+    True = 2,
+    False = 3,
+    Other = 4,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

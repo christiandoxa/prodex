@@ -3,7 +3,7 @@
 use super::{
     QUOTA_CAPACITY_BATCH_MAX_COUNT, QUOTA_CAPACITY_FIELD_COUNT, QUOTA_CAPACITY_LANE_MAIN,
     QUOTA_CAPACITY_LANE_MODEL_SPECIFIC, QUOTA_CAPACITY_LANE_UNKNOWN_ADDITIONAL,
-    QuotaAdmissionValue, QuotaCapacityInput, QuotaCapacityOutput, prodex_quota_capacity_batch_v2,
+    QuotaCapacityInput, QuotaCapacityOutput, prodex_quota_capacity_batch_v2,
 };
 
 pub fn quota_capacity_batch(
@@ -29,11 +29,11 @@ pub fn quota_capacity_batch(
             allowed_tag(input.outer_allowed),
             limit_reached_tag(input.pair_limit_reached),
             limit_reached_tag(input.outer_limit_reached),
-            admission_value_tag(input.rate_limit_reached_type),
-            admission_value_tag(input.camel_rate_limit_reached_type),
-            admission_value_tag(input.spend_control_reached),
-            admission_value_tag(input.camel_spend_control_reached),
-            admission_value_tag(input.ordinary_usage_allowed),
+            input.rate_limit_reached_type as i64,
+            input.camel_rate_limit_reached_type as i64,
+            input.spend_control_reached as i64,
+            input.camel_spend_control_reached as i64,
+            input.ordinary_usage_allowed as i64,
             input.five_hour_used_percent,
             i64::from(input.five_hour_has_value),
             input.five_hour_reset_at,
@@ -163,15 +163,5 @@ fn limit_reached_tag(value: Option<bool>) -> i64 {
         None => 0,
         Some(false) => 1,
         Some(true) => 2,
-    }
-}
-
-fn admission_value_tag(value: QuotaAdmissionValue) -> i64 {
-    match value {
-        QuotaAdmissionValue::Missing => 0,
-        QuotaAdmissionValue::Null => 1,
-        QuotaAdmissionValue::True => 2,
-        QuotaAdmissionValue::False => 3,
-        QuotaAdmissionValue::Other => 4,
     }
 }

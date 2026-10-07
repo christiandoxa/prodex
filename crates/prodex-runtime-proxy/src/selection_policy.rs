@@ -255,11 +255,11 @@ pub fn runtime_proxy_allows_direct_current_profile_fallback(
 #[repr(i64)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeSelectionQuotaWindowStatus {
-    Ready,
-    Thin,
-    Critical,
-    Exhausted,
-    Unknown,
+    Ready = 0,
+    Thin = 1,
+    Critical = 2,
+    Exhausted = 3,
+    Unknown = 4,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -278,11 +278,11 @@ pub struct RuntimeSelectionQuotaSummary {
 #[repr(i64)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
 pub enum RuntimeSelectionQuotaPressureBand {
-    Healthy,
-    Thin,
-    Critical,
-    Exhausted,
-    Unknown,
+    Healthy = 0,
+    Thin = 1,
+    Critical = 2,
+    Exhausted = 3,
+    Unknown = 4,
 }
 
 #[repr(i64)]
@@ -290,14 +290,6 @@ pub enum RuntimeSelectionQuotaPressureBand {
 pub enum RuntimeSelectionQuotaSource {
     LiveProbe,
     PersistedSnapshot,
-}
-
-fn runtime_selection_quota_window_status_tag(status: RuntimeSelectionQuotaWindowStatus) -> i64 {
-    status as i64
-}
-
-fn runtime_selection_quota_pressure_band_tag(band: RuntimeSelectionQuotaPressureBand) -> i64 {
-    band as i64
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -314,9 +306,9 @@ fn runtime_quota_selection_policy_code(
         mode,
         prodex_mojo_core::runtime::QuotaSelectionPolicyInput {
             route_kind: route_kind as i64,
-            five_hour_status: runtime_selection_quota_window_status_tag(five_hour_status),
-            weekly_status: runtime_selection_quota_window_status_tag(weekly_status),
-            quota_band: runtime_selection_quota_pressure_band_tag(band),
+            five_hour_status: five_hour_status as i64,
+            weekly_status: weekly_status as i64,
+            quota_band: band as i64,
             quota_source_present: source_present,
             responses_critical_floor_percent,
         },
@@ -540,13 +532,9 @@ fn runtime_soft_affinity_policy_mojo(input: RuntimeSoftAffinityPolicyInput) -> i
         prodex_mojo_core::runtime::SoftAffinityPolicyInput {
             affinity_kind: input.affinity_kind as i64,
             route_kind: input.route_kind as i64,
-            five_hour_status: runtime_selection_quota_window_status_tag(
-                input.quota_summary.five_hour.status,
-            ),
-            weekly_status: runtime_selection_quota_window_status_tag(
-                input.quota_summary.weekly.status,
-            ),
-            quota_band: runtime_selection_quota_pressure_band_tag(input.quota_summary.route_band),
+            five_hour_status: input.quota_summary.five_hour.status as i64,
+            weekly_status: input.quota_summary.weekly.status as i64,
+            quota_band: input.quota_summary.route_band as i64,
             quota_source_present: input.quota_source.is_some(),
             current_profile_matches_candidate: input.current_profile_matches_candidate,
             has_route_eligible_quota_fallback: input.has_route_eligible_quota_fallback,

@@ -2003,6 +2003,31 @@ export function findViolations(files) {
     }
     return violations;
   });
+  const enumTagMirrorViolations = files.flatMap(([filePath, contents]) => {
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    const forbiddenByFile = new Map([
+      ["crates/prodex-provider-spi/src/lib.rs", [
+        "fn provider_error_class_tag(",
+        "let stage_tag = match stage",
+        "let cause_tag = match cause",
+      ]],
+      ["crates/prodex-mojo-core/src/quota/capacity.rs", [
+        "fn admission_value_tag(",
+      ]],
+      ["crates/prodex-runtime-proxy/src/selection_policy.rs", [
+        "fn runtime_selection_quota_window_status_tag(",
+        "fn runtime_selection_quota_pressure_band_tag(",
+      ]],
+      ["crates/prodex-runtime-store/src/continuations/status/mojo.rs", [
+        "fn state_tag(",
+      ]],
+    ]);
+    const forbidden = forbiddenByFile.get(filePath);
+    if (!forbidden) return [];
+    return forbidden
+      .filter((marker) => production.includes(marker))
+      .map((marker) => filePath + ": contains restored Rust numeric enum-tag mirror " + marker);
+  });
 
   const appSelectionPolicyMirrorViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== "crates/prodex-app/src/runtime_proxy/selection/policy.rs") return [];
@@ -5414,7 +5439,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
