@@ -30,6 +30,20 @@ fn copilot_provider_core_extracts_response_id_shapes() {
         copilot_provider_core_response_id_from_value(&json!({"id": "   "})),
         None
     );
+    assert_eq!(
+        copilot_provider_core_response_id_from_value(&json!({
+            "response": {"id": "\u{2003}"},
+            "id": "resp_top"
+        })),
+        None
+    );
+    assert_eq!(
+        copilot_provider_core_response_id_from_value(&json!({
+            "response": {"id": " \u{1F980} resp \u{1F980} "}
+        }))
+        .as_deref(),
+        Some("🦀 resp 🦀")
+    );
 }
 
 #[test]

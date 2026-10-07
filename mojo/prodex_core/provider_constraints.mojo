@@ -7436,6 +7436,7 @@ comptime COPILOT_REQUEST_POLICY_ABI_VERSION: Int64 = 1
 comptime COPILOT_REQUEST_POLICY_STRIP_ENCRYPTED: Int64 = 1
 comptime COPILOT_REQUEST_POLICY_AGENT_INPUT: Int64 = 2
 comptime COPILOT_REQUEST_POLICY_VISION_INPUT: Int64 = 3
+comptime COPILOT_REQUEST_POLICY_RESPONSE_ID: Int64 = 4
 comptime COPILOT_REQUEST_POLICY_STATUS_INVALID: Int64 = 1
 comptime COPILOT_REQUEST_POLICY_STATUS_CAPACITY: Int64 = 3
 comptime COPILOT_REQUEST_POLICY_STATUS_ABI: Int64 = 4
@@ -7538,6 +7539,52 @@ def copilot_request_nonblank_string(
     if not gemini_bridge_text_raw_string(source, token):
         return False
     return gemini_bridge_full_trimmed_inner(source, token)[0] >= 0
+
+
+def copilot_request_write_response_id(
+    source: GeminiRequestContentStringView,
+    root: Array[Int64, 2],
+    output_address: UInt64,
+    output_capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    result: Pointer[mut=True, Int64, _],
+) -> Int64:
+    var token = copilot_request_object_member(
+        source, root[0], root[1], StringSlice("response")
+    )
+    token = copilot_request_object_member(
+        source, token[0], token[1], StringSlice("id")
+    )
+    if not gemini_bridge_text_raw_string(source, token):
+        token = copilot_request_object_member(
+            source, root[0], root[1], StringSlice("id")
+        )
+    if not gemini_bridge_text_raw_string(source, token):
+        token = copilot_request_object_member(
+            source, root[0], root[1], StringSlice("response_id")
+        )
+    if not gemini_bridge_text_raw_string(source, token):
+        return 0
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var decoded = gemini_bridge_request_decode_json_string(
+        source, token[0], token[1], output, output_capacity
+    )
+    if decoded < 0:
+        return COPILOT_REQUEST_POLICY_STATUS_INVALID
+    var bounds = rich_trim_bounds(
+        ProdexRichStringView(UInt(output_address), UInt(decoded))
+    )
+    var length = bounds[1] - bounds[0]
+    if length <= 0:
+        return 0
+    for index in range(length):
+        output[unsafe_offset=index] = output[unsafe_offset=bounds[0] + index]
+    written[] = length
+    result[] = 1
+    return 0
 
 
 def copilot_request_write_stripped_value(
@@ -7886,12 +7933,12 @@ def prodex_copilot_request_policy_v1(
         return COPILOT_REQUEST_POLICY_STATUS_ABI
     if (
         operation < COPILOT_REQUEST_POLICY_STRIP_ENCRYPTED
-        or operation > COPILOT_REQUEST_POLICY_VISION_INPUT
+        or operation > COPILOT_REQUEST_POLICY_RESPONSE_ID
         or input_length < 0
         or input_address == 0
         or written_address == 0
         or result_address == 0
-        or (operation == COPILOT_REQUEST_POLICY_STRIP_ENCRYPTED and (
+        or ((operation == COPILOT_REQUEST_POLICY_STRIP_ENCRYPTED or operation == COPILOT_REQUEST_POLICY_RESPONSE_ID) and (
             output_capacity <= 0 or output_address == 0
         ))
     ):
@@ -7919,6 +7966,10 @@ def prodex_copilot_request_policy_v1(
     if operation == COPILOT_REQUEST_POLICY_VISION_INPUT:
         result[] = 1 if copilot_request_has_vision(source, root) else 0
         return 0
+    if operation == COPILOT_REQUEST_POLICY_RESPONSE_ID:
+        return copilot_request_write_response_id(
+            source, root, output_address, output_capacity, written, result
+        )
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )

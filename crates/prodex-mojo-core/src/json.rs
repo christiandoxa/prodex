@@ -9,6 +9,8 @@ pub use self::session_report::{
     SessionReportOrderKey, SessionReportUpdatePlan, session_report_metadata_json,
     session_report_order, session_report_timestamp_sort_key, session_report_update_json,
 };
+mod session_selector;
+pub use self::session_selector::{session_selector_is_full, session_selector_matches};
 mod kiro_catalog;
 pub use self::kiro_catalog::{
     KiroModelCatalogModel, KiroModelCatalogPlan, kiro_model_catalog_plan,

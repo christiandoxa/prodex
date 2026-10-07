@@ -320,6 +320,7 @@ const PROMOTED_FILES = [
   PRECOMMIT_BUDGET_FILE,
   PRECOMMIT_BUDGET_TEST_FILE,
   "crates/prodex-runtime-proxy/src/selection_prompt_cache_mojo.rs",
+  "crates/prodex-runtime-proxy/src/admission.rs",
   "crates/prodex-runtime-proxy/src/selection_policy.rs",
   "crates/prodex-runtime-proxy/src/attempt_outcome.rs",
   "crates/prodex-runtime-proxy/src/websocket_message.rs",
@@ -2050,6 +2051,27 @@ export function findViolations(files) {
     return violations;
   });
   const runtimeStateBackgroundViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-proxy/src/admission.rs") {
+      const required = [
+        "prodex_mojo_core::runtime_state::runtime_proxy_admission_policy(",
+        "fn runtime_proxy_admission_policy(",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: runtime proxy admission must retain Mojo dispatch ${marker}`);
+      const restoredRust = [
+        "RuntimeRouteKind::Compact | RuntimeRouteKind::Standard",
+        "local_overload_pressure\n        || (background_queue_pressure",
+        "lane == RuntimeRouteKind::Responses",
+        "pressure_mode && session_profile.is_none()",
+      ];
+      for (const marker of restoredRust) {
+        if (contents.includes(marker)) {
+          violations.push(`${filePath}: contains restored Rust runtime proxy admission policy ${marker}`);
+        }
+      }
+      return violations;
+    }
     if (filePath === RUNTIME_STATE_BACKGROUND_FILE) {
       const required = [
         "prodex_mojo_core::runtime_state::mutation_policy(",
@@ -2084,11 +2106,14 @@ export function findViolations(files) {
     }
     if (filePath === RUNTIME_STATE_BACKGROUND_ADAPTER_FILE) {
       return contents.includes("prodex_runtime_state_mutation_reason_v1(") &&
+          contents.includes("prodex_runtime_proxy_admission_policy_v1(") &&
+          contents.includes("pub fn runtime_proxy_admission_policy(") &&
           contents.includes("pub fn mutation_reason(")
-        ? [] : [`${filePath}: runtime-state mutation reason adapter must retain its versioned Mojo ABI`];
+        ? [] : [`${filePath}: runtime-state policy adapters must retain their versioned Mojo ABIs`];
     }
     if (filePath === RUNTIME_STATE_BACKGROUND_MOJO_FILE) {
       return contents.includes('@export("prodex_runtime_state_mutation_reason_v1")') &&
+          contents.includes('@export("prodex_runtime_proxy_admission_policy_v1")') &&
           contents.includes("def runtime_state_put_mutation_label(") &&
           contents.includes('StringSlice("profile_auth_backoff_cleared")')
         ? [] : [`${filePath}: runtime-state mutation labels must remain Mojo-owned`];
@@ -5584,6 +5609,18 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  const runtimeProxyAdmissionFile = "crates/prodex-runtime-proxy/src/admission.rs";
+  const runtimeProxyAdmission = [
+    "prodex_mojo_core::runtime_state::runtime_proxy_admission_policy(",
+    "fn runtime_proxy_admission_policy(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[runtimeProxyAdmissionFile, runtimeProxyAdmission]]), []);
+  assert.match(
+    findViolations([[runtimeProxyAdmissionFile,
+      `${runtimeProxyAdmission}\npressure_mode && session_profile.is_none()`,
+    ]]).join("\n"),
+    /restored Rust runtime proxy admission policy/u,
+  );
   const geminiCompactConsumer = "GeminiCompactSnippetInput {\nformat_gemini_compact_snippet(";
   assert.deepEqual(findViolations([[GEMINI_COMPACT_SNIPPET_CONSUMER_FILE, geminiCompactConsumer]]), []);
   assert.match(findViolations([[GEMINI_COMPACT_SNIPPET_CONSUMER_FILE, geminiCompactConsumer + "\ngemini_provider_core_truncate_utf8(text, 768);"]]).join("\n"), /Gemini compact snippet shaping must use Mojo/u);
