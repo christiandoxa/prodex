@@ -80,95 +80,55 @@ pub enum RuntimeStateMutation {
     ProfileAuthBackoffCleared(String),
 }
 
-impl RuntimeStateMutation {
-    pub fn reason(&self) -> String {
-        let with_value = |prefix: &str, value: &str| format!("{prefix}:{value}");
-        match self {
-            Self::FullState => "full_state".to_string(),
-            Self::StartupAudit => "startup_audit".to_string(),
-            Self::StartupContinuationMigration => "startup_continuation_migration".to_string(),
-            Self::StartupBackoffSoften => "startup_backoff_soften".to_string(),
-            Self::ResponseIds(value) => with_value("response_ids", value),
-            Self::PreviousResponseOwner(value) => with_value("previous_response_owner", value),
-            Self::PreviousResponseNegativeCache(value) => {
-                with_value("previous_response_negative_cache", value)
-            }
-            Self::PreviousResponseRelease(value) => with_value("previous_response_release", value),
-            Self::ResponseTouch(value) => with_value("response_touch", value),
-            Self::TurnState(value) => with_value("turn_state", value),
-            Self::TurnStateTouch(value) => with_value("turn_state_touch", value),
-            Self::SessionId(value) => with_value("session_id", value),
-            Self::SessionTouch(value) => with_value("session_touch", value),
-            Self::SessionAffinityRelease(value) => with_value("session_affinity_release", value),
-            Self::CompactLineage(value) => with_value("compact_lineage", value),
-            Self::CompactLineageRelease(value) => with_value("compact_lineage_release", value),
-            Self::CompactSessionTouch(value) => with_value("compact_session_touch", value),
-            Self::CompactTurnStateTouch(value) => with_value("compact_turn_state_touch", value),
-            Self::DeadResponseBindingClear(value) => {
-                with_value("dead_response_binding_clear", value)
-            }
-            Self::QuotaRelease(value) => with_value("quota_release", value),
-            Self::AuthFailedRelease(value) => with_value("auth_failed_release", value),
-            Self::ContinuationStale(value) => with_value("continuation_stale", value),
-            Self::ProfileCommit(value) => with_value("profile_commit", value),
-            Self::UsageSnapshot(value) => with_value("usage_snapshot", value),
-            Self::ProfileRetryBackoff(value) => with_value("profile_retry_backoff", value),
-            Self::ProfileTransportBackoff(value) => with_value("profile_transport_backoff", value),
-            Self::ProfileCircuitHalfOpenProbe(value) => {
-                with_value("profile_circuit_half_open_probe", value)
-            }
-            Self::ProfileHealth(value) => with_value("profile_health", value),
-            Self::ProfileCircuitClear(value) => with_value("profile_circuit_clear", value),
-            Self::ProfileBadPairing(value) => with_value("profile_bad_pairing", value),
-            Self::ProfileAuthBackoff(value) => with_value("profile_auth_backoff", value),
-            Self::ProfileAuthBackoffCleared(value) => {
-                with_value("profile_auth_backoff_cleared", value)
-            }
-        }
+fn runtime_state_mutation_input(mutation: &RuntimeStateMutation) -> (u8, Option<&str>) {
+    match mutation {
+        RuntimeStateMutation::FullState => (0, None),
+        RuntimeStateMutation::StartupAudit => (1, None),
+        RuntimeStateMutation::StartupContinuationMigration => (2, None),
+        RuntimeStateMutation::StartupBackoffSoften => (3, None),
+        RuntimeStateMutation::ResponseIds(value) => (4, Some(value)),
+        RuntimeStateMutation::PreviousResponseOwner(value) => (5, Some(value)),
+        RuntimeStateMutation::PreviousResponseNegativeCache(value) => (6, Some(value)),
+        RuntimeStateMutation::PreviousResponseRelease(value) => (7, Some(value)),
+        RuntimeStateMutation::ResponseTouch(value) => (8, Some(value)),
+        RuntimeStateMutation::TurnState(value) => (9, Some(value)),
+        RuntimeStateMutation::TurnStateTouch(value) => (10, Some(value)),
+        RuntimeStateMutation::SessionId(value) => (11, Some(value)),
+        RuntimeStateMutation::SessionTouch(value) => (12, Some(value)),
+        RuntimeStateMutation::SessionAffinityRelease(value) => (13, Some(value)),
+        RuntimeStateMutation::CompactLineage(value) => (14, Some(value)),
+        RuntimeStateMutation::CompactLineageRelease(value) => (15, Some(value)),
+        RuntimeStateMutation::CompactSessionTouch(value) => (16, Some(value)),
+        RuntimeStateMutation::CompactTurnStateTouch(value) => (17, Some(value)),
+        RuntimeStateMutation::DeadResponseBindingClear(value) => (18, Some(value)),
+        RuntimeStateMutation::QuotaRelease(value) => (19, Some(value)),
+        RuntimeStateMutation::AuthFailedRelease(value) => (20, Some(value)),
+        RuntimeStateMutation::ContinuationStale(value) => (21, Some(value)),
+        RuntimeStateMutation::ProfileCommit(value) => (22, Some(value)),
+        RuntimeStateMutation::UsageSnapshot(value) => (23, Some(value)),
+        RuntimeStateMutation::ProfileRetryBackoff(value) => (24, Some(value)),
+        RuntimeStateMutation::ProfileTransportBackoff(value) => (25, Some(value)),
+        RuntimeStateMutation::ProfileCircuitHalfOpenProbe(value) => (26, Some(value)),
+        RuntimeStateMutation::ProfileHealth(value) => (27, Some(value)),
+        RuntimeStateMutation::ProfileCircuitClear(value) => (28, Some(value)),
+        RuntimeStateMutation::ProfileBadPairing(value) => (29, Some(value)),
+        RuntimeStateMutation::ProfileAuthBackoff(value) => (30, Some(value)),
+        RuntimeStateMutation::ProfileAuthBackoffCleared(value) => (31, Some(value)),
     }
 }
 
-fn runtime_state_mutation_kind(mutation: &RuntimeStateMutation) -> u8 {
-    match mutation {
-        RuntimeStateMutation::FullState => 0,
-        RuntimeStateMutation::StartupAudit => 1,
-        RuntimeStateMutation::StartupContinuationMigration => 2,
-        RuntimeStateMutation::StartupBackoffSoften => 3,
-        RuntimeStateMutation::ResponseIds(_) => 4,
-        RuntimeStateMutation::PreviousResponseOwner(_) => 5,
-        RuntimeStateMutation::PreviousResponseNegativeCache(_) => 6,
-        RuntimeStateMutation::PreviousResponseRelease(_) => 7,
-        RuntimeStateMutation::ResponseTouch(_) => 8,
-        RuntimeStateMutation::TurnState(_) => 9,
-        RuntimeStateMutation::TurnStateTouch(_) => 10,
-        RuntimeStateMutation::SessionId(_) => 11,
-        RuntimeStateMutation::SessionTouch(_) => 12,
-        RuntimeStateMutation::SessionAffinityRelease(_) => 13,
-        RuntimeStateMutation::CompactLineage(_) => 14,
-        RuntimeStateMutation::CompactLineageRelease(_) => 15,
-        RuntimeStateMutation::CompactSessionTouch(_) => 16,
-        RuntimeStateMutation::CompactTurnStateTouch(_) => 17,
-        RuntimeStateMutation::DeadResponseBindingClear(_) => 18,
-        RuntimeStateMutation::QuotaRelease(_) => 19,
-        RuntimeStateMutation::AuthFailedRelease(_) => 20,
-        RuntimeStateMutation::ContinuationStale(_) => 21,
-        RuntimeStateMutation::ProfileCommit(_) => 22,
-        RuntimeStateMutation::UsageSnapshot(_) => 23,
-        RuntimeStateMutation::ProfileRetryBackoff(_) => 24,
-        RuntimeStateMutation::ProfileTransportBackoff(_) => 25,
-        RuntimeStateMutation::ProfileCircuitHalfOpenProbe(_) => 26,
-        RuntimeStateMutation::ProfileHealth(_) => 27,
-        RuntimeStateMutation::ProfileCircuitClear(_) => 28,
-        RuntimeStateMutation::ProfileBadPairing(_) => 29,
-        RuntimeStateMutation::ProfileAuthBackoff(_) => 30,
-        RuntimeStateMutation::ProfileAuthBackoffCleared(_) => 31,
+impl RuntimeStateMutation {
+    pub fn reason(&self) -> String {
+        let (kind, value) = runtime_state_mutation_input(self);
+        prodex_mojo_core::runtime_state::mutation_reason(kind, value)
+            .expect("Mojo runtime-state mutation reason returned invalid output")
     }
 }
 
 fn runtime_state_mutation_policy(
     mutation: &RuntimeStateMutation,
 ) -> prodex_mojo_core::runtime_state::RuntimeStateMutationPolicy {
-    prodex_mojo_core::runtime_state::mutation_policy(runtime_state_mutation_kind(mutation))
+    prodex_mojo_core::runtime_state::mutation_policy(runtime_state_mutation_input(mutation).0)
         .expect("Mojo runtime-state mutation policy returned invalid output")
 }
 
