@@ -1,7 +1,7 @@
 # Prodex Quickstart
 
 This path imports one Codex login, verifies quota, and launches Codex through
-Prodex. The current local version in this repo is `0.435.7`.
+Prodex. The current local version in this repo is `0.435.8`.
 
 ## 1. Install prerequisites
 
