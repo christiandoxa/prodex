@@ -145,6 +145,69 @@ def session_raw_string_token(
     )
 
 
+def session_raw_string_equals_literal(
+    view: ProdexRichStringView,
+    bounds: Array[Int64, 2],
+    literal: StringSlice,
+) -> Bool:
+    if not session_raw_string_token(view, bounds):
+        return False
+    var source = rich_view_ptr(view)
+    var expected = literal.unsafe_ptr()
+    var expected_length = Int64(literal.byte_length())
+    var expected_index: Int64 = 0
+    var index = bounds[0] + 1
+    var end = bounds[1] - 1
+    while index < end:
+        if expected_index >= expected_length:
+            return False
+        var value = source[unsafe_offset=index]
+        var decoded: Int64
+        if value == 92:
+            if index + 1 >= end:
+                return False
+            var escaped = source[unsafe_offset=index + 1]
+            if escaped == 117:
+                if index + 5 >= end:
+                    return False
+                decoded = 0
+                for offset in range(2, 6):
+                    var digit = session_json_hex(
+                        source[unsafe_offset=index + Int64(offset)]
+                    )
+                    if digit < 0:
+                        return False
+                    decoded = decoded * 16 + digit
+                index += 6
+                if decoded >= 55296 and decoded <= 57343:
+                    return False
+            else:
+                if escaped == 34 or escaped == 92 or escaped == 47:
+                    decoded = Int64(escaped)
+                elif escaped == 98:
+                    decoded = 8
+                elif escaped == 102:
+                    decoded = 12
+                elif escaped == 110:
+                    decoded = 10
+                elif escaped == 114:
+                    decoded = 13
+                elif escaped == 116:
+                    decoded = 9
+                else:
+                    return False
+                index += 2
+        else:
+            if value >= 128:
+                return False
+            decoded = Int64(value)
+            index += 1
+        if decoded != Int64(expected[unsafe_offset=expected_index]):
+            return False
+        expected_index += 1
+    return expected_index == expected_length
+
+
 def session_raw_string_field(
     view: ProdexRichStringView,
     object: Array[Int64, 2],
@@ -644,7 +707,7 @@ def prodex_session_report_update_json_v2(
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    for index in range(21):
+    for index in range(28):
         output[unsafe_offset=index] = -1
     output[unsafe_offset=0] = 0
     output[unsafe_offset=19] = 0
@@ -689,7 +752,85 @@ def prodex_session_report_update_json_v2(
         if parsed[0]:
             output[unsafe_offset=19] = 1
             output[unsafe_offset=20] = parsed[1]
+    session_meta_repair_fields(view, root, output)
     return SESSION_REPORT_OK
+
+
+def session_meta_repair_fields(
+    view: ProdexRichStringView,
+    root: Array[Int64, 2],
+    output: Pointer[mut=True, Int64, _],
+):
+    var payload = session_raw_object_field(
+        view, root, StringSlice("payload")
+    )
+    var root_timestamp_token = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("timestamp")
+    )
+    var root_type_token = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("type")
+    )
+    var structural = (
+        session_raw_string_token(view, root_timestamp_token)
+        and session_raw_string_equals_literal(
+            view, root_type_token, StringSlice("session_meta")
+        )
+        and session_raw_present(payload)
+    )
+    if structural:
+        for name_index in range(5):
+            var field = Array[Int64, 2](fill=-1)
+            if name_index == 0:
+                field = deepseek_json_object_member(
+                    view, payload[0], payload[1], StringSlice("id")
+                )
+            elif name_index == 1:
+                field = deepseek_json_object_member(
+                    view, payload[0], payload[1], StringSlice("timestamp")
+                )
+            elif name_index == 2:
+                field = deepseek_json_object_member(
+                    view, payload[0], payload[1], StringSlice("cwd")
+                )
+            elif name_index == 3:
+                field = deepseek_json_object_member(
+                    view, payload[0], payload[1], StringSlice("originator")
+                )
+            else:
+                field = deepseek_json_object_member(
+                    view, payload[0], payload[1], StringSlice("cli_version")
+                )
+            if not session_raw_string_token(view, field):
+                structural = False
+                break
+    output[unsafe_offset=21] = Int64(structural)
+
+    var repair_timestamp = session_raw_string_field(
+        view, root, StringSlice("timestamp")
+    )
+    if not session_raw_present(repair_timestamp):
+        repair_timestamp = session_raw_string_field(
+            view, payload, StringSlice("timestamp")
+        )
+    session_raw_write_span(output, 22, repair_timestamp)
+
+    var repair_cwd = session_raw_string_field(
+        view, payload, StringSlice("cwd")
+    )
+    if not session_raw_present(repair_cwd):
+        repair_cwd = session_raw_string_field(
+            view, root, StringSlice("cwd")
+        )
+    session_raw_write_span(output, 24, repair_cwd)
+
+    var repair_provider = session_raw_string_field(
+        view, payload, StringSlice("model_provider")
+    )
+    if not session_raw_present(repair_provider):
+        repair_provider = session_raw_string_field(
+            view, root, StringSlice("model_provider")
+        )
+    session_raw_write_span(output, 26, repair_provider)
 
 
 @export("prodex_session_report_sort_v1")

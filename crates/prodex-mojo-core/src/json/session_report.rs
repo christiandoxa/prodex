@@ -41,6 +41,10 @@ pub struct SessionReportUpdatePlan {
     pub metadata: SessionReportMetadataPlan,
     pub update_resume_id: Option<(usize, usize)>,
     pub numeric_timestamp: Option<i64>,
+    pub starts_rollout_metadata: bool,
+    pub repair_timestamp: Option<(usize, usize)>,
+    pub repair_cwd: Option<(usize, usize)>,
+    pub repair_model_provider: Option<(usize, usize)>,
 }
 
 /// Sort key input for deterministic session-report ordering.
@@ -52,7 +56,7 @@ pub struct SessionReportOrderKey<'a> {
 }
 
 pub fn session_report_update_json(raw: &str) -> Result<SessionReportUpdatePlan, MojoError> {
-    let mut output = [-1_i64; 21];
+    let mut output = [-1_i64; 28];
     status(unsafe {
         prodex_session_report_update_json_v2(
             2,
@@ -85,10 +89,19 @@ pub fn session_report_update_json(raw: &str) -> Result<SessionReportUpdatePlan, 
         1 => Some(output[20]),
         _ => return Err(MojoError::InvalidOutput),
     };
+    let starts_rollout_metadata = match output[21] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
     Ok(SessionReportUpdatePlan {
         metadata,
         update_resume_id,
         numeric_timestamp,
+        starts_rollout_metadata,
+        repair_timestamp: span(22)?,
+        repair_cwd: span(24)?,
+        repair_model_provider: span(26)?,
     })
 }
 

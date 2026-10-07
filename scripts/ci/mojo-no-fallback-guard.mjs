@@ -4575,6 +4575,25 @@ export function findViolations(files) {
     return [];
   });
   const sessionReportViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-session-store/src/session_meta.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const violations = production.includes("prodex_mojo_core::json::session_report_update_json(")
+        ? [] : [filePath + ": session-meta repair and rollout validation must use the Mojo raw planner"];
+      for (const restored of [
+        "first_string_value(",
+        "fn value_starts_codex_rollout_metadata(",
+        '.get("timestamp")',
+        '&["payload", "timestamp"]',
+        '&["payload", "cwd"]',
+        '&["payload", "model_provider"]',
+      ]) {
+        if (production.includes(restored)) {
+          violations.push(filePath + ": contains restored Rust session-meta fixed-path or validation semantics");
+          break;
+        }
+      }
+      return violations;
+    }
     if (filePath === "crates/prodex-session-store/src/report.rs") {
       const required = [
         "prodex_mojo_core::json::session_report_metadata_json(",
@@ -4625,6 +4644,8 @@ export function findViolations(files) {
         "prodex_session_report_update_json_v2(",
         "pub fn session_report_update_json(",
         "pub fn session_report_metadata_json(",
+        "pub starts_rollout_metadata: bool",
+        "pub repair_timestamp: Option<(usize, usize)>",
         "update_plan_uses_raw_json_precedence_for_id_and_numeric_timestamp",
         "raw_metadata_preserves_string_precedence_and_unicode_trim_contract",
       ];
@@ -4640,7 +4661,9 @@ export function findViolations(files) {
       const required = [
         '@export("prodex_session_report_update_json_v2")',
         "def session_report_raw_metadata(",
+        "def session_meta_repair_fields(",
         "def session_raw_string_field(",
+        "def session_raw_string_equals_literal(",
         "def session_raw_numeric_field(",
       ];
       const violations = required
