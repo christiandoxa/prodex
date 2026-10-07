@@ -2021,6 +2021,12 @@ export function findViolations(files) {
       ["crates/prodex-runtime-store/src/continuations/status/mojo.rs", [
         "fn state_tag(",
       ]],
+      ["crates/prodex-runtime-state/src/background.rs", [
+        "fn runtime_background_queue_kind(",
+      ]],
+      ["crates/prodex-app/src/app_commands/super_main_prompt.rs", [
+        "fn provider_reasoning_effort_label(",
+      ]],
     ]);
     const forbidden = forbiddenByFile.get(filePath);
     if (!forbidden) return [];

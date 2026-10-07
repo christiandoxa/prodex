@@ -54,7 +54,7 @@ fn resolve_main_model_and_effort_mojo(
             prodex_provider_core::provider_model_reasoning_resolution(provider, Some(model), None)
                 .ok()
                 .and_then(|resolution| resolution.selected_reasoning_effort)
-                .and_then(provider_reasoning_effort_label)
+                .and_then(|effort| effort.label())
                 .map(str::to_string)
         })
         .collect::<Vec<_>>();
@@ -177,22 +177,6 @@ fn catalog_configuration_error(error: prodex_mojo_core::MojoError) -> anyhow::Er
         }
         error => anyhow::anyhow!("catalog configuration planning failed: {error:?}"),
     }
-}
-
-fn provider_reasoning_effort_label(
-    effort: prodex_provider_core::ProviderReasoningEffort,
-) -> Option<&'static str> {
-    Some(match effort {
-        prodex_provider_core::ProviderReasoningEffort::None => "none",
-        prodex_provider_core::ProviderReasoningEffort::Minimal => "minimal",
-        prodex_provider_core::ProviderReasoningEffort::Low => "low",
-        prodex_provider_core::ProviderReasoningEffort::Medium => "medium",
-        prodex_provider_core::ProviderReasoningEffort::High => "high",
-        prodex_provider_core::ProviderReasoningEffort::XHigh => "xhigh",
-        prodex_provider_core::ProviderReasoningEffort::Max => "max",
-        prodex_provider_core::ProviderReasoningEffort::Ultra => "ultra",
-        prodex_provider_core::ProviderReasoningEffort::Unknown => return None,
-    })
 }
 
 fn current_main_selection(

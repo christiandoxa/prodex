@@ -2,8 +2,8 @@
 
 use super::{
     QUOTA_CAPACITY_BATCH_MAX_COUNT, QUOTA_CAPACITY_FIELD_COUNT, QUOTA_CAPACITY_LANE_MAIN,
-    QUOTA_CAPACITY_LANE_MODEL_SPECIFIC, QUOTA_CAPACITY_LANE_UNKNOWN_ADDITIONAL,
-    QuotaCapacityInput, QuotaCapacityOutput, prodex_quota_capacity_batch_v2,
+    QUOTA_CAPACITY_LANE_MODEL_SPECIFIC, QUOTA_CAPACITY_LANE_UNKNOWN_ADDITIONAL, QuotaCapacityInput,
+    QuotaCapacityOutput, prodex_quota_capacity_batch_v2,
 };
 
 pub fn quota_capacity_batch(
