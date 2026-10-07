@@ -25,6 +25,9 @@ from json_view import (
 comptime PRODEX_RICH_ABI_VERSION: Int64 = 6
 comptime DEEPSEEK_KERNEL_MAX_BYTES: Int64 = 4_194_304
 comptime DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES: Int64 = 16_777_216
+comptime DEEPSEEK_RESPONSE_METADATA_MAX_BYTES: Int64 = (
+    DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES + DEEPSEEK_KERNEL_MAX_BYTES
+)
 comptime DEEPSEEK_SIMPLE_REQUEST_MAX_BYTES: Int64 = DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES
 comptime DEEPSEEK_KERNEL_ABI_VERSION: Int64 = 3
 comptime DEEPSEEK_KERNEL_STATUS_OK: Int64 = 0
@@ -3512,7 +3515,15 @@ def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
         and rich_view_valid(input.usage, DEEPSEEK_KERNEL_MAX_BYTES)
         and rich_view_valid(input.metadata, DEEPSEEK_KERNEL_MAX_BYTES)
         and rich_view_valid(input.item, DEEPSEEK_KERNEL_MAX_BYTES)
-        and rich_view_valid(input.response, DEEPSEEK_KERNEL_MAX_BYTES)
+        and (
+            rich_view_valid(input.response, DEEPSEEK_KERNEL_MAX_BYTES)
+            or (
+                input.operation == DEEPSEEK_RESPONSE_METADATA
+                and rich_view_valid(
+                    input.response, DEEPSEEK_RESPONSE_METADATA_MAX_BYTES
+                )
+            )
+        )
         and rich_view_valid(input.tool_calls, DEEPSEEK_KERNEL_MAX_BYTES)
         and (
             rich_view_valid(input.input, DEEPSEEK_KERNEL_MAX_BYTES)

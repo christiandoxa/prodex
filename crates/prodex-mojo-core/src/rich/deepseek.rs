@@ -230,8 +230,14 @@ unsafe extern "C" {
 }
 
 pub const DEEPSEEK_KERNEL_MAX_BYTES: usize = 4 * 1024 * 1024;
-/// Maximum aggregate input size for bounded large DeepSeek response operations.
+/// Maximum size of one large DeepSeek response payload such as tool arguments.
 pub const DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES: usize = 16 * 1024 * 1024;
+/// Maximum aggregate raw response size used only by metadata extraction.
+///
+/// The extra normal-kernel allowance covers the JSON envelope around one maximum-sized
+/// large response payload without widening any individual field limit.
+const DEEPSEEK_RESPONSE_METADATA_MAX_BYTES: usize =
+    DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES + DEEPSEEK_KERNEL_MAX_BYTES;
 const DEEPSEEK_KERNEL_ABI_VERSION: i64 = 3;
 
 fn kernel_view(value: Option<&str>) -> RichStringView {
@@ -333,6 +339,9 @@ fn kernel_output_capacity(
     if operation == DeepSeekKernelOperation::ResponsesHistoryContainsCallId {
         return Ok(8);
     }
+    if operation == DeepSeekKernelOperation::ResponseMetadata {
+        return input_bytes.checked_add(2048).ok_or(MojoError::InvalidInput);
+    }
     let multiplier = match operation {
         DeepSeekKernelOperation::ResponseToolCallItem
         | DeepSeekKernelOperation::BufferedResponse => 6,
@@ -346,6 +355,7 @@ fn kernel_output_capacity(
 
 fn kernel_input_limit(operation: DeepSeekKernelOperation) -> usize {
     match operation {
+        DeepSeekKernelOperation::ResponseMetadata => DEEPSEEK_RESPONSE_METADATA_MAX_BYTES,
         DeepSeekKernelOperation::ResponseToolCallItem
         | DeepSeekKernelOperation::BufferedResponse
         | DeepSeekKernelOperation::ResponsesHistoryCallId
@@ -508,7 +518,25 @@ pub fn deepseek_kernel(input: DeepSeekKernelInput<'_>) -> Result<Vec<u8>, MojoEr
 
 #[cfg(test)]
 mod tests {
-    use super::{DEEPSEEK_KERNEL_MAX_BYTES, DeepSeekKernelOperation, kernel_output_capacity};
+    use super::{
+        DEEPSEEK_KERNEL_MAX_BYTES, DEEPSEEK_RESPONSE_METADATA_MAX_BYTES, DeepSeekKernelOperation,
+        kernel_input_limit, kernel_output_capacity,
+    };
+
+    #[test]
+    fn response_metadata_uses_bounded_large_envelope_capacity() {
+        assert_eq!(
+            kernel_input_limit(DeepSeekKernelOperation::ResponseMetadata),
+            DEEPSEEK_RESPONSE_METADATA_MAX_BYTES
+        );
+        assert_eq!(
+            kernel_output_capacity(
+                DeepSeekKernelOperation::ResponseMetadata,
+                DEEPSEEK_RESPONSE_METADATA_MAX_BYTES
+            ),
+            Ok(DEEPSEEK_RESPONSE_METADATA_MAX_BYTES + 2048)
+        );
+    }
 
     #[test]
     fn user_id_output_capacity_stays_bounded_for_large_inputs() {
