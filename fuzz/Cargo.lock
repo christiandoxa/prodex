@@ -916,7 +916,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-domain"
-version = "0.435.8"
+version = "0.435.9"
 dependencies = [
  "prodex-mojo-core",
  "serde",
@@ -935,11 +935,11 @@ dependencies = [
 
 [[package]]
 name = "prodex-mojo-core"
-version = "0.435.8"
+version = "0.435.9"
 
 [[package]]
 name = "prodex-profile-export"
-version = "0.435.8"
+version = "0.435.9"
 dependencies = [
  "aes-gcm-siv",
  "anyhow",
@@ -957,7 +957,7 @@ dependencies = [
 
 [[package]]
 name = "prodex-secret-store"
-version = "0.435.8"
+version = "0.435.9"
 dependencies = [
  "aes-gcm-siv",
  "getrandom",
