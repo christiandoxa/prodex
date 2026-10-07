@@ -1,35 +1,48 @@
-use crate::first_string_value;
 use chrono::{SecondsFormat, Utc};
 use std::path::Path;
 
 pub(crate) fn line_starts_codex_rollout_metadata(line: &str) -> bool {
-    serde_json::from_str::<serde_json::Value>(line)
+    prodex_mojo_core::json::session_report_update_json(line)
         .ok()
-        .is_some_and(|value| value_starts_codex_rollout_metadata(&value))
+        .is_some_and(|plan| plan.starts_rollout_metadata)
 }
 
-fn value_starts_codex_rollout_metadata(value: &serde_json::Value) -> bool {
-    if value
-        .get("timestamp")
-        .and_then(serde_json::Value::as_str)
-        .is_none()
-    {
-        return false;
+fn session_meta_span_string(raw: &str, span: Option<(usize, usize)>) -> Option<String> {
+    span.map(|(start, end)| {
+        serde_json::from_str::<String>(&raw[start..end])
+            .expect("Mojo session-meta plan selected a JSON string token")
+            .trim()
+            .to_string()
+    })
+}
+
+#[derive(Default)]
+struct SyntheticSessionFields {
+    timestamp: Option<String>,
+    cwd: Option<String>,
+    model_provider: Option<String>,
+}
+
+fn synthetic_session_fields(lines: &[String]) -> SyntheticSessionFields {
+    let mut fields = SyntheticSessionFields::default();
+    for line in lines {
+        let Ok(plan) = prodex_mojo_core::json::session_report_update_json(line) else {
+            continue;
+        };
+        if fields.timestamp.is_none() {
+            fields.timestamp = session_meta_span_string(line, plan.repair_timestamp);
+        }
+        if fields.cwd.is_none() {
+            fields.cwd = session_meta_span_string(line, plan.repair_cwd);
+        }
+        if fields.model_provider.is_none() {
+            fields.model_provider = session_meta_span_string(line, plan.repair_model_provider);
+        }
+        if fields.timestamp.is_some() && fields.cwd.is_some() && fields.model_provider.is_some() {
+            break;
+        }
     }
-    if value.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
-        return false;
-    }
-    let Some(payload) = value.get("payload").and_then(serde_json::Value::as_object) else {
-        return false;
-    };
-    ["id", "timestamp", "cwd", "originator", "cli_version"]
-        .iter()
-        .all(|field| {
-            payload
-                .get(*field)
-                .and_then(serde_json::Value::as_str)
-                .is_some()
-        })
+    fields
 }
 
 pub(crate) fn synthetic_session_metadata_line(
@@ -42,18 +55,19 @@ pub(crate) fn synthetic_session_metadata_line(
         .find_map(|line| super::session_line_resume_id_matching_mode(line, selector, false))
         .or_else(|| super::session_path_id_matching_selector(path, selector, false))
         .or_else(|| super::full_codex_session_id(selector).map(ToOwned::to_owned))?;
-    let timestamp = synthetic_session_timestamp(lines);
-    let cwd = synthetic_session_cwd(lines);
-    let model_provider = lines.iter().find_map(|line| {
-        serde_json::from_str::<serde_json::Value>(line)
-            .ok()
-            .and_then(|value| {
-                first_string_value(
-                    &value,
-                    &[&["payload", "model_provider"], &["model_provider"]],
-                )
-            })
-    });
+    let repair = synthetic_session_fields(lines);
+    let timestamp = repair
+        .timestamp
+        .unwrap_or_else(|| Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true));
+    let cwd = repair
+        .cwd
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|path| path.to_string_lossy().into_owned())
+        })
+        .unwrap_or_else(|| ".".to_string());
+    let model_provider = repair.model_provider;
     let mut payload = serde_json::Map::new();
     payload.insert(
         "session_id".to_string(),
@@ -92,33 +106,4 @@ pub(crate) fn synthetic_session_metadata_line(
         })
         .to_string(),
     )
-}
-
-fn synthetic_session_timestamp(lines: &[String]) -> String {
-    lines
-        .iter()
-        .find_map(|line| {
-            serde_json::from_str::<serde_json::Value>(line)
-                .ok()
-                .and_then(|value| {
-                    first_string_value(&value, &[&["timestamp"], &["payload", "timestamp"]])
-                })
-        })
-        .unwrap_or_else(|| Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true))
-}
-
-fn synthetic_session_cwd(lines: &[String]) -> String {
-    lines
-        .iter()
-        .find_map(|line| {
-            serde_json::from_str::<serde_json::Value>(line)
-                .ok()
-                .and_then(|value| first_string_value(&value, &[&["payload", "cwd"], &["cwd"]]))
-        })
-        .or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .map(|path| path.to_string_lossy().into_owned())
-        })
-        .unwrap_or_else(|| ".".to_string())
 }
