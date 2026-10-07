@@ -82,6 +82,7 @@ pub(super) enum RuntimeProxyBackendMode {
     HttpOnlyPreviousResponseToolContextMissing,
     HttpOnlyPlain429,
     Websocket,
+    WebsocketCapacityPressure,
     WebsocketUsageLimitAll,
     WebsocketOverloaded,
     WebsocketDelayedQuotaAfterPrelude,
@@ -224,6 +225,10 @@ impl RuntimeProxyBackend {
 
     pub(super) fn start_websocket() -> Self {
         Self::start_with_mode(RuntimeProxyBackendMode::Websocket)
+    }
+
+    pub(super) fn start_websocket_capacity_pressure() -> Self {
+        Self::start_with_mode(RuntimeProxyBackendMode::WebsocketCapacityPressure)
     }
 
     pub(super) fn start_websocket_usage_limit_all() -> Self {
@@ -378,6 +383,7 @@ impl RuntimeProxyBackend {
                         let websocket_enabled = matches!(
                             mode,
                             RuntimeProxyBackendMode::Websocket
+                                | RuntimeProxyBackendMode::WebsocketCapacityPressure
                                 | RuntimeProxyBackendMode::WebsocketUsageLimitAll
                                 | RuntimeProxyBackendMode::WebsocketOverloaded
                                 | RuntimeProxyBackendMode::WebsocketDelayedQuotaAfterPrelude

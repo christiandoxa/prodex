@@ -379,6 +379,10 @@ impl RuntimeProxyLaneAdmission {
         } else {
             inflight.insert(profile_name.to_string(), plan.remaining);
         }
+        // Publish the generation before the freed count becomes visible.
+        // Selection must never observe free capacity with the old revision.
+        self.inflight_release_revision
+            .fetch_add(1, Ordering::SeqCst);
         drop(inflight);
         self.profile_inflight_releases_total
             .fetch_add(1, Ordering::Relaxed);
@@ -386,7 +390,7 @@ impl RuntimeProxyLaneAdmission {
             self.profile_inflight_release_underflows_total
                 .fetch_add(1, Ordering::Relaxed);
         }
-        self.record_inflight_release();
+        self.notify_waiters();
         (plan.remaining, plan.count_before, plan.underflow)
     }
 
@@ -424,6 +428,10 @@ impl RuntimeProxyLaneAdmission {
     pub fn record_inflight_release(&self) {
         self.inflight_release_revision
             .fetch_add(1, Ordering::SeqCst);
+        self.notify_waiters();
+    }
+
+    fn notify_waiters(&self) {
         let (mutex, condvar) = self.wait();
         let _guard = mutex
             .lock()
@@ -438,11 +446,7 @@ impl RuntimeProxyLaneAdmission {
     pub fn notify_selection_change(&self) {
         self.selection_change_revision
             .fetch_add(1, Ordering::SeqCst);
-        let (mutex, condvar) = self.wait();
-        let _guard = mutex
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        condvar.notify_all();
+        self.notify_waiters();
     }
 
     pub fn active_counter(&self, lane: RuntimeRouteKind) -> Arc<AtomicUsize> {

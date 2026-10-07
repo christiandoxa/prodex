@@ -242,6 +242,7 @@ fn runtime_proxy_wait_scopes_to_session_owner_relief() {
     assert!(
         matches!(
             runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        observed_release_revision: None,
                 request_id: 45,
                 request: &request,
                 shared: &shared,

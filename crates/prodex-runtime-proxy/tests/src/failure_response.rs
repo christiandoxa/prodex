@@ -173,7 +173,24 @@ fn precommit_budget_exhaustion_uses_attempt_and_elapsed_limits() {
         .checked_sub(Duration::from_millis(1_501))
         .expect("expired instant");
 
-    assert!(runtime_proxy_precommit_budget_exhausted_for_profile_count(
+    assert!(!runtime_proxy_precommit_budget_exhausted_for_profile_count(
         expired, 0, false, false, 3,
     ));
+    assert!(runtime_proxy_precommit_budget_exhausted_for_profile_count(
+        expired, 1, false, false, 3,
+    ));
+}
+
+#[test]
+fn precommit_exhaustion_canonical_boundaries_preserve_actual_attempt_limits() {
+    use prodex_mojo_core::runtime::precommit_budget_exhausted as exhausted;
+    assert!(!exhausted(0, u64::MAX, 6, 800).unwrap());
+    assert!(!exhausted(1, 799, 6, 800).unwrap());
+    assert!(exhausted(1, 800, 6, 800).unwrap());
+    assert!(!exhausted(5, 0, 6, 800).unwrap());
+    assert!(exhausted(6, 0, 6, 800).unwrap());
+    assert!(exhausted(usize::MAX, 0, usize::MAX, u64::MAX).unwrap());
+    assert!(!exhausted(0, u64::MAX, 1, 0).unwrap());
+    assert!(exhausted(1, 0, 2, 0).unwrap());
+    assert!(exhausted(0, 0, 0, 800).is_err());
 }

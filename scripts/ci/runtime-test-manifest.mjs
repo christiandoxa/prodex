@@ -434,6 +434,11 @@ export const RUNTIME_CI_WORKFLOW_SHARDS = [
         label: "websocket-precommit",
       },
       {
+        id: "continuation-websocket-parallel-capacity",
+        filter: "main_internal_tests::runtime_proxy_continuations::parallel_capacity::",
+        label: "websocket-parallel-capacity",
+      },
+      {
         id: "continuation-websocket-pool-exhaustion",
         filter:
           "main_internal_tests::runtime_proxy_continuations::websocket_pool_exhaustion::",

@@ -24,3 +24,6 @@ mod http_compact_transparency;
 mod http_backend_passthrough;
 #[path = "runtime_proxy_continuations/post_commit.rs"]
 mod post_commit;
+
+#[path = "runtime_proxy_continuations/parallel_capacity.rs"]
+mod parallel_capacity;

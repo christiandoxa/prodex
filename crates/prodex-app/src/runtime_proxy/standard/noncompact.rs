@@ -239,11 +239,12 @@ fn wait_after_runtime_noncompact_inflight_saturation(
 ) -> Result<()> {
     loop_state.record_inflight_saturation();
     let _ = runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        observed_release_revision: None,
         request_id,
         shared,
         excluded_profiles: &loop_state.excluded_profiles,
         route_kind: RuntimeRouteKind::Standard,
-        selection_started_at: loop_state.selection_started_at,
+        selection_started_at: &mut loop_state.selection_started_at,
         continuation: session_profile.is_some(),
         wait_affinity_owner: session_profile.as_deref(),
         selected_profile: None,
@@ -304,6 +305,7 @@ fn run_runtime_noncompact_standard_loop(
             continue;
         }
 
+        loop_state.begin_attempt();
         let attempt = attempt_runtime_noncompact_standard_request(
             request_id,
             request,
@@ -353,6 +355,7 @@ fn runtime_noncompact_next_action(
     session_present: bool,
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
 ) -> Result<RuntimePrecommitLoopAction<String, tiny_http::ResponseBox>> {
+    let release_revision = runtime_profile_inflight_release_revision(shared);
     if let Some(action) = runtime_noncompact_preferred_action(
         request_id,
         shared,
@@ -375,11 +378,12 @@ fn runtime_noncompact_next_action(
         return Ok(RuntimePrecommitLoopAction::Attempt(candidate_name));
     }
     match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        observed_release_revision: Some(release_revision),
         request_id,
         shared,
         excluded_profiles: &loop_state.excluded_profiles,
         route_kind: RuntimeRouteKind::Standard,
-        selection_started_at: loop_state.selection_started_at,
+        selection_started_at: &mut loop_state.selection_started_at,
         continuation: session_present,
         wait_affinity_owner: session_present.then_some(preferred_profile),
         selected_profile: None,
@@ -530,11 +534,12 @@ fn runtime_noncompact_candidate_saturated(
     );
     loop_state.record_inflight_saturation();
     match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        observed_release_revision: None,
         request_id,
         shared,
         excluded_profiles: &loop_state.excluded_profiles,
         route_kind: RuntimeRouteKind::Standard,
-        selection_started_at: loop_state.selection_started_at,
+        selection_started_at: &mut loop_state.selection_started_at,
         continuation,
         wait_affinity_owner,
         selected_profile: None,

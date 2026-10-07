@@ -91,6 +91,12 @@ impl<F> RuntimePrecommitLoopState<F> {
             .max(1))
     }
 
+    pub fn begin_attempt(&mut self) {
+        if self.selection_attempts == 0 {
+            self.selection_started_at = Instant::now();
+        }
+    }
+
     pub fn record_attempt(&mut self) {
         self.selection_attempts = self.selection_attempts.saturating_add(1);
     }

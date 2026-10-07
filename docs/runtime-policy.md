@@ -639,6 +639,12 @@ shared-state integration around those operations.
 - Prodex stays a scoped Codex gateway, not a general-purpose LLM SDK.
 - Profile selection must be visible through policy, `prodex info`, `prodex doctor`, and runtime logs.
 - Pre-commit retry and fallback paths must stay bounded per request.
+- Healthy local capacity contention waits for a permit instead of consuming an upstream retry.
+  The retry clock starts with the first upstream dispatch and pauses during capacity waits;
+  waiting never clears failed-profile exclusions or replenishes the actual attempt limit.
+  Exhaustion policy is canonical in Mojo. Selection carries the observed release revision
+  into its waiter, and readiness is rechecked even after a missed notification, so a newly
+  available profile cannot be mistaken for an exhausted pool.
 - An explicit `rate_limit_exceeded` response uses its bounded `Retry-After` signal and remains
   distinct from provider overload. Generic 429 responses pass through unless their structured
   payload proves a retry or quota class; 503 remains overload/service availability, never proof

@@ -284,7 +284,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     pub(super) fn candidate_inflight_saturated(
         &mut self,
         candidate_name: &str,
-        selection_started_at: Instant,
+        selection_started_at: &mut Instant,
     ) -> Result<bool> {
         let session_affinity_candidate = self.session_profile.as_deref() == Some(candidate_name);
         if self.previous_response_id.is_none()
@@ -319,6 +319,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             self.saw_inflight_saturation = true;
             return match runtime_proxy_maybe_wait_for_interactive_inflight_relief(
                 RuntimeInflightReliefWait {
+                    observed_release_revision: None,
                     request_id: self.request_id,
                     shared: self.shared,
                     excluded_profiles: &self.excluded_profiles,

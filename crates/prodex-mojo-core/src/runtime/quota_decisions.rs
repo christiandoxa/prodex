@@ -59,6 +59,12 @@ pub struct QuotaGatePlan {
 }
 
 unsafe extern "C" {
+    fn prodex_runtime_precommit_budget_exhausted_v1(
+        attempts: u64,
+        elapsed_ms: u64,
+        attempt_limit: u64,
+        budget_ms: u64,
+    ) -> i64;
     fn prodex_runtime_precommit_budget_plan_v2(
         continuation: i64,
         pressure_mode: i64,
@@ -98,6 +104,28 @@ unsafe extern "C" {
         has_alternative_quota_profile: i64,
         output: *mut i64,
     ) -> i64;
+}
+
+/// Canonical retry exhaustion; elapsed time alone cannot reject unsent work.
+pub fn precommit_budget_exhausted(
+    attempts: usize,
+    elapsed_ms: u64,
+    attempt_limit: usize,
+    budget_ms: u64,
+) -> Result<bool, MojoError> {
+    let status = unsafe {
+        prodex_runtime_precommit_budget_exhausted_v1(
+            u64::try_from(attempts).unwrap_or(u64::MAX),
+            elapsed_ms,
+            u64::try_from(attempt_limit).unwrap_or(u64::MAX),
+            budget_ms,
+        )
+    };
+    match status {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

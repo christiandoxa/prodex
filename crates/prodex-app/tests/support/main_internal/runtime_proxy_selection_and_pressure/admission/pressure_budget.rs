@@ -9,10 +9,10 @@ fn runtime_proxy_pressure_mode_shrinks_precommit_budget() {
         .expect("checked_sub should succeed");
 
     assert!(runtime_proxy_precommit_budget_exhausted(
-        started_at, 0, false, true
+        started_at, 1, false, true
     ));
     assert!(!runtime_proxy_precommit_budget_exhausted(
-        started_at, 0, false, false
+        started_at, 1, false, false
     ));
 }
 
@@ -25,7 +25,7 @@ fn runtime_proxy_pressure_mode_preserves_continuation_budget() {
         .expect("checked_sub should succeed");
 
     assert!(
-        !runtime_proxy_precommit_budget_exhausted(pressure_budget_elapsed, 0, true, true),
+        !runtime_proxy_precommit_budget_exhausted(pressure_budget_elapsed, 1, true, true),
         "continuations should keep extended budget under pressure"
     );
     assert!(
