@@ -11,7 +11,7 @@ pub(crate) use wait::{
     RuntimeProfileInFlightWaitOutcome, runtime_probe_refresh_wait_outcome_since,
     runtime_profile_inflight_release_revision, runtime_profile_inflight_wait_outcome_label,
     runtime_profile_inflight_wait_outcome_since_with_selection_revision,
-    runtime_profile_wait_outcome_label,
+    runtime_profile_wait_outcome_label, wait_for_runtime_probe_refresh_progress,
 };
 
 impl Drop for RuntimeRotationProxy {
