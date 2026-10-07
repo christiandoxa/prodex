@@ -265,7 +265,7 @@ This file belongs to one temporary Prodex launch overlay.
 Write a narrow task to a new file under `/tmp/tasks` (maximum 65536 bytes), then invoke
 the official launcher. This example uses `task-001.txt`; choose a new name for each task:
 
-`'prodex' '__sub-agent-exec'`
+`'prodex' '__sub-agent-exec' '--config' '/tmp/config' '--task-file' '/tmp/task-001.txt'`
 
 ## Rules
 

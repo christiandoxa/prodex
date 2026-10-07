@@ -132,7 +132,7 @@ pub(super) fn try_signal_runtime_responses_full_context_retry(
 pub(super) enum RuntimeResponsesQuotaBlockedAction {
     Continue,
     ReplayWithoutTurnState,
-    Return(RuntimeResponsesReply),
+    Return(Box<RuntimeResponsesReply>),
 }
 
 pub(super) struct RuntimeResponsesQuotaBlocked<'a> {
@@ -230,7 +230,7 @@ pub(super) fn handle_runtime_responses_quota_blocked(
                 reason: "upstream_quota",
             })?
         {
-            return Ok(RuntimeResponsesQuotaBlockedAction::Return(retry));
+            return Ok(RuntimeResponsesQuotaBlockedAction::Return(Box::new(retry)));
         }
 
         let turn_state_full_context_replay = previous_response_id.is_none()
@@ -272,7 +272,9 @@ pub(super) fn handle_runtime_responses_quota_blocked(
                 *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
                 return Ok(RuntimeResponsesQuotaBlockedAction::ReplayWithoutTurnState);
             }
-            return Ok(RuntimeResponsesQuotaBlockedAction::Return(response));
+            return Ok(RuntimeResponsesQuotaBlockedAction::Return(Box::new(
+                response,
+            )));
         }
 
         runtime_proxy_log(
@@ -281,7 +283,9 @@ pub(super) fn handle_runtime_responses_quota_blocked(
                 "request={request_id} transport=http upstream_usage_limit_passthrough route=responses profile={profile_name} reason=hard_affinity"
             ),
         );
-        return Ok(RuntimeResponsesQuotaBlockedAction::Return(response));
+        return Ok(RuntimeResponsesQuotaBlockedAction::Return(Box::new(
+            response,
+        )));
     }
 
     let released_affinity = release_runtime_quota_blocked_affinity(
@@ -309,7 +313,9 @@ pub(super) fn handle_runtime_responses_quota_blocked(
         quota_last_chance_profile,
         request_model_name,
     )? {
-        return Ok(RuntimeResponsesQuotaBlockedAction::Return(response));
+        return Ok(RuntimeResponsesQuotaBlockedAction::Return(Box::new(
+            response,
+        )));
     }
 
     *last_failure = Some((RuntimeUpstreamFailureResponse::Http(response), true));
@@ -387,7 +393,7 @@ pub(super) fn handle_runtime_responses_quota_attempt(
     })?;
     match result {
         RuntimeResponsesQuotaBlockedAction::Continue => Ok(None),
-        RuntimeResponsesQuotaBlockedAction::Return(response) => Ok(Some(response)),
+        RuntimeResponsesQuotaBlockedAction::Return(response) => Ok(Some(*response)),
         RuntimeResponsesQuotaBlockedAction::ReplayWithoutTurnState => {
             context.request =
                 runtime_proxy_crate::runtime_request_without_turn_state(&context.request);

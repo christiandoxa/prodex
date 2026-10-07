@@ -158,15 +158,14 @@ fn stale_previous_response_policy_uses_turn_state_or_fails_closed() {
             fresh_fallback: RuntimePreviousResponseFreshFallbackPolicy::FailClosed,
         },
     );
-    assert_eq!(
-        runtime_previous_response_not_found_fallback_policy(
+    assert!(
+        !runtime_previous_response_not_found_fallback_policy(
             RuntimePreviousResponseNotFoundFallbackRequest {
                 has_turn_state_retry: true,
                 ..request
             },
         )
-        .stale_continuation,
-        false,
+        .stale_continuation
     );
 }
 

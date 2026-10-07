@@ -76,7 +76,7 @@
   },
   {
     "file": "crates/prodex-mojo-core/src/log.rs",
-    "maxLines": 989,
+    "maxLines": 955,
     "reason": "Mojo log ABI/materialization remains a single migration boundary while runtime log semantics continue moving out of Rust; exact cap records the current production surface without widening the global limit."
   },
   {

@@ -1842,11 +1842,11 @@
       "introduced_in": "0.435.4",
       "baseline_state": "candidate",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_quota_reset_epoch_v1",
+      "mojo_entry": "prodex_quota_reset_json_epoch_v1",
       "mojo_abi_version": 1,
       "mojo_source": "mojo/prodex_core/quota.mojo",
       "consumer": "crates/prodex-quota/src/render/windows.rs",
-      "consumer_marker": "prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(",
+      "consumer_marker": "prodex_mojo_core::quota::reset_epoch::quota_reset_json_epoch(&canonical)",
       "production_consumers": [
         "crates/prodex-quota/src/render/windows.rs"
       ],
@@ -1857,7 +1857,7 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "serde_json parsing, typed candidate extraction, case-insensitive header-key acquisition, and numeric/string conversion"
+      "rust_adapter_scope": "canonical JSON serialization and bounded ABI adaptation; Mojo owns reset JSON parsing, candidate precedence, used-percent gates, and numeric/string conversion"
     },
     {
       "name": "quota_model_policy",
@@ -6151,7 +6151,7 @@
           "end": 318
         },
         "release_symbol": "pub(super) fn main_model_choices_from_catalog",
-        "release_marker": "main_model_choices_from_catalog_mojo("
+        "release_marker": "main_model_catalog_plan_with_mojo(entries)?"
       },
       "cleanup_evidence": "The public Rust entry is now an unconditional adapter to the Mojo-backed catalog planner; the feature-off Rust catalog algorithm and test oracle were deleted."
     },

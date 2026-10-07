@@ -1,7 +1,9 @@
 use crate::MojoError;
 
-const LOG_LEVEL_ABI_VERSION: i64 = 1;
-const LOG_LEVEL_MAX_BYTES: usize = 4096;
+mod event_name;
+mod level;
+pub use event_name::render_log_event_name;
+pub use level::classify_log_level;
 
 const _: () = assert!(std::mem::size_of::<usize>() == std::mem::size_of::<u64>());
 
@@ -13,15 +15,6 @@ struct LogStringView {
 }
 
 unsafe extern "C" {
-    fn prodex_mojo_log_level_classify_v1(abi_version: i64, event: u64, level: u64) -> i64;
-    fn prodex_mojo_log_event_name_v1(
-        abi_version: i64,
-        event_address: u64,
-        event_length: i64,
-        output_address: u64,
-        output_capacity: i64,
-        written_address: u64,
-    ) -> i64;
     fn prodex_mojo_upstream_payload_classify_v1(
         abi_version: i64,
         input_address: u64,
@@ -525,75 +518,6 @@ pub fn render_chain_log(input: ChainLogRenderInput<'_>) -> Result<String, MojoEr
             views.as_ptr() as usize as u64,
             i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
             presence,
-            output.as_mut_ptr() as usize as u64,
-            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
-            (&mut written as *mut i64) as usize as u64,
-        )
-    };
-    match status {
-        0 => {}
-        1 => return Err(MojoError::InvalidInput),
-        2 => return Err(MojoError::Capacity),
-        4 => return Err(MojoError::AbiMismatch),
-        _ => return Err(MojoError::InvalidOutput),
-    }
-    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
-    if written > output.len() {
-        return Err(MojoError::InvalidOutput);
-    }
-    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
-}
-
-/// Classifies an already-normalized, length-bounded log line by its level.
-pub fn classify_log_level(line: &str) -> Result<Option<&'static str>, MojoError> {
-    if line.len() > LOG_LEVEL_MAX_BYTES {
-        return Err(MojoError::InvalidInput);
-    }
-    let mut level = -1_i64;
-    let line_view = LogStringView {
-        ptr: line.as_ptr() as usize as u64,
-        len: line.len() as u64,
-    };
-    let status = unsafe {
-        prodex_mojo_log_level_classify_v1(
-            LOG_LEVEL_ABI_VERSION,
-            pointer_address(&line_view),
-            mutable_pointer_address(&mut level),
-        )
-    };
-    if status == 2 {
-        return Err(MojoError::InvalidInput);
-    }
-    if status != 0 {
-        return Err(MojoError::AbiMismatch);
-    }
-    match level {
-        0 => Ok(None),
-        1 => Ok(Some("fatal")),
-        2 => Ok(Some("error")),
-        3 => Ok(Some("warn")),
-        4 => Ok(Some("info")),
-        5 => Ok(Some("debug")),
-        6 => Ok(Some("trace")),
-        _ => Err(MojoError::InvalidOutput),
-    }
-}
-
-const LOG_EVENT_NAME_ABI_VERSION: i64 = 1;
-
-pub fn render_log_event_name(event: &str) -> Result<String, MojoError> {
-    let capacity = event
-        .len()
-        .checked_add(64)
-        .ok_or(MojoError::InvalidInput)?
-        .max(1);
-    let mut output = vec![0_u8; capacity];
-    let mut written = -1_i64;
-    let status = unsafe {
-        prodex_mojo_log_event_name_v1(
-            LOG_EVENT_NAME_ABI_VERSION,
-            event.as_ptr() as usize as u64,
-            i64::try_from(event.len()).map_err(|_| MojoError::InvalidInput)?,
             output.as_mut_ptr() as usize as u64,
             i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
             (&mut written as *mut i64) as usize as u64,

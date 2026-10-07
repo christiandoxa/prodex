@@ -110,10 +110,7 @@ fn websocket_previous_response_not_found_fallback_policy_is_explicitly_fail_clos
         },
     );
 
-    assert_eq!(
-        policy.stale_continuation,
-        true
-    );
+    assert!(policy.stale_continuation);
     assert_eq!(
         policy.fresh_fallback,
         RuntimePreviousResponseFreshFallbackPolicy::FailClosed

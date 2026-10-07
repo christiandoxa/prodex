@@ -7,16 +7,13 @@ use prodex_mojo_core::rich::{
     plan_anthropic_response_blocks,
 };
 
-fn response_plan_with_mojo(
-    content: &[Value],
-) -> Result<
-    (
-        Vec<AnthropicResponseBlock>,
-        Vec<Option<Value>>,
-        Vec<AnthropicResponsePlanItem>,
-    ),
-    String,
-> {
+type AnthropicResponsePlan = (
+    Vec<AnthropicResponseBlock>,
+    Vec<Option<Value>>,
+    Vec<AnthropicResponsePlanItem>,
+);
+
+fn response_plan_with_mojo(content: &[Value]) -> Result<AnthropicResponsePlan, String> {
     let classification_input = content
         .iter()
         .map(|block| AnthropicResponseBlockClassificationInput {

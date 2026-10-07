@@ -638,6 +638,10 @@ export const RUNTIME_CI_TEST_CASES = [
     tags: SERIALIZED_TAGS,
   },
   {
+    name: "runtime_proxy_websocket_post_compaction_turn_state_quota_replays_without_user_error",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "websocket_previous_response_not_found_requires_stale_continuation_without_turn_state",
     tags: SERIALIZED_TAGS,
   },
