@@ -5,6 +5,7 @@ from rich_types import ProdexRichStringView
 
 comptime RUNTIME_DOCTOR_MARKER_ABI_VERSION: Int64 = 1
 comptime RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: Int64 = 2
+comptime RUNTIME_DOCTOR_MESSAGE_PARSE_ABI_VERSION: Int64 = 2
 comptime RUNTIME_DOCTOR_MARKER_MAX_BYTES: Int64 = 256
 
 def runtime_doctor_marker_known(view: ProdexRichStringView) -> Bool:
@@ -876,20 +877,20 @@ def runtime_doctor_message_skip_value(
         next += 1
     return next
 
-@export("prodex_mojo_runtime_doctor_parse_message_v1")
-def prodex_mojo_runtime_doctor_parse_message_v1(
+@export("prodex_mojo_runtime_doctor_parse_message_v2")
+def prodex_mojo_runtime_doctor_parse_message_v2(
     abi_version: Int64,
     input_address: UInt,
     input_length: Int64,
     output_address: UInt,
     output_capacity: Int64,
 ) abi("C") -> Int64:
-    if abi_version != RUNTIME_DOCTOR_MARKER_ABI_VERSION:
+    if abi_version != RUNTIME_DOCTOR_MESSAGE_PARSE_ABI_VERSION:
         return 4
     if (
         input_length < 0
         or input_length > RUNTIME_DOCTOR_MESSAGE_PARSE_MAX_BYTES
-        or output_capacity < 3
+        or output_capacity < 5
         or output_address == 0
         or (input_length > 0 and input_address == 0)
     ):
@@ -902,7 +903,9 @@ def prodex_mojo_runtime_doctor_parse_message_v1(
     )
     output[unsafe_offset=0] = -1
     output[unsafe_offset=1] = -1
-    output[unsafe_offset=2] = 0
+    output[unsafe_offset=2] = -1
+    output[unsafe_offset=3] = -1
+    output[unsafe_offset=4] = 0
     var index: Int64 = 0
     var field_count: Int64 = 0
     var ptr = rich_view_ptr(view)
@@ -915,7 +918,7 @@ def prodex_mojo_runtime_doctor_parse_message_v1(
         if index < input_length and ptr[unsafe_offset=index] == 61:
             var value_start = index + 1
             var value_end = runtime_doctor_message_skip_value(view, value_start)
-            var base = 3 + field_count * 4
+            var base = 5 + field_count * 4
             if base + 4 > output_capacity:
                 return 3
             output[unsafe_offset=base] = token_start
@@ -923,11 +926,76 @@ def prodex_mojo_runtime_doctor_parse_message_v1(
             output[unsafe_offset=base + 2] = value_start
             output[unsafe_offset=base + 3] = value_end
             field_count += 1
-            output[unsafe_offset=2] = field_count
+            output[unsafe_offset=4] = field_count
             index = value_end
             continue
         if token_start < index and output[unsafe_offset=0] < 0:
             output[unsafe_offset=0] = token_start
             output[unsafe_offset=1] = index
         index = runtime_doctor_message_skip_token(view, index)
+    var marker_bounds = runtime_doctor_message_marker_bounds(view)
+    output[unsafe_offset=2] = marker_bounds[0]
+    output[unsafe_offset=3] = marker_bounds[1]
     return 0
+
+def runtime_doctor_message_marker_token_byte(value: UInt8) -> Bool:
+    return (
+        (value >= 48 and value <= 57)
+        or (value >= 65 and value <= 90)
+        or (value >= 97 and value <= 122)
+        or value == 95
+    )
+
+
+def runtime_doctor_message_marker_bounds(
+    view: ProdexRichStringView,
+) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
+    var length = Int64(view.len)
+    var ptr = rich_view_ptr(view)
+
+    # Preserve parsed-event precedence: skip leading key=value fields,
+    # then prefer the first standalone token when it is a known marker.
+    var index: Int64 = 0
+    while index < length:
+        index = runtime_doctor_message_skip_space(view, index)
+        if index >= length:
+            break
+        var token_start = index
+        index = runtime_doctor_message_skip_key_or_token(view, index)
+        if index < length and ptr[unsafe_offset=index] == 61:
+            index = runtime_doctor_message_skip_value(view, index + 1)
+            continue
+        if token_start < index:
+            var candidate = ProdexRichStringView(
+                view.ptr + UInt(token_start), UInt(index - token_start)
+            )
+            if runtime_doctor_marker_known(candidate):
+                result[0] = token_start
+                result[1] = index
+                return result^
+            break
+        index = runtime_doctor_message_skip_token(view, index)
+
+    # Match Rust's historical split predicate exactly: fallback marker tokens
+    # contain only ASCII alphanumeric bytes and underscore.
+    index = 0
+    while index < length:
+        while index < length and not runtime_doctor_message_marker_token_byte(
+            ptr[unsafe_offset=index]
+        ):
+            index += 1
+        var token_start = index
+        while index < length and runtime_doctor_message_marker_token_byte(
+            ptr[unsafe_offset=index]
+        ):
+            index += 1
+        if token_start < index:
+            var candidate = ProdexRichStringView(
+                view.ptr + UInt(token_start), UInt(index - token_start)
+            )
+            if runtime_doctor_marker_known(candidate):
+                result[0] = token_start
+                result[1] = index
+                return result^
+    return result^

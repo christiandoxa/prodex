@@ -8,6 +8,7 @@ const RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_LOG_VALUE_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: i64 = 2;
+const RUNTIME_DOCTOR_MESSAGE_PARSE_ABI_VERSION: i64 = 2;
 const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_MAX_BATCH: usize = 256;
 const RUNTIME_DOCTOR_COMPACT_EXIT_COUNTS_ABI_VERSION: i64 = 1;
@@ -65,7 +66,7 @@ unsafe extern "C" {
         count: i64,
         output: u64,
     ) -> i64;
-    fn prodex_mojo_runtime_doctor_parse_message_v1(
+    fn prodex_mojo_runtime_doctor_parse_message_v2(
         abi_version: i64,
         input_address: u64,
         input_length: i64,
@@ -297,6 +298,7 @@ pub struct RuntimeDoctorMessageFieldRange {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RuntimeDoctorMessageParsePlan {
     pub event: Option<(usize, usize)>,
+    pub marker: Option<(usize, usize)>,
     pub fields: Vec<RuntimeDoctorMessageFieldRange>,
 }
 
@@ -311,12 +313,12 @@ pub fn runtime_doctor_parse_message_offsets(
     let max_fields = message.len().saturating_div(2).saturating_add(1);
     let output_capacity = max_fields
         .checked_mul(4)
-        .and_then(|value| value.checked_add(3))
+        .and_then(|value| value.checked_add(5))
         .ok_or(MojoError::InvalidInput)?;
     let mut output = vec![0_i64; output_capacity];
     let status = unsafe {
-        prodex_mojo_runtime_doctor_parse_message_v1(
-            RUNTIME_DOCTOR_MARKER_ABI_VERSION,
+        prodex_mojo_runtime_doctor_parse_message_v2(
+            RUNTIME_DOCTOR_MESSAGE_PARSE_ABI_VERSION,
             message.as_ptr() as u64,
             i64::try_from(message.len()).map_err(|_| MojoError::InvalidInput)?,
             output.as_mut_ptr() as u64,
@@ -331,28 +333,32 @@ pub fn runtime_doctor_parse_message_offsets(
             _ => MojoError::InvalidOutput,
         });
     }
-    let event = match (output[0], output[1]) {
-        (-1, -1) => None,
-        (start, end) if start >= 0 && end >= start => {
-            let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
-            let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
-            if end > message.len()
-                || !message.is_char_boundary(start)
-                || !message.is_char_boundary(end)
-            {
-                return Err(MojoError::InvalidOutput);
+    let decode_span = |start: i64, end: i64| -> Result<Option<(usize, usize)>, MojoError> {
+        match (start, end) {
+            (-1, -1) => Ok(None),
+            (start, end) if start >= 0 && end >= start => {
+                let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+                let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
+                if end > message.len()
+                    || !message.is_char_boundary(start)
+                    || !message.is_char_boundary(end)
+                {
+                    return Err(MojoError::InvalidOutput);
+                }
+                Ok(Some((start, end)))
             }
-            Some((start, end))
+            _ => Err(MojoError::InvalidOutput),
         }
-        _ => return Err(MojoError::InvalidOutput),
     };
-    let field_count = usize::try_from(output[2]).map_err(|_| MojoError::InvalidOutput)?;
-    if field_count > max_fields || 3 + field_count * 4 > output.len() {
+    let event = decode_span(output[0], output[1])?;
+    let marker = decode_span(output[2], output[3])?;
+    let field_count = usize::try_from(output[4]).map_err(|_| MojoError::InvalidOutput)?;
+    if field_count > max_fields || 5 + field_count * 4 > output.len() {
         return Err(MojoError::InvalidOutput);
     }
     let mut fields = Vec::with_capacity(field_count);
     for index in 0..field_count {
-        let base = 3 + index * 4;
+        let base = 5 + index * 4;
         let key_start = usize::try_from(output[base]).map_err(|_| MojoError::InvalidOutput)?;
         let key_end = usize::try_from(output[base + 1]).map_err(|_| MojoError::InvalidOutput)?;
         let value_start =
@@ -376,7 +382,11 @@ pub fn runtime_doctor_parse_message_offsets(
             value_end,
         });
     }
-    Ok(RuntimeDoctorMessageParsePlan { event, fields })
+    Ok(RuntimeDoctorMessageParsePlan {
+        event,
+        marker,
+        fields,
+    })
 }
 
 /// Decide whether a parsed runtime-doctor log value is semantically absent.
@@ -525,6 +535,43 @@ mod tests {
         );
         assert!(runtime_doctor_smart_context_decision_is_fallback("require_exact").unwrap());
         assert!(runtime_doctor_smart_context_decision_is_fallback("").unwrap());
+    }
+
+    #[test]
+    fn runtime_doctor_message_marker_selection_preserves_event_and_fallback_precedence() {
+        let exact = "selection_pick profile=alpha";
+        assert_eq!(
+            runtime_doctor_parse_message_offsets(exact)
+                .unwrap()
+                .marker
+                .map(|(start, end)| &exact[start..end]),
+            Some("selection_pick")
+        );
+
+        let prefixed = "notice request_id=req-1 selection_pick profile=alpha";
+        assert_eq!(
+            runtime_doctor_parse_message_offsets(prefixed)
+                .unwrap()
+                .marker
+                .map(|(start, end)| &prefixed[start..end]),
+            Some("selection_pick")
+        );
+
+        let fields_first = "request=7 selection_pick profile=alpha";
+        assert_eq!(
+            runtime_doctor_parse_message_offsets(fields_first)
+                .unwrap()
+                .marker
+                .map(|(start, end)| &fields_first[start..end]),
+            Some("selection_pick")
+        );
+
+        assert_eq!(
+            runtime_doctor_parse_message_offsets("notice unknown=value")
+                .unwrap()
+                .marker,
+            None
+        );
     }
 
     #[test]
