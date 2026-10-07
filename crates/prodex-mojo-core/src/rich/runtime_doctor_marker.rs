@@ -302,6 +302,58 @@ pub struct RuntimeDoctorMessageParsePlan {
     pub fields: Vec<RuntimeDoctorMessageFieldRange>,
 }
 
+fn runtime_doctor_message_optional_span(
+    message: &str,
+    start: i64,
+    end: i64,
+) -> Result<Option<(usize, usize)>, MojoError> {
+    match (start, end) {
+        (-1, -1) => Ok(None),
+        (start, end) if start >= 0 && end >= start => {
+            let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+            let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
+            if end > message.len()
+                || !message.is_char_boundary(start)
+                || !message.is_char_boundary(end)
+            {
+                return Err(MojoError::InvalidOutput);
+            }
+            Ok(Some((start, end)))
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+fn runtime_doctor_message_field_range(
+    message: &str,
+    values: &[i64],
+) -> Result<RuntimeDoctorMessageFieldRange, MojoError> {
+    let [key_start, key_end, value_start, value_end] = values else {
+        return Err(MojoError::InvalidOutput);
+    };
+    let key_start = usize::try_from(*key_start).map_err(|_| MojoError::InvalidOutput)?;
+    let key_end = usize::try_from(*key_end).map_err(|_| MojoError::InvalidOutput)?;
+    let value_start = usize::try_from(*value_start).map_err(|_| MojoError::InvalidOutput)?;
+    let value_end = usize::try_from(*value_end).map_err(|_| MojoError::InvalidOutput)?;
+    if key_start > key_end
+        || value_start > value_end
+        || key_end > message.len()
+        || value_end > message.len()
+        || !message.is_char_boundary(key_start)
+        || !message.is_char_boundary(key_end)
+        || !message.is_char_boundary(value_start)
+        || !message.is_char_boundary(value_end)
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(RuntimeDoctorMessageFieldRange {
+        key_start,
+        key_end,
+        value_start,
+        value_end,
+    })
+}
+
 pub fn runtime_doctor_parse_message_offsets(
     message: &str,
 ) -> Result<RuntimeDoctorMessageParsePlan, MojoError> {
@@ -333,25 +385,8 @@ pub fn runtime_doctor_parse_message_offsets(
             _ => MojoError::InvalidOutput,
         });
     }
-    let decode_span = |start: i64, end: i64| -> Result<Option<(usize, usize)>, MojoError> {
-        match (start, end) {
-            (-1, -1) => Ok(None),
-            (start, end) if start >= 0 && end >= start => {
-                let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
-                let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
-                if end > message.len()
-                    || !message.is_char_boundary(start)
-                    || !message.is_char_boundary(end)
-                {
-                    return Err(MojoError::InvalidOutput);
-                }
-                Ok(Some((start, end)))
-            }
-            _ => Err(MojoError::InvalidOutput),
-        }
-    };
-    let event = decode_span(output[0], output[1])?;
-    let marker = decode_span(output[2], output[3])?;
+    let event = runtime_doctor_message_optional_span(message, output[0], output[1])?;
+    let marker = runtime_doctor_message_optional_span(message, output[2], output[3])?;
     let field_count = usize::try_from(output[4]).map_err(|_| MojoError::InvalidOutput)?;
     if field_count > max_fields || 5 + field_count * 4 > output.len() {
         return Err(MojoError::InvalidOutput);
@@ -359,28 +394,10 @@ pub fn runtime_doctor_parse_message_offsets(
     let mut fields = Vec::with_capacity(field_count);
     for index in 0..field_count {
         let base = 5 + index * 4;
-        let key_start = usize::try_from(output[base]).map_err(|_| MojoError::InvalidOutput)?;
-        let key_end = usize::try_from(output[base + 1]).map_err(|_| MojoError::InvalidOutput)?;
-        let value_start =
-            usize::try_from(output[base + 2]).map_err(|_| MojoError::InvalidOutput)?;
-        let value_end = usize::try_from(output[base + 3]).map_err(|_| MojoError::InvalidOutput)?;
-        if key_start > key_end
-            || value_start > value_end
-            || key_end > message.len()
-            || value_end > message.len()
-            || !message.is_char_boundary(key_start)
-            || !message.is_char_boundary(key_end)
-            || !message.is_char_boundary(value_start)
-            || !message.is_char_boundary(value_end)
-        {
-            return Err(MojoError::InvalidOutput);
-        }
-        fields.push(RuntimeDoctorMessageFieldRange {
-            key_start,
-            key_end,
-            value_start,
-            value_end,
-        });
+        fields.push(runtime_doctor_message_field_range(
+            message,
+            &output[base..base + 4],
+        )?);
     }
     Ok(RuntimeDoctorMessageParsePlan {
         event,
