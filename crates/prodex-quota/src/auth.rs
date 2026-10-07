@@ -8,66 +8,37 @@ use super::{AuthSummary, StoredAuth, UsageAuth, UsageAuthSyncOutcome, UsageAuthS
 const CHATGPT_AUTH_REFRESH_INTERVAL_DAYS: i64 = 8;
 const CHATGPT_AUTH_REFRESH_EXPIRY_SKEW_SECONDS: i64 = if cfg!(test) { 30 } else { 5 * 60 };
 
-#[derive(Debug)]
-enum AuthSummaryKind {
-    UnreadableAuth,
-    MissingAuth,
-    InvalidAuth,
-    Chatgpt,
-    ApiKey,
-    BedrockApiKey,
-    Other(String),
-}
-
-impl AuthSummaryKind {
-    fn into_summary(self) -> AuthSummary {
-        match self {
-            Self::UnreadableAuth => AuthSummary {
-                label: "unreadable-auth".to_string(),
-                quota_compatible: false,
-            },
-            Self::MissingAuth => AuthSummary {
-                label: "no-auth".to_string(),
-                quota_compatible: false,
-            },
-            Self::InvalidAuth => AuthSummary {
-                label: "invalid-auth".to_string(),
-                quota_compatible: false,
-            },
-            Self::Chatgpt => AuthSummary {
-                label: "chatgpt".to_string(),
-                quota_compatible: true,
-            },
-            Self::ApiKey => AuthSummary {
-                label: "api-key".to_string(),
-                quota_compatible: false,
-            },
-            Self::BedrockApiKey => AuthSummary {
-                label: "bedrock-api-key".to_string(),
-                quota_compatible: false,
-            },
-            Self::Other(label) => AuthSummary {
-                label,
-                quota_compatible: false,
-            },
-        }
-    }
-}
-
 pub fn auth_summary_from_auth_text_result<E>(
     result: std::result::Result<Option<String>, E>,
 ) -> AuthSummary {
     match result {
         Ok(Some(content)) => auth_summary_from_auth_text(&Zeroizing::new(content)),
-        Ok(None) => AuthSummaryKind::MissingAuth.into_summary(),
-        Err(_) => AuthSummaryKind::UnreadableAuth.into_summary(),
+        Ok(None) => AuthSummary {
+            label: prodex_mojo_core::quota::quota_auth_summary_label(5)
+                .expect("Mojo quota auth-summary label returned invalid output")
+                .to_string(),
+            quota_compatible: false,
+        },
+        Err(_) => AuthSummary {
+            label: prodex_mojo_core::quota::quota_auth_summary_label(4)
+                .expect("Mojo quota auth-summary label returned invalid output")
+                .to_string(),
+            quota_compatible: false,
+        },
     }
 }
 
 pub fn auth_summary_from_auth_text(content: &str) -> AuthSummary {
     let stored_auth: StoredAuth = match serde_json::from_str(content) {
         Ok(auth) => auth,
-        Err(_) => return AuthSummaryKind::InvalidAuth.into_summary(),
+        Err(_) => {
+            return AuthSummary {
+                label: prodex_mojo_core::quota::quota_auth_summary_label(6)
+                    .expect("Mojo quota auth-summary label returned invalid output")
+                    .to_string(),
+                quota_compatible: false,
+            };
+        }
     };
     auth_summary_from_stored_auth(&stored_auth)
 }
@@ -87,30 +58,40 @@ pub fn auth_summary_from_stored_auth(stored_auth: &StoredAuth) -> AuthSummary {
             .as_deref()
             .is_some_and(|key| !key.trim().is_empty())
     });
-    match prodex_mojo_core::quota::quota_auth_summary_kind(
+    let kind = prodex_mojo_core::quota::quota_auth_summary_kind(
         stored_auth.auth_mode.as_deref(),
         has_chatgpt_token,
         has_api_key,
         has_bedrock_api_key,
     )
-    .expect("Mojo quota auth-summary policy returned invalid output")
-    {
+    .expect("Mojo quota auth-summary policy returned invalid output");
+    let label = match kind {
+        prodex_mojo_core::quota::QuotaAuthSummaryKind::Other => {
+            stored_auth.auth_mode.clone().unwrap_or_else(|| {
+                prodex_mojo_core::quota::quota_auth_summary_label(3)
+                    .expect("Mojo quota auth-summary label returned invalid output")
+                    .to_string()
+            })
+        }
         prodex_mojo_core::quota::QuotaAuthSummaryKind::Chatgpt => {
-            AuthSummaryKind::Chatgpt.into_summary()
+            prodex_mojo_core::quota::quota_auth_summary_label(0)
+                .expect("Mojo quota auth-summary label returned invalid output")
+                .to_string()
         }
         prodex_mojo_core::quota::QuotaAuthSummaryKind::BedrockApiKey => {
-            AuthSummaryKind::BedrockApiKey.into_summary()
+            prodex_mojo_core::quota::quota_auth_summary_label(1)
+                .expect("Mojo quota auth-summary label returned invalid output")
+                .to_string()
         }
         prodex_mojo_core::quota::QuotaAuthSummaryKind::ApiKey => {
-            AuthSummaryKind::ApiKey.into_summary()
+            prodex_mojo_core::quota::quota_auth_summary_label(2)
+                .expect("Mojo quota auth-summary label returned invalid output")
+                .to_string()
         }
-        prodex_mojo_core::quota::QuotaAuthSummaryKind::Other => AuthSummaryKind::Other(
-            stored_auth
-                .auth_mode
-                .clone()
-                .unwrap_or_else(|| "auth-present".to_string()),
-        )
-        .into_summary(),
+    };
+    AuthSummary {
+        label,
+        quota_compatible: kind == prodex_mojo_core::quota::QuotaAuthSummaryKind::Chatgpt,
     }
 }
 
