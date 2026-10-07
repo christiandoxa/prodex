@@ -149,14 +149,6 @@ fn runtime_state_sections_from_policy(
     }
 }
 
-fn runtime_background_queue_kind(kind: RuntimeBackgroundQueueKind) -> u8 {
-    match kind {
-        RuntimeBackgroundQueueKind::StateSave => 0,
-        RuntimeBackgroundQueueKind::ContinuationJournal => 1,
-        RuntimeBackgroundQueueKind::ProbeRefresh => 2,
-    }
-}
-
 fn runtime_background_thresholds(
     thresholds: RuntimeBackgroundQueuePressureThresholds,
 ) -> [usize; 3] {
@@ -226,17 +218,18 @@ pub fn runtime_background_enqueue_backlog(pending_len_after_enqueue: usize) -> u
         .expect("Mojo runtime background backlog policy returned invalid output")
 }
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeBackgroundQueueKind {
-    StateSave,
-    ContinuationJournal,
-    ProbeRefresh,
+    StateSave = 0,
+    ContinuationJournal = 1,
+    ProbeRefresh = 2,
 }
 
 impl RuntimeBackgroundQueuePressureThresholds {
     pub fn threshold_for(self, kind: RuntimeBackgroundQueueKind) -> usize {
         prodex_mojo_core::runtime_state::queue_threshold(
-            runtime_background_queue_kind(kind),
+            kind as u8,
             runtime_background_thresholds(self),
         )
         .expect("Mojo runtime background threshold policy returned invalid output")
@@ -255,7 +248,7 @@ pub fn runtime_background_queue_enqueue_plan(
     thresholds: RuntimeBackgroundQueuePressureThresholds,
 ) -> RuntimeBackgroundQueueEnqueuePlan {
     let plan = prodex_mojo_core::runtime_state::queue_enqueue_plan(
-        runtime_background_queue_kind(kind),
+        kind as u8,
         pending_len_after_enqueue,
         runtime_background_thresholds(thresholds),
     )
