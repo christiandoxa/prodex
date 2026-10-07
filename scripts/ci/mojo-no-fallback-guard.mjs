@@ -4187,12 +4187,19 @@ export function findViolations(files) {
       return violations;
     }
     if (filePath === QUOTA_AUTH_FILE) {
-      const violations = contents.includes("quota_usage_auth_sync_source_label(")
-        ? []
-        : [filePath + ": auth-sync source labels must retain Mojo mapping"];
+      const violations = [];
+      if (!contents.includes("quota_usage_auth_sync_source_label(")) {
+        violations.push(filePath + ": auth-sync source labels must retain Mojo mapping");
+      }
+      if (!contents.includes("quota_auth_summary_label(")) {
+        violations.push(filePath + ": auth-summary labels must retain Mojo mapping");
+      }
       const body = contents.match(/\bpub fn usage_auth_sync_source_label\([^]*?^\}/mu)?.[0];
       if (body?.includes("UsageAuthSyncSource::Reloaded") || body?.includes('"reloaded"')) {
         violations.push(filePath + ": contains restored Rust auth-sync source label mapping");
+      }
+      if (/\benum\s+AuthSummaryKind\b/u.test(contents)) {
+        violations.push(filePath + ": contains restored Rust auth-summary label mirror");
       }
       return violations;
     }

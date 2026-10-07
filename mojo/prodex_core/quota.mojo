@@ -1291,6 +1291,7 @@ def quota_plan_type_matches(
 comptime QUOTA_DISPLAY_LABEL_SORT: Int64 = 0
 comptime QUOTA_DISPLAY_LABEL_BLOCKED_STATUS: Int64 = 1
 comptime QUOTA_DISPLAY_LABEL_AUTH_SYNC_SOURCE: Int64 = 2
+comptime QUOTA_DISPLAY_LABEL_AUTH_SUMMARY: Int64 = 3
 
 comptime QUOTA_WINDOW_LABEL_USAGE: Int64 = 0
 comptime QUOTA_WINDOW_LABEL_FIVE_HOUR: Int64 = 1
@@ -1371,6 +1372,23 @@ def prodex_quota_display_label_v1(
             label = StringSlice("reloaded")
         elif value == 1:
             label = StringSlice("refreshed")
+        else:
+            return QUOTA_MODEL_POLICY_INVALID
+    elif label_kind == QUOTA_DISPLAY_LABEL_AUTH_SUMMARY:
+        if value == 0:
+            label = StringSlice("chatgpt")
+        elif value == 1:
+            label = StringSlice("bedrock-api-key")
+        elif value == 2:
+            label = StringSlice("api-key")
+        elif value == 3:
+            label = StringSlice("auth-present")
+        elif value == 4:
+            label = StringSlice("unreadable-auth")
+        elif value == 5:
+            label = StringSlice("no-auth")
+        elif value == 6:
+            label = StringSlice("invalid-auth")
         else:
             return QUOTA_MODEL_POLICY_INVALID
     else:

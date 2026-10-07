@@ -637,6 +637,7 @@ const QUOTA_DISPLAY_LABEL_MAX_BYTES: usize = 64;
 const QUOTA_DISPLAY_LABEL_SORT: i64 = 0;
 const QUOTA_DISPLAY_LABEL_BLOCKED_STATUS: i64 = 1;
 const QUOTA_DISPLAY_LABEL_AUTH_SYNC_SOURCE: i64 = 2;
+const QUOTA_DISPLAY_LABEL_AUTH_SUMMARY: i64 = 3;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum QuotaAuthFilterPlan {
@@ -1131,6 +1132,27 @@ pub fn quota_usage_auth_sync_source_label(source: i64) -> Result<&'static str, c
     }) {
         Ok(labels) => labels
             .get(source)
+            .map(String::as_str)
+            .ok_or(crate::MojoError::InvalidOutput),
+        Err(error) => Err(*error),
+    }
+}
+
+pub fn quota_auth_summary_label(kind: i64) -> Result<&'static str, crate::MojoError> {
+    use std::sync::OnceLock;
+
+    static LABELS: OnceLock<Result<Vec<String>, crate::MojoError>> = OnceLock::new();
+    let kind = usize::try_from(kind)
+        .ok()
+        .filter(|kind| *kind < 7)
+        .ok_or(crate::MojoError::InvalidInput)?;
+    match LABELS.get_or_init(|| {
+        (0_i64..7)
+            .map(|value| load_quota_display_label(QUOTA_DISPLAY_LABEL_AUTH_SUMMARY, value))
+            .collect()
+    }) {
+        Ok(labels) => labels
+            .get(kind)
             .map(String::as_str)
             .ok_or(crate::MojoError::InvalidOutput),
         Err(error) => Err(*error),
