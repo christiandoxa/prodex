@@ -2,7 +2,7 @@
 //! parsing and compatibility serialization remain outside the Mojo bridge.
 mod response_metadata;
 pub use self::response_metadata::{
-    JsonStringSpan, RuntimeResponseMetadataPlan, runtime_response_metadata,
+    RuntimeResponseMetadataJsonPlan, runtime_response_metadata_json,
 };
 mod session_report;
 pub use self::session_report::{
@@ -169,10 +169,8 @@ unsafe extern "C" {
         session_present: i64,
         output: u64,
     ) -> i64;
-    fn prodex_runtime_response_metadata_v1(
+    fn prodex_runtime_response_metadata_json_v1(
         abi_version: i64,
-        nodes_address: u64,
-        nodes_count: i64,
         raw_address: u64,
         raw_length: i64,
         output_address: u64,
@@ -324,6 +322,26 @@ fn validated_optional_node_index(value: i64, count: usize) -> Result<Option<usiz
     (index < count)
         .then_some(Some(index))
         .ok_or(MojoError::InvalidOutput)
+}
+
+fn validated_optional_raw_span(
+    start: i64,
+    end: i64,
+    raw: &str,
+) -> Result<Option<(usize, usize)>, MojoError> {
+    if start == -1 && end == -1 {
+        return Ok(None);
+    }
+    let start = usize::try_from(start).map_err(|_| MojoError::InvalidOutput)?;
+    let end = usize::try_from(end).map_err(|_| MojoError::InvalidOutput)?;
+    if end <= start || end > raw.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let token = raw.get(start..end).ok_or(MojoError::InvalidOutput)?;
+    if !token.starts_with('"') || !token.ends_with('"') {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(Some((start, end)))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

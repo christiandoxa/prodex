@@ -3932,19 +3932,19 @@ export function findViolations(files) {
   const responseMetadataViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === RESPONSE_METADATA_FILE) {
       const body = contents.match(/\bfn\s+runtime_response_metadata_from_value\s*\([^]*?^\}/mu)?.[0];
-      const rustSemantics = /\bfn\s+(?:extract_runtime_token_usage_candidate|runtime_token_usage_from_usage_value|extract_runtime_turn_state_from_header_entry|extract_runtime_turn_state_header_value|push_runtime_response_id)\s*\(/u;
-      return body?.includes("prodex_mojo_core::json::runtime_response_metadata(") &&
+      const rustSemantics = /\bfn\s+(?:extract_runtime_token_usage_candidate|runtime_token_usage_from_usage_value|extract_runtime_turn_state_from_header_entry|extract_runtime_turn_state_header_value|push_runtime_response_id|runtime_response_json_nodes|runtime_response_metadata_number_texts)\s*\(/u;
+      return body?.includes("prodex_mojo_core::json::runtime_response_metadata_json(") &&
           !rustSemantics.test(contents)
         ? []
         : [`${filePath}: response metadata decisions must use the Mojo plan without Rust copies`];
     }
     if (filePath === RESPONSE_METADATA_ADAPTER_FILE &&
-        !contents.includes("prodex_runtime_response_metadata_v1(")) {
+        !contents.includes("prodex_runtime_response_metadata_json_v1(")) {
       return [`${filePath}: response metadata adapter must call its versioned Mojo ABI`];
     }
     if (filePath === RESPONSE_METADATA_MOJO_FILE &&
-        (!contents.includes('@export("prodex_runtime_response_metadata_v1")') ||
-          !contents.includes("runtime_response_metadata_token_usage(tree)"))) {
+        (!contents.includes('@export("prodex_runtime_response_metadata_json_v1")') ||
+          !contents.includes("runtime_response_raw_scan_usage("))) {
       return [`${filePath}: response metadata production owner must retain its ABI and usage planner`];
     }
     return [];
@@ -6282,7 +6282,7 @@ function selfTest() {
   assert.match(findViolations([[CLI_DEFAULT_RUN_CALLER_TEST_FILE, "fn unrelated_test() {}"]]).join("\n"),
   /CLI default-run behavior must retain caller-boundary coverage/u);
   assert.deepEqual(findViolations([[RESPONSE_METADATA_FILE,
-    "fn runtime_response_metadata_from_value(value: &Value) -> Plan {\n  prodex_mojo_core::json::runtime_response_metadata(&nodes, &number_texts)\n}"]]), []);
+    "fn runtime_response_metadata_from_value(value: &Value) -> Plan {\n  prodex_mojo_core::json::runtime_response_metadata_json(&raw)\n}"]]), []);
   assert.match(findViolations([[RESPONSE_METADATA_FILE,
     "fn runtime_response_metadata_from_value(value: &Value) -> Plan {\n  extract_runtime_token_usage_candidate(value)\n}"]]).join("\n"),
   /response metadata decisions must use the Mojo plan without Rust copies/u);
