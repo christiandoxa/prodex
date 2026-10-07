@@ -157,3 +157,8 @@ pub fn kiro_provider_core_anthropic_message_value_from_response(
         panic!("Mojo Kiro Anthropic response rewrite returned invalid JSON: {error}")
     })
 }
+
+pub fn kiro_provider_core_anthropic_sse_body(message: &Value) -> Result<Vec<u8>, MojoError> {
+    let canonical = serde_json::to_string(message).map_err(|_| MojoError::InvalidInput)?;
+    prodex_mojo_core::rich::kiro_anthropic_sse_body(&canonical)
+}

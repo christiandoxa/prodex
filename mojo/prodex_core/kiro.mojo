@@ -4189,6 +4189,247 @@ def kiro_anthropic_response_rewrite_v1(
     return KIRO_KERNEL_STATUS_OK
 
 
+def kiro_sse_event_start(
+    writer: Pointer[mut=True, KiroResponseWriter, _], event_type: StringSlice
+) -> Bool:
+    return (
+        kiro_put_literal(writer, StringSlice("event: "))
+        and kiro_put_literal(writer, event_type)
+        and kiro_put_literal(writer, StringSlice("\ndata: "))
+    )
+
+
+def kiro_sse_event_end(
+    writer: Pointer[mut=True, KiroResponseWriter, _]
+) -> Bool:
+    return kiro_put_literal(writer, StringSlice("\n\n"))
+
+
+def kiro_put_raw_json_string(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    if start < 0 or end < start or end > Int64(view.len):
+        return False
+    if not kiro_put_byte(writer, 34):
+        return False
+    var ptr = rich_view_ptr(view)
+    for index in range(start, end):
+        var value = ptr[unsafe_offset=index]
+        if value == 34 or value == 92:
+            if not kiro_put_byte(writer, 92) or not kiro_put_byte(writer, value):
+                return False
+        elif value == 8:
+            if not kiro_put_literal(writer, StringSlice("\\b")):
+                return False
+        elif value == 9:
+            if not kiro_put_literal(writer, StringSlice("\\t")):
+                return False
+        elif value == 10:
+            if not kiro_put_literal(writer, StringSlice("\\n")):
+                return False
+        elif value == 12:
+            if not kiro_put_literal(writer, StringSlice("\\f")):
+                return False
+        elif value == 13:
+            if not kiro_put_literal(writer, StringSlice("\\r")):
+                return False
+        elif value < 32:
+            if not kiro_put_literal(writer, StringSlice("\\u00")) or not kiro_put_hex_byte(writer, value):
+                return False
+        elif not kiro_put_byte(writer, value):
+            return False
+    return kiro_put_byte(writer, 34)
+
+
+def kiro_raw_sse_start_message(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    root: Array[Int64, 2],
+) -> Bool:
+    if deepseek_json_byte(view, root[0]) != 123:
+        return False
+    if not kiro_put_byte(writer, 123):
+        return False
+    var first = True
+    var has_content = False
+    var has_stop_reason = False
+    var cursor = deepseek_json_skip_ws(view, root[0] + 1, root[1] - 1)
+    while cursor < root[1] - 1:
+        var key_start = cursor
+        var key_end = deepseek_json_string_end(view, key_start, root[1] - 1)
+        if key_end < 0:
+            return False
+        cursor = deepseek_json_skip_ws(view, key_end, root[1] - 1)
+        if cursor >= root[1] - 1 or deepseek_json_byte(view, cursor) != 58:
+            return False
+        var value_start = deepseek_json_skip_ws(view, cursor + 1, root[1] - 1)
+        var value_end = deepseek_json_value_end(view, value_start, root[1] - 1, 0)
+        if value_end < 0:
+            return False
+        if not first and not kiro_put_byte(writer, 44):
+            return False
+        first = False
+        if kiro_json_key_matches(view, key_start, key_end, StringSlice("content")):
+            if not kiro_put_view_range(writer, view, key_start, key_end) or not kiro_put_literal(writer, StringSlice(":[]")):
+                return False
+            has_content = True
+        elif kiro_json_key_matches(view, key_start, key_end, StringSlice("stop_reason")):
+            if not kiro_put_view_range(writer, view, key_start, key_end) or not kiro_put_literal(writer, StringSlice(":null")):
+                return False
+            has_stop_reason = True
+        elif not kiro_put_view_range(writer, view, key_start, value_end):
+            return False
+        cursor = deepseek_json_skip_ws(view, value_end, root[1] - 1)
+        if cursor < root[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, root[1] - 1)
+            continue
+        if cursor != root[1] - 1:
+            return False
+        break
+    if not has_content:
+        if not first and not kiro_put_byte(writer, 44):
+            return False
+        if not kiro_put_literal(writer, StringSlice('"content":[]')):
+            return False
+        first = False
+    if not has_stop_reason:
+        if not first and not kiro_put_byte(writer, 44):
+            return False
+        if not kiro_put_literal(writer, StringSlice('"stop_reason":null')):
+            return False
+    return kiro_put_byte(writer, 125)
+
+
+def kiro_raw_sse_content_blocks(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+    content: Array[Int64, 2],
+) -> Bool:
+    if not kiro_raw_present(content) or deepseek_json_byte(view, content[0]) != 91:
+        return True
+    var cursor = deepseek_json_skip_ws(view, content[0] + 1, content[1] - 1)
+    var index: Int64 = 0
+    while cursor < content[1] - 1:
+        var item_end = deepseek_json_value_end(view, cursor, content[1] - 1, 0)
+        if item_end < 0:
+            return False
+        if deepseek_json_byte(view, cursor) == 123:
+            var item = Array[Int64, 2](fill=-1)
+            item[0] = cursor
+            item[1] = item_end
+            var kind = kiro_raw_member(view, item, StringSlice("type"))
+            if kiro_raw_present(kind) and deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("text")):
+                var text = kiro_raw_member(view, item, StringSlice("text"))
+                if not kiro_sse_event_start(writer, StringSlice("content_block_start")) or not kiro_put_literal(writer, StringSlice('{"content_block":{"text":"","type":"text"},"index":')) or not kiro_put_u64(writer, UInt64(index)) or not kiro_put_literal(writer, StringSlice(',"type":"content_block_start"}')) or not kiro_sse_event_end(writer):
+                    return False
+                var text_nonempty = kiro_raw_present(text) and deepseek_json_byte(view, text[0]) == 34 and text[1] - text[0] > 2
+                if text_nonempty:
+                    if not kiro_sse_event_start(writer, StringSlice("content_block_delta")) or not kiro_put_literal(writer, StringSlice('{"delta":{"text":')):
+                        return False
+                    if not kiro_raw_put_default_or_string(writer, view, text, StringSlice("\"\"")):
+                        return False
+                    if not kiro_put_literal(writer, StringSlice(',"type":"text_delta"},"index":')) or not kiro_put_u64(writer, UInt64(index)) or not kiro_put_literal(writer, StringSlice(',"type":"content_block_delta"}')) or not kiro_sse_event_end(writer):
+                        return False
+                if not kiro_sse_event_start(writer, StringSlice("content_block_stop")) or not kiro_put_literal(writer, StringSlice('{"index":')) or not kiro_put_u64(writer, UInt64(index)) or not kiro_put_literal(writer, StringSlice(',"type":"content_block_stop"}')) or not kiro_sse_event_end(writer):
+                    return False
+            elif kiro_raw_present(kind) and deepseek_json_raw_equals(view, kind[0], kind[1], StringSlice("tool_use")):
+                var call_id = kiro_raw_member(view, item, StringSlice("id"))
+                var name = kiro_raw_member(view, item, StringSlice("name"))
+                var input = kiro_raw_member(view, item, StringSlice("input"))
+                if not kiro_sse_event_start(writer, StringSlice("content_block_start")) or not kiro_put_literal(writer, StringSlice('{"content_block":{"id":')) or not kiro_raw_put_default_or_string(writer, view, call_id, StringSlice('"call_kiro"')) or not kiro_put_literal(writer, StringSlice(',"input":{},"name":')) or not kiro_raw_put_default_or_string(writer, view, name, StringSlice('"tool_call"')) or not kiro_put_literal(writer, StringSlice(',"type":"tool_use"},"index":')) or not kiro_put_u64(writer, UInt64(index)) or not kiro_put_literal(writer, StringSlice(',"type":"content_block_start"}')) or not kiro_sse_event_end(writer):
+                    return False
+                if not kiro_sse_event_start(writer, StringSlice("content_block_delta")) or not kiro_put_literal(writer, StringSlice('{"delta":{"partial_json":')):
+                    return False
+                if kiro_raw_present(input):
+                    if not kiro_put_raw_json_string(writer, view, input[0], input[1]):
+                        return False
+                elif not kiro_put_literal(writer, StringSlice('"{}"')):
+                    return False
+                if not kiro_put_literal(writer, StringSlice(',"type":"input_json_delta"},"index":')) or not kiro_put_u64(writer, UInt64(index)) or not kiro_put_literal(writer, StringSlice(',"type":"content_block_delta"}')) or not kiro_sse_event_end(writer):
+                    return False
+                if not kiro_sse_event_start(writer, StringSlice("content_block_stop")) or not kiro_put_literal(writer, StringSlice('{"index":')) or not kiro_put_u64(writer, UInt64(index)) or not kiro_put_literal(writer, StringSlice(',"type":"content_block_stop"}')) or not kiro_sse_event_end(writer):
+                    return False
+        cursor = deepseek_json_skip_ws(view, item_end, content[1] - 1)
+        index += 1
+        if cursor < content[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, content[1] - 1)
+            continue
+        if cursor != content[1] - 1:
+            return False
+        break
+    return True
+
+
+def kiro_raw_anthropic_sse_body(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    var root = Array[Int64, 2](fill=-1)
+    var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
+    var end = deepseek_json_value_end(view, start, Int64(view.len), 0)
+    if start < 0 or end < 0 or deepseek_json_skip_ws(view, end, Int64(view.len)) != Int64(view.len) or deepseek_json_byte(view, start) != 123:
+        return False
+    root[0] = start
+    root[1] = end
+    var content = kiro_raw_member(view, root, StringSlice("content"))
+    var stop_reason = kiro_raw_member(view, root, StringSlice("stop_reason"))
+    var usage = kiro_raw_member(view, root, StringSlice("usage"))
+    var output_tokens = kiro_raw_member(view, usage, StringSlice("output_tokens"))
+    if not kiro_sse_event_start(writer, StringSlice("message_start")) or not kiro_put_literal(writer, StringSlice('{"message":')) or not kiro_raw_sse_start_message(writer, view, root) or not kiro_put_literal(writer, StringSlice(',"type":"message_start"}')) or not kiro_sse_event_end(writer):
+        return False
+    if not kiro_raw_sse_content_blocks(writer, view, content):
+        return False
+    if not kiro_sse_event_start(writer, StringSlice("message_delta")) or not kiro_put_literal(writer, StringSlice('{"delta":{"stop_reason":')):
+        return False
+    if kiro_raw_present(stop_reason):
+        if not kiro_put_view_range(writer, view, stop_reason[0], stop_reason[1]):
+            return False
+    elif not kiro_put_literal(writer, StringSlice('"end_turn"')):
+        return False
+    if not kiro_put_literal(writer, StringSlice(',"stop_sequence":null},"type":"message_delta","usage":{"output_tokens":')):
+        return False
+    if kiro_raw_present(output_tokens):
+        if not kiro_put_view_range(writer, view, output_tokens[0], output_tokens[1]):
+            return False
+    elif not kiro_put_byte(writer, 48):
+        return False
+    if not kiro_put_literal(writer, StringSlice("}}")) or not kiro_sse_event_end(writer):
+        return False
+    return kiro_sse_event_start(writer, StringSlice("message_stop")) and kiro_put_literal(writer, StringSlice('{"type":"message_stop"}')) and kiro_sse_event_end(writer)
+
+
+def kiro_anthropic_sse_body_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return KIRO_KERNEL_STATUS_ABI
+    if input_length < 0 or input_length > KIRO_RESPONSE_MAX_BYTES or output_capacity <= 0 or output_capacity > KIRO_RESPONSE_MAX_OUTPUT_BYTES or input_address == 0 or output_address == 0 or written_address == 0:
+        return KIRO_KERNEL_STATUS_INVALID
+    var view = ProdexRichStringView(input_address, UInt(input_length))
+    if not rich_view_valid(view, KIRO_RESPONSE_MAX_BYTES):
+        return KIRO_KERNEL_STATUS_UTF8
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))
+    written[] = 0
+    var writer = KiroResponseWriter(output, output_capacity, 0)
+    var writer_ptr = Pointer(to=writer)
+    if not kiro_raw_anthropic_sse_body(writer_ptr, view):
+        if writer.written >= output_capacity:
+            written[] = writer.written
+            return KIRO_KERNEL_STATUS_CAPACITY
+        return KIRO_KERNEL_STATUS_INVALID
+    written[] = writer.written
+    return KIRO_KERNEL_STATUS_OK
+
+
 comptime KIRO_CHAT_RESPONSE_INPUT_VALID: Int64 = 0
 comptime KIRO_CHAT_RESPONSE_INPUT_TOO_LARGE: Int64 = 1
 comptime KIRO_CHAT_RESPONSE_INPUT_INVALID_JSON: Int64 = 2
