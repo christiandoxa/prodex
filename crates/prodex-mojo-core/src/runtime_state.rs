@@ -75,6 +75,15 @@ unsafe extern "C" {
         pending_len_after_enqueue: u64,
         output_address: u64,
     ) -> i64;
+    fn prodex_runtime_state_mutation_reason_v1(
+        abi_version: i64,
+        mutation_kind: i64,
+        value_address: u64,
+        value_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
+    ) -> i64;
 }
 
 fn bool_output(value: u64) -> Result<bool, MojoError> {
@@ -120,6 +129,37 @@ fn call(
         4 => Err(MojoError::AbiMismatch),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+pub fn mutation_reason(kind: u8, value: Option<&str>) -> Result<String, MojoError> {
+    let value = value.unwrap_or_default();
+    let capacity = value.len().checked_add(64).ok_or(MojoError::InvalidInput)?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_runtime_state_mutation_reason_v1(
+            ABI_VERSION,
+            i64::from(kind),
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
 pub fn mutation_policy(kind: u8) -> Result<RuntimeStateMutationPolicy, MojoError> {

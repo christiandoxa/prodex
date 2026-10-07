@@ -29,6 +29,131 @@ def runtime_state_flag(value: Bool) -> UInt64:
     return UInt64(1) if value else UInt64(0)
 
 
+def runtime_state_reason_put(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    source: Pointer[mut=False, UInt8, _],
+    length: Int64,
+) -> Bool:
+    if length < 0 or written[] > capacity - length:
+        return False
+    for index in range(length):
+        output[unsafe_offset=written[] + index] = source[unsafe_offset=index]
+    written[] += length
+    return True
+
+
+def runtime_state_reason_put_literal(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    literal: StringSlice,
+) -> Bool:
+    return runtime_state_reason_put(
+        output,
+        capacity,
+        written,
+        literal.unsafe_ptr(),
+        Int64(literal.byte_length()),
+    )
+
+
+def runtime_state_put_mutation_label(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    kind: Int64,
+) -> Bool:
+    if kind == 0: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("full_state"))
+    if kind == 1: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("startup_audit"))
+    if kind == 2: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("startup_continuation_migration"))
+    if kind == 3: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("startup_backoff_soften"))
+    if kind == 4: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("response_ids"))
+    if kind == 5: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("previous_response_owner"))
+    if kind == 6: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("previous_response_negative_cache"))
+    if kind == 7: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("previous_response_release"))
+    if kind == 8: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("response_touch"))
+    if kind == 9: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("turn_state"))
+    if kind == 10: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("turn_state_touch"))
+    if kind == 11: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("session_id"))
+    if kind == 12: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("session_touch"))
+    if kind == 13: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("session_affinity_release"))
+    if kind == 14: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("compact_lineage"))
+    if kind == 15: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("compact_lineage_release"))
+    if kind == 16: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("compact_session_touch"))
+    if kind == 17: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("compact_turn_state_touch"))
+    if kind == 18: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("dead_response_binding_clear"))
+    if kind == 19: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("quota_release"))
+    if kind == 20: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("auth_failed_release"))
+    if kind == 21: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("continuation_stale"))
+    if kind == 22: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("profile_commit"))
+    if kind == 23: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("usage_snapshot"))
+    if kind == 24: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("profile_retry_backoff"))
+    if kind == 25: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("profile_transport_backoff"))
+    if kind == 26: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("profile_circuit_half_open_probe"))
+    if kind == 27: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("profile_health"))
+    if kind == 28: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("profile_circuit_clear"))
+    if kind == 29: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("profile_bad_pairing"))
+    if kind == 30: return runtime_state_reason_put_literal(output, capacity, written, StringSlice("profile_auth_backoff"))
+    return runtime_state_reason_put_literal(output, capacity, written, StringSlice("profile_auth_backoff_cleared"))
+
+
+@export("prodex_runtime_state_mutation_reason_v1")
+def prodex_runtime_state_mutation_reason_v1(
+    abi_version: Int64,
+    mutation_kind: Int64,
+    value_address: UInt,
+    value_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_STATE_BACKGROUND_ABI_VERSION:
+        return RUNTIME_STATE_BACKGROUND_ABI
+    if (
+        mutation_kind < 0
+        or mutation_kind > 31
+        or value_length < 0
+        or (value_length > 0 and value_address == 0)
+        or output_address == 0
+        or output_capacity <= 0
+        or written_address == 0
+    ):
+        return RUNTIME_STATE_BACKGROUND_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if not runtime_state_put_mutation_label(
+        output, output_capacity, written, mutation_kind
+    ):
+        return 3
+    if mutation_kind >= 4:
+        var colon = StringSlice(":")
+        if not runtime_state_reason_put(
+            output,
+            output_capacity,
+            written,
+            colon.unsafe_ptr(),
+            1,
+        ):
+            return 3
+        if value_length > 0:
+            var value = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+                unsafe_from_address=Int(value_address)
+            )
+            if not runtime_state_reason_put(
+                output, output_capacity, written, value, value_length
+            ):
+                return 3
+    return RUNTIME_STATE_BACKGROUND_OK
+
+
+
 def runtime_state_mutation_plan(
     mutation_kind: Int64,
     output: Pointer[mut=True, UInt64, _],

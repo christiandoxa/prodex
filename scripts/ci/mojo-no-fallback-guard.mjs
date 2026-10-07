@@ -862,6 +862,8 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
   ["crates/prodex-runtime-launch/Cargo.toml", "mojo"],
 ]);
 const RUNTIME_STATE_BACKGROUND_FILE = "crates/prodex-runtime-state/src/background.rs";
+const RUNTIME_STATE_BACKGROUND_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_state.rs";
+const RUNTIME_STATE_BACKGROUND_MOJO_FILE = "mojo/prodex_core/runtime_state_background.mojo";
 const RUNTIME_LOG_RETENTION_FILE = "crates/prodex-runtime-log/src/retention.rs";
 const RUNTIME_LOG_RETENTION_SELECTION_FILE = "crates/prodex-runtime-log/src/retention_selection.rs";
 const RUNTIME_STATE_QUOTA_FILE = "crates/prodex-runtime-state/src/quota.rs";
@@ -2017,32 +2019,50 @@ export function findViolations(files) {
     return violations;
   });
   const runtimeStateBackgroundViolations = files.flatMap(([filePath, contents]) => {
-    if (filePath !== RUNTIME_STATE_BACKGROUND_FILE) return [];
-    const required = [
-      "prodex_mojo_core::runtime_state::mutation_policy(",
-      "prodex_mojo_core::runtime_state::queue_pressure_active(",
-      "prodex_mojo_core::runtime_state::enqueue_backlog(",
-      "prodex_mojo_core::runtime_state::queue_threshold(",
-      "prodex_mojo_core::runtime_state::queue_enqueue_plan(",
-    ];
-    const violations = required
-      .filter((call) => !contents.includes(call))
-      .map((call) => `${filePath}: runtime-state migration must retain Mojo call ${call}`);
-    const functions = [
-      "runtime_state_save_requires_continuation_journal",
-      "runtime_state_save_sections",
-      "runtime_hot_continuation_state_mutation",
-    ];
-    for (const name of functions) {
-      const body = contents.match(new RegExp(`\\bpub fn ${name}\\([^]*?^\\}`, "mu"))?.[0];
-      if (!body?.includes("runtime_state_mutation_policy(")) {
-        violations.push(`${filePath}: ${name} must retain Mojo mutation-policy dispatch`);
+    if (filePath === RUNTIME_STATE_BACKGROUND_FILE) {
+      const required = [
+        "prodex_mojo_core::runtime_state::mutation_policy(",
+        "prodex_mojo_core::runtime_state::mutation_reason(",
+        "prodex_mojo_core::runtime_state::queue_pressure_active(",
+        "prodex_mojo_core::runtime_state::enqueue_backlog(",
+        "prodex_mojo_core::runtime_state::queue_threshold(",
+        "prodex_mojo_core::runtime_state::queue_enqueue_plan(",
+        "fn runtime_state_mutation_input(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => `${filePath}: runtime-state migration must retain Mojo call/adapter ${call}`);
+      const functions = [
+        "runtime_state_save_requires_continuation_journal",
+        "runtime_state_save_sections",
+        "runtime_hot_continuation_state_mutation",
+      ];
+      for (const name of functions) {
+        const body = contents.match(new RegExp(String.raw`\bpub fn ${name}\([^]*?^\}`, "mu"))?.[0];
+        if (!body?.includes("runtime_state_mutation_policy(")) {
+          violations.push(`${filePath}: ${name} must retain Mojo mutation-policy dispatch`);
+        }
       }
+      if (/\bfn\s+(?:runtime_state_mutation_kind|runtime_state_save_sections_rust|runtime_state_save_requires_continuation_journal_rust|runtime_hot_continuation_state_mutation_rust|runtime_background_queue_enqueue_plan_rust)\s*\(/u.test(contents) ||
+          contents.includes('with_value("') ||
+          contents.includes('"full_state".to_string()') ||
+          contents.includes('"profile_auth_backoff_cleared"')) {
+        violations.push(`${filePath}: contains restored Rust runtime-state mutation labels or policy semantics`);
+      }
+      return violations;
     }
-    if (/\bfn\s+(?:runtime_state_save_sections_rust|runtime_state_save_requires_continuation_journal_rust|runtime_hot_continuation_state_mutation_rust|runtime_background_queue_enqueue_plan_rust)\s*\(/u.test(contents)) {
-      violations.push(`${filePath}: contains restored Rust runtime-state policy semantics`);
+    if (filePath === RUNTIME_STATE_BACKGROUND_ADAPTER_FILE) {
+      return contents.includes("prodex_runtime_state_mutation_reason_v1(") &&
+          contents.includes("pub fn mutation_reason(")
+        ? [] : [`${filePath}: runtime-state mutation reason adapter must retain its versioned Mojo ABI`];
     }
-    return violations;
+    if (filePath === RUNTIME_STATE_BACKGROUND_MOJO_FILE) {
+      return contents.includes('@export("prodex_runtime_state_mutation_reason_v1")') &&
+          contents.includes("def runtime_state_put_mutation_label(") &&
+          contents.includes('StringSlice("profile_auth_backoff_cleared")')
+        ? [] : [`${filePath}: runtime-state mutation labels must remain Mojo-owned`];
+    }
+    return [];
   });
   const runtimeStateQuotaViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== RUNTIME_STATE_QUOTA_FILE) return [];

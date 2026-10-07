@@ -84,6 +84,19 @@ fn future_jobs_return_wait_duration() {
 }
 
 #[test]
+fn mutation_reasons_are_rendered_by_mojo_with_payloads() {
+    assert_eq!(RuntimeStateMutation::FullState.reason(), "full_state");
+    assert_eq!(
+        RuntimeStateMutation::PreviousResponseOwner("resp-1".into()).reason(),
+        "previous_response_owner:resp-1"
+    );
+    assert_eq!(
+        RuntimeStateMutation::ProfileAuthBackoffCleared(String::new()).reason(),
+        "profile_auth_backoff_cleared:"
+    );
+}
+
+#[test]
 fn save_sections_follow_typed_mutation_scope() {
     assert_eq!(
         runtime_state_save_sections(&RuntimeStateMutation::UsageSnapshot("main".into())),
