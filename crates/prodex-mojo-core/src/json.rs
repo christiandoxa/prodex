@@ -6,8 +6,8 @@ pub use self::response_metadata::{
 };
 mod session_report;
 pub use self::session_report::{
-    SessionReportOrderKey, SessionReportUpdatePlan, session_report_order,
-    session_report_timestamp_sort_key, session_report_update_plan,
+    SessionReportOrderKey, SessionReportUpdatePlan, session_report_metadata_json,
+    session_report_order, session_report_timestamp_sort_key, session_report_update_json,
 };
 mod kiro_catalog;
 pub use self::kiro_catalog::{
@@ -175,14 +175,6 @@ unsafe extern "C" {
         raw_length: i64,
         output_address: u64,
     ) -> i64;
-    fn prodex_session_report_metadata_v1(
-        abi_version: i64,
-        nodes_address: u64,
-        nodes_count: i64,
-        raw_address: u64,
-        raw_length: i64,
-        output_address: u64,
-    ) -> i64;
     fn prodex_mojo_gemini_grounding_v1(
         abi_version: i64,
         operation: i64,
@@ -314,16 +306,6 @@ pub fn gemini_grounding(
     Ok(output)
 }
 
-fn validated_optional_node_index(value: i64, count: usize) -> Result<Option<usize>, MojoError> {
-    if value == -1 {
-        return Ok(None);
-    }
-    let index = usize::try_from(value).map_err(|_| MojoError::InvalidOutput)?;
-    (index < count)
-        .then_some(Some(index))
-        .ok_or(MojoError::InvalidOutput)
-}
-
 fn validated_optional_raw_span(
     start: i64,
     end: i64,
@@ -385,46 +367,14 @@ pub fn runtime_proxy_request_shape(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SessionReportMetadataPlan {
     pub type_class: i64,
-    pub resume_id: Option<usize>,
-    pub model: Option<usize>,
-    pub effort: Option<usize>,
-    pub thread_name: Option<usize>,
-    pub cwd: Option<usize>,
-    pub updated_at: Option<usize>,
-    pub parent_thread_id: Option<usize>,
-    pub model_provider: Option<usize>,
-}
-
-pub fn session_report_metadata(
-    nodes: &[JsonNode<'_>],
-) -> Result<SessionReportMetadataPlan, MojoError> {
-    let raw = "";
-    let input = ffi_nodes(nodes, raw)?;
-    let mut output = [-1_i64; 9];
-    status(unsafe {
-        prodex_session_report_metadata_v1(
-            1,
-            input.as_ptr() as u64,
-            signed(input.len())?,
-            raw.as_ptr() as u64,
-            0,
-            output.as_mut_ptr() as u64,
-        )
-    })?;
-    if !(0..=3).contains(&output[0]) {
-        return Err(MojoError::InvalidOutput);
-    }
-    Ok(SessionReportMetadataPlan {
-        type_class: output[0],
-        resume_id: validated_optional_node_index(output[1], nodes.len())?,
-        model: validated_optional_node_index(output[2], nodes.len())?,
-        effort: validated_optional_node_index(output[3], nodes.len())?,
-        thread_name: validated_optional_node_index(output[4], nodes.len())?,
-        cwd: validated_optional_node_index(output[5], nodes.len())?,
-        updated_at: validated_optional_node_index(output[6], nodes.len())?,
-        parent_thread_id: validated_optional_node_index(output[7], nodes.len())?,
-        model_provider: validated_optional_node_index(output[8], nodes.len())?,
-    })
+    pub resume_id: Option<(usize, usize)>,
+    pub model: Option<(usize, usize)>,
+    pub effort: Option<(usize, usize)>,
+    pub thread_name: Option<(usize, usize)>,
+    pub cwd: Option<(usize, usize)>,
+    pub updated_at: Option<(usize, usize)>,
+    pub parent_thread_id: Option<(usize, usize)>,
+    pub model_provider: Option<(usize, usize)>,
 }
 
 /// Apply the provider error request-member policy to a Serde-built tree.

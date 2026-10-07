@@ -37,132 +37,36 @@ pub(super) struct SessionValueMetadata {
     pub(super) model_provider: Option<String>,
 }
 
-fn session_json_node_kind_and_text(
-    value: &serde_json::Value,
-) -> (prodex_mojo_core::json::JsonKind, &str) {
-    use prodex_mojo_core::json::JsonKind;
-    match value {
-        serde_json::Value::Null => (JsonKind::Null, ""),
-        serde_json::Value::Bool(false) => (JsonKind::False, ""),
-        serde_json::Value::Bool(true) => (JsonKind::True, ""),
-        serde_json::Value::Number(_) => (JsonKind::Number, ""),
-        serde_json::Value::String(value) => (JsonKind::String, value.as_str()),
-        serde_json::Value::Array(_) => (JsonKind::Array, ""),
-        serde_json::Value::Object(_) => (JsonKind::Object, ""),
-    }
-}
-
-fn session_link_json_child(
-    nodes: &mut [prodex_mojo_core::json::JsonNode<'_>],
-    parent: usize,
-    previous: Option<usize>,
-    child: usize,
-) {
-    if let Some(previous) = previous {
-        nodes[previous].next_sibling = Some(child);
-    } else {
-        nodes[parent].first_child = Some(child);
-    }
-}
-
-fn session_push_json_node<'a>(
-    nodes: &mut Vec<prodex_mojo_core::json::JsonNode<'a>>,
-    number_values: Option<&mut Vec<Option<i64>>>,
-    value: &'a serde_json::Value,
-    key: &'a str,
-    parent: Option<usize>,
-) -> usize {
-    use prodex_mojo_core::json::JsonNode;
-
-    let (kind, text) = session_json_node_kind_and_text(value);
-    let index = nodes.len();
-    nodes.push(JsonNode {
-        kind,
-        first_child: None,
-        next_sibling: None,
-        parent,
-        key,
-        text,
-        raw_start: 0,
-        raw_length: 0,
-    });
-    let mut number_values = number_values;
-    if let Some(values) = number_values.as_deref_mut() {
-        values.push(value.as_i64());
-    }
-
-    let mut previous = None;
-    match value {
-        serde_json::Value::Array(values) => {
-            for child in values {
-                let child_index = session_push_json_node(
-                    nodes,
-                    number_values.as_deref_mut(),
-                    child,
-                    "",
-                    Some(index),
-                );
-                session_link_json_child(nodes, index, previous, child_index);
-                previous = Some(child_index);
-            }
-        }
-        serde_json::Value::Object(map) => {
-            for (child_key, child) in map {
-                let child_index = session_push_json_node(
-                    nodes,
-                    number_values.as_deref_mut(),
-                    child,
-                    child_key.as_str(),
-                    Some(index),
-                );
-                session_link_json_child(nodes, index, previous, child_index);
-                previous = Some(child_index);
-            }
-        }
-        _ => {}
-    }
-    index
-}
-
-fn session_json_nodes<'a>(
-    value: &'a serde_json::Value,
-) -> Vec<prodex_mojo_core::json::JsonNode<'a>> {
-    let mut nodes = Vec::new();
-    session_push_json_node(&mut nodes, None, value, "", None);
-    nodes
-}
-
-fn session_json_nodes_with_numbers<'a>(
-    value: &'a serde_json::Value,
-) -> (Vec<prodex_mojo_core::json::JsonNode<'a>>, Vec<Option<i64>>) {
-    let mut nodes = Vec::new();
-    let mut number_values = Vec::new();
-    session_push_json_node(&mut nodes, Some(&mut number_values), value, "", None);
-    (nodes, number_values)
+fn session_string_from_span(raw: &str, span: Option<(usize, usize)>) -> Option<String> {
+    span.map(|(start, end)| {
+        serde_json::from_str::<String>(&raw[start..end])
+            .expect("Mojo session-report plan selected a JSON string token")
+            .trim()
+            .to_string()
+    })
 }
 
 pub(super) fn session_value_metadata(value: &serde_json::Value) -> SessionValueMetadata {
-    let nodes = session_json_nodes(value);
-    let plan = prodex_mojo_core::json::session_report_metadata(&nodes)
+    let raw = serde_json::to_string(value).expect("session report JSON serializes");
+    let plan = prodex_mojo_core::json::session_report_metadata_json(&raw)
         .expect("Mojo session-report metadata planner returned invalid output");
-    session_value_metadata_from_plan(&nodes, plan)
+    session_value_metadata_from_plan(&raw, plan)
 }
 
 fn session_value_metadata_from_plan(
-    nodes: &[prodex_mojo_core::json::JsonNode<'_>],
+    raw: &str,
     plan: prodex_mojo_core::json::SessionReportMetadataPlan,
 ) -> SessionValueMetadata {
-    let string_at = |index: Option<usize>| index.map(|index| nodes[index].text.trim().to_string());
     SessionValueMetadata {
         type_class: plan.type_class,
-        resume_id: string_at(plan.resume_id),
-        model: string_at(plan.model),
-        effort: string_at(plan.effort),
-        thread_name: string_at(plan.thread_name),
-        cwd: string_at(plan.cwd),
-        updated_at: string_at(plan.updated_at),
-        parent_thread_id: string_at(plan.parent_thread_id),
-        model_provider: string_at(plan.model_provider),
+        resume_id: session_string_from_span(raw, plan.resume_id),
+        model: session_string_from_span(raw, plan.model),
+        effort: session_string_from_span(raw, plan.effort),
+        thread_name: session_string_from_span(raw, plan.thread_name),
+        cwd: session_string_from_span(raw, plan.cwd),
+        updated_at: session_string_from_span(raw, plan.updated_at),
+        parent_thread_id: session_string_from_span(raw, plan.parent_thread_id),
+        model_provider: session_string_from_span(raw, plan.model_provider),
     }
 }
 
@@ -257,10 +161,14 @@ pub fn apply_session_json_line(report: &mut SessionReport, line: &str) {
 }
 
 pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value) {
-    let (nodes, number_values) = session_json_nodes_with_numbers(value);
-    let plan = prodex_mojo_core::json::session_report_update_plan(&nodes, &number_values)
+    let raw = serde_json::to_string(value).expect("session report JSON serializes");
+    let plan = prodex_mojo_core::json::session_report_update_json(&raw)
         .expect("Mojo session-report update planner returned invalid output");
-    let metadata = session_value_metadata_from_plan(&nodes, plan.metadata);
+    let metadata = session_value_metadata_from_plan(&raw, plan.metadata);
+    let string_timestamp_sort_key = metadata
+        .updated_at
+        .as_deref()
+        .and_then(timestamp_label_sort_key);
 
     if let Some(model) = metadata.model {
         report.last_model = Some(model);
@@ -285,7 +193,7 @@ pub fn apply_session_value(report: &mut SessionReport, value: &serde_json::Value
     }
 
     if let Some(updated_at) = metadata.updated_at {
-        if let Some(updated_sort_key) = plan.updated_sort_key {
+        if let Some(updated_sort_key) = string_timestamp_sort_key {
             report.updated_sort_key = updated_sort_key;
         }
         report.updated_at = Some(updated_at);
