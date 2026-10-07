@@ -47,7 +47,7 @@ pub use self::request::{
 };
 pub use self::response::{
     kiro_provider_core_anthropic_message_value_from_response,
-    kiro_provider_core_apply_response_runtime_metadata,
+    kiro_provider_core_anthropic_sse_body, kiro_provider_core_apply_response_runtime_metadata,
     kiro_provider_core_chat_completion_finish_reason,
     kiro_provider_core_chat_completion_finish_reason_from_response,
     kiro_provider_core_chat_completion_value_from_response,

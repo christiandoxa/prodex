@@ -323,6 +323,59 @@ fn kiro_response_anthropic_mapping_preserves_order_and_wrong_type_values() {
 }
 
 #[test]
+fn kiro_response_anthropic_sse_body_keeps_event_order_and_unicode() {
+    let message = json!({
+        "id": "resp_界",
+        "type": "message",
+        "role": "assistant",
+        "model": "kiro",
+        "content": [
+            {"type": "text", "text": "hello 🐈"},
+            {"type": "text", "text": ""},
+            {"type": "tool_use", "id": "call_1", "name": "run", "input": {"z": 1, "a": "é"}},
+            {"type": "unknown", "value": true},
+        ],
+        "stop_reason": "tool_use",
+        "stop_sequence": null,
+        "usage": {"input_tokens": 3, "output_tokens": 5},
+    });
+    let body = kiro_provider_core_anthropic_sse_body(&message).unwrap();
+    let body = String::from_utf8(body).unwrap();
+    assert_eq!(
+        body,
+        concat!(
+            "event: message_start\n",
+            "data: {\"message\":{\"content\":[],\"id\":\"resp_界\",\"model\":\"kiro\",\"role\":\"assistant\",\"stop_reason\":null,\"stop_sequence\":null,\"type\":\"message\",\"usage\":{\"input_tokens\":3,\"output_tokens\":5}},\"type\":\"message_start\"}\n\n",
+            "event: content_block_start\n",
+            "data: {\"content_block\":{\"text\":\"\",\"type\":\"text\"},\"index\":0,\"type\":\"content_block_start\"}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"delta\":{\"text\":\"hello 🐈\",\"type\":\"text_delta\"},\"index\":0,\"type\":\"content_block_delta\"}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"index\":0,\"type\":\"content_block_stop\"}\n\n",
+            "event: content_block_start\n",
+            "data: {\"content_block\":{\"text\":\"\",\"type\":\"text\"},\"index\":1,\"type\":\"content_block_start\"}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"index\":1,\"type\":\"content_block_stop\"}\n\n",
+            "event: content_block_start\n",
+            "data: {\"content_block\":{\"id\":\"call_1\",\"input\":{},\"name\":\"run\",\"type\":\"tool_use\"},\"index\":2,\"type\":\"content_block_start\"}\n\n",
+            "event: content_block_delta\n",
+            "data: {\"delta\":{\"partial_json\":\"{\\\"a\\\":\\\"é\\\",\\\"z\\\":1}\",\"type\":\"input_json_delta\"},\"index\":2,\"type\":\"content_block_delta\"}\n\n",
+            "event: content_block_stop\n",
+            "data: {\"index\":2,\"type\":\"content_block_stop\"}\n\n",
+            "event: message_delta\n",
+            "data: {\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},\"type\":\"message_delta\",\"usage\":{\"output_tokens\":5}}\n\n",
+            "event: message_stop\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        )
+    );
+    let oversized = "x".repeat(prodex_mojo_core::rich::KIRO_RESPONSE_MAX_BYTES + 1);
+    assert_eq!(
+        prodex_mojo_core::rich::kiro_anthropic_sse_body(&oversized),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    );
+}
+
+#[test]
 fn kiro_response_finish_reason_handles_missing_and_wrong_type_details() {
     for response in [
         Value::Null,

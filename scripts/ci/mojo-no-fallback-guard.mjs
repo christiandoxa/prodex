@@ -944,6 +944,10 @@ const KIRO_CHAT_RESPONSE_FILE = "crates/prodex-provider-core/src/translators/kir
 const KIRO_MESSAGES_FILE = "crates/prodex-provider-core/src/translators/kiro/request/messages.rs";
 const KIRO_REQUEST_FILE = "crates/prodex-provider-core/src/translators/kiro/request.rs";
 const KIRO_LOCAL_REWRITE_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro.rs";
+const KIRO_MESSAGES_STREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/messages.rs";
+const KIRO_RICH_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/kiro.rs";
+const KIRO_MOJO_FILE = "mojo/prodex_core/kiro.mojo";
+const KIRO_RICH_ABI_FILE = "mojo/prodex_core/rich_abi.mojo";
 const KIRO_PROMPT_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/kiro_prompt.rs";
 const KIRO_STREAM_FILE = "crates/prodex-provider-core/src/translators/kiro/stream.rs";
 const KIRO_FINAL_STREAM_FILE = "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_kiro/stream.rs";
@@ -1682,6 +1686,39 @@ export function findViolations(files) {
       violations.push(`${filePath}: contains replaced Rust Kiro Anthropic response semantics`);
     }
     return violations;
+  });
+  const kiroAnthropicSseViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === KIRO_MESSAGES_STREAM_FILE) {
+      const required = "prodex_provider_core::kiro_provider_core_anthropic_sse_body(&message)";
+      const restoredRust = /\bfn\s+runtime_kiro_anthropic_sse_body\s*\(|\bfn\s+push_event\s*\(/u;
+      return contents.includes(required) && !restoredRust.test(contents)
+        ? []
+        : [`${filePath}: Kiro Anthropic SSE rendering must use Mojo without a Rust copy`];
+    }
+    if (filePath === KIRO_CHAT_RESPONSE_FILE) {
+      return contents.includes("pub fn kiro_provider_core_anthropic_sse_body(") &&
+          contents.includes("prodex_mojo_core::rich::kiro_anthropic_sse_body(&canonical)")
+        ? []
+        : [`${filePath}: Kiro Anthropic SSE provider adapter must delegate to Mojo`];
+    }
+    if (filePath === KIRO_RICH_ADAPTER_FILE) {
+      return contents.includes("pub fn kiro_anthropic_sse_body(") &&
+          contents.includes("prodex_mojo_kiro_anthropic_sse_body_v1(")
+        ? []
+        : [`${filePath}: Kiro Anthropic SSE adapter must retain its versioned Mojo ABI`];
+    }
+    if (filePath === KIRO_MOJO_FILE) {
+      return contents.includes("def kiro_anthropic_sse_body_v1(") &&
+          contents.includes("kiro_raw_anthropic_sse_body(")
+        ? []
+        : [`${filePath}: Kiro Anthropic SSE production owner must remain in Mojo`];
+    }
+    if (filePath === KIRO_RICH_ABI_FILE) {
+      return contents.includes('@export("prodex_mojo_kiro_anthropic_sse_body_v1")')
+        ? []
+        : [`${filePath}: Kiro Anthropic SSE ABI export must remain registered`];
+    }
+    return [];
   });
   const kiroAcpViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== KIRO_ACP_FILE) return [];
@@ -5337,6 +5374,7 @@ export function findViolations(files) {
     ...kiroFinalStreamViolations,
     ...kiroStreamPlanViolations,
     ...kiroResponseHelperViolations,
+    ...kiroAnthropicSseViolations,
     ...kiroAcpViolations,
     ...kiroMessageShapeViolations,
     ...kiroCatalogViolations,
@@ -5894,6 +5932,10 @@ function selfTest() {
     pub fn kiro_provider_core_anthropic_message_value_from_response(value: &Value, model: &str) -> Value {
       prodex_mojo_core::rich::kiro_rewrite_anthropic_response_json(value, model)
     }
+    pub fn kiro_provider_core_anthropic_sse_body(message: &Value) {
+      let canonical = String::new();
+      prodex_mojo_core::rich::kiro_anthropic_sse_body(&canonical)
+    }
     pub fn kiro_provider_core_apply_response_runtime_metadata() {}
   `), []);
   assert.match(kiroChatResponseViolations(`
@@ -5902,6 +5944,12 @@ function selfTest() {
     }
     pub fn kiro_provider_core_apply_response_runtime_metadata() {}
   `)[0], /Kiro chat response mapping must use Mojo/u);
+  assert.deepEqual(findViolations([[KIRO_MESSAGES_STREAM_FILE,
+    "prodex_provider_core::kiro_provider_core_anthropic_sse_body(&message)"
+  ]]), []);
+  assert.match(findViolations([[KIRO_MESSAGES_STREAM_FILE,
+    "fn runtime_kiro_anthropic_sse_body() { fn push_event() {} }"
+  ]]).join("\n"), /Kiro Anthropic SSE rendering must use Mojo without a Rust copy/u);
   const kiroFinalStreamViolations = (contents) => findViolations([[KIRO_FINAL_STREAM_FILE, contents]]);
   assert.deepEqual(kiroFinalStreamViolations(`
     pub(super) fn runtime_kiro_send_final_stream() {
