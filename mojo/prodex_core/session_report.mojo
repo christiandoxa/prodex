@@ -1,64 +1,198 @@
+from std.collections import Array
 from std.memory import Pointer
 
-from parsed_json import (
-    JSON_OBJECT,
-    JSON_NUMBER,
-    ParsedJson,
-    ParsedJsonNode,
-    pj_field,
-    pj_equal,
-    pj_is,
-    pj_kind,
-    pj_less,
-    pj_nonblank,
-    pj_trim,
-    pj_string_field,
-    pj_valid,
+from json_view import (
+    deepseek_json_byte,
+    deepseek_json_fragment_valid,
+    deepseek_json_object_member,
+    deepseek_json_raw_equals,
+    deepseek_json_skip_ws,
+    deepseek_json_value_end,
 )
+from launch_args_common import launch_rust_space
+from parsed_json import pj_equal, pj_less
 from rich_types import ProdexRichStringView
-from rich_text import rich_view_ptr, rich_view_valid
+from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_view_ptr,
+    rich_view_valid,
+)
 
 comptime SESSION_REPORT_ABI_VERSION: Int64 = 1
 comptime SESSION_REPORT_OK: Int64 = 0
 comptime SESSION_REPORT_INVALID: Int64 = 1
 
-def session_string_field(tree: ParsedJson, object: Int64, name: StringSlice) -> Int64:
-    var field = pj_string_field(tree, object, name)
-    return field if field >= 0 and pj_nonblank(tree, field) else -1
+def session_raw_present(bounds: Array[Int64, 2]) -> Bool:
+    return bounds[0] >= 0 and bounds[1] > bounds[0]
 
-def session_object_field(tree: ParsedJson, object: Int64, name: StringSlice) -> Int64:
-    var field = pj_field(tree, object, name)
-    return field if pj_kind(tree, field) == JSON_OBJECT else -1
 
-def session_nested_string2(
-    tree: ParsedJson,
-    object: Int64,
-    parent: StringSlice,
+def session_raw_root(view: ProdexRichStringView) -> Array[Int64, 2]:
+    var result = Array[Int64, 2](fill=-1)
+    var start = deepseek_json_skip_ws(view, 0, Int64(view.len))
+    var end = deepseek_json_value_end(view, start, Int64(view.len), 0)
+    if (
+        end < 0
+        or deepseek_json_skip_ws(view, end, Int64(view.len)) != Int64(view.len)
+        or start >= Int64(view.len)
+        or deepseek_json_byte(view, start) != 123
+    ):
+        return result^
+    result[0] = start
+    result[1] = end
+    return result^
+
+
+def session_raw_object_field(
+    view: ProdexRichStringView,
+    object: Array[Int64, 2],
     name: StringSlice,
-) -> Int64:
-    var nested = session_object_field(tree, object, parent)
-    return session_string_field(tree, nested, name) if nested >= 0 else -1
+) -> Array[Int64, 2]:
+    if not session_raw_present(object):
+        return Array[Int64, 2](fill=-1)^
+    var field = deepseek_json_object_member(
+        view, object[0], object[1], name
+    )
+    if (
+        not session_raw_present(field)
+        or deepseek_json_byte(view, field[0]) != 123
+    ):
+        return Array[Int64, 2](fill=-1)^
+    return field^
 
-def session_nested_string5(
-    tree: ParsedJson,
-    object: Int64,
+
+def session_json_hex(value: UInt8) -> Int64:
+    if value >= 48 and value <= 57:
+        return Int64(value - 48)
+    if value >= 65 and value <= 70:
+        return Int64(value - 65 + 10)
+    if value >= 97 and value <= 102:
+        return Int64(value - 97 + 10)
+    return -1
+
+
+def session_raw_string_nonblank(
+    view: ProdexRichStringView,
+    bounds: Array[Int64, 2],
+) -> Bool:
+    if (
+        not session_raw_present(bounds)
+        or deepseek_json_byte(view, bounds[0]) != 34
+        or deepseek_json_byte(view, bounds[1] - 1) != 34
+    ):
+        return False
+    var ptr = rich_view_ptr(view)
+    var index = bounds[0] + 1
+    var end = bounds[1] - 1
+    while index < end:
+        var value = ptr[unsafe_offset=index]
+        var codepoint: Int64
+        if value == 92:
+            if index + 1 >= end:
+                return False
+            var escaped = ptr[unsafe_offset=index + 1]
+            if escaped == 116:
+                codepoint = 9
+                index += 2
+            elif escaped == 110:
+                codepoint = 10
+                index += 2
+            elif escaped == 114:
+                codepoint = 13
+                index += 2
+            elif escaped == 102:
+                codepoint = 12
+                index += 2
+            elif escaped == 98:
+                codepoint = 8
+                index += 2
+            elif escaped == 117:
+                if index + 5 >= end:
+                    return False
+                codepoint = 0
+                for offset in range(2, 6):
+                    var digit = session_json_hex(
+                        ptr[unsafe_offset=index + Int64(offset)]
+                    )
+                    if digit < 0:
+                        return False
+                    codepoint = codepoint * 16 + digit
+                index += 6
+            elif escaped == 34 or escaped == 92 or escaped == 47:
+                codepoint = Int64(escaped)
+                index += 2
+            else:
+                return False
+        else:
+            var width = rich_codepoint_width(value)
+            if index + width > end:
+                return False
+            codepoint = rich_codepoint(ptr, index, width)
+            index += width
+        if not launch_rust_space(codepoint):
+            return True
+    return False
+
+
+def session_raw_string_token(
+    view: ProdexRichStringView,
+    bounds: Array[Int64, 2],
+) -> Bool:
+    return (
+        session_raw_present(bounds)
+        and deepseek_json_byte(view, bounds[0]) == 34
+        and deepseek_json_byte(view, bounds[1] - 1) == 34
+    )
+
+
+def session_raw_string_field(
+    view: ProdexRichStringView,
+    object: Array[Int64, 2],
+    name: StringSlice,
+) -> Array[Int64, 2]:
+    if not session_raw_present(object):
+        return Array[Int64, 2](fill=-1)^
+    var field = deepseek_json_object_member(
+        view, object[0], object[1], name
+    )
+    if not session_raw_string_nonblank(view, field):
+        return Array[Int64, 2](fill=-1)^
+    return field^
+
+
+def session_raw_nested_string5(
+    view: ProdexRichStringView,
+    object: Array[Int64, 2],
     first: StringSlice,
     second: StringSlice,
     third: StringSlice,
     fourth: StringSlice,
     name: StringSlice,
-) -> Int64:
-    var one = session_object_field(tree, object, first)
-    if one < 0:
-        return -1
-    var two = session_object_field(tree, one, second)
-    if two < 0:
-        return -1
-    var three = session_object_field(tree, two, third)
-    if three < 0:
-        return -1
-    var four = session_object_field(tree, three, fourth)
-    return session_string_field(tree, four, name) if four >= 0 else -1
+) -> Array[Int64, 2]:
+    var one = session_raw_object_field(view, object, first)
+    if not session_raw_present(one):
+        return Array[Int64, 2](fill=-1)^
+    var two = session_raw_object_field(view, one, second)
+    if not session_raw_present(two):
+        return Array[Int64, 2](fill=-1)^
+    var three = session_raw_object_field(view, two, third)
+    if not session_raw_present(three):
+        return Array[Int64, 2](fill=-1)^
+    var four = session_raw_object_field(view, three, fourth)
+    if not session_raw_present(four):
+        return Array[Int64, 2](fill=-1)^
+    return session_raw_string_field(view, four, name)
+
+
+def session_raw_write_span(
+    output: Pointer[mut=True, Int64, _],
+    offset: Int64,
+    bounds: Array[Int64, 2],
+):
+    if session_raw_present(bounds):
+        output[unsafe_offset=offset] = bounds[0]
+        output[unsafe_offset=offset + 1] = bounds[1]
+
 
 def session_digit(value: ProdexRichStringView, index: Int64) -> Int64:
     if index < 0 or index >= Int64(value.len):
@@ -197,17 +331,22 @@ def session_timestamp_sort_key(value: ProdexRichStringView) -> Tuple[Bool, Int64
         return parsed
     return session_parse_i64(value)
 
-def session_numeric_timestamp_field(
-    tree: ParsedJson,
-    number_values: Pointer[mut=False, Int64, ImmUntrackedOrigin],
-    number_valid: Pointer[mut=False, Int64, ImmUntrackedOrigin],
-    object: Int64,
+def session_raw_numeric_field(
+    view: ProdexRichStringView,
+    object: Array[Int64, 2],
     name: StringSlice,
-) -> Int64:
-    var field = pj_field(tree, object, name)
-    if field < 0 or pj_kind(tree, field) != JSON_NUMBER:
-        return -1
-    return field if number_valid[unsafe_offset=field] == 1 else -1
+) -> Tuple[Bool, Int64]:
+    if not session_raw_present(object):
+        return False, 0
+    var field = deepseek_json_object_member(
+        view, object[0], object[1], name
+    )
+    if not session_raw_present(field):
+        return False, 0
+    var token = ProdexRichStringView(
+        view.ptr + UInt(field[0]), UInt(field[1] - field[0])
+    )
+    return session_parse_i64(token)
 
 @fieldwise_init
 struct SessionReportSortKey(Copyable):
@@ -284,279 +423,274 @@ def session_report_heap_sort(
         session_report_swap(indices, 0, end)
         session_report_sift_down(keys, indices, 0, end - 1)
 
-@export("prodex_session_report_metadata_v1")
-def prodex_session_report_metadata_v1(
-    abi_version: Int64,
-    nodes_address: UInt,
-    nodes_count: Int64,
-    raw_address: UInt,
-    raw_length: Int64,
-    output_address: UInt,
-) abi("C") -> Int64:
-    if (
-        abi_version != SESSION_REPORT_ABI_VERSION
-        or nodes_address == 0
-        or nodes_count <= 0
-        or raw_length < 0
-        or output_address == 0
-        or (raw_length > 0 and raw_address == 0)
-    ):
-        return SESSION_REPORT_INVALID
-
-    var tree = ParsedJson(
-        Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](
-            unsafe_from_address=Int(nodes_address)
-        ),
-        nodes_count,
-        ProdexRichStringView(UInt(raw_address), UInt(raw_length)),
+def session_report_raw_metadata(
+    view: ProdexRichStringView,
+    root: Array[Int64, 2],
+    output: Pointer[mut=True, Int64, _],
+):
+    var payload = session_raw_object_field(
+        view, root, StringSlice("payload")
     )
-    if not pj_valid(tree) or pj_kind(tree, 0) != JSON_OBJECT:
-        return SESSION_REPORT_INVALID
-
-    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
-        unsafe_from_address=Int(output_address)
+    var metadata = session_raw_object_field(
+        view, root, StringSlice("metadata")
     )
-    for index in range(9):
-        output[unsafe_offset=index] = -1
-
-    var payload = session_object_field(tree, 0, StringSlice("payload"))
-    var metadata = session_object_field(tree, 0, StringSlice("metadata"))
-    var payload_metadata = (
-        session_object_field(tree, payload, StringSlice("metadata"))
-        if payload >= 0
-        else -1
+    var payload_metadata = session_raw_object_field(
+        view, payload, StringSlice("metadata")
     )
 
-    var type_node = pj_string_field(tree, 0, StringSlice("type"))
+    var type_token = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("type")
+    )
     var type_class: Int64 = 0
-    if type_node >= 0:
-        if pj_is["session_meta"](tree, type_node):
+    if session_raw_string_token(view, type_token):
+        if deepseek_json_raw_equals(
+            view, type_token[0], type_token[1], StringSlice("session_meta")
+        ):
             type_class = 1
-        elif pj_is["turn_context"](tree, type_node):
+        elif deepseek_json_raw_equals(
+            view, type_token[0], type_token[1], StringSlice("turn_context")
+        ):
             type_class = 2
         else:
             type_class = 3
-    output[0] = type_class
+    output[unsafe_offset=0] = type_class
 
-    var id_node: Int64 = -1
-    if payload >= 0:
-        id_node = session_string_field(tree, payload, StringSlice("id"))
-        if id_node < 0:
-            id_node = session_string_field(tree, payload, StringSlice("session_id"))
-    if id_node < 0:
-        id_node = session_string_field(tree, 0, StringSlice("id"))
-    if id_node < 0:
-        id_node = session_string_field(tree, 0, StringSlice("session_id"))
-    output[1] = id_node
+    var resume = session_raw_string_field(
+        view, payload, StringSlice("id")
+    )
+    if not session_raw_present(resume):
+        resume = session_raw_string_field(
+            view, payload, StringSlice("session_id")
+        )
+    if not session_raw_present(resume):
+        resume = session_raw_string_field(
+            view, root, StringSlice("id")
+        )
+    if not session_raw_present(resume):
+        resume = session_raw_string_field(
+            view, root, StringSlice("session_id")
+        )
+    session_raw_write_span(output, 1, resume)
 
     if type_class == 2:
-        var model = (
-            session_string_field(tree, payload, StringSlice("model"))
-            if payload >= 0
-            else -1
+        var model = session_raw_string_field(
+            view, payload, StringSlice("model")
         )
-        if model < 0:
-            model = session_string_field(tree, 0, StringSlice("model"))
-        output[2] = model
-
-        var effort = (
-            session_string_field(tree, payload, StringSlice("effort"))
-            if payload >= 0
-            else -1
-        )
-        if effort < 0 and payload >= 0:
-            effort = session_string_field(tree, payload, StringSlice("reasoning_effort"))
-        if effort < 0:
-            effort = session_string_field(tree, 0, StringSlice("effort"))
-        if effort < 0:
-            effort = session_string_field(tree, 0, StringSlice("reasoning_effort"))
-        output[3] = effort
-
-    var thread_name: Int64 = -1
-    if payload >= 0:
-        thread_name = session_string_field(tree, payload, StringSlice("thread_name"))
-        if thread_name < 0:
-            thread_name = session_string_field(tree, payload, StringSlice("title"))
-        if thread_name < 0 and payload_metadata >= 0:
-            thread_name = session_string_field(
-                tree, payload_metadata, StringSlice("thread_name")
+        if not session_raw_present(model):
+            model = session_raw_string_field(
+                view, root, StringSlice("model")
             )
-    if thread_name < 0:
-        thread_name = session_string_field(tree, 0, StringSlice("thread_name"))
-    if thread_name < 0:
-        thread_name = session_string_field(tree, 0, StringSlice("title"))
-    if thread_name < 0 and metadata >= 0:
-        thread_name = session_string_field(tree, metadata, StringSlice("thread_name"))
-    output[4] = thread_name
+        session_raw_write_span(output, 3, model)
 
-    var cwd: Int64 = -1
-    if payload >= 0:
-        cwd = session_string_field(tree, payload, StringSlice("cwd"))
-        if cwd < 0 and payload_metadata >= 0:
-            cwd = session_string_field(tree, payload_metadata, StringSlice("cwd"))
-        if cwd < 0:
-            cwd = session_string_field(tree, payload, StringSlice("workdir"))
-    if cwd < 0:
-        cwd = session_string_field(tree, 0, StringSlice("cwd"))
-    if cwd < 0 and metadata >= 0:
-        cwd = session_string_field(tree, metadata, StringSlice("cwd"))
-    if cwd < 0:
-        cwd = session_string_field(tree, 0, StringSlice("workdir"))
-    output[5] = cwd
-
-    var updated: Int64 = session_string_field(tree, 0, StringSlice("updated_at"))
-    if updated < 0:
-        updated = session_string_field(tree, 0, StringSlice("timestamp"))
-    if updated < 0 and payload >= 0:
-        updated = session_string_field(tree, payload, StringSlice("updated_at"))
-    if updated < 0 and payload >= 0:
-        updated = session_string_field(tree, payload, StringSlice("timestamp"))
-    output[6] = updated
-
-    var parent: Int64 = -1
-    if payload >= 0:
-        parent = session_nested_string5(
-            tree,
-            0,
-            StringSlice("payload"),
-            StringSlice("source"),
-            StringSlice("subagent"),
-            StringSlice("thread_spawn"),
-            StringSlice("parent_thread_id"),
+        var effort = session_raw_string_field(
+            view, payload, StringSlice("effort")
         )
-    if parent < 0:
-        var source = session_object_field(tree, 0, StringSlice("source"))
-        var subagent = (
-            session_object_field(tree, source, StringSlice("subagent"))
-            if source >= 0
-            else -1
-        )
-        var spawn = (
-            session_object_field(tree, subagent, StringSlice("thread_spawn"))
-            if subagent >= 0
-            else -1
-        )
-        if spawn >= 0:
-            parent = session_string_field(
-                tree, spawn, StringSlice("parent_thread_id")
+        if not session_raw_present(effort):
+            effort = session_raw_string_field(
+                view, payload, StringSlice("reasoning_effort")
             )
-    if parent < 0 and payload >= 0:
-        parent = session_string_field(tree, payload, StringSlice("parent_thread_id"))
-    if parent < 0:
-        parent = session_string_field(tree, 0, StringSlice("parent_thread_id"))
-    output[7] = parent
-
-    var provider: Int64 = -1
-    if payload >= 0:
-        provider = session_string_field(tree, payload, StringSlice("model_provider"))
-        if provider < 0 and payload_metadata >= 0:
-            provider = session_string_field(
-                tree, payload_metadata, StringSlice("model_provider")
+        if not session_raw_present(effort):
+            effort = session_raw_string_field(
+                view, root, StringSlice("effort")
             )
-    if provider < 0:
-        provider = session_string_field(tree, 0, StringSlice("model_provider"))
-    if provider < 0 and metadata >= 0:
-        provider = session_string_field(tree, metadata, StringSlice("model_provider"))
-    output[8] = provider
-    return SESSION_REPORT_OK
+        if not session_raw_present(effort):
+            effort = session_raw_string_field(
+                view, root, StringSlice("reasoning_effort")
+            )
+        session_raw_write_span(output, 5, effort)
 
-@export("prodex_session_report_update_v1")
-def prodex_session_report_update_v1(
+    var thread_name = session_raw_string_field(
+        view, payload, StringSlice("thread_name")
+    )
+    if not session_raw_present(thread_name):
+        thread_name = session_raw_string_field(
+            view, payload, StringSlice("title")
+        )
+    if not session_raw_present(thread_name):
+        thread_name = session_raw_string_field(
+            view, payload_metadata, StringSlice("thread_name")
+        )
+    if not session_raw_present(thread_name):
+        thread_name = session_raw_string_field(
+            view, root, StringSlice("thread_name")
+        )
+    if not session_raw_present(thread_name):
+        thread_name = session_raw_string_field(
+            view, root, StringSlice("title")
+        )
+    if not session_raw_present(thread_name):
+        thread_name = session_raw_string_field(
+            view, metadata, StringSlice("thread_name")
+        )
+    session_raw_write_span(output, 7, thread_name)
+
+    var cwd = session_raw_string_field(
+        view, payload, StringSlice("cwd")
+    )
+    if not session_raw_present(cwd):
+        cwd = session_raw_string_field(
+            view, payload_metadata, StringSlice("cwd")
+        )
+    if not session_raw_present(cwd):
+        cwd = session_raw_string_field(
+            view, payload, StringSlice("workdir")
+        )
+    if not session_raw_present(cwd):
+        cwd = session_raw_string_field(
+            view, root, StringSlice("cwd")
+        )
+    if not session_raw_present(cwd):
+        cwd = session_raw_string_field(
+            view, metadata, StringSlice("cwd")
+        )
+    if not session_raw_present(cwd):
+        cwd = session_raw_string_field(
+            view, root, StringSlice("workdir")
+        )
+    session_raw_write_span(output, 9, cwd)
+
+    var updated = session_raw_string_field(
+        view, root, StringSlice("updated_at")
+    )
+    if not session_raw_present(updated):
+        updated = session_raw_string_field(
+            view, root, StringSlice("timestamp")
+        )
+    if not session_raw_present(updated):
+        updated = session_raw_string_field(
+            view, payload, StringSlice("updated_at")
+        )
+    if not session_raw_present(updated):
+        updated = session_raw_string_field(
+            view, payload, StringSlice("timestamp")
+        )
+    session_raw_write_span(output, 11, updated)
+
+    var parent = session_raw_nested_string5(
+        view,
+        root,
+        StringSlice("payload"),
+        StringSlice("source"),
+        StringSlice("subagent"),
+        StringSlice("thread_spawn"),
+        StringSlice("parent_thread_id"),
+    )
+    if not session_raw_present(parent):
+        var source = session_raw_object_field(
+            view, root, StringSlice("source")
+        )
+        var subagent = session_raw_object_field(
+            view, source, StringSlice("subagent")
+        )
+        var spawn = session_raw_object_field(
+            view, subagent, StringSlice("thread_spawn")
+        )
+        parent = session_raw_string_field(
+            view, spawn, StringSlice("parent_thread_id")
+        )
+    if not session_raw_present(parent):
+        parent = session_raw_string_field(
+            view, payload, StringSlice("parent_thread_id")
+        )
+    if not session_raw_present(parent):
+        parent = session_raw_string_field(
+            view, root, StringSlice("parent_thread_id")
+        )
+    session_raw_write_span(output, 13, parent)
+
+    var provider = session_raw_string_field(
+        view, payload, StringSlice("model_provider")
+    )
+    if not session_raw_present(provider):
+        provider = session_raw_string_field(
+            view, payload_metadata, StringSlice("model_provider")
+        )
+    if not session_raw_present(provider):
+        provider = session_raw_string_field(
+            view, root, StringSlice("model_provider")
+        )
+    if not session_raw_present(provider):
+        provider = session_raw_string_field(
+            view, metadata, StringSlice("model_provider")
+        )
+    session_raw_write_span(output, 15, provider)
+
+
+@export("prodex_session_report_update_json_v2")
+def prodex_session_report_update_json_v2(
     abi_version: Int64,
-    nodes_address: UInt,
-    nodes_count: Int64,
     raw_address: UInt,
     raw_length: Int64,
-    number_values_address: UInt,
-    number_valid_address: UInt,
     output_address: UInt,
 ) abi("C") -> Int64:
     if (
-        abi_version != SESSION_REPORT_ABI_VERSION
-        or nodes_address == 0
-        or nodes_count <= 0
-        or raw_length < 0
+        abi_version != 2
+        or raw_length <= 0
+        or raw_address == 0
         or output_address == 0
-        or number_values_address == 0
-        or number_valid_address == 0
-        or (raw_length > 0 and raw_address == 0)
     ):
         return SESSION_REPORT_INVALID
-    var metadata_status = prodex_session_report_metadata_v1(
-        abi_version,
-        nodes_address,
-        nodes_count,
-        raw_address,
-        raw_length,
-        output_address,
-    )
-    if metadata_status != SESSION_REPORT_OK:
-        return metadata_status
 
-    var tree = ParsedJson(
-        Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](
-            unsafe_from_address=Int(nodes_address)
-        ),
-        nodes_count,
-        ProdexRichStringView(UInt(raw_address), UInt(raw_length)),
-    )
-    var values = Pointer[mut=False, Int64, ImmUntrackedOrigin](
-        unsafe_from_address=Int(number_values_address)
-    )
-    var valid = Pointer[mut=False, Int64, ImmUntrackedOrigin](
-        unsafe_from_address=Int(number_valid_address)
-    )
-    for index in range(nodes_count):
-        var present = valid[unsafe_offset=index]
-        if present < 0 or present > 1 or (present == 1 and pj_kind(tree, index) != JSON_NUMBER):
-            return SESSION_REPORT_INVALID
+    var view = ProdexRichStringView(raw_address, UInt(raw_length))
+    if (
+        not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF)
+        or not deepseek_json_fragment_valid(view)
+    ):
+        return SESSION_REPORT_INVALID
+    var root = session_raw_root(view)
+    if not session_raw_present(root):
+        return SESSION_REPORT_INVALID
 
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    output[unsafe_offset=9] = -1
-    output[unsafe_offset=10] = -1
-    output[unsafe_offset=11] = 0
-    output[unsafe_offset=12] = 0
-    if output[unsafe_offset=0] == 0 or output[unsafe_offset=0] == 1:
-        output[unsafe_offset=9] = output[unsafe_offset=1]
+    for index in range(21):
+        output[unsafe_offset=index] = -1
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=19] = 0
+    output[unsafe_offset=20] = 0
 
-    if output[unsafe_offset=6] >= 0:
-        var timestamp = pj_trim(tree.nodes[unsafe_offset=output[unsafe_offset=6]].text.copy())
-        var parsed = session_timestamp_sort_key(timestamp)
-        if parsed[0]:
-            output[unsafe_offset=11] = 1
-            output[unsafe_offset=12] = parsed[1]
-    else:
-        var payload = session_object_field(tree, 0, StringSlice("payload"))
-        var timestamp_node = session_numeric_timestamp_field(
-            tree, values, valid, 0, StringSlice("updated_at")
+    session_report_raw_metadata(view, root, output)
+
+    if (
+        (output[unsafe_offset=0] == 0 or output[unsafe_offset=0] == 1)
+        and output[unsafe_offset=1] >= 0
+    ):
+        output[unsafe_offset=17] = output[unsafe_offset=1]
+        output[unsafe_offset=18] = output[unsafe_offset=2]
+
+    if output[unsafe_offset=11] < 0:
+        var payload = session_raw_object_field(
+            view, root, StringSlice("payload")
         )
-        if timestamp_node < 0:
-            timestamp_node = session_numeric_timestamp_field(
-                tree, values, valid, 0, StringSlice("ts")
+        var parsed = session_raw_numeric_field(
+            view, root, StringSlice("updated_at")
+        )
+        if not parsed[0]:
+            parsed = session_raw_numeric_field(
+                view, root, StringSlice("ts")
             )
-        if timestamp_node < 0:
-            timestamp_node = session_numeric_timestamp_field(
-                tree, values, valid, 0, StringSlice("timestamp")
+        if not parsed[0]:
+            parsed = session_raw_numeric_field(
+                view, root, StringSlice("timestamp")
             )
-        if timestamp_node < 0 and payload >= 0:
-            timestamp_node = session_numeric_timestamp_field(
-                tree, values, valid, payload, StringSlice("updated_at")
+        if not parsed[0]:
+            parsed = session_raw_numeric_field(
+                view, payload, StringSlice("updated_at")
             )
-        if timestamp_node < 0 and payload >= 0:
-            timestamp_node = session_numeric_timestamp_field(
-                tree, values, valid, payload, StringSlice("ts")
+        if not parsed[0]:
+            parsed = session_raw_numeric_field(
+                view, payload, StringSlice("ts")
             )
-        if timestamp_node < 0 and payload >= 0:
-            timestamp_node = session_numeric_timestamp_field(
-                tree, values, valid, payload, StringSlice("timestamp")
+        if not parsed[0]:
+            parsed = session_raw_numeric_field(
+                view, payload, StringSlice("timestamp")
             )
-        if timestamp_node >= 0:
-            output[unsafe_offset=10] = timestamp_node
-            output[unsafe_offset=11] = 1
-            output[unsafe_offset=12] = values[unsafe_offset=timestamp_node]
+        if parsed[0]:
+            output[unsafe_offset=19] = 1
+            output[unsafe_offset=20] = parsed[1]
     return SESSION_REPORT_OK
+
 
 @export("prodex_session_report_sort_v1")
 def prodex_session_report_sort_v1(

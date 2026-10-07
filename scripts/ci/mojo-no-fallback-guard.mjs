@@ -4576,18 +4576,26 @@ export function findViolations(files) {
   });
   const sessionReportViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-session-store/src/report.rs") {
-      const violations = [];
-      if (!contents.includes("prodex_mojo_core::json::session_report_metadata(")) {
-        violations.push(filePath + ": session report metadata must retain Mojo planning");
-      }
+      const required = [
+        "prodex_mojo_core::json::session_report_metadata_json(",
+        "prodex_mojo_core::json::session_report_update_json(",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": session report raw-JSON migration must retain Mojo call " + call);
       for (const restored of [
+        "fn session_json_node_kind_and_text(",
+        "fn session_link_json_child(",
+        "fn session_push_json_node",
+        "fn session_json_nodes(",
+        "fn session_json_nodes_with_numbers(",
         '&["payload", "thread_name"]',
         '&["payload", "model"]',
         '&["payload", "cwd"]',
         '&["payload", "model_provider"]',
       ]) {
         if (contents.includes(restored)) {
-          violations.push(filePath + ": contains restored Rust fixed session-metadata path precedence");
+          violations.push(filePath + ": contains restored Rust session-report JSON-tree or fixed-path semantics");
           break;
         }
       }
@@ -4605,12 +4613,46 @@ export function findViolations(files) {
     }
     if (filePath === "crates/prodex-mojo-core/src/json.rs") {
       const required = [
-        "prodex_session_report_metadata_v1(",
-        "pub fn session_report_metadata(",
+        "session_report_metadata_json,",
+        "session_report_update_json,",
       ];
       return required
         .filter((call) => !contents.includes(call))
-        .map((call) => filePath + ": session-report ABI adapter must retain " + call);
+        .map((call) => filePath + ": session-report facade must re-export raw-JSON planner " + call);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/json/session_report.rs") {
+      const required = [
+        "prodex_session_report_update_json_v2(",
+        "pub fn session_report_update_json(",
+        "pub fn session_report_metadata_json(",
+        "update_plan_uses_raw_json_precedence_for_id_and_numeric_timestamp",
+        "raw_metadata_preserves_string_precedence_and_unicode_trim_contract",
+      ];
+      const violations = required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": raw session-report ABI adapter must retain " + call);
+      if (contents.includes("session_report_update_plan(") || contents.includes("JsonNode")) {
+        violations.push(filePath + ": contains restored tree-based session-report adapter");
+      }
+      return violations;
+    }
+    if (filePath === "mojo/prodex_core/session_report.mojo") {
+      const required = [
+        '@export("prodex_session_report_update_json_v2")',
+        "def session_report_raw_metadata(",
+        "def session_raw_string_field(",
+        "def session_raw_numeric_field(",
+      ];
+      const violations = required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": raw session-report semantics must remain Mojo-owned (" + marker + ")");
+      if (
+        contents.includes('@export("prodex_session_report_metadata_v1")') ||
+        contents.includes('@export("prodex_session_report_update_v1")')
+      ) {
+        violations.push(filePath + ": contains restored parsed-tree session-report ABI");
+      }
+      return violations;
     }
     return [];
   });
@@ -6116,8 +6158,8 @@ function selfTest() {
     `fn prodex_mojo_kiro_catalog_normalize_v1(
      pub fn kiro_model_catalog_plan(
      prodex_runtime_response_metadata_v1(
-     prodex_session_report_metadata_v1(
-     pub fn session_report_metadata(`]]), []);
+     session_report_metadata_json,
+     session_report_update_json,`]]), []);
   assert.deepEqual(findViolations([[KIRO_CATALOG_MOJO_FILE,
     "KIRO_CATALOG_ABI_VERSION: Int64 = 1\ndef kiro_model_catalog_normalize_v1("]]), []);
   assert.deepEqual(findViolations([[KIRO_CATALOG_ABI_TEST_FILE,
