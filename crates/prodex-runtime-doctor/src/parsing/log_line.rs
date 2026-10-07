@@ -9,28 +9,6 @@ use runtime_proxy_crate::runtime_proxy_redact_log_field_value;
 #[cfg(feature = "runtime-log-mojo")]
 use runtime_proxy_crate::runtime_proxy_redact_log_text;
 
-#[cfg(feature = "runtime-log-mojo")]
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct RuntimeDoctorParsedLogMessage {
-    event: Option<String>,
-    fields: Vec<(String, String)>,
-}
-
-#[cfg(feature = "runtime-log-mojo")]
-impl RuntimeDoctorParsedLogMessage {
-    fn fields_map(&self) -> BTreeMap<String, String> {
-        self.fields
-            .iter()
-            .map(|(key, value)| {
-                (
-                    key.clone(),
-                    runtime_proxy_redact_log_field_value(key, value),
-                )
-            })
-            .collect()
-    }
-}
-
 pub(crate) struct RuntimeDoctorParsedLogLine<'a> {
     line: &'a str,
     json: Option<serde_json::Value>,
@@ -111,21 +89,33 @@ impl<'a> RuntimeDoctorParsedLogLine<'a> {
         }
 
         let message = self.message();
-        if let Some(event) = runtime_doctor_parse_log_message(&message).event
-            && runtime_doctor_marker_is_known(&event)
-        {
-            return Some(event);
-        }
-        message
-            .split(|character: char| !(character.is_ascii_alphanumeric() || character == '_'))
-            .find(|token| !token.is_empty() && runtime_doctor_marker_is_known(token))
-            .map(str::to_string)
+        prodex_mojo_core::rich::runtime_doctor_parse_message_offsets(&message)
+            .expect("Mojo runtime-doctor message parser returned invalid output")
+            .marker
+            .map(|(start, end)| message[start..end].to_string())
     }
 }
 
 #[cfg(feature = "runtime-log-mojo")]
 pub(super) fn runtime_doctor_parse_message_fields(message: &str) -> BTreeMap<String, String> {
-    runtime_doctor_parse_log_message(message).fields_map()
+    let plan = prodex_mojo_core::rich::runtime_doctor_parse_message_offsets(message)
+        .expect("Mojo runtime-doctor message parser returned invalid output");
+    plan.fields
+        .into_iter()
+        .filter_map(|field| {
+            let key = &message[field.key_start..field.key_end];
+            let raw_value = &message[field.value_start..field.value_end];
+            (!key.is_empty() && !raw_value.is_empty()).then(|| {
+                (
+                    key.to_string(),
+                    runtime_proxy_redact_log_field_value(
+                        key,
+                        &runtime_doctor_parse_log_field_value(raw_value),
+                    ),
+                )
+            })
+        })
+        .collect()
 }
 
 #[cfg(feature = "runtime-log-mojo")]
@@ -150,31 +140,6 @@ fn runtime_doctor_json_fields_map(
 }
 
 #[cfg(feature = "runtime-log-mojo")]
-fn runtime_doctor_parse_log_message(message: &str) -> RuntimeDoctorParsedLogMessage {
-    let plan = prodex_mojo_core::rich::runtime_doctor_parse_message_offsets(message)
-        .expect("Mojo runtime-doctor message parser returned invalid output");
-    RuntimeDoctorParsedLogMessage {
-        event: plan
-            .event
-            .map(|(start, end)| message[start..end].to_string()),
-        fields: plan
-            .fields
-            .into_iter()
-            .filter_map(|field| {
-                let key = &message[field.key_start..field.key_end];
-                let raw_value = &message[field.value_start..field.value_end];
-                (!key.is_empty() && !raw_value.is_empty()).then(|| {
-                    (
-                        key.to_string(),
-                        runtime_doctor_parse_log_field_value(raw_value),
-                    )
-                })
-            })
-            .collect(),
-    }
-}
-
-#[cfg(feature = "runtime-log-mojo")]
 fn runtime_doctor_parse_log_field_value(raw_value: &str) -> String {
     if raw_value.starts_with('"') {
         serde_json::from_str::<String>(raw_value)
@@ -189,8 +154,7 @@ pub(super) fn runtime_doctor_chain_event_summary(
     marker: &str,
     fields: &BTreeMap<String, String>,
 ) -> String {
-    let mut parts = vec![marker.to_string()];
-    for key in [
+    let keys = [
         "reason",
         "profile",
         "transport",
@@ -199,15 +163,30 @@ pub(super) fn runtime_doctor_chain_event_summary(
         "previous_response_id",
         "event",
         "via",
-    ] {
-        if let Some(value) = fields.get(key) {
-            parts.push(format!(
-                "{key}={}",
-                runtime_proxy_redact_log_field_value(key, value)
-            ));
-        }
-    }
-    parts.join(" ")
+    ];
+    let redacted = keys.map(|key| {
+        fields
+            .get(key)
+            .map(|value| runtime_proxy_redact_log_field_value(key, value))
+    });
+    prodex_mojo_core::rich::runtime_doctor_render(
+        prodex_mojo_core::rich::RuntimeDoctorRenderInput {
+            operation: prodex_mojo_core::rich::RUNTIME_DOCTOR_RENDER_CHAIN_EVENT_SUMMARY,
+            detail: 0,
+            values: &[
+                Some(marker),
+                redacted[0].as_deref(),
+                redacted[1].as_deref(),
+                redacted[2].as_deref(),
+                redacted[3].as_deref(),
+                redacted[4].as_deref(),
+                redacted[5].as_deref(),
+                redacted[6].as_deref(),
+                redacted[7].as_deref(),
+            ],
+        },
+    )
+    .expect("Mojo runtime-doctor chain-event renderer returned invalid output")
 }
 
 #[cfg(feature = "runtime-log-mojo")]
@@ -230,18 +209,17 @@ mod expected_message_parser_output {
 
     #[test]
     fn message_parser_matches_fixed_cases() {
-        let parsed = runtime_doctor_parse_log_message(
+        let fields = runtime_doctor_parse_message_fields(
             r#"selection_pick profile="alpha beta" note="say \"yes\"" count=42"#,
         );
 
-        assert_eq!(parsed.event.as_deref(), Some("selection_pick"));
         assert_eq!(
-            parsed.fields,
-            vec![
-                ("profile".to_string(), "alpha beta".to_string()),
-                ("note".to_string(), "say \"yes\"".to_string()),
+            fields,
+            BTreeMap::from([
                 ("count".to_string(), "42".to_string()),
-            ]
+                ("note".to_string(), "say \"yes\"".to_string()),
+                ("profile".to_string(), "alpha beta".to_string()),
+            ])
         );
     }
 }

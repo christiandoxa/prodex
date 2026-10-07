@@ -30,6 +30,7 @@ comptime RENDER_POLICY_SUGGESTION_REASON: Int64 = 20
 comptime RENDER_POLICY_MARKER_NAME: Int64 = 21
 comptime RENDER_REQUEST_TIMELINE_DETAIL: Int64 = 22
 comptime RENDER_LAST_MARKER_LINE_TRUNCATION: Int64 = 23
+comptime RENDER_CHAIN_EVENT_SUMMARY: Int64 = 24
 
 comptime DETAIL_CONTEXT_DEPENDENT: Int64 = 1
 comptime DETAIL_COMPACT_PRESSURE: Int64 = 2
@@ -613,6 +614,51 @@ def runtime_doctor_render_last_marker_line(
     )
 
 
+def runtime_doctor_render_chain_event_key(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _], index: Int
+) -> Bool:
+    if index == 1:
+        return runtime_doctor_render_put_literal(writer, StringSlice("reason="))
+    if index == 2:
+        return runtime_doctor_render_put_literal(writer, StringSlice("profile="))
+    if index == 3:
+        return runtime_doctor_render_put_literal(writer, StringSlice("transport="))
+    if index == 4:
+        return runtime_doctor_render_put_literal(writer, StringSlice("route="))
+    if index == 5:
+        return runtime_doctor_render_put_literal(writer, StringSlice("websocket_session="))
+    if index == 6:
+        return runtime_doctor_render_put_literal(writer, StringSlice("previous_response_id="))
+    if index == 7:
+        return runtime_doctor_render_put_literal(writer, StringSlice("event="))
+    if index == 8:
+        return runtime_doctor_render_put_literal(writer, StringSlice("via="))
+    return False
+
+
+def runtime_doctor_render_chain_event_summary(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
+    input: ProdexRuntimeDoctorRenderInput,
+) -> Bool:
+    if not runtime_doctor_render_input_present(input, 0):
+        return False
+    if not runtime_doctor_render_put_view(
+        writer, runtime_doctor_render_input_value(input, 0)
+    ):
+        return False
+    for index in range(1, 9):
+        if runtime_doctor_render_input_present(input, index):
+            if (
+                not runtime_doctor_render_put_byte(writer, 32)
+                or not runtime_doctor_render_chain_event_key(writer, index)
+                or not runtime_doctor_render_put_view(
+                    writer, runtime_doctor_render_input_value(input, index)
+                )
+            ):
+                return False
+    return True
+
+
 def runtime_doctor_render_request_timeline_detail(
     writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
     input: ProdexRuntimeDoctorRenderInput,
@@ -652,6 +698,8 @@ def runtime_doctor_render_value(
         return runtime_doctor_render_request_timeline_detail(writer, input)
     if input.operation == RENDER_LAST_MARKER_LINE_TRUNCATION:
         return runtime_doctor_render_last_marker_line(writer, input)
+    if input.operation == RENDER_CHAIN_EVENT_SUMMARY:
+        return runtime_doctor_render_chain_event_summary(writer, input)
     if input.operation == RENDER_PREVIOUS_RESPONSE:
         return runtime_doctor_render_previous(writer, input)
     if input.operation == RENDER_COMPACT_FINAL_FAILURE:
@@ -777,7 +825,7 @@ def prodex_mojo_runtime_doctor_render_v1(
         return 1
     var input_pointer = Pointer[mut=False, ProdexRuntimeDoctorRenderInput, ImmUntrackedOrigin](unsafe_from_address=Int(input_address))
     var input = input_pointer[].copy()
-    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_LAST_MARKER_LINE_TRUNCATION or input.detail < 0 or input.detail > 799 or input.values_address == 0:
+    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_CHAIN_EVENT_SUMMARY or input.detail < 0 or input.detail > 799 or input.values_address == 0:
         return 1
     for index in range(16):
         if not rich_view_valid(runtime_doctor_render_input_value(input, index), RUNTIME_DOCTOR_RENDER_MAX_VALUE_BYTES):

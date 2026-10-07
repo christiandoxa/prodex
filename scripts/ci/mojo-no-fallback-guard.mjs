@@ -3884,26 +3884,56 @@ export function findViolations(files) {
   const doctorLastMarkerLineViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === DOCTOR_LAST_MARKER_LINE_CONSUMER_FILE) {
       const body = contents.match(/\bpub\(super\) fn runtime_doctor_truncate_line\s*\([^]*?^\}/mu)?.[0];
-      return body?.includes("RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION") &&
-          body.includes("prodex_mojo_core::rich::runtime_doctor_render(") &&
+      const required = [
+        "RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION",
+        "RUNTIME_DOCTOR_RENDER_CHAIN_EVENT_SUMMARY",
+        "runtime_doctor_parse_message_offsets(",
+      ];
+      const restoredRust = [
+        ".split(|character: char|",
+        "runtime_doctor_parse_log_message(&message).event",
+        "let mut parts = vec![marker.to_string()]",
+        'parts.join(" ")',
+      ];
+      return body?.includes("prodex_mojo_core::rich::runtime_doctor_render(") &&
           !/\.chars\(\)|\.take\(|\.count\(\)/u.test(body) &&
+          required.every((marker) => contents.includes(marker)) &&
+          restoredRust.every((marker) => !contents.includes(marker)) &&
           contents.includes("last_marker_line_trims_before_mojo_unicode_truncation")
         ? []
-        : [`${filePath}: last-marker line truncation must use the Mojo renderer with caller coverage`];
+        : [`${filePath}: runtime-doctor marker selection, chain summary, and last-marker truncation must stay Mojo-owned`];
     }
     if (filePath === DOCTOR_RENDER_ADAPTER_FILE &&
         (!contents.includes("RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION: i64 = 23") ||
-          !contents.includes("last_marker_line_preserves_160_unicode_scalars_and_truncates_at_boundary"))) {
-      return [`${filePath}: last-marker line truncation must retain bounded real-Mojo operation 23 and its ABI boundary test`];
+          !contents.includes("RUNTIME_DOCTOR_RENDER_CHAIN_EVENT_SUMMARY: i64 = 24") ||
+          !contents.includes("last_marker_line_preserves_160_unicode_scalars_and_truncates_at_boundary") ||
+          !contents.includes("chain_event_summary_preserves_field_order_and_omits_absent_values"))) {
+      return [`${filePath}: doctor render adapter must retain bounded operations 23/24 and direct ABI coverage`];
+    }
+    if (filePath === DOCTOR_MARKER_ABI_ADAPTER_FILE &&
+        (!contents.includes("prodex_mojo_runtime_doctor_parse_message_v2(") ||
+          !contents.includes("RUNTIME_DOCTOR_MESSAGE_PARSE_ABI_VERSION: i64 = 2") ||
+          !contents.includes("pub marker: Option<(usize, usize)>") ||
+          !contents.includes("runtime_doctor_message_marker_selection_preserves_event_and_fallback_precedence"))) {
+      return [`${filePath}: runtime-doctor message parse v2 must retain Mojo-owned marker selection and parity coverage`];
+    }
+    if (filePath === DOCTOR_MARKER_ABI_MOJO_FILE &&
+        (!contents.includes('@export("prodex_mojo_runtime_doctor_parse_message_v2")') ||
+          !contents.includes("RUNTIME_DOCTOR_MESSAGE_PARSE_ABI_VERSION: Int64 = 2") ||
+          !contents.includes("def runtime_doctor_message_marker_bounds(") ||
+          !contents.includes("runtime_doctor_marker_known(candidate)"))) {
+      return [`${filePath}: runtime-doctor marker selection precedence must remain in message parse v2`];
     }
     if (filePath === DOCTOR_RENDER_MOJO_FILE &&
         (!contents.includes("RENDER_LAST_MARKER_LINE_TRUNCATION: Int64 = 23") ||
+          !contents.includes("RENDER_CHAIN_EVENT_SUMMARY: Int64 = 24") ||
+          !contents.includes("def runtime_doctor_render_chain_event_summary(") ||
           !contents.includes("def runtime_doctor_render_put_bounded_value(") ||
           !contents.includes("def runtime_doctor_render_last_marker_line(") ||
           !contents.includes("runtime_doctor_render_put_bounded_value(writer, runtime_doctor_render_input_value(input, index), 48, StringSlice(\"...\"), 3)") ||
           !contents.includes("runtime_doctor_render_put_bounded_value(\n        writer,\n        runtime_doctor_render_input_value(input, 0),\n        160,") ||
           !contents.includes("runtime_doctor_render_last_marker_line(writer, input)") ||
-          !contents.includes("input.operation > RENDER_LAST_MARKER_LINE_TRUNCATION"))) {
+          !contents.includes("input.operation > RENDER_CHAIN_EVENT_SUMMARY"))) {
       return [`${filePath}: bounded Unicode truncation for timeline details and last-marker lines must stay in the production Mojo renderer`];
     }
     return [];
@@ -6311,9 +6341,9 @@ function selfTest() {
   /request-timeline detail semantics must stay in the production Mojo renderer/u);
   assert.match(findViolations([[DOCTOR_LAST_MARKER_LINE_CONSUMER_FILE,
     "pub(super) fn runtime_doctor_truncate_line(line: &str) -> String { line.chars().take(159).collect() }\n"]]).join("\n"),
-  /last-marker line truncation must use the Mojo renderer with caller coverage/u);
+  /marker selection, chain summary, and last-marker truncation must stay Mojo-owned/u);
   assert.match(findViolations([[DOCTOR_RENDER_ADAPTER_FILE, "fn runtime_doctor_render() {}"]]).join("\n"),
-  /last-marker line truncation must retain bounded real-Mojo operation 23 and its ABI boundary test/u);
+  /doctor render adapter must retain bounded operations 23\/24 and direct ABI coverage/u);
   assert.match(findViolations([[DOCTOR_RENDER_MOJO_FILE, "def runtime_doctor_render_value(): pass"]]).join("\n"),
   /bounded Unicode truncation for timeline details and last-marker lines must stay in the production Mojo renderer/u);
   assert.match(findViolations([[RUNTIME_DOCTOR_PLAN_ADAPTER_FILE,

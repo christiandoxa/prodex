@@ -7,6 +7,8 @@ pub const RUNTIME_DOCTOR_RENDER_ABI_VERSION: i64 = 1;
 pub const RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL: i64 = 22;
 /// Mojo renderer operation for the bounded last-marker log line.
 pub const RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION: i64 = 23;
+/// Mojo renderer operation for compact chain-event summaries.
+pub const RUNTIME_DOCTOR_RENDER_CHAIN_EVENT_SUMMARY: i64 = 24;
 const RUNTIME_DOCTOR_RENDER_VALUE_COUNT: usize = 16;
 
 pub struct RuntimeDoctorRenderInput<'a> {
@@ -37,7 +39,7 @@ unsafe extern "C" {
 
 pub fn runtime_doctor_render(input: RuntimeDoctorRenderInput<'_>) -> Result<String, MojoError> {
     ensure_rich_abi()?;
-    if !(0..=RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION).contains(&input.operation)
+    if !(0..=RUNTIME_DOCTOR_RENDER_CHAIN_EVENT_SUMMARY).contains(&input.operation)
         || !(0..=799).contains(&input.detail)
         || input.values.len() > RUNTIME_DOCTOR_RENDER_VALUE_COUNT
         || input
@@ -140,6 +142,29 @@ mod tests {
             })
             .unwrap(),
             format!("profile=profile route={}", "🧭".repeat(48))
+        );
+    }
+
+    #[test]
+    fn chain_event_summary_preserves_field_order_and_omits_absent_values() {
+        assert_eq!(
+            runtime_doctor_render(RuntimeDoctorRenderInput {
+                operation: RUNTIME_DOCTOR_RENDER_CHAIN_EVENT_SUMMARY,
+                detail: 0,
+                values: &[
+                    Some("chain_retried_owner"),
+                    Some("quota"),
+                    Some("alpha"),
+                    Some("http"),
+                    None,
+                    Some("42"),
+                    None,
+                    Some("retry"),
+                    Some("rotation"),
+                ],
+            })
+            .unwrap(),
+            "chain_retried_owner reason=quota profile=alpha transport=http websocket_session=42 event=retry via=rotation"
         );
     }
 
