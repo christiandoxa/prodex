@@ -316,6 +316,72 @@ pub(super) fn prompt_super_reasoning_effort(
     prompt_reasoning_effort(title, canonical_sub_agent_efforts(provider, model), current)
 }
 
+pub(super) fn prompt_openai_ping_model_and_effort(
+    current_model: Option<&str>,
+    current_effort: Option<&str>,
+) -> anyhow::Result<(Option<String>, Option<String>)> {
+    let provider = prodex_provider_core::ProviderId::OpenAi;
+    let model = if let Some(model) = current_model {
+        Some(model.to_string())
+    } else {
+        let models = main_model_choices(provider, None)
+            .into_iter()
+            .filter(|choice| {
+                matches!(
+                    choice.choice,
+                    prodex_provider_core::ProviderModelChoice::ProviderDefault
+                        | prodex_provider_core::ProviderModelChoice::Model(_)
+                )
+            })
+            .collect::<Vec<_>>();
+        let choices = models
+            .iter()
+            .map(|choice| choice.label.clone())
+            .collect::<Vec<_>>();
+        let selected = super_prompt::prompt_ping_choice("OpenAI ping model", &choices, 0)?;
+        match &models[selected].choice {
+            prodex_provider_core::ProviderModelChoice::ProviderDefault => None,
+            prodex_provider_core::ProviderModelChoice::Model(model) => Some(model.clone()),
+            prodex_provider_core::ProviderModelChoice::Custom => {
+                unreachable!("filtered ping model choice")
+            }
+        }
+    };
+
+    let effort = if let Some(current_effort) = current_effort {
+        let resolution = prodex_provider_core::provider_model_reasoning_resolution(
+            provider,
+            model.as_deref(),
+            Some(current_effort),
+        )
+        .map_err(anyhow::Error::new)?;
+        Some(
+            resolution
+                .selected_reasoning_effort
+                .and_then(|effort| effort.label())
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("reasoning effort is unsupported for the selected model")
+                })?,
+        )
+    } else {
+        let mut efforts = vec![("provider default".to_string(), None)];
+        efforts.extend(
+            main_model_efforts(provider, model.as_deref())
+                .into_iter()
+                .map(|effort| (effort.clone(), Some(effort))),
+        );
+        let choices = efforts
+            .iter()
+            .map(|(label, _)| label.clone())
+            .collect::<Vec<_>>();
+        efforts[super_prompt::prompt_ping_choice("OpenAI ping reasoning effort", &choices, 0)?]
+            .1
+            .clone()
+    };
+    Ok((model, effort))
+}
+
 fn prompt_main_reasoning_effort(
     title: &str,
     provider: prodex_provider_core::ProviderId,

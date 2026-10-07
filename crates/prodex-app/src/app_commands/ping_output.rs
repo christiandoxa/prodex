@@ -9,12 +9,13 @@ pub(super) fn render_ping_result(result: &PingResult) -> Result<()> {
         |latency| format!("{latency}ms"),
     );
     print_stdout_line(&format!(
-        "{}  {:<20} first={} completion={}ms  requested={} effective={}",
+        "{}  {:<20} first={} completion={}ms  requested={} effort={} effective={}",
         result.profile,
         result.status.label(),
         first_response,
         result.latency_ms.unwrap_or_default(),
         result.model.as_deref().unwrap_or("configured/default"),
+        result.effort.as_deref().unwrap_or("configured/default"),
         result.effective_model.as_deref().unwrap_or("unavailable")
     ))?;
     if result.status.is_failure() {
@@ -54,6 +55,8 @@ pub(super) fn render_ping_summary(
             "status": if healthy == total && total > 0 { "ok" } else { "failed" },
             "model": results.first().and_then(|result| result.model.clone()),
             "requested_model": results.first().and_then(|result| result.model.clone()),
+            "effort": results.first().and_then(|result| result.effort.clone()),
+            "requested_effort": results.first().and_then(|result| result.effort.clone()),
             "effective_model": results.first().and_then(|result| result.effective_model.clone()),
             "latency_ms": elapsed.as_millis(),
             "detail": format!("{healthy}/{total} profiles healthy"),
@@ -62,6 +65,8 @@ pub(super) fn render_ping_summary(
                 "status": result.status.json_label(),
                 "model": result.model,
                 "requested_model": result.model,
+                "effort": result.effort,
+                "requested_effort": result.effort,
                 "effective_model": result.effective_model,
                 "credential_validation": if result.status == PingStatus::AuthFailed { "failed" } else if result.status == PingStatus::Pass { "valid" } else { "unknown" },
                 "first_response_latency_ms": result.first_response_latency_ms,

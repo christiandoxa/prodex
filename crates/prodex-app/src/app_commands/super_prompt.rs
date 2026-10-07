@@ -343,10 +343,43 @@ pub(super) fn prompt_super_choice(
     selected: usize,
     escape_selects_last: bool,
 ) -> Result<usize> {
+    prompt_choice(
+        "Prodex Super",
+        "Super sub-agent prompt TUI",
+        title,
+        choices,
+        selected,
+        escape_selects_last,
+    )
+}
+
+pub(super) fn prompt_ping_choice(
+    title: &str,
+    choices: &[String],
+    selected: usize,
+) -> Result<usize> {
+    prompt_choice(
+        "Prodex Ping",
+        "OpenAI ping selection TUI",
+        title,
+        choices,
+        selected,
+        false,
+    )
+}
+
+fn prompt_choice(
+    brand: &str,
+    terminal_context: &str,
+    title: &str,
+    choices: &[String],
+    selected: usize,
+    escape_selects_last: bool,
+) -> Result<usize> {
     if choices.is_empty() {
-        bail!("Super prompt has no choices");
+        bail!("prompt has no choices");
     }
-    let mut tui = terminal_ui::AlternateScreenTerminal::stderr("Super sub-agent prompt TUI")?;
+    let mut tui = terminal_ui::AlternateScreenTerminal::stderr(terminal_context)?;
     let mut selected = selected.min(choices.len().saturating_sub(1));
     loop {
         tui.terminal.draw(|frame| {
@@ -359,7 +392,7 @@ pub(super) fn prompt_super_choice(
                 ])
                 .split(frame.area());
             let header = Paragraph::new(Line::from(vec![
-                Span::styled("Prodex Super", tui_title_style()),
+                Span::styled(brand, tui_title_style()),
                 Span::raw("  "),
                 Span::styled(title, tui_detail_style()),
             ]))

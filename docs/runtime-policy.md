@@ -673,10 +673,13 @@ shared-state integration around those operations.
 - `prodex ping openai` is an all-account application-level diagnostic: it snapshots configured
   eligible OpenAI profiles, sends the text `hello` through the normal OpenAI/Codex runtime path
   with each probe pinned to its profile and cross-profile fallback disabled, and records every
-  terminal result. A valid completed model response is sufficient; exact response wording is not
-  a contract. It is not a DNS, TCP, TLS, ICMP, `/models`, or server-health probe. The command
-  exits non-zero when any requested profile fails while separately reporting whether any profile
-  remains usable.
+  terminal result. Interactive human invocations select the model and reasoning effort first via
+  the Ratatui Prodex Ping picker; `--model` and `--effort` can preselect them. `--json` and
+  non-terminal invocations must remain non-interactive. The selected effort is validated against
+  the OpenAI model catalog and passed to Codex as `model_reasoning_effort`. A valid completed model
+  response is sufficient; exact response wording is not a contract. It is not a DNS, TCP, TLS,
+  ICMP, `/models`, or server-health probe. The command exits non-zero when any requested profile
+  fails while separately reporting whether any profile remains usable.
 - OpenAI Secure MCP Tunnel readiness remains layered: local MCP/browser checks and tunnel-client
   `/healthz`/`/readyz` prove local runtime readiness only. Runtime compatibility accepts official
   stable tunnel-client 0.0.13 or newer when its version metadata is self-consistent and the required

@@ -106,6 +106,7 @@ impl PingStatus {
 struct PingResult {
     profile: String,
     model: Option<String>,
+    effort: Option<String>,
     effective_model: Option<String>,
     status: PingStatus,
     detail: String,
@@ -116,6 +117,7 @@ struct PingResult {
 #[derive(Clone)]
 struct PingProbeOptions {
     model: Option<String>,
+    effort: Option<String>,
     base_url: Option<String>,
     no_proxy: bool,
 }
@@ -138,8 +140,25 @@ pub(crate) fn handle_ping(command: PingCommands) -> Result<()> {
     }
 }
 
-fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
+fn ping_should_prompt_selection(json: bool, interactive: bool) -> bool {
+    !json && interactive
+}
+
+fn handle_ping_openai(mut args: PingOpenaiArgs) -> Result<()> {
     validate_ping_args(&args)?;
+    if ping_should_prompt_selection(
+        args.json,
+        super::super_prompt::super_prompt_is_interactive(),
+    ) {
+        let (model, effort) = super::super_main_prompt::prompt_openai_ping_model_and_effort(
+            args.model.as_deref(),
+            args.effort.as_deref(),
+        )?;
+        args.model = model;
+        args.effort = effort;
+    }
+    validate_ping_args(&args)?;
+    args.effort = normalize_ping_effort(args.model.as_deref(), args.effort.as_deref())?;
     let paths = AppPaths::discover()?;
     let targets = ping_targets(&paths, args.profile.as_deref())?;
     let started = Instant::now();
@@ -148,6 +167,7 @@ fn handle_ping_openai(args: PingOpenaiArgs) -> Result<()> {
     }
     let options = PingProbeOptions {
         model: args.model.clone(),
+        effort: args.effort.clone(),
         base_url: args.base_url.clone(),
         no_proxy: args.no_proxy,
     };
@@ -227,6 +247,7 @@ fn probe_ping_target(target: PingTarget, options: &PingProbeOptions) -> PingResu
             let result = ping_result_from_output(
                 &output.output,
                 options.model.clone(),
+                options.effort.clone(),
                 output
                     .first_stdout_match_latency
                     .map(|value| value.as_millis()),
@@ -242,6 +263,7 @@ fn probe_ping_target(target: PingTarget, options: &PingProbeOptions) -> PingResu
     PingResult {
         profile: target.name,
         model: options.model.clone(),
+        effort: options.effort.clone(),
         effective_model: None,
         status,
         detail,
@@ -250,12 +272,31 @@ fn probe_ping_target(target: PingTarget, options: &PingProbeOptions) -> PingResu
     }
 }
 
+fn normalize_ping_effort(model: Option<&str>, effort: Option<&str>) -> Result<Option<String>> {
+    let Some(effort) = effort else {
+        return Ok(None);
+    };
+    let resolution = prodex_provider_core::provider_model_reasoning_resolution(
+        prodex_provider_core::ProviderId::OpenAi,
+        model,
+        Some(effort),
+    )
+    .map_err(anyhow::Error::new)?;
+    resolution
+        .selected_reasoning_effort
+        .and_then(|effort| effort.label())
+        .map(str::to_string)
+        .ok_or_else(|| anyhow::anyhow!("reasoning effort is unsupported for the selected model"))
+        .map(Some)
+}
+
 fn validate_ping_args(args: &PingOpenaiArgs) -> Result<()> {
     if let Some(base_url) = args.base_url.as_deref() {
         crate::validate_credential_free_http_url(base_url, "ping upstream base URL")?;
     }
     for (name, value) in [
         ("--model", args.model.as_deref()),
+        ("--effort", args.effort.as_deref()),
         ("--profile", args.profile.as_deref()),
     ] {
         if value.is_some_and(|value| value.trim().is_empty() || value.chars().any(char::is_control))
@@ -269,6 +310,7 @@ fn validate_ping_args(args: &PingOpenaiArgs) -> Result<()> {
 fn ping_result_from_output(
     output: &Output,
     model: Option<String>,
+    effort: Option<String>,
     first_response_latency_ms: Option<u128>,
     started: Instant,
 ) -> PingResult {
@@ -301,6 +343,7 @@ fn ping_result_from_output(
     PingResult {
         profile: String::new(),
         model,
+        effort,
         effective_model: None,
         status,
         detail,
