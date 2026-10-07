@@ -463,6 +463,14 @@
   "release_inventory": {
     "inherit_baseline": true,
     "overrides": {
+      "mojo/prodex_core/quota_pressure.mojo": {
+        "operations": [
+          "quota_pressure_score_batch",
+          "quota_pressure_band_and_reserve_scoring",
+          "quota_route_score_resolution",
+          "runtime_precommit_retry_exhaustion"
+        ]
+      },
       "mojo/prodex_core/rich_catalog.mojo": {
         "operations": [
           "provider_catalog_model_identity",
@@ -1320,6 +1328,26 @@
     "deepseek_chat_stream_event_translation"
   ],
   "authoritative_operations": [
+    {
+      "name": "runtime_precommit_retry_exhaustion",
+      "domain": "runtime/retry-budget",
+      "introduced_in": "0.435.9",
+      "baseline_state": "Rust compared attempt counts and elapsed wall time, including unsent local queue time",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_precommit_budget_exhausted_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota_pressure.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/failure_response.rs",
+      "consumer_marker": "prodex_mojo_core::runtime::precommit_budget_exhausted(",
+      "production_reachability_test": "crates/prodex-runtime-proxy/tests/src/failure_response.rs",
+      "rust_owner_before": "attempt-limit and elapsed retry-deadline exhaustion predicates",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "none retained; fixed zero-attempt, exact-boundary, overflow and live WebSocket fanout cases exercise production callers",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "monotonic host-clock acquisition and pause/resume effects, duration conversion and validated boolean result mapping"
+    },
     {
       "name": "governance_finding_classification",
       "domain": "governance/inspection",

@@ -191,6 +191,7 @@ fn run_runtime_responses_loop(
             }
         }
 
+        let release_revision = runtime_profile_inflight_release_revision(context.shared);
         let Some(candidate_name) = runtime_responses_next_candidate(
             context,
             affinity_state,
@@ -203,6 +204,7 @@ fn run_runtime_responses_loop(
                 affinity_state,
                 loop_state,
                 quota_last_chance_profile,
+                release_revision,
             )? {
                 RuntimeResponsesLoopControl::Continue => continue,
                 RuntimeResponsesLoopControl::Return(response) => return Ok(*response),
@@ -312,11 +314,12 @@ fn runtime_responses_candidate_saturated(
     );
     loop_state.record_inflight_saturation();
     match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        observed_release_revision: None,
         request_id: context.request_id,
         shared: context.shared,
         excluded_profiles: &loop_state.excluded_profiles,
         route_kind: RuntimeRouteKind::Responses,
-        selection_started_at: loop_state.selection_started_at,
+        selection_started_at: &mut loop_state.selection_started_at,
         continuation: affinity_state
             .has_continuation_priority(context.previous_response_id, context.request_turn_state),
         wait_affinity_owner: affinity_state.wait_affinity_owner(),
@@ -419,6 +422,7 @@ fn handle_runtime_responses_candidate_exhausted(
     affinity_state: &mut RuntimeResponsesAffinityState,
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
     quota_last_chance_profile: &mut Option<String>,
+    release_revision: u64,
 ) -> Result<RuntimeResponsesLoopControl> {
     runtime_proxy_log(
         context.shared,
@@ -442,11 +446,12 @@ fn handle_runtime_responses_candidate_exhausted(
         return Ok(RuntimeResponsesLoopControl::Continue);
     }
     match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        observed_release_revision: Some(release_revision),
         request_id: context.request_id,
         shared: context.shared,
         excluded_profiles: &loop_state.excluded_profiles,
         route_kind: RuntimeRouteKind::Responses,
-        selection_started_at: loop_state.selection_started_at,
+        selection_started_at: &mut loop_state.selection_started_at,
         continuation: affinity_state
             .has_continuation_priority(context.previous_response_id, context.request_turn_state),
         wait_affinity_owner: affinity_state.wait_affinity_owner(),
@@ -535,6 +540,7 @@ fn handle_runtime_responses_attempt(
     loop_state: &mut RuntimePrecommitLoopState<RuntimeUpstreamFailureResponse>,
 ) -> Result<Option<RuntimeResponsesReply>> {
     let hard_affinity = affinity_state.candidate_has_hard_affinity(candidate_name);
+    loop_state.begin_attempt();
     let attempt = attempt_runtime_responses_request(
         context.request_id,
         &context.request,
@@ -741,7 +747,7 @@ fn handle_runtime_responses_local_selection_attempt(
     handle_runtime_responses_local_selection_blocked(RuntimeResponsesLocalSelectionBlocked {
         request_id: context.request_id,
         shared: context.shared,
-        selection_started_at: loop_state.selection_started_at,
+        selection_started_at: &mut loop_state.selection_started_at,
         profile_name,
         reason,
         previous_response_id: context.previous_response_id,

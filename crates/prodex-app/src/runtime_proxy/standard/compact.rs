@@ -289,6 +289,7 @@ impl RuntimeCompactSelectionContext<'_> {
     }
 
     fn next_action(&mut self) -> Result<RuntimeCompactLoopAction> {
+        let release_revision = crate::runtime_profile_inflight_release_revision(self.shared);
         let candidate = select_runtime_response_candidate_for_route_with_request(
             self.shared,
             RuntimeResponseCandidateSelection {
@@ -309,7 +310,7 @@ impl RuntimeCompactSelectionContext<'_> {
             self.request_model_name.as_deref(),
         )?;
         let Some(candidate) = candidate else {
-            return self.no_candidate_action();
+            return self.no_candidate_action(release_revision);
         };
         if self.excluded_profiles.contains(&candidate) {
             return Ok(RuntimeCompactLoopAction::Continue);
@@ -317,7 +318,7 @@ impl RuntimeCompactSelectionContext<'_> {
         Ok(RuntimeCompactLoopAction::Attempt(candidate))
     }
 
-    fn no_candidate_action(&mut self) -> Result<RuntimeCompactLoopAction> {
+    fn no_candidate_action(&mut self, release_revision: u64) -> Result<RuntimeCompactLoopAction> {
         runtime_proxy_log(
             self.shared,
             format!(
@@ -336,12 +337,14 @@ impl RuntimeCompactSelectionContext<'_> {
             .map(|(profile_name, _)| profile_name.as_str())
             .or(self.previous_response_profile.as_deref())
             .or(self.session_profile.as_deref());
+        let continuation = !self.is_fresh_request();
         match wait_for_compact_inflight_relief(
             self.request_id,
             self.shared,
             &self.excluded_profiles,
-            self.selection_started_at,
-            !self.is_fresh_request(),
+            &mut self.selection_started_at,
+            Some(release_revision),
+            continuation,
             wait_affinity_owner,
         )? {
             RuntimeInflightReliefWaitResult::Relieved => {
@@ -402,17 +405,22 @@ impl RuntimeCompactSelectionContext<'_> {
             candidate_has_hard_affinity,
         )? {
             self.saw_inflight_saturation = true;
+            let continuation = !self.is_fresh_request();
             return match wait_for_compact_inflight_relief(
                 self.request_id,
                 self.shared,
                 &self.excluded_profiles,
-                self.selection_started_at,
-                !self.is_fresh_request(),
+                &mut self.selection_started_at,
+                None,
+                continuation,
                 candidate_has_hard_affinity.then_some(candidate_name.as_str()),
             )? {
                 RuntimeInflightReliefWaitResult::Relieved
                 | RuntimeInflightReliefWaitResult::NotWaitable => Ok(None),
             };
+        }
+        if self.selection_attempts == 0 {
+            self.selection_started_at = Instant::now();
         }
         let attempt = attempt_runtime_standard_request(
             self.request_id,
@@ -427,12 +435,14 @@ impl RuntimeCompactSelectionContext<'_> {
             RuntimeStandardAttempt::ProfileInflightSaturated { .. }
         ) {
             self.saw_inflight_saturation = true;
+            let continuation = !self.is_fresh_request();
             return match wait_for_compact_inflight_relief(
                 self.request_id,
                 self.shared,
                 &self.excluded_profiles,
-                self.selection_started_at,
-                !self.is_fresh_request(),
+                &mut self.selection_started_at,
+                None,
+                continuation,
                 candidate_has_hard_affinity.then_some(candidate_name.as_str()),
             )? {
                 RuntimeInflightReliefWaitResult::Relieved

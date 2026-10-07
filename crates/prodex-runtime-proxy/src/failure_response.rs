@@ -78,7 +78,13 @@ pub fn runtime_proxy_precommit_budget_exhausted(
 ) -> bool {
     let (attempt_limit, budget) = runtime_proxy_precommit_budget(continuation, pressure_mode);
 
-    attempts >= attempt_limit || started_at.elapsed() >= budget
+    prodex_mojo_core::runtime::precommit_budget_exhausted(
+        attempts,
+        u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
+        attempt_limit,
+        u64::try_from(budget.as_millis()).unwrap_or(u64::MAX),
+    )
+    .expect("Mojo precommit exhaustion returned an invalid result")
 }
 
 pub fn runtime_proxy_precommit_budget_exhausted_for_profile_count(
@@ -93,7 +99,13 @@ pub fn runtime_proxy_precommit_budget_exhausted_for_profile_count(
         pressure_mode,
         profile_count,
     );
-    attempts >= attempt_limit || started_at.elapsed() >= budget
+    prodex_mojo_core::runtime::precommit_budget_exhausted(
+        attempts,
+        u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX),
+        attempt_limit,
+        u64::try_from(budget.as_millis()).unwrap_or(u64::MAX),
+    )
+    .expect("Mojo precommit exhaustion returned an invalid result")
 }
 
 pub fn runtime_websocket_error_payload_is_previous_response_not_found(

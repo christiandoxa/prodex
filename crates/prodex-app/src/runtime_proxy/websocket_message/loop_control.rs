@@ -69,8 +69,9 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         selection_started_at: &mut Instant,
         selection_attempts: &mut usize,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
+        let release_revision = crate::runtime_profile_inflight_release_revision(self.shared);
         let Some(candidate_name) = self.select_candidate()? else {
-            return match self.handle_candidate_exhausted()? {
+            return match self.handle_candidate_exhausted(selection_started_at, release_revision)? {
                 RuntimeWebsocketMessageLoopAction::Continue => {
                     Ok(RuntimeWebsocketMessageLoopAction::Continue)
                 }
@@ -81,12 +82,15 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         };
         let turn_state_override = self.turn_state_override_for(&candidate_name);
         self.log_candidate(&candidate_name, turn_state_override.as_deref());
-        if self.candidate_inflight_saturated(&candidate_name, *selection_started_at)? {
+        if self.candidate_inflight_saturated(&candidate_name, selection_started_at)? {
             return Ok(RuntimeWebsocketMessageLoopAction::Continue);
         }
 
+        if *selection_attempts == 0 {
+            *selection_started_at = Instant::now();
+        }
         let attempt = self.attempt_profile(&candidate_name, turn_state_override.as_deref())?;
-        if self.handle_inflight_saturation(&attempt, *selection_started_at)? {
+        if self.handle_inflight_saturation(&attempt, selection_started_at)? {
             return Ok(RuntimeWebsocketMessageLoopAction::Continue);
         }
         if !matches!(
@@ -101,7 +105,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     fn handle_inflight_saturation(
         &mut self,
         attempt: &RuntimeWebsocketAttempt,
-        selection_started_at: Instant,
+        selection_started_at: &mut Instant,
     ) -> Result<bool> {
         if !matches!(
             attempt,
@@ -114,6 +118,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         }
         self.saw_inflight_saturation = true;
         match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+            observed_release_revision: None,
             request_id: self.request_id,
             shared: self.shared,
             excluded_profiles: &self.excluded_profiles,
@@ -362,6 +367,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
 
     pub(super) fn handle_candidate_exhausted(
         &mut self,
+        selection_started_at: &mut Instant,
+        release_revision: u64,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
         runtime_proxy_log(
             self.shared,
@@ -387,11 +394,12 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             return Ok(RuntimeWebsocketMessageLoopAction::Continue);
         }
         match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+            observed_release_revision: Some(release_revision),
             request_id: self.request_id,
             shared: self.shared,
             excluded_profiles: &self.excluded_profiles,
             route_kind: RuntimeRouteKind::Websocket,
-            selection_started_at: Instant::now(),
+            selection_started_at,
             continuation: self.has_continuation_priority(),
             wait_affinity_owner: runtime_noncompact_session_priority_profile(
                 self.session_profile.as_deref(),
@@ -400,7 +408,6 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             selected_profile: None,
         })? {
             RuntimeInflightReliefWaitResult::Relieved => {
-                self.reset_selection_budget = true;
                 return Ok(RuntimeWebsocketMessageLoopAction::Continue);
             }
             RuntimeInflightReliefWaitResult::NotWaitable => {}

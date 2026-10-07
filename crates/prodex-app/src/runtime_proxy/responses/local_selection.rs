@@ -26,7 +26,7 @@ pub(super) fn runtime_responses_local_selection_failure_reply() -> RuntimeRespon
 pub(super) struct RuntimeResponsesLocalSelectionBlocked<'a> {
     pub(super) request_id: u64,
     pub(super) shared: &'a RuntimeRotationProxyShared,
-    pub(super) selection_started_at: Instant,
+    pub(super) selection_started_at: &'a mut Instant,
     pub(super) profile_name: String,
     pub(super) reason: &'static str,
     pub(super) previous_response_id: Option<&'a str>,
@@ -70,6 +70,7 @@ pub(super) fn handle_runtime_responses_local_selection_blocked(
     if reason == "profile_inflight_saturated" {
         let _ =
             runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+                observed_release_revision: None,
                 request_id,
                 shared,
                 excluded_profiles,

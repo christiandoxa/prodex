@@ -45,7 +45,8 @@ pub use profile_rotation::profile_selection_order_batch;
 pub use prompt_cache_affinity::prompt_cache_affinity_batch;
 pub use quota_decisions::{
     PrecommitBudgetPlan, QuotaGatePlan, QuotaGatePlanInput, QuotaSnapshotPlan,
-    QuotaSnapshotPlanInput, precommit_budget_plan, quota_gate_plan, quota_snapshot_plan,
+    QuotaSnapshotPlanInput, precommit_budget_exhausted, precommit_budget_plan, quota_gate_plan,
+    quota_snapshot_plan,
 };
 pub use quota_route_score::quota_route_score_batch;
 pub use selection_planning::{

@@ -188,11 +188,13 @@ pub(super) fn wait_for_compact_inflight_relief(
     request_id: u64,
     shared: &RuntimeRotationProxyShared,
     excluded_profiles: &BTreeSet<String>,
-    selection_started_at: Instant,
+    selection_started_at: &mut Instant,
+    observed_release_revision: Option<u64>,
     continuation: bool,
     wait_affinity_owner: Option<&str>,
 ) -> Result<RuntimeInflightReliefWaitResult> {
     runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
+        observed_release_revision,
         request_id,
         shared,
         excluded_profiles,

@@ -215,6 +215,26 @@ fn handle_fresh_second_account(
     request: &str,
     request_count: usize,
 ) -> BackendWebsocketAction {
+    if matches!(mode, RuntimeProxyBackendMode::WebsocketCapacityPressure) {
+        let body: serde_json::Value = serde_json::from_str(request).unwrap();
+        let session = body["session_id"].as_str().expect("fanout request session");
+        let response_id = format!("resp-capacity-{session}");
+        events::send_response_created(websocket, &response_id);
+        events::send_backend_websocket_json(
+            websocket,
+            serde_json::json!({
+                "type": "response.output_text.delta",
+                "response": {"id": response_id},
+                "delta": session,
+            }),
+            "fanout response should commit before the capacity hold",
+        );
+        // Keep the real upstream permit occupied past the 800ms production
+        // pressure budget, while queued sessions remain otherwise healthy.
+        thread::sleep(Duration::from_millis(1_050));
+        events::send_response_completed(websocket, &response_id);
+        return BackendWebsocketAction::Continue;
+    }
     if matches!(mode, RuntimeProxyBackendMode::WebsocketUsageLimitAll) {
         events::send_backend_websocket_json(
             websocket,

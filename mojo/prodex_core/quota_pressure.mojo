@@ -43,6 +43,23 @@ def prodex_runtime_precommit_budget_plan_v2(
     )
 
 
+
+@export("prodex_runtime_precommit_budget_exhausted_v1")
+def prodex_runtime_precommit_budget_exhausted_v1(
+    attempts: UInt64,
+    elapsed_ms: UInt64,
+    attempt_limit: UInt64,
+    budget_ms: UInt64,
+) abi("C") -> Int64:
+    if attempt_limit == 0:
+        return -1
+    # A retry deadline cannot expire before the first upstream attempt. Local
+    # selection and capacity contention are not evidence of provider failure.
+    if attempts >= attempt_limit or (attempts > 0 and elapsed_ms >= budget_ms):
+        return 1
+    return 0
+
+
 def runtime_i64_saturating_sub(left: Int64, right: Int64) -> Int64:
     if right < 0 and left > INT64_MAX + right:
         return INT64_MAX

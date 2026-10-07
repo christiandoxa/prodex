@@ -201,11 +201,12 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
 }
 
 pub(crate) struct RuntimeInflightReliefWait<'a> {
+    pub(crate) observed_release_revision: Option<u64>,
     pub(crate) request_id: u64,
     pub(crate) shared: &'a RuntimeRotationProxyShared,
     pub(crate) excluded_profiles: &'a BTreeSet<String>,
     pub(crate) route_kind: RuntimeRouteKind,
-    pub(crate) selection_started_at: Instant,
+    pub(crate) selection_started_at: &'a mut Instant,
     pub(crate) continuation: bool,
     pub(crate) wait_affinity_owner: Option<&'a str>,
     pub(crate) selected_profile: Option<&'a str>,
@@ -286,12 +287,12 @@ fn refresh_runtime_inflight_wait_candidates(
     started_at: Instant,
     state: &mut RuntimeInflightWaitState,
 ) -> Result<Option<BTreeSet<String>>> {
+    state.observed_revision = runtime_profile_inflight_release_revision(wait.shared);
+    state.observed_selection_revision = wait.shared.lane_admission.selection_change_revision();
     let refreshed = runtime_scoped_waitable_profiles(wait)?;
     if refreshed.is_empty() {
         return Ok(None);
     }
-    state.observed_revision = runtime_profile_inflight_release_revision(wait.shared);
-    state.observed_selection_revision = wait.shared.lane_admission.selection_change_revision();
     runtime_proxy_log(
         wait.shared,
         runtime_proxy_structured_log_message(
@@ -316,6 +317,13 @@ fn run_runtime_inflight_backpressure_wait(
     state: &mut RuntimeInflightWaitState,
 ) -> Result<bool> {
     loop {
+        // Notifications are hints, not readiness. In particular, a release
+        // can precede the waiter reaching the condition variable.
+        if runtime_any_waited_candidate_relieved(wait.shared, waited_profiles, wait.route_kind)? {
+            state.useful_relief = true;
+            state.wake_source = RuntimeProfileInFlightWaitOutcome::InflightRelease;
+            return Ok(true);
+        }
         let outcome = runtime_profile_inflight_wait_outcome_since_with_selection_revision(
             wait.shared,
             wait_epoch,
@@ -326,7 +334,12 @@ fn run_runtime_inflight_backpressure_wait(
             let Some(refreshed) =
                 refresh_runtime_inflight_wait_candidates(wait, started_at, state)?
             else {
-                return Ok(false);
+                // The old saturated pool disappeared while waiting. It may
+                // now be ready, or its eligibility changed: reselect rather
+                // than treating that stale snapshot as terminal exhaustion.
+                state.useful_relief = true;
+                state.wake_source = RuntimeProfileInFlightWaitOutcome::SelectionChanged;
+                return Ok(true);
             };
             *waited_profiles = refreshed;
             continue;
@@ -373,8 +386,24 @@ fn log_runtime_inflight_wait_finished(
 pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     wait: RuntimeInflightReliefWait<'_>,
 ) -> Result<RuntimeInflightReliefWaitResult> {
+    // Register revisions before inspecting readiness: a concurrent release
+    // must be visible either in the predicate or in the subsequent wait.
+    let mut wait_state = RuntimeInflightWaitState {
+        observed_revision: runtime_profile_inflight_release_revision(wait.shared),
+        observed_selection_revision: wait.shared.lane_admission.selection_change_revision(),
+        signaled: false,
+        useful_relief: false,
+        wake_source: RuntimeProfileInFlightWaitOutcome::Timeout,
+    };
     let mut waited_profiles = runtime_scoped_waitable_profiles(&wait)?;
     if waited_profiles.is_empty() {
+        // Selection may have seen a full pool just before a permit release.
+        // An empty *saturated* set then means reselection, not pool exhaustion.
+        if wait.observed_release_revision.is_some_and(|revision| {
+            revision != runtime_profile_inflight_release_revision(wait.shared)
+        }) {
+            return Ok(RuntimeInflightReliefWaitResult::Relieved);
+        }
         return Ok(RuntimeInflightReliefWaitResult::NotWaitable);
     }
 
@@ -386,20 +415,19 @@ pub(crate) fn runtime_proxy_maybe_wait_for_interactive_inflight_relief(
     log_runtime_inflight_wait_started(&wait, wait_epoch, &waited_profiles);
 
     let started_at = Instant::now();
-    let mut wait_state = RuntimeInflightWaitState {
-        observed_revision: runtime_profile_inflight_release_revision(wait.shared),
-        observed_selection_revision: wait.shared.lane_admission.selection_change_revision(),
-        signaled: false,
-        useful_relief: false,
-        wake_source: RuntimeProfileInFlightWaitOutcome::Timeout,
-    };
-    let remained_waitable = run_runtime_inflight_backpressure_wait(
+    let result = run_runtime_inflight_backpressure_wait(
         &wait,
         wait_epoch,
         started_at,
         &mut waited_profiles,
         &mut wait_state,
-    )?;
+    );
+    // Local contention is not an upstream attempt. Pause only the monotonic
+    // retry clock; never clear exclusions, failures, or the attempt counter.
+    if let Some(resumed_at) = wait.selection_started_at.checked_add(started_at.elapsed()) {
+        *wait.selection_started_at = resumed_at;
+    }
+    let remained_waitable = result?;
     log_runtime_inflight_wait_finished(&wait, started_at, &wait_state);
 
     match (wait_state.useful_relief, remained_waitable) {
