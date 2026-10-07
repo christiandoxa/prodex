@@ -40,7 +40,6 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
 ) -> Result<Option<String>> {
     let prompt_cache_owner = runtime_prompt_cache_bound_profile(prompt_cache_key);
     let selection_started_at = Instant::now();
-    let mut waited_for_cold_start_probe = false;
 
     loop {
         let mut prepared = prepare_runtime_response_selection(
@@ -115,12 +114,7 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
             return Ok(Some(candidate));
         }
 
-        if wait_for_cold_start_probe(
-            shared,
-            &prepared,
-            selection_started_at,
-            &mut waited_for_cold_start_probe,
-        ) {
+        if wait_for_cold_start_probe(shared, &prepared, selection_started_at) {
             continue;
         }
 
@@ -146,28 +140,21 @@ fn wait_for_cold_start_probe(
     shared: &RuntimeRotationProxyShared,
     prepared: &RuntimeResponseSelectionPrepared,
     selection_started_at: Instant,
-    waited_for_cold_start_probe: &mut bool,
 ) -> bool {
-    if *waited_for_cold_start_probe
-        || prepared.sync_probe_pressure_mode
-        || !prepared.has_cold_start_probe_jobs()
-    {
+    if prepared.sync_probe_pressure_mode || !prepared.has_cold_start_probe_jobs() {
         return false;
     }
     let Some(observed_probe_revision) = prepared.probe_refresh_revision else {
         return false;
     };
 
-    *waited_for_cold_start_probe = true;
     let (_, precommit_budget) = runtime_proxy_precommit_budget(false, false);
     let remaining_budget = precommit_budget.saturating_sub(selection_started_at.elapsed());
-    let wait_budget = Duration::from_millis(shared.runtime_config.sync_probe_pressure_pause_ms)
-        .min(remaining_budget);
-    !wait_budget.is_zero()
-        && !matches!(
-            runtime_probe_refresh_wait_outcome_since(wait_budget, observed_probe_revision),
-            RuntimeProfileInFlightWaitOutcome::Timeout
-        )
+    wait_for_runtime_probe_refresh_progress(
+        remaining_budget,
+        Duration::from_millis(shared.runtime_config.sync_probe_pressure_pause_ms),
+        observed_probe_revision,
+    )
 }
 
 pub(crate) fn runtime_quota_last_chance_profile_for_route(

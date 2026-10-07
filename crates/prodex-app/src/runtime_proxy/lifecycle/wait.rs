@@ -3,7 +3,7 @@
 use super::{
     RuntimeRotationProxyShared, runtime_probe_refresh_queue, runtime_probe_refresh_revision,
 };
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 pub(crate) fn runtime_profile_inflight_release_revision(
     shared: &RuntimeRotationProxyShared,
@@ -107,6 +107,30 @@ pub(crate) fn runtime_probe_refresh_wait_outcome_since(
         RuntimeProfileInFlightWaitOutcome::Timeout
     } else {
         RuntimeProfileInFlightWaitOutcome::OtherNotify
+    }
+}
+
+pub(crate) fn wait_for_runtime_probe_refresh_progress(
+    timeout: Duration,
+    wait_slice: Duration,
+    observed_revision: u64,
+) -> bool {
+    if timeout.is_zero() || wait_slice.is_zero() {
+        return false;
+    }
+    let started = Instant::now();
+    loop {
+        let remaining = timeout.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            return false;
+        }
+        match runtime_probe_refresh_wait_outcome_since(wait_slice.min(remaining), observed_revision)
+        {
+            RuntimeProfileInFlightWaitOutcome::InflightRelease => return true,
+            RuntimeProfileInFlightWaitOutcome::Timeout
+            | RuntimeProfileInFlightWaitOutcome::OtherNotify
+            | RuntimeProfileInFlightWaitOutcome::SelectionChanged => {}
+        }
     }
 }
 
