@@ -174,8 +174,11 @@ fn precommit_budget_exhausts_by_attempt_limit_or_elapsed_time() {
     let started_at = Instant::now()
         .checked_sub(Duration::from_millis(RUNTIME_PROXY_PRECOMMIT_BUDGET_MS + 1))
         .expect("elapsed start should be constructible");
-    assert!(runtime_proxy_precommit_budget_exhausted(
+    assert!(!runtime_proxy_precommit_budget_exhausted(
         started_at, 0, false, false
+    ));
+    assert!(runtime_proxy_precommit_budget_exhausted(
+        started_at, 1, false, false
     ));
     assert!(!runtime_proxy_precommit_budget_exhausted(
         Instant::now(),
