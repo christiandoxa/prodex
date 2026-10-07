@@ -2,45 +2,21 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.435.9 - 2026-10-07
+
+### Runtime
+
+- Keep queued fanout out of upstream retry budgets (`cfa0681`)
+
 ## 0.435.8 - 2026-10-07
+
+### Runtime
+
+- Wait through cold-start probe slices (`378ca83`)
 
 ### Misc
 
 - Add OpenAI model effort picker (`6842e68`)
-# Prodex 0.435.8
-
-## New Features
-
-### Interactive OpenAI ping model and effort selection
-
-- `prodex ping openai` now opens a dedicated Ratatui **Prodex Ping** picker on interactive terminals before any probe is sent.
-- The picker asks for the OpenAI model first and then the reasoning effort, using the same canonical OpenAI model catalog and effort compatibility rules as the main-agent selector.
-- Added `--effort LEVEL` alongside `--model MODEL`; supplying either flag preselects that dimension, while omitted values remain interactive on a TTY.
-- The selected reasoning effort is passed through the canonical Codex request path as `model_reasoning_effort` and is included in human and JSON diagnostics.
-
-## Bug Fixes
-
-### Ping automation remains non-interactive and deterministic
-
-- `prodex ping openai --json` never opens the Ratatui picker, preserving machine-readable automation behavior.
-- Non-terminal invocations also remain prompt-free, so CI and scripts cannot block waiting for terminal input.
-- Explicit reasoning effort is validated against the selected OpenAI model before launch; unsupported model/effort combinations fail before the probe process starts.
-- Existing per-profile pinning, cross-profile fallback isolation, typed failure classification, and all-profile completion behavior remain unchanged.
-
-## Verification
-
-- `prodex-app` ping test set passes with 31/31 focused tests.
-- Super/main model-selection regressions pass with 13/13 focused tests after the shared Ratatui choice renderer was generalized for the Prodex Ping brand.
-- `prodex-cli` ping parsing tests pass, including `--model` and `--effort` handling.
-- `cargo check --locked -p prodex-app`, Mojo no-fallback guard, markdown lint, and runtime-policy docs checks pass.
-
-## Changelog
-
-- Add a dedicated Ratatui model and reasoning-effort picker to interactive `prodex ping openai`.
-- Add `--effort LEVEL`, validate it against the chosen OpenAI model, and propagate it as `model_reasoning_effort`.
-- Keep JSON and non-interactive ping invocations prompt-free and report the requested effort in diagnostics.
-
-Full Changelog: [0.435.7...0.435.8](https://github.com/christiandoxa/prodex/compare/0.435.7...0.435.8)
 
 ## 0.435.7 - 2026-10-07
 
