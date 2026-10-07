@@ -78,6 +78,12 @@ pub(super) fn ping_command_args(options: &PingProbeOptions) -> Vec<OsString> {
     if let Some(model) = options.model.as_deref() {
         command_args.extend([OsString::from("--model"), OsString::from(model)]);
     }
+    if let Some(effort) = options.effort.as_deref() {
+        command_args.extend([
+            OsString::from("-c"),
+            OsString::from(format!("model_reasoning_effort={effort}")),
+        ]);
+    }
     command_args.extend([
         OsString::from("--json"),
         OsString::from("--color"),

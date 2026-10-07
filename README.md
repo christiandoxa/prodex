@@ -465,12 +465,17 @@ Managed optimizer roots are checked in this order: `PRODEX_OPTIMIZERS_HOME`, `$X
 `prodex ping openai` snapshots every configured eligible OpenAI profile and
 sends the minimal user text `hello` through the normal Prodex OpenAI/Codex
 request path, pinning each probe so one account cannot hide behind another.
-It reports each completed response or typed failure, continues after failures,
-and exits non-zero unless every requested profile succeeds. A valid completed
-model response is enough; the response does not need to say `pong`. Use
-`prodex ping openai --profile NAME` for one explicit profile or
-`prodex ping openai --json` for the aggregate machine-readable result. This
-report keeps requested and effective model fields separate; when Codex JSONL
+On an interactive terminal it opens a Ratatui **Prodex Ping** selector for the
+OpenAI model and reasoning effort before any probe is sent. Pass `--model MODEL`
+and/or `--effort LEVEL` to preselect either value. `--json` and non-interactive
+invocations never open the selector, so scripts and CI cannot hang waiting for
+terminal input. It reports each completed response or typed failure, continues
+after failures, and exits non-zero unless every requested profile succeeds. A
+valid completed model response is enough; the response does not need to say
+`pong`. Use `prodex ping openai --profile NAME` for one explicit profile or
+`prodex ping openai --json` for the aggregate machine-readable result. Human
+and JSON output include the requested reasoning effort. This report keeps
+requested and effective model fields separate; when Codex JSONL
 does not expose the effective model, it reports `unavailable` instead of
 guessing. It reports credential validation, first completed model-message
 latency, and terminal completion latency separately. This is an

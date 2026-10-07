@@ -3,7 +3,8 @@ use super::ping_process::{PING_ERROR_DETAIL_MAX_BYTES, ping_command_args};
 use super::ping_process::{run_ping_child, run_ping_child_in_test_cwd};
 use super::{
     PING_PROMPT, PingOpenaiArgs, PingProbeOptions, PingStatus, classify_failure_text,
-    ping_result_from_output, validate_ping_output,
+    normalize_ping_effort, ping_result_from_output, ping_should_prompt_selection,
+    validate_ping_args, validate_ping_output,
 };
 #[cfg(unix)]
 use crate::ChildProcessPlan;
@@ -46,6 +47,37 @@ fn output_with_stderr(stdout: &str, stderr: &str, success: bool) -> Output {
 }
 
 #[test]
+fn ping_effort_normalizes_and_rejects_unsupported_values() {
+    assert_eq!(
+        normalize_ping_effort(Some("gpt-5.6-luna"), Some("MAX")).unwrap(),
+        Some("max".to_string())
+    );
+    assert!(normalize_ping_effort(Some("gpt-5.6-luna"), Some("ultra")).is_err());
+}
+
+#[test]
+fn ping_selection_prompt_is_human_interactive_only() {
+    assert!(ping_should_prompt_selection(false, true));
+    assert!(!ping_should_prompt_selection(true, true));
+    assert!(!ping_should_prompt_selection(false, false));
+}
+
+#[test]
+fn ping_effort_rejects_empty_or_control_values() {
+    let mut args = PingOpenaiArgs {
+        profile: None,
+        model: None,
+        effort: Some("".to_string()),
+        base_url: None,
+        no_proxy: false,
+        json: false,
+    };
+    assert!(validate_ping_args(&args).is_err());
+    args.effort = Some("max\n".to_string());
+    assert!(validate_ping_args(&args).is_err());
+}
+
+#[test]
 fn completed_model_response_is_required_for_pass() {
     let result = validate_ping_output(&output(
         r#"{"type":"thread.started","thread_id":"t"}
@@ -62,12 +94,14 @@ fn exact_ping_text_uses_the_canonical_codex_exec_path() {
     let args = PingOpenaiArgs {
         profile: Some("profile".to_string()),
         model: Some("gpt-5.6-luna".to_string()),
+        effort: Some("max".to_string()),
         base_url: Some("https://example.com".to_string()),
         no_proxy: true,
         json: false,
     };
     let command = ping_command_args(&PingProbeOptions {
         model: args.model,
+        effort: args.effort,
         base_url: args.base_url,
         no_proxy: args.no_proxy,
     });
@@ -76,6 +110,11 @@ fn exact_ping_text_uses_the_canonical_codex_exec_path() {
         .map(|value| value.to_string_lossy().into_owned())
         .collect::<Vec<_>>();
     assert_eq!(values.first().map(String::as_str), Some("exec"));
+    assert!(
+        values
+            .windows(2)
+            .any(|pair| pair == ["-c", "model_reasoning_effort=max"])
+    );
     assert_eq!(PING_PROMPT, "hello");
     assert_eq!(values.last().map(String::as_str), Some(PING_PROMPT));
     assert!(!values.iter().any(|value| value == "run"));
@@ -161,6 +200,7 @@ fn authoritative_error_is_classified_when_child_emits_no_json() {
         &output_with_stderr("", "HTTP 503 upstream unavailable", false),
         None,
         None,
+        None,
         std::time::Instant::now(),
     );
     assert_eq!(result.status, PingStatus::UpstreamOverloaded);
@@ -188,6 +228,7 @@ fn structured_failure_detail_preserves_authoritative_message() {
         ),
         None,
         None,
+        None,
         Instant::now(),
     );
 
@@ -208,6 +249,7 @@ fn fast_nonzero_exit_preserves_bounded_redacted_stderr_detail() {
             &format!("fast child failure {secret}\n{}", "x".repeat(8_000)),
             false,
         ),
+        None,
         None,
         None,
         Instant::now(),

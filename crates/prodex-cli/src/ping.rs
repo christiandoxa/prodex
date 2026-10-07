@@ -15,6 +15,9 @@ pub struct PingOpenaiArgs {
     /// Model passed through to the normal Codex request path.
     #[arg(long, value_name = "MODEL")]
     pub model: Option<String>,
+    /// Reasoning effort passed through to the normal Codex request path.
+    #[arg(long, value_name = "LEVEL")]
+    pub effort: Option<String>,
     /// Override the ChatGPT backend base URL used by the normal OpenAI request path.
     #[arg(long, value_name = "URL")]
     pub base_url: Option<String>,
@@ -32,6 +35,7 @@ impl fmt::Debug for PingOpenaiArgs {
             .debug_struct("PingOpenaiArgs")
             .field("profile_configured", &self.profile.is_some())
             .field("model_configured", &self.model.is_some())
+            .field("effort_configured", &self.effort.is_some())
             .field("base_url_configured", &self.base_url.is_some())
             .field("no_proxy", &self.no_proxy)
             .field("json", &self.json)
@@ -49,6 +53,7 @@ mod tests {
         let command = PingCommands::Openai(PingOpenaiArgs {
             profile: None,
             model: None,
+            effort: None,
             base_url: Some(format!("https://user:{sentinel}@example.test")),
             no_proxy: false,
             json: false,
