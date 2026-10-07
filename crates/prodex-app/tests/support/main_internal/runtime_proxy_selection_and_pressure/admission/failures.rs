@@ -192,23 +192,54 @@ fn fresh_noncompact_cold_start_probe_wait_is_one_shot() {
         )
         .build();
     let shared = harness.shared();
+    let circuit_key = runtime_profile_route_circuit_key("second", RuntimeRouteKind::Standard);
     shared
         .runtime
         .lock()
         .expect("runtime lock should succeed")
         .profile_route_circuit_open_until
-        .insert(
-            runtime_profile_route_circuit_key("second", RuntimeRouteKind::Standard),
-            Local::now().timestamp() + 1,
-        );
+        .insert(circuit_key.clone(), Local::now().timestamp() + 60);
     let request = RuntimeProxyRequest {
         method: "GET".to_string(),
         path_and_query: "/backend-api/status".to_string(),
         headers: Vec::new(),
         body: Vec::new(),
     };
-    let response = proxy_runtime_standard_request(86, &request, shared)
-        .expect("cold-start recovery should reselect the profile after its circuit clears");
+    let response = std::thread::scope(|scope| {
+        let release = scope.spawn(|| {
+            // Hold the circuit until the real recovery phase is observable;
+            // crossing a wall-clock second must not skip the path under test.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let saw_wait = loop {
+                let log = std::fs::read_to_string(&shared.log_path).unwrap_or_default();
+                if log.lines().any(|line| {
+                    line.contains("rotation_waiting_for_recovery")
+                        && line.contains("route=standard")
+                }) {
+                    break true;
+                }
+                if Instant::now() >= deadline {
+                    break false;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            };
+            shared
+                .runtime
+                .lock()
+                .unwrap()
+                .profile_route_circuit_open_until
+                .remove(&circuit_key);
+            shared.lane_admission.notify_selection_change();
+            saw_wait
+        });
+        let response = proxy_runtime_standard_request(86, &request, shared)
+            .expect("cold-start recovery should reselect the profile after its circuit clears");
+        assert!(
+            release.join().unwrap(),
+            "the real recovery wait must be exercised"
+        );
+        response
+    });
     let (status, body) = tiny_http_response_status_and_body(response);
     let log = read_runtime_proxy_test_log(&shared.log_path);
 
