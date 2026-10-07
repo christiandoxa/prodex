@@ -4,8 +4,8 @@ use prodex_cli::SubAgentReasoningEffort;
 
 const CATALOG_MAX_PRIORITY: u64 = i64::MAX as u64;
 use prodex_mojo_core::rich::{
-    CatalogModel, CatalogPlanModel, ascii_casefold_equal_exact, merge_catalog_ids,
-    plan_dynamic_catalog, resolve_catalog_model_exact,
+    CatalogChoicesPlan, CatalogModel, CatalogPlanModel, ascii_casefold_equal_exact,
+    merge_catalog_ids, plan_dynamic_catalog, resolve_catalog_model_exact,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -348,9 +348,9 @@ fn catalog_entry_default_effort(entry: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
-pub(super) fn main_model_choices_from_catalog(
+fn main_model_catalog_plan_with_mojo(
     entries: Vec<serde_json::Value>,
-) -> Option<Vec<MainModelChoice>> {
+) -> Option<(Vec<DynamicCatalogModel>, CatalogChoicesPlan)> {
     let owned = entries
         .into_iter()
         .map(dynamic_catalog_model)
@@ -384,6 +384,13 @@ pub(super) fn main_model_choices_from_catalog(
         Err(prodex_mojo_core::MojoError::InvalidInput) => return None,
         Err(error) => panic!("Mojo dynamic catalog planning failed: {error:?}"),
     };
+    Some((owned, plan))
+}
+
+pub(super) fn main_model_choices_from_catalog(
+    entries: Vec<serde_json::Value>,
+) -> Option<Vec<MainModelChoice>> {
+    let (owned, plan) = main_model_catalog_plan_with_mojo(entries)?;
     if plan.models.is_empty() {
         return None;
     }

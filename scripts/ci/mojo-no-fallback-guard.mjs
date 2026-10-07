@@ -5408,6 +5408,7 @@ function selfTest() {
   const geminiCompactSemanticConsumer = [
     "gemini_provider_core_truncate_utf8_edges(",
     "format_gemini_semantic_continuation_summary(",
+    "plan_gemini_semantic_compact_indices(",
   ].join("\n");
   assert.deepEqual(findViolations([[GEMINI_COMPACT_SEMANTIC_CONSUMER_FILE, geminiCompactSemanticConsumer]]), []);
   assert.match(findViolations([[GEMINI_COMPACT_SEMANTIC_CONSUMER_FILE, geminiCompactSemanticConsumer + "\nsummary.push_str(\"restored\");"]]).join("\n"), /Gemini semantic continuation formatting must use Mojo/u);
@@ -5847,6 +5848,7 @@ function selfTest() {
   const duplicateTextPlannerCalls = [
     "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Rewrite)",
     "smart_context_duplicate_text_plan(&candidates, SmartContextDuplicateTextMode::Probe)",
+    "smart_context_rewrite_validation_reason(",
   ].join("; ");
   assert.deepEqual(findViolations([[SMART_CONTEXT_DUPLICATE_VALIDATION_FILE,
     duplicateTextPlannerCalls]]), []);
@@ -5857,9 +5859,9 @@ function selfTest() {
     duplicateTextPlannerCalls.replace("SmartContextDuplicateTextMode::Probe", "RustProbe")]]).join("\n"),
   /duplicate-text path must use Mojo planner/u);
   assert.match(findViolations([[SMART_CONTEXT_DUPLICATE_ADAPTER_FILE,
-    "fn adapter() {}"]]).join("\n"), /duplicate-text adapter must retain/u);
+    "fn adapter() {}"]]).join("\n"), /Smart Context adapter must retain/u);
   assert.deepEqual(findViolations([[SMART_CONTEXT_DUPLICATE_ADAPTER_FILE,
-    "fn prodex_smart_context_duplicate_text_plan_v1() {}"]]), []);
+    "fn prodex_smart_context_duplicate_text_plan_v1() {}; fn prodex_smart_context_rewrite_validation_reason_v1() {}"]]), []);
   assert.deepEqual(findViolations([[SMART_CONTEXT_DUPLICATE_MOJO_FILE,
     '@export("prodex_smart_context_duplicate_text_plan_v1") def smart_context_duplicate_text_plan_kernel() {}']]), []);
   assert.match(findViolations([[SMART_CONTEXT_DUPLICATE_MOJO_FILE,
@@ -6032,17 +6034,14 @@ function selfTest() {
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
     'prodex_mojo_core::quota::quota_blocked_status_label(0);\nfn format_blocked_quota_status() {\n    #[cfg(not(feature = "mojo"))] rust();\n}']]).join("\n"),
     /feature-off Rust classifier/u);
-  const quotaResetEpochConsumer = [
-    "prodex_mojo_core::quota::reset_epoch::quota_reset_epoch_precedence(",
-    'quota_json_i64_path(&value, &["resets_at"]);',
-    'quota_json_i64_path(&value, &["reset_at"]);',
-    'quota_json_i64_path(&value, &["error", "resets_at"]);',
-    'quota_json_i64_path(&value, &["error", "reset_at"]);',
-  ].join("\n");
+  const quotaResetEpochConsumer =
+    "prodex_mojo_core::quota::reset_epoch::quota_reset_json_epoch(&canonical)";
   const quotaResetEpochAdapter = [
     "pub struct QuotaResetEpochInput",
     "pub fn quota_reset_epoch_precedence(",
     "prodex_quota_reset_epoch_v1(",
+    "pub fn quota_reset_json_epoch(",
+    "prodex_quota_reset_json_epoch_v1(",
   ].join("\n");
   const quotaDisplayAdapter = [
     "prodex_quota_display_label_v1(",
@@ -6060,11 +6059,14 @@ function selfTest() {
   ].join("\n");
   const quotaResetEpochMojo = [
     '@export("prodex_quota_reset_epoch_v1")',
-    "while index < 4:",
+    '@export("prodex_quota_reset_json_epoch_v1")',
+    "quota_reset_epoch_plan(",
+    "quota_json_object_member_casefold_first(",
+    "quota_json_i64(",
     "primary_used >= 100",
     "secondary_used >= 100",
-    "fields[unsafe_offset=9] == 1",
-    "fields[unsafe_offset=11] == 1",
+    "fields[9] == 1",
+    "fields[11] == 1",
   ].join("\n");
   const quotaResetEpochMojoTest = [
     "quota_reset_epoch_prefers_valid_candidates_in_declared_order",
@@ -6086,11 +6088,11 @@ function selfTest() {
     [QUOTA_RESET_EPOCH_CALLER_TEST_FILE, quotaResetEpochCallerTest],
   ]), []);
   assert.match(findViolations([[QUOTA_WINDOWS_FILE,
-    quotaResetEpochConsumer + "\nprodex_mojo_core::quota::quota_blocked_status_label(0);\nif primary_used { return primary_reset; }"]]).join("\n"),
-  /contains Rust reset-epoch precedence policy/u);
+    quotaResetEpochConsumer + "\nprodex_mojo_core::quota::quota_blocked_status_label(0);\nfn quota_json_reset() {}"]]).join("\n"),
+  /contains restored Rust reset JSON extraction or precedence policy/u);
   assert.match(findViolations([[QUOTA_RESET_EPOCH_MOJO_FILE,
     quotaResetEpochMojo.replace("primary_used >= 100", "primary_used > 100")]]).join("\n"),
-  /quota reset-epoch precedence must remain Mojo-owned/u);
+  /quota reset parsing and precedence must remain Mojo-owned/u);
   assert.match(findViolations([[QUOTA_RESET_EPOCH_CALLER_TEST_FILE,
     quotaResetEpochCallerTest.replace("quota_reset_json_preserves_serde_duplicate_key_behavior", "")]]).join("\n"),
   /caller-boundary tests must retain quota_reset_json_preserves_serde_duplicate_key_behavior/u);
