@@ -3400,8 +3400,8 @@
       "introduced_in": "0.432.3",
       "baseline_state": "candidate",
       "final_state": "authoritative",
-      "mojo_entry": "prodex_session_report_metadata_v1",
-      "mojo_abi_version": 1,
+      "mojo_entry": "prodex_session_report_update_json_v2",
+      "mojo_abi_version": 2,
       "mojo_source": "mojo/prodex_core/session_report.mojo",
       "consumer": "crates/prodex-session-store/src/report.rs",
       "consumer_marker": "prodex_mojo_core::json::session_report_metadata",
@@ -3416,7 +3416,7 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "serde_json decoding and borrowed JsonNode tree construction, numeric timestamp fallback, chrono formatting, PathBuf/canonicalization, file discovery and report DTO mutation remain Rust"
+      "rust_adapter_scope": "Rust serializes caller-owned JSON values for the raw planner, decodes selected string spans, applies numeric timestamp fallback and chrono formatting, and keeps PathBuf/canonicalization, file discovery and report DTO mutation"
     },
     {
       "name": "smart_context_artifact_reference_policy",

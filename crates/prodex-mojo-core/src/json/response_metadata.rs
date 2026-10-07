@@ -87,7 +87,7 @@ pub fn runtime_response_metadata_json(
 mod response_metadata_tests {
     use super::runtime_response_metadata_json;
 
-    fn token<'a>(raw: &'a str, span: Option<(usize, usize)>) -> Option<&'a str> {
+    fn token(raw: &str, span: Option<(usize, usize)>) -> Option<&str> {
         span.map(|(start, end)| &raw[start..end])
     }
 

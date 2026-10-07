@@ -66,12 +66,12 @@
   },
   {
     "file": "crates/prodex-mojo-core/src/quota.rs",
-    "maxLines": 1554,
+    "maxLines": 1253,
     "reason": "Quota.rs remains the typed Rust ABI boundary for Mojo quota policy; report comparison and sort adapters now live in quota/report_sort.rs. This exact post-split cap blocks further growth until remaining policy families can move behind cohesive adapters."
   },
   {
     "file": "crates/prodex-runtime-state/tests/src/lib.rs",
-    "maxLines": 961,
+    "maxLines": 948,
     "reason": "Runtime-state fixed parity coverage now includes exhaustive Mojo mutation/quota/background policy matrices and usize boundary regressions; exact test cap ratchets the audited 0.433.0 suite until policy fixtures split into sibling modules."
   },
   {
