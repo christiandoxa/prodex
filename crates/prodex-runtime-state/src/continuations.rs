@@ -65,13 +65,14 @@ pub struct RuntimeContinuationStatuses {
     pub session_id: BTreeMap<String, RuntimeContinuationBindingStatus>,
 }
 
+#[repr(i64)]
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum RuntimeContinuationBindingLifecycle {
     #[default]
-    Warm,
-    Verified,
-    Suspect,
-    Dead,
+    Warm = 0,
+    Verified = 1,
+    Suspect = 2,
+    Dead = 3,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]

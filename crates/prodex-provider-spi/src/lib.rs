@@ -10,19 +10,21 @@ pub enum ProviderStreamMode {
     Streaming,
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderRetryStage {
-    BeforeDispatch,
-    BeforeFirstByte,
-    AfterFirstByte,
-    AfterCancellation,
+    BeforeDispatch = 0,
+    BeforeFirstByte = 1,
+    AfterFirstByte = 2,
+    AfterCancellation = 3,
 }
 
+#[repr(i64)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProviderRetryCause {
-    NextModel,
-    RotateCredential,
-    NextProvider,
+    NextModel = 0,
+    RotateCredential = 1,
+    NextProvider = 2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -67,17 +69,6 @@ pub struct ProviderRetryPlan {
     pub remaining_precommit_retries: u8,
 }
 
-fn provider_error_class_tag(error_class: ProviderErrorClass) -> i64 {
-    match error_class {
-        ProviderErrorClass::Auth => 0,
-        ProviderErrorClass::Quota => 1,
-        ProviderErrorClass::RateLimit => 2,
-        ProviderErrorClass::Transient => 3,
-        ProviderErrorClass::NotFound => 4,
-        ProviderErrorClass::Other => 5,
-    }
-}
-
 pub fn plan_provider_retry_transition(
     error_class: ProviderErrorClass,
     model_index: usize,
@@ -87,7 +78,7 @@ pub fn plan_provider_retry_transition(
     retry_enabled: bool,
 ) -> ProviderRetryTransition {
     match prodex_mojo_core::provider_constraints::provider_retry_transition(
-        provider_error_class_tag(error_class),
+        error_class as i64,
         model_index,
         model_count,
         auth_index,
@@ -110,23 +101,11 @@ pub fn plan_provider_retry(
     error_class: ProviderErrorClass,
     attempted_precommit_retries: u8,
 ) -> ProviderRetryPlan {
-    let stage_tag = match stage {
-        ProviderRetryStage::BeforeDispatch => 0,
-        ProviderRetryStage::BeforeFirstByte => 1,
-        ProviderRetryStage::AfterFirstByte => 2,
-        ProviderRetryStage::AfterCancellation => 3,
-    };
-    let cause_tag = match cause {
-        ProviderRetryCause::NextModel => 0,
-        ProviderRetryCause::RotateCredential => 1,
-        ProviderRetryCause::NextProvider => 2,
-    };
-    let error_class_tag = provider_error_class_tag(error_class);
     let plan = prodex_mojo_core::provider_constraints::provider_retry_plan(
         policy.max_precommit_attempts,
-        stage_tag,
-        cause_tag,
-        error_class_tag,
+        stage as i64,
+        cause as i64,
+        error_class as i64,
         attempted_precommit_retries,
     )
     .expect("Mojo provider retry policy returned invalid output");
