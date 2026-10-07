@@ -5,6 +5,11 @@ comptime RUNTIME_STATE_BACKGROUND_OK: Int64 = 0
 comptime RUNTIME_STATE_BACKGROUND_INVALID: Int64 = 1
 comptime RUNTIME_STATE_BACKGROUND_ABI: Int64 = 4
 
+comptime RUNTIME_PROXY_ADMISSION_ABI_VERSION: Int64 = 1
+comptime RUNTIME_PROXY_ADMISSION_OK: Int64 = 0
+comptime RUNTIME_PROXY_ADMISSION_INVALID: Int64 = 1
+comptime RUNTIME_PROXY_ADMISSION_ABI: Int64 = 4
+
 comptime MODE_MUTATION_PLAN: Int64 = 0
 comptime MODE_QUEUE_PRESSURE: Int64 = 1
 comptime MODE_QUEUE_ENQUEUE: Int64 = 2
@@ -24,9 +29,62 @@ comptime SECTION_NONE: UInt64 = 0
 comptime SECTION_CORE: UInt64 = 1
 comptime SECTION_FULL: UInt64 = 2
 
+comptime RUNTIME_PROXY_ROUTE_RESPONSES: Int64 = 0
+comptime RUNTIME_PROXY_ROUTE_COMPACT: Int64 = 1
+comptime RUNTIME_PROXY_ROUTE_WEBSOCKET: Int64 = 2
+comptime RUNTIME_PROXY_ROUTE_STANDARD: Int64 = 3
+
 
 def runtime_state_flag(value: Bool) -> UInt64:
     return UInt64(1) if value else UInt64(0)
+
+
+@export("prodex_runtime_proxy_admission_policy_v1")
+def prodex_runtime_proxy_admission_policy_v1(
+    abi_version: Int64,
+    route_kind: Int64,
+    local_overload_pressure: Int64,
+    background_queue_pressure: Int64,
+    session_profile_present: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_PROXY_ADMISSION_ABI_VERSION:
+        return RUNTIME_PROXY_ADMISSION_ABI
+    if (
+        route_kind < RUNTIME_PROXY_ROUTE_RESPONSES
+        or route_kind > RUNTIME_PROXY_ROUTE_STANDARD
+        or local_overload_pressure < 0
+        or local_overload_pressure > 1
+        or background_queue_pressure < 0
+        or background_queue_pressure > 1
+        or session_profile_present < 0
+        or session_profile_present > 1
+        or output_address == 0
+    ):
+        return RUNTIME_PROXY_ADMISSION_INVALID
+
+    var background_affects_route = (
+        route_kind == RUNTIME_PROXY_ROUTE_COMPACT
+        or route_kind == RUNTIME_PROXY_ROUTE_STANDARD
+    )
+    var pressure_mode = (
+        local_overload_pressure == 1
+        or (
+            background_queue_pressure == 1 and background_affects_route
+        )
+    )
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = runtime_state_flag(background_affects_route)
+    output[unsafe_offset=1] = runtime_state_flag(pressure_mode)
+    output[unsafe_offset=2] = runtime_state_flag(
+        route_kind == RUNTIME_PROXY_ROUTE_RESPONSES
+    )
+    output[unsafe_offset=3] = runtime_state_flag(
+        pressure_mode and session_profile_present == 0
+    )
+    return RUNTIME_PROXY_ADMISSION_OK
 
 
 def runtime_state_reason_put(

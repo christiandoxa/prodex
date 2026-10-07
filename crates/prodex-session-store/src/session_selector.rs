@@ -1,5 +1,4 @@
 use super::report::session_value_metadata;
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 use std::path::Path;
 
 pub(super) fn session_lines_start_resume_metadata<'a>(
@@ -71,18 +70,14 @@ pub(super) fn session_path_id_matching_selector(
 }
 
 pub(super) fn session_id_matches_selector(id: &str, selector: &str, exact: bool) -> bool {
-    ascii_casefold_equal_exact(id, selector).expect("Mojo session selector comparison failed")
-        || (!exact && id.to_lowercase().starts_with(&selector.to_lowercase()))
+    prodex_mojo_core::json::session_selector_matches(id, selector, exact)
+        .expect("Mojo session selector comparison failed")
 }
 
 pub(super) fn full_codex_session_id(selector: &str) -> Option<&str> {
-    let bytes = selector.as_bytes();
-    let valid = bytes.len() == 36
-        && bytes.iter().enumerate().all(|(index, byte)| match index {
-            8 | 13 | 18 | 23 => *byte == b'-',
-            _ => byte.is_ascii_hexdigit(),
-        });
-    valid.then_some(selector)
+    prodex_mojo_core::json::session_selector_is_full(selector)
+        .expect("Mojo session selector validation failed")
+        .then_some(selector)
 }
 
 pub(super) fn codex_session_id_from_path(path: &Path) -> Option<String> {
@@ -95,4 +90,38 @@ pub(super) fn codex_session_id_from_path(path: &Path) -> Option<String> {
         .windows(5)
         .map(|parts| parts.join("-"))
         .find(|candidate| full_codex_session_id(candidate).is_some())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{full_codex_session_id, session_id_matches_selector};
+
+    #[test]
+    fn mojo_selector_keeps_uuid_shape_and_casefold_prefix_contract() {
+        let id = "01900000-0000-7000-8000-000000000301";
+        assert_eq!(full_codex_session_id(id), Some(id));
+        assert_eq!(
+            full_codex_session_id(&id.to_uppercase()),
+            Some(id.to_uppercase().as_str())
+        );
+        assert_eq!(
+            full_codex_session_id("01900000-0000-7000-8000-00000000030"),
+            None
+        );
+        assert!(session_id_matches_selector(
+            id,
+            "01900000-0000-7000-8000-0000000003",
+            false
+        ));
+        assert!(!session_id_matches_selector(
+            id,
+            "01900000-0000-7000-8000-0000000003",
+            true
+        ));
+        assert!(!session_id_matches_selector(
+            id,
+            "01900000-0000-7000-8000-0000000004",
+            false
+        ));
+    }
 }

@@ -11,6 +11,8 @@ const MODE_PROFILE_INFLIGHT_ACQUIRE: i64 = 6;
 const MODE_PROFILE_INFLIGHT_RELEASE: i64 = 7;
 const MODE_LANE_LIMIT: i64 = 8;
 
+const RUNTIME_PROXY_ADMISSION_ABI_VERSION: i64 = 1;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct RuntimeStateMutationPolicy {
     pub state_section: u8,
@@ -60,6 +62,14 @@ pub struct RuntimeProfileInflightReleasePlan {
     pub weight: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeProxyAdmissionPolicy {
+    pub background_queue_pressure_affects_route: bool,
+    pub pressure_mode: bool,
+    pub lane_limit_marks_global_overload: bool,
+    pub shed_fresh_compact_request: bool,
+}
+
 unsafe extern "C" {
     fn prodex_runtime_state_background_policy_v1(
         abi_version: i64,
@@ -83,6 +93,14 @@ unsafe extern "C" {
         output_address: u64,
         output_capacity: i64,
         written_address: u64,
+    ) -> i64;
+    fn prodex_runtime_proxy_admission_policy_v1(
+        abi_version: i64,
+        route_kind: i64,
+        local_overload_pressure: i64,
+        background_queue_pressure: i64,
+        session_profile_present: i64,
+        output_address: u64,
     ) -> i64;
 }
 
@@ -317,6 +335,36 @@ pub fn lane_limit(route_kind: u8, limits: [usize; 4]) -> Result<usize, MojoError
     )
 }
 
+pub fn runtime_proxy_admission_policy(
+    route_kind: u8,
+    local_overload_pressure: bool,
+    background_queue_pressure: bool,
+    session_profile_present: bool,
+) -> Result<RuntimeProxyAdmissionPolicy, MojoError> {
+    let mut output = [0_u64; 4];
+    let status = unsafe {
+        prodex_runtime_proxy_admission_policy_v1(
+            RUNTIME_PROXY_ADMISSION_ABI_VERSION,
+            i64::from(route_kind),
+            i64::from(local_overload_pressure),
+            i64::from(background_queue_pressure),
+            i64::from(session_profile_present),
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    match status {
+        0 => Ok(RuntimeProxyAdmissionPolicy {
+            background_queue_pressure_affects_route: bool_output(output[0])?,
+            pressure_mode: bool_output(output[1])?,
+            lane_limit_marks_global_overload: bool_output(output[2])?,
+            shed_fresh_compact_request: bool_output(output[3])?,
+        }),
+        1 => Err(MojoError::InvalidInput),
+        4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -372,5 +420,19 @@ mod tests {
             }
         );
         assert_eq!(lane_limit(3, [1, 2, 3, 4]).unwrap(), 4);
+        assert_eq!(
+            runtime_proxy_admission_policy(1, false, true, false).unwrap(),
+            RuntimeProxyAdmissionPolicy {
+                background_queue_pressure_affects_route: true,
+                pressure_mode: true,
+                lane_limit_marks_global_overload: false,
+                shed_fresh_compact_request: true,
+            }
+        );
+        assert!(
+            !runtime_proxy_admission_policy(0, false, true, false)
+                .unwrap()
+                .pressure_mode
+        );
     }
 }

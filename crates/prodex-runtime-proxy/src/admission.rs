@@ -82,10 +82,8 @@ pub(crate) fn release_runtime_proxy_active_request_guard(
 }
 
 pub fn runtime_proxy_background_queue_pressure_affects_route(route_kind: RuntimeRouteKind) -> bool {
-    matches!(
-        route_kind,
-        RuntimeRouteKind::Compact | RuntimeRouteKind::Standard
-    )
+    runtime_proxy_admission_policy(route_kind, false, false, false)
+        .background_queue_pressure_affects_route
 }
 
 pub fn runtime_proxy_pressure_mode_for_route(
@@ -93,9 +91,13 @@ pub fn runtime_proxy_pressure_mode_for_route(
     local_overload_pressure: bool,
     background_queue_pressure: bool,
 ) -> bool {
-    local_overload_pressure
-        || (background_queue_pressure
-            && runtime_proxy_background_queue_pressure_affects_route(route_kind))
+    runtime_proxy_admission_policy(
+        route_kind,
+        local_overload_pressure,
+        background_queue_pressure,
+        false,
+    )
+    .pressure_mode
 }
 
 pub fn runtime_proxy_sync_probe_pressure_mode_for_route(
@@ -111,14 +113,35 @@ pub fn runtime_proxy_sync_probe_pressure_mode_for_route(
 }
 
 pub fn runtime_proxy_lane_limit_marks_global_overload(lane: RuntimeRouteKind) -> bool {
-    lane == RuntimeRouteKind::Responses
+    runtime_proxy_admission_policy(lane, false, false, false).lane_limit_marks_global_overload
 }
 
 pub fn runtime_proxy_should_shed_fresh_compact_request(
     pressure_mode: bool,
     session_profile: Option<&str>,
 ) -> bool {
-    pressure_mode && session_profile.is_none()
+    runtime_proxy_admission_policy(
+        RuntimeRouteKind::Compact,
+        pressure_mode,
+        false,
+        session_profile.is_some(),
+    )
+    .shed_fresh_compact_request
+}
+
+fn runtime_proxy_admission_policy(
+    route_kind: RuntimeRouteKind,
+    local_overload_pressure: bool,
+    background_queue_pressure: bool,
+    session_profile_present: bool,
+) -> prodex_mojo_core::runtime_state::RuntimeProxyAdmissionPolicy {
+    prodex_mojo_core::runtime_state::runtime_proxy_admission_policy(
+        route_kind as u8,
+        local_overload_pressure,
+        background_queue_pressure,
+        session_profile_present,
+    )
+    .expect("Mojo runtime-proxy admission policy returned invalid output")
 }
 
 #[cfg(test)]

@@ -49,4 +49,15 @@ fn pressure_mode_only_applies_background_pressure_to_side_lanes() {
         true,
         false,
     ));
+    assert!(runtime_proxy_lane_limit_marks_global_overload(
+        RuntimeRouteKind::Responses
+    ));
+    assert!(!runtime_proxy_lane_limit_marks_global_overload(
+        RuntimeRouteKind::Compact
+    ));
+    assert!(runtime_proxy_should_shed_fresh_compact_request(true, None));
+    assert!(!runtime_proxy_should_shed_fresh_compact_request(
+        true,
+        Some("profile-a")
+    ));
 }

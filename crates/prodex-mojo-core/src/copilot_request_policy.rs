@@ -4,6 +4,7 @@ const ABI_VERSION: i64 = 1;
 const OP_STRIP_ENCRYPTED: i64 = 1;
 const OP_AGENT_INPUT: i64 = 2;
 const OP_VISION_INPUT: i64 = 3;
+const OP_RESPONSE_ID: i64 = 4;
 
 unsafe extern "C" {
     fn prodex_copilot_request_policy_v1(
@@ -23,7 +24,7 @@ fn signed(value: usize) -> Result<i64, MojoError> {
 }
 
 fn run(body: &[u8], operation: i64) -> Result<(Vec<u8>, bool), MojoError> {
-    let mut output = if operation == OP_STRIP_ENCRYPTED {
+    let mut output = if matches!(operation, OP_STRIP_ENCRYPTED | OP_RESPONSE_ID) {
         vec![0_u8; body.len().max(1)]
     } else {
         Vec::new()
@@ -83,6 +84,16 @@ pub fn has_vision_input(body: &[u8]) -> Result<bool, MojoError> {
         return Err(MojoError::InvalidOutput);
     }
     Ok(result)
+}
+
+pub fn response_id(body: &[u8]) -> Result<Option<String>, MojoError> {
+    let (output, present) = run(body, OP_RESPONSE_ID)?;
+    if !present {
+        return Ok(None);
+    }
+    String::from_utf8(output)
+        .map(Some)
+        .map_err(|_| MojoError::InvalidOutput)
 }
 
 #[cfg(test)]
