@@ -2,8 +2,8 @@ use crate::MojoError;
 use crate::json::JsonNode;
 
 const ABI_VERSION: i64 = 1;
-const MAX_JSON_BYTES: usize = 4 * 1024 * 1024;
-const MAX_JSON_NODES: usize = 65_536;
+const MAX_JSON_BYTES: usize = 64 * 1024 * 1024;
+const MAX_JSON_NODES: usize = 1_048_576;
 // ponytail: cap cursor history at 65k entries / 16 MiB; raise both ABI bounds if scans exceed it.
 const MAX_SEEN_CURSORS: usize = 65_536;
 const MAX_SEEN_CURSOR_BYTES: usize = 16 * 1024 * 1024;

@@ -43,6 +43,31 @@ fn reconciliation_scans_all_active_and_archived_pages() {
 }
 
 #[test]
+fn reconciliation_accepts_large_unrelated_thread_page() {
+    // Codex thread/list can return large page metadata. Only the cursor
+    // controls pagination; a large data payload must not fail reconciliation.
+    let page = serde_json::json!({
+        "id": 2,
+        "result": {
+            "data": [{"metadata": "x".repeat(5 * 1024 * 1024)}],
+            "nextCursor": null,
+        }
+    });
+    let responses = format!(
+        "{init}\n{page}\n{archived}\n",
+        init = r#"{"id":1,"result":{}}"#,
+        page = page,
+        archived = r#"{"id":3,"result":{"nextCursor":null}}"#,
+    );
+    let mut reader = std::io::Cursor::new(responses.as_bytes());
+    let mut written = Vec::new();
+    reconcile_codex_thread_index_protocol(&mut reader, &mut written).unwrap();
+    let requests = String::from_utf8(written).unwrap();
+    assert_eq!(requests.lines().count(), 4);
+    assert!(requests.contains("\"archived\":true"));
+}
+
+#[test]
 fn reconciliation_rejects_repeated_cursor() {
     let responses = concat!(
         "{\"id\":1,\"result\":{}}\n",

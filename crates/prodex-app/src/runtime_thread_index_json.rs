@@ -1,8 +1,8 @@
 use anyhow::{Context, Result, bail};
 use prodex_mojo_core::json::{JsonKind, JsonNode};
 
-pub(super) const THREAD_INDEX_MAX_JSON_BYTES: usize = 4 * 1024 * 1024;
-pub(super) const THREAD_INDEX_MAX_JSON_NODES: usize = 65_536;
+pub(super) const THREAD_INDEX_MAX_JSON_BYTES: usize = 64 * 1024 * 1024;
+pub(super) const THREAD_INDEX_MAX_JSON_NODES: usize = 1_048_576;
 
 #[derive(serde::Deserialize)]
 struct DirtyMarkerBoundary {
