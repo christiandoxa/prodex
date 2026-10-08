@@ -737,6 +737,52 @@ fn wait_for_existing_runtime_broker_recovery_or_exit_clears_dead_registry_withou
 }
 
 #[test]
+fn runtime_broker_registry_identity_is_exact_for_reads_and_removal() {
+    let temp_dir = TestDir::isolated();
+    let paths = AppPaths {
+        root: temp_dir.path.join("prodex"),
+        state_file: temp_dir.path.join("prodex/state.json"),
+        managed_profiles_root: temp_dir.path.join("prodex/profiles"),
+        shared_codex_root: temp_dir.path.join("shared"),
+        legacy_shared_codex_root: temp_dir.path.join("prodex/shared"),
+    };
+    let broker_key = "exact-instance";
+    let registry = RuntimeBrokerRegistry {
+        pid: std::process::id(),
+        process_birth_identity: None,
+        listen_addr: "127.0.0.1:4567".to_string(),
+        started_at: 100,
+        upstream_base_url: "https://upstream.example".to_string(),
+        include_code_review: false,
+        upstream_no_proxy: false,
+        smart_context_enabled: false,
+        current_profile: "main".to_string(),
+        instance_id: "Case-Sensitive-instance".to_string(),
+        prodex_version: None,
+        executable_path: None,
+        executable_sha256: None,
+        openai_mount_path: Some(RUNTIME_PROXY_OPENAI_MOUNT_PATH.to_string()),
+        realtime_ws_addr: None,
+    };
+    save_runtime_broker_registry(&paths, broker_key, &registry)
+        .expect("registry should save");
+    save_runtime_broker_test_capability(&paths, broker_key, &registry.instance_id, "secret");
+
+    assert!(load_runtime_broker_capability(&paths, broker_key, "case-sensitive-instance").is_err());
+    assert!(load_runtime_broker_capability(&paths, broker_key, &registry.instance_id).is_ok());
+    remove_runtime_broker_registry_if_instance_matches(&paths, broker_key, "case-sensitive-instance");
+    assert!(load_runtime_broker_registry(&paths, broker_key)
+        .expect("registry should reload")
+        .is_some());
+
+    remove_runtime_broker_registry_if_instance_matches(&paths, broker_key, &registry.instance_id);
+    assert!(load_runtime_broker_registry(&paths, broker_key)
+        .expect("registry should reload after cleanup")
+        .is_none());
+    assert!(load_runtime_broker_capability(&paths, broker_key, &registry.instance_id).is_err());
+}
+
+#[test]
 fn find_compatible_runtime_broker_registry_prunes_dead_registry_without_probe() {
     dead_registry::find_compatible_runtime_broker_registry_prunes_dead_registry_without_probe();
 }

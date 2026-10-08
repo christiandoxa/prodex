@@ -358,6 +358,93 @@ def prodex_runtime_broker_health_key_kind_v1(
         return 0
     return 2
 
+
+comptime BROKER_REGISTRY_STATUS_NOT_LEGACY: Int64 = 0
+comptime BROKER_REGISTRY_STATUS_VALID_LEGACY: Int64 = 1
+comptime BROKER_REGISTRY_STATUS_MALFORMED: Int64 = 2
+comptime BROKER_REGISTRY_STATUS_TOO_LARGE: Int64 = 3
+
+
+@export("prodex_runtime_broker_registry_store_plan_v1")
+def prodex_runtime_broker_registry_store_plan_v1(
+    abi_version: Int64,
+    primary_exists: Int64,
+    primary_status: Int64,
+    backup_status: Int64,
+    primary_current: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or (primary_exists != 0 and primary_exists != 1)
+        or primary_status < BROKER_REGISTRY_STATUS_NOT_LEGACY
+        or primary_status > BROKER_REGISTRY_STATUS_TOO_LARGE
+        or backup_status < BROKER_REGISTRY_STATUS_NOT_LEGACY
+        or backup_status > BROKER_REGISTRY_STATUS_TOO_LARGE
+        or (primary_current != 0 and primary_current != 1)
+        or output_address == 0
+    ):
+        return BROKER_CONTINUITY_INVALID
+
+    var action: Int64 = 0
+    if (
+        backup_status == BROKER_REGISTRY_STATUS_VALID_LEGACY
+        and primary_status == BROKER_REGISTRY_STATUS_NOT_LEGACY
+        and primary_current == 1
+    ):
+        action = 2
+    elif (
+        primary_status == BROKER_REGISTRY_STATUS_VALID_LEGACY
+        or (
+            backup_status == BROKER_REGISTRY_STATUS_VALID_LEGACY
+            and primary_exists == 0
+        )
+    ):
+        action = 1
+
+    var error_source: Int64 = 0
+    if primary_status == BROKER_REGISTRY_STATUS_TOO_LARGE:
+        error_source = 1
+    elif backup_status == BROKER_REGISTRY_STATUS_TOO_LARGE:
+        error_source = 2
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = action
+    output[unsafe_offset=1] = error_source
+    return 0
+
+
+@export("prodex_runtime_broker_registry_identity_match_v1")
+def prodex_runtime_broker_registry_identity_match_v1(
+    abi_version: Int64,
+    left_address: UInt,
+    left_length: Int64,
+    right_address: UInt,
+    right_length: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or left_length < 0
+        or right_length < 0
+        or (left_length > 0 and left_address == 0)
+        or (right_length > 0 and right_address == 0)
+    ):
+        return BROKER_CONTINUITY_INVALID
+    var left = broker_view(left_address, left_length)
+    var right = broker_view(right_address, right_length)
+    if not rich_view_valid(left, left_length) or not rich_view_valid(right, right_length):
+        return BROKER_CONTINUITY_INVALID
+    if left_length != right_length:
+        return 0
+    var left_ptr = rich_view_ptr(left)
+    var right_ptr = rich_view_ptr(right)
+    for index in range(left_length):
+        if left_ptr[unsafe_offset=index] != right_ptr[unsafe_offset=index]:
+            return 0
+    return 1
+
 comptime BROKER_ID_VERSION: Int64 = 1
 comptime BROKER_ID_PATH: Int64 = 2
 comptime BROKER_ID_SHA: Int64 = 4
