@@ -49,17 +49,17 @@ Prodex launches never run this online check or update an external tool. Runtime 
 
 Caveman is not embedded in Prodex. Runtime accepts stable Caveman 2.3.1 or newer from a validated managed version directory. The table below records the current latest-stable release-qualified reference:
 
-| Field | 0.435.4 qualified reference |
+| Field | 0.436.1 qualified reference |
 | --- | --- |
-| Version | `3.1.0` |
+| Version | `3.2.0` |
 | Source | `https://github.com/JuliusBrussee/caveman` |
-| Commit | `8af1f1b9b1346bca0722a1556f119b4e6675cc96` |
-| Prodex tree SHA-256 | `2ca3549a88da2fc49b2abda20c90a1a8701f56833e2b19e60bdcede3ce68b316` |
+| Commit | `e20f07e8152a0c0360f58c09e79d30ac94329991` |
+| Prodex tree SHA-256 | `061fb970ee293e1ccce02e0a7fa19a94c73299ca6df52701dd3feeea204df927` |
 
 For the current release-qualified reference, the managed path is:
 
 ```text
-<managed-root>/caveman/3.1.0/
+<managed-root>/caveman/3.2.0/
 ```
 
 The directory must contain the upstream `AGENTS.md`,
@@ -70,10 +70,10 @@ manifest as `prodex-tool.json`:
 {
   "schema_version": 1,
   "id": "caveman",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "source": "https://github.com/JuliusBrussee/caveman",
-  "commit": "8af1f1b9b1346bca0722a1556f119b4e6675cc96",
-  "tree_sha256": "2ca3549a88da2fc49b2abda20c90a1a8701f56833e2b19e60bdcede3ce68b316"
+  "commit": "e20f07e8152a0c0360f58c09e79d30ac94329991",
+  "tree_sha256": "061fb970ee293e1ccce02e0a7fa19a94c73299ca6df52701dd3feeea204df927"
 }
 ```
 
@@ -84,25 +84,25 @@ finished tree. Standalone optimizer and Claude-plugin command paths are retired;
 Unversioned managed directories are rejected. Prodex chooses the newest stable version directory at or above 2.3.1. A newer stable release is accepted when the official source, manifest schema, required files, commit shape, and recomputed tree digest are self-consistent; the current latest-stable reference keeps the stronger audited commit/tree check.
 
 Prodex recomputes the complete tree digest before activation and treats that
-recomputed digest as authoritative. The current 3.1.0 reference requires its exact audited manifest digest. The vetted 3.0.0 release at commit `b33a39554ed06cbc7d7d3198ff90c171e8043b69` remains accepted only with its exact audited tree digest. For backward compatibility, a vetted 2.7.0
+recomputed digest as authoritative. The current 3.2.0 reference requires its exact audited manifest digest. The vetted 3.0.0 release at commit `b33a39554ed06cbc7d7d3198ff90c171e8043b69` remains accepted only with its exact audited tree digest. For backward compatibility, a vetted 2.7.0
 checkout at commit `8b0c1d3699b8d83e87fe4605b378da20c41555e0` still accepts the
 legacy manifest digest written by earlier installers, while its actual tree
 must match `09127915a13a493146ed0392b6895bbbd5f620d276dda9f4e68a6722f96df950`.
 
-Caveman 3.1.0 documents telemetry as enabled by default for its CLI and agent
+Caveman 3.2.0 documents telemetry as enabled by default for its CLI and agent
 hooks; its skill-only integration sends no telemetry. Users of the CLI or
 Claude plugin hooks can use Caveman's documented `caveman telemetry off` or
 `DO_NOT_TRACK=1` controls when telemetry is not desired.
 
 ## Ponytail
 
-Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/4.13.0/` with metadata:
+Ponytail uses the same versioned manifest/tree contract, accepts stable 4.9.0 or newer, and selects the newest compatible managed directory. The current release-qualified reference is `<managed-root>/ponytail/5.0.0/` with metadata:
 
 - source: `https://github.com/DietrichGebert/ponytail`
-- commit: `08e952d7a8057a57ce561ff1330d093fd92eec67`
-- tree SHA-256: `4187a87a014975e268d1e6a0ea553382e7d53232a2f2ea741941c0b1c412dd2f`
+- commit: `b088b2df6e08d4306c6a3c3d575fe38c2d2d2989`
+- tree SHA-256: `4d8896cca8c8214ac8226bb77b8c3572822ba76dcfd8bfd73c70b9dee59f72f7`
 
-The 4.13.0 qualified reference requires its exact audited commit and complete tree digest. Existing stable 4.10.x checkouts remain accepted through the minimum-version and manifest-digest compatibility rules, including the previously qualified 4.10.0 legacy-manifest rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
+The 5.0.0 qualified reference requires its exact audited commit and complete tree digest. Existing stable 4.10.x checkouts remain accepted through the minimum-version and manifest-digest compatibility rules, including the previously qualified 4.10.0 legacy-manifest rule. Future stable releases are accepted when the plugin version matches the managed manifest and the recomputed tree digest matches that manifest.
 
 RTK requires `0.46.0` or newer; `0.51.0` is the latest stable release-qualified reference for this Prodex release. It remains externally managed and version-compatible rather than latest-only. Codebase Memory MCP
 `0.11.0` is the latest stable release validated for this Prodex release. Both resolve from

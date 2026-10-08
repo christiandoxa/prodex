@@ -57,3 +57,18 @@ The regression for delayed headers failed before the fix with the actual mock
 `response.failed` payload. After the fixes, rotation and the single-profile
 same-session follow-up both succeeded. Remaining release qualification is
 tracked by exact-SHA CI and the standalone release workflow, not this document.
+
+## Release freshness qualification
+
+The first standalone release dispatch stopped before artifact creation because
+Caveman 3.2.0 and Ponytail 5.0.0 had replaced the previous stable references.
+The release gate was retained. Both official tagged source archives were
+validated against the existing bounded-tree contract (regular files only,
+no symlinks, unchanged file/count/byte limits), and the exact tag/commit/Git-tree
+and Prodex tree digests were recorded in `optional-tools-audit.json`.
+
+The compiled production resolvers accepted each exact tree, rejected a modified
+tree, and accepted the restored original. No hooks, telemetry, installers, or
+upstream binaries were executed. All 59 optional-tool tests passed; old minimum
+version and legacy-manifest rules were unchanged. These are reference updates,
+not automatic installation or activation of an optional tool.

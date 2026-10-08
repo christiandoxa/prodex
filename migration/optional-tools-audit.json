@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
-  "audited_at": "2026-10-06",
-  "release": "0.434.3",
+  "audited_at": "2026-10-08T07:21:30.431219Z",
+  "release": "0.436.1",
   "tools": [
     {
       "id": "caveman",
       "repository": "https://github.com/JuliusBrussee/caveman",
-      "latest_stable": "3.1.0",
-      "release": "v3.1.0",
-      "tag_object": "63767f5e0e25368fbdbb16e416af1615d2efa6dc",
-      "commit": "8af1f1b9b1346bca0722a1556f119b4e6675cc96",
-      "git_tree": "ecb79dbbb6b20d6ccd8067ef43beb0b75d1d19c8",
-      "source_archive_sha256": "676ae2e9bd2ee23c9fa216056d6ad38b97b49ac8f5f838c29f8a23f37a861564",
-      "prodex_tree_sha256": "2ca3549a88da2fc49b2abda20c90a1a8701f56833e2b19e60bdcede3ce68b316",
+      "latest_stable": "3.2.0",
+      "release": "v3.2.0",
+      "tag_object": "4192fb38ae0921c7b4baa9c5fa6fa1b90dbcdaf4",
+      "commit": "e20f07e8152a0c0360f58c09e79d30ac94329991",
+      "git_tree": "35d48e0238c3fe1fd817a47c3f2a523eb9069524",
+      "source_archive_sha256": "8ea40b5a3dabcc8dc552d28462785bdcc6625972583a6f4609a0a16af7e1dbca",
+      "prodex_tree_sha256": "061fb970ee293e1ccce02e0a7fa19a94c73299ca6df52701dd3feeea204df927",
       "license": "Apache-2.0",
       "runtime": "Node.js >=18; externally managed immutable checkout",
       "platforms": [
@@ -21,7 +21,7 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "v3.1.0 is the latest stable release; the exact annotated tag, commit, Git tree, source archive, required plugin/skill files, and complete Prodex tree digest were revalidated from the tagged source. Prodex retains exact validation for the vetted 3.0.0 release and the 2.7.0 legacy-manifest compatibility path."
+      "notes": "Latest stable v3.2.0 was checked at the 0.436.1 release gate using the exact official tag, commit and Git tree. The full Prodex digest covers 1649 regular files / 19743814 bytes; no symlinks or tree-limit exceptions are needed. Required plugin names, versions and hook/skill paths remain compatible. No upstream hooks or installers were executed; existing minimum-version and legacy-manifest rules remain unchanged."
     },
     {
       "id": "rtk",
@@ -99,11 +99,11 @@
     {
       "id": "ponytail",
       "repository": "https://github.com/DietrichGebert/ponytail",
-      "latest_stable": "4.13.0",
-      "release": "v4.13.0",
-      "commit": "08e952d7a8057a57ce561ff1330d093fd92eec67",
-      "git_tree": "b0a551a2dfad80063167798ba6469034f668ebe5",
-      "prodex_tree_sha256": "4187a87a014975e268d1e6a0ea553382e7d53232a2f2ea741941c0b1c412dd2f",
+      "latest_stable": "5.0.0",
+      "release": "v5.0.0",
+      "commit": "b088b2df6e08d4306c6a3c3d575fe38c2d2d2989",
+      "git_tree": "cd94f9b4abb6ff6e65055b0076e82a5b13c693aa",
+      "prodex_tree_sha256": "4d8896cca8c8214ac8226bb77b8c3572822ba76dcfd8bfd73c70b9dee59f72f7",
       "license": "MIT",
       "runtime": "Node.js plugin; externally managed immutable checkout",
       "platforms": [
@@ -112,7 +112,8 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Latest stable v4.13.0 was revalidated from the exact release tag: plugin version 4.13.0, required Codex hook/skills present, no symlinks, 175 files / 1,866,406 bytes under the Prodex tree policy, and complete Prodex tree digest pinned. Previously qualified 4.10.3 remains accepted through a self-consistent managed manifest; 4.10.0 retains its audited legacy-manifest compatibility rule."
+      "notes": "Latest stable v5.0.0 was checked at the 0.436.1 release gate using the exact official tag, commit and Git tree. The full Prodex digest covers 199 regular files / 10528434 bytes; no symlinks or tree-limit exceptions are needed. Required plugin names, versions and hook/skill paths remain compatible. No upstream hooks or installers were executed; existing minimum-version and legacy-manifest rules remain unchanged.",
+      "source_archive_sha256": "a5675290f7dd9979fc694988774d548064a906aa1d913335c276a7566a77b718"
     },
     {
       "id": "presidio",
