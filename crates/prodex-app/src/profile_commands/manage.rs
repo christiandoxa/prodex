@@ -313,7 +313,7 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
             ("Auth".to_string(), summary.auth.label),
             (
                 "Identity".to_string(),
-                if row_status.identity_present() {
+                if row_status.identity_present {
                     summary.email.unwrap_or_default()
                 } else {
                     "-".to_string()
@@ -412,13 +412,11 @@ pub(crate) fn handle_current_profile() -> Result<()> {
         ProfileManagementScreenStatus::Active => {}
     }
 
-    let active_row_status = state
-        .profiles
+    let active_row_status = status_plan
+        .rows
         .iter()
-        .zip(status_plan.rows.iter())
-        .find_map(|((name, _), status)| {
-            (state.active_profile.as_deref() == Some(name.as_str())).then_some(*status)
-        })
+        .find(|status| status.active)
+        .copied()
         .context("profile-management status omitted the active profile row")?;
     let active = state
         .active_profile

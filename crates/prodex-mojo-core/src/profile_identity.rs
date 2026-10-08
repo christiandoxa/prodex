@@ -113,71 +113,28 @@ pub enum ProfileManagementScreenStatus {
     Active,
 }
 
-/// The current/storage state selected for one profile row.
+/// Mojo-selected state for one profile row.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ProfileManagementRowStatus {
-    ActiveManagedWithIdentity,
-    ActiveManagedWithoutIdentity,
-    InactiveManagedWithIdentity,
-    InactiveManagedWithoutIdentity,
-    ActiveExternalWithIdentity,
-    ActiveExternalWithoutIdentity,
-    InactiveExternalWithIdentity,
-    InactiveExternalWithoutIdentity,
+pub struct ProfileManagementRowStatus {
+    pub active: bool,
+    pub managed: bool,
+    pub identity_present: bool,
 }
 
 impl ProfileManagementRowStatus {
     /// Render the stable current label for this row status.
     pub fn current_label(self) -> &'static str {
-        match self {
-            Self::ActiveManagedWithIdentity
-            | Self::ActiveManagedWithoutIdentity
-            | Self::ActiveExternalWithIdentity
-            | Self::ActiveExternalWithoutIdentity => "Yes",
-            Self::InactiveManagedWithIdentity
-            | Self::InactiveManagedWithoutIdentity
-            | Self::InactiveExternalWithIdentity
-            | Self::InactiveExternalWithoutIdentity => "No",
-        }
+        if self.active { "Yes" } else { "No" }
     }
 
     /// Render the stable storage-kind label for this row status.
     pub fn kind_label(self) -> &'static str {
-        match self {
-            Self::ActiveManagedWithIdentity
-            | Self::ActiveManagedWithoutIdentity
-            | Self::InactiveManagedWithIdentity
-            | Self::InactiveManagedWithoutIdentity => "managed",
-            Self::ActiveExternalWithIdentity
-            | Self::ActiveExternalWithoutIdentity
-            | Self::InactiveExternalWithIdentity
-            | Self::InactiveExternalWithoutIdentity => "external",
-        }
+        if self.managed { "managed" } else { "external" }
     }
 
     /// Render the stable managed/external boolean label for this row status.
     pub fn managed_label(self) -> &'static str {
-        match self {
-            Self::ActiveManagedWithIdentity
-            | Self::ActiveManagedWithoutIdentity
-            | Self::InactiveManagedWithIdentity
-            | Self::InactiveManagedWithoutIdentity => "Yes",
-            Self::ActiveExternalWithIdentity
-            | Self::ActiveExternalWithoutIdentity
-            | Self::InactiveExternalWithIdentity
-            | Self::InactiveExternalWithoutIdentity => "No",
-        }
-    }
-
-    /// Whether this row contains a stored profile identity.
-    pub fn identity_present(self) -> bool {
-        matches!(
-            self,
-            Self::ActiveManagedWithIdentity
-                | Self::InactiveManagedWithIdentity
-                | Self::ActiveExternalWithIdentity
-                | Self::InactiveExternalWithIdentity
-        )
+        if self.managed { "Yes" } else { "No" }
     }
 }
 
@@ -706,7 +663,8 @@ pub fn profile_management_status(
     inputs: &[ProfileManagementStatusInput],
 ) -> Result<ProfileManagementStatusPlan, MojoError> {
     let profile_count = i64::try_from(inputs.len()).map_err(|_| MojoError::InvalidInput)?;
-    let mut flags = Vec::with_capacity(inputs.len().saturating_mul(3));
+    let flag_capacity = inputs.len().checked_mul(3).ok_or(MojoError::InvalidInput)?;
+    let mut flags = Vec::with_capacity(flag_capacity);
     for input in inputs {
         flags.extend([
             i64::from(input.active),
@@ -748,18 +706,15 @@ pub fn profile_management_status(
     };
     let mut rows = Vec::with_capacity(inputs.len());
     for index in 0..inputs.len() {
-        let row_status = match output[1 + index] {
-            0 => ProfileManagementRowStatus::ActiveManagedWithIdentity,
-            1 => ProfileManagementRowStatus::ActiveManagedWithoutIdentity,
-            2 => ProfileManagementRowStatus::InactiveManagedWithIdentity,
-            3 => ProfileManagementRowStatus::InactiveManagedWithoutIdentity,
-            4 => ProfileManagementRowStatus::ActiveExternalWithIdentity,
-            5 => ProfileManagementRowStatus::ActiveExternalWithoutIdentity,
-            6 => ProfileManagementRowStatus::InactiveExternalWithIdentity,
-            7 => ProfileManagementRowStatus::InactiveExternalWithoutIdentity,
-            _ => return Err(MojoError::InvalidOutput),
-        };
-        rows.push(row_status);
+        let row_flags = u8::try_from(output[1 + index]).map_err(|_| MojoError::InvalidOutput)?;
+        if row_flags & !0b111 != 0 {
+            return Err(MojoError::InvalidOutput);
+        }
+        rows.push(ProfileManagementRowStatus {
+            active: row_flags & 0b001 != 0,
+            managed: row_flags & 0b010 != 0,
+            identity_present: row_flags & 0b100 != 0,
+        });
     }
     Ok(ProfileManagementStatusPlan { screen, rows })
 }
