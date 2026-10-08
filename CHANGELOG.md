@@ -23,6 +23,10 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 - Add structured precommit wait and boundary diagnostics without printing
   provider failures into the interactive terminal during successful recovery.
 
+- Refresh release-qualified Caveman 3.2.0 and Ponytail 5.0.0 references after
+  their upstream releases changed the freshness gate. Exact commit/tree checks
+  remain enabled; no optional tool is installed or activated automatically.
+
 ## Bug Fixes
 
 - Stop treating a short SSE lookahead timeout or metadata-only prefix as a
