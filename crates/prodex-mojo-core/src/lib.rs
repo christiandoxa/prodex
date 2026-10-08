@@ -213,7 +213,9 @@ pub mod launch;
 #[cfg(feature = "mojo-runtime")]
 pub mod launch_config;
 
-#[cfg(feature = "mojo-rich")]
+// Runtime thread-index reconciliation shares this ABI; build.rs already links
+// the JSON Mojo sources for both runtime and rich feature selections.
+#[cfg(any(feature = "mojo-rich", feature = "mojo-runtime"))]
 pub mod json;
 
 #[cfg(feature = "mojo-rich")]

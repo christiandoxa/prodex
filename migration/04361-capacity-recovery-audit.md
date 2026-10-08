@@ -72,3 +72,29 @@ tree, and accepted the restored original. No hooks, telemetry, installers, or
 upstream binaries were executed. All 59 optional-tool tests passed; old minimum
 version and legacy-manifest rules were unchanged. These are reference updates,
 not automatic installation or activation of an optional tool.
+
+## Release gate repair: runtime-only JSON ABI
+
+The first exact-SHA release candidate was stopped by `Real Mojo / parity` in CI
+run `37744420690`. The `prodex-runtime-tuning --features mojo` consumer enables
+only `prodex-mojo-core/mojo-runtime`; its thread-index protocol imported
+`crate::json::JsonNode`, but that module was exposed only with `mojo-rich`.
+All-features checks could not expose the missing feature boundary.
+
+The shared JSON ABI is now available with either runtime or rich enabled,
+matching the source inclusion already used by `build.rs`. No extra feature is
+forced, no runtime semantics are copied to Rust, and no CI test is skipped.
+
+The new `runtime_json_feature` integration target reproduces the compile error
+before the fix and executes initialization, newest-page completion, invalid-JSON
+mapping, and EOF mapping through the real Mojo protocol after the fix. CI runs
+it explicitly with `--no-default-features --features mojo-runtime`.
+
+Local PDX verification:
+
+- Runtime-only integration: 2 passed, with the pre-fix build failing E0432.
+- Original failing consumer command: `cargo test --locked -p
+  prodex-runtime-tuning --features mojo -- --test-threads=1`: 8 passed.
+
+These results supplement the capacity-recovery regressions above; they do not
+claim that provider-wide capacity is guaranteed or that BRP was modified.
