@@ -11,7 +11,9 @@ use crate::{
     read_blocking_response_body_with_limit,
 };
 use anyhow::{Context, Result, bail};
-use prodex_mojo_core::rich::{ascii_casefold_contains, ascii_casefold_equal_exact};
+use prodex_mojo_core::rich::{
+    GeminiCompactErrorReason, ascii_casefold_equal_exact, gemini_compact_error_reason,
+};
 #[cfg(test)]
 use prodex_provider_core::GEMINI_PROVIDER_CORE_LOCAL_COMPACT_SUMMARY_PREFIX;
 use prodex_provider_core::{
@@ -42,30 +44,14 @@ pub(super) fn runtime_compact_reason(err: &anyhow::Error) -> &'static str {
     {
         "unavailable"
     } else {
-        let message = err.to_string();
-        let contains = |needle| {
-            ascii_casefold_contains(&message, needle)
-                .expect("Mojo compact error-text comparison failed")
-        };
-        if contains("timed out") || contains("timeout") {
-            "timeout"
-        } else if contains("unavailable")
-            || contains("connection refused")
-            || contains("could not connect")
-            || contains("failed to spawn")
+        match gemini_compact_error_reason(&err.to_string())
+            .expect("Mojo compact error-text classification failed")
         {
-            "unavailable"
-        } else if contains("unsupported") {
-            "unsupported"
-        } else if contains("parse")
-            || contains("missing")
-            || contains("no summary")
-            || contains("invalid")
-            || contains("unexpectedly returned")
-        {
-            "invalid-response"
-        } else {
-            "provider-error"
+            GeminiCompactErrorReason::Timeout => "timeout",
+            GeminiCompactErrorReason::Unavailable => "unavailable",
+            GeminiCompactErrorReason::Unsupported => "unsupported",
+            GeminiCompactErrorReason::InvalidResponse => "invalid-response",
+            GeminiCompactErrorReason::Provider => "provider-error",
         }
     }
 }
@@ -262,7 +248,8 @@ fn runtime_gemini_semantic_compact_response_parts_from_value(
     if !(200..300).contains(&status) {
         bail!("Gemini semantic compact returned HTTP {status}");
     }
-    let summary = gemini_provider_core_semantic_compact_summary(value, request_id);
+    let summary = gemini_provider_core_semantic_compact_summary(value, request_id)
+        .map_err(anyhow::Error::msg)?;
     if summary.is_empty() {
         bail!("Gemini semantic compact returned no summary text");
     }
@@ -401,6 +388,7 @@ mod tests {
     fn compact_reason_codes_are_bounded_and_content_free() {
         for (message, expected) in [
             ("request timed out while sending bearer secret", "timeout"),
+            ("timed out while parsing an invalid response", "timeout"),
             ("provider unavailable at private URL", "unavailable"),
             ("unsupported semantic compact", "unsupported"),
             ("failed to parse private response", "invalid-response"),
@@ -446,6 +434,15 @@ mod tests {
         assert!(text.contains("Investigate Gemini compact."));
         assert!(text.contains("tool call shell (call_1)"));
         assert!(text.contains("tests passed"));
+    }
+
+    #[test]
+    fn gemini_compact_response_body_preserves_unicode_and_escaping() {
+        let parts =
+            runtime_compact_response_parts("Résumé \"done\" — 続行", "gemini", "semantic", None);
+        let value: serde_json::Value = serde_json::from_slice(&parts.body).unwrap();
+        let text = value["output"][0]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("Résumé \"done\" — 続行"));
     }
 
     #[test]
@@ -523,6 +520,58 @@ mod tests {
     }
 
     #[test]
+    fn gemini_semantic_compact_request_preserves_affinity_and_metadata() {
+        let large_text = format!("{}終端", "é".repeat(100_000));
+        let body = serde_json::to_vec(&serde_json::json!({
+            "model": "auto",
+            "previous_response_id": "resp_gemini_owner",
+            "client_metadata": {"turn_id": "turn-例"},
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": large_text}]
+            }],
+            "tools": [{"type": "function", "name": "shell"}]
+        }))
+        .unwrap();
+
+        let translated = gemini_provider_core_semantic_compact_request_body(&body).unwrap();
+        let value: serde_json::Value = serde_json::from_slice(&translated).unwrap();
+        assert_eq!(value["previous_response_id"], "resp_gemini_owner");
+        assert_eq!(value["client_metadata"]["turn_id"], "turn-例");
+        assert!(
+            value["input"][0]["content"][0]["text"]
+                .as_str()
+                .unwrap()
+                .ends_with("終端")
+        );
+        assert!(value.get("tools").is_none());
+        assert_eq!(value["input"].as_array().unwrap().len(), 2);
+        assert_eq!(value["stream"], false);
+        assert_eq!(value["store"], false);
+    }
+
+    #[test]
+    fn gemini_semantic_compact_request_rejects_malformed_shapes() {
+        assert!(gemini_provider_core_semantic_compact_request_body(b"[]").is_err());
+        assert!(gemini_provider_core_semantic_compact_request_body(br#"{"input":{}}"#).is_err());
+    }
+
+    #[test]
+    fn gemini_semantic_compact_request_rejects_oversized_json() {
+        let body = serde_json::to_vec(&serde_json::json!({
+            "input": [{
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "x".repeat(16_777_216)}]
+            }]
+        }))
+        .unwrap();
+
+        assert!(gemini_provider_core_semantic_compact_request_body(&body).is_err());
+    }
+
+    #[test]
     fn gemini_semantic_compact_returns_codex_replacement_history() {
         let request = serde_json::to_vec(&serde_json::json!({
             "input": [
@@ -544,7 +593,10 @@ mod tests {
             "modelVersion": "gemini-2.5-pro",
             "candidates": [{
                 "content": {
-                    "parts": [{"text": "Goal: fix compact.\nTests: cargo test passed."}]
+                    "parts": [
+                        {"thought": true, "text": "internal reasoning"},
+                        {"text": "Goal: fix compact.\nTests: cargo test passed."}
+                    ]
                 },
                 "finishReason": "STOP"
             }]
@@ -573,6 +625,7 @@ mod tests {
         assert!(text.contains("focused tests passed"));
         assert!(text.contains("Goal: fix compact."));
         assert!(text.contains("Tests: cargo test passed."));
+        assert!(!text.contains("internal reasoning"));
         assert!(text.contains("Continue the active user request."));
     }
 
