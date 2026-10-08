@@ -198,6 +198,82 @@ def prodex_mojo_super_expose_route_v1(
 
 comptime SUPER_EXPOSE_MODE_FULL: Int64 = 0
 comptime SUPER_EXPOSE_MODE_EXEC: Int64 = 1
+comptime SUPER_EXPOSE_MAX_CONCURRENCY_PRESETS: Int64 = 32
+
+@export("prodex_mojo_super_expose_concurrency_plan_v1")
+def prodex_mojo_super_expose_concurrency_plan_v1(
+    abi_version: Int64,
+    default_value: Int64,
+    preset_address: UInt,
+    preset_count: Int64,
+    hard_max: Int64,
+    selected_index: Int64,
+    menu_address: UInt,
+    menu_capacity: Int64,
+    menu_count_address: UInt,
+    selected_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_EXPOSE_ABI_VERSION:
+        return 4
+    if (
+        default_value < 1
+        or hard_max < default_value
+        or preset_count < 0
+        or preset_count > SUPER_EXPOSE_MAX_CONCURRENCY_PRESETS
+        or (preset_count > 0 and preset_address == 0)
+        or selected_index < -1
+        or selected_index > preset_count + 1
+        or menu_capacity < (preset_count + 2) * 2
+        or menu_address == 0
+        or menu_count_address == 0
+        or selected_address == 0
+    ):
+        return 1
+
+    if preset_count > 0:
+        var presets = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+            unsafe_from_address=Int(preset_address)
+        )
+        for index in range(preset_count):
+            var value = presets[unsafe_offset=index]
+            if value < 1 or value > hard_max:
+                return 1
+            for prior in range(index):
+                if presets[unsafe_offset=prior] == value:
+                    return 1
+
+    var menu = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(menu_address)
+    )
+    var choice_count = preset_count + 2
+    for index in range(choice_count):
+        if index == 0:
+            menu[unsafe_offset=index * 2] = 0
+            menu[unsafe_offset=index * 2 + 1] = default_value
+        elif index <= preset_count:
+            var presets = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+                unsafe_from_address=Int(preset_address)
+            )
+            menu[unsafe_offset=index * 2] = 1
+            menu[unsafe_offset=index * 2 + 1] = presets[unsafe_offset=index - 1]
+        else:
+            menu[unsafe_offset=index * 2] = 2
+            menu[unsafe_offset=index * 2 + 1] = 0
+
+    var menu_count = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(menu_count_address)
+    )
+    menu_count[] = choice_count
+    var selected = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(selected_address)
+    )
+    if selected_index < 0:
+        selected[unsafe_offset=0] = -1
+        selected[unsafe_offset=1] = -1
+    else:
+        selected[unsafe_offset=0] = menu[unsafe_offset=selected_index * 2]
+        selected[unsafe_offset=1] = menu[unsafe_offset=selected_index * 2 + 1]
+    return 0
 
 @export("prodex_mojo_super_expose_tool_allowed_v1")
 def prodex_mojo_super_expose_tool_allowed_v1(

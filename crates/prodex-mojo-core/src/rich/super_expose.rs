@@ -7,6 +7,11 @@ pub use tunnel::{super_expose_tunnel_client_version_output_valid, super_expose_t
 
 const SUPER_EXPOSE_ABI_VERSION: i64 = 1;
 const SUPER_EXPOSE_MAX_NAME_BYTES: usize = 128;
+const SUPER_EXPOSE_MAX_CONCURRENCY_PRESETS: usize = 32;
+
+#[cfg(test)]
+#[path = "super_expose/tests.rs"]
+mod concurrency_tests;
 
 #[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,6 +71,25 @@ unsafe extern "C" {
         tool_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_mojo_super_expose_concurrency_plan_v1(
+        abi_version: i64,
+        default_value: i64,
+        preset_address: u64,
+        preset_count: i64,
+        hard_max: i64,
+        selected_index: i64,
+        menu_address: u64,
+        menu_capacity: i64,
+        menu_count_address: u64,
+        selected_address: u64,
+    ) -> i64;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuperExposeConcurrencyChoice {
+    Default,
+    Preset(u16),
+    Custom,
 }
 
 pub fn super_expose_route(method: &str, tool: Option<&str>) -> Result<SuperExposeRoute, MojoError> {
@@ -188,37 +212,74 @@ pub fn super_expose_tool_allowed(exec_only: bool, tool: &str) -> Result<bool, Mo
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn tunnel_client_version_policy_accepts_official_format_across_versions() {
-        for value in [
-            "0.0.13+4b5267f823be0b046bb883aacb51603cfde3a0ea (git sha: 4b5267f823be0b046bb883aacb51603cfde3a0ea)",
-            "0.0.15+a390c168ff1b2d14e73a95991c186c6aba3ff5a0 (git sha: a390c168ff1b2d14e73a95991c186c6aba3ff5a0)",
-            "0.0.16+1111111111111111111111111111111111111111 (git sha: 1111111111111111111111111111111111111111)",
-        ] {
-            assert!(
-                super_expose_tunnel_client_version_output_valid(value).unwrap(),
-                "{value}"
-            );
-        }
+pub fn super_expose_concurrency_plan(
+    default_value: u16,
+    presets: &[u16],
+    hard_max: u16,
+    selected_index: Option<usize>,
+) -> Result<
+    (
+        Vec<SuperExposeConcurrencyChoice>,
+        Option<SuperExposeConcurrencyChoice>,
+    ),
+    MojoError,
+> {
+    ensure_rich_abi()?;
+    if presets.len() > SUPER_EXPOSE_MAX_CONCURRENCY_PRESETS {
+        return Err(MojoError::InvalidInput);
     }
-
-    #[test]
-    fn tunnel_client_version_policy_rejects_malformed_official_format() {
-        for value in [
-            "0.0.15+1111111111111111111111111111111111111111 (git sha: 2222222222222222222222222222222222222222)",
-            "0.0.15+not-a-git-sha (git sha: not-a-git-sha)",
-            "0.0.15",
-        ] {
-            assert!(
-                !super_expose_tunnel_client_version_output_valid(value).unwrap(),
-                "{value}"
-            );
-        }
+    let choice_count = presets.len() + 2;
+    let preset_values = presets
+        .iter()
+        .map(|value| i64::from(*value))
+        .collect::<Vec<_>>();
+    let mut menu = vec![-1_i64; choice_count * 2];
+    let mut menu_count = -1_i64;
+    let mut selected = [-1_i64; 2];
+    let selected_requested = selected_index.is_some();
+    let selected_index = selected_index.map_or(Ok(-1), |index| {
+        i64::try_from(index).map_err(|_| MojoError::InvalidInput)
+    })?;
+    let status = unsafe {
+        prodex_mojo_super_expose_concurrency_plan_v1(
+            SUPER_EXPOSE_ABI_VERSION,
+            i64::from(default_value),
+            preset_values.as_ptr() as usize as u64,
+            i64::try_from(presets.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(hard_max),
+            selected_index,
+            mojo_mut_pointer_address(menu.as_mut_ptr()),
+            i64::try_from(menu.len()).map_err(|_| MojoError::InvalidInput)?,
+            mojo_mut_pointer_address(&mut menu_count),
+            mojo_mut_pointer_address(selected.as_mut_ptr()),
+        )
+    };
+    super_expose_status(status)?;
+    if menu_count != choice_count as i64 {
+        return Err(MojoError::InvalidOutput);
     }
+    let decode = |kind, value| match kind {
+        0 if value == i64::from(default_value) => Ok(SuperExposeConcurrencyChoice::Default),
+        1 if u16::try_from(value)
+            .is_ok_and(|value| value <= hard_max && presets.contains(&value)) =>
+        {
+            Ok(SuperExposeConcurrencyChoice::Preset(
+                u16::try_from(value).map_err(|_| MojoError::InvalidOutput)?,
+            ))
+        }
+        2 if value == 0 => Ok(SuperExposeConcurrencyChoice::Custom),
+        _ => Err(MojoError::InvalidOutput),
+    };
+    let choices = menu
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|choice| decode(choice[0], choice[1]))
+        .collect::<Result<Vec<_>, _>>()?;
+    let selected = selected_requested
+        .then(|| decode(selected[0], selected[1]))
+        .transpose()?;
+    Ok((choices, selected))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
