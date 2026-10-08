@@ -16,8 +16,8 @@ from rich_text import rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
 
 comptime THREAD_INDEX_ABI_VERSION: Int64 = 1
-comptime THREAD_INDEX_MAX_JSON_BYTES: Int64 = 4 * 1024 * 1024
-comptime THREAD_INDEX_MAX_JSON_NODES: Int64 = 65_536
+comptime THREAD_INDEX_MAX_JSON_BYTES: Int64 = 64 * 1024 * 1024
+comptime THREAD_INDEX_MAX_JSON_NODES: Int64 = 1_048_576
 comptime THREAD_INDEX_MAX_SEEN_CURSORS: Int64 = 65_536
 comptime THREAD_INDEX_MAX_SEEN_CURSOR_BYTES: Int64 = 16 * 1024 * 1024
 
