@@ -6349,6 +6349,36 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "profile/affinity fact acquisition, runtime fallback lookup, typed boolean marshalling, and quota-replay effects"
+    },
+    {
+      "name": "gemini_response_media_projection",
+      "domain": "provider/gemini",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust projected Gemini inline/file/data-URL media, executable/code-result text, video metadata text, and image-generation items",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_response_media_v1",
+      "mojo_abi_version": 1,
+      "mojo_operation_ids": {
+        "content": 0,
+        "special_text": 1,
+        "image_generation": 2
+      },
+      "mojo_source": "mojo/prodex_core/gemini_response_media.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
+      "consumer_marker": "prodex_mojo_core::rich::gemini_response_media",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
+        "crates/prodex-provider-core/src/translators/gemini/response/build.rs",
+        "crates/prodex-provider-core/src/translators/gemini/response/chat_messages.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
+      "rust_owner_before": "Gemini media MIME inference and response-part projection",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "direct compiled Mojo fixtures and provider-core caller expectations cover inline/file/data-URL media, special text, image-generation items, Unicode, aliases, and malformed/oversized inputs",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde Value acquisition, caller-owned JSON-tree construction, bounded ABI invocation, and returned JSON decoding; response ordering and envelope assembly remain Rust adapters"
     }
   ],
   "rust_semantic_reductions": [
@@ -7264,6 +7294,24 @@
         "release_marker": "prodex_mojo_core::profile_ui_policy::value_color"
       },
       "cleanup_evidence": "Pure profile-screen geometry and color branches now execute through the Mojo ABI; Rust retains only terminal/ratatui effects and typed adaptation."
+    },
+    {
+      "file": "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
+      "symbol": "gemini_media_content_item_from_part; gemini_text_from_special_part; gemini_image_generation_call_item_from_part",
+      "operation": "gemini_response_media_projection",
+      "previous_responsibility": "Gemini response media MIME inference, data-URL parsing, special-part text formatting, and image-generation item shaping",
+      "baseline_semantic_loc": 138,
+      "migrated_semantic_loc": 138,
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
+      "rust_after": "Rust builds the borrowed Serde JSON tree and materializes the validated Mojo JSON result",
+      "mojo_owner": "mojo/prodex_core/gemini_response_media.mojo::gemini_response_media_kernel_v1",
+      "mojo_source": "mojo/prodex_core/gemini_response_media.mojo",
+      "mojo_entry": "prodex_mojo_gemini_response_media_v1",
+      "production_consumer": "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/gemini_response_media.rs",
+      "performance": "one bounded parsed-tree Mojo call per response part projection",
+      "cleanup_evidence": "The prior Rust MIME, data-URL, special-text, and image-generation shaping branches are deleted; direct Mojo and provider-core caller tests retain fixed expected values."
     }
   ],
   "deleted_authoritative_operations": [

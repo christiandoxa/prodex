@@ -79,6 +79,9 @@ pub use gemini_response::{
     GeminiResponseKernelOperation, gemini_buffered_response_kernel,
     gemini_chat_assistant_response_kernel, gemini_response_kernel,
 };
+#[path = "rich/gemini_response_media.rs"]
+mod gemini_response_media;
+pub use gemini_response_media::{GeminiResponseMediaOperation, gemini_response_media};
 #[path = "rich/gemini_compact_snippet.rs"]
 mod gemini_compact_snippet;
 pub use gemini_compact_snippet::{
