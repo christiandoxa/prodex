@@ -1,9 +1,10 @@
 
 from std.memory import Pointer
+from json_sink import JsonSink, js_byte, js_literal
 from parsed_json import (
-    JSON_ARRAY, JSON_OBJECT, JSON_STRING, ParsedJson, ParsedJsonNode, pj_valid,
+    JSON_ARRAY, JSON_NUMBER, JSON_OBJECT, JSON_STRING, ParsedJson, ParsedJsonNode, pj_valid,
 )
-from rich_text import rich_view_valid
+from rich_text import rich_trim_bounds, rich_view_matches_literal, rich_view_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
 
 
@@ -17,6 +18,151 @@ comptime PROVIDER_ERROR_REJECTION_ABI: Int64 = 1
 comptime PROVIDER_ERROR_REJECTION_MAX_NODES: Int64 = 65537
 comptime PROVIDER_ERROR_REJECTION_MAX_RAW_BYTES: Int64 = 1048576
 comptime PROVIDER_ERROR_REJECTION_MAX_INPUT_BYTES: Int64 = 65536
+
+comptime PROVIDER_ERROR_CODES_ABI_VERSION: Int64 = 1
+
+
+def provider_error_code_key(key: ProdexRichStringView) -> Bool:
+    return (
+        rich_view_matches_literal["code"](key, False)
+        or rich_view_matches_literal["status"](key, False)
+        or rich_view_matches_literal["reason"](key, False)
+        or rich_view_matches_literal["type"](key, False)
+    )
+
+
+def provider_error_write_code(
+    sink: Pointer[mut=True, JsonSink, _], value: ProdexRichStringView, first: Bool
+) -> Bool:
+    var bounds = rich_trim_bounds(value)
+    if bounds[1] <= bounds[0]:
+        return first
+    if not first:
+        js_byte(sink, 44)
+    js_byte(sink, 34)
+    var ptr = rich_view_ptr(value)
+    for index in range(bounds[0], bounds[1]):
+        var byte = ptr[unsafe_offset=index]
+        if byte == 34 or byte == 92:
+            js_byte(sink, 92)
+            js_byte(sink, byte)
+        elif byte == 8:
+            js_literal(sink, StringSlice("\\b"))
+        elif byte == 9:
+            js_literal(sink, StringSlice("\\t"))
+        elif byte == 10:
+            js_literal(sink, StringSlice("\\n"))
+        elif byte == 12:
+            js_literal(sink, StringSlice("\\f"))
+        elif byte == 13:
+            js_literal(sink, StringSlice("\\r"))
+        elif byte < 32:
+            js_literal(sink, StringSlice("\\u00"))
+            var high = byte >> 4
+            var low = byte & 15
+            js_byte(sink, high + UInt8(48 if high < 10 else 87))
+            js_byte(sink, low + UInt8(48 if low < 10 else 87))
+        else:
+            if byte >= 65 and byte <= 90:
+                byte = byte + 32
+            js_byte(sink, byte)
+    js_byte(sink, 34)
+    return False
+
+
+def provider_error_codes_emit(
+    sink: Pointer[mut=True, JsonSink, _], tree: ParsedJson
+) -> Bool:
+    js_byte(sink, 91)
+    var first = True
+    var node: Int64 = 0
+    while node >= 0:
+        var current = tree.nodes[unsafe_offset=node].copy()
+        if (
+            current.parent >= 0
+            and tree.nodes[unsafe_offset=current.parent].kind == JSON_OBJECT
+            and provider_error_code_key(current.key)
+            and (current.kind == JSON_STRING or current.kind == JSON_NUMBER)
+        ):
+            var value = current.text.copy()
+            if current.kind == JSON_NUMBER:
+                value = ProdexRichStringView(
+                    tree.raw.ptr + UInt(current.raw_start), UInt(current.raw_length)
+                )
+            first = provider_error_write_code(sink, value, first)
+        if current.first_child >= 0:
+            node = current.first_child
+            continue
+        while node >= 0 and tree.nodes[unsafe_offset=node].next_sibling < 0:
+            node = tree.nodes[unsafe_offset=node].parent
+        if node >= 0:
+            node = tree.nodes[unsafe_offset=node].next_sibling
+    js_byte(sink, 93)
+    return not sink[].failed
+
+
+@export("prodex_mojo_provider_error_codes_v1")
+def prodex_mojo_provider_error_codes_v1(
+    abi: Int64,
+    operation: Int64,
+    flag: Int64,
+    nodes_address: UInt64,
+    nodes_count: Int64,
+    raw_address: UInt64,
+    raw_length: Int64,
+    scratch_address: UInt64,
+    scratch_count: Int64,
+    measuring: Int64,
+    output_address: UInt64,
+    output_capacity: Int64,
+    metadata_address: UInt64,
+) abi("C") -> Int64:
+    if (
+        abi != PROVIDER_ERROR_CODES_ABI_VERSION
+        or operation != 0
+        or flag != 0
+        or nodes_address == 0
+        or nodes_count <= 0
+        or raw_address == 0
+        or raw_length <= 0
+        or scratch_address == 0
+        or scratch_count < nodes_count
+        or metadata_address == 0
+        or measuring < 0
+        or measuring > 1
+        or output_capacity < 0
+    ):
+        return 1
+    if measuring == 1:
+        if output_address != 0 or output_capacity != 0:
+            return 1
+    elif output_address == 0:
+        return 1
+    var tree = ParsedJson(
+        Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](
+            unsafe_from_address=Int(nodes_address)
+        ),
+        nodes_count,
+        ProdexRichStringView(UInt(raw_address), UInt(raw_length)),
+    )
+    if not pj_valid(tree):
+        return 1
+    var sink = JsonSink(
+        Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address)),
+        output_capacity,
+        0,
+        measuring == 1,
+        False,
+    )
+    var success = provider_error_codes_emit(Pointer(to=sink), tree)
+    var metadata = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(metadata_address)
+    )
+    metadata[unsafe_offset=0] = 1
+    metadata[unsafe_offset=1] = sink.written
+    if not success or sink.failed:
+        return 3 if sink.failed else 1
+    return 0
 
 
 def provider_error_ascii_space(value: UInt8) -> Bool:

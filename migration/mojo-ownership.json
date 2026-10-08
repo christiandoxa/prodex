@@ -706,7 +706,8 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "provider_error_request_member_rejection"
+          "provider_error_request_member_rejection",
+          "provider_error_code_extraction"
         ]
       },
       {
@@ -6192,6 +6193,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "reqwest transport error detection, borrowed error text, typed enum mapping, and log/response label selection"
+    },
+    {
+      "name": "provider_error_code_extraction",
+      "domain": "provider/error",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust-recursive provider error body token extraction",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_provider_error_codes_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/provider_error.mojo",
+      "consumer": "crates/prodex-provider-core/src/errors/body.rs",
+      "consumer_marker": "prodex_mojo_core::json::provider_error_codes_json",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/errors/body.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/errors/body.rs",
+      "rust_owner_before": "recursive JSON/SSE traversal, structured code/status/reason/type field selection, token trimming, and ASCII case normalization",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "provider-core body tests cover nested ordering, SSE framing, Unicode whitespace, and message exclusion",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON/SSE acquisition, Document tree construction, and bounded Mojo result decoding"
     }
   ],
   "rust_semantic_reductions": [
