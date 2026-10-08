@@ -130,7 +130,8 @@ pub(super) fn runtime_affinity_selection_decision(
             turn_state_profile: selection.turn_state_profile,
             session_profile: selection.session_profile,
         },
-    )?;
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo hard-binding conflict policy failed: {error:?}"))?;
     if hard_binding_conflict {
         return Ok(
             match runtime_proxy_crate::runtime_affinity_outcome(
