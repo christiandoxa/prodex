@@ -1373,6 +1373,26 @@
         "operations": [
           "profile_screen_geometry_and_value_color_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_responses_quota.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_responses_turn_state_quota_replay_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_responses_quota.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_responses_turn_state_quota_replay_policy"
+        ]
       }
     ],
     "removed": [
@@ -6306,6 +6326,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Content-Length extraction, bounded request body reads, error classification, and HTTP response construction"
+    },
+    {
+      "name": "runtime_responses_turn_state_quota_replay_policy",
+      "domain": "runtime-proxy/responses-quota",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust combined continuation facts before checking runtime fallback availability for full-history replay without turn state",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_responses_quota_turn_state_replay_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_responses_quota.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/responses/quota_blocked.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_responses_quota::turn_state_full_context_replay_candidate(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/responses/quota_blocked.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_responses_quota.rs",
+      "rust_owner_before": "Turn-state quota replay required no previous response, a matching turn-state owner, no compact follow-up, reconstructable full history, and a route-eligible fallback",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct versioned Mojo ABI cases and Responses quota caller regressions cover replay and fail-closed behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "profile/affinity fact acquisition, runtime fallback lookup, typed boolean marshalling, and quota-replay effects"
     }
   ],
   "rust_semantic_reductions": [

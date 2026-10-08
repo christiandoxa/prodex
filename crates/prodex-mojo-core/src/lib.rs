@@ -180,6 +180,8 @@ pub mod runtime_proxy_body_limit;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_repo_map;
 #[cfg(feature = "mojo-runtime")]
+pub mod runtime_responses_quota;
+#[cfg(feature = "mojo-runtime")]
 pub mod runtime_route_reason;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_state;

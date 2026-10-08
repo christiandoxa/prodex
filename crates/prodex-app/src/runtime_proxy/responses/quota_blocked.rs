@@ -233,12 +233,21 @@ pub(super) fn handle_runtime_responses_quota_blocked(
             return Ok(RuntimeResponsesQuotaBlockedAction::Return(Box::new(retry)));
         }
 
-        let turn_state_full_context_replay = previous_response_id.is_none()
-            && request_turn_state.is_some()
-            && affinity_state.turn_state_profile() == Some(profile_name.as_str())
-            && affinity_state.compact_followup_profile_name().is_none()
-            && request_reconstructable_full_history
-            && runtime_responses_full_context_fallback_available(
+        let turn_state_owner_matches =
+            runtime_proxy_crate::runtime_candidate_no_rotate_affinity(
+                affinity_state.candidate_affinity(&profile_name),
+            ) == Some(runtime_proxy_crate::RuntimeNoRotateAffinity::TurnState);
+        let turn_state_full_context_replay =
+            prodex_mojo_core::runtime_responses_quota::turn_state_full_context_replay_candidate(
+                previous_response_id.is_some(),
+                request_turn_state.is_some(),
+                turn_state_owner_matches,
+                affinity_state.compact_followup_profile_name().is_some(),
+                request_reconstructable_full_history,
+            )
+            .map_err(|error| {
+                anyhow::anyhow!("Mojo Responses quota replay planning failed: {error:?}")
+            })? && runtime_responses_full_context_fallback_available(
                 shared,
                 &profile_name,
                 prompt_cache_key,

@@ -315,6 +315,14 @@ fn responses_post_compaction_turn_state_usage_limit_replays_to_ready_profile_wit
             .and_then(|metadata| metadata.get("x-codex-turn-state")),
         None
     );
+    assert_eq!(
+        replay["input"],
+        serde_json::json!([
+            {"type":"message","role":"user","content":"compacted history"},
+            {"type":"message","role":"assistant","content":"completed work"},
+            {"type":"message","role":"user","content":"continue"},
+        ])
+    );
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(
         log.contains("quota_blocked_turn_state_full_context_replay")
