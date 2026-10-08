@@ -179,6 +179,8 @@ pub mod runtime_state_quota;
 #[cfg(feature = "mojo-runtime")]
 pub mod secret_policy;
 #[cfg(feature = "mojo-runtime")]
+pub mod session_cli_policy;
+#[cfg(feature = "mojo-runtime")]
 pub mod shared_attachment_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod shared_history_policy;
