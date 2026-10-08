@@ -628,70 +628,76 @@ fn handle_runtime_responses_non_success(
                 .map(|(name, value)| (name.as_str(), value.as_slice())),
         )
     });
-    let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
     let invalid_previous_response_id =
         runtime_proxy_crate::runtime_proxy_body_is_invalid_previous_response_id(&parts.body);
     let retryable_previous =
         status == 400 && extract_runtime_proxy_previous_response_message(&parts.body).is_some();
+    let token_invalidated = runtime_proxy_body_indicates_token_invalidated(&parts.body);
     let response = RuntimeResponsesReply::Buffered(parts);
-    if status == 401 {
-        note_runtime_profile_auth_failure(
-            shared,
-            profile_name,
-            RuntimeRouteKind::Responses,
-            status,
-        );
-        return Ok(Some(RuntimeResponsesAttempt::AuthFailed {
-            profile_name: profile_name.to_string(),
-            response,
-        }));
+    match runtime_proxy_crate::runtime_responses_precommit_attempt_plan(
+        status,
+        error_policy.class,
+        error_policy.action,
+        retryable_previous,
+        token_invalidated,
+        false, // A buffered non-success response has not committed a stream.
+    ) {
+        runtime_proxy_crate::RuntimeResponsesPrecommitAttemptPlan::AuthFailed => {
+            note_runtime_profile_auth_failure(
+                shared,
+                profile_name,
+                RuntimeRouteKind::Responses,
+                status,
+            );
+            Ok(Some(RuntimeResponsesAttempt::AuthFailed {
+                profile_name: profile_name.to_string(),
+                response,
+            }))
+        }
+        runtime_proxy_crate::RuntimeResponsesPrecommitAttemptPlan::QuotaBlocked => {
+            Ok(Some(RuntimeResponsesAttempt::QuotaBlocked {
+                profile_name: profile_name.to_string(),
+                response,
+            }))
+        }
+        runtime_proxy_crate::RuntimeResponsesPrecommitAttemptPlan::RateLimited => {
+            Ok(Some(RuntimeResponsesAttempt::RateLimited {
+                profile_name: profile_name.to_string(),
+                response,
+                retry_after,
+            }))
+        }
+        runtime_proxy_crate::RuntimeResponsesPrecommitAttemptPlan::Overloaded => {
+            Ok(Some(RuntimeResponsesAttempt::Overloaded {
+                profile_name: profile_name.to_string(),
+                response,
+            }))
+        }
+        runtime_proxy_crate::RuntimeResponsesPrecommitAttemptPlan::PreviousResponseNotFound => {
+            Ok(Some(RuntimeResponsesAttempt::PreviousResponseNotFound {
+                profile_name: profile_name.to_string(),
+                response,
+                turn_state: response_turn_state,
+                invalid_previous_response_id,
+            }))
+        }
+        runtime_proxy_crate::RuntimeResponsesPrecommitAttemptPlan::Success {
+            note_auth_failure,
+        } => {
+            if note_auth_failure {
+                note_runtime_profile_auth_failure(
+                    shared,
+                    profile_name,
+                    RuntimeRouteKind::Responses,
+                    status,
+                );
+            }
+            Ok(Some(RuntimeResponsesAttempt::Success {
+                profile_name: profile_name.to_string(),
+                response,
+            }))
+        }
     }
-    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
-        && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::Quota
-    {
-        return Ok(Some(RuntimeResponsesAttempt::QuotaBlocked {
-            profile_name: profile_name.to_string(),
-            response,
-        }));
-    }
-    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
-        && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::RateLimited
-    {
-        return Ok(Some(RuntimeResponsesAttempt::RateLimited {
-            profile_name: profile_name.to_string(),
-            response,
-            retry_after,
-        }));
-    }
-    if error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RetryProfile
-        || (error_policy.action == runtime_proxy_crate::RuntimeHttpErrorAction::RotateProfile
-            && error_policy.class == runtime_proxy_crate::RuntimeHttpErrorClass::ProfileUnavailable)
-    {
-        return Ok(Some(RuntimeResponsesAttempt::Overloaded {
-            profile_name: profile_name.to_string(),
-            response,
-        }));
-    }
-    if retryable_previous {
-        return Ok(Some(RuntimeResponsesAttempt::PreviousResponseNotFound {
-            profile_name: profile_name.to_string(),
-            response,
-            turn_state: response_turn_state,
-            invalid_previous_response_id,
-        }));
-    }
-    if status == 401 || token_invalidated {
-        note_runtime_profile_auth_failure(
-            shared,
-            profile_name,
-            RuntimeRouteKind::Responses,
-            status,
-        );
-    }
-    Ok(Some(RuntimeResponsesAttempt::Success {
-        profile_name: profile_name.to_string(),
-        response,
-    }))
 }
 
 struct RuntimeResponsesSuccessAttemptContext {

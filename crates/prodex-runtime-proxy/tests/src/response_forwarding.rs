@@ -328,6 +328,116 @@ fn current_codex_reasoning_first_fixture_times_final_usage() {
 }
 
 #[test]
+fn responses_precommit_attempt_plan_preserves_precedence_and_commit_boundary() {
+    let plan = |status, class, action, retryable_previous, token_invalidated, committed| {
+        runtime_responses_precommit_attempt_plan(
+            status,
+            class,
+            action,
+            retryable_previous,
+            token_invalidated,
+            committed,
+        )
+    };
+
+    assert_eq!(
+        plan(
+            401,
+            RuntimeHttpErrorClass::Other,
+            RuntimeHttpErrorAction::PassThrough,
+            false,
+            false,
+            false,
+        ),
+        RuntimeResponsesPrecommitAttemptPlan::AuthFailed
+    );
+    assert_eq!(
+        plan(
+            429,
+            RuntimeHttpErrorClass::Quota,
+            RuntimeHttpErrorAction::RotateProfile,
+            false,
+            false,
+            false,
+        ),
+        RuntimeResponsesPrecommitAttemptPlan::QuotaBlocked
+    );
+    assert_eq!(
+        plan(
+            429,
+            RuntimeHttpErrorClass::RateLimited,
+            RuntimeHttpErrorAction::RetryProfile,
+            false,
+            false,
+            false,
+        ),
+        RuntimeResponsesPrecommitAttemptPlan::RateLimited
+    );
+    assert_eq!(
+        plan(
+            503,
+            RuntimeHttpErrorClass::TransientServer,
+            RuntimeHttpErrorAction::RetryProfile,
+            false,
+            false,
+            false,
+        ),
+        RuntimeResponsesPrecommitAttemptPlan::Overloaded
+    );
+    assert_eq!(
+        plan(
+            400,
+            RuntimeHttpErrorClass::Other,
+            RuntimeHttpErrorAction::PassThrough,
+            true,
+            true,
+            false,
+        ),
+        RuntimeResponsesPrecommitAttemptPlan::PreviousResponseNotFound
+    );
+    assert_eq!(
+        plan(
+            403,
+            RuntimeHttpErrorClass::Other,
+            RuntimeHttpErrorAction::PassThrough,
+            false,
+            true,
+            false,
+        ),
+        RuntimeResponsesPrecommitAttemptPlan::Success {
+            note_auth_failure: true,
+        }
+    );
+    assert_eq!(
+        plan(
+            429,
+            RuntimeHttpErrorClass::Quota,
+            RuntimeHttpErrorAction::RotateProfile,
+            false,
+            false,
+            true,
+        ),
+        RuntimeResponsesPrecommitAttemptPlan::Success {
+            note_auth_failure: false,
+        }
+    );
+}
+
+#[test]
+fn responses_precommit_attempt_plan_rejects_invalid_abi_tags() {
+    let result = unsafe {
+        prodex_runtime_response_forwarding_classify_v1(
+            super::RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT,
+            0,
+            0,
+            0,
+            6_u64 << 16,
+        )
+    };
+    assert_eq!(result, -1);
+}
+
+#[test]
 fn live_token_usage_progress_is_cumulative_and_rate_limited() {
     let mut progress = RuntimeTokenUsageProgress::default();
     let start = std::time::Instant::now();

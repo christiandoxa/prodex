@@ -13,6 +13,15 @@ comptime RESPONSE_FORWARDING_RECORD_RESPONSE_IDS: Int64 = 5
 comptime RESPONSE_FORWARDING_COMMITTED_PREVIOUS_RESPONSE_NOT_FOUND: Int64 = 6
 comptime RESPONSE_FORWARDING_GENERATION_START_ONCE: Int64 = 7
 comptime RESPONSE_FORWARDING_USAGE_EVENT_LIVE: Int64 = 8
+comptime RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT: Int64 = 9
+
+comptime RESPONSE_ATTEMPT_SUCCESS: Int64 = 0
+comptime RESPONSE_ATTEMPT_AUTH_FAILED: Int64 = 1
+comptime RESPONSE_ATTEMPT_QUOTA_BLOCKED: Int64 = 2
+comptime RESPONSE_ATTEMPT_RATE_LIMITED: Int64 = 3
+comptime RESPONSE_ATTEMPT_OVERLOADED: Int64 = 4
+comptime RESPONSE_ATTEMPT_PREVIOUS_RESPONSE_NOT_FOUND: Int64 = 5
+comptime RESPONSE_ATTEMPT_AUTH_FAILURE_NOTICE: Int64 = 8
 
 comptime RESPONSE_USAGE_PROGRESS_ABI_VERSION: Int64 = 1
 comptime RESPONSE_USAGE_PROGRESS_IGNORE: Int64 = 0
@@ -134,6 +143,35 @@ def response_generation_start(address: UInt, length: Int64) -> Bool:
     )
 
 
+def response_precommit_attempt_plan(numeric: UInt64) -> Int64:
+    # Rust packs status, the existing Mojo error class/action tags, and the
+    # caller-owned response observations into this scalar. Mojo owns only the
+    # deterministic outcome precedence; Rust retains response/effect handling.
+    var status = numeric & 0xffff
+    var class_tag = (numeric >> 16) & 0x7
+    var action_tag = (numeric >> 19) & 0x3
+    var retryable_previous = ((numeric >> 21) & 1) == 1
+    var token_invalidated = ((numeric >> 22) & 1) == 1
+    var committed = ((numeric >> 23) & 1) == 1
+    if class_tag > 5 or action_tag > 2:
+        return -1
+    if committed:
+        return RESPONSE_ATTEMPT_SUCCESS
+    if status == 401:
+        return RESPONSE_ATTEMPT_AUTH_FAILED
+    if action_tag == 1 and class_tag == 1:
+        return RESPONSE_ATTEMPT_QUOTA_BLOCKED
+    if action_tag == 2 and class_tag == 2:
+        return RESPONSE_ATTEMPT_RATE_LIMITED
+    if action_tag == 2 or (action_tag == 1 and class_tag == 3):
+        return RESPONSE_ATTEMPT_OVERLOADED
+    if retryable_previous:
+        return RESPONSE_ATTEMPT_PREVIOUS_RESPONSE_NOT_FOUND
+    if token_invalidated:
+        return RESPONSE_ATTEMPT_AUTH_FAILURE_NOTICE
+    return RESPONSE_ATTEMPT_SUCCESS
+
+
 @export("prodex_runtime_response_forwarding_classify_v1")
 def prodex_runtime_response_forwarding_classify_v1(
     operation: Int64,
@@ -144,7 +182,7 @@ def prodex_runtime_response_forwarding_classify_v1(
 ) abi("C") -> Int64:
     if (
         operation < RESPONSE_FORWARDING_SKIP_HEADER
-        or operation > RESPONSE_FORWARDING_USAGE_EVENT_LIVE
+        or operation > RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT
         or present < 0
         or present > 1
         or length < 0
@@ -227,6 +265,11 @@ def prodex_runtime_response_forwarding_classify_v1(
             and present == 1
             and response_generation_start(address, length)
         )
+
+    if operation == RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT:
+        if present != 0:
+            return -1
+        return response_precommit_attempt_plan(_numeric)
 
     return Int64(
         present == 1
