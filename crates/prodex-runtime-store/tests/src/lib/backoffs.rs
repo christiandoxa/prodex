@@ -163,8 +163,45 @@ fn cleared_backoff_is_not_resurrected_by_stale_snapshot() {
 
     let merged = merge_runtime_profile_backoffs(&stale, &cleared, &profiles, 100);
     assert!(!merged.retry_backoff_until.contains_key("alpha"));
+    assert_eq!(
+        merged.updated_at[&runtime_profile_retry_backoff_update_key("alpha")],
+        2_000
+    );
     let merged_again = merge_runtime_profile_backoffs(&merged, &stale, &profiles, 100);
     assert!(!merged_again.retry_backoff_until.contains_key("alpha"));
+}
+
+#[test]
+fn backoff_merge_uses_mojo_timestamp_ties_without_crossing_signal_maps() {
+    let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
+    let transport_key = runtime_profile_transport_backoff_key("alpha", RuntimeRouteKind::Responses);
+    let circuit_key = runtime_profile_route_circuit_key("alpha", RuntimeRouteKind::Responses);
+    let retry_update = runtime_profile_retry_backoff_update_key("alpha");
+    let transport_update = runtime_profile_transport_backoff_update_key(&transport_key);
+    let circuit_update = runtime_profile_route_circuit_update_key(&circuit_key);
+    let existing = RuntimeProfileBackoffs {
+        retry_backoff_until: BTreeMap::from([("alpha".to_string(), 300)]),
+        transport_backoff_until: BTreeMap::from([(transport_key.clone(), 400)]),
+        route_circuit_open_until: BTreeMap::from([(circuit_key.clone(), 500)]),
+        updated_at: BTreeMap::from([
+            (retry_update.clone(), 1_000),
+            (transport_update.clone(), 2_000),
+            (circuit_update.clone(), 3_000),
+        ]),
+    };
+    let incoming = RuntimeProfileBackoffs {
+        transport_backoff_until: BTreeMap::from([(transport_key.clone(), 450)]),
+        updated_at: BTreeMap::from([(retry_update, 1_000), (transport_update.clone(), 2_500)]),
+        ..RuntimeProfileBackoffs::default()
+    };
+
+    let merged = merge_runtime_profile_backoffs(&existing, &incoming, &profiles, 100);
+
+    assert!(!merged.retry_backoff_until.contains_key("alpha"));
+    assert_eq!(merged.transport_backoff_until[&transport_key], 450);
+    assert_eq!(merged.route_circuit_open_until[&circuit_key], 500);
+    assert_eq!(merged.updated_at[&transport_update], 2_500);
+    assert_eq!(merged.updated_at[&circuit_update], 3_000);
 }
 
 #[test]
