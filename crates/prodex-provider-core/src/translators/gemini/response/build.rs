@@ -38,10 +38,9 @@ pub(super) fn gemini_build_response_value(
         .cloned()
         .unwrap_or_default();
     let mut output = Vec::new();
-    let (text, content_items) = gemini_collect_response_parts(
+    let (text, content_items, function_call_flags) = gemini_collect_response_parts(
         parts,
         response_id,
-        suppress_visible_text_when_tool_calls,
         &mut visible_text_from_part,
         &mut function_call_item,
         &mut output,
@@ -69,6 +68,9 @@ pub(super) fn gemini_build_response_value(
     input.usage = usage.as_deref();
     input.metadata = metadata.as_deref();
     input.citations = citations.as_deref();
+    // BufferedResponse v2 uses these operation-local fields for cross-part text precedence.
+    input.response = Some(&function_call_flags);
+    input.reason_present = suppress_visible_text_when_tool_calls;
     input.reason = value
         .pointer("/candidates/0/finishReason")
         .and_then(Value::as_str);
@@ -86,15 +88,22 @@ pub(super) fn gemini_build_response_value(
 fn gemini_collect_response_parts(
     parts: Vec<Value>,
     response_id: &str,
-    suppress_visible_text_when_tool_calls: bool,
     visible_text_from_part: &mut impl FnMut(&Value) -> Option<String>,
     function_call_item: &mut impl FnMut(&Value, &Value, usize) -> Value,
     output: &mut Vec<Value>,
-) -> (String, Vec<Value>) {
+) -> (String, Vec<Value>, String) {
     let mut text = String::new();
     let mut content_items = Vec::new();
-    let suppress_visible_text = suppress_visible_text_when_tool_calls
-        && parts.iter().any(|part| part.get("functionCall").is_some());
+    let function_call_flags = parts
+        .iter()
+        .map(|part| {
+            if part.get("functionCall").is_some() {
+                '1'
+            } else {
+                '0'
+            }
+        })
+        .collect();
     for (index, part) in parts.into_iter().enumerate() {
         let visible_text = visible_text_from_part(&part);
         let special_text = gemini_text_from_special_part(&part);
@@ -119,7 +128,7 @@ fn gemini_collect_response_parts(
             command_output_only: false,
             forced_output: false,
             internal_instruction_echo: false,
-            suppress_visible_text,
+            suppress_visible_text: false,
         })
         .expect("Gemini response part planner returned invalid output");
         if plan.emit_visible_text
@@ -151,7 +160,7 @@ fn gemini_collect_response_parts(
             output.push(function_call_item(&part, function_call, index));
         }
     }
-    (text, content_items)
+    (text, content_items, function_call_flags)
 }
 
 fn gemini_append_grounding_and_citations(

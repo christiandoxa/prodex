@@ -392,7 +392,21 @@ def gemini_views_valid(
         and rich_view_valid(input.namespace, maximum_bytes)
         and rich_view_valid(input.arguments, maximum_bytes)
         and rich_view_valid(input.citations, maximum_bytes)
+        and (input.operation != GEMINI_BUFFERED_RESPONSE or gemini_buffered_response_flags_valid(input.response))
     )
+
+
+def gemini_buffered_response_flags_valid(flags: ProdexRichStringView) -> Bool:
+    if flags.len == 0:
+        return True
+    if flags.ptr == 0:
+        return False
+    var ptr = rich_view_ptr(flags)
+    for index in range(Int64(flags.len)):
+        var value = ptr[unsafe_offset=index]
+        if value != 48 and value != 49:
+            return False
+    return True
 
 
 def gemini_tool_name_split(view: ProdexRichStringView) -> Array[Int64, 2]:
@@ -614,11 +628,12 @@ def gemini_put_stream_completed_tool_call_item(
 def gemini_put_buffered_message(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     input: ProdexGeminiResponseKernelInput,
+    suppress_visible_text: Bool,
 ) -> Bool:
     if not gemini_put_literal(writer, StringSlice('{"type":"message","role":"assistant","content":[')):
         return False
     var first = True
-    if input.delta.len > 0:
+    if input.delta.len > 0 and not suppress_visible_text:
         if not gemini_put_literal(writer, StringSlice('{"type":"output_text","text":')) or not gemini_put_json_string(writer, input.delta) or not gemini_put_byte(writer, 125):
             return False
         first = False
@@ -630,13 +645,27 @@ def gemini_put_buffered_message(
     return gemini_put_literal(writer, StringSlice("]}"))
 
 
-def gemini_response_has_visible_output(input: ProdexGeminiResponseKernelInput) -> Bool:
+def gemini_response_has_visible_output(
+    input: ProdexGeminiResponseKernelInput, suppress_visible_text: Bool
+) -> Bool:
     return (
-        input.delta.len > 0
+        (input.delta.len > 0 and not suppress_visible_text)
         or input.content.len > 2
         or input.output.len > 2
         or input.citations.len > 0
     )
+
+
+def gemini_buffered_response_suppresses_visible_text(
+    input: ProdexGeminiResponseKernelInput,
+) -> Bool:
+    if input.reason_present != 1:
+        return False
+    var flags = rich_view_ptr(input.response)
+    for index in range(Int64(input.response.len)):
+        if flags[unsafe_offset=index] == 49:
+            return True
+    return False
 
 
 def gemini_put_buffered_failure(
@@ -714,16 +743,17 @@ def gemini_put_buffered_response(
     writer: Pointer[mut=True, GeminiResponseWriter, _],
     input: ProdexGeminiResponseKernelInput,
 ) -> Bool:
+    var suppress_visible_text = gemini_buffered_response_suppresses_visible_text(input)
     if not gemini_put_literal(writer, StringSlice('{"id":')) or not gemini_put_json_string(writer, input.response_id):
         return False
     if not gemini_put_literal(writer, StringSlice(',"object":"response","model":')) or not gemini_put_json_string(writer, input.model):
         return False
     if not gemini_put_literal(writer, StringSlice(',"output":[')):
         return False
-    var has_message = input.delta.len > 0 or input.content.len > 0
+    var has_message = (input.delta.len > 0 and not suppress_visible_text) or input.content.len > 0
     var output_has_items = input.output.len > 2
     if has_message:
-        if not gemini_put_buffered_message(writer, input):
+        if not gemini_put_buffered_message(writer, input, suppress_visible_text):
             return False
         if output_has_items and not gemini_put_byte(writer, 44):
             return False
@@ -752,7 +782,7 @@ def gemini_put_buffered_response(
     elif input.include_empty_metadata == 1 and not gemini_put_literal(writer, StringSlice(',"metadata":{}')):
         return False
     if not gemini_put_buffered_status(
-        writer, input, gemini_response_has_visible_output(input)
+        writer, input, gemini_response_has_visible_output(input, suppress_visible_text)
     ):
         return False
     return gemini_put_byte(writer, 125)
