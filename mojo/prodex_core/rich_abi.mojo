@@ -33,7 +33,11 @@ from gemini_response import (
 )
 from gemini_config import gemini_config_kernel_v1
 # DeepSeek shares the rich ABI while keeping its provider wire semantics isolated.
-from deepseek import deepseek_kernel_v2, deepseek_request_policy_v1
+from deepseek import (
+    deepseek_kernel_v2,
+    deepseek_request_policy_v1,
+    deepseek_responses_request_v1,
+)
 from anthropic_request import anthropic_request_kernel_v1
 from openai_compat import openai_compat_kernel_v1
 # Kiro shares the rich ABI while keeping ACP transport and session behavior in Rust.
@@ -508,6 +512,39 @@ def prodex_mojo_deepseek_kernel_v2(
 ) abi("C") -> Int64:
     return deepseek_kernel_v2(
         abi_version, input_address, output_address, output_capacity, written_address
+    )
+
+
+@export("prodex_mojo_deepseek_responses_request_v1")
+def prodex_mojo_deepseek_responses_request_export_v1(
+    abi: Int64,
+    operation: Int64,
+    flag: Int64,
+    nodes_address: UInt64,
+    nodes_count: Int64,
+    raw_address: UInt64,
+    raw_length: Int64,
+    scratch_address: UInt64,
+    scratch_count: Int64,
+    measuring: Int64,
+    output_address: UInt64,
+    capacity: Int64,
+    metadata_address: UInt64,
+) abi("C") -> Int64:
+    return deepseek_responses_request_v1(
+        abi,
+        operation,
+        flag,
+        nodes_address,
+        nodes_count,
+        raw_address,
+        raw_length,
+        scratch_address,
+        scratch_count,
+        measuring,
+        output_address,
+        capacity,
+        metadata_address,
     )
 
 

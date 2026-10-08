@@ -2,6 +2,7 @@ use super::{
     MojoError, MojoIssue, RICH_ABI_VERSION, RichStringView, ensure_rich_abi,
     mojo_mut_pointer_address, mojo_pointer_address, view,
 };
+use crate::json::{JsonKernel, JsonNode, transform_json};
 
 /// Deterministic DeepSeek request, response, and stream JSON shapes.
 #[repr(i64)]
@@ -47,7 +48,6 @@ pub enum DeepSeekKernelOperation {
     RequestMetadata = 38,
     RawBridgeInputItem = 39,
     ResponseToolCallItem = 40,
-    RawCommonRequestPlan = 41,
     ResponsesHistoryCallId = 42,
     ResponsesHistoryContainsCallId = 43,
 }
@@ -227,6 +227,21 @@ unsafe extern "C" {
         scalar: i64,
         output: u64,
     ) -> i64;
+    fn prodex_mojo_deepseek_responses_request_v1(
+        abi: i64,
+        operation: i64,
+        flag: i64,
+        nodes: u64,
+        count: i64,
+        raw: u64,
+        raw_length: i64,
+        scratch: u64,
+        scratch_count: i64,
+        measuring: i64,
+        output: u64,
+        capacity: i64,
+        metadata: u64,
+    ) -> i64;
 }
 
 pub const DEEPSEEK_KERNEL_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -286,7 +301,6 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::RequestMetadata => 38,
         DeepSeekKernelOperation::RawBridgeInputItem => 39,
         DeepSeekKernelOperation::ResponseToolCallItem => 40,
-        DeepSeekKernelOperation::RawCommonRequestPlan => 41,
         DeepSeekKernelOperation::ResponsesHistoryCallId => 42,
         DeepSeekKernelOperation::ResponsesHistoryContainsCallId => 43,
     }
@@ -416,6 +430,26 @@ pub fn deepseek_request_policy(
         detail_start,
         detail_end,
     })
+}
+
+/// Runs the complete Responses-to-Chat request plan over a validated JSON tree.
+/// The returned JSON is a small adapter envelope containing the transformed body,
+/// loss classification, continuation metadata, or a stable rejection reason.
+pub fn deepseek_responses_request_transform(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+) -> Result<Vec<u8>, MojoError> {
+    if raw.len() > DEEPSEEK_KERNEL_MAX_BYTES * 2 + 1024 {
+        return Err(MojoError::InvalidInput);
+    }
+    transform_json(
+        nodes,
+        raw,
+        0,
+        false,
+        prodex_mojo_deepseek_responses_request_v1 as JsonKernel,
+    )?
+    .ok_or(MojoError::InvalidOutput)
 }
 
 /// Runs one bounded DeepSeek request, response, or stream JSON builder in Mojo.

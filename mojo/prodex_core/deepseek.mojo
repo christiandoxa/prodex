@@ -12,6 +12,18 @@ from rich_text import (
     rich_view_valid,
 )
 from rich_types import ProdexRichStringView
+from parsed_json import (
+    ParsedJson,
+    ParsedJsonNode,
+    JSON_OBJECT,
+    JSON_STRING,
+    pj_field,
+    pj_kind,
+    pj_nonblank,
+    pj_text,
+    pj_valid,
+)
+from json_sink import js_raw_view
 from json_view import (
     deepseek_json_byte,
     deepseek_json_fragment_valid,
@@ -76,7 +88,6 @@ comptime DEEPSEEK_RAW_COMMON_REQUEST: Int64 = 37
 comptime DEEPSEEK_REQUEST_METADATA: Int64 = 38
 comptime DEEPSEEK_RAW_BRIDGE_INPUT_ITEM: Int64 = 39
 comptime DEEPSEEK_RESPONSE_TOOL_CALL_ITEM: Int64 = 40
-comptime DEEPSEEK_RAW_COMMON_REQUEST_PLAN: Int64 = 41
 comptime DEEPSEEK_RESPONSES_HISTORY_CALL_ID: Int64 = 42
 comptime DEEPSEEK_RESPONSES_HISTORY_CONTAINS_CALL_ID: Int64 = 43
 comptime DEEPSEEK_JSON_MAX_DEPTH: Int64 = 256
@@ -143,14 +154,18 @@ struct DeepSeekResponseWriter(Copyable):
     var output: Pointer[mut=True, UInt8, MutUntrackedOrigin]
     var capacity: Int64
     var written: Int64
+    var measuring: Bool
 
 
 def deepseek_put_byte(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _], value: UInt8
 ) -> Bool:
-    if writer[].written < 0 or writer[].written >= writer[].capacity:
+    if writer[].written < 0 or writer[].written == 0x7FFFFFFFFFFFFFFF:
         return False
-    writer[].output[unsafe_offset=writer[].written] = value
+    if not writer[].measuring:
+        if writer[].written >= writer[].capacity:
+            return False
+        writer[].output[unsafe_offset=writer[].written] = value
     writer[].written += 1
     return True
 
@@ -1102,13 +1117,7 @@ def deepseek_trimmed_effort_equals(
     return True
 
 
-def deepseek_put_reasoning_parameters(
-    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
-    input: ProdexDeepSeekKernelInput,
-) -> Bool:
-    if input.reasoning_content_present != 1 or input.reasoning_content.len == 0:
-        return False
-    var effort = input.reasoning_content.copy()
+def deepseek_reasoning_mode(effort: ProdexRichStringView, gemini_compat: Bool) -> Int64:
     var is_xhigh = deepseek_trimmed_effort_equals(effort, StringSlice("xhigh"))
     var is_max = deepseek_trimmed_effort_equals(effort, StringSlice("max"))
     var is_high = deepseek_trimmed_effort_equals(effort, StringSlice("high"))
@@ -1116,25 +1125,75 @@ def deepseek_put_reasoning_parameters(
     var is_low = deepseek_trimmed_effort_equals(effort, StringSlice("low"))
     var is_minimal = deepseek_trimmed_effort_equals(effort, StringSlice("minimal"))
     var is_none = deepseek_trimmed_effort_equals(effort, StringSlice("none"))
-    if input.stream == 1:
+    if gemini_compat:
         if is_xhigh or is_max or is_high:
-            return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"high"}'))
+            return 1
         if is_medium:
-            return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"medium"}'))
+            return 2
         if is_low:
-            return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"low"}'))
+            return 3
         if is_minimal:
-            return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"minimal"}'))
+            return 4
         if is_none:
-            return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"none"}'))
-        return False
+            return 5
+        return 0
     if is_xhigh or is_max:
-        return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"enabled"},"reasoning_effort":"max"}'))
+        return 6
     if is_high or is_medium or is_low:
-        return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"enabled"},"reasoning_effort":"high"}'))
+        return 7
     if is_minimal or is_none:
+        return 8
+    return 0
+
+
+def deepseek_write_reasoning_parameters(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _], mode: Int64
+) -> Bool:
+    if mode == 1:
+        return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"high"}'))
+    if mode == 2:
+        return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"medium"}'))
+    if mode == 3:
+        return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"low"}'))
+    if mode == 4:
+        return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"minimal"}'))
+    if mode == 5:
+        return deepseek_put_literal(writer, StringSlice('{"reasoning_effort":"none"}'))
+    if mode == 6:
+        return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"enabled"},"reasoning_effort":"max"}'))
+    if mode == 7:
+        return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"enabled"},"reasoning_effort":"high"}'))
+    if mode == 8:
         return deepseek_put_literal(writer, StringSlice('{"thinking":{"type":"disabled"}}'))
     return False
+
+
+def deepseek_put_reasoning_parameters(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.reasoning_content_present != 1 or input.reasoning_content.len == 0:
+        return False
+    var mode = deepseek_reasoning_mode(input.reasoning_content, input.stream == 1)
+    return mode != 0 and deepseek_write_reasoning_parameters(writer, mode)
+
+
+def deepseek_put_request_reasoning_fields(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _], mode: Int64
+) -> Bool:
+    if mode == 6:
+        return deepseek_put_literal(
+            writer, StringSlice(',"thinking":{"type":"enabled"},"reasoning_effort":"max"')
+        )
+    if mode == 7:
+        return deepseek_put_literal(
+            writer, StringSlice(',"thinking":{"type":"enabled"},"reasoning_effort":"high"')
+        )
+    if mode == 8:
+        return deepseek_put_literal(
+            writer, StringSlice(',"thinking":{"type":"disabled"}')
+        )
+    return mode == 0
 
 
 def deepseek_put_response_format(
@@ -1146,19 +1205,15 @@ def deepseek_put_response_format(
     return deepseek_put_literal(writer, StringSlice('{"type":"json_object"}'))
 
 
-def deepseek_put_user_id(
-    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
-    input: ProdexDeepSeekKernelInput,
-) -> Bool:
-    if input.input_present != 1:
-        return False
-    var bounds = rich_trim_bounds(input.input)
-    var start = bounds[0]
-    var end = bounds[1]
-    if end - start > 512:
-        return deepseek_put_literal(writer, StringSlice("null"))
-    for index in range(start, end):
-        var value = deepseek_json_byte(input.input, index)
+def deepseek_user_id_plan(view: ProdexRichStringView) -> Array[Int64, 3]:
+    var bounds = Array[Int64, 3](fill=-1)
+    var trimmed = rich_trim_bounds(view)
+    bounds[1] = trimmed[0]
+    bounds[2] = trimmed[1]
+    if trimmed[1] - trimmed[0] > 512:
+        return bounds.copy()
+    for index in range(trimmed[0], trimmed[1]):
+        var value = deepseek_json_byte(view, index)
         if not (
             (value >= 48 and value <= 57)
             or (value >= 65 and value <= 90)
@@ -1166,8 +1221,21 @@ def deepseek_put_user_id(
             or value == 45
             or value == 95
         ):
-            return deepseek_put_literal(writer, StringSlice("null"))
-    return deepseek_put_json_string_range(writer, input.input, start, end)
+            return bounds.copy()
+    bounds[0] = 1
+    return bounds.copy()
+
+
+def deepseek_put_user_id(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.input_present != 1:
+        return False
+    var bounds = deepseek_user_id_plan(input.input)
+    if bounds[0] != 1:
+        return deepseek_put_literal(writer, StringSlice("null"))
+    return deepseek_put_json_string_range(writer, input.input, bounds[1], bounds[2])
 
 
 def deepseek_put_function_call(
@@ -3169,8 +3237,6 @@ def deepseek_write_operation(
     var operation = input.operation
     if operation == DEEPSEEK_RAW_COMMON_REQUEST:
         return deepseek_raw_common_request(writer, input)
-    if operation == DEEPSEEK_RAW_COMMON_REQUEST_PLAN:
-        return deepseek_raw_common_request_plan(writer, input)
     if operation == DEEPSEEK_RAW_BRIDGE_INPUT_ITEM:
         return deepseek_raw_bridge_input_item(writer, input)
     if operation == DEEPSEEK_RESPONSES_HISTORY_CALL_ID:
@@ -3560,7 +3626,7 @@ def deepseek_kernel_v2(
     var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
         unsafe_from_address=Int(output_address)
     )
-    var writer = DeepSeekResponseWriter(output, output_capacity, 0)
+    var writer = DeepSeekResponseWriter(output, output_capacity, 0, False)
     var writer_ptr = Pointer(to=writer)
     if not deepseek_write_operation(writer_ptr, input[].copy()):
         if writer.written >= output_capacity:
@@ -3985,7 +4051,32 @@ def deepseek_raw_common_request(
 ) -> Bool:
     if input.input_present != 1:
         return False
-    var source = input.input.copy()
+    return deepseek_raw_common_request_fields(
+        writer,
+        input.input.copy(),
+        ProdexRichStringView(0, 0),
+        False,
+        input.content,
+        input.content_present == 1,
+        input.reasoning_content,
+        input.reasoning_content_present == 1,
+        Int64(input.sequence_number),
+        0,
+    )
+
+
+def deepseek_raw_common_request_fields(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    source: ProdexRichStringView,
+    canonical_model: ProdexRichStringView,
+    canonical_model_present: Bool,
+    user_id: ProdexRichStringView,
+    user_id_present: Bool,
+    instructions: ProdexRichStringView,
+    instructions_present: Bool,
+    response_format_mode: Int64,
+    reasoning_mode: Int64,
+) -> Bool:
     var root = deepseek_raw_root(source)
     if root[0] < 0:
         return False
@@ -4021,11 +4112,16 @@ def deepseek_raw_common_request(
 
     if (
         not deepseek_put_literal(writer, StringSlice('{"model":'))
-        or not deepseek_raw_put_default_or_string(
-            writer, source, model, StringSlice('"deepseek-chat"')
-        )
-        or not deepseek_put_literal(writer, StringSlice(',"stream":'))
     ):
+        return False
+    if canonical_model_present:
+        if not deepseek_put_json_string(writer, canonical_model):
+            return False
+    elif not deepseek_raw_put_default_or_string(
+            writer, source, model, StringSlice('"deepseek-chat"')
+        ):
+        return False
+    if not deepseek_put_literal(writer, StringSlice(',"stream":')):
         return False
     if deepseek_json_is_true(source, stream):
         if not deepseek_put_literal(writer, StringSlice("true")):
@@ -4038,8 +4134,8 @@ def deepseek_raw_common_request(
         writer,
         source,
         root,
-        input.reasoning_content,
-        input.reasoning_content_present == 1,
+        instructions,
+        instructions_present,
     ):
         return False
     if tool_count > 0:
@@ -4048,7 +4144,7 @@ def deepseek_raw_common_request(
             or not deepseek_raw_put_function_tools(writer, source, tools)
         ):
             return False
-    if deepseek_raw_present(tool_choice):
+    if deepseek_raw_present(tool_choice) and reasoning_mode != 6 and reasoning_mode != 7:
         var saved = writer[].written
         if not deepseek_put_literal(writer, StringSlice(',"tool_choice":')):
             return False
@@ -4078,13 +4174,15 @@ def deepseek_raw_common_request(
         writer, source, StringSlice(',"stop":'), stop
     ):
         return False
-    if input.content_present == 1:
+    if user_id_present:
         if (
             not deepseek_put_literal(writer, StringSlice(',"user_id":'))
-            or not deepseek_put_json_string(writer, input.content)
+            or not deepseek_put_json_string(writer, user_id)
         ):
             return False
-    if input.sequence_number == 1:
+    if not deepseek_put_request_reasoning_fields(writer, reasoning_mode):
+        return False
+    if response_format_mode == 1:
         if not deepseek_put_literal(
             writer, StringSlice(',"response_format":{"type":"json_object"}')
         ):
@@ -4139,9 +4237,12 @@ def deepseek_raw_response_format_plan(
 
 def deepseek_raw_request_plan_continuation(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
-    input: ProdexDeepSeekKernelInput,
     view: ProdexRichStringView,
     root: Array[Int64, 2],
+    turn_state: ProdexRichStringView,
+    turn_state_present: Bool,
+    session_id: ProdexRichStringView,
+    session_id_present: Bool,
 ) -> Bool:
     var previous = deepseek_raw_member(
         view, root, StringSlice("previous_response_id")
@@ -4150,29 +4251,29 @@ def deepseek_raw_request_plan_continuation(
         view, previous[0]
     ) == 34
     if (
-        input.error_code_present == 0
-        and input.error_message_present == 0
+        not turn_state_present
+        and not session_id_present
         and not previous_string
     ):
         return deepseek_put_literal(writer, StringSlice("null"))
     if not deepseek_put_byte(writer, 123):
         return False
     var first = True
-    if input.error_code_present == 1:
+    if turn_state_present:
         if (
             not deepseek_put_literal(
                 writer, StringSlice('"x-codex-turn-state":')
             )
-            or not deepseek_put_json_string(writer, input.error_code)
+            or not deepseek_put_json_string(writer, turn_state)
         ):
             return False
         first = False
-    if input.error_message_present == 1:
+    if session_id_present:
         if not first and not deepseek_put_byte(writer, 44):
             return False
         if (
             not deepseek_put_literal(writer, StringSlice('"session_id":'))
-            or not deepseek_put_json_string(writer, input.error_message)
+            or not deepseek_put_json_string(writer, session_id)
         ):
             return False
         first = False
@@ -4191,51 +4292,280 @@ def deepseek_raw_request_plan_continuation(
     return deepseek_put_byte(writer, 125)
 
 
-def deepseek_raw_common_request_plan(
+def deepseek_request_write_issue(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
-    input: ProdexDeepSeekKernelInput,
+    issue: Int64,
+    source: ProdexRichStringView,
+    detail_start: Int64 = -1,
+    detail_end: Int64 = -1,
 ) -> Bool:
-    if input.input_present != 1:
+    if not deepseek_put_literal(writer, StringSlice('{"issue":')):
         return False
-    var source = input.input.copy()
+    if not deepseek_put_u64(writer, UInt64(issue)):
+        return False
+    if detail_start >= 0 and detail_end > detail_start:
+        if (
+            not deepseek_put_literal(writer, StringSlice(',"detail":'))
+            or not deepseek_put_view_range(
+                writer, source, detail_start, detail_end
+            )
+        ):
+            return False
+    return deepseek_put_byte(writer, 125)
+
+
+def deepseek_responses_request_v1(
+    abi: Int64,
+    operation: Int64,
+    flag: Int64,
+    nodes_address: UInt64,
+    nodes_count: Int64,
+    raw_address: UInt64,
+    raw_length: Int64,
+    scratch_address: UInt64,
+    scratch_count: Int64,
+    measuring: Int64,
+    output_address: UInt64,
+    capacity: Int64,
+    metadata_address: UInt64,
+) abi("C") -> Int64:
+    if abi != 1:
+        return DEEPSEEK_KERNEL_STATUS_ABI
+    if (
+        operation != 0
+        or flag != 0
+        or measuring < 0
+        or measuring > 1
+        or raw_length < 0
+        or raw_length > DEEPSEEK_KERNEL_MAX_BYTES * 2 + 1024
+        or capacity < 0
+        or nodes_address == 0
+        or scratch_address == 0
+        or metadata_address == 0
+        or scratch_count < nodes_count
+    ):
+        return DEEPSEEK_KERNEL_STATUS_INVALID
+    if measuring == 1:
+        if output_address != 0 or capacity != 0:
+            return DEEPSEEK_KERNEL_STATUS_INVALID
+    elif output_address == 0:
+        return DEEPSEEK_KERNEL_STATUS_INVALID
+
+    var tree = ParsedJson(
+        Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](
+            unsafe_from_address=Int(nodes_address)
+        ),
+        nodes_count,
+        ProdexRichStringView(UInt(raw_address), UInt(raw_length)),
+    )
+    if not pj_valid(tree) or pj_kind(tree, 0) != JSON_OBJECT:
+        return DEEPSEEK_KERNEL_STATUS_INVALID
+    var request = pj_field(tree, 0, StringSlice("request"))
+    if pj_kind(tree, request) != JSON_OBJECT:
+        return DEEPSEEK_KERNEL_STATUS_INVALID
+    var source = js_raw_view(tree, request)
+    if source.len > UInt(DEEPSEEK_KERNEL_MAX_BYTES):
+        return DEEPSEEK_KERNEL_STATUS_INVALID
     var root = deepseek_raw_root(source)
     if root[0] < 0:
-        return False
+        return DEEPSEEK_KERNEL_STATUS_INVALID
 
-    var parallel = deepseek_raw_member(
-        source, root, StringSlice("parallel_tool_calls")
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
     )
-    if deepseek_raw_present(parallel) and deepseek_json_is_false(source, parallel):
-        return deepseek_put_literal(writer, StringSlice('{"issue":1}'))
+    var writer = DeepSeekResponseWriter(output, capacity, 0, measuring == 1)
+    var writer_ptr = Pointer(to=writer)
 
-    var format = deepseek_raw_response_format_plan(source, root)
-    if format[0] == 2:
-        return (
-            deepseek_put_literal(writer, StringSlice('{"issue":2,"detail":'))
-            and deepseek_put_view_range(writer, source, format[2], format[3])
-            and deepseek_put_byte(writer, 125)
-        )
+    var params = Array[Int64, 3](fill=-1)
+    params[0] = 0
+    var params_ptr = Pointer(to=params[0])
+    if not deepseek_responses_request_params_plan(source, params_ptr):
+        return DEEPSEEK_KERNEL_STATUS_INVALID
+    if params[0] != 0:
+        if not deepseek_request_write_issue(
+            writer_ptr, 9 + params[0], source
+        ):
+            return DEEPSEEK_KERNEL_STATUS_CAPACITY
+    else:
+        var user_id = pj_field(tree, request, StringSlice("user_id"))
+        if user_id < 0:
+            user_id = pj_field(tree, request, StringSlice("user"))
+        if user_id < 0:
+            user_id = pj_field(tree, request, StringSlice("safety_identifier"))
+        if user_id >= 0 and pj_kind(tree, user_id) != JSON_STRING:
+            if not deepseek_request_write_issue(writer_ptr, 3, source):
+                return DEEPSEEK_KERNEL_STATUS_CAPACITY
+        else:
+            var user_id_text = pj_text(tree, user_id)
+            var user_id_plan = Array[Int64, 3](fill=0)
+            if user_id >= 0:
+                user_id_plan = deepseek_user_id_plan(user_id_text)
+            if user_id >= 0 and user_id_plan[0] != 1:
+                if not deepseek_request_write_issue(writer_ptr, 4, source):
+                    return DEEPSEEK_KERNEL_STATUS_CAPACITY
+            else:
+                var parallel = deepseek_raw_member(
+                    source, root, StringSlice("parallel_tool_calls")
+                )
+                if deepseek_raw_present(parallel) and deepseek_json_is_false(
+                    source, parallel
+                ):
+                    if not deepseek_request_write_issue(writer_ptr, 1, source):
+                        return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                else:
+                    var format = deepseek_raw_response_format_plan(source, root)
+                    if format[0] == 2:
+                        if not deepseek_request_write_issue(
+                            writer_ptr, 2, source, format[2], format[3]
+                        ):
+                            return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                    else:
+                        var reasoning = Array[Int64, 3](fill=-1)
+                        reasoning[0] = 0
+                        var reasoning_ptr = Pointer(to=reasoning[0])
+                        if not deepseek_reasoning_shape_plan(source, reasoning_ptr):
+                            return DEEPSEEK_KERNEL_STATUS_INVALID
+                        if reasoning[0] == 1:
+                            if not deepseek_request_write_issue(writer_ptr, 5, source):
+                                return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                        elif reasoning[0] == 2:
+                            if not deepseek_request_write_issue(
+                                writer_ptr, 6, source, reasoning[1], reasoning[2]
+                            ):
+                                return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                        elif reasoning[0] == 3:
+                            if not deepseek_request_write_issue(writer_ptr, 7, source):
+                                return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                        elif reasoning[0] == 4:
+                            if not deepseek_request_write_issue(writer_ptr, 8, source):
+                                return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                        else:
+                            var effort_node = pj_field(
+                                tree, request, StringSlice("reasoning_effort")
+                            )
+                            var reasoning_node = pj_field(
+                                tree, request, StringSlice("reasoning")
+                            )
+                            if reasoning_node >= 0:
+                                var nested_effort = pj_field(
+                                    tree, reasoning_node, StringSlice("effort")
+                                )
+                                if nested_effort >= 0:
+                                    effort_node = nested_effort
+                            var reasoning_mode: Int64 = 0
+                            if reasoning[0] == 10 and effort_node >= 0:
+                                reasoning_mode = deepseek_reasoning_mode(
+                                    pj_text(tree, effort_node), False
+                                )
+                                if reasoning_mode == 0:
+                                    if not deepseek_request_write_issue(
+                                        writer_ptr, 9, source
+                                    ):
+                                        return DEEPSEEK_KERNEL_STATUS_CAPACITY
 
-    var planned = input.copy()
-    planned.sequence_number = UInt64(format[0])
-    if not deepseek_put_literal(writer, StringSlice('{"issue":0,"degraded":')):
-        return False
-    if format[1] == 1:
-        if not deepseek_put_literal(writer, StringSlice("true")):
-            return False
-    elif not deepseek_put_literal(writer, StringSlice("false")):
-        return False
-    if not deepseek_put_literal(writer, StringSlice(',"body":')):
-        return False
-    if not deepseek_raw_common_request(writer, planned):
-        return False
-    if not deepseek_put_literal(writer, StringSlice(',"continuation":')):
-        return False
-    if not deepseek_raw_request_plan_continuation(
-        writer, input, source, root
-    ):
-        return False
-    return deepseek_put_byte(writer, 125)
+                            if writer.written == 0:
+                                var instructions_node = pj_field(
+                                    tree, request, StringSlice("instructions")
+                                )
+                                var instructions = pj_text(tree, instructions_node)
+                                var instructions_present = pj_nonblank(
+                                    tree, instructions_node
+                                )
+                                var canonical_model_node = pj_field(
+                                    tree, 0, StringSlice("canonical_model")
+                                )
+                                var canonical_model = pj_text(
+                                    tree, canonical_model_node
+                                )
+                                var canonical_model_present = (
+                                    pj_kind(tree, canonical_model_node) == JSON_STRING
+                                )
+                                var user_id_present = (
+                                    user_id >= 0 and user_id_plan[2] > user_id_plan[1]
+                                )
+                                if not deepseek_put_literal(
+                                    writer_ptr,
+                                    StringSlice('{"issue":0,"degraded":'),
+                                ):
+                                    return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                                if format[1] == 1:
+                                    if not deepseek_put_literal(
+                                        writer_ptr, StringSlice("true")
+                                    ):
+                                        return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                                elif not deepseek_put_literal(
+                                    writer_ptr, StringSlice("false")
+                                ):
+                                    return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                                if not deepseek_put_literal(
+                                    writer_ptr, StringSlice(',"body":')
+                                ):
+                                    return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                                var body_writer = writer.copy()
+                                var body_writer_ptr = Pointer(to=body_writer)
+                                if not deepseek_raw_common_request_fields(
+                                    body_writer_ptr,
+                                    source,
+                                    canonical_model,
+                                    canonical_model_present,
+                                    ProdexRichStringView(
+                                        user_id_text.ptr + UInt(user_id_plan[1]),
+                                        UInt(user_id_plan[2] - user_id_plan[1]),
+                                    ),
+                                    user_id_present,
+                                    instructions,
+                                    instructions_present,
+                                    format[0],
+                                    reasoning_mode,
+                                ):
+                                    if body_writer.written >= capacity:
+                                        return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                                    return DEEPSEEK_KERNEL_STATUS_INVALID
+                                writer.written = body_writer.written
+                                if not deepseek_put_literal(
+                                    writer_ptr, StringSlice(',"continuation":')
+                                ):
+                                    return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                                var turn_state_node = pj_field(
+                                    tree, 0, StringSlice("turn_state")
+                                )
+                                var session_id_node = pj_field(
+                                    tree, 0, StringSlice("session_id")
+                                )
+                                if not deepseek_raw_request_plan_continuation(
+                                    writer_ptr,
+                                    source,
+                                    root,
+                                    pj_text(tree, turn_state_node),
+                                    pj_kind(tree, turn_state_node) == JSON_STRING,
+                                    pj_text(tree, session_id_node),
+                                    pj_kind(tree, session_id_node) == JSON_STRING,
+                                ):
+                                    return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                                var choice = pj_field(
+                                    tree, request, StringSlice("tool_choice")
+                                )
+                                if (
+                                    reasoning_mode == 6 or reasoning_mode == 7
+                                ) and choice >= 0:
+                                    if not deepseek_put_literal(
+                                        writer_ptr,
+                                        StringSlice(',"omitted_tool_choice":'),
+                                    ) or not deepseek_put_view(
+                                        writer_ptr, js_raw_view(tree, choice)
+                                    ):
+                                        return DEEPSEEK_KERNEL_STATUS_CAPACITY
+                                if not deepseek_put_byte(writer_ptr, 125):
+                                    return DEEPSEEK_KERNEL_STATUS_CAPACITY
+
+    if writer.written > 0x7FFFFFFFFFFFFFFF:
+        return DEEPSEEK_KERNEL_STATUS_CAPACITY
+    var meta = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(metadata_address)
+    )
+    meta[unsafe_offset=0] = 1
+    meta[unsafe_offset=1] = writer.written
+    return DEEPSEEK_KERNEL_STATUS_OK
 
 def deepseek_raw_first_member3(
     view: ProdexRichStringView,
