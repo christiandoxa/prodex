@@ -5055,7 +5055,7 @@
         "crates/prodex-provider-core/src/runtime_metadata.rs",
         "crates/prodex-provider-core/src/gemini_bridge/util.rs"
       ],
-      "production_reachability_test": "crates/prodex-mojo-core/src/provider_constraints.rs",
+      "production_reachability_test": "crates/prodex-mojo-core/src/provider_constraints/scalar_policy.rs",
       "rust_owner_before": "trimmed ASCII-casefold token classification for reasoning effort and Gemini booleans plus the Copilot model-to-prompt-token-limit table",
       "rust_state_after": "adapter-only",
       "rust_test_oracle": "deleted; direct Mojo adapter coverage plus provider-core reasoning, Copilot prompt-limit, and Gemini boolean caller tests preserve mixed-case, Unicode-whitespace, unknown-token, and numeric results",
