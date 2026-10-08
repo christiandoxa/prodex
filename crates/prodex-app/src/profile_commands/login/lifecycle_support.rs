@@ -28,11 +28,8 @@ fn profile_login_provider_decision(
     provider: &ProfileProvider,
     method: LoginMethod,
 ) -> prodex_mojo_core::profile_login_policy::ProviderLoginValidation {
-    prodex_mojo_core::profile_login_policy::validate_provider_login(
-        provider.label(),
-        method.mojo_tag(),
-    )
-    .expect("Mojo profile-login provider validation returned invalid output")
+    prodex_mojo_core::profile_login_policy::validate_provider_login(provider.label(), method as i64)
+        .expect("Mojo profile-login provider validation returned invalid output")
 }
 
 pub(super) fn validate_profile_login_provider(
@@ -137,7 +134,7 @@ pub(super) fn login_into_profile(
     };
 
     if matches!(
-        prodex_mojo_core::profile_login_policy::login_execution(login_request.method.mojo_tag())
+        prodex_mojo_core::profile_login_policy::login_execution(login_request.method as i64)
             .expect("Mojo profile-login execution policy returned invalid output"),
         prodex_mojo_core::profile_login_policy::LoginExecution::DirectProfileHome
     ) {
