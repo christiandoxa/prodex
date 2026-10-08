@@ -35,7 +35,7 @@ comptime PROFILE_MANAGEMENT_STATUS_OK: Int64 = 0
 comptime PROFILE_MANAGEMENT_STATUS_INVALID: Int64 = 1
 comptime PROFILE_MANAGEMENT_STATUS_CAPACITY: Int64 = 2
 comptime PROFILE_MANAGEMENT_STATUS_ABI: Int64 = 4
-comptime PROFILE_MANAGEMENT_STATUS_MAX_ABI_COUNT: Int64 = 3_074_457_345_618_258_602
+comptime PROFILE_MANAGEMENT_STATUS_MAX_PROFILES: Int64 = 256
 
 comptime PROFILE_MANAGEMENT_SCREEN_NO_ACTIVE: Int64 = 0
 comptime PROFILE_MANAGEMENT_SCREEN_ONLY_PROFILE: Int64 = 1
@@ -922,7 +922,7 @@ def prodex_profile_management_status_v1(
     if (
         (active_profile_present != 0 and active_profile_present != 1)
         or profile_count < 0
-        or profile_count > PROFILE_MANAGEMENT_STATUS_MAX_ABI_COUNT
+        or profile_count > PROFILE_MANAGEMENT_STATUS_MAX_PROFILES
         or output_capacity < 0
         or written_address == 0
         or (profile_count > 0 and flags_address == 0)

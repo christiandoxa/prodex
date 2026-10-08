@@ -133,7 +133,7 @@ fn profile_management_status_mutations_change_the_mojo_result() {
 }
 
 #[test]
-fn profile_management_status_accepts_more_than_256_profiles() {
+fn profile_management_status_rejects_more_than_256_profiles() {
     let inputs = vec![
         ProfileManagementStatusInput {
             active: false,
@@ -142,9 +142,10 @@ fn profile_management_status_accepts_more_than_256_profiles() {
         };
         257
     ];
-    let plan = profile_management_status(false, &inputs).unwrap();
-    assert_eq!(plan.screen, ProfileManagementScreenStatus::NoActive);
-    assert_eq!(plan.rows.len(), inputs.len());
+    assert_eq!(
+        profile_management_status(false, &inputs),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    );
 }
 
 #[test]

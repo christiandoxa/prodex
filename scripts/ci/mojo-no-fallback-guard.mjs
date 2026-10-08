@@ -4212,7 +4212,7 @@ export function findViolations(files) {
           !contents.includes("runtime_doctor_render_put_bounded_value(writer, runtime_doctor_render_input_value(input, index), 48, StringSlice(\"...\"), 3)") ||
           !contents.includes("runtime_doctor_render_put_bounded_value(\n        writer,\n        runtime_doctor_render_input_value(input, 0),\n        160,") ||
           !contents.includes("runtime_doctor_render_last_marker_line(writer, input)") ||
-          !contents.includes("input.operation > RENDER_CHAIN_EVENT_SUMMARY"))) {
+          !contents.includes("input.operation > RENDER_CONFIGURATION_STATUS"))) {
       return [`${filePath}: bounded Unicode truncation for timeline details and last-marker lines must stay in the production Mojo renderer`];
     }
     return [];
