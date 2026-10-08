@@ -8,8 +8,9 @@ use super::super::lifecycle::{
 };
 use super::super::secrets::{read_optional_secret_text_file, validate_exported_secret_file_path};
 use crate::{
-    AppPaths, AppState, AppStateIoExt, ImportedExistingProfileAuthUpdate, PreparedImportedProfiles,
-    ProfileEntry, ProfileExportPayload, read_auth_json_text,
+    AppPaths, AppState, AppStateIoExt, ImportedExistingProfileAuthUpdate,
+    PreparedExistingProfileUpdate, PreparedImportedProfiles, ProfileEntry, ProfileExportPayload,
+    read_auth_json_text,
 };
 
 pub(super) fn build_import_lifecycle_plan(
@@ -17,32 +18,73 @@ pub(super) fn build_import_lifecycle_plan(
     payload: &ProfileExportPayload,
     prepared: &PreparedImportedProfiles,
 ) -> Result<ProfileLifecyclePlan> {
+    let mut mutations = Vec::with_capacity(
+        prepared.staged_profiles.len()
+            + prepared.auth_updates.len()
+            + prepared.existing_profile_updates.len(),
+    );
+    mutations.extend(
+        prepared
+            .staged_profiles
+            .iter()
+            .map(ImportLifecycleMutation::Staged),
+    );
+    mutations.extend(
+        prepared
+            .auth_updates
+            .iter()
+            .map(ImportLifecycleMutation::Auth),
+    );
+    mutations.extend(
+        prepared
+            .existing_profile_updates
+            .iter()
+            .map(ImportLifecycleMutation::Profile),
+    );
+    let mutation_names = mutations
+        .iter()
+        .map(ImportLifecycleMutation::profile_name)
+        .collect::<Vec<_>>();
+    let order = prodex_mojo_core::profile_export::profile_import_lifecycle_order(&mutation_names)
+        .map_err(|error| {
+        anyhow::anyhow!("Mojo profile-import lifecycle plan failed: {error:?}")
+    })?;
+
     let mut desired = state.clone();
-    for staged in &prepared.staged_profiles {
-        desired.profiles.insert(
-            staged.name.clone(),
-            ProfileEntry {
-                codex_home: staged.final_home.clone(),
-                managed: true,
-                email: staged.email.clone(),
-                provider: staged.provider.clone(),
-            },
-        );
-    }
-    for update in &prepared.auth_updates {
-        let profile = desired
-            .profiles
-            .get_mut(&update.target_profile_name)
-            .with_context(|| format!("profile '{}' is missing", update.target_profile_name))?;
-        profile.email = update.email.clone();
-    }
-    for update in &prepared.existing_profile_updates {
-        let profile = desired
-            .profiles
-            .get_mut(&update.name)
-            .with_context(|| format!("profile '{}' is missing", update.name))?;
-        profile.email = update.email.clone();
-        profile.provider = update.provider.clone();
+    for mutation_index in &order.operation_indices {
+        match mutations
+            .get(*mutation_index)
+            .context("Mojo import lifecycle operation index is invalid")?
+        {
+            ImportLifecycleMutation::Staged(staged) => {
+                desired.profiles.insert(
+                    staged.name.clone(),
+                    ProfileEntry {
+                        codex_home: staged.final_home.clone(),
+                        managed: true,
+                        email: staged.email.clone(),
+                        provider: staged.provider.clone(),
+                    },
+                );
+            }
+            ImportLifecycleMutation::Auth(update) => {
+                let profile = desired
+                    .profiles
+                    .get_mut(&update.target_profile_name)
+                    .with_context(|| {
+                        format!("profile '{}' is missing", update.target_profile_name)
+                    })?;
+                profile.email = update.email.clone();
+            }
+            ImportLifecycleMutation::Profile(update) => {
+                let profile = desired
+                    .profiles
+                    .get_mut(&update.name)
+                    .with_context(|| format!("profile '{}' is missing", update.name))?;
+                profile.email = update.email.clone();
+                profile.provider = update.provider.clone();
+            }
+        }
     }
     desired.active_profile = prodex_profile_export::resolve_imported_active_profile(
         state.active_profile.as_deref(),
@@ -50,30 +92,15 @@ pub(super) fn build_import_lifecycle_plan(
         &prepared.resolved_profile_names,
     );
 
-    let mut names = prepared
-        .staged_profiles
-        .iter()
-        .map(|profile| profile.name.clone())
-        .chain(
-            prepared
-                .auth_updates
-                .iter()
-                .map(|update| update.target_profile_name.clone()),
-        )
-        .chain(
-            prepared
-                .existing_profile_updates
-                .iter()
-                .map(|update| update.name.clone()),
-        )
-        .collect::<Vec<_>>();
-    names.sort();
-    names.dedup();
-
     Ok(ProfileLifecyclePlan {
-        profile_states: names
+        profile_states: order
+            .profile_indices
             .iter()
-            .map(|name| {
+            .map(|index| {
+                let name = mutations
+                    .get(*index)
+                    .context("Mojo import lifecycle profile index is invalid")?
+                    .profile_name();
                 lifecycle_profile_state(name, state.profiles.get(name), desired.profiles.get(name))
             })
             .collect::<Result<Vec<_>>>()?,
@@ -90,6 +117,22 @@ pub(super) fn build_import_lifecycle_plan(
             .collect(),
         auth_journal_paths: Vec::new(),
     })
+}
+
+enum ImportLifecycleMutation<'a> {
+    Staged(&'a super::StagedImportedProfile),
+    Auth(&'a prodex_profile_export::ProfileImportAuthUpdatePlan),
+    Profile(&'a PreparedExistingProfileUpdate),
+}
+
+impl ImportLifecycleMutation<'_> {
+    fn profile_name(&self) -> &str {
+        match self {
+            Self::Staged(staged) => &staged.name,
+            Self::Auth(update) => &update.target_profile_name,
+            Self::Profile(update) => &update.name,
+        }
+    }
 }
 
 fn cleanup_orphaned_import_staging_homes(paths: &AppPaths) -> Result<()> {
@@ -356,43 +399,64 @@ pub(crate) fn imported_auth_update_journal_is_committed(
     {
         validate_exported_secret_file_path(secret_file, &journal.profile_name)?;
     }
-    let Some(profile) = state.profiles.get(&journal.profile_name) else {
-        return Ok(false);
-    };
-    if profile.codex_home.as_path() != Path::new(&journal.codex_home) {
-        return Ok(false);
-    }
+    let profile = state.profiles.get(&journal.profile_name);
+    let profile_exists = profile.is_some();
+    let codex_home_matches = profile
+        .is_some_and(|profile| profile.codex_home.as_path() == Path::new(&journal.codex_home));
+    let has_next_state = journal.next_email.is_some()
+        || journal.next_auth_json.is_some()
+        || journal.next_provider_json.is_some()
+        || !journal.next_secret_files.is_empty();
+    let email_matches = profile.is_some_and(|profile| profile.email == journal.next_email);
+    let can_compare_files = profile_exists
+        && codex_home_matches
+        && journal.state_after_known
+        && has_next_state
+        && email_matches;
 
-    if !journal.state_after_known {
-        return Ok(false);
-    }
-    if journal.next_email.is_none()
-        && journal.next_auth_json.is_none()
-        && journal.next_provider_json.is_none()
-        && journal.next_secret_files.is_empty()
+    let mut provider_matches = true;
+    if can_compare_files
+        && let (Some(profile), Some(next_provider_json)) =
+            (profile, journal.next_provider_json.as_deref())
     {
-        return Ok(false);
+        provider_matches = serde_json::to_value(&profile.provider)?
+            == serde_json::from_str::<serde_json::Value>(next_provider_json)?;
     }
-    if profile.email != journal.next_email {
-        return Ok(false);
-    }
-    if let Some(next_provider_json) = journal.next_provider_json.as_deref()
-        && serde_json::to_value(&profile.provider)?
-            != serde_json::from_str::<serde_json::Value>(next_provider_json)?
+    let mut auth_matches = true;
+    if can_compare_files
+        && provider_matches
+        && let (Some(profile), Some(next_auth_json)) = (profile, journal.next_auth_json.as_deref())
     {
-        return Ok(false);
+        auth_matches =
+            read_auth_json_text(&profile.codex_home)? == Some(next_auth_json.to_string());
     }
-    if let Some(next_auth_json) = journal.next_auth_json.as_deref()
-        && read_auth_json_text(&profile.codex_home)? != Some(next_auth_json.to_string())
+    let mut secret_files_match = true;
+    if can_compare_files
+        && provider_matches
+        && auth_matches
+        && let Some(profile) = profile
     {
-        return Ok(false);
-    }
-    for secret_file in &journal.next_secret_files {
-        if read_optional_secret_text_file(&profile.codex_home.join(&secret_file.path))?
-            != secret_file.text
-        {
-            return Ok(false);
+        for secret_file in &journal.next_secret_files {
+            if read_optional_secret_text_file(&profile.codex_home.join(&secret_file.path))?
+                != secret_file.text
+            {
+                secret_files_match = false;
+                break;
+            }
         }
     }
-    Ok(true)
+
+    prodex_mojo_core::profile_export::profile_import_auth_journal_is_committed(
+        prodex_mojo_core::profile_export::ProfileImportAuthJournalCommitInput {
+            profile_exists,
+            codex_home_matches,
+            state_after_known: journal.state_after_known,
+            has_next_state,
+            email_matches,
+            provider_matches,
+            auth_matches,
+            secret_files_match,
+        },
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo profile-import journal decision failed: {error:?}"))
 }

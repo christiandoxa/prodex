@@ -434,3 +434,40 @@ fn failed_import_lifecycle_plan_creation_removes_staging_home() {
     assert!(state.profiles.is_empty());
     assert_no_import_staging_homes(&paths);
 }
+
+#[test]
+fn profile_import_rejects_secret_file_path_traversal_before_staging() {
+    let sandbox_dir = ProfileCommandsTestDir::new("profile-commands-env");
+    let _env = ProfileCommandsTestEnv::new(&sandbox_dir.path);
+    let target_dir = ProfileCommandsTestDir::new("import-secret-path-traversal");
+    let paths = profile_commands_test_paths(&target_dir.path);
+    let payload = ProfileExportPayload {
+        exported_at: Local::now().to_rfc3339(),
+        source_prodex_version: env!("CARGO_PKG_VERSION").to_string(),
+        active_profile: None,
+        profiles: vec![ExportedProfile {
+            name: "main".to_string(),
+            email: None,
+            source_managed: true,
+            provider: ProfileProvider::Openai,
+            auth_json: String::new(),
+            secret_files: vec![prodex_profile_export::ExportedSecretFile {
+                path: "../auth.json".to_string(),
+                text: "credential-sentinel".to_string(),
+            }],
+        }],
+    };
+    let mut state = AppState::default();
+
+    let err = import_profile_export_payload(&paths, &mut state, &payload)
+        .expect_err("path traversal should be rejected before staging");
+
+    assert!(err.to_string().contains("unsafe secret file path"));
+    assert!(state.profiles.is_empty());
+    assert_eq!(
+        fs::read_dir(&paths.managed_profiles_root)
+            .expect("managed root should be created before payload validation")
+            .count(),
+        0
+    );
+}

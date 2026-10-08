@@ -1,7 +1,9 @@
 from std.memory import Pointer
+from std.math import isfinite
 
 from rich_text import rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
+from runtime_math import INT64_MAX, INT64_MIN, UINT64_MAX
 
 comptime INFO_RENDER_ABI_VERSION: Int64 = 1
 comptime INFO_RENDER_OK: Int64 = 0
@@ -29,6 +31,16 @@ comptime INFO_RENDER_HUMAN_COUNT: Int64 = 16
 comptime INFO_RENDER_TOKEN_EFFICIENCY: Int64 = 17
 comptime INFO_RENDER_MEMORY_PERCENT: Int64 = 18
 comptime INFO_RENDER_TEXT_SPARKLINE: Int64 = 19
+comptime INFO_RENDER_STATUS_PROFILE_FILTER: Int64 = 20
+comptime INFO_RENDER_STATUS_TOKEN_PLAN: Int64 = 21
+comptime INFO_RENDER_STATUS_RUNTIME_PROFILE: Int64 = 22
+comptime INFO_RENDER_STATUS_RUNWAY: Int64 = 23
+comptime INFO_RENDER_STATUS_FIELDS: Int64 = 24
+comptime INFO_RENDER_STATUS_RESOURCE_METRICS: Int64 = 25
+comptime INFO_RENDER_STATUS_RESOURCE_HISTORY: Int64 = 26
+comptime INFO_RENDER_STATUS_QUOTA_GAUGE: Int64 = 27
+comptime INFO_STATUS_HISTORY_LIMIT: Int64 = 64
+comptime INFO_STATUS_FIELD_COUNT: Int64 = 14
 
 comptime INFO_RUNTIME_LAUNCH_STATUS_NONE: UInt64 = 0
 comptime INFO_RUNTIME_LAUNCH_STATUS_READY: UInt64 = 1
@@ -144,6 +156,97 @@ def info_validate_texts(address: UInt, count: Int64) -> Bool:
         if not rich_view_valid(value, Int64(value.len)):
             return False
     return True
+
+
+def info_status_compare_views(
+    left: ProdexRichStringView, right: ProdexRichStringView
+) -> Int64:
+    var left_ptr = rich_view_ptr(left)
+    var right_ptr = rich_view_ptr(right)
+    var common = min(Int64(left.len), Int64(right.len))
+    for index in range(common):
+        var left_byte = left_ptr[unsafe_offset=index]
+        var right_byte = right_ptr[unsafe_offset=index]
+        if left_byte < right_byte:
+            return -1
+        if left_byte > right_byte:
+            return 1
+    if left.len < right.len:
+        return -1
+    if left.len > right.len:
+        return 1
+    return 0
+
+
+def info_status_event_compare(
+    left: Int64,
+    right: Int64,
+    unsigned_address: UInt,
+    text_address: UInt,
+) -> Int64:
+    var left_timestamp = info_text(text_address, 0, left * 2)
+    var right_timestamp = info_text(text_address, 0, right * 2)
+    var compared = info_status_compare_views(left_timestamp, right_timestamp)
+    if compared != 0:
+        return compared
+
+    var left_request_present = info_unsigned(unsigned_address, 0, left * 4)
+    var right_request_present = info_unsigned(unsigned_address, 0, right * 4)
+    if left_request_present < right_request_present:
+        return -1
+    if left_request_present > right_request_present:
+        return 1
+    if left_request_present == 1:
+        var left_request = info_unsigned(unsigned_address, 0, left * 4 + 1)
+        var right_request = info_unsigned(unsigned_address, 0, right * 4 + 1)
+        if left_request < right_request:
+            return -1
+        if left_request > right_request:
+            return 1
+
+    var left_profile = info_text(text_address, 0, left * 2 + 1)
+    var right_profile = info_text(text_address, 0, right * 2 + 1)
+    compared = info_status_compare_views(left_profile, right_profile)
+    if compared != 0:
+        return compared
+    if left < right:
+        return -1
+    if left > right:
+        return 1
+    return 0
+
+
+def info_status_put_field_label(
+    writer: Pointer[mut=True, InfoRenderWriter, _], label: StringSlice
+) -> Bool:
+    return (
+        info_put_u64(writer, UInt64(label.byte_length()))
+        and info_put_byte(writer, UInt8(58))
+        and info_put_literal(writer, label)
+    )
+
+
+def info_status_begin_field_value(
+    writer: Pointer[mut=True, InfoRenderWriter, _]
+) -> Int64:
+    var prefix = writer[].written
+    for _ in range(20):
+        if not info_put_byte(writer, UInt8(48)):
+            return -1
+    if not info_put_byte(writer, UInt8(58)):
+        return -1
+    return prefix
+
+
+def info_status_finish_field_value(
+    writer: Pointer[mut=True, InfoRenderWriter, _], prefix: Int64
+) -> Bool:
+    var length = UInt64(writer[].written - prefix - 21)
+    for index in range(20):
+        var position = prefix + 19 - Int64(index)
+        writer[].output[unsafe_offset=position] = UInt8(length % UInt64(10)) + UInt8(48)
+        length //= UInt64(10)
+    return length == 0
 
 
 def info_render_relative_duration(
@@ -757,6 +860,586 @@ def info_render_text_sparkline(
     return True
 
 
+def info_status_write_field_text(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    label: StringSlice,
+    value: ProdexRichStringView,
+) -> Bool:
+    if not info_status_put_field_label(writer, label):
+        return False
+    var prefix = info_status_begin_field_value(writer)
+    if prefix < 0 or not info_put_view(writer, value):
+        return False
+    return info_status_finish_field_value(writer, prefix)
+
+
+def info_render_status_field(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    field: Int64,
+    unsigned_address: UInt,
+    text_address: UInt,
+    presence: UInt64,
+) -> Bool:
+    var label = StringSlice("")
+    if field == 0:
+        label = StringSlice("Profile")
+    elif field == 1:
+        return info_status_write_field_text(
+            writer, StringSlice("5h quota"), info_text(text_address, 11, 2)
+        )
+    elif field == 2:
+        return info_status_write_field_text(
+            writer, StringSlice("5h runway"), info_text(text_address, 11, 3)
+        )
+    elif field == 3:
+        return info_status_write_field_text(
+            writer, StringSlice("Weekly quota"), info_text(text_address, 11, 4)
+        )
+    elif field == 4:
+        return info_status_write_field_text(
+            writer, StringSlice("Weekly runway"), info_text(text_address, 11, 5)
+        )
+    elif field == 5:
+        return info_status_write_field_text(
+            writer, StringSlice("Token usage"), info_text(text_address, 11, 6)
+        )
+    elif field == 6:
+        label = StringSlice("Token efficiency")
+    elif field == 7:
+        label = StringSlice("Token history")
+    elif field == 8:
+        label = StringSlice("Processes")
+    elif field == 9:
+        label = StringSlice("Memory")
+    elif field == 10:
+        label = StringSlice("Network")
+    elif field == 11:
+        label = StringSlice("Disk I/O")
+    elif field == 12:
+        return info_status_write_field_text(
+            writer, StringSlice("Recent load"), info_text(text_address, 11, 9)
+        )
+    elif field == 13:
+        return info_status_write_field_text(
+            writer, StringSlice("Updated"), info_text(text_address, 11, 10)
+        )
+    else:
+        return False
+
+    if not info_status_put_field_label(writer, label):
+        return False
+    var prefix = info_status_begin_field_value(writer)
+    if prefix < 0:
+        return False
+
+    if field == 0:
+        if not (
+            info_put_literal(writer, StringSlice("runtime="))
+            and info_put_view(writer, info_text(text_address, 11, 0))
+            and info_put_literal(writer, StringSlice(", configured="))
+            and info_put_view(writer, info_text(text_address, 11, 1))
+            and info_put_literal(writer, StringSlice(", pool="))
+            and info_put_u64(writer, info_unsigned(unsigned_address, 0, 0))
+            and info_put_literal(writer, StringSlice(", quota-compatible="))
+            and info_put_u64(writer, info_unsigned(unsigned_address, 0, 1))
+            and info_put_literal(writer, StringSlice(", unavailable="))
+            and info_put_u64(writer, info_unsigned(unsigned_address, 0, 2))
+        ):
+            return False
+    elif field == 6:
+        if not info_render_token_efficiency(
+            writer, unsigned_address + UInt(3 * 8)
+        ):
+            return False
+    elif field == 7:
+        if not info_put_view(writer, info_text(text_address, 12, 11)):
+            return False
+        if not info_put_byte(writer, UInt8(32)):
+            return False
+        if (presence & UInt64(4)) != 0:
+            if not info_put_view(writer, info_text(text_address, 11, 7)):
+                return False
+        elif not info_put_byte(writer, UInt8(45)):
+            return False
+        if not info_put_literal(writer, StringSlice(" → ")):
+            return False
+        if (presence & UInt64(8)) != 0:
+            if not info_put_view(writer, info_text(text_address, 11, 8)):
+                return False
+        elif not info_put_byte(writer, UInt8(45)):
+            return False
+    elif field == 8:
+        if (presence & UInt64(1)) == 0:
+            if not info_put_literal(writer, StringSlice("unavailable")):
+                return False
+        else:
+            if not (
+                info_put_u64(writer, info_unsigned(unsigned_address, 0, 8))
+                and info_put_literal(writer, StringSlice(" total, "))
+                and info_put_u64(writer, info_unsigned(unsigned_address, 0, 9))
+                and info_put_literal(writer, StringSlice(" runtime; CPU "))
+            ):
+                return False
+            if (presence & UInt64(2)) != 0:
+                var cpu_values = Pointer[
+                    mut=False, Float64, ImmUntrackedOrigin
+                ](unsafe_from_address=Int(unsigned_address + UInt(17 * 8)))
+                if not info_put_one_decimal(
+                    writer, info_round_nonnegative_tenths(cpu_values[unsafe_offset=0])
+                ) or not info_put_byte(writer, UInt8(37)):
+                    return False
+            elif not info_put_literal(writer, StringSlice("warming up")):
+                return False
+    elif field == 9:
+        if (presence & UInt64(1)) == 0:
+            if not info_put_literal(writer, StringSlice("unavailable")):
+                return False
+        else:
+            if not (
+                info_render_human_bytes(writer, unsigned_address + UInt(6 * 8))
+                and info_put_literal(writer, StringSlice(" ("))
+                and info_render_memory_percent(writer, unsigned_address + UInt(6 * 8))
+                and info_put_literal(writer, StringSlice(" host)"))
+            ):
+                return False
+    elif field == 10:
+        if (presence & UInt64(1)) == 0:
+            if not info_put_literal(writer, StringSlice("unavailable")):
+                return False
+        elif not (
+            info_put_u64(writer, info_unsigned(unsigned_address, 0, 10))
+            and info_put_literal(writer, StringSlice(" sockets; RX queue "))
+            and info_render_human_bytes(writer, unsigned_address + UInt(11 * 8))
+            and info_put_literal(writer, StringSlice(", TX queue "))
+            and info_render_human_bytes(writer, unsigned_address + UInt(12 * 8))
+        ):
+            return False
+    elif field == 11:
+        if (presence & UInt64(1)) == 0:
+            if not info_put_literal(writer, StringSlice("unavailable")):
+                return False
+        elif not (
+            info_put_literal(writer, StringSlice("read "))
+            and info_render_human_bytes(writer, unsigned_address + UInt(13 * 8))
+            and info_put_literal(writer, StringSlice(" total ("))
+            and info_render_human_bytes(writer, unsigned_address + UInt(15 * 8))
+            and info_put_literal(writer, StringSlice("/s), write "))
+            and info_render_human_bytes(writer, unsigned_address + UInt(14 * 8))
+            and info_put_literal(writer, StringSlice(" total ("))
+            and info_render_human_bytes(writer, unsigned_address + UInt(16 * 8))
+            and info_put_literal(writer, StringSlice("/s)"))
+        ):
+            return False
+    return info_status_finish_field_value(writer, prefix)
+
+
+def info_render_status_fields(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+    text_address: UInt,
+    presence: UInt64,
+) -> Bool:
+    for field in range(INFO_STATUS_FIELD_COUNT):
+        if not info_render_status_field(
+            writer, field, unsigned_address, text_address, presence
+        ):
+            return False
+    return True
+
+
+def info_status_saturating_sub(left: Int64, right: Int64) -> Int64:
+    if right > 0 and left < INT64_MIN + right:
+        return INT64_MIN
+    if right < 0 and left > INT64_MAX + right:
+        return INT64_MAX
+    return left - right
+
+
+def info_render_status_runway(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    signed_address: UInt,
+    unsigned_address: UInt,
+    text_address: UInt,
+    presence: UInt64,
+) -> Bool:
+    var profiles = info_unsigned(unsigned_address, 2, 0)
+    var current_remaining = info_signed(signed_address, 5, 0)
+    var has_reset = (presence & UInt64(1)) != 0
+    var has_estimate = (presence & UInt64(2)) != 0
+    if profiles == 0:
+        return info_put_literal(writer, StringSlice("Unavailable"))
+    if current_remaining <= 0:
+        return info_put_literal(writer, StringSlice("Exhausted"))
+    if not has_estimate:
+        return info_put_literal(
+            writer,
+            StringSlice(
+                "Unavailable (no recent quota decay observed in active runtime logs)"
+            ),
+        )
+
+    var estimate_values = Pointer[
+        mut=False, Float64, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(unsigned_address + UInt(16)))
+    var burn_per_hour = estimate_values[unsafe_offset=0]
+    if not isfinite(burn_per_hour) or burn_per_hour < 0.0:
+        return False
+    var exhaust_at = info_signed(signed_address, 5, 2)
+    var now = info_signed(signed_address, 5, 4)
+    var exhaust_in = info_status_saturating_sub(exhaust_at, now)
+    var observed = info_signed(signed_address, 5, 3)
+    var observed_profiles = info_unsigned(unsigned_address, 3, 1)
+    var burn_tenths = info_round_nonnegative_tenths(burn_per_hour)
+    if has_reset and info_signed(signed_address, 5, 1) <= exhaust_at:
+        return (
+            info_put_literal(writer, StringSlice("Earliest reset "))
+            and info_put_view(writer, info_text(text_address, 2, 0))
+            and info_put_literal(
+                writer,
+                StringSlice(" arrives before the no-reset runway (~"),
+            )
+            and info_render_relative_duration_value(writer, exhaust_in)
+            and info_put_literal(writer, StringSlice(" at "))
+            and info_put_one_decimal(writer, burn_tenths)
+            and info_put_literal(
+                writer,
+                StringSlice(" aggregated-%/h, "),
+            )
+            and info_put_u64(writer, observed_profiles)
+            and info_put_literal(writer, StringSlice(" profile(s), observed over "))
+            and info_render_relative_duration_value(writer, observed)
+            and info_put_byte(writer, UInt8(41))
+        )
+
+    return (
+        info_put_view(writer, info_text(text_address, 2, 1))
+        and info_put_literal(writer, StringSlice(" (~"))
+        and info_render_relative_duration_value(writer, exhaust_in)
+        and info_put_literal(writer, StringSlice(") at "))
+        and info_put_one_decimal(writer, burn_tenths)
+        and info_put_literal(writer, StringSlice(" aggregated-%/h from "))
+        and info_put_u64(writer, observed_profiles)
+        and info_put_literal(writer, StringSlice(" profile(s), observed over "))
+        and info_render_relative_duration_value(writer, observed)
+        and info_put_literal(writer, StringSlice(", no-reset estimate"))
+    )
+
+
+def info_render_status_profile_filter(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+    unsigned_count: Int64,
+) -> Bool:
+    var first = True
+    for index in range(unsigned_count):
+        var eligible = info_unsigned(unsigned_address, unsigned_count, index)
+        if eligible != 0 and eligible != 1:
+            return False
+        if eligible == 1:
+            if not first and not info_put_byte(writer, UInt8(44)):
+                return False
+            if not info_put_u64(writer, UInt64(index)):
+                return False
+            first = False
+    return True
+
+
+def info_render_status_token_plan(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+    text_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    event_count: Int64,
+) -> Bool:
+    # ponytail: O(events * 64) bounded history selection; use merge sort if cap grows.
+    var scratch_bytes = INFO_STATUS_HISTORY_LIMIT * 8
+    if output_capacity < scratch_bytes:
+        return False
+    var scratch = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address + UInt(output_capacity - scratch_bytes))
+    )
+    var first_index: Int64 = 0
+    var latest_index: Int64 = 0
+    var kept: Int64 = 0
+    for candidate in range(event_count):
+        if candidate == 0:
+            first_index = candidate
+            latest_index = candidate
+        else:
+            if info_status_event_compare(
+                candidate, first_index, unsigned_address, text_address
+            ) < 0:
+                first_index = candidate
+            if info_status_event_compare(
+                candidate, latest_index, unsigned_address, text_address
+            ) >= 0:
+                latest_index = candidate
+
+        var position = kept
+        while position > 0 and info_status_event_compare(
+            candidate,
+            Int64(scratch[unsafe_offset=position - 1]),
+            unsigned_address,
+            text_address,
+        ) < 0:
+            position -= 1
+
+        if kept < INFO_STATUS_HISTORY_LIMIT:
+            var shift = kept
+            while shift > position:
+                scratch[unsafe_offset=shift] = scratch[unsafe_offset=shift - 1]
+                shift -= 1
+            scratch[unsafe_offset=position] = UInt64(candidate)
+            kept += 1
+        elif position == INFO_STATUS_HISTORY_LIMIT:
+            for shift in range(INFO_STATUS_HISTORY_LIMIT - 1):
+                scratch[unsafe_offset=shift] = scratch[unsafe_offset=shift + 1]
+            scratch[unsafe_offset=INFO_STATUS_HISTORY_LIMIT - 1] = UInt64(candidate)
+        elif position > 0:
+            # ponytail: bounded insertion keeps the latest 64 events; sort cost is capped.
+            for shift in range(INFO_STATUS_HISTORY_LIMIT - 1):
+                scratch[unsafe_offset=shift] = scratch[unsafe_offset=shift + 1]
+            var insert = position - 1
+            var shift = INFO_STATUS_HISTORY_LIMIT - 1
+            while shift > insert:
+                scratch[unsafe_offset=shift] = scratch[unsafe_offset=shift - 1]
+                shift -= 1
+            scratch[unsafe_offset=insert] = UInt64(candidate)
+
+    if event_count == 0:
+        if not info_put_literal(writer, StringSlice("-;-")):
+            return False
+    elif not (
+        info_put_u64(writer, UInt64(first_index))
+        and info_put_byte(writer, UInt8(59))
+        and info_put_u64(writer, UInt64(latest_index))
+    ):
+        return False
+    if not (
+        info_put_byte(writer, UInt8(59))
+        and info_put_u64(writer, UInt64(kept))
+        and info_put_byte(writer, UInt8(59))
+    ):
+        return False
+
+    for index in range(kept):
+        if index > 0 and not info_put_byte(writer, UInt8(44)):
+            return False
+        var event_index = Int64(scratch[unsafe_offset=index])
+        var input_tokens = info_unsigned(unsigned_address, 0, event_index * 4 + 2)
+        var output_tokens = info_unsigned(unsigned_address, 0, event_index * 4 + 3)
+        var total = UINT64_MAX
+        if input_tokens <= UINT64_MAX - output_tokens:
+            total = input_tokens + output_tokens
+        if not info_put_u64(writer, total):
+            return False
+    return True
+
+
+def info_render_status_runtime_profile(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    signed_address: UInt,
+    signed_count: Int64,
+    unsigned_address: UInt,
+    text_address: UInt,
+    text_count: Int64,
+    presence: UInt64,
+) -> Bool:
+    if info_unsigned(unsigned_address, 1, 0) == 0:
+        return info_put_byte(writer, UInt8(48))
+    var latest: Int64 = -1
+    for index in range(signed_count):
+        if latest < 0 or info_signed(signed_address, signed_count, index) >= info_signed(
+            signed_address, signed_count, latest
+        ):
+            latest = index
+    if latest >= 0:
+        return info_put_u64(writer, UInt64(latest + 2))
+    if (presence & UInt64(1)) != 0:
+        return info_put_byte(writer, UInt8(49))
+    return info_put_byte(writer, UInt8(48))
+
+
+def info_status_u64_saturating_add(left: UInt64, right: UInt64) -> UInt64:
+    if left > UINT64_MAX - right:
+        return UINT64_MAX
+    return left + right
+
+
+def info_render_status_resource_metrics(
+    unsigned_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+) -> Int64:
+    if output_capacity < 32:
+        return INFO_RENDER_CAPACITY
+    if (output_address % UInt(8)) != 0:
+        return INFO_RENDER_INVALID
+    var input = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(unsigned_address)
+    )
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var cpu_output = Pointer[mut=True, Float64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address + UInt(8))
+    )
+    output[unsafe_offset=0] = UInt64(0)
+    cpu_output[unsafe_offset=0] = 0.0
+    output[unsafe_offset=2] = UInt64(0)
+    output[unsafe_offset=3] = UInt64(0)
+
+    var previous_present = input[unsafe_offset=0]
+    var previous_available = input[unsafe_offset=1]
+    var current_available = input[unsafe_offset=2]
+    if previous_present > 1 or previous_available > 1 or current_available > 1:
+        return INFO_RENDER_INVALID
+    if previous_present == 0 and previous_available != 0:
+        return INFO_RENDER_INVALID
+    if previous_present == 1 and previous_available == 1 and current_available == 1:
+        var elapsed_values = Pointer[mut=False, Float64, ImmUntrackedOrigin](
+            unsafe_from_address=Int(unsigned_address + UInt(11 * 8))
+        )
+        var seconds = elapsed_values[unsafe_offset=0]
+        if not isfinite(seconds) or seconds < 0.0:
+            return INFO_RENDER_INVALID
+        if seconds < 0.001:
+            seconds = 0.001
+
+        var previous_process = input[unsafe_offset=3]
+        var previous_system = input[unsafe_offset=4]
+        var previous_read = input[unsafe_offset=5]
+        var previous_write = input[unsafe_offset=6]
+        var process_delta = UInt64(0)
+        var system_delta = UInt64(0)
+        var read_delta = UInt64(0)
+        var write_delta = UInt64(0)
+        if input[unsafe_offset=7] > previous_process:
+            process_delta = input[unsafe_offset=7] - previous_process
+        if input[unsafe_offset=8] > previous_system:
+            system_delta = input[unsafe_offset=8] - previous_system
+        if input[unsafe_offset=9] > previous_read:
+            read_delta = input[unsafe_offset=9] - previous_read
+        if input[unsafe_offset=10] > previous_write:
+            write_delta = input[unsafe_offset=10] - previous_write
+
+        if system_delta > 0:
+            var cpu = Float64(process_delta) / Float64(system_delta) * 100.0
+            if cpu < 0.0:
+                cpu = 0.0
+            if cpu > 100.0:
+                cpu = 100.0
+            output[unsafe_offset=0] = UInt64(1)
+            cpu_output[unsafe_offset=0] = cpu
+
+        var read_rate = Float64(read_delta) / seconds
+        var write_rate = Float64(write_delta) / seconds
+        if not isfinite(read_rate) or not isfinite(write_rate):
+            return INFO_RENDER_INVALID
+        output[unsafe_offset=2] = (
+            UINT64_MAX if read_rate >= Float64(UINT64_MAX) else UInt64(read_rate)
+        )
+        output[unsafe_offset=3] = (
+            UINT64_MAX if write_rate >= Float64(UINT64_MAX) else UInt64(write_rate)
+        )
+    return INFO_RENDER_OK
+
+
+def info_render_status_resource_history(
+    unsigned_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    presence: UInt64,
+) -> Int64:
+    if output_capacity < 32:
+        return INFO_RENDER_CAPACITY
+    if (output_address % UInt(8)) != 0:
+        return INFO_RENDER_INVALID
+    var input = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(unsigned_address)
+    )
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var cpu: UInt64 = 0
+    if presence == 1:
+        var cpu_values = Pointer[mut=False, Float64, ImmUntrackedOrigin](
+            unsafe_from_address=Int(unsigned_address)
+        )
+        var percent = cpu_values[unsafe_offset=0]
+        if not isfinite(percent) or percent < 0.0 or percent > 100.0:
+            return INFO_RENDER_INVALID
+        cpu = UInt64(percent + 0.5)
+    output[unsafe_offset=0] = cpu
+    output[unsafe_offset=1] = input[unsafe_offset=1]
+    output[unsafe_offset=2] = info_status_u64_saturating_add(
+        input[unsafe_offset=2], input[unsafe_offset=3]
+    )
+    output[unsafe_offset=3] = info_status_u64_saturating_add(
+        input[unsafe_offset=4], input[unsafe_offset=5]
+    )
+    return INFO_RENDER_OK
+
+
+def info_render_status_quota_gauge(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    signed_address: UInt,
+    unsigned_address: UInt,
+    text_address: UInt,
+    presence: UInt64,
+) -> Bool:
+    var profiles = info_unsigned(unsigned_address, 1, 0)
+    var remaining = info_signed(signed_address, 3, 0)
+    var average = 0.0
+    if profiles > 0:
+        average = Float64(remaining) / Float64(profiles)
+        if average < 0.0:
+            average = 0.0
+        if average > 100.0:
+            average = 100.0
+    var ratio = UInt64(average + 0.5)
+    var band: UInt64 = 2
+    if average <= 10.0:
+        band = 0
+    elif average <= 25.0:
+        band = 1
+    if not (
+        info_put_u64(writer, band)
+        and info_put_byte(writer, UInt8(59))
+        and info_put_u64(writer, ratio)
+        and info_put_byte(writer, UInt8(59))
+    ):
+        return False
+    if profiles == 0:
+        return info_put_literal(writer, StringSlice("quota unavailable"))
+
+    if not (
+        info_put_u64(writer, ratio)
+        and info_put_literal(writer, StringSlice("% avg · pool "))
+        and info_put_i64(writer, remaining)
+        and info_put_literal(writer, StringSlice("% · "))
+    ):
+        return False
+    if (presence & UInt64(1)) == 0:
+        return info_put_literal(writer, StringSlice("reset unknown"))
+    if not (
+        info_put_literal(writer, StringSlice("reset in "))
+        and info_render_relative_duration_value(
+            writer,
+            info_status_saturating_sub(
+                info_signed(signed_address, 3, 1),
+                info_signed(signed_address, 3, 2),
+            ),
+        )
+        and info_put_literal(writer, StringSlice(" ("))
+        and info_put_view(writer, info_text(text_address, 1, 0))
+        and info_put_byte(writer, UInt8(41))
+    ):
+        return False
+    return True
+
+
 def info_render_runtime_quota_hint(
     writer: Pointer[mut=True, InfoRenderWriter, _],
     text_address: UInt,
@@ -791,7 +1474,7 @@ def prodex_terminal_info_render_v1(
     if (
         abi_version != INFO_RENDER_ABI_VERSION
         or operation < INFO_RENDER_RELATIVE_DURATION
-        or operation > INFO_RENDER_TEXT_SPARKLINE
+        or operation > INFO_RENDER_STATUS_QUOTA_GAUGE
         or signed_count < 0
         or unsigned_count < 0
         or text_count < 0
@@ -807,7 +1490,96 @@ def prodex_terminal_info_render_v1(
     var required_signed: Int64 = 0
     var required_unsigned: Int64 = 0
     var required_text: Int64 = 0
-    if operation == INFO_RENDER_RELATIVE_DURATION:
+    if operation == INFO_RENDER_STATUS_PROFILE_FILTER:
+        if signed_count != 0 or text_count != 0:
+            return INFO_RENDER_INVALID
+        for index in range(unsigned_count):
+            if info_unsigned(unsigned_address, unsigned_count, index) > 1:
+                return INFO_RENDER_INVALID
+    elif operation == INFO_RENDER_STATUS_TOKEN_PLAN:
+        if signed_count != 0 or text_count % 2 != 0 or text_count > INT64_MAX / 2:
+            return INFO_RENDER_INVALID
+        if unsigned_count != text_count * 2:
+            return INFO_RENDER_INVALID
+        for row in range(text_count // 2):
+            var request_present = info_unsigned(unsigned_address, unsigned_count, row * 4)
+            var request_value = info_unsigned(unsigned_address, unsigned_count, row * 4 + 1)
+            if request_present > 1 or (request_present == 0 and request_value != 0):
+                return INFO_RENDER_INVALID
+    elif operation == INFO_RENDER_STATUS_RUNTIME_PROFILE:
+        if (
+            unsigned_count != 1
+            or text_count < 2
+            or signed_count != text_count - 2
+            or presence > 1
+            or info_unsigned(unsigned_address, unsigned_count, 0) > 1
+        ):
+            return INFO_RENDER_INVALID
+    elif operation == INFO_RENDER_STATUS_RUNWAY:
+        required_signed = 5
+        required_unsigned = 3
+        required_text = 2
+        if signed_count != 5 or unsigned_count != 3 or text_count != 2 or presence > 3:
+            return INFO_RENDER_INVALID
+        if (presence & UInt64(1)) != 0 and info_text(text_address, text_count, 0).len == 0:
+            return INFO_RENDER_INVALID
+        if (presence & UInt64(2)) != 0:
+            var burn_values = Pointer[
+                mut=False, Float64, ImmUntrackedOrigin
+            ](unsafe_from_address=Int(unsigned_address + UInt(16)))
+            if not isfinite(burn_values[unsafe_offset=0]) or burn_values[unsafe_offset=0] <= 0.0:
+                return INFO_RENDER_INVALID
+            if info_text(text_address, text_count, 1).len == 0:
+                return INFO_RENDER_INVALID
+    elif operation == INFO_RENDER_STATUS_FIELDS:
+        required_unsigned = 18
+        required_text = 12
+        if text_count != 12 or presence > 15 or unsigned_count != 18:
+            return INFO_RENDER_INVALID
+        if info_unsigned(unsigned_address, unsigned_count, 1) > info_unsigned(
+            unsigned_address, unsigned_count, 0
+        ) or info_unsigned(unsigned_address, unsigned_count, 2) > info_unsigned(
+            unsigned_address, unsigned_count, 1
+        ):
+            return INFO_RENDER_INVALID
+        if (presence & UInt64(2)) != 0:
+            if (presence & UInt64(1)) == 0:
+                return INFO_RENDER_INVALID
+            var cpu_values = Pointer[
+                mut=False, Float64, ImmUntrackedOrigin
+            ](unsafe_from_address=Int(unsigned_address + UInt(17 * 8)))
+            var cpu_percent = cpu_values[unsafe_offset=0]
+            if not isfinite(cpu_percent) or cpu_percent < 0.0 or cpu_percent > 100.0:
+                return INFO_RENDER_INVALID
+        if (presence & UInt64(1)) != 0:
+            if info_unsigned(unsigned_address, unsigned_count, 9) > info_unsigned(
+                unsigned_address, unsigned_count, 8
+            ):
+                return INFO_RENDER_INVALID
+    elif operation == INFO_RENDER_STATUS_RESOURCE_METRICS:
+        required_unsigned = 12
+        if signed_count != 0 or unsigned_count != 12 or text_count != 0 or presence != 0:
+            return INFO_RENDER_INVALID
+    elif operation == INFO_RENDER_STATUS_RESOURCE_HISTORY:
+        required_unsigned = 6
+        if signed_count != 0 or unsigned_count != 6 or text_count != 0 or presence > 1:
+            return INFO_RENDER_INVALID
+        if presence == 1:
+            var cpu_values = Pointer[mut=False, Float64, ImmUntrackedOrigin](
+                unsafe_from_address=Int(unsigned_address)
+            )
+            var percent = cpu_values[unsafe_offset=0]
+            if not isfinite(percent) or percent < 0.0 or percent > 100.0:
+                return INFO_RENDER_INVALID
+    elif operation == INFO_RENDER_STATUS_QUOTA_GAUGE:
+        required_signed = 3
+        required_unsigned = 1
+        required_text = 1
+        if signed_count != 3 or unsigned_count != 1 or text_count != 1 or presence > 1:
+            return INFO_RENDER_INVALID
+        if (presence & UInt64(1)) != 0 and info_text(text_address, text_count, 0).len == 0:
+            return INFO_RENDER_INVALID
+    elif operation == INFO_RENDER_RELATIVE_DURATION:
         required_signed = 1
     elif operation == INFO_RENDER_QUOTA_DATA:
         required_unsigned = 4
@@ -861,11 +1633,38 @@ def prodex_terminal_info_render_v1(
     ):
         return INFO_RENDER_INVALID
 
+    if operation == INFO_RENDER_STATUS_RESOURCE_METRICS or operation == INFO_RENDER_STATUS_RESOURCE_HISTORY:
+        if output_capacity < 32 or (output_address % UInt(8)) != 0:
+            return INFO_RENDER_INVALID
+        var result = INFO_RENDER_INVALID
+        if operation == INFO_RENDER_STATUS_RESOURCE_METRICS:
+            result = info_render_status_resource_metrics(
+                unsigned_address, output_address, output_capacity
+            )
+        else:
+            result = info_render_status_resource_history(
+                unsigned_address, output_address, output_capacity, presence
+            )
+        if result != INFO_RENDER_OK:
+            return result
+        var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(written_address)
+        )
+        written[] = 32
+        return INFO_RENDER_OK
+
+    var writer_capacity = output_capacity
+    if operation == INFO_RENDER_STATUS_TOKEN_PLAN:
+        if output_capacity < INFO_STATUS_HISTORY_LIMIT * 8:
+            return INFO_RENDER_INVALID
+        writer_capacity -= INFO_STATUS_HISTORY_LIMIT * 8
+        if (output_address % UInt(8)) != 0 or (output_capacity % 8) != 0:
+            return INFO_RENDER_INVALID
     var writer = InfoRenderWriter(
         Pointer[mut=True, UInt8, MutUntrackedOrigin](
             unsafe_from_address=Int(output_address)
         ),
-        output_capacity,
+        writer_capacity,
         0,
     )
     var ok = False
@@ -924,6 +1723,41 @@ def prodex_terminal_info_render_v1(
     elif operation == INFO_RENDER_TEXT_SPARKLINE:
         ok = info_render_text_sparkline(
             Pointer(to=writer), unsigned_address, unsigned_count
+        )
+    elif operation == INFO_RENDER_STATUS_PROFILE_FILTER:
+        ok = info_render_status_profile_filter(
+            Pointer(to=writer), unsigned_address, unsigned_count
+        )
+    elif operation == INFO_RENDER_STATUS_TOKEN_PLAN:
+        ok = info_render_status_token_plan(
+            Pointer(to=writer),
+            unsigned_address,
+            text_address,
+            output_address,
+            output_capacity,
+            text_count // 2,
+        )
+    elif operation == INFO_RENDER_STATUS_RUNTIME_PROFILE:
+        ok = info_render_status_runtime_profile(
+            Pointer(to=writer),
+            signed_address,
+            signed_count,
+            unsigned_address,
+            text_address,
+            text_count,
+            presence,
+        )
+    elif operation == INFO_RENDER_STATUS_RUNWAY:
+        ok = info_render_status_runway(
+            Pointer(to=writer), signed_address, unsigned_address, text_address, presence
+        )
+    elif operation == INFO_RENDER_STATUS_FIELDS:
+        ok = info_render_status_fields(
+            Pointer(to=writer), unsigned_address, text_address, presence
+        )
+    elif operation == INFO_RENDER_STATUS_QUOTA_GAUGE:
+        ok = info_render_status_quota_gauge(
+            Pointer(to=writer), signed_address, unsigned_address, text_address, presence
         )
     else:
         ok = info_render_token_usage(

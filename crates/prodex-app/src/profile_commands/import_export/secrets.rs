@@ -74,12 +74,13 @@ pub(super) fn validate_exported_secret_files(exported: &ExportedProfile) -> Resu
 }
 
 pub(super) fn validate_exported_secret_file_path(path: &str, profile_name: &str) -> Result<()> {
-    if path.trim().is_empty()
-        || Path::new(path).is_absolute()
-        || path.contains('/')
-        || path.contains('\\')
-        || matches!(path, "." | "..")
-    {
+    let is_absolute = Path::new(path).is_absolute();
+    let is_safe =
+        prodex_mojo_core::profile_export::profile_import_secret_path_is_safe(path, is_absolute)
+            .map_err(|error| {
+                anyhow::anyhow!("Mojo profile-import secret path failed: {error:?}")
+            })?;
+    if !is_safe {
         bail!(
             "profile export bundle contains unsafe secret file path '{}' for profile '{}'",
             path,

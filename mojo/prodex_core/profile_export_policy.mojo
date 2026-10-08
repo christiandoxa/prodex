@@ -687,6 +687,198 @@ def prodex_profile_import_active_profile_plan_v1(
     return 0
 
 
+comptime PROFILE_IMPORT_LIFECYCLE_ABI_VERSION: Int64 = 1
+comptime PROFILE_IMPORT_LIFECYCLE_MAX_OPERATIONS: Int64 = PROFILE_IMPORT_PLAN_MAX_PROFILES * 3
+
+
+def profile_import_views_less(
+    left: ProdexRichStringView,
+    right: ProdexRichStringView,
+) -> Bool:
+    var left_bytes = rich_view_ptr(left)
+    var right_bytes = rich_view_ptr(right)
+    var common = min(Int64(left.len), Int64(right.len))
+    for index in range(common):
+        if left_bytes[unsafe_offset=index] < right_bytes[unsafe_offset=index]:
+            return True
+        if left_bytes[unsafe_offset=index] > right_bytes[unsafe_offset=index]:
+            return False
+    return left.len < right.len
+
+
+@export("prodex_profile_import_lifecycle_order_v1")
+def prodex_profile_import_lifecycle_order_v1(
+    abi_version: Int64,
+    operation_count: Int64,
+    names_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    operation_count_address: UInt,
+    profile_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_IMPORT_LIFECYCLE_ABI_VERSION:
+        return 100
+    if (
+        operation_count < 0
+        or operation_count > PROFILE_IMPORT_LIFECYCLE_MAX_OPERATIONS
+        or operation_count_address == 0
+        or profile_count_address == 0
+    ):
+        return 99
+    var operation_count_out = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(operation_count_address)
+    )
+    var profile_count_out = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(profile_count_address)
+    )
+    operation_count_out[] = 0
+    profile_count_out[] = 0
+    if operation_count == 0:
+        if output_address == 0 or output_capacity < 2:
+            return 99
+        var empty_output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        )
+        empty_output[unsafe_offset=0] = 0
+        empty_output[unsafe_offset=1] = 0
+        return 0
+    if names_address == 0 or output_address == 0:
+        return 99
+    if output_capacity < operation_count * 2 + 2:
+        return 2
+
+    var names = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(names_address))
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = 0
+    for index in range(operation_count):
+        if not profile_import_view_valid(names[unsafe_offset=index].copy(), False):
+            return 99
+        output[unsafe_offset=index + 2] = index
+
+    # ponytail: O(n²) sort is bounded by 768 import updates; use a native sort if that cap rises.
+    for index in range(operation_count):
+        var smallest = index
+        for probe in range(index + 1, operation_count):
+            var probe_index = output[unsafe_offset=probe + 2]
+            var smallest_index = output[unsafe_offset=smallest + 2]
+            var probe_name = names[unsafe_offset=probe_index].copy()
+            var smallest_name = names[unsafe_offset=smallest_index].copy()
+            if (
+                profile_import_views_less(probe_name, smallest_name)
+                or (
+                    profile_import_views_equal(probe_name, smallest_name)
+                    and probe_index < smallest_index
+                )
+            ):
+                smallest = probe
+        if smallest != index:
+            var current_index = output[unsafe_offset=index + 2]
+            output[unsafe_offset=index + 2] = output[unsafe_offset=smallest + 2]
+            output[unsafe_offset=smallest + 2] = current_index
+
+    var unique_count: Int64 = 0
+    for index in range(operation_count):
+        var current_index = output[unsafe_offset=index + 2]
+        var current_name = names[unsafe_offset=current_index].copy()
+        var duplicate = False
+        for previous_index in range(index):
+            var previous_operation = output[unsafe_offset=previous_index + 2]
+            var equal = profile_import_views_equal(
+                current_name,
+                names[unsafe_offset=previous_operation].copy(),
+            )
+            if equal:
+                duplicate = True
+                break
+        if not duplicate:
+            output[unsafe_offset=operation_count + unique_count + 2] = current_index
+            unique_count += 1
+
+    output[unsafe_offset=0] = operation_count
+    output[unsafe_offset=1] = unique_count
+    operation_count_out[] = operation_count
+    profile_count_out[] = unique_count
+    return 0
+
+
+@export("prodex_profile_import_secret_path_valid_v1")
+def prodex_profile_import_secret_path_valid_v1(
+    abi_version: Int64,
+    path_address: UInt,
+    path_is_absolute: Int64,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_IMPORT_LIFECYCLE_ABI_VERSION:
+        return 100
+    if path_address == 0 or (path_is_absolute != 0 and path_is_absolute != 1):
+        return 99
+    var path = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(path_address)
+    )[].copy()
+    if not profile_import_view_valid(path, False):
+        return 1
+    var bounds = rich_trim_bounds(path)
+    if bounds[0] == bounds[1] or path_is_absolute == 1:
+        return 1
+    var source = rich_view_ptr(path)
+    for index in range(Int64(path.len)):
+        var byte = source[unsafe_offset=index]
+        if byte == UInt8(47) or byte == UInt8(92):
+            return 1
+    if path.len == UInt(1) and source[unsafe_offset=0] == UInt8(46):
+        return 1
+    if (
+        path.len == UInt(2)
+        and source[unsafe_offset=0] == UInt8(46)
+        and source[unsafe_offset=1] == UInt8(46)
+    ):
+        return 1
+    return 0
+
+
+@export("prodex_profile_import_auth_journal_commit_v1")
+def prodex_profile_import_auth_journal_commit_v1(
+    abi_version: Int64,
+    profile_exists: Int64,
+    codex_home_matches: Int64,
+    state_after_known: Int64,
+    has_next_state: Int64,
+    email_matches: Int64,
+    provider_matches: Int64,
+    auth_matches: Int64,
+    secret_files_match: Int64,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_IMPORT_LIFECYCLE_ABI_VERSION:
+        return 100
+    if (
+        (profile_exists != 0 and profile_exists != 1)
+        or (codex_home_matches != 0 and codex_home_matches != 1)
+        or (state_after_known != 0 and state_after_known != 1)
+        or (has_next_state != 0 and has_next_state != 1)
+        or (email_matches != 0 and email_matches != 1)
+        or (provider_matches != 0 and provider_matches != 1)
+        or (auth_matches != 0 and auth_matches != 1)
+        or (secret_files_match != 0 and secret_files_match != 1)
+    ):
+        return 99
+    if (
+        profile_exists == 0
+        or codex_home_matches == 0
+        or state_after_known == 0
+        or has_next_state == 0
+        or email_matches == 0
+        or provider_matches == 0
+        or auth_matches == 0
+        or secret_files_match == 0
+    ):
+        return 1
+    return 0
+
+
 @export("prodex_profile_export_copilot_strip_json_line_comments_v1")
 def prodex_profile_export_copilot_strip_json_line_comments_v1(
     abi_version: Int64,

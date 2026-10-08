@@ -1,5 +1,15 @@
 use crate::MojoError;
 
+mod status;
+pub use status::{
+    InfoStatusFields, InfoStatusProfileChoice, InfoStatusQuotaGauge, InfoStatusReset,
+    InfoStatusResourceCounters, InfoStatusResourceMetrics, InfoStatusResources,
+    InfoStatusRuntimeCandidate, InfoStatusRunway, InfoStatusRunwayEstimate, InfoStatusTokenEvent,
+    InfoStatusTokenPlan, format_status_fields, format_status_quota_gauge, format_status_runway,
+    status_profile_choice, status_profile_indices, status_resource_history_values,
+    status_resource_metrics, status_token_plan,
+};
+
 const ABI_VERSION: i64 = 1;
 const RELATIVE_DURATION: i64 = 0;
 const QUOTA_DATA: i64 = 1;
@@ -21,7 +31,6 @@ const HUMAN_COUNT: i64 = 16;
 const TOKEN_EFFICIENCY: i64 = 17;
 const MEMORY_PERCENT: i64 = 18;
 const TEXT_SPARKLINE: i64 = 19;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct InfoTokenUsageProfile<'a> {
     pub profile: &'a str,
@@ -75,6 +84,17 @@ fn render(
     texts: &[&str],
     presence: u64,
 ) -> Result<String, MojoError> {
+    String::from_utf8(render_bytes(operation, signed, unsigned, texts, presence)?)
+        .map_err(|_| MojoError::InvalidOutput)
+}
+
+fn render_bytes(
+    operation: i64,
+    signed: &[i64],
+    unsigned: &[u64],
+    texts: &[&str],
+    presence: u64,
+) -> Result<Vec<u8>, MojoError> {
     let views = texts
         .iter()
         .map(|value| {
@@ -89,10 +109,28 @@ fn render(
             .checked_add(value.len())
             .ok_or(MojoError::InvalidInput)
     })?;
+    let output_extra = match operation {
+        status::STATUS_PROFILE_FILTER => unsigned
+            .len()
+            .checked_mul(21)
+            .ok_or(MojoError::InvalidInput)?,
+        status::STATUS_TOKEN_PLAN => status::STATUS_HISTORY_LIMIT
+            .checked_mul(std::mem::size_of::<u64>())
+            .ok_or(MojoError::InvalidInput)?,
+        _ => 0,
+    };
     let capacity = text_bytes
         .checked_add(4096)
+        .and_then(|capacity| capacity.checked_add(output_extra))
         .ok_or(MojoError::InvalidInput)?;
-    let mut output = vec![0_u8; capacity];
+    let word_count = capacity
+        .checked_add(std::mem::size_of::<u64>() - 1)
+        .ok_or(MojoError::InvalidInput)?
+        / std::mem::size_of::<u64>();
+    let output_capacity = word_count
+        .checked_mul(std::mem::size_of::<u64>())
+        .ok_or(MojoError::InvalidInput)?;
+    let mut output = vec![0_u64; word_count];
     let mut written = -1_i64;
     let status = unsafe {
         prodex_terminal_info_render_v1(
@@ -105,8 +143,8 @@ fn render(
             views.as_ptr() as usize as u64,
             i64::try_from(views.len()).map_err(|_| MojoError::InvalidInput)?,
             presence,
-            output.as_mut_ptr() as usize as u64,
-            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr().cast::<u8>() as usize as u64,
+            i64::try_from(output_capacity).map_err(|_| MojoError::InvalidInput)?,
             (&mut written as *mut i64) as usize as u64,
         )
     };
@@ -118,10 +156,11 @@ fn render(
         _ => return Err(MojoError::InvalidOutput),
     }
     let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
-    if written > output.len() {
+    if written > output_capacity {
         return Err(MojoError::InvalidOutput);
     }
-    String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)
+    let bytes = unsafe { std::slice::from_raw_parts(output.as_ptr().cast::<u8>(), written) };
+    Ok(bytes.to_vec())
 }
 
 pub fn format_process_summary(

@@ -1,6 +1,6 @@
 use super::{
     StatusOverview, StatusResourceHistory, StatusResourceSnapshot, format_info_load_summary,
-    format_info_pool_remaining, format_info_runway, format_info_token_usage_summary,
+    format_info_pool_remaining, format_info_token_usage_summary,
 };
 use chrono::{Local, TimeZone};
 use prodex_mojo_core::info_render;
@@ -127,24 +127,39 @@ fn render_quota_gauge(
         overview.quota.weekly
     };
     if window.profiles == 0 {
-        frame.render_widget(
-            Paragraph::new("quota unavailable").block(status_block(title)),
-            area,
-        );
+        let gauge = info_render::format_status_quota_gauge(
+            window.total_remaining,
+            window.profiles,
+            window.earliest_reset_at,
+            Local::now().timestamp(),
+            None,
+        )
+        .expect("Mojo status quota-gauge formatter returned invalid output");
+        frame.render_widget(Paragraph::new(gauge.label).block(status_block(title)), area);
         return;
     }
-    let average = (window.total_remaining as f64 / window.profiles as f64).clamp(0.0, 100.0);
-    let reset = format_reset(window.earliest_reset_at, Local::now().timestamp());
-    let label = format!(
-        "{average:.0}% avg · pool {}% · {reset}",
-        window.total_remaining
-    );
+    let now = Local::now().timestamp();
+    let absolute_reset = window.earliest_reset_at.and_then(|reset_at| {
+        Local
+            .timestamp_opt(reset_at, 0)
+            .single()
+            .map(|value| value.format("%m-%d %H:%M").to_string())
+            .or_else(|| Some(reset_at.to_string()))
+    });
+    let gauge = info_render::format_status_quota_gauge(
+        window.total_remaining,
+        window.profiles,
+        window.earliest_reset_at,
+        now,
+        absolute_reset.as_deref(),
+    )
+    .expect("Mojo status quota-gauge formatter returned invalid output");
     frame.render_widget(
         Gauge::default()
             .block(status_block(title))
-            .gauge_style(Style::default().fg(quota_color(average)))
-            .ratio(average / 100.0)
-            .label(label),
+            .gauge_style(Style::default().fg(quota_color(gauge.band)))
+            .ratio(gauge.ratio)
+            .label(gauge.label),
         area,
     );
 }
@@ -259,7 +274,7 @@ fn render_resource_panel(
     frame.render_widget(
         Gauge::default()
             .block(Block::default().title(" CPU "))
-            .gauge_style(Style::default().fg(quota_color(100.0 - cpu)))
+            .gauge_style(Style::default().fg(resource_color(100.0 - cpu)))
             .ratio((cpu / 100.0).clamp(0.0, 1.0))
             .label(format!("{cpu:.1}% host capacity")),
         rows[0],
@@ -380,152 +395,122 @@ pub(super) fn status_fields(
     resources: &StatusResourceSnapshot,
 ) -> Vec<(String, String)> {
     let now = Local::now().timestamp();
-    vec![
-        (
-            "Profile".to_string(),
-            format!(
-                "runtime={}, configured={}, pool={}, quota-compatible={}, unavailable={}",
-                overview.runtime_profile,
-                overview.active_profile,
-                overview.profile_count,
-                overview.quota.compatible_profiles,
-                overview.quota.unavailable_profiles
-            ),
+    let five_hour_runway = status_runway(
+        overview.quota.five_hour.profiles,
+        overview.quota.five_hour.total_remaining,
+        overview.quota.five_hour.earliest_reset_at,
+        overview.five_hour_runway.as_ref(),
+        now,
+    );
+    let weekly_runway = status_runway(
+        overview.quota.weekly.profiles,
+        overview.quota.weekly.total_remaining,
+        overview.quota.weekly.earliest_reset_at,
+        overview.weekly_runway.as_ref(),
+        now,
+    );
+    let token_history_text = info_render::format_text_sparkline(&overview.token_history)
+        .expect("Mojo status sparkline formatter returned invalid output");
+    info_render::format_status_fields(info_render::InfoStatusFields {
+        runtime_profile: &overview.runtime_profile,
+        active_profile: &overview.active_profile,
+        profile_count: overview.profile_count,
+        quota_compatible_profiles: overview.quota.compatible_profiles,
+        unavailable_profiles: overview.quota.unavailable_profiles,
+        five_hour_quota: &format_info_pool_remaining(
+            overview.quota.five_hour.total_remaining,
+            overview.quota.five_hour.profiles,
+            overview.quota.five_hour.earliest_reset_at,
         ),
-        (
-            "5h quota".to_string(),
-            format_info_pool_remaining(
-                overview.quota.five_hour.total_remaining,
-                overview.quota.five_hour.profiles,
-                overview.quota.five_hour.earliest_reset_at,
-            ),
+        five_hour_runway: &five_hour_runway,
+        weekly_quota: &format_info_pool_remaining(
+            overview.quota.weekly.total_remaining,
+            overview.quota.weekly.profiles,
+            overview.quota.weekly.earliest_reset_at,
         ),
-        (
-            "5h runway".to_string(),
-            format_info_runway(
-                overview.quota.five_hour.profiles,
-                overview.quota.five_hour.total_remaining,
-                overview.quota.five_hour.earliest_reset_at,
-                overview.five_hour_runway.as_ref(),
-                now,
-            ),
+        weekly_runway: &weekly_runway,
+        token_usage_summary: &format_info_token_usage_summary(&overview.token_summary),
+        token_input: overview.token_summary.total.input_tokens,
+        token_cached_input: overview.token_summary.total.cached_input_tokens,
+        token_output: overview.token_summary.total.output_tokens,
+        token_history_text: &token_history_text,
+        token_first_at: overview.token_first_at.as_deref(),
+        token_last_at: overview.token_last_at.as_deref(),
+        resources: info_render::InfoStatusResources {
+            available: resources.available,
+            process_count: resources.process_count,
+            runtime_process_count: resources.runtime_process_count,
+            cpu_percent: resources.cpu_percent,
+            resident_bytes: resources.resident_bytes,
+            memory_total_bytes: resources.memory_total_bytes,
+            socket_count: resources.socket_count,
+            network_rx_queue_bytes: resources.network_rx_queue_bytes,
+            network_tx_queue_bytes: resources.network_tx_queue_bytes,
+            disk_read_bytes: resources.disk_read_bytes,
+            disk_write_bytes: resources.disk_write_bytes,
+            disk_read_bytes_per_second: resources.disk_read_bytes_per_second,
+            disk_write_bytes_per_second: resources.disk_write_bytes_per_second,
+        },
+        recent_load: &format_info_load_summary(
+            &overview.runtime_load,
+            overview.runtime_process_count,
         ),
-        (
-            "Weekly quota".to_string(),
-            format_info_pool_remaining(
-                overview.quota.weekly.total_remaining,
-                overview.quota.weekly.profiles,
-                overview.quota.weekly.earliest_reset_at,
-            ),
-        ),
-        (
-            "Weekly runway".to_string(),
-            format_info_runway(
-                overview.quota.weekly.profiles,
-                overview.quota.weekly.total_remaining,
-                overview.quota.weekly.earliest_reset_at,
-                overview.weekly_runway.as_ref(),
-                now,
-            ),
-        ),
-        (
-            "Token usage".to_string(),
-            format_info_token_usage_summary(&overview.token_summary),
-        ),
-        (
-            "Token efficiency".to_string(),
-            info_render::format_token_efficiency(
-                overview.token_summary.total.input_tokens,
-                overview.token_summary.total.cached_input_tokens,
-                overview.token_summary.total.output_tokens,
-            )
-            .expect("Mojo status token-efficiency formatter returned invalid output"),
-        ),
-        (
-            "Token history".to_string(),
-            format!(
-                "{} {} → {}",
-                info_render::format_text_sparkline(&overview.token_history)
-                    .expect("Mojo status sparkline formatter returned invalid output"),
-                overview.token_first_at.as_deref().unwrap_or("-"),
-                overview.token_last_at.as_deref().unwrap_or("-")
-            ),
-        ),
-        (
-            "Processes".to_string(),
-            if resources.available {
-                format!(
-                    "{} total, {} runtime; CPU {}",
-                    resources.process_count,
-                    resources.runtime_process_count,
-                    resources
-                        .cpu_percent
-                        .map(|value| format!("{value:.1}%"))
-                        .unwrap_or_else(|| "warming up".to_string())
-                )
-            } else {
-                "unavailable".to_string()
-            },
-        ),
-        (
-            "Memory".to_string(),
-            if resources.available {
-                format!(
-                    "{} ({} host)",
-                    info_render::format_human_bytes(resources.resident_bytes)
-                        .expect("Mojo status byte formatter returned invalid output"),
-                    info_render::format_memory_percent(
-                        resources.resident_bytes,
-                        resources.memory_total_bytes
-                    )
-                    .expect("Mojo status memory-percent formatter returned invalid output")
-                )
-            } else {
-                "unavailable".to_string()
-            },
-        ),
-        (
-            "Network".to_string(),
-            if resources.available {
-                format!(
-                    "{} sockets; RX queue {}, TX queue {}",
-                    resources.socket_count,
-                    info_render::format_human_bytes(resources.network_rx_queue_bytes)
-                        .expect("Mojo status byte formatter returned invalid output"),
-                    info_render::format_human_bytes(resources.network_tx_queue_bytes)
-                        .expect("Mojo status byte formatter returned invalid output")
-                )
-            } else {
-                "unavailable".to_string()
-            },
-        ),
-        (
-            "Disk I/O".to_string(),
-            if resources.available {
-                format!(
-                    "read {} total ({}/s), write {} total ({}/s)",
-                    info_render::format_human_bytes(resources.disk_read_bytes)
-                        .expect("Mojo status byte formatter returned invalid output"),
-                    info_render::format_human_bytes(resources.disk_read_bytes_per_second)
-                        .expect("Mojo status byte formatter returned invalid output"),
-                    info_render::format_human_bytes(resources.disk_write_bytes)
-                        .expect("Mojo status byte formatter returned invalid output"),
-                    info_render::format_human_bytes(resources.disk_write_bytes_per_second)
-                        .expect("Mojo status byte formatter returned invalid output")
-                )
-            } else {
-                "unavailable".to_string()
-            },
-        ),
-        (
-            "Recent load".to_string(),
-            format_info_load_summary(&overview.runtime_load, overview.runtime_process_count),
-        ),
-        ("Updated".to_string(), overview.updated_at.clone()),
-    ]
+        updated_at: &overview.updated_at,
+    })
+    .expect("Mojo status field renderer returned invalid output")
 }
 
-fn quota_color(remaining: f64) -> Color {
+fn status_runway(
+    profiles_with_data: usize,
+    current_remaining: i64,
+    earliest_reset_at: Option<i64>,
+    estimate: Option<&super::InfoRunwayEstimate>,
+    now: i64,
+) -> String {
+    let reset_text = earliest_reset_at.map(|timestamp| {
+        (
+            timestamp,
+            prodex_quota::format_precise_reset_time(Some(timestamp)),
+        )
+    });
+    let exhaust_text = estimate.map(|estimate| {
+        (
+            estimate,
+            prodex_quota::format_precise_reset_time(Some(estimate.exhaust_at)),
+        )
+    });
+    info_render::format_status_runway(info_render::InfoStatusRunway {
+        profiles_with_data,
+        current_remaining,
+        earliest_reset: reset_text
+            .as_ref()
+            .map(|(timestamp, text)| info_render::InfoStatusReset {
+                timestamp: *timestamp,
+                text,
+            }),
+        estimate: exhaust_text.as_ref().map(|(estimate, text)| {
+            info_render::InfoStatusRunwayEstimate {
+                burn_per_hour: estimate.burn_per_hour,
+                observed_profiles: estimate.observed_profiles,
+                observed_span_seconds: estimate.observed_span_seconds,
+                exhaust_at: estimate.exhaust_at,
+                exhaust_text: text,
+            }
+        }),
+        now,
+    })
+    .expect("Mojo status runway renderer returned invalid output")
+}
+
+fn quota_color(band: u8) -> Color {
+    match band {
+        0 => Color::LightRed,
+        1 => Color::LightYellow,
+        _ => Color::LightGreen,
+    }
+}
+
+fn resource_color(remaining: f64) -> Color {
     if remaining <= 10.0 {
         Color::LightRed
     } else if remaining <= 25.0 {
@@ -533,17 +518,4 @@ fn quota_color(remaining: f64) -> Color {
     } else {
         Color::LightGreen
     }
-}
-
-fn format_reset(reset_at: Option<i64>, now: i64) -> String {
-    let Some(reset_at) = reset_at else {
-        return "reset unknown".to_string();
-    };
-    let relative = terminal_ui::format_relative_duration(reset_at.saturating_sub(now));
-    let absolute = Local
-        .timestamp_opt(reset_at, 0)
-        .single()
-        .map(|value| value.format("%m-%d %H:%M").to_string())
-        .unwrap_or_else(|| reset_at.to_string());
-    format!("reset in {relative} ({absolute})")
 }

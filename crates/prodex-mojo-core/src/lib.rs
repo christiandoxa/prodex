@@ -134,6 +134,9 @@ pub mod policy;
 pub mod profile_export;
 #[cfg(feature = "mojo-runtime")]
 pub mod profile_identity;
+#[cfg(all(feature = "mojo-runtime", feature = "mojo-rich"))]
+#[path = "profile_export/import_lifecycle.rs"]
+mod profile_import_lifecycle;
 #[cfg(feature = "mojo-runtime")]
 pub mod profile_login_policy;
 #[cfg(feature = "mojo-provider-constraints")]

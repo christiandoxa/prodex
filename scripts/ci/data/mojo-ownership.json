@@ -940,7 +940,10 @@
           "profile_export_copilot_platform_mapping",
           "profile_export_copilot_user_api_origin",
           "profile_export_copilot_models_api_url",
-          "profile_export_copilot_import_state_planning"
+          "profile_export_copilot_import_state_planning",
+          "profile_import_lifecycle_ordering",
+          "profile_import_secret_path_safety",
+          "profile_import_auth_journal_commit_policy"
         ]
       },
       {
@@ -1323,6 +1326,16 @@
           "gemini_compact_utf8_truncation",
           "gemini_local_compact_summary_formatting",
           "gemini_semantic_continuation_summary_formatting"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/info_render.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "status_command_presentation_policy"
         ]
       }
     ],
@@ -5944,6 +5957,100 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON parsing, item/index traversal, content extraction, Mojo edge-truncation calls, borrowed string views, and final String ownership"
+    },
+    {
+      "name": "profile_import_lifecycle_ordering",
+      "domain": "profiles/import",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust sorted and deduplicated imported-profile mutation names before staging changes",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_import_lifecycle_order_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::profile_import_lifecycle_order(",
+      "production_consumers": [
+        "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/import_lifecycle.rs",
+      "rust_owner_before": "Imported-profile mutation ordering and stable duplicate removal before staging",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo adapter tests and profile-command lifecycle integration tests cover stable ordering and duplicate names",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "profile-name extraction, filesystem staging, state persistence, and typed ABI result mapping"
+    },
+    {
+      "name": "profile_import_secret_path_safety",
+      "domain": "profiles/import",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust classified imported secret filenames for emptiness, absolute paths, path separators, and dot traversal",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_import_secret_path_valid_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-app/src/profile_commands/import_export/secrets.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::profile_import_secret_path_is_safe(",
+      "production_consumers": [
+        "crates/prodex-app/src/profile_commands/import_export/secrets.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/import_lifecycle.rs",
+      "rust_owner_before": "Secret-file filename safety policy for imported profile bundles",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the profile-import caller regression rejects path traversal before staging",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "host path metadata acquisition and secure filesystem staging"
+    },
+    {
+      "name": "profile_import_auth_journal_commit_policy",
+      "domain": "profiles/import",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust decided whether an auth-update journal represented a fully committed profile update",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_import_auth_journal_commit_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_export_policy.mojo",
+      "consumer": "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs",
+      "consumer_marker": "prodex_mojo_core::profile_export::profile_import_auth_journal_is_committed(",
+      "production_consumers": [
+        "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/profile_export/import_lifecycle.rs",
+      "rust_owner_before": "Auth-update journal commit classification across profile, state, identity, provider, auth, and secret-file matches",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo adapter tests reject each incomplete journal fact",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "profile and credential filesystem reads, provider/state decoding, and journal recovery effects"
+    },
+    {
+      "name": "status_command_presentation_policy",
+      "domain": "cli/status",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust selected the status profile and token history, derived resource chart values and quota runway, and formatted the fixed status field list",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_info_render_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/info_render.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/status.rs",
+      "consumer_marker": "prodex_mojo_core::info_render::status_profile_choice(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/status.rs",
+        "crates/prodex-app/src/app_commands/status/render.rs",
+        "crates/prodex-app/src/app_commands/status/resource.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/status/tests.rs",
+      "rust_owner_before": "Status profile precedence, chronological token-history selection, resource-rate aggregation, quota runway policy, and ordered field formatting",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; required-Mojo status tests cover field output, profile precedence, token history, quota gauge bands, and resource counters",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "clock and log acquisition, host resource sampling, terminal layout/color mapping, and typed ABI input/output adaptation"
     }
   ],
   "rust_semantic_reductions": [

@@ -215,11 +215,15 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/profile_export.rs",
   "crates/prodex-mojo-core/src/profile_export/active_profile.rs",
   "crates/prodex-mojo-core/src/profile_export/copilot.rs",
+  "crates/prodex-mojo-core/src/profile_export/import_lifecycle.rs",
   "mojo/prodex_core/profile_export_policy.mojo",
   "crates/prodex-profile-export/src/envelope.rs",
   "crates/prodex-profile-export/src/data_model.rs",
   "crates/prodex-profile-export/src/selection.rs",
   "crates/prodex-profile-export/tests/src/lib.rs",
+  "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs",
+  "crates/prodex-app/src/profile_commands/import_export/secrets.rs",
+  "crates/prodex-app/tests/support/profile_commands_body/import/lifecycle.rs",
   "crates/prodex-runtime-state/src/quota.rs",
   "crates/prodex-runtime-proxy/src/lib.rs",
   "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
@@ -293,6 +297,7 @@ const PROMOTED_FILES = [
   "crates/prodex-terminal-ui/src/info.rs",
   "crates/prodex-terminal-ui/src/runtime_launch.rs",
   "crates/prodex-mojo-core/src/info_render.rs",
+  "crates/prodex-mojo-core/src/info_render/status.rs",
   "crates/prodex-app/src/runtime_external_provider_config.rs",
   "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
   "crates/prodex-app/src/super_expose/protocol.rs",
@@ -3972,6 +3977,22 @@ export function findViolations(files) {
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": terminal info ABI adapter must retain " + marker);
     }
+    if (filePath === "crates/prodex-mojo-core/src/info_render/status.rs") {
+      const required = [
+        "pub fn status_resource_metrics(",
+        "pub fn status_resource_history_values(",
+        "pub fn status_profile_indices(",
+        "pub fn status_token_plan(",
+        "pub fn status_profile_choice(",
+        "pub fn format_status_runway(",
+        "pub fn format_status_fields(",
+        "render_numeric_fields(STATUS_RESOURCE_METRICS",
+        "render_bytes(\n        STATUS_FIELDS",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => filePath + ": status policy adapter must retain Mojo call " + marker);
+    }
     if (filePath === "mojo/prodex_core/info_render.mojo") {
       const required = [
         "INFO_RENDER_HUMAN_BYTES",
@@ -3984,6 +4005,14 @@ export function findViolations(files) {
         "info_render_token_efficiency(",
         "info_render_memory_percent(",
         "info_render_text_sparkline(",
+        "info_render_status_profile_filter(",
+        "info_render_status_token_plan(",
+        "info_render_status_runtime_profile(",
+        "info_render_status_runway(",
+        "info_render_status_fields(",
+        "info_render_status_resource_metrics(",
+        "info_render_status_resource_history(",
+        "info_render_status_quota_gauge(",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -4692,6 +4721,18 @@ export function findViolations(files) {
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: Copilot JSONC adapter must retain ${marker}`);
     }
+    if (filePath === "crates/prodex-mojo-core/src/profile_export/import_lifecycle.rs") {
+      const required = [
+        "pub fn profile_import_lifecycle_order(",
+        "pub fn profile_import_secret_path_is_safe(",
+        "pub fn profile_import_auth_journal_is_committed(",
+        "profile_import_lifecycle_order_is_mojo_owned",
+        "profile_import_secret_path_rules_are_mojo_owned",
+        "profile_import_auth_journal_commit_requires_every_match",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: profile-import lifecycle decisions must retain ${marker}`);
+    }
     if (filePath === "crates/prodex-profile-export/src/copilot.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
@@ -4720,6 +4761,24 @@ export function findViolations(files) {
         restoredRust.every((marker) => !production.includes(marker))
         ? []
         : [`${filePath}: Copilot JSONC/version/platform policy must use Mojo without a Rust semantic copy`];
+    }
+    if (filePath === "crates/prodex-app/src/profile_commands/import_export/import/lifecycle_support.rs") {
+      const required = [
+        "prodex_mojo_core::profile_export::profile_import_lifecycle_order(&mutation_names)",
+        "prodex_mojo_core::profile_export::profile_import_auth_journal_is_committed(",
+      ];
+      const restoredRust = ["names.sort();", "names.dedup();", "return Ok(true);", "return Ok(false);"];
+      return required.every((marker) => contents.includes(marker)) &&
+        restoredRust.every((marker) => !contents.includes(marker))
+        ? []
+        : [`${filePath}: import lifecycle ordering and committed-state classification must use Mojo without a Rust policy copy`];
+    }
+    if (filePath === "crates/prodex-app/src/profile_commands/import_export/secrets.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      return production.includes("prodex_mojo_core::profile_export::profile_import_secret_path_is_safe(") &&
+        !/path\.trim\(\)\.is_empty\(\)|path\.contains\('\/'\)|path\.contains\('\\\\'\)|matches!\(path, "\." \| "\.\."\)/u.test(production)
+        ? []
+        : [`${filePath}: secret-file path safety must use Mojo without a Rust policy copy`];
     }
     if (filePath === "mojo/prodex_core/profile_export_policy.mojo") {
       const required = [
@@ -4750,6 +4809,12 @@ export function findViolations(files) {
         "PROFILE_EXPORT_COPILOT_STATE_ACCOUNT_CONFLICT",
         "PROFILE_EXPORT_COPILOT_STATE_REQUESTED_EXISTS",
         "has_active_profile == 0 or activate_requested != 0",
+        '@export("prodex_profile_import_lifecycle_order_v1")',
+        "profile_import_views_equal(",
+        '@export("prodex_profile_import_secret_path_valid_v1")',
+        "rich_trim_bounds(path)",
+        '@export("prodex_profile_import_auth_journal_commit_v1")',
+        "secret_files_match == 0",
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: requested profile selection must remain Mojo-owned (${marker})`);
@@ -4766,6 +4831,11 @@ export function findViolations(files) {
       ];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: profile-export selection caller coverage must retain ${marker}`);
+    }
+    if (filePath === "crates/prodex-app/tests/support/profile_commands_body/import/lifecycle.rs") {
+      return contents.includes("profile_import_rejects_secret_file_path_traversal_before_staging")
+        ? []
+        : [`${filePath}: profile import must retain its path-traversal caller regression`];
     }
     return [];
   });

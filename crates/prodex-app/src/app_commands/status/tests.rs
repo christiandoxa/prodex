@@ -188,6 +188,62 @@ fn resource_snapshot_derives_cpu_and_disk_rates() {
 }
 
 #[test]
+fn status_resource_history_aggregation_uses_mojo() {
+    let mut history = StatusResourceHistory::default();
+    let snapshot = StatusResourceSnapshot {
+        available: true,
+        process_count: 2,
+        runtime_process_count: 1,
+        cpu_percent: Some(12.5),
+        resident_bytes: 512,
+        disk_read_bytes_per_second: u64::MAX,
+        disk_write_bytes_per_second: 1,
+        network_rx_queue_bytes: 4,
+        network_tx_queue_bytes: 6,
+        ..StatusResourceSnapshot::default()
+    };
+    history.push(&snapshot);
+
+    assert_eq!(history.cpu.iter().copied().collect::<Vec<_>>(), [13]);
+    assert_eq!(history.memory.iter().copied().collect::<Vec<_>>(), [512]);
+    assert_eq!(history.disk.iter().copied().collect::<Vec<_>>(), [u64::MAX]);
+    assert_eq!(history.network.iter().copied().collect::<Vec<_>>(), [10]);
+}
+
+#[test]
+fn status_resource_mojo_boundary_rejects_non_finite_elapsed_time() {
+    let counters = prodex_mojo_core::info_render::InfoStatusResourceCounters {
+        available: true,
+        ..prodex_mojo_core::info_render::InfoStatusResourceCounters::default()
+    };
+    assert!(matches!(
+        prodex_mojo_core::info_render::status_resource_metrics(
+            Some((counters, f64::NAN)),
+            counters,
+        ),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    ));
+}
+
+#[test]
+fn status_quota_gauge_uses_mojo_threshold_and_reset_label() {
+    let gauge = prodex_mojo_core::info_render::format_status_quota_gauge(
+        25,
+        2,
+        Some(1_060),
+        1_000,
+        Some("01-01 00:17"),
+    )
+    .unwrap();
+    assert_eq!(gauge.band, 1);
+    assert_eq!(gauge.ratio, 0.13);
+    assert_eq!(
+        gauge.label,
+        "13% avg · pool 25% · reset in 1m (01-01 00:17)"
+    );
+}
+
+#[test]
 fn status_fields_mark_proc_resources_unavailable_instead_of_zero() {
     let overview = StatusOverview {
         updated_at: "now".to_string(),
@@ -213,6 +269,147 @@ fn status_fields_mark_proc_resources_unavailable_instead_of_zero() {
             .expect("status resource field should exist");
         assert_eq!(value, "unavailable");
     }
+    assert_eq!(
+        fields
+            .iter()
+            .find(|(label, _)| label == "Profile")
+            .map(|(_, value)| value.as_str()),
+        Some("runtime=main, configured=main, pool=1, quota-compatible=0, unavailable=0")
+    );
+}
+
+#[test]
+fn status_fields_keep_quota_token_and_resource_output_contract() {
+    let mut overview = StatusOverview {
+        updated_at: "now".to_string(),
+        active_profile: "configured".to_string(),
+        runtime_profile: "runtime".to_string(),
+        profile_count: 3,
+        quota: StatusQuotaSummary {
+            compatible_profiles: 2,
+            unavailable_profiles: 1,
+            five_hour: StatusQuotaWindow {
+                profiles: 2,
+                total_remaining: 90,
+                earliest_reset_at: None,
+            },
+            weekly: StatusQuotaWindow::default(),
+        },
+        five_hour_runway: None,
+        weekly_runway: None,
+        token_summary: InfoTokenUsageSummary {
+            log_count: 1,
+            event_count: 2,
+            total: crate::reports::InfoTokenUsageCounts {
+                input_tokens: 200,
+                cached_input_tokens: 50,
+                output_tokens: 100,
+                reasoning_tokens: 20,
+            },
+            ..InfoTokenUsageSummary::default()
+        },
+        token_history: vec![1, 2, 3],
+        token_first_at: Some("first".to_string()),
+        token_last_at: Some("last".to_string()),
+        runtime_load: crate::InfoRuntimeLoadSummary::default(),
+        runtime_process_count: 1,
+    };
+    let resources = StatusResourceSnapshot {
+        available: true,
+        process_count: 3,
+        runtime_process_count: 1,
+        cpu_percent: Some(12.5),
+        resident_bytes: 512,
+        memory_total_bytes: 1_024,
+        socket_count: 2,
+        network_rx_queue_bytes: 1_024,
+        network_tx_queue_bytes: 1_536,
+        disk_read_bytes: 2_048,
+        disk_write_bytes: 4_096,
+        disk_read_bytes_per_second: 1_024,
+        disk_write_bytes_per_second: 1_536,
+    };
+    let fields = status_fields(&overview, &resources);
+    let value = |name: &str| {
+        fields
+            .iter()
+            .find(|(label, _)| label == name)
+            .map(|(_, value)| value.as_str())
+            .unwrap_or_else(|| panic!("missing status field {name}"))
+    };
+
+    assert_eq!(
+        value("Profile"),
+        "runtime=runtime, configured=configured, pool=3, quota-compatible=2, unavailable=1"
+    );
+    assert_eq!(value("5h quota"), "90% across 2 profile(s)");
+    assert_eq!(
+        value("5h runway"),
+        "Unavailable (no recent quota decay observed in active runtime logs)"
+    );
+    assert_eq!(value("Weekly quota"), "Unavailable");
+    assert_eq!(
+        value("Token efficiency"),
+        "cache hit 25.0% · output share 33.3%"
+    );
+    assert_eq!(value("Token history"), "▃▅█ first → last");
+    assert_eq!(value("Processes"), "3 total, 1 runtime; CPU 12.5%");
+    assert_eq!(value("Memory"), "512 B (50.0% host)");
+    assert_eq!(
+        value("Network"),
+        "2 sockets; RX queue 1.0 KiB, TX queue 1.5 KiB"
+    );
+    assert_eq!(
+        value("Disk I/O"),
+        "read 2.0 KiB total (1.0 KiB/s), write 4.0 KiB total (1.5 KiB/s)"
+    );
+    assert_eq!(value("Updated"), "now");
+
+    overview.quota.five_hour.total_remaining = 0;
+    let fields = status_fields(&overview, &resources);
+    assert_eq!(
+        fields
+            .iter()
+            .find(|(label, _)| label == "5h runway")
+            .map(|(_, value)| value.as_str()),
+        Some("Exhausted")
+    );
+}
+
+#[test]
+fn status_field_mojo_boundary_rejects_non_finite_cpu_input() {
+    let result = prodex_mojo_core::info_render::format_status_fields(
+        prodex_mojo_core::info_render::InfoStatusFields {
+            runtime_profile: "runtime",
+            active_profile: "active",
+            profile_count: 1,
+            quota_compatible_profiles: 1,
+            unavailable_profiles: 0,
+            five_hour_quota: "quota",
+            five_hour_runway: "runway",
+            weekly_quota: "quota",
+            weekly_runway: "runway",
+            token_usage_summary: "tokens",
+            token_input: 0,
+            token_cached_input: 0,
+            token_output: 0,
+            token_history_text: "-",
+            token_first_at: None,
+            token_last_at: None,
+            resources: prodex_mojo_core::info_render::InfoStatusResources {
+                available: true,
+                process_count: 1,
+                cpu_percent: Some(f64::NAN),
+                ..prodex_mojo_core::info_render::InfoStatusResources::default()
+            },
+            recent_load: "load",
+            updated_at: "now",
+        },
+    );
+    assert!(matches!(
+        result,
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    ));
 }
 
 #[test]
@@ -262,13 +459,79 @@ fn network_queue_parser_filters_prodex_socket_inodes() {
 fn token_history_is_chronological_and_bounded() {
     let event = |timestamp: &str, input_tokens| InfoTokenUsageEvent {
         timestamp: timestamp.to_string(),
+        profile: "main".to_string(),
         input_tokens,
         output_tokens: 5,
         ..InfoTokenUsageEvent::default()
     };
     let events = vec![event("1", 10), event("2", 20), event("3", 30)];
-    assert_eq!(token_history(&events, 2), vec![25, 35]);
+    let history = status_token_history(&events).unwrap();
+    assert_eq!(history.history, vec![15, 25, 35]);
+    assert_eq!(history.first_at.as_deref(), Some("1"));
+    assert_eq!(history.last_at.as_deref(), Some("3"));
+    assert_eq!(history.latest_profile.as_deref(), Some("main"));
     assert_eq!(text_sparkline(&[1, 2, 3]).unwrap().chars().count(), 3);
+}
+
+#[test]
+fn token_history_drops_oldest_event_at_mojo_bound() {
+    let events = (0..65)
+        .map(|index| InfoTokenUsageEvent {
+            timestamp: format!("{index:02}"),
+            profile: "main".to_string(),
+            input_tokens: index,
+            ..InfoTokenUsageEvent::default()
+        })
+        .collect::<Vec<_>>();
+    let history = status_token_history(&events).unwrap();
+    assert_eq!(history.history.len(), 64);
+    assert_eq!(history.history.first(), Some(&1));
+    assert_eq!(history.history.last(), Some(&64));
+}
+
+#[test]
+fn status_profile_filter_preserves_input_order_through_mojo() {
+    assert_eq!(
+        status_profile_indices(&[false, true, true, false]).unwrap(),
+        [1, 2]
+    );
+    assert!(status_profile_indices(&[]).unwrap().is_empty());
+}
+
+#[test]
+fn status_runtime_profile_precedence_uses_mojo_callpath() {
+    use prodex_mojo_core::info_render::InfoStatusRuntimeCandidate;
+
+    let candidates = [
+        InfoStatusRuntimeCandidate {
+            timestamp: 10,
+            profile: "old",
+        },
+        InfoStatusRuntimeCandidate {
+            timestamp: 20,
+            profile: "tie-first",
+        },
+        InfoStatusRuntimeCandidate {
+            timestamp: 20,
+            profile: "tie-last",
+        },
+    ];
+    assert_eq!(
+        status_runtime_profile(0, "active", Some("token"), &candidates).unwrap(),
+        "active"
+    );
+    assert_eq!(
+        status_runtime_profile(1, "active", Some("token"), &candidates).unwrap(),
+        "tie-last"
+    );
+    assert_eq!(
+        status_runtime_profile(1, "active", Some("token"), &[]).unwrap(),
+        "token"
+    );
+    assert_eq!(
+        status_runtime_profile(1, "active", None, &[]).unwrap(),
+        "active"
+    );
 }
 
 #[test]
