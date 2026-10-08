@@ -547,6 +547,18 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
 
 export const RUNTIME_CI_TEST_CASES = [
   {
+    name: "delayed_capacity_after_http_headers_rotates_without_restart_or_failed_binding",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "delayed_capacity_with_one_ready_profile_recovers_and_keeps_session_usable",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "failed_sse_attempt_releases_slot_while_payload_is_retained",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "weekly_exhausted_profile_is_not_a_ready_quota_fallback",
     tags: [TAGS.parallelSafe],
   },

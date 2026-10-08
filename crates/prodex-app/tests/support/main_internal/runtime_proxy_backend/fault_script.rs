@@ -112,10 +112,17 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
-    pub(crate) fn sse_rate_limited(
+    pub(crate) fn delayed_sse_overloaded(
         route: RuntimeProxyBackendFaultRoute,
         account_id: &str,
+        delay: Duration,
     ) -> Self {
+        let mut step = Self::sse_overloaded(route, account_id);
+        step.initial_body_stall = Some(delay);
+        step
+    }
+
+    pub(crate) fn sse_rate_limited(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
         Self {
             route,
             account_id: Some(account_id.to_string()),
@@ -237,10 +244,7 @@ impl RuntimeProxyBackendFaultStep {
         }
     }
 
-    pub(crate) fn rate_limited_429(
-        route: RuntimeProxyBackendFaultRoute,
-        account_id: &str,
-    ) -> Self {
+    pub(crate) fn rate_limited_429(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
         Self {
             route,
             account_id: Some(account_id.to_string()),
