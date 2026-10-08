@@ -78,10 +78,5 @@
     "file": "crates/prodex-mojo-core/src/log.rs",
     "maxLines": 955,
     "reason": "Mojo log ABI/materialization remains a single migration boundary while runtime log semantics continue moving out of Rust; exact cap records the current production surface without widening the global limit."
-  },
-  {
-    "file": "crates/prodex-mojo-core/src/provider_constraints.rs",
-    "maxLines": 870,
-    "reason": "Provider-constraint Mojo ABI coverage currently spans the consolidated deterministic policy boundary; exact cap records current production LOC pending a focused adapter split."
   }
 ]
