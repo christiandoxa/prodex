@@ -29,6 +29,167 @@ comptime CACHED_MODEL_RETIRED: Int64 = 2
 
 comptime INT64_MAX: Int64 = 9223372036854775807
 comptime INT64_MIN: Int64 = -9223372036854775808
+comptime LOG_FIELDS_MAX_TEXT_BYTES: Int64 = 64
+comptime LOG_FIELDS_OK: Int64 = 0
+comptime LOG_FIELDS_INVALID: Int64 = 1
+comptime LOG_FIELDS_CAPACITY: Int64 = 2
+
+@fieldwise_init
+struct RuntimeStateQuotaLogWriter(Copyable):
+    var output: Pointer[mut=True, UInt8, MutUntrackedOrigin]
+    var capacity: Int64
+    var written: Int64
+
+
+def state_quota_log_put_byte(
+    writer: Pointer[mut=True, RuntimeStateQuotaLogWriter, _], byte: UInt8
+) -> Bool:
+    if writer[].written < 0 or writer[].written >= writer[].capacity:
+        return False
+    writer[].output[unsafe_offset=writer[].written] = byte
+    writer[].written += 1
+    return True
+
+
+def state_quota_log_put_literal(
+    writer: Pointer[mut=True, RuntimeStateQuotaLogWriter, _], value: StringSlice
+) -> Bool:
+    var source = value.unsafe_ptr()
+    for index in range(Int64(value.byte_length())):
+        if not state_quota_log_put_byte(writer, source[unsafe_offset=index]):
+            return False
+    return True
+
+
+def state_quota_log_put_text(
+    writer: Pointer[mut=True, RuntimeStateQuotaLogWriter, _],
+    address: UInt,
+    length: Int64,
+) -> Bool:
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    for index in range(length):
+        if not state_quota_log_put_byte(writer, source[unsafe_offset=index]):
+            return False
+    return True
+
+
+def state_quota_log_put_u64(
+    writer: Pointer[mut=True, RuntimeStateQuotaLogWriter, _], value: UInt64
+) -> Bool:
+    if value == 0:
+        return state_quota_log_put_byte(writer, UInt8(48))
+    var divisor: UInt64 = 1
+    while value / divisor >= UInt64(10):
+        divisor *= UInt64(10)
+    var remaining = value
+    while divisor > 0:
+        if not state_quota_log_put_byte(
+            writer, UInt8(remaining / divisor) + UInt8(48)
+        ):
+            return False
+        remaining %= divisor
+        divisor //= UInt64(10)
+    return True
+
+
+def state_quota_log_put_i64(
+    writer: Pointer[mut=True, RuntimeStateQuotaLogWriter, _], value: Int64
+) -> Bool:
+    if value >= 0:
+        return state_quota_log_put_u64(writer, UInt64(value))
+    if not state_quota_log_put_byte(writer, UInt8(45)):
+        return False
+    var magnitude = (
+        UInt64(9_223_372_036_854_775_808)
+        if value == INT64_MIN
+        else UInt64(-value)
+    )
+    return state_quota_log_put_u64(writer, magnitude)
+
+
+@export("prodex_runtime_state_quota_summary_log_fields_v1")
+def prodex_runtime_state_quota_summary_log_fields_v1(
+    abi_version: Int64,
+    band_address: UInt,
+    band_length: Int64,
+    five_hour_status_address: UInt,
+    five_hour_status_length: Int64,
+    five_hour_remaining: Int64,
+    five_hour_reset_at: Int64,
+    weekly_status_address: UInt,
+    weekly_status_length: Int64,
+    weekly_remaining: Int64,
+    weekly_reset_at: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_STATE_QUOTA_ABI_VERSION:
+        return RUNTIME_STATE_QUOTA_ABI
+    if (
+        band_address == 0
+        or band_length <= 0
+        or band_length > LOG_FIELDS_MAX_TEXT_BYTES
+        or five_hour_status_address == 0
+        or five_hour_status_length <= 0
+        or five_hour_status_length > LOG_FIELDS_MAX_TEXT_BYTES
+        or weekly_status_address == 0
+        or weekly_status_length <= 0
+        or weekly_status_length > LOG_FIELDS_MAX_TEXT_BYTES
+        or output_address == 0
+        or output_capacity < 0
+        or written_address == 0
+    ):
+        return LOG_FIELDS_INVALID
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var writer = RuntimeStateQuotaLogWriter(output, output_capacity, 0)
+    var writer_ptr = Pointer(to=writer)
+    if (
+        not state_quota_log_put_literal(
+            writer_ptr,
+            StringSlice("quota_band="),
+        )
+    ):
+        return LOG_FIELDS_CAPACITY
+    if (
+        not state_quota_log_put_text(writer_ptr, band_address, band_length)
+        or not state_quota_log_put_literal(writer_ptr, StringSlice(" five_hour_status="))
+        or not state_quota_log_put_text(
+            writer_ptr, five_hour_status_address, five_hour_status_length
+        )
+        or not state_quota_log_put_literal(
+            writer_ptr, StringSlice(" five_hour_remaining=")
+        )
+        or not state_quota_log_put_i64(writer_ptr, five_hour_remaining)
+        or not state_quota_log_put_literal(
+            writer_ptr, StringSlice(" five_hour_reset_at=")
+        )
+        or not state_quota_log_put_i64(writer_ptr, five_hour_reset_at)
+        or not state_quota_log_put_literal(writer_ptr, StringSlice(" weekly_status="))
+        or not state_quota_log_put_text(
+            writer_ptr, weekly_status_address, weekly_status_length
+        )
+        or not state_quota_log_put_literal(
+            writer_ptr, StringSlice(" weekly_remaining=")
+        )
+        or not state_quota_log_put_i64(writer_ptr, weekly_remaining)
+        or not state_quota_log_put_literal(
+            writer_ptr, StringSlice(" weekly_reset_at=")
+        )
+        or not state_quota_log_put_i64(writer_ptr, weekly_reset_at)
+    ):
+        return LOG_FIELDS_CAPACITY
+    written[] = writer.written
+    return LOG_FIELDS_OK
 
 
 def state_quota_valid_bool(value: Int64) -> Bool:

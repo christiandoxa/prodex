@@ -600,4 +600,22 @@ fn quota_summary_log_fields_use_existing_reason_labels() {
         runtime_quota_summary_log_fields(summary),
         "quota_band=quota_critical five_hour_status=critical five_hour_remaining=2 five_hour_reset_at=12345 weekly_status=ready weekly_remaining=80 weekly_reset_at=67890",
     );
+
+    let extremes = RuntimeQuotaSummary {
+        five_hour: RuntimeQuotaWindowSummary {
+            status: RuntimeQuotaWindowStatus::Unknown,
+            remaining_percent: i64::MIN,
+            reset_at: i64::MAX,
+        },
+        weekly: RuntimeQuotaWindowSummary {
+            status: RuntimeQuotaWindowStatus::Exhausted,
+            remaining_percent: i64::MAX,
+            reset_at: i64::MIN,
+        },
+        route_band: RuntimeQuotaPressureBand::Unknown,
+    };
+    assert_eq!(
+        runtime_quota_summary_log_fields(extremes),
+        "quota_band=quota_unknown five_hour_status=unknown five_hour_remaining=-9223372036854775808 five_hour_reset_at=9223372036854775807 weekly_status=exhausted weekly_remaining=9223372036854775807 weekly_reset_at=-9223372036854775808",
+    );
 }

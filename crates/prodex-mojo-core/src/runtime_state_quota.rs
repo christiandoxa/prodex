@@ -57,6 +57,24 @@ pub struct CachedQuotaSummaryPlan {
     pub source: CachedQuotaSourceKind,
 }
 
+/// Inputs for Mojo's stable runtime-quota log-field formatter.
+pub struct QuotaSummaryLogFields<'a> {
+    /// Mojo-owned quota pressure-band label.
+    pub pressure_band: &'a str,
+    /// Mojo-owned five-hour window status label.
+    pub five_hour_status: &'a str,
+    /// Five-hour remaining percentage.
+    pub five_hour_remaining: i64,
+    /// Five-hour reset timestamp.
+    pub five_hour_reset_at: i64,
+    /// Mojo-owned weekly window status label.
+    pub weekly_status: &'a str,
+    /// Weekly remaining percentage.
+    pub weekly_remaining: i64,
+    /// Weekly reset timestamp.
+    pub weekly_reset_at: i64,
+}
+
 unsafe extern "C" {
     fn prodex_runtime_state_quota_policy_v1(
         abi_version: i64,
@@ -73,6 +91,22 @@ unsafe extern "C" {
         input9: i64,
         input10: i64,
         output_address: u64,
+    ) -> i64;
+    fn prodex_runtime_state_quota_summary_log_fields_v1(
+        abi_version: i64,
+        band_address: u64,
+        band_length: i64,
+        five_hour_status_address: u64,
+        five_hour_status_length: i64,
+        five_hour_remaining: i64,
+        five_hour_reset_at: i64,
+        weekly_status_address: u64,
+        weekly_status_length: i64,
+        weekly_remaining: i64,
+        weekly_reset_at: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
     ) -> i64;
 }
 
@@ -313,6 +347,49 @@ pub fn unknown_window_override(
         true => Some(output[1]),
         false => None,
     })
+}
+
+/// Format runtime quota log fields through the versioned Mojo quota ABI.
+pub fn format_quota_summary_log_fields(
+    fields: QuotaSummaryLogFields<'_>,
+) -> Result<String, MojoError> {
+    const OUTPUT_CAPACITY: usize = 512;
+    let mut output = [0_u8; OUTPUT_CAPACITY];
+    let mut written = -1_i64;
+    let band_length =
+        i64::try_from(fields.pressure_band.len()).map_err(|_| MojoError::InvalidInput)?;
+    let five_hour_status_length =
+        i64::try_from(fields.five_hour_status.len()).map_err(|_| MojoError::InvalidInput)?;
+    let weekly_status_length =
+        i64::try_from(fields.weekly_status.len()).map_err(|_| MojoError::InvalidInput)?;
+    let status = unsafe {
+        prodex_runtime_state_quota_summary_log_fields_v1(
+            ABI_VERSION,
+            fields.pressure_band.as_ptr() as usize as u64,
+            band_length,
+            fields.five_hour_status.as_ptr() as usize as u64,
+            five_hour_status_length,
+            fields.five_hour_remaining,
+            fields.five_hour_reset_at,
+            fields.weekly_status.as_ptr() as usize as u64,
+            weekly_status_length,
+            fields.weekly_remaining,
+            fields.weekly_reset_at,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    let bytes = output.get(..written).ok_or(MojoError::InvalidOutput)?;
+    String::from_utf8(bytes.to_vec()).map_err(|_| MojoError::InvalidOutput)
 }
 
 #[allow(clippy::too_many_arguments)]
