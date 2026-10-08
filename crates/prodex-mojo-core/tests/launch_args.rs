@@ -2,8 +2,9 @@
 #![allow(unsafe_code)]
 
 use prodex_mojo_core::launch::{
-    LaunchArgument, LaunchArgumentOperation, default_cli_invocation_to_run,
-    find_super_expose_alias_index, inspect_launch_arguments, plan_launch_arguments,
+    LaunchArgument, LaunchArgumentOperation, SuperValidationInput, SuperValidationScope,
+    SuperValidationViolation, default_cli_invocation_to_run, find_super_expose_alias_index,
+    inspect_launch_arguments, plan_launch_arguments, plan_super_validation,
 };
 
 #[test]
@@ -270,6 +271,54 @@ fn launch_boundary_rejects_bad_abi_tags_utf8_and_capacities_without_writes() {
 }
 
 #[test]
+fn super_validation_abi_accepts_empty_and_max_flags_and_rejects_bad_limits() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    let mut metadata = [0_i64; 11];
+    for operation in [14, 15] {
+        let status = unsafe {
+            prodex_mojo_launch_args_v1(
+                1,
+                operation,
+                2_097_151,
+                0,
+                0,
+                0,
+                0,
+                0,
+                metadata.as_mut_ptr() as u64,
+            )
+        };
+        assert_eq!(status, 0);
+        assert_eq!(metadata[0], 1);
+    }
+
+    metadata.fill(0x5a);
+    for (version, operation, flags, count, expected) in [
+        (1, 14, 2_097_152, 0, 1),
+        (1, 16, 0, 0, 1),
+        (1, 14, 0, i64::MAX, 1),
+        (2, 14, 0, 0, 4),
+    ] {
+        let status = unsafe {
+            prodex_mojo_launch_args_v1(
+                version,
+                operation,
+                flags,
+                0,
+                count,
+                0,
+                0,
+                0,
+                metadata.as_mut_ptr() as u64,
+            )
+        };
+        assert_eq!(status, expected);
+        assert_eq!(metadata, [0x5a; 11]);
+    }
+}
+
+#[test]
 fn launch_model_whitespace_matches_rust_not_python_classification() {
     for text in ["\u{001c}", "\u{001d}", "\u{001e}", "\u{001f}"] {
         assert_eq!(
@@ -287,6 +336,198 @@ fn launch_model_whitespace_matches_rust_not_python_classification() {
             None
         );
     }
+}
+
+#[test]
+fn super_validation_plan_preserves_order_and_sub_agent_scope() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    let validate = |input, arguments: &[Option<&str>], scope| {
+        plan_super_validation(input, arguments, scope).unwrap()
+    };
+    assert_eq!(
+        validate(
+            SuperValidationInput::default(),
+            &[],
+            SuperValidationScope::Full
+        ),
+        None
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                sub_agent: true,
+                no_sub_agent: true,
+                auto_rotate: true,
+                no_auto_rotate: true,
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::SubAgentConflict)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                sub_agent_model: true,
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::SubAgentDetailsRequireEnable)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                sub_agent: true,
+                sub_agent_model: true,
+                provider_url_violation: Some(
+                    prodex_mojo_core::sub_agent_policy::ProviderUrlViolation::LocalRequiresUrl
+                ),
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::SubAgentModelEmpty)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                provider_url_violation: Some(
+                    prodex_mojo_core::sub_agent_policy::ProviderUrlViolation::LocalRequiresUrl
+                ),
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::SubAgentOnly
+        ),
+        Some(SuperValidationViolation::LocalSubAgentRequiresUrl)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                provider_url_violation: Some(
+                    prodex_mojo_core::sub_agent_policy::ProviderUrlViolation::NonLocalRejectsUrl
+                ),
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::SubAgentUrlRequiresLocal)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                auto_rotate: true,
+                no_auto_rotate: true,
+                presidio: true,
+                no_presidio: true,
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::AutoRotateConflict)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                presidio: true,
+                no_presidio: true,
+                required_presidio: true,
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::PresidioConflict)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                no_presidio: true,
+                required_presidio: true,
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::NoPresidioRequiresPresidioTool)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                provider: true,
+                url: true,
+                base_url: true,
+                api_key: true,
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::ProviderUrlConflict)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                base_url: true,
+                url: true,
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::BaseUrlUrlConflict)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                api_key: true,
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::ApiKeyRequiresProvider)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                local_context_window: true,
+                ..Default::default()
+            },
+            &[],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::ContextWindowRequiresProviderOrUrl)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                sub_agent: true,
+                ..Default::default()
+            },
+            &[Some("gui")],
+            SuperValidationScope::Full
+        ),
+        Some(SuperValidationViolation::SubAgentUnsupportedWithDesktop)
+    );
+    assert_eq!(
+        validate(
+            SuperValidationInput {
+                api_key: true,
+                ..Default::default()
+            },
+            &[Some("gui")],
+            SuperValidationScope::SubAgentOnly
+        ),
+        None
+    );
 }
 
 #[test]

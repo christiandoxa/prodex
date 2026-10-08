@@ -2,94 +2,105 @@ use super::SuperArgs;
 use prodex_provider_core::ProviderId;
 
 pub(super) fn validate_super_mode_compatibility(args: &SuperArgs) -> Result<(), String> {
-    validate_sub_agent_flags(args)?;
-    validate_mode_conflicts(args)?;
-    validate_provider_options(args)?;
-    validate_frontend_options(args)
-}
-
-fn validate_mode_conflicts(args: &SuperArgs) -> Result<(), String> {
-    if args.auto_rotate && args.no_auto_rotate {
-        return Err("--auto-rotate conflicts with --no-auto-rotate".to_string());
-    }
-    if args.presidio && args.no_presidio {
-        return Err("--presidio conflicts with --no-presidio".to_string());
-    }
-    if args.no_presidio
-        && args
-            .required_tools
-            .contains(&prodex_optional_tools::OptionalToolId::Presidio)
-    {
-        return Err("--no-presidio conflicts with --require-tool presidio".to_string());
-    }
-    Ok(())
-}
-
-fn validate_provider_options(args: &SuperArgs) -> Result<(), String> {
-    if args.provider.is_some() && args.url.is_some() {
-        return Err("--provider conflicts with --url".to_string());
-    }
-    if args.base_url.is_some() && args.url.is_some() {
-        return Err("--base-url conflicts with --url".to_string());
-    }
-    if args.api_key.is_some() && args.provider.is_none() {
-        return Err("--api-key requires --provider".to_string());
-    }
-    if (args.local_context_window.is_some() || args.local_auto_compact_token_limit.is_some())
-        && args.provider.is_none()
-        && args.url.is_none()
-    {
-        return Err("context-window options require --provider or --url".to_string());
-    }
-    Ok(())
-}
-
-fn validate_frontend_options(args: &SuperArgs) -> Result<(), String> {
-    if args.sub_agent
-        && args
-            .codex_args
-            .first()
-            .is_some_and(|argument| argument == "gui")
-    {
-        return Err("--sub-agent is unsupported with the Codex Desktop frontend".to_string());
-    }
-    Ok(())
+    validate(args, prodex_mojo_core::launch::SuperValidationScope::Full)
 }
 
 pub(super) fn validate_sub_agent_flags(args: &SuperArgs) -> Result<(), String> {
-    if args.sub_agent && args.no_sub_agent {
-        return Err("--sub-agent conflicts with --no-sub-agent".to_string());
-    }
-    if !args.sub_agent
-        && (args.sub_agent_provider.is_some()
-            || args.sub_agent_model.is_some()
-            || args.sub_agent_model_reasoning_effort.is_some()
-            || args.sub_agent_url.is_some()
-            || args.sub_agent_max_concurrency.is_some())
-    {
-        return Err("sub-agent detail flags require explicit --sub-agent".to_string());
-    }
-    if args
+    validate(
+        args,
+        prodex_mojo_core::launch::SuperValidationScope::SubAgentOnly,
+    )
+}
+
+fn validate(
+    args: &SuperArgs,
+    scope: prodex_mojo_core::launch::SuperValidationScope,
+) -> Result<(), String> {
+    let sub_agent_model_nonempty = args
         .sub_agent_model
         .as_deref()
-        .is_some_and(|model| model.trim().is_empty())
-    {
-        return Err("--sub-agent-model must be nonempty".to_string());
-    }
-    let provider = args.sub_agent_provider.unwrap_or(ProviderId::OpenAi);
-    match prodex_mojo_core::sub_agent_policy::provider_url_violation(
-        provider == ProviderId::Local,
+        .map(|model| {
+            prodex_mojo_core::sub_agent_policy::model_nonempty(model)
+                .map_err(|_| "sub-agent model validation failed".to_string())
+        })
+        .transpose()?
+        .unwrap_or(false);
+    let provider_url_violation = prodex_mojo_core::sub_agent_policy::provider_url_violation(
+        args.sub_agent_provider == Some(ProviderId::Local),
         args.sub_agent_url.is_some(),
     )
-    .map_err(|_| "sub-agent provider URL policy failed".to_string())?
-    {
-        None => {}
-        Some(prodex_mojo_core::sub_agent_policy::ProviderUrlViolation::LocalRequiresUrl) => {
-            return Err("local sub-agent provider requires --sub-agent-url".to_string());
+    .map_err(|_| "sub-agent provider URL policy failed".to_string())?;
+    let input = prodex_mojo_core::launch::SuperValidationInput {
+        auto_rotate: args.auto_rotate,
+        no_auto_rotate: args.no_auto_rotate,
+        presidio: args.presidio,
+        no_presidio: args.no_presidio,
+        required_presidio: args
+            .required_tools
+            .contains(&prodex_optional_tools::OptionalToolId::Presidio),
+        provider: args.provider.is_some(),
+        url: args.url.is_some(),
+        base_url: args.base_url.is_some(),
+        api_key: args.api_key.is_some(),
+        local_context_window: args.local_context_window.is_some(),
+        local_auto_compact_token_limit: args.local_auto_compact_token_limit.is_some(),
+        sub_agent: args.sub_agent,
+        no_sub_agent: args.no_sub_agent,
+        sub_agent_provider: args.sub_agent_provider.is_some(),
+        sub_agent_model: args.sub_agent_model.is_some(),
+        sub_agent_model_nonempty,
+        sub_agent_reasoning_effort: args.sub_agent_model_reasoning_effort.is_some(),
+        sub_agent_url: args.sub_agent_url.is_some(),
+        sub_agent_max_concurrency: args.sub_agent_max_concurrency.is_some(),
+        provider_url_violation,
+    };
+    let codex_argument = args.codex_args.first().map(|argument| argument.to_str());
+    let violation =
+        prodex_mojo_core::launch::plan_super_validation(input, codex_argument.as_slice(), scope)
+            .map_err(|_| "Super argument validation failed".to_string())?;
+    match violation {
+        None => Ok(()),
+        Some(violation) => Err(match violation {
+            prodex_mojo_core::launch::SuperValidationViolation::SubAgentConflict => {
+                "--sub-agent conflicts with --no-sub-agent"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::SubAgentDetailsRequireEnable => {
+                "sub-agent detail flags require explicit --sub-agent"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::SubAgentModelEmpty => {
+                "--sub-agent-model must be nonempty"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::LocalSubAgentRequiresUrl => {
+                "local sub-agent provider requires --sub-agent-url"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::SubAgentUrlRequiresLocal => {
+                "--sub-agent-url requires --sub-agent-provider local"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::AutoRotateConflict => {
+                "--auto-rotate conflicts with --no-auto-rotate"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::PresidioConflict => {
+                "--presidio conflicts with --no-presidio"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::NoPresidioRequiresPresidioTool => {
+                "--no-presidio conflicts with --require-tool presidio"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::ProviderUrlConflict => {
+                "--provider conflicts with --url"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::BaseUrlUrlConflict => {
+                "--base-url conflicts with --url"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::ApiKeyRequiresProvider => {
+                "--api-key requires --provider"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::ContextWindowRequiresProviderOrUrl => {
+                "context-window options require --provider or --url"
+            }
+            prodex_mojo_core::launch::SuperValidationViolation::SubAgentUnsupportedWithDesktop => {
+                "--sub-agent is unsupported with the Codex Desktop frontend"
+            }
         }
-        Some(prodex_mojo_core::sub_agent_policy::ProviderUrlViolation::NonLocalRejectsUrl) => {
-            return Err("--sub-agent-url requires --sub-agent-provider local".to_string());
-        }
+        .to_string()),
     }
-    Ok(())
 }

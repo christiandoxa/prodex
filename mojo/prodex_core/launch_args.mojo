@@ -36,6 +36,46 @@ comptime LAUNCH_SCAN_SUPER_OVERRIDES: Int64 = 10
 comptime LAUNCH_FIND_SUPER_EXPOSE_ALIAS: Int64 = 11
 comptime LAUNCH_LOGIN_POLICY: Int64 = 12
 comptime LAUNCH_CLI_DEFAULT_RUN: Int64 = 13
+comptime LAUNCH_SUPER_VALIDATE: Int64 = 14
+comptime LAUNCH_SUPER_VALIDATE_SUB_AGENT: Int64 = 15
+
+comptime SUPER_VALIDATE_AUTO_ROTATE: Int64 = 1 << 0
+comptime SUPER_VALIDATE_NO_AUTO_ROTATE: Int64 = 1 << 1
+comptime SUPER_VALIDATE_PRESIDIO: Int64 = 1 << 2
+comptime SUPER_VALIDATE_NO_PRESIDIO: Int64 = 1 << 3
+comptime SUPER_VALIDATE_REQUIRED_PRESIDIO: Int64 = 1 << 4
+comptime SUPER_VALIDATE_PROVIDER: Int64 = 1 << 5
+comptime SUPER_VALIDATE_URL: Int64 = 1 << 6
+comptime SUPER_VALIDATE_BASE_URL: Int64 = 1 << 7
+comptime SUPER_VALIDATE_API_KEY: Int64 = 1 << 8
+comptime SUPER_VALIDATE_CONTEXT_WINDOW: Int64 = 1 << 9
+comptime SUPER_VALIDATE_AUTO_COMPACT: Int64 = 1 << 10
+comptime SUPER_VALIDATE_SUB_AGENT: Int64 = 1 << 11
+comptime SUPER_VALIDATE_NO_SUB_AGENT: Int64 = 1 << 12
+comptime SUPER_VALIDATE_SUB_AGENT_PROVIDER: Int64 = 1 << 13
+comptime SUPER_VALIDATE_SUB_AGENT_MODEL: Int64 = 1 << 14
+comptime SUPER_VALIDATE_SUB_AGENT_MODEL_NONEMPTY: Int64 = 1 << 15
+comptime SUPER_VALIDATE_SUB_AGENT_REASONING: Int64 = 1 << 16
+comptime SUPER_VALIDATE_SUB_AGENT_URL: Int64 = 1 << 17
+comptime SUPER_VALIDATE_SUB_AGENT_MAX_CONCURRENCY: Int64 = 1 << 18
+comptime SUPER_VALIDATE_LOCAL_REQUIRES_URL: Int64 = 1 << 19
+comptime SUPER_VALIDATE_URL_REQUIRES_LOCAL: Int64 = 1 << 20
+comptime SUPER_VALIDATE_MAX_FLAGS: Int64 = 2_097_151
+
+comptime SUPER_VALIDATION_OK: Int64 = 0
+comptime SUPER_VALIDATION_SUB_AGENT_CONFLICT: Int64 = 1
+comptime SUPER_VALIDATION_SUB_AGENT_DETAILS_REQUIRE_ENABLE: Int64 = 2
+comptime SUPER_VALIDATION_SUB_AGENT_MODEL_EMPTY: Int64 = 3
+comptime SUPER_VALIDATION_LOCAL_SUB_AGENT_REQUIRES_URL: Int64 = 4
+comptime SUPER_VALIDATION_SUB_AGENT_URL_REQUIRES_LOCAL: Int64 = 5
+comptime SUPER_VALIDATION_AUTO_ROTATE_CONFLICT: Int64 = 6
+comptime SUPER_VALIDATION_PRESIDIO_CONFLICT: Int64 = 7
+comptime SUPER_VALIDATION_NO_PRESIDIO_REQUIRES_TOOL: Int64 = 8
+comptime SUPER_VALIDATION_PROVIDER_URL_CONFLICT: Int64 = 9
+comptime SUPER_VALIDATION_BASE_URL_URL_CONFLICT: Int64 = 10
+comptime SUPER_VALIDATION_API_KEY_REQUIRES_PROVIDER: Int64 = 11
+comptime SUPER_VALIDATION_CONTEXT_WINDOW_REQUIRES_PROVIDER_OR_URL: Int64 = 12
+comptime SUPER_VALIDATION_SUB_AGENT_UNSUPPORTED_WITH_DESKTOP: Int64 = 13
 
 comptime LOGIN_METHOD_CHATGPT: Int64 = 0
 comptime LOGIN_METHOD_DEVICE_CODE: Int64 = 1
@@ -322,6 +362,98 @@ def launch_cli_default_run_policy(
     metadata[unsafe_offset=0] = Int64(should_default)
 
 
+def launch_super_validation_policy(
+    arguments: UInt64,
+    count: Int64,
+    flags: Int64,
+    sub_agent_only: Bool,
+    metadata: Pointer[mut=True, Int64, _],
+):
+    var sub_agent = (flags & SUPER_VALIDATE_SUB_AGENT) != 0
+    var no_sub_agent = (flags & SUPER_VALIDATE_NO_SUB_AGENT) != 0
+    var sub_agent_details = (
+        (flags & SUPER_VALIDATE_SUB_AGENT_PROVIDER) != 0
+        or (flags & SUPER_VALIDATE_SUB_AGENT_MODEL) != 0
+        or (flags & SUPER_VALIDATE_SUB_AGENT_REASONING) != 0
+        or (flags & SUPER_VALIDATE_SUB_AGENT_URL) != 0
+        or (flags & SUPER_VALIDATE_SUB_AGENT_MAX_CONCURRENCY) != 0
+    )
+    if sub_agent and no_sub_agent:
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_SUB_AGENT_CONFLICT
+        return
+    if not sub_agent and sub_agent_details:
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_SUB_AGENT_DETAILS_REQUIRE_ENABLE
+        return
+    if (
+        (flags & SUPER_VALIDATE_SUB_AGENT_MODEL) != 0
+        and (flags & SUPER_VALIDATE_SUB_AGENT_MODEL_NONEMPTY) == 0
+    ):
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_SUB_AGENT_MODEL_EMPTY
+        return
+    if (flags & SUPER_VALIDATE_LOCAL_REQUIRES_URL) != 0:
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_LOCAL_SUB_AGENT_REQUIRES_URL
+        return
+    if (flags & SUPER_VALIDATE_URL_REQUIRES_LOCAL) != 0:
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_SUB_AGENT_URL_REQUIRES_LOCAL
+        return
+    if sub_agent_only:
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_OK
+        return
+    if (
+        (flags & SUPER_VALIDATE_AUTO_ROTATE) != 0
+        and (flags & SUPER_VALIDATE_NO_AUTO_ROTATE) != 0
+    ):
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_AUTO_ROTATE_CONFLICT
+        return
+    if (
+        (flags & SUPER_VALIDATE_PRESIDIO) != 0
+        and (flags & SUPER_VALIDATE_NO_PRESIDIO) != 0
+    ):
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_PRESIDIO_CONFLICT
+        return
+    if (
+        (flags & SUPER_VALIDATE_NO_PRESIDIO) != 0
+        and (flags & SUPER_VALIDATE_REQUIRED_PRESIDIO) != 0
+    ):
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_NO_PRESIDIO_REQUIRES_TOOL
+        return
+    if (
+        (flags & SUPER_VALIDATE_PROVIDER) != 0
+        and (flags & SUPER_VALIDATE_URL) != 0
+    ):
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_PROVIDER_URL_CONFLICT
+        return
+    if (
+        (flags & SUPER_VALIDATE_BASE_URL) != 0
+        and (flags & SUPER_VALIDATE_URL) != 0
+    ):
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_BASE_URL_URL_CONFLICT
+        return
+    if (
+        (flags & SUPER_VALIDATE_API_KEY) != 0
+        and (flags & SUPER_VALIDATE_PROVIDER) == 0
+    ):
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_API_KEY_REQUIRES_PROVIDER
+        return
+    if (
+        (
+            (flags & SUPER_VALIDATE_CONTEXT_WINDOW) != 0
+            or (flags & SUPER_VALIDATE_AUTO_COMPACT) != 0
+        )
+        and (flags & (SUPER_VALIDATE_PROVIDER | SUPER_VALIDATE_URL)) == 0
+    ):
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_CONTEXT_WINDOW_REQUIRES_PROVIDER_OR_URL
+        return
+    if (
+        sub_agent
+        and count > 0
+        and launch_is["gui"](launch_arg(arguments, 0, 0))
+    ):
+        metadata[unsafe_offset=0] = SUPER_VALIDATION_SUB_AGENT_UNSUPPORTED_WITH_DESKTOP
+        return
+    metadata[unsafe_offset=0] = SUPER_VALIDATION_OK
+
+
 def launch_login_policy(
     arguments: UInt64,
     count: Int64,
@@ -534,11 +666,18 @@ def prodex_mojo_launch_args_v1(
     # Lengths are bounded by caller-owned storage and signed address arithmetic.
     if (
         operation < LAUNCH_INSPECT
-        or operation > LAUNCH_CLI_DEFAULT_RUN
+        or operation > LAUNCH_SUPER_VALIDATE_SUB_AGENT
         or operation == 4
         or operation == 5
         or full_access < 0
-        or full_access > 1
+        or (
+            operation < LAUNCH_SUPER_VALIDATE
+            and full_access > 1
+        )
+        or (
+            operation >= LAUNCH_SUPER_VALIDATE
+            and full_access > SUPER_VALIDATE_MAX_FLAGS
+        )
         or count < 0
         or count > 0x7FFFFFFFFFFFFFFF // 24 - 3
         or (count > 0 and arguments == 0)
@@ -571,6 +710,18 @@ def prodex_mojo_launch_args_v1(
         return 0
     if operation == LAUNCH_CLI_DEFAULT_RUN:
         launch_cli_default_run_policy(arguments, count, metadata)
+        return 0
+    if (
+        operation == LAUNCH_SUPER_VALIDATE
+        or operation == LAUNCH_SUPER_VALIDATE_SUB_AGENT
+    ):
+        launch_super_validation_policy(
+            arguments,
+            count,
+            full_access,
+            operation == LAUNCH_SUPER_VALIDATE_SUB_AGENT,
+            metadata,
+        )
         return 0
     if operation == LAUNCH_INSPECT:
         launch_inspect(arguments, count, metadata)
