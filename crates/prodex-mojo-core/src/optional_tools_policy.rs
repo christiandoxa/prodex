@@ -48,6 +48,13 @@ unsafe extern "C" {
         legacy_address: u64,
         legacy_length: i64,
     ) -> i64;
+    fn prodex_optional_tool_hex_encode_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+    ) -> i64;
 }
 
 fn signed_len(value: &str) -> Result<i64, MojoError> {
@@ -122,6 +129,33 @@ pub fn optional_tool_manifest_tree_supported(
         -2 => Err(MojoError::InvalidInput),
         0 => Ok(false),
         1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn optional_tool_hex_encode(input: &[u8], output: &mut [u8]) -> Result<usize, MojoError> {
+    let result = unsafe {
+        prodex_optional_tool_hex_encode_v1(
+            ABI_VERSION,
+            input.as_ptr() as usize as u64,
+            i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+        )
+    };
+    match result {
+        -2 => Err(MojoError::InvalidInput),
+        -3 => Err(MojoError::Capacity),
+        written if written >= 0 => {
+            let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+            if written == input.len().checked_mul(2).ok_or(MojoError::InvalidOutput)?
+                && written <= output.len()
+            {
+                Ok(written)
+            } else {
+                Err(MojoError::InvalidOutput)
+            }
+        }
         _ => Err(MojoError::InvalidOutput),
     }
 }

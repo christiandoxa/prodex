@@ -6,7 +6,8 @@ use anyhow::{Context, Result};
 use prodex_mojo_core::optional_tools_policy::{
     CAP_BROWSER_AUTOMATION, CAP_CLAUDE, CAP_CODEX, CAP_REDACTION, CAP_SHELL_COMPRESSION,
     CAP_SIMPLICITY_REVIEW, CAP_STRUCTURAL_NAVIGATION, OptionalToolPolicyId, OptionalToolPolicyKind,
-    optional_tool_class, optional_tool_descriptor_policy, optional_tool_manifest_tree_supported,
+    optional_tool_class, optional_tool_descriptor_policy, optional_tool_hex_encode,
+    optional_tool_manifest_tree_supported,
 };
 use prodex_mojo_core::rich::ascii_casefold_contains;
 use semver::Version;
@@ -679,13 +680,10 @@ fn sha256_file(path: &Path, limit: u64) -> Result<String> {
 }
 
 pub(crate) fn hex_digest(bytes: &[u8]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut encoded = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        encoded.push(char::from(HEX[usize::from(byte >> 4)]));
-        encoded.push(char::from(HEX[usize::from(byte & 0x0f)]));
-    }
-    encoded
+    let mut encoded = vec![0; bytes.len() * 2];
+    optional_tool_hex_encode(bytes, &mut encoded)
+        .expect("Mojo optional-tool digest formatter failed");
+    String::from_utf8(encoded).expect("Mojo optional-tool digest formatter returned invalid UTF-8")
 }
 
 #[cfg(test)]
@@ -731,5 +729,10 @@ mod tests {
                 .to_string()
                 .contains("Update rtk to the latest stable release")
         );
+    }
+
+    #[test]
+    fn digest_formatting_uses_lowercase_hex_at_the_optional_tools_boundary() {
+        assert_eq!(hex_digest(&[0, 1, 0xab, 0xff]), "0001abff");
     }
 }

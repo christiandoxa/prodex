@@ -1139,7 +1139,8 @@
         "operations": [
           "optional_tool_alias_classification",
           "optional_tool_descriptor_policy",
-          "optional_tool_manifest_tree_compatibility"
+          "optional_tool_manifest_tree_compatibility",
+          "optional_tool_digest_hex_encoding"
         ]
       },
       {
@@ -5055,6 +5056,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "borrow manifest digest strings and map the Mojo boolean into the existing validation flow"
+    },
+    {
+      "name": "optional_tool_digest_hex_encoding",
+      "domain": "optional-tools/digest-format",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust byte loop formatting SHA-256 digests as lowercase hexadecimal",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_optional_tool_hex_encode_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/optional_tools_policy.mojo",
+      "consumer": "crates/prodex-optional-tools/src/optional_tools.rs",
+      "consumer_marker": "optional_tool_hex_encode",
+      "production_consumers": [
+        "crates/prodex-optional-tools/src/optional_tools.rs"
+      ],
+      "production_reachability_test": "crates/prodex-optional-tools/src/optional_tools.rs",
+      "rust_owner_before": "lowercase hexadecimal byte formatting for validated tool digests",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "Rust caller regression verifies a mixed zero/high-nibble byte sequence at the production adapter boundary",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "allocate bounded caller-owned output and pass Rust-owned digest bytes across the ABI; file reads and SHA-256 hashing stay in Rust"
     },
     {
       "name": "confirmation_token_policy",

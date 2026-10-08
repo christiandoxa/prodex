@@ -26,6 +26,7 @@ comptime OPTIONAL_TOOL_CAP_SIMPLICITY_REVIEW: Int64 = 32
 comptime OPTIONAL_TOOL_CAP_REDACTION: Int64 = 64
 comptime OPTIONAL_TOOL_CAP_SHIFT: Int64 = 8
 comptime OPTIONAL_TOOL_DEFAULT_SHIFT: Int64 = 16
+comptime OPTIONAL_TOOL_HEX_MAX_INPUT: Int64 = 4_611_686_018_427_387_903
 
 
 def optional_tool_view(address: UInt, length: Int64) -> ProdexRichStringView:
@@ -70,6 +71,12 @@ def optional_tool_views_equal(
         if left_ptr[unsafe_offset=index] != right_ptr[unsafe_offset=index]:
             return False
     return True
+
+
+def optional_tool_hex_digit(value: UInt8) -> UInt8:
+    if value < 10:
+        return value + 48
+    return value + 87
 
 
 @export("prodex_optional_tool_class_v1")
@@ -163,3 +170,40 @@ def prodex_optional_tool_manifest_tree_supported_v1(
         optional_tool_views_equal(value, vetted)
         or optional_tool_views_equal(value, legacy)
     )
+
+
+@export("prodex_optional_tool_hex_encode_v1")
+def prodex_optional_tool_hex_encode_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+) abi("C") -> Int64:
+    if abi_version != OPTIONAL_TOOLS_POLICY_ABI_VERSION:
+        return -2
+    if (
+        input_length < 0
+        or input_length > OPTIONAL_TOOL_HEX_MAX_INPUT
+        or output_capacity < 0
+    ):
+        return -2
+    var output_length = input_length * 2
+    if output_capacity < output_length:
+        return -3
+    if input_length == 0:
+        return 0
+    if input_address == 0 or output_address == 0:
+        return -2
+
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    for index in range(input_length):
+        var value = source[unsafe_offset=index]
+        output[unsafe_offset=index * 2] = optional_tool_hex_digit(value >> 4)
+        output[unsafe_offset=index * 2 + 1] = optional_tool_hex_digit(value & UInt8(15))
+    return output_length
