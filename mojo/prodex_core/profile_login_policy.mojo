@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_view_matches_literal
+from rich_text import rich_view_matches_literal, rich_view_ptr
 from rich_types import ProdexRichStringView
 
 
@@ -15,6 +15,8 @@ comptime PROFILE_LOGIN_EXECUTION: Int64 = 2
 comptime PROFILE_LOGIN_AUTH_COMMIT: Int64 = 3
 comptime PROFILE_LOGIN_AUTO_ROUTE: Int64 = 4
 comptime PROFILE_LOGIN_METHOD_ROUTE: Int64 = 5
+comptime PROFILE_LOGIN_AUTO_TRANSITION: Int64 = 6
+comptime PROFILE_LOGIN_CANDIDATE_SELECTION: Int64 = 7
 
 comptime PROFILE_LOGIN_CLAUDE: Int64 = 4
 comptime PROFILE_LOGIN_STATUS: Int64 = 6
@@ -35,6 +37,11 @@ comptime PROFILE_LOGIN_ROUTE_ANTHROPIC: Int64 = 1
 comptime PROFILE_LOGIN_ROUTE_API_KEY: Int64 = 2
 comptime PROFILE_LOGIN_ROUTE_IDENTITY: Int64 = 3
 comptime PROFILE_LOGIN_ROUTE_NEEDS_AUTH_LABEL: Int64 = 4
+
+comptime PROFILE_LOGIN_TRANSITION_API_KEY_EXISTING: Int64 = 5
+comptime PROFILE_LOGIN_TRANSITION_API_KEY_NEW: Int64 = 6
+comptime PROFILE_LOGIN_TRANSITION_IDENTITY_EXISTING: Int64 = 7
+comptime PROFILE_LOGIN_TRANSITION_IDENTITY_NEW: Int64 = 8
 
 comptime PROFILE_LOGIN_METHOD_EXTERNAL_CLAUDE: Int64 = 0
 comptime PROFILE_LOGIN_METHOD_DIRECT_API_KEY: Int64 = 1
@@ -177,6 +184,62 @@ def profile_login_method_route(
     return PROFILE_LOGIN_POLICY_OK
 
 
+def profile_login_auto_transition(
+    method: Int64,
+    auth_label: ProdexRichStringView,
+    auth_label_present: Int64,
+    existing_profile: Int64,
+    output: Pointer[mut=True, Int64, _],
+) -> Int64:
+    if (
+        method < 0
+        or method > 6
+        or (auth_label_present != 0 and auth_label_present != 1)
+        or (existing_profile != 0 and existing_profile != 1)
+    ):
+        return PROFILE_LOGIN_POLICY_INVALID
+    if method == PROFILE_LOGIN_STATUS:
+        output[0] = PROFILE_LOGIN_ROUTE_STATUS
+    elif method == PROFILE_LOGIN_CLAUDE:
+        output[0] = PROFILE_LOGIN_ROUTE_ANTHROPIC
+    elif not profile_login_bool(auth_label_present):
+        output[0] = PROFILE_LOGIN_ROUTE_NEEDS_AUTH_LABEL
+    elif rich_view_matches_literal["api-key"](auth_label, False):
+        output[0] = (
+            PROFILE_LOGIN_TRANSITION_API_KEY_EXISTING
+            if profile_login_bool(existing_profile)
+            else PROFILE_LOGIN_TRANSITION_API_KEY_NEW
+        )
+    else:
+        output[0] = (
+            PROFILE_LOGIN_TRANSITION_IDENTITY_EXISTING
+            if profile_login_bool(existing_profile)
+            else PROFILE_LOGIN_TRANSITION_IDENTITY_NEW
+        )
+    return PROFILE_LOGIN_POLICY_OK
+
+
+def profile_login_candidate_selection(
+    candidates: ProdexRichStringView,
+    output: Pointer[mut=True, Int64, _],
+) -> Int64:
+    var first_match: Int64 = -1
+    var match_count: Int64 = 0
+    var ptr = rich_view_ptr(candidates)
+    for index in range(Int64(candidates.len)):
+        var value = ptr[unsafe_offset=index]
+        if value == 49:
+            if first_match < 0:
+                first_match = index
+            match_count += 1
+        elif value != 48:
+            return PROFILE_LOGIN_POLICY_INVALID
+    output[0] = first_match
+    output[1] = match_count
+    output[2] = Int64(match_count > 1)
+    return PROFILE_LOGIN_POLICY_OK
+
+
 @export("prodex_profile_login_policy_v1")
 def prodex_profile_login_policy_v1(
     abi_version: Int64,
@@ -192,7 +255,7 @@ def prodex_profile_login_policy_v1(
         return PROFILE_LOGIN_POLICY_ABI
     if (
         operation < PROFILE_LOGIN_VALIDATE_PROVIDER
-        or operation > PROFILE_LOGIN_METHOD_ROUTE
+        or operation > PROFILE_LOGIN_CANDIDATE_SELECTION
         or label_length < 0
         or (label_length > 0 and label_address == 0)
         or output_address == 0
@@ -216,4 +279,8 @@ def prodex_profile_login_policy_v1(
         return profile_login_auth_commit(label, input0, output)
     if operation == PROFILE_LOGIN_AUTO_ROUTE:
         return profile_login_auto_route(method, label, input0, output)
-    return profile_login_method_route(method, input0, output)
+    if operation == PROFILE_LOGIN_METHOD_ROUTE:
+        return profile_login_method_route(method, input0, output)
+    if operation == PROFILE_LOGIN_AUTO_TRANSITION:
+        return profile_login_auto_transition(method, label, input0, input1, output)
+    return profile_login_candidate_selection(label, output)

@@ -69,17 +69,27 @@ pub(super) fn finish_auto_login_for_anthropic_profile(
     login_home: &Path,
 ) -> Result<()> {
     let (account, auth_method) = claude_external_oauth_profile_identity(login_home)?;
-    if let Some(profile_name) = state.profiles.iter().find_map(|(name, profile)| {
-        profile
-            .provider
-            .anthropic_matches(account.as_deref(), auth_method.as_deref())
-            .then(|| name.clone())
-    }) {
+    let mut profile_names = Vec::with_capacity(state.profiles.len());
+    let mut matches = Vec::with_capacity(state.profiles.len());
+    for (name, profile) in &state.profiles {
+        profile_names.push(name.clone());
+        matches.push(
+            profile
+                .provider
+                .anthropic_matches(account.as_deref(), auth_method.as_deref()),
+        );
+    }
+    let selection = prodex_mojo_core::profile_login_policy::select_login_candidate(&matches)
+        .expect("Mojo Anthropic profile candidate policy returned invalid output");
+    if let Some(index) = selection.first_match {
+        let profile_name = profile_names
+            .get(index)
+            .with_context(|| format!("Mojo selected invalid Anthropic profile index {index}"))?;
         finish_anthropic_login_for_existing_profile(
             paths,
             state,
             login_home,
-            &profile_name,
+            profile_name,
             account,
             auth_method,
         )?;

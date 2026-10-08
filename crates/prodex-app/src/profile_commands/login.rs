@@ -31,7 +31,9 @@ use self::api_key::*;
 use self::claude::*;
 use self::copilot_import::*;
 use self::home::create_temporary_login_home;
-use self::lifecycle_support::{login_into_profile, validate_profile_login_provider};
+use self::lifecycle_support::{
+    auto_login_transition, login_into_profile, validate_profile_login_provider,
+};
 use self::login_menu::{
     LoginGuidanceKind, LoginMenuAction, login_prompt_is_interactive, prompt_login_menu_action,
     show_login_guidance,
@@ -204,20 +206,19 @@ fn login_with_auto_profile(paths: &AppPaths, login_request: &LoginRequest) -> Re
         remove_dir_if_exists(&login_home)?;
         return Ok(status);
     }
-    match auto_login_route(login_request.method, None) {
-        prodex_mojo_core::profile_login_policy::AutoLoginRoute::Status => {
+    match auto_login_transition(login_request.method, None, false) {
+        prodex_mojo_core::profile_login_policy::AutoLoginTransition::Status => {
             remove_dir_if_exists(&login_home)?;
             return Ok(status);
         }
-        prodex_mojo_core::profile_login_policy::AutoLoginRoute::Anthropic => {
+        prodex_mojo_core::profile_login_policy::AutoLoginTransition::Anthropic => {
             let _lock = acquire_profile_lifecycle_lock(paths)?;
             let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
             finish_auto_login_for_anthropic_profile(paths, &mut state, &login_home)?;
             return Ok(status);
         }
-        prodex_mojo_core::profile_login_policy::AutoLoginRoute::AuthLabelRequired
-        | prodex_mojo_core::profile_login_policy::AutoLoginRoute::ApiKey
-        | prodex_mojo_core::profile_login_policy::AutoLoginRoute::Identity => {}
+        prodex_mojo_core::profile_login_policy::AutoLoginTransition::AuthLabelRequired => {}
+        route => unreachable!("Mojo auto-login transition returned unexpected route {route:?}"),
     }
 
     let auth_json = required_auth_json_text(&login_home)?;
@@ -254,19 +255,33 @@ fn login_with_auto_profile(paths: &AppPaths, login_request: &LoginRequest) -> Re
 
     let _lock = acquire_profile_lifecycle_lock(paths)?;
     let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
-    if let Some(profile_name) = find_profile_by_identity(&mut state, &identity)? {
-        finish_auto_login_for_existing_profile(
-            paths,
-            &mut state,
-            &login_home,
-            &profile_name,
-            email,
-            &auth_json,
-        )?;
-        return Ok(status);
+    let profile_name = find_profile_by_identity(&mut state, &identity)?;
+    match auto_login_transition(
+        login_request.method,
+        Some(&auth_label),
+        profile_name.is_some(),
+    ) {
+        prodex_mojo_core::profile_login_policy::AutoLoginTransition::IdentityExisting => {
+            let profile_name = profile_name
+                .as_deref()
+                .context("Mojo selected an existing login target without a profile")?;
+            finish_auto_login_for_existing_profile(
+                paths,
+                &mut state,
+                &login_home,
+                profile_name,
+                email,
+                &auth_json,
+            )?;
+        }
+        prodex_mojo_core::profile_login_policy::AutoLoginTransition::IdentityNew => {
+            if profile_name.is_some() {
+                bail!("Mojo selected a new login target for an existing profile");
+            }
+            finish_auto_login_for_new_profile(paths, &mut state, &login_home, email)?;
+        }
+        route => unreachable!("Mojo identity transition returned unexpected route {route:?}"),
     }
-
-    finish_auto_login_for_new_profile(paths, &mut state, &login_home, email)?;
     Ok(status)
 }
 
