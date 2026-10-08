@@ -31,7 +31,7 @@ fn status(value: i64) -> Result<(), MojoError> {
 }
 
 fn rewrite(command: &str, mode: i64) -> Result<Option<String>, MojoError> {
-    if command.len() > 4 * 1024 * 1024 {
+    if command.len() > 64 * 1024 * 1024 {
         return Err(MojoError::InvalidInput);
     }
     let mut output = vec![
@@ -87,6 +87,20 @@ mod tests {
             Some("printf 'a; b' && rtk cargo test".to_string())
         );
         assert_eq!(wrapped_shell_command("git 'cargo test'").unwrap(), None);
+    }
+
+    #[test]
+    fn mojo_rtk_parser_preserves_large_shell_command_without_abi_failure() {
+        let command = format!("rg {}", "x".repeat(5 * 1024 * 1024));
+        let rewritten = wrapped_shell_command(&command).unwrap().unwrap();
+        assert_eq!(rewritten, format!("rtk {command}"));
+    }
+
+    #[test]
+    fn mojo_rtk_parser_skips_oversized_environment_values_before_noisy_command() {
+        let command = format!("CACHE={} cargo test", "z".repeat(5000));
+        let rewritten = wrapped_shell_command(&command).unwrap().unwrap();
+        assert_eq!(rewritten, command.replace(" cargo test", " rtk cargo test"));
     }
 
     #[test]
