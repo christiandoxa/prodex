@@ -22,16 +22,13 @@ fn deepseek_request_plan_from_responses(
     turn_state: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<DeepSeekRequestPlan, String> {
-    let model = value
-        .get("model")
-        .and_then(Value::as_str)
-        .or(model)
-        .filter(|model| !model.trim().is_empty())
-        .map(|model| crate::provider_canonical_model(ProviderId::DeepSeek, model));
     let mut context = serde_json::Map::new();
     context.insert("request".to_string(), value);
     if let Some(model) = model {
-        context.insert("canonical_model".to_string(), Value::String(model));
+        context.insert(
+            "adapter_model".to_string(),
+            Value::String(model.to_string()),
+        );
     }
     if let Some(turn_state) = turn_state {
         context.insert(
@@ -426,6 +423,98 @@ mod tests {
     }
 
     #[test]
+    fn request_transform_model_policy_matches_reachable_mojo_fallback() {
+        for requested in [
+            "pro",
+            "flash",
+            "AUTO",
+            " custom-model ",
+            "combo:flash,pro",
+            "combo: , custom-model",
+            "default",
+        ] {
+            let expected = prodex_mojo_core::rich::model_fallback_chain("deepseek", requested)
+                .expect("DeepSeek fallback plan")
+                .into_iter()
+                .next()
+                .expect("non-empty model fallback");
+            let result = deepseek_transform_request(
+                ProviderId::DeepSeek,
+                ProviderTransformInput::new(
+                    ProviderEndpoint::Responses,
+                    serde_json::to_vec(&json!({
+                        "model": requested,
+                        "input": "model parity"
+                    }))
+                    .expect("request serializes"),
+                ),
+            );
+            let body: Value =
+                serde_json::from_slice(result.body.as_ref().expect("translated request body"))
+                    .expect("translated body is JSON");
+            assert_eq!(body["model"], expected, "requested model: {requested}");
+        }
+    }
+
+    #[test]
+    fn request_transform_model_policy_rejects_alias_prefix_mutations() {
+        for requested in ["profile", "flashy", "combo:prose,flash"] {
+            let result = deepseek_transform_request(
+                ProviderId::DeepSeek,
+                ProviderTransformInput::new(
+                    ProviderEndpoint::Responses,
+                    serde_json::to_vec(&json!({
+                        "model": requested,
+                        "input": "model mutation"
+                    }))
+                    .expect("request serializes"),
+                ),
+            );
+            let body: Value =
+                serde_json::from_slice(result.body.as_ref().expect("translated request body"))
+                    .expect("translated body is JSON");
+            let expected = requested
+                .split_once(':')
+                .map(|(_, value)| value.split([',', ';', '|', '>']).next().unwrap().trim())
+                .filter(|value| !value.is_empty())
+                .unwrap_or(requested)
+                .to_string();
+            assert_eq!(body["model"], expected, "requested model: {requested}");
+        }
+    }
+
+    #[test]
+    fn request_transform_selects_and_normalizes_model_in_mojo() {
+        for (request, adapter_model, expected) in [
+            (
+                json!({"model": "flash", "input": "x"}),
+                Some("pro"),
+                "deepseek-v4-flash",
+            ),
+            (json!({"input": "x"}), Some("pro"), "deepseek-v4-pro"),
+            (
+                json!({"model": 7, "input": "x"}),
+                Some("flash"),
+                "deepseek-v4-flash",
+            ),
+            (json!({"model": "", "input": "x"}), Some("flash"), ""),
+            (json!({"model": "   ", "input": "x"}), Some("flash"), "   "),
+            (json!({"input": "x"}), None, "deepseek-chat"),
+        ] {
+            let mut input = ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                serde_json::to_vec(&request).expect("request serializes"),
+            );
+            input.model = adapter_model.map(str::to_owned);
+            let result = deepseek_transform_request(ProviderId::DeepSeek, input);
+            let body: Value =
+                serde_json::from_slice(result.body.as_ref().expect("translated request body"))
+                    .expect("translated body is JSON");
+            assert_eq!(body["model"], expected, "request: {request}");
+        }
+    }
+
+    #[test]
     fn request_transform_matches_expected_request_bodies() {
         let mut cases = vec![
             (
@@ -588,6 +677,16 @@ mod tests {
                 "messages": [{"role": "user", "content": "hello"}]
             })
         );
+    }
+
+    #[test]
+    fn raw_request_model_policy_is_owned_by_mojo() {
+        let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::RawCommonRequest);
+        input.input = Some(r#"{"input":"hello"}"#);
+        input.model = Some(" flash ");
+        let body = deepseek_kernel(input).expect("raw request kernel");
+        let body: Value = serde_json::from_slice(&body).expect("JSON body");
+        assert_eq!(body["model"], "deepseek-v4-flash");
     }
 
     #[test]
