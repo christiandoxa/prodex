@@ -1,7 +1,6 @@
 use super::{
-    RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES, RuntimePrefetchChunk, RuntimePrefetchStream,
-    RuntimeSseInspection, RuntimeSseInspectionProgress, inspect_runtime_sse_buffer,
-    runtime_proxy_log_to_path,
+    RuntimePrefetchChunk, RuntimePrefetchStream, RuntimeSseInspection,
+    RuntimeSseInspectionProgress, inspect_runtime_sse_buffer, runtime_proxy_log_to_path,
 };
 use anyhow::Result;
 use std::io;
@@ -14,18 +13,30 @@ async fn inspect_runtime_sse_lookahead(
     log_path: &Path,
     request_id: u64,
 ) -> Result<RuntimeSseInspection> {
-    let deadline =
-        Instant::now() + Duration::from_millis(prefetch.shared.config.lookahead_timeout_ms);
+    let started_at = Instant::now();
+    let deadline_ms = prefetch.shared.config.stream_idle_timeout_ms;
+    let polling_slice = Duration::from_millis(prefetch.shared.config.lookahead_timeout_ms.max(1));
     let mut buffered = Vec::new();
-    let mut upstream_eof = false;
+    let mut waiting_logged = false;
 
-    while buffered.len() < RUNTIME_PROXY_SSE_LOOKAHEAD_BYTES {
-        let now = Instant::now();
-        if now >= deadline {
-            break;
-        }
-        let remaining = deadline.saturating_duration_since(now);
-        match prefetch.recv_timeout_async(remaining).await {
+    loop {
+        // A lookahead slice is only a wakeup interval, not a commit boundary.
+        // Keep the original request replayable until actual output or an error.
+        let elapsed_ms = u64::try_from(started_at.elapsed().as_millis()).unwrap_or(u64::MAX);
+        let boundary = prodex_mojo_core::sse_precommit::held_boundary(
+            buffered.len(),
+            prefetch.shared.config.max_buffered_bytes,
+            elapsed_ms,
+            deadline_ms,
+            false,
+        )
+        .map_err(|error| anyhow::anyhow!("Mojo SSE precommit boundary failed: {error:?}"))?;
+        ensure_runtime_sse_held_boundary(boundary, log_path, request_id, buffered.len())?;
+        let remaining = Duration::from_millis(deadline_ms.saturating_sub(elapsed_ms));
+        match prefetch
+            .recv_timeout_async(polling_slice.min(remaining))
+            .await
+        {
             Ok(RuntimePrefetchChunk::Data(chunk)) => {
                 buffered.extend_from_slice(&chunk);
                 if let Some(inspection) =
@@ -35,54 +46,72 @@ async fn inspect_runtime_sse_lookahead(
                 }
             }
             Ok(RuntimePrefetchChunk::End) => {
-                upstream_eof = true;
-                break;
+                return runtime_sse_lookahead_finish(buffered, log_path, request_id, true);
             }
             Ok(RuntimePrefetchChunk::Error(kind, message)) => {
-                if buffered.is_empty() {
+                runtime_proxy_log_to_path(
+                    log_path,
+                    &format!(
+                        "request={request_id} transport=http lookahead_error_before_commit bytes={} kind={kind:?}",
+                        buffered.len()
+                    ),
+                );
+                return Err(anyhow::Error::new(io::Error::new(kind, message))
+                    .context("failed to inspect runtime auto-rotate SSE stream"));
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                if !waiting_logged {
                     runtime_proxy_log_to_path(
                         log_path,
                         &format!(
-                            "request={request_id} transport=http lookahead_error_before_bytes kind={kind:?} error={message}"
+                            "request={request_id} transport=http lookahead_waiting_for_output bytes={} committed=false",
+                            buffered.len()
                         ),
                     );
-                    return Err(anyhow::Error::new(io::Error::new(kind, message))
-                        .context("failed to inspect runtime auto-rotate SSE stream"));
+                    waiting_logged = true;
                 }
-                prefetch.push_backlog(RuntimePrefetchChunk::Error(kind, message));
-                break;
-            }
-            Err(RecvTimeoutError::Timeout) => {
-                runtime_proxy_log_to_path(
-                    log_path,
-                    &format!(
-                        "request={request_id} transport=http lookahead_timeout bytes={}",
-                        buffered.len()
-                    ),
-                );
-                break;
             }
             Err(RecvTimeoutError::Disconnected) => {
-                runtime_proxy_log_to_path(
-                    log_path,
-                    &format!(
-                        "request={request_id} transport=http lookahead_channel_disconnected bytes={}",
-                        buffered.len()
-                    ),
-                );
-                if buffered.is_empty() {
-                    return Err(anyhow::Error::new(io::Error::new(
-                        io::ErrorKind::BrokenPipe,
-                        "runtime SSE prefetch channel disconnected before EOF",
-                    ))
-                    .context("failed to inspect runtime auto-rotate SSE stream"));
-                }
-                break;
+                return Err(anyhow::Error::new(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    "runtime SSE prefetch channel disconnected before commit and EOF",
+                ))
+                .context("failed to inspect runtime auto-rotate SSE stream"));
             }
         }
     }
+}
 
-    runtime_sse_lookahead_finish(buffered, log_path, request_id, upstream_eof)
+fn ensure_runtime_sse_held_boundary(
+    boundary: prodex_mojo_core::sse_precommit::SsePrecommitBoundary,
+    log_path: &Path,
+    request_id: u64,
+    buffered_bytes: usize,
+) -> Result<()> {
+    use prodex_mojo_core::sse_precommit::SsePrecommitBoundary;
+    let (kind, reason) = match boundary {
+        SsePrecommitBoundary::Wait => return Ok(()),
+        SsePrecommitBoundary::DeadlineExceeded => (
+            io::ErrorKind::TimedOut,
+            "runtime SSE stream timed out before commit-ready output",
+        ),
+        SsePrecommitBoundary::ByteLimitExceeded => (
+            io::ErrorKind::InvalidData,
+            "runtime SSE precommit metadata exceeded its bounded buffer",
+        ),
+        SsePrecommitBoundary::IncompleteEof => (
+            io::ErrorKind::UnexpectedEof,
+            "runtime SSE stream ended before commit-ready output",
+        ),
+    };
+    runtime_proxy_log_to_path(
+        log_path,
+        &format!(
+            "request={request_id} transport=http sse_precommit_boundary_rejected bytes={buffered_bytes} reason={boundary:?} committed=false"
+        ),
+    );
+    Err(anyhow::Error::new(io::Error::new(kind, reason))
+        .context("failed to inspect runtime auto-rotate SSE stream"))
 }
 
 fn runtime_sse_lookahead_finish(
@@ -96,16 +125,12 @@ fn runtime_sse_lookahead_finish(
         RuntimeSseInspectionProgress::Commit {
             response_ids,
             turn_state,
-        }
-        | RuntimeSseInspectionProgress::Hold {
-            response_ids,
-            turn_state,
         } => {
             if !buffered.is_empty() {
                 runtime_proxy_log_to_path(
                     log_path,
                     &format!(
-                        "request={request_id} transport=http lookahead_budget_exhausted bytes={} response_ids={}",
+                        "request={request_id} transport=http lookahead_eof_commit bytes={} response_ids={}",
                         buffered.len(),
                         response_ids.len()
                     ),
@@ -116,6 +141,20 @@ fn runtime_sse_lookahead_finish(
                 response_ids,
                 turn_state,
             })
+        }
+        RuntimeSseInspectionProgress::Hold { .. } => {
+            let boundary = prodex_mojo_core::sse_precommit::held_boundary(
+                buffered.len(),
+                usize::MAX,
+                0,
+                1,
+                upstream_eof,
+            )
+            .map_err(|error| anyhow::anyhow!("Mojo SSE terminal boundary failed: {error:?}"))?;
+            ensure_runtime_sse_held_boundary(boundary, log_path, request_id, buffered.len())?;
+            Err(anyhow::anyhow!(
+                "uncommitted SSE prelude is not a completed response"
+            ))
         }
         RuntimeSseInspectionProgress::QuotaBlocked => {
             Ok(RuntimeSseInspection::QuotaBlocked(buffered))

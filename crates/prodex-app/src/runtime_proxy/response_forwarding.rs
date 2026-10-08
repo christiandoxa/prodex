@@ -260,6 +260,9 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
                     prelude.len()
                 ),
             );
+            // The upstream attempt has failed. Retaining its payload must not
+            // retain admission capacity while the retry loop selects a profile.
+            drop(inflight_guard);
             return Ok(RuntimeResponsesAttempt::QuotaBlocked {
                 profile_name: profile_name.to_string(),
                 response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
@@ -270,7 +273,7 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
                     profile_name: profile_name.to_string(),
                     log_path: shared.log_path.clone(),
                     shared: shared.clone(),
-                    _inflight_guard: Some(inflight_guard),
+                    _inflight_guard: None,
                 }),
             });
         }
@@ -286,6 +289,9 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
                     retry_after.map_or(0, |delay| delay.as_millis()),
                 ),
             );
+            // The upstream attempt has failed. Retaining its payload must not
+            // retain admission capacity while the retry loop selects a profile.
+            drop(inflight_guard);
             return Ok(RuntimeResponsesAttempt::RateLimited {
                 profile_name: profile_name.to_string(),
                 response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
@@ -296,7 +302,7 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
                     profile_name: profile_name.to_string(),
                     log_path: shared.log_path.clone(),
                     shared: shared.clone(),
-                    _inflight_guard: Some(inflight_guard),
+                    _inflight_guard: None,
                 }),
                 retry_after: retry_after.or_else(|| {
                     runtime_proxy_crate::runtime_retry_after_from_headers(
@@ -315,6 +321,9 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
                     prelude.len()
                 ),
             );
+            // The upstream attempt has failed. Retaining its payload must not
+            // retain admission capacity while the retry loop selects a profile.
+            drop(inflight_guard);
             return Ok(RuntimeResponsesAttempt::Overloaded {
                 profile_name: profile_name.to_string(),
                 response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
@@ -325,7 +334,7 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
                     profile_name: profile_name.to_string(),
                     log_path: shared.log_path.clone(),
                     shared: shared.clone(),
-                    _inflight_guard: Some(inflight_guard),
+                    _inflight_guard: None,
                 }),
             });
         }

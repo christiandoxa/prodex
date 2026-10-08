@@ -146,3 +146,27 @@ def prodex_runtime_sse_event_byte_plan_v1(
     output[unsafe_offset=0] = next_bytes
     output[unsafe_offset=1] = UInt64(next_bytes > max_bytes)
     return 0
+
+
+# A polling slice or metadata prefix is never evidence of model output.
+# The caller invokes this only while event inspection still reports Hold.
+@export("prodex_runtime_sse_precommit_boundary_v1")
+def prodex_runtime_sse_precommit_boundary_v1(
+    abi_version: Int64,
+    buffered_bytes: UInt64,
+    byte_limit: UInt64,
+    elapsed_ms: UInt64,
+    deadline_ms: UInt64,
+    upstream_eof: Int64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -4
+    if byte_limit == 0 or deadline_ms == 0 or upstream_eof < 0 or upstream_eof > 1:
+        return -1
+    if upstream_eof == 1:
+        return 3
+    if buffered_bytes >= byte_limit:
+        return 2
+    if elapsed_ms >= deadline_ms:
+        return 1
+    return 0

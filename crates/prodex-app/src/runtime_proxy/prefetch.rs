@@ -1,5 +1,7 @@
 use super::*;
 
+#[cfg(test)]
+mod capacity_tests;
 mod lookahead;
 mod worker;
 
@@ -78,10 +80,6 @@ impl RuntimePrefetchStream {
                 tokio::time::sleep(sleep_for).await;
             }
         }
-    }
-
-    fn push_backlog(&mut self, chunk: RuntimePrefetchChunk) {
-        self.backlog.push_back(chunk);
     }
 
     pub(super) fn into_reader(mut self, prelude: Vec<u8>) -> Result<RuntimePrefetchReader> {
@@ -311,27 +309,17 @@ mod tests {
     }
 
     #[test]
-    fn prefetch_lookahead_timeout_with_partial_hold_commits_buffered_prelude() {
+    fn prefetch_lookahead_disconnected_partial_hold_is_not_committed() {
         let expected =
             b"data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-partial\"}";
-        let (inspection, _prefetch) = block_on_lookahead(
+        let result = block_on_lookahead(
             vec![RuntimePrefetchChunk::Data(expected.to_vec())],
-            "partial-timeout",
-        )
-        .expect("lookahead should inspect");
-
-        match inspection {
-            RuntimeSseInspection::Commit {
-                prelude,
-                response_ids,
-                turn_state,
-            } => {
-                assert_eq!(prelude, expected);
-                assert!(response_ids.is_empty());
-                assert_eq!(turn_state, None);
-            }
-            other => panic!("expected commit after hold timeout, got {other:?}"),
-        }
+            "partial-disconnect",
+        );
+        assert!(
+            result.is_err(),
+            "partial metadata must not become a committed response"
+        );
     }
 
     #[test]
@@ -354,37 +342,19 @@ mod tests {
     }
 
     #[test]
-    fn prefetch_lookahead_error_after_prelude_preserves_error_backlog() {
-        let expected =
-            b"data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-before-error\"}";
-        let (inspection, prefetch) = block_on_lookahead(
+    fn prefetch_lookahead_error_after_metadata_remains_precommit() {
+        let result = block_on_lookahead(
             vec![
-                RuntimePrefetchChunk::Data(expected.to_vec()),
-                RuntimePrefetchChunk::Error(
-                    io::ErrorKind::ConnectionReset,
-                    "connection reset".to_string(),
+                RuntimePrefetchChunk::Data(
+                    b"data: {\"type\":\"response.in_progress\",\"response_id\":\"resp-before-error\"}".to_vec(),
                 ),
+                RuntimePrefetchChunk::Error(io::ErrorKind::ConnectionReset, "connection reset".into()),
             ],
             "error-after-prelude",
-        )
-        .expect("lookahead should keep partial prelude");
-
-        match inspection {
-            RuntimeSseInspection::Commit {
-                prelude,
-                response_ids,
-                turn_state,
-            } => {
-                assert_eq!(prelude, expected);
-                assert!(response_ids.is_empty());
-                assert_eq!(turn_state, None);
-            }
-            other => panic!("expected partial commit, got {other:?}"),
-        }
-        assert!(matches!(
-            prefetch.backlog.front(),
-            Some(RuntimePrefetchChunk::Error(io::ErrorKind::ConnectionReset, message))
-                if message == "connection reset"
-        ));
+        );
+        assert!(
+            result.is_err(),
+            "metadata must not hide a precommit transport error"
+        );
     }
 }
