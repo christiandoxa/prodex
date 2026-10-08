@@ -100,39 +100,10 @@ fn session_scroll_plan_keeps_key_and_viewport_boundaries() {
 }
 
 #[test]
-fn session_mojo_abis_reject_malformed_inputs() {
-    let mut output = [-1_i64; 2];
-    let output_address = output.as_mut_ptr() as u64;
-    assert_eq!(
-        unsafe { prodex_session_cli_output_mode_v1(0, 0, 0, 0, output_address) },
-        1
-    );
-    assert_eq!(
-        unsafe {
-            prodex_session_cli_output_mode_v1(SESSION_CLI_ABI_VERSION, 2, 0, 0, output_address)
-        },
-        1
-    );
-    assert_eq!(
-        unsafe {
-            prodex_session_resume_repair_action_v1(SESSION_CLI_ABI_VERSION, 0, 0, 2, output_address)
-        },
-        1
-    );
-    assert_eq!(
-        unsafe {
-            prodex_session_report_scroll_update_v1(
-                SESSION_CLI_ABI_VERSION,
-                0,
-                0,
-                0,
-                -1,
-                0,
-                output_address,
-            )
-        },
-        1
-    );
+fn session_mojo_adapter_rejects_invalid_scroll_bounds() {
+    let down = KeyEvent::new(KeyCode::Down, KeyModifiers::NONE);
+    assert!(session_scroll_update(Some(&down), 3, 0, 3).is_err());
+    assert!(session_scroll_update(Some(&down), 5, 2, 4).is_err());
 }
 
 #[test]

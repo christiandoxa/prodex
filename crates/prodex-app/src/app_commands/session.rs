@@ -21,36 +21,11 @@ use crate::{
     print_stdout_line, print_stdout_text,
 };
 use prodex_cli::CodexRuntimeFeatureArgs;
+use prodex_mojo_core::session_cli_policy::{
+    self as session_cli_mojo, SessionOutputPlan, SessionResumeRepairAction,
+};
 use prodex_mojo_core::super_provider_config::runtime_ci_truth_token;
 pub(crate) use prodex_session_store::SessionReport;
-
-unsafe extern "C" {
-    fn prodex_session_cli_output_mode_v1(
-        abi_version: i64,
-        json: i64,
-        id_only: i64,
-        resume_command: i64,
-        output_address: u64,
-    ) -> i64;
-    fn prodex_session_resume_repair_action_v1(
-        abi_version: i64,
-        repaired: i64,
-        inspected_unrepairable: i64,
-        unrepairable_found: i64,
-        output_address: u64,
-    ) -> i64;
-    fn prodex_session_report_scroll_update_v1(
-        abi_version: i64,
-        key_code: i64,
-        control: i64,
-        offset: i64,
-        visible: i64,
-        max_scroll: i64,
-        output_address: u64,
-    ) -> i64;
-}
-
-const SESSION_CLI_ABI_VERSION: i64 = 1;
 
 pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
     match command {
@@ -126,28 +101,17 @@ fn session_output_mode(
     id_only: bool,
     resume_command: bool,
 ) -> Result<SessionOutputMode> {
-    let mut output = [-1_i64; 1];
-    let status = unsafe {
-        prodex_session_cli_output_mode_v1(
-            SESSION_CLI_ABI_VERSION,
-            i64::from(json),
-            i64::from(id_only),
-            i64::from(resume_command),
-            output.as_mut_ptr() as u64,
-        )
-    };
-    match status {
-        0 => {}
-        2 => anyhow::bail!("--json, --id-only, and --resume-command cannot be combined"),
-        _ => anyhow::bail!("Mojo session output planner rejected input"),
-    }
-    match output[0] {
-        0 => Ok(SessionOutputMode::Text),
-        1 => Ok(SessionOutputMode::Json),
-        2 => Ok(SessionOutputMode::IdOnly),
-        3 => Ok(SessionOutputMode::ResumeCommand),
-        _ => anyhow::bail!("Mojo session output planner returned invalid output"),
-    }
+    let selected = session_cli_mojo::output_mode(json, id_only, resume_command)
+        .map_err(|error| anyhow::anyhow!("Mojo session output planner rejected input: {error:?}"))?
+        .ok_or_else(|| {
+            anyhow::anyhow!("--json, --id-only, and --resume-command cannot be combined")
+        })?;
+    Ok(match selected {
+        SessionOutputPlan::Text => SessionOutputMode::Text,
+        SessionOutputPlan::Json => SessionOutputMode::Json,
+        SessionOutputPlan::IdOnly => SessionOutputMode::IdOnly,
+        SessionOutputPlan::ResumeCommand => SessionOutputMode::ResumeCommand,
+    })
 }
 
 fn print_session_reports(
@@ -432,27 +396,11 @@ fn session_scroll_update(
         ),
         None => (0, 0),
     };
-    let mut output = [-1_i64; 2];
-    let status = unsafe {
-        prodex_session_report_scroll_update_v1(
-            SESSION_CLI_ABI_VERSION,
-            key_code,
-            control,
-            i64::try_from(offset).context("session scroll offset exceeds Mojo ABI")?,
-            i64::try_from(visible).context("session visible row count exceeds Mojo ABI")?,
-            i64::try_from(max_scroll).context("session scroll limit exceeds Mojo ABI")?,
-            output.as_mut_ptr() as u64,
-        )
-    };
-    if status != 0 {
-        anyhow::bail!("Mojo session scroll planner rejected input");
-    }
-    if output[0] != 0 && output[0] != 1 {
-        anyhow::bail!("Mojo session scroll planner returned invalid exit state");
-    }
-    let offset = usize::try_from(output[1])
-        .context("Mojo session scroll planner returned invalid offset")?;
-    Ok((offset, output[0] == 1))
+    let plan = session_cli_mojo::scroll_update(key_code, control != 0, offset, visible, max_scroll)
+        .map_err(|error| {
+            anyhow::anyhow!("Mojo session scroll planner rejected input: {error:?}")
+        })?;
+    Ok((plan.offset, plan.exit))
 }
 
 fn session_scroll_lines(reports: &[SessionReport]) -> Vec<Line<'_>> {
@@ -607,37 +555,13 @@ fn handle_session_resume(args: SessionResumeArgs) -> Result<()> {
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SessionResumeRepairAction {
-    InspectUnrepairable,
-    Continue,
-    Reject,
-}
-
 fn session_resume_repair_action(
     repaired: bool,
     inspected_unrepairable: bool,
     unrepairable_found: bool,
 ) -> Result<SessionResumeRepairAction> {
-    let mut output = [-1_i64; 1];
-    let status = unsafe {
-        prodex_session_resume_repair_action_v1(
-            SESSION_CLI_ABI_VERSION,
-            i64::from(repaired),
-            i64::from(inspected_unrepairable),
-            i64::from(unrepairable_found),
-            output.as_mut_ptr() as u64,
-        )
-    };
-    if status != 0 {
-        anyhow::bail!("Mojo session resume planner rejected input");
-    }
-    match output[0] {
-        0 => Ok(SessionResumeRepairAction::InspectUnrepairable),
-        1 => Ok(SessionResumeRepairAction::Continue),
-        2 => Ok(SessionResumeRepairAction::Reject),
-        _ => anyhow::bail!("Mojo session resume planner returned invalid output"),
-    }
+    session_cli_mojo::resume_repair_action(repaired, inspected_unrepairable, unrepairable_found)
+        .map_err(|error| anyhow::anyhow!("Mojo session resume planner rejected input: {error:?}"))
 }
 
 #[cfg(test)]
