@@ -4,10 +4,11 @@ use super::super::import_export::{
     read_optional_secret_text_file,
 };
 use super::{
-    LoginMethod, LoginRequest, create_temporary_login_home, fetch_profile_email,
+    LoginMethod, LoginRequest, auto_login_route, create_temporary_login_home, fetch_profile_email,
     finish_named_anthropic_profile_login, finish_named_profile_login,
-    prepare_anthropic_profile_login_home, prepare_profile_login_home, read_auth_summary,
-    required_auth_json_text, run_codex_login, write_secret_text_file,
+    prepare_anthropic_profile_login_home, prepare_profile_login_home,
+    profile_login_auth_commit_plan, read_auth_summary, required_auth_json_text, run_codex_login,
+    write_secret_text_file,
 };
 use crate::{
     AppPaths, AppState, ProfileEntry, ProfileProvider, claude_external_oauth_profile_identity,
@@ -23,14 +24,82 @@ struct ProfileLoginTarget {
     profile: ProfileEntry,
 }
 
-fn validate_profile_login_target(state: &AppState, target: &ProfileLoginTarget) -> Result<()> {
-    let Some(current) = state.profiles.get(&target.name) else {
-        bail!("profile '{}' changed while login was running", target.name);
-    };
-    if current != &target.profile {
-        bail!("profile '{}' changed while login was running", target.name);
+fn profile_login_provider_decision(
+    provider: &ProfileProvider,
+    method: LoginMethod,
+) -> prodex_mojo_core::profile_login_policy::ProviderLoginValidation {
+    prodex_mojo_core::profile_login_policy::validate_provider_login(
+        provider.label(),
+        method.mojo_tag(),
+    )
+    .expect("Mojo profile-login provider validation returned invalid output")
+}
+
+pub(super) fn validate_profile_login_provider(
+    profile_name: &str,
+    provider: &ProfileProvider,
+    method: LoginMethod,
+) -> Result<()> {
+    let decision = profile_login_provider_decision(provider, method);
+    match decision {
+        prodex_mojo_core::profile_login_policy::ProviderLoginValidation::Allowed => Ok(()),
+        prodex_mojo_core::profile_login_policy::ProviderLoginValidation::CodexProviderUnsupported => {
+            bail!(
+                "profile '{}' uses {}. `prodex login --profile` currently supports OpenAI/Codex profiles only.",
+                profile_name,
+                provider.display_name()
+            )
+        }
+        prodex_mojo_core::profile_login_policy::ProviderLoginValidation::ClaudeProviderUnsupported => {
+            bail!(
+                "profile '{}' uses {}. Claude sign-in supports OpenAI/Codex placeholders or Anthropic Claude profiles.",
+                profile_name,
+                provider.display_name()
+            )
+        }
     }
-    Ok(())
+}
+
+pub(super) fn validate_api_key_profile_provider(
+    profile_name: &str,
+    provider: &ProfileProvider,
+) -> Result<()> {
+    match profile_login_provider_decision(provider, LoginMethod::ApiKey) {
+        prodex_mojo_core::profile_login_policy::ProviderLoginValidation::Allowed => Ok(()),
+        prodex_mojo_core::profile_login_policy::ProviderLoginValidation::CodexProviderUnsupported => {
+            bail!(
+                "profile '{}' uses {}. API key login supports OpenAI/Codex profiles only.",
+                profile_name,
+                provider.display_name()
+            )
+        }
+        prodex_mojo_core::profile_login_policy::ProviderLoginValidation::ClaudeProviderUnsupported => {
+            bail!(
+                "profile '{}' uses {}. Claude sign-in supports OpenAI/Codex placeholders or Anthropic Claude profiles.",
+                profile_name,
+                provider.display_name()
+            )
+        }
+    }
+}
+
+fn validate_profile_login_target(state: &AppState, target: &ProfileLoginTarget) -> Result<()> {
+    let (profile_present, profile_matches_snapshot) = match state.profiles.get(&target.name) {
+        Some(current) => (true, current == &target.profile),
+        None => (false, false),
+    };
+    match prodex_mojo_core::profile_login_policy::validate_login_target(
+        profile_present,
+        profile_matches_snapshot,
+    )
+    .expect("Mojo profile-login target validation returned invalid output")
+    {
+        prodex_mojo_core::profile_login_policy::LoginTargetValidation::Valid => Ok(()),
+        prodex_mojo_core::profile_login_policy::LoginTargetValidation::Missing
+        | prodex_mojo_core::profile_login_policy::LoginTargetValidation::Changed => {
+            bail!("profile '{}' changed while login was running", target.name)
+        }
+    }
 }
 
 fn validate_profile_login_request(
@@ -42,27 +111,7 @@ fn validate_profile_login_request(
         .profiles
         .get(profile_name)
         .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    if method == LoginMethod::Claude {
-        if matches!(
-            profile.provider,
-            ProfileProvider::Gemini { .. }
-                | ProfileProvider::Copilot { .. }
-                | ProfileProvider::Agy { .. }
-        ) {
-            bail!(
-                "profile '{}' uses {}. Claude sign-in supports OpenAI/Codex placeholders or Anthropic Claude profiles.",
-                profile_name,
-                profile.provider.display_name()
-            );
-        }
-    } else if !profile.provider.supports_codex_runtime() {
-        bail!(
-            "profile '{}' uses {}. `prodex login --profile` currently supports OpenAI/Codex profiles only.",
-            profile_name,
-            profile.provider.display_name()
-        );
-    }
-    Ok(())
+    validate_profile_login_provider(profile_name, &profile.provider, method)
 }
 
 pub(super) fn login_into_profile(
@@ -87,7 +136,11 @@ pub(super) fn login_into_profile(
         }
     };
 
-    if login_request.method == LoginMethod::Status {
+    if matches!(
+        prodex_mojo_core::profile_login_policy::login_execution(login_request.method.mojo_tag())
+            .expect("Mojo profile-login execution policy returned invalid output"),
+        prodex_mojo_core::profile_login_policy::LoginExecution::DirectProfileHome
+    ) {
         return run_codex_login(&target.profile.codex_home, login_request);
     }
 
@@ -122,55 +175,63 @@ fn finish_login_into_profile_locked(
     login_home: &Path,
     status: ExitStatus,
 ) -> Result<ExitStatus> {
-    if login_request.method == LoginMethod::Claude {
-        let codex_home = prepare_anthropic_profile_login_home(paths, state, profile_name)?;
-        let (account, auth_method) = claude_external_oauth_profile_identity(login_home)?;
-        let mut desired_profile = state
-            .profiles
-            .get(profile_name)
-            .with_context(|| format!("profile '{}' is missing", profile_name))?
-            .clone();
-        desired_profile.email = account.clone();
-        desired_profile.provider = ProfileProvider::Anthropic {
-            account,
-            auth_method,
-        };
-        let credentials = read_external_claude_credentials_text(login_home)
-            .context("Claude login did not produce credentials")?;
-        let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
-            paths,
-            "login",
-            state,
-            profile_name,
-            &desired_profile,
-            Some(profile_name.to_string()),
-            ProfileAuthUpdate {
-                next_auth_json: None,
-                next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
-                next_secret_files: vec![prodex_profile_export::ImportedExistingProfileFileUpdate {
-                    path: crate::CLAUDE_CREDENTIALS_FILE.to_string(),
-                    text: Some(credentials),
-                }],
-                previous_secret_file_paths: &[crate::CLAUDE_CREDENTIALS_FILE],
-                temporary_home: Some(login_home),
-            },
-        )?;
-        crate::copy_claude_oauth_credentials(login_home, &codex_home)?;
-        finish_named_anthropic_profile_login(paths, state, profile_name, &codex_home)?;
-        remove_dir_if_exists(login_home)?;
-        cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
-        return Ok(status);
+    match auto_login_route(login_request.method, None) {
+        prodex_mojo_core::profile_login_policy::AutoLoginRoute::Anthropic => {
+            let codex_home = prepare_anthropic_profile_login_home(paths, state, profile_name)?;
+            let (account, auth_method) = claude_external_oauth_profile_identity(login_home)?;
+            let mut desired_profile = state
+                .profiles
+                .get(profile_name)
+                .with_context(|| format!("profile '{}' is missing", profile_name))?
+                .clone();
+            desired_profile.email = account.clone();
+            desired_profile.provider = ProfileProvider::Anthropic {
+                account,
+                auth_method,
+            };
+            let credentials = read_external_claude_credentials_text(login_home)
+                .context("Claude login did not produce credentials")?;
+            let (lifecycle_path, auth_journal_path) = prepare_existing_profile_lifecycle(
+                paths,
+                "login",
+                state,
+                profile_name,
+                &desired_profile,
+                Some(profile_name.to_string()),
+                ProfileAuthUpdate {
+                    next_auth_json: None,
+                    next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
+                    next_secret_files: vec![
+                        prodex_profile_export::ImportedExistingProfileFileUpdate {
+                            path: crate::CLAUDE_CREDENTIALS_FILE.to_string(),
+                            text: Some(credentials),
+                        },
+                    ],
+                    previous_secret_file_paths: &[crate::CLAUDE_CREDENTIALS_FILE],
+                    temporary_home: Some(login_home),
+                },
+            )?;
+            crate::copy_claude_oauth_credentials(login_home, &codex_home)?;
+            finish_named_anthropic_profile_login(paths, state, profile_name, &codex_home)?;
+            remove_dir_if_exists(login_home)?;
+            cleanup_profile_lifecycle_and_auth_journal(&lifecycle_path, &auth_journal_path)?;
+            return Ok(status);
+        }
+        prodex_mojo_core::profile_login_policy::AutoLoginRoute::AuthLabelRequired => {}
+        route => unreachable!("Mojo named-login policy returned unexpected route {route:?}"),
     }
 
-    let codex_home = prepare_profile_login_home(paths, state, profile_name)?;
+    let codex_home = prepare_profile_login_home(paths, state, profile_name, login_request.method)?;
     let auth_json = required_auth_json_text(login_home)?;
     let auth_label = read_auth_summary(login_home).label;
+    let auth_plan =
+        profile_login_auth_commit_plan(&auth_label, login_request.openai_base_url_specified);
     let mut desired_profile = state
         .profiles
         .get(profile_name)
         .with_context(|| format!("profile '{}' is missing", profile_name))?
         .clone();
-    desired_profile.email = if auth_label == "api-key" {
+    desired_profile.email = if auth_plan.clear_email {
         None
     } else {
         fetch_profile_email(login_home)
@@ -187,7 +248,7 @@ fn finish_login_into_profile_locked(
         ProfileAuthUpdate {
             next_auth_json: Some(auth_json.clone()),
             next_provider_json: Some(serde_json::to_string(&desired_profile.provider)?),
-            next_secret_files: if login_request.openai_base_url_specified {
+            next_secret_files: if auth_plan.write_base_url {
                 vec![prodex_profile_export::ImportedExistingProfileFileUpdate {
                     path: ".prodex-profile.toml".to_string(),
                     text: read_optional_secret_text_file(&login_home.join(".prodex-profile.toml"))?,
@@ -195,7 +256,7 @@ fn finish_login_into_profile_locked(
             } else {
                 Vec::new()
             },
-            previous_secret_file_paths: if login_request.openai_base_url_specified {
+            previous_secret_file_paths: if auth_plan.write_base_url {
                 &[".prodex-profile.toml"][..]
             } else {
                 &[][..]
@@ -306,6 +367,71 @@ mod tests {
                 .filter_map(|entry| entry.ok())
                 .all(|entry| !entry.file_name().to_string_lossy().starts_with(".login-")),
             "status should not allocate a temporary login home"
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn named_login_rejects_provider_before_running_codex() {
+        let root = std::env::temp_dir().join(format!(
+            "prodex-login-provider-policy-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("test root should be created");
+        let paths = AppPaths {
+            root: root.clone(),
+            state_file: root.join("state.json"),
+            managed_profiles_root: root.join("profiles"),
+            shared_codex_root: root.join("shared"),
+            legacy_shared_codex_root: root.join("legacy"),
+        };
+        fs::create_dir_all(&paths.managed_profiles_root)
+            .expect("managed profiles root should be created");
+        let profile_home = paths.managed_profiles_root.join("gemini");
+        create_codex_home_if_missing(&profile_home).expect("profile home should be created");
+        AppState {
+            active_profile: Some("gemini".to_string()),
+            profiles: std::collections::BTreeMap::from([(
+                "gemini".to_string(),
+                ProfileEntry {
+                    codex_home: profile_home,
+                    managed: true,
+                    email: Some("account@example.com".to_string()),
+                    provider: ProfileProvider::Gemini {
+                        email: "account@example.com".to_string(),
+                        project_id: None,
+                    },
+                },
+            )]),
+            ..AppState::default()
+        }
+        .save(&paths)
+        .expect("initial state should save");
+
+        let error = login_into_profile(
+            &paths,
+            "gemini",
+            &LoginRequest {
+                method: LoginMethod::Status,
+                codex_args: Vec::new(),
+                api_key: None,
+                openai_base_url: None,
+                openai_base_url_specified: false,
+                api_key_profile_name: None,
+            },
+        )
+        .expect_err("Gemini profile must be rejected before Codex runs");
+        assert!(error.to_string().contains("OpenAI/Codex profiles only"));
+        assert!(
+            fs::read_dir(&paths.managed_profiles_root)
+                .expect("managed profiles root should be readable")
+                .filter_map(|entry| entry.ok())
+                .all(|entry| !entry.file_name().to_string_lossy().starts_with(".login-")),
+            "provider validation must not allocate a temporary login home"
         );
         let _ = fs::remove_dir_all(root);
     }

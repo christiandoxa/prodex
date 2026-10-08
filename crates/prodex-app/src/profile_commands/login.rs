@@ -31,7 +31,7 @@ use self::api_key::*;
 use self::claude::*;
 use self::copilot_import::*;
 use self::home::create_temporary_login_home;
-use self::lifecycle_support::login_into_profile;
+use self::lifecycle_support::{login_into_profile, validate_profile_login_provider};
 use self::login_menu::{
     LoginGuidanceKind, LoginMenuAction, login_prompt_is_interactive, prompt_login_menu_action,
     show_login_guidance,
@@ -58,6 +58,7 @@ use crate::{
 use prodex_runtime_launch::ChildProcessPlan;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
 enum LoginMethod {
     ChatGpt,
     DeviceCode,
@@ -66,6 +67,12 @@ enum LoginMethod {
     Claude,
     Antigravity,
     Status,
+}
+
+impl LoginMethod {
+    fn mojo_tag(self) -> i64 {
+        self as i64
+    }
 }
 
 struct LoginRequest {
@@ -114,18 +121,13 @@ fn prepare_profile_login_home(
     paths: &AppPaths,
     state: &AppState,
     profile_name: &str,
+    login_method: LoginMethod,
 ) -> Result<PathBuf> {
     let profile = state
         .profiles
         .get(profile_name)
         .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    if !profile.provider.supports_codex_runtime() {
-        bail!(
-            "profile '{}' uses {}. `prodex login --profile` currently supports OpenAI/Codex profiles only.",
-            profile_name,
-            profile.provider.display_name()
-        );
-    }
+    validate_profile_login_provider(profile_name, &profile.provider, login_method)?;
     prepare_profile_codex_home(paths, profile)?;
     Ok(profile.codex_home.clone())
 }
@@ -139,11 +141,12 @@ fn finish_named_profile_login(
     openai_base_url_specified: bool,
 ) -> Result<()> {
     let auth_label = read_auth_summary(codex_home).label;
-    if auth_label == "api-key" {
+    let auth_plan = profile_login_auth_commit_plan(&auth_label, openai_base_url_specified);
+    if auth_plan.clear_email {
         if let Some(profile) = state.profiles.get_mut(profile_name) {
             profile.email = None;
         }
-        if openai_base_url_specified {
+        if auth_plan.write_base_url {
             write_profile_openai_compatible_base_url(codex_home, openai_base_url)?;
         }
     } else {
@@ -153,7 +156,7 @@ fn finish_named_profile_login(
     activate_profile(state, profile_name);
     state.save(paths)?;
 
-    let result = if auth_label == "api-key" {
+    let result = if auth_plan.is_api_key {
         format!("Logged in with API key for profile '{profile_name}'.")
     } else {
         format!("Logged in successfully for profile '{profile_name}'.")
@@ -184,6 +187,22 @@ fn profile_email_label(state: &AppState, profile_name: &str) -> String {
         .unwrap_or_else(|| "-".to_string())
 }
 
+fn profile_login_auth_commit_plan(
+    auth_label: &str,
+    base_url_specified: bool,
+) -> prodex_mojo_core::profile_login_policy::AuthCommitPlan {
+    prodex_mojo_core::profile_login_policy::auth_commit_plan(auth_label, base_url_specified)
+        .expect("Mojo profile-login auth plan returned invalid output")
+}
+
+fn auto_login_route(
+    login_method: LoginMethod,
+    auth_label: Option<&str>,
+) -> prodex_mojo_core::profile_login_policy::AutoLoginRoute {
+    prodex_mojo_core::profile_login_policy::auto_login_route(login_method.mojo_tag(), auth_label)
+        .expect("Mojo profile-login auto route returned invalid output")
+}
+
 fn login_with_auto_profile(paths: &AppPaths, login_request: &LoginRequest) -> Result<ExitStatus> {
     let login_home = create_temporary_login_home(paths)?;
     let status = run_codex_login(&login_home, login_request)?;
@@ -191,32 +210,41 @@ fn login_with_auto_profile(paths: &AppPaths, login_request: &LoginRequest) -> Re
         remove_dir_if_exists(&login_home)?;
         return Ok(status);
     }
-    if login_request.method == LoginMethod::Status {
-        remove_dir_if_exists(&login_home)?;
-        return Ok(status);
-    }
-    if login_request.method == LoginMethod::Claude {
-        let _lock = acquire_profile_lifecycle_lock(paths)?;
-        let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
-        finish_auto_login_for_anthropic_profile(paths, &mut state, &login_home)?;
-        return Ok(status);
+    match auto_login_route(login_request.method, None) {
+        prodex_mojo_core::profile_login_policy::AutoLoginRoute::Status => {
+            remove_dir_if_exists(&login_home)?;
+            return Ok(status);
+        }
+        prodex_mojo_core::profile_login_policy::AutoLoginRoute::Anthropic => {
+            let _lock = acquire_profile_lifecycle_lock(paths)?;
+            let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
+            finish_auto_login_for_anthropic_profile(paths, &mut state, &login_home)?;
+            return Ok(status);
+        }
+        prodex_mojo_core::profile_login_policy::AutoLoginRoute::AuthLabelRequired
+        | prodex_mojo_core::profile_login_policy::AutoLoginRoute::ApiKey
+        | prodex_mojo_core::profile_login_policy::AutoLoginRoute::Identity => {}
     }
 
     let auth_json = required_auth_json_text(&login_home)?;
-    let auth_is_api_key = read_auth_summary(&login_home).label == "api-key";
-    if auth_is_api_key {
-        let _lock = acquire_profile_lifecycle_lock(paths)?;
-        let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
-        finish_auto_login_for_api_key_profile(
-            paths,
-            &mut state,
-            &login_home,
-            login_request.api_key_profile_name.as_deref(),
-            login_request.openai_base_url.as_deref(),
-            login_request.openai_base_url_specified,
-            &auth_json,
-        )?;
-        return Ok(status);
+    let auth_label = read_auth_summary(&login_home).label;
+    match auto_login_route(login_request.method, Some(&auth_label)) {
+        prodex_mojo_core::profile_login_policy::AutoLoginRoute::ApiKey => {
+            let _lock = acquire_profile_lifecycle_lock(paths)?;
+            let (mut state, _) = load_profile_state_with_profile_recovery_locked(paths, true)?;
+            finish_auto_login_for_api_key_profile(
+                paths,
+                &mut state,
+                &login_home,
+                login_request.api_key_profile_name.as_deref(),
+                login_request.openai_base_url.as_deref(),
+                login_request.openai_base_url_specified,
+                &auth_json,
+            )?;
+            return Ok(status);
+        }
+        prodex_mojo_core::profile_login_policy::AutoLoginRoute::Identity => {}
+        route => unreachable!("Mojo auto-login policy returned unexpected route {route:?}"),
     }
 
     let identity = fetch_profile_identity(&login_home).with_context(|| {
@@ -357,21 +385,30 @@ fn finish_auto_login_for_new_profile(
 }
 
 fn run_codex_login(codex_home: &Path, login_request: &LoginRequest) -> Result<ExitStatus> {
-    if login_request.method == LoginMethod::Claude {
-        return login_with_claude_oauth(codex_home, None);
-    }
-
-    if login_request.method == LoginMethod::ApiKey
-        && let Some(api_key) = login_request.api_key.as_deref()
-    {
-        write_api_key_auth_json(codex_home, api_key)?;
-        if login_request.openai_base_url_specified {
-            write_profile_openai_compatible_base_url(
-                codex_home,
-                login_request.openai_base_url.as_deref(),
-            )?;
+    let method_plan = prodex_mojo_core::profile_login_policy::login_method_plan(
+        login_request.method.mojo_tag(),
+        login_request.api_key.is_some(),
+    )
+    .expect("Mojo profile-login method route returned invalid output");
+    match method_plan.route {
+        prodex_mojo_core::profile_login_policy::LoginMethodRoute::ExternalClaude => {
+            return login_with_claude_oauth(codex_home, None);
         }
-        return Ok(success_exit_status());
+        prodex_mojo_core::profile_login_policy::LoginMethodRoute::DirectApiKey => {
+            let api_key = login_request
+                .api_key
+                .as_deref()
+                .expect("Mojo selected direct API-key login without a key");
+            write_api_key_auth_json(codex_home, api_key)?;
+            if method_plan.allows_base_url && login_request.openai_base_url_specified {
+                write_profile_openai_compatible_base_url(
+                    codex_home,
+                    login_request.openai_base_url.as_deref(),
+                )?;
+            }
+            return Ok(success_exit_status());
+        }
+        prodex_mojo_core::profile_login_policy::LoginMethodRoute::CodexChild => {}
     }
 
     let mut command_args = vec![OsString::from("login")];
@@ -380,7 +417,15 @@ fn run_codex_login(codex_home: &Path, login_request: &LoginRequest) -> Result<Ex
         &codex_child_plan(codex_home.to_path_buf(), command_args),
         None,
     )?;
-    if status.success() && login_request.method != LoginMethod::Status {
+    let execution =
+        prodex_mojo_core::profile_login_policy::login_execution(login_request.method.mojo_tag())
+            .expect("Mojo profile-login execution policy returned invalid output");
+    if status.success()
+        && matches!(
+            execution,
+            prodex_mojo_core::profile_login_policy::LoginExecution::TemporaryLoginHome
+        )
+    {
         let auth_location = secret_store::auth_json_location(codex_home);
         secret_store::FileSecretBackend::new()
             .seal_existing(&auth_location)
@@ -392,10 +437,7 @@ fn run_codex_login(codex_home: &Path, login_request: &LoginRequest) -> Result<Ex
                 )
             })?;
     }
-    if status.success()
-        && login_request.method == LoginMethod::ApiKey
-        && login_request.openai_base_url_specified
-    {
+    if status.success() && method_plan.allows_base_url && login_request.openai_base_url_specified {
         write_profile_openai_compatible_base_url(
             codex_home,
             login_request.openai_base_url.as_deref(),

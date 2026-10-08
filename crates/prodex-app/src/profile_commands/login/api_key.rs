@@ -6,6 +6,7 @@ use super::super::import_export::{
 };
 use super::super::manage::print_profile_panel;
 use super::super::write_secret_text_file;
+use super::lifecycle_support::validate_api_key_profile_provider;
 use super::{default_api_key_profile_name, unique_profile_name_for_slug};
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, activate_profile,
@@ -13,7 +14,7 @@ use crate::{
     prepare_managed_codex_home, remove_dir_if_exists, update_existing_profile_auth,
     write_profile_openai_compatible_base_url,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use serde_json::json;
 use std::path::Path;
 
@@ -70,13 +71,7 @@ fn finish_api_key_login_for_existing_profile(
         .with_context(|| format!("profile '{}' is missing", profile_name))?
         .provider
         .clone();
-    if !provider.supports_codex_runtime() {
-        bail!(
-            "profile '{}' uses {}. API key login supports OpenAI/Codex profiles only.",
-            profile_name,
-            provider.display_name()
-        );
-    }
+    validate_api_key_profile_provider(profile_name, &provider)?;
 
     let mut desired_profile = state
         .profiles

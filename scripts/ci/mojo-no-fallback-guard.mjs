@@ -80,7 +80,21 @@ const GEMINI_COMPACT_SEMANTIC_CONSUMER_FILE = "crates/prodex-provider-core/src/g
 const GEMINI_COMPACT_SNIPPET_REMOVED_RUST_FILE = "crates/prodex-provider-core/src/gemini_bridge/compact/local/snippet/tool.rs";
 const GEMINI_COMPACT_SNIPPET_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/gemini_compact_snippet.rs";
 const GEMINI_COMPACT_SNIPPET_MOJO_FILE = "mojo/prodex_core/gemini_compact_snippet.mojo";
+const PROFILE_LOGIN_FILE = "crates/prodex-app/src/profile_commands/login.rs";
+const PROFILE_LOGIN_LIFECYCLE_FILE = "crates/prodex-app/src/profile_commands/login/lifecycle_support.rs";
+const PROFILE_LOGIN_API_KEY_FILE = "crates/prodex-app/src/profile_commands/login/api_key.rs";
+const PROFILE_LOGIN_CLAUDE_FILE = "crates/prodex-app/src/profile_commands/login/claude.rs";
+const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_policy.rs";
+const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
+const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
 const PROMOTED_FILES = [
+  PROFILE_LOGIN_FILE,
+  PROFILE_LOGIN_LIFECYCLE_FILE,
+  PROFILE_LOGIN_API_KEY_FILE,
+  PROFILE_LOGIN_CLAUDE_FILE,
+  PROFILE_LOGIN_ADAPTER_FILE,
+  PROFILE_LOGIN_MOJO_FILE,
+  PROFILE_LOGIN_TEST_FILE,
   GEMINI_COMPACT_SNIPPET_CONSUMER_FILE,
   GEMINI_COMPACT_TEXT_CONSUMER_FILE,
   GEMINI_COMPACT_SUMMARY_CONSUMER_FILE,
@@ -2526,6 +2540,96 @@ export function findViolations(files) {
       violations.push(filePath + ": contains a retired Rust profile-identity semantic helper");
     }
     return violations;
+  });
+  const profileLoginViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === PROFILE_LOGIN_FILE) {
+      const required = [
+        "prodex_mojo_core::profile_login_policy::login_method_plan(",
+        "prodex_mojo_core::profile_login_policy::login_execution(",
+        "profile_login_auth_commit_plan(",
+        "auto_login_route(",
+      ];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const violations = required
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: login policy must retain Mojo call ${marker}`);
+      if (production.includes('auth_label == "api-key"') ||
+          production.includes("supports_codex_runtime()")) {
+        violations.push(`${filePath}: contains restored Rust provider-login policy`);
+      }
+      return violations;
+    }
+    if (filePath === PROFILE_LOGIN_LIFECYCLE_FILE) {
+      const required = [
+        "validate_provider_login(",
+        "validate_login_target(",
+        "login_execution(",
+        "profile_login_auth_commit_plan(",
+        "auto_login_route(",
+      ];
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const violations = required
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: login lifecycle must retain Mojo call ${marker}`);
+      if (production.includes("supports_codex_runtime()") ||
+          production.includes("current != &target.profile") ||
+          /matches!\(\s*profile\.provider,/u.test(production)) {
+        violations.push(`${filePath}: contains restored Rust provider-login validation or target policy`);
+      }
+      return violations;
+    }
+    if (filePath === PROFILE_LOGIN_API_KEY_FILE) {
+      return contents.includes("validate_api_key_profile_provider(") &&
+          !contents.includes("supports_codex_runtime()")
+        ? []
+        : [`${filePath}: API-key profile eligibility must use the Mojo login policy`];
+    }
+    if (filePath === PROFILE_LOGIN_CLAUDE_FILE) {
+      return contents.includes("validate_profile_login_provider(") &&
+          !/matches!\(\s*profile\.provider,/u.test(contents)
+        ? []
+        : [`${filePath}: Claude profile eligibility must use the Mojo login policy`];
+    }
+    if (filePath === PROFILE_LOGIN_ADAPTER_FILE) {
+      const required = [
+        "prodex_profile_login_policy_v1(",
+        "validate_provider_login(",
+        "validate_login_target(",
+        "login_execution(",
+        "auth_commit_plan(",
+        "auto_login_route(",
+        "login_method_plan(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: login-policy adapter must retain ${marker}`);
+    }
+    if (filePath === PROFILE_LOGIN_MOJO_FILE) {
+      const required = [
+        '@export("prodex_profile_login_policy_v1")',
+        "profile_login_provider_validation(",
+        "profile_login_target_validation(",
+        "profile_login_execution(",
+        "profile_login_auth_commit(",
+        "profile_login_auto_route(",
+        "profile_login_method_route(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: login policy must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === PROFILE_LOGIN_TEST_FILE) {
+      const required = [
+        "profile_login_policy_is_real_mojo_at_the_rust_boundary",
+        "validate_provider_login(\"openai\", 0)",
+        "validate_login_target(true, false)",
+        "auth_commit_plan(\"api-key\", true)",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: login-policy ABI regression coverage must retain ${marker}`);
+    }
+    return [];
   });
   const superProviderConfigViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === SUPER_PROVIDER_CONFIG_FILE) {
@@ -5543,6 +5647,7 @@ export function findViolations(files) {
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
+    ...profileLoginViolations,
     ...coreFilePolicyViolations,
     ...mcpStdioPolicyViolations,
     ...sharedHistoryPolicyViolations,
@@ -5613,6 +5718,47 @@ async function promotedFiles() {
 function selfTest() {
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
+  const profileLoginConsumer = [
+    "prodex_mojo_core::profile_login_policy::login_method_plan(",
+    "prodex_mojo_core::profile_login_policy::login_execution(",
+    "profile_login_auth_commit_plan(",
+    "auto_login_route(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PROFILE_LOGIN_FILE, profileLoginConsumer]]), []);
+  assert.match(
+    findViolations([[PROFILE_LOGIN_FILE, `${profileLoginConsumer}\nif auth_label == \"api-key\" {}`]]).join("\n"),
+    /restored Rust provider-login policy/u,
+  );
+  const profileLoginLifecycle = [
+    "validate_provider_login(",
+    "validate_login_target(",
+    "login_execution(",
+    "profile_login_auth_commit_plan(",
+    "auto_login_route(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PROFILE_LOGIN_LIFECYCLE_FILE, profileLoginLifecycle]]), []);
+  assert.match(
+    findViolations([[PROFILE_LOGIN_LIFECYCLE_FILE, `${profileLoginLifecycle}\nsupports_codex_runtime()`]]).join("\n"),
+    /restored Rust provider-login validation/u,
+  );
+  assert.deepEqual(findViolations([[PROFILE_LOGIN_ADAPTER_FILE, [
+    "prodex_profile_login_policy_v1(",
+    "validate_provider_login(",
+    "validate_login_target(",
+    "login_execution(",
+    "auth_commit_plan(",
+    "auto_login_route(",
+    "login_method_plan(",
+  ].join("\n")]]), []);
+  assert.deepEqual(findViolations([[PROFILE_LOGIN_MOJO_FILE, [
+    '@export("prodex_profile_login_policy_v1")',
+    "profile_login_provider_validation(",
+    "profile_login_target_validation(",
+    "profile_login_execution(",
+    "profile_login_auth_commit(",
+    "profile_login_auto_route(",
+    "profile_login_method_route(",
+  ].join("\n")]]), []);
   const runtimeProxyAdmissionFile = "crates/prodex-runtime-proxy/src/admission.rs";
   const runtimeProxyAdmission = [
     "prodex_mojo_core::runtime_state::runtime_proxy_admission_policy(",
