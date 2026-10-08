@@ -1,4 +1,4 @@
-use crate::runtime_catalog_config::{parse_catalog_u64, toml_string_literal};
+use crate::runtime_catalog_config::toml_string_literal;
 use crate::{
     codex_cli_config_override_value, codex_effective_config_exact_value,
     codex_effective_config_value,
@@ -12,7 +12,8 @@ use prodex_cli::{
     SUPER_KIRO_DEFAULT_MODEL, super_copilot_prompt_token_limit_for_model,
 };
 use prodex_mojo_core::super_provider_config::{
-    RuntimeModelProviderClass, runtime_model_provider_class,
+    ExternalProviderConfigError, ExternalProviderNumericField, ExternalProviderNumericIssue,
+    external_provider_numeric_config,
 };
 use prodex_provider_core::{
     ProviderCatalogEntry, ProviderId, provider_catalog_entries_for, provider_catalog_entry,
@@ -112,19 +113,43 @@ fn external_provider_catalog_codex_args(
         return Ok(user_args.to_vec());
     };
     let model = external_catalog_model_for_launch(codex_home, user_args, provider)?;
-    let context_window = external_catalog_u64_config_for_launch(
-        codex_home,
-        user_args,
-        "model_context_window",
-        provider.default_context_window() as u64,
-    )?;
-    let auto_compact_token_limit = external_catalog_u64_config_for_launch(
+    let context_window =
+        codex_effective_config_exact_value(codex_home, user_args, "model_context_window")?;
+    let auto_compact_token_limit = codex_effective_config_exact_value(
         codex_home,
         user_args,
         "model_auto_compact_token_limit",
+    )?;
+    let normalized = external_provider_numeric_config(
+        context_window.as_deref(),
+        provider.default_context_window() as u64,
+        auto_compact_token_limit.as_deref(),
         provider.default_auto_compact_token_limit() as u64,
-    )?
-    .min(context_window.saturating_sub(1));
+    )
+    .map_err(|error| match error {
+        ExternalProviderConfigError::InvalidValue { field, issue } => {
+            let key = match field {
+                ExternalProviderNumericField::ContextWindow => "model_context_window",
+                ExternalProviderNumericField::AutoCompactTokenLimit => {
+                    "model_auto_compact_token_limit"
+                }
+            };
+            let message = match issue {
+                ExternalProviderNumericIssue::Empty => "cannot be empty",
+                ExternalProviderNumericIssue::Whitespace => "must not contain whitespace",
+                ExternalProviderNumericIssue::InvalidUnsignedInteger => {
+                    "must be an unsigned integer"
+                }
+                ExternalProviderNumericIssue::MustBeGreaterThanOne => "must be greater than 1",
+            };
+            anyhow::anyhow!("external provider {key} {message}")
+        }
+        ExternalProviderConfigError::Mojo(error) => {
+            anyhow::anyhow!("external provider config normalization failed: {error:?}")
+        }
+    })?;
+    let context_window = normalized.context_window;
+    let auto_compact_token_limit = normalized.auto_compact_token_limit;
     let catalog_path = codex_home.join(EXTERNAL_MODEL_CATALOG_FILE);
     if write_catalog {
         write_external_model_catalog(
@@ -153,12 +178,12 @@ fn external_catalog_provider(
     else {
         return Ok(None);
     };
-    let provider = runtime_model_provider_class(&provider)
-        .expect("runtime model-provider classification should accept Rust strings");
+    let provider = prodex_provider_core::provider_implementation_registry()
+        .resolve_model_provider_id(&provider);
     Ok(match provider {
-        Some(RuntimeModelProviderClass::Anthropic) => Some(ExternalCatalogProvider::Anthropic),
-        Some(RuntimeModelProviderClass::Copilot) => Some(ExternalCatalogProvider::Copilot),
-        Some(RuntimeModelProviderClass::Kiro) => Some(ExternalCatalogProvider::Kiro),
+        Some(ProviderId::Anthropic) => Some(ExternalCatalogProvider::Anthropic),
+        Some(ProviderId::Copilot) => Some(ExternalCatalogProvider::Copilot),
+        Some(ProviderId::Kiro) => Some(ExternalCatalogProvider::Kiro),
         _ => None,
     })
 }
@@ -174,18 +199,6 @@ fn external_catalog_model_for_launch(
             .filter(|model| !model.is_empty())
             .unwrap_or_else(|| provider.default_model().to_string()),
     )
-}
-
-fn external_catalog_u64_config_for_launch(
-    codex_home: &Path,
-    user_args: &[OsString],
-    key: &str,
-    default_value: u64,
-) -> Result<u64> {
-    let Some(value) = codex_effective_config_exact_value(codex_home, user_args, key)? else {
-        return Ok(default_value);
-    };
-    parse_catalog_u64("external provider", key, &value)
 }
 
 fn write_external_model_catalog(
@@ -334,6 +347,26 @@ mod tests {
         assert_eq!(catalog["models"][0]["slug"], "claude-sonnet-4-6");
         assert_eq!(catalog["models"][0]["supports_search_tool"], true);
         assert_eq!(catalog["models"][0]["input_modalities"][1], "image");
+    }
+
+    #[test]
+    fn external_provider_catalog_resolves_registry_aliases() {
+        let codex_home = temp_codex_home("copilot-alias");
+        let user_args = vec![
+            OsString::from("-c"),
+            OsString::from("model_provider=\" GitHub_Copilot \""),
+            OsString::from("-c"),
+            OsString::from("model=\"gpt-6.1-sol\""),
+        ];
+
+        prepare_external_provider_catalog_codex_args(&codex_home, &user_args)
+            .expect("Copilot alias should prepare a provider catalog");
+
+        let catalog: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(codex_home.join(EXTERNAL_MODEL_CATALOG_FILE)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(catalog["models"][0]["slug"], "gpt-6.1-sol");
     }
 
     #[test]

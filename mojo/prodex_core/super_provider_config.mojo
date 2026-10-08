@@ -1,6 +1,13 @@
 from std.memory import Pointer
 
-from rich_text import rich_trim_bounds, rich_view_ptr, rich_view_valid
+from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_trim_bounds,
+    rich_unicode_space,
+    rich_view_ptr,
+    rich_view_valid,
+)
 from rich_types import ProdexRichStringView
 
 comptime SUPER_PROVIDER_CONFIG_ABI_VERSION: Int64 = 1
@@ -346,6 +353,114 @@ def config_put_uint(
                 return False
         divisor //= 10
     return True
+
+
+def config_contains_unicode_whitespace(view: ProdexRichStringView) -> Bool:
+    var ptr = rich_view_ptr(view)
+    var index: Int64 = 0
+    while index < Int64(view.len):
+        var width = rich_codepoint_width(ptr[unsafe_offset=index])
+        if rich_unicode_space(rich_codepoint(ptr, index, width)):
+            return True
+        index += width
+    return False
+
+
+def config_parse_external_provider_uint(
+    view: ProdexRichStringView,
+) -> Tuple[Int64, UInt64]:
+    if view.len == 0:
+        return (1, UInt64(0))
+    if config_contains_unicode_whitespace(view):
+        return (2, UInt64(0))
+    var ptr = rich_view_ptr(view)
+    var index: Int64 = 0
+    if ptr[unsafe_offset=0] == 43:
+        index = 1
+    if index == Int64(view.len):
+        return (3, UInt64(0))
+    var value = UInt64(0)
+    while index < Int64(view.len):
+        var digit = ptr[unsafe_offset=index]
+        if digit < 48 or digit > 57:
+            return (3, UInt64(0))
+        var numeric_digit = UInt64(digit - 48)
+        if value > (UInt64(0xFFFFFFFFFFFFFFFF) - numeric_digit) // 10:
+            return (3, UInt64(0))
+        value = value * 10 + numeric_digit
+        index += 1
+    if value <= 1:
+        return (4, UInt64(0))
+    return (0, value)
+
+
+def config_external_provider_optional_view_valid(
+    address: UInt,
+    length: Int64,
+    present: Int64,
+) -> Bool:
+    if present == 0:
+        return address == 0 and length == 0
+    if present == 1:
+        return config_valid_view(address, length)
+    return False
+
+
+@export("prodex_external_provider_numeric_config_v1")
+def prodex_external_provider_numeric_config_v1(
+    abi_version: Int64,
+    context_address: UInt,
+    context_length: Int64,
+    context_present: Int64,
+    default_context_window: UInt64,
+    compact_address: UInt,
+    compact_length: Int64,
+    compact_present: Int64,
+    default_auto_compact_token_limit: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUPER_PROVIDER_CONFIG_ABI_VERSION:
+        return SUPER_PROVIDER_CONFIG_ABI
+    if (
+        not config_external_provider_optional_view_valid(
+            context_address, context_length, context_present
+        )
+        or not config_external_provider_optional_view_valid(
+            compact_address, compact_length, compact_present
+        )
+        or output_address == 0
+    ):
+        return SUPER_PROVIDER_CONFIG_INVALID
+
+    var context_window = default_context_window
+    if context_present == 1:
+        var parsed_context = config_parse_external_provider_uint(
+            config_view(context_address, context_length)
+        )
+        if parsed_context[0] != 0:
+            return 10 + parsed_context[0]
+        context_window = parsed_context[1]
+
+    var auto_compact_token_limit = default_auto_compact_token_limit
+    if compact_present == 1:
+        var parsed_compact = config_parse_external_provider_uint(
+            config_view(compact_address, compact_length)
+        )
+        if parsed_compact[0] != 0:
+            return 20 + parsed_compact[0]
+        auto_compact_token_limit = parsed_compact[1]
+
+    var compact_ceiling = UInt64(0)
+    if context_window > 0:
+        compact_ceiling = context_window - 1
+    if auto_compact_token_limit > compact_ceiling:
+        auto_compact_token_limit = compact_ceiling
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[0] = context_window
+    output[1] = auto_compact_token_limit
+    return SUPER_PROVIDER_CONFIG_OK
 
 
 def config_begin_record(

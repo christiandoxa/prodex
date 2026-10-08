@@ -56,6 +56,39 @@ pub struct ExternalCatalogStaticModel {
     pub description: String,
 }
 
+/// Normalized numeric limits for an external provider model catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExternalProviderNumericConfig {
+    pub context_window: u64,
+    pub auto_compact_token_limit: u64,
+}
+
+/// Numeric setting rejected by external provider configuration normalization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalProviderNumericField {
+    ContextWindow,
+    AutoCompactTokenLimit,
+}
+
+/// Reason an external provider numeric setting failed validation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalProviderNumericIssue {
+    Empty,
+    Whitespace,
+    InvalidUnsignedInteger,
+    MustBeGreaterThanOne,
+}
+
+/// Boundary or field error returned by external provider normalization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalProviderConfigError {
+    Mojo(MojoError),
+    InvalidValue {
+        field: ExternalProviderNumericField,
+        issue: ExternalProviderNumericIssue,
+    },
+}
+
 #[repr(i64)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeOpenAiScalarPolicy {
@@ -165,6 +198,19 @@ unsafe extern "C" {
         records_address: u64,
         record_count: i64,
         written_address: u64,
+    ) -> i64;
+
+    fn prodex_external_provider_numeric_config_v1(
+        abi_version: i64,
+        context_address: u64,
+        context_length: i64,
+        context_present: i64,
+        default_context_window: u64,
+        compact_address: u64,
+        compact_length: i64,
+        compact_present: i64,
+        default_auto_compact_token_limit: u64,
+        output_address: u64,
     ) -> i64;
 }
 
@@ -537,6 +583,87 @@ pub struct ProviderConfigInput<'a> {
     pub image_generation: bool,
 }
 
+fn external_provider_optional_text_parts(
+    value: Option<&str>,
+) -> Result<(u64, i64, i64), MojoError> {
+    let Some(value) = value else {
+        return Ok((0, 0, 0));
+    };
+    Ok((value.as_ptr() as usize as u64, signed_len(value)?, 1))
+}
+
+/// Validates configured limits and clamps compacting below the context window.
+pub fn external_provider_numeric_config(
+    context_window: Option<&str>,
+    default_context_window: u64,
+    auto_compact_token_limit: Option<&str>,
+    default_auto_compact_token_limit: u64,
+) -> Result<ExternalProviderNumericConfig, ExternalProviderConfigError> {
+    let (context_address, context_length, context_present) =
+        external_provider_optional_text_parts(context_window)
+            .map_err(ExternalProviderConfigError::Mojo)?;
+    let (compact_address, compact_length, compact_present) =
+        external_provider_optional_text_parts(auto_compact_token_limit)
+            .map_err(ExternalProviderConfigError::Mojo)?;
+    let mut output = [0_u64; 2];
+    let status = unsafe {
+        prodex_external_provider_numeric_config_v1(
+            ABI_VERSION,
+            context_address,
+            context_length,
+            context_present,
+            default_context_window,
+            compact_address,
+            compact_length,
+            compact_present,
+            default_auto_compact_token_limit,
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    let issue = |field, issue| ExternalProviderConfigError::InvalidValue { field, issue };
+    match status {
+        0 => Ok(ExternalProviderNumericConfig {
+            context_window: output[0],
+            auto_compact_token_limit: output[1],
+        }),
+        11 => Err(issue(
+            ExternalProviderNumericField::ContextWindow,
+            ExternalProviderNumericIssue::Empty,
+        )),
+        12 => Err(issue(
+            ExternalProviderNumericField::ContextWindow,
+            ExternalProviderNumericIssue::Whitespace,
+        )),
+        13 => Err(issue(
+            ExternalProviderNumericField::ContextWindow,
+            ExternalProviderNumericIssue::InvalidUnsignedInteger,
+        )),
+        14 => Err(issue(
+            ExternalProviderNumericField::ContextWindow,
+            ExternalProviderNumericIssue::MustBeGreaterThanOne,
+        )),
+        21 => Err(issue(
+            ExternalProviderNumericField::AutoCompactTokenLimit,
+            ExternalProviderNumericIssue::Empty,
+        )),
+        22 => Err(issue(
+            ExternalProviderNumericField::AutoCompactTokenLimit,
+            ExternalProviderNumericIssue::Whitespace,
+        )),
+        23 => Err(issue(
+            ExternalProviderNumericField::AutoCompactTokenLimit,
+            ExternalProviderNumericIssue::InvalidUnsignedInteger,
+        )),
+        24 => Err(issue(
+            ExternalProviderNumericField::AutoCompactTokenLimit,
+            ExternalProviderNumericIssue::MustBeGreaterThanOne,
+        )),
+        1 => Err(ExternalProviderConfigError::Mojo(MojoError::InvalidInput)),
+        4 => Err(ExternalProviderConfigError::Mojo(MojoError::AbiMismatch)),
+        _ => Err(ExternalProviderConfigError::Mojo(MojoError::InvalidOutput)),
+    }
+}
+
 pub fn provider_config_entries(input: ProviderConfigInput<'_>) -> Result<Vec<String>, MojoError> {
     let capacity = input
         .provider_id
@@ -606,6 +733,54 @@ pub fn provider_config_entries(input: ProviderConfigInput<'_>) -> Result<Vec<Str
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rust_external_provider_number(
+        value: Option<&str>,
+        default: u64,
+    ) -> Result<u64, ExternalProviderNumericIssue> {
+        let Some(value) = value else {
+            return Ok(default);
+        };
+        if value.is_empty() {
+            return Err(ExternalProviderNumericIssue::Empty);
+        }
+        if value.chars().any(char::is_whitespace) {
+            return Err(ExternalProviderNumericIssue::Whitespace);
+        }
+        let value = value
+            .parse::<u64>()
+            .map_err(|_| ExternalProviderNumericIssue::InvalidUnsignedInteger)?;
+        if value <= 1 {
+            return Err(ExternalProviderNumericIssue::MustBeGreaterThanOne);
+        }
+        Ok(value)
+    }
+
+    fn rust_external_provider_numeric_config(
+        context_window: Option<&str>,
+        default_context_window: u64,
+        auto_compact_token_limit: Option<&str>,
+        default_auto_compact_token_limit: u64,
+    ) -> Result<ExternalProviderNumericConfig, ExternalProviderConfigError> {
+        let context_window = rust_external_provider_number(context_window, default_context_window)
+            .map_err(|issue| ExternalProviderConfigError::InvalidValue {
+                field: ExternalProviderNumericField::ContextWindow,
+                issue,
+            })?;
+        let auto_compact_token_limit = rust_external_provider_number(
+            auto_compact_token_limit,
+            default_auto_compact_token_limit,
+        )
+        .map_err(|issue| ExternalProviderConfigError::InvalidValue {
+            field: ExternalProviderNumericField::AutoCompactTokenLimit,
+            issue,
+        })?
+        .min(context_window.saturating_sub(1));
+        Ok(ExternalProviderNumericConfig {
+            context_window,
+            auto_compact_token_limit,
+        })
+    }
 
     #[test]
     fn super_provider_config_kernel_preserves_aliases_escaping_and_order() {
@@ -800,5 +975,59 @@ mod tests {
         assert_eq!(entries[11], "features.apps=false");
         assert_eq!(entries[12], "features.js_repl=false");
         assert_eq!(entries[13], "features.image_generation=true");
+    }
+
+    #[test]
+    fn external_provider_numeric_config_matches_rust_validation_oracle() {
+        let values = [
+            None,
+            Some(""),
+            Some("0"),
+            Some("1"),
+            Some("2"),
+            Some("+42"),
+            Some("18446744073709551615"),
+            Some("18446744073709551616"),
+            Some("-2"),
+            Some("2_000"),
+            Some(" 2"),
+            Some("2\u{3000}"),
+            Some("\u{0085}2"),
+            Some("\u{001c}2"),
+        ];
+        for context_window in values {
+            for auto_compact_token_limit in values {
+                let expected = rust_external_provider_numeric_config(
+                    context_window,
+                    100_000,
+                    auto_compact_token_limit,
+                    90_000,
+                );
+                let actual = external_provider_numeric_config(
+                    context_window,
+                    100_000,
+                    auto_compact_token_limit,
+                    90_000,
+                );
+                assert_eq!(
+                    actual, expected,
+                    "{context_window:?}, {auto_compact_token_limit:?}"
+                );
+            }
+        }
+        assert_eq!(
+            external_provider_numeric_config(None, 100_000, None, 90_000).unwrap(),
+            ExternalProviderNumericConfig {
+                context_window: 100_000,
+                auto_compact_token_limit: 90_000,
+            }
+        );
+        assert_eq!(
+            external_provider_numeric_config(Some("10"), 100_000, None, 90_000).unwrap(),
+            ExternalProviderNumericConfig {
+                context_window: 10,
+                auto_compact_token_limit: 9,
+            }
+        );
     }
 }
