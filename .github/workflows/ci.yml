@@ -1930,6 +1930,7 @@ jobs:
           }
           run_test provider-core cargo test --locked -q -p prodex-provider-core --features mojo -- --test-threads=1
           run_test runtime-tuning cargo test --locked -q -p prodex-runtime-tuning --features mojo -- --test-threads=1
+          run_test runtime-json-only cargo test --locked -q -p prodex-mojo-core --no-default-features --features mojo-runtime --test runtime_json_feature -- --test-threads=1
           run_test runtime-launch cargo test --locked -q -p prodex-runtime-launch --features mojo -- --test-threads=1
           run_test context cargo test --locked -q -p prodex-context --features mojo -- --test-threads=1
           run_test runtime-policy cargo test --locked -q -p prodex-runtime-policy --features mojo -- --test-threads=1
