@@ -301,18 +301,26 @@ fn runtime_hard_binding_identity(
     turn_state: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<prodex_runtime_state::RuntimeHardBindingIdentity> {
-    let supplied = [previous_response_id, turn_state, session_id]
-        .into_iter()
-        .flatten()
-        .any(|value| !value.trim().is_empty());
     match prodex_runtime_state::RuntimeHardBindingIdentity::new(
         previous_response_id,
         turn_state,
         session_id,
     ) {
         Some(identity) => Ok(identity),
-        None if !supplied => Ok(prodex_runtime_state::RuntimeHardBindingIdentity::default()),
-        None => Err(anyhow::anyhow!("runtime hard-binding identity is invalid")),
+        None => match prodex_mojo_core::runtime_lineage::identity_fallback_plan(
+            previous_response_id,
+            turn_state,
+            session_id,
+        )
+        .expect("Mojo hard-binding identity fallback returned invalid output")
+        {
+            prodex_mojo_core::runtime_lineage::RuntimeLineageIdentityFallback::Empty => {
+                Ok(prodex_runtime_state::RuntimeHardBindingIdentity::default())
+            }
+            prodex_mojo_core::runtime_lineage::RuntimeLineageIdentityFallback::Invalid => {
+                Err(anyhow::anyhow!("runtime hard-binding identity is invalid"))
+            }
+        },
     }
 }
 
@@ -373,4 +381,30 @@ fn touch_runtime_session_binding(
         binding.bound_at = now;
     }
     *persist_touch
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hard_binding_identity_fallback_preserves_unicode_trim_and_validation() {
+        assert_eq!(
+            runtime_hard_binding_identity(Some("\u{2003}\u{00a0}"), None, None).unwrap(),
+            prodex_runtime_state::RuntimeHardBindingIdentity::default()
+        );
+        assert_eq!(
+            runtime_hard_binding_identity(Some("\u{2003}response\u{00a0}"), None, None)
+                .unwrap()
+                .response_id
+                .as_deref(),
+            Some("response")
+        );
+        assert_eq!(
+            runtime_hard_binding_identity(Some("\u{2003}\0"), None, None)
+                .unwrap_err()
+                .to_string(),
+            "runtime hard-binding identity is invalid"
+        );
+    }
 }

@@ -1,6 +1,12 @@
 from std.memory import Pointer
 
-from rich_text import rich_codepoint, rich_codepoint_width, rich_view_ptr, rich_view_valid
+from rich_text import (
+    rich_codepoint,
+    rich_codepoint_width,
+    rich_trim_bounds,
+    rich_view_ptr,
+    rich_view_valid,
+)
 from rich_types import ProdexRichStringView
 
 comptime LINEAGE_ABI_VERSION: Int64 = 1
@@ -51,6 +57,15 @@ def valid_key(address: UInt, length: Int64) -> Bool:
         and not text_has_control(address, length)
     )
 
+def trimmed_component_present(address: UInt, length: Int64) -> Int64:
+    if length < 0 or (length > 0 and address == 0):
+        return -1
+    var input = view(address, length)
+    if not rich_view_valid(input, length):
+        return -1
+    var bounds = rich_trim_bounds(input)
+    return Int64(bounds[0] < bounds[1])
+
 def prefix_matches[address_literal: StaticString](
     address: UInt, length: Int64
 ) -> Bool:
@@ -84,6 +99,27 @@ def prodex_runtime_lineage_classify_v1(
     if kind == 3:
         return Int64(prefix_matches[COMPACT_SESSION_PREFIX](address, length))
     return -1
+
+@export("prodex_runtime_lineage_identity_fallback_v1")
+def prodex_runtime_lineage_identity_fallback_v1(
+    abi_version: Int64,
+    response_address: UInt,
+    response_length: Int64,
+    turn_state_address: UInt,
+    turn_state_length: Int64,
+    session_address: UInt,
+    session_length: Int64,
+) abi("C") -> Int64:
+    if abi_version != LINEAGE_ABI_VERSION:
+        return -4
+    var response_present = trimmed_component_present(response_address, response_length)
+    var turn_state_present = trimmed_component_present(turn_state_address, turn_state_length)
+    var session_present = trimmed_component_present(session_address, session_length)
+    if response_present < 0 or turn_state_present < 0 or session_present < 0:
+        return -1
+    if response_present == 1 or turn_state_present == 1 or session_present == 1:
+        return 1
+    return 0
 
 def emit_literal[literal: StaticString](
     output: Pointer[mut=True, UInt8, _],
