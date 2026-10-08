@@ -161,37 +161,3 @@ pub fn deepseek_provider_core_user_id_from_responses_request(
         .map(str::to_string)
         .map_or(Ok(None), |user_id| Ok(Some(user_id)))
 }
-
-pub(crate) fn deepseek_provider_core_validate_responses_request_params(
-    source: &str,
-    provider_label: &str,
-) -> Result<(), String> {
-    let plan = prodex_mojo_core::rich::deepseek_request_policy(
-        DeepSeekRequestPolicyOperation::ResponsesRequestParams,
-        source,
-        false,
-        0,
-    )
-    .map_err(|error| format!("{provider_label} request parameter policy failed: {error:?}"))?;
-    let error = match plan.tag {
-        0 => return Ok(()),
-        1 => "temperature must be a number",
-        2 => "top_p must be a number",
-        3 => "max_output_tokens must be a positive integer",
-        4 => "max_tokens must be a positive integer",
-        5 => "max_completion_tokens must be a positive integer",
-        6 => "logprobs must be a boolean",
-        7 => "top_logprobs must be an integer",
-        8 => "top_logprobs must be <= 20",
-        9 => "top_logprobs requires logprobs=true",
-        10 => "stop must be a string or array of strings",
-        11 => "supports at most 16 stop sequences",
-        12 => "stop sequences must be strings",
-        tag => {
-            return Err(format!(
-                "{provider_label} request parameter validation returned unknown result {tag}"
-            ));
-        }
-    };
-    Err(format!("{provider_label} {error}"))
-}

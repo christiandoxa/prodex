@@ -3114,9 +3114,13 @@ export function findViolations(files) {
       /\bfn\s+precommit_budget_matches_rust_oracle\s*\(/u.test(contents))
     .map(([filePath]) => `${filePath}: contains a Rust pre-commit budget oracle`);
   const deepseekRequestViolations = files
-    .filter(([filePath, contents]) => filePath === DEEPSEEK_REQUEST_FILE &&
-      !contents.includes("DeepSeekKernelOperation::RawCommonRequest"))
-    .map(([filePath]) => `${filePath}: DeepSeek request body must use the Mojo raw kernel`);
+    .filter(([filePath, contents]) => {
+      if (filePath !== DEEPSEEK_REQUEST_FILE) return false;
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      return !production.includes("deepseek_responses_request_transform(") ||
+        production.includes("DeepSeekKernelOperation::RawCommonRequest");
+    })
+    .map(([filePath]) => `${filePath}: DeepSeek request body must use the parsed-tree Mojo request kernel`);
   const deepseekRequestRejectViolations = files.flatMap(([filePath, contents]) => {
     if (filePath !== DEEPSEEK_REQUEST_REJECT_FILE) return [];
     const operations = [
@@ -6571,7 +6575,12 @@ function selfTest() {
     "request_policy::try_plan_value(DeepSeekRequestPolicyOperation::ReasoningShape); DeepSeekKernelOperation::ReasoningParameters"]]), []);
   assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
     "fn deepseek_request_body_from_responses() {}"]]).join("\n"),
-    /must use the Mojo raw kernel/u);
+    /must use the parsed-tree Mojo request kernel/u);
+  assert.match(findViolations([[DEEPSEEK_REQUEST_FILE,
+    "fn transform() { DeepSeekKernelOperation::RawCommonRequest; }"]]).join("\n"),
+    /must use the parsed-tree Mojo request kernel/u);
+  assert.deepEqual(findViolations([[DEEPSEEK_REQUEST_FILE,
+    "fn transform() { deepseek_responses_request_transform(nodes, source); }\n#[cfg(test)] mod tests { DeepSeekKernelOperation::RawCommonRequest; }"]]), []);
   assert.match(findViolations([["crates/prodex-provider-core/src/deepseek_bridge/request_params.rs",
     '#[cfg(not(feature = "mojo"))] fn validate_primitive_request_fields_rust() {}']]).join("\n"),
     /feature-off Rust path/u);

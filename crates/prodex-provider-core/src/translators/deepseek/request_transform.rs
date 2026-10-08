@@ -3,38 +3,54 @@
 use std::collections::BTreeMap;
 
 use super::deepseek_passthrough_endpoint;
+use crate::mojo_json::Document;
 use crate::translator::{ProviderTransformInput, ProviderTransformResult};
 use crate::{ProviderEndpoint, ProviderId, ProviderWireFormat};
-use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation};
+use prodex_mojo_core::rich::deepseek_responses_request_transform;
 use serde_json::Value;
 
-type DeepSeekRequestPlan = (Vec<u8>, bool, Option<Value>);
+struct DeepSeekRequestPlan {
+    body: Vec<u8>,
+    degraded: bool,
+    continuation: Option<Value>,
+    omitted_tool_choice: Option<Value>,
+}
 
 fn deepseek_request_plan_from_responses(
-    value: &Value,
+    value: Value,
+    model: Option<&str>,
     turn_state: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<DeepSeekRequestPlan, String> {
-    let canonical = serde_json::to_string(value)
-        .map_err(|error| format!("DeepSeek request serialization failed: {error}"))?;
-    crate::deepseek_bridge::deepseek_provider_core_validate_responses_request_params(
-        &canonical, "DeepSeek",
-    )?;
-    let user_id = crate::deepseek_bridge::deepseek_provider_core_user_id_from_responses_request(
-        value, "DeepSeek",
-    )?;
-    let instructions = value
-        .get("instructions")
+    let model = value
+        .get("model")
         .and_then(Value::as_str)
-        .filter(|text| !text.trim().is_empty());
-
-    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::RawCommonRequestPlan);
-    input.input = Some(&canonical);
-    input.content = user_id.as_deref();
-    input.reasoning_content = instructions;
-    input.error_code = turn_state;
-    input.error_message = session_id;
-    let bytes = prodex_mojo_core::rich::deepseek_kernel(input)
+        .or(model)
+        .filter(|model| !model.trim().is_empty())
+        .map(|model| crate::provider_canonical_model(ProviderId::DeepSeek, model));
+    let mut context = serde_json::Map::new();
+    context.insert("request".to_string(), value);
+    if let Some(model) = model {
+        context.insert("canonical_model".to_string(), Value::String(model));
+    }
+    if let Some(turn_state) = turn_state {
+        context.insert(
+            "turn_state".to_string(),
+            Value::String(turn_state.to_string()),
+        );
+    }
+    if let Some(session_id) = session_id {
+        context.insert(
+            "session_id".to_string(),
+            Value::String(session_id.to_string()),
+        );
+    }
+    let context = Value::Object(context);
+    let mut document = Document::default();
+    document.push(&context, None, "");
+    let source = std::str::from_utf8(&document.raw)
+        .map_err(|error| format!("DeepSeek request serialization failed: {error}"))?;
+    let bytes = deepseek_responses_request_transform(&document.nodes, source)
         .map_err(|error| format!("DeepSeek request kernel failed: {error:?}"))?;
     let plan: Value = serde_json::from_slice(&bytes)
         .map_err(|error| format!("DeepSeek request plan returned invalid JSON: {error}"))?;
@@ -59,6 +75,40 @@ fn deepseek_request_plan_from_responses(
                 "DeepSeek response_format type `{detail}` is not supported"
             ));
         }
+        3 => return Err("DeepSeek user_id must be a string".to_string()),
+        4 => {
+            return Err(
+                "DeepSeek user_id must use only letters, numbers, underscores, or dashes and be at most 512 bytes"
+                    .to_string(),
+            );
+        }
+        5 => return Err("DeepSeek reasoning must be an object".to_string()),
+        6 => {
+            let detail = plan
+                .get("detail")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            return Err(format!(
+                "DeepSeek reasoning.{detail} is not supported by this Responses adapter"
+            ));
+        }
+        7 => return Err("DeepSeek reasoning.effort must be a string".to_string()),
+        8 => return Err("DeepSeek reasoning_effort must be a string".to_string()),
+        9 => return Err("DeepSeek reasoning effort is not supported".to_string()),
+        10 => return Err("DeepSeek temperature must be a number".to_string()),
+        11 => return Err("DeepSeek top_p must be a number".to_string()),
+        12 => return Err("DeepSeek max_output_tokens must be a positive integer".to_string()),
+        13 => return Err("DeepSeek max_tokens must be a positive integer".to_string()),
+        14 => {
+            return Err("DeepSeek max_completion_tokens must be a positive integer".to_string());
+        }
+        15 => return Err("DeepSeek logprobs must be a boolean".to_string()),
+        16 => return Err("DeepSeek top_logprobs must be an integer".to_string()),
+        17 => return Err("DeepSeek top_logprobs must be <= 20".to_string()),
+        18 => return Err("DeepSeek top_logprobs requires logprobs=true".to_string()),
+        19 => return Err("DeepSeek stop must be a string or array of strings".to_string()),
+        20 => return Err("DeepSeek supports at most 16 stop sequences".to_string()),
+        21 => return Err("DeepSeek stop sequences must be strings".to_string()),
         other => {
             return Err(format!(
                 "DeepSeek request plan returned unknown issue code {other}"
@@ -78,7 +128,13 @@ fn deepseek_request_plan_from_responses(
         .get("continuation")
         .filter(|value| !value.is_null())
         .cloned();
-    Ok((body, degraded, continuation))
+    let omitted_tool_choice = plan.get("omitted_tool_choice").cloned();
+    Ok(DeepSeekRequestPlan {
+        body,
+        degraded,
+        continuation,
+        omitted_tool_choice,
+    })
 }
 
 pub(super) fn deepseek_transform_request(
@@ -132,19 +188,28 @@ pub(super) fn deepseek_transform_request(
     };
     let turn_state = input.headers.get("x-codex-turn-state").map(String::as_str);
     let session_id = input.headers.get("session_id").map(String::as_str);
-    let (body, degraded, continuation) =
-        match deepseek_request_plan_from_responses(&value, turn_state, session_id) {
-            Ok(result) => result,
-            Err(reason) => {
-                return ProviderTransformResult::rejected(
-                    provider,
-                    input.endpoint,
-                    ProviderWireFormat::OpenAiResponses,
-                    ProviderWireFormat::OpenAiChatCompletions,
-                    reason,
-                );
-            }
-        };
+    let DeepSeekRequestPlan {
+        body,
+        degraded,
+        continuation,
+        omitted_tool_choice,
+    } = match deepseek_request_plan_from_responses(
+        value,
+        input.model.as_deref(),
+        turn_state,
+        session_id,
+    ) {
+        Ok(result) => result,
+        Err(reason) => {
+            return ProviderTransformResult::rejected(
+                provider,
+                input.endpoint,
+                ProviderWireFormat::OpenAiResponses,
+                ProviderWireFormat::OpenAiChatCompletions,
+                reason,
+            );
+        }
+    };
     let result = if degraded {
         ProviderTransformResult::degraded(
             provider,
@@ -167,6 +232,19 @@ pub(super) fn deepseek_transform_request(
             body,
         )
     };
+    let result = if let Some(tool_choice) = omitted_tool_choice {
+        result.with_metadata(
+            "deepseek",
+            serde_json::json!({
+                "omitted_tool_choice": {
+                    "from": tool_choice,
+                    "reason": "DeepSeek thinking mode currently rejects explicit tool_choice on the OpenAI Chat route, so Prodex omits it while preserving translated function tools"
+                }
+            }),
+        )
+    } else {
+        result
+    };
     if let Some(continuation) = continuation {
         result.with_metadata("continuation", continuation)
     } else {
@@ -180,7 +258,7 @@ mod tests {
     use crate::translator::{ProviderTransformInput, ProviderTransformLoss};
     use crate::{ProviderEndpoint, ProviderId};
     use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation, deepseek_kernel};
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     #[test]
     fn request_transform_matches_expected_body_and_preserves_boundary_metadata() {
@@ -282,6 +360,69 @@ mod tests {
                 "response_format": {"type": "json_object"}
             })
         );
+    }
+
+    #[test]
+    fn request_transform_maps_models_and_reasoning_in_the_mojo_plan() {
+        for (request, model, expected_reasoning, omitted_choice) in [
+            (
+                json!({
+                    "model": "pro",
+                    "input": "think this through",
+                    "reasoning": {"effort": "xhigh"},
+                    "tool_choice": {"type": "function", "name": "search"}
+                }),
+                "deepseek-v4-pro",
+                json!({"thinking": {"type": "enabled"}, "reasoning_effort": "max"}),
+                true,
+            ),
+            (
+                json!({
+                    "input": "think this through",
+                    "reasoning_effort": "low",
+                    "tool_choice": "required"
+                }),
+                "deepseek-v4-flash",
+                json!({"thinking": {"type": "enabled"}, "reasoning_effort": "high"}),
+                true,
+            ),
+            (
+                json!({
+                    "input": "think this through",
+                    "reasoning_effort": "minimal",
+                    "tool_choice": "required"
+                }),
+                "deepseek-chat",
+                json!({"thinking": {"type": "disabled"}}),
+                false,
+            ),
+        ] {
+            let mut input = ProviderTransformInput::new(
+                ProviderEndpoint::Responses,
+                serde_json::to_vec(&request).expect("request serializes"),
+            );
+            if request.get("model").is_none() && model != "deepseek-chat" {
+                input.model = Some("flash".to_string());
+            }
+            let result = deepseek_transform_request(ProviderId::DeepSeek, input);
+            let body: Value =
+                serde_json::from_slice(result.body.as_ref().expect("translated request body"))
+                    .expect("translated body is JSON");
+            assert_eq!(body["model"], model);
+            for (key, value) in expected_reasoning.as_object().expect("reasoning object") {
+                assert_eq!(body[key], *value, "effort request: {request}");
+            }
+            if omitted_choice {
+                assert!(body.get("tool_choice").is_none(), "{request}");
+                assert_eq!(
+                    result.metadata["deepseek"]["omitted_tool_choice"]["from"],
+                    request["tool_choice"]
+                );
+            } else {
+                assert_eq!(body["tool_choice"], request["tool_choice"]);
+                assert!(result.metadata.get("deepseek").is_none());
+            }
+        }
     }
 
     #[test]

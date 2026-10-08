@@ -95,7 +95,7 @@ mod deepseek;
 pub use deepseek::{
     DEEPSEEK_KERNEL_MAX_BYTES, DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES, DeepSeekKernelInput,
     DeepSeekKernelOperation, DeepSeekRequestPolicyOperation, DeepSeekRequestPolicyPlan,
-    deepseek_kernel, deepseek_request_policy,
+    deepseek_kernel, deepseek_request_policy, deepseek_responses_request_transform,
 };
 #[path = "rich/openai_compat.rs"]
 mod openai_compat;
