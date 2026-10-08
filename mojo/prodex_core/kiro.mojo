@@ -86,6 +86,7 @@ comptime KIRO_PROMPT_FROM_CHAT_MESSAGES: Int64 = 53
 comptime KIRO_SEMANTIC_COMPACT_INSTRUCTIONS: Int64 = 54
 comptime KIRO_SEMANTIC_COMPACT_REQUEST: Int64 = 55
 comptime KIRO_SEMANTIC_COMPACT_SUMMARY: Int64 = 56
+comptime KIRO_SUPPORTED_PARAMS: Int64 = 57
 
 comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
 comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
@@ -214,6 +215,24 @@ def kiro_put_literal(
         if not kiro_put_byte(writer, ptr[unsafe_offset=index]):
             return False
     return True
+
+
+def kiro_put_supported_param(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    first: Pointer[mut=True, Int64, _],
+    field: StringSlice,
+    reason: StringSlice,
+) -> Bool:
+    if first[] == 0 and not kiro_put_byte(writer, 44):
+        return False
+    first[] = 0
+    return (
+        kiro_put_literal(writer, StringSlice('{"field":"'))
+        and kiro_put_literal(writer, field)
+        and kiro_put_literal(writer, StringSlice('","reason":"'))
+        and kiro_put_literal(writer, reason)
+        and kiro_put_literal(writer, StringSlice('"}'))
+    )
 
 
 def kiro_put_hex_byte(
@@ -1376,6 +1395,166 @@ def kiro_put_semantic_compact_instructions(
         and kiro_put_byte(writer, 34)
     )
 
+
+def kiro_write_supported_params(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    input: ProdexKiroKernelInput,
+) -> Bool:
+    if input.request_id != 1 and input.request_id != 2:
+        return False
+    if not kiro_put_literal(writer, StringSlice('{"supported":true,"unsupported":[')):
+        return False
+    var first: Int64 = 1
+    var first_ptr = Pointer(to=first)
+    if input.request_id == 1:
+        if (
+            not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("response_format(json_schema/json_object)"),
+                StringSlice("Kiro currently supports only text chat response_format"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("n>1"),
+                StringSlice("Kiro currently supports only one chat completion choice"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("stop"),
+                StringSlice("Kiro does not currently support non-empty chat stop sequences"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("temperature"),
+                StringSlice("Kiro does not currently support non-default chat temperature"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("top_p"),
+                StringSlice("Kiro does not currently support non-default chat top_p"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("presence_penalty"),
+                StringSlice("Kiro does not currently support non-default chat presence_penalty"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("frequency_penalty"),
+                StringSlice("Kiro does not currently support non-default chat frequency_penalty"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("seed"),
+                StringSlice("Kiro does not currently support chat seed"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("parallel_tool_calls"),
+                StringSlice("Kiro does not currently support chat parallel_tool_calls=false"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("user"),
+                StringSlice("Kiro ignores chat user metadata"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("max_output_tokens/max_tokens/max_completion_tokens"),
+                StringSlice("Kiro ACP does not expose chat token-limit controls"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("tool_choice!=auto/function_call"),
+                StringSlice("Kiro ACP owns tool selection"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("logprobs/top_logprobs"),
+                StringSlice("Kiro ACP does not expose log probabilities"),
+            )
+        ):
+            return False
+    else:
+        var token_limit_reason = StringSlice(
+            "Kiro ACP does not expose output token-limit controls"
+        )
+        if input.include_role == 1:
+            token_limit_reason = StringSlice(
+                "Kiro Messages accepts the required token limit for compatibility, but ACP cannot enforce it"
+            )
+        if (
+            not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("temperature/top_p"),
+                StringSlice("Kiro ACP does not expose sampling controls"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("stop/stop_sequences"),
+                StringSlice("Kiro ACP does not expose stop-sequence controls"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("logprobs/top_logprobs"),
+                StringSlice("Kiro ACP does not expose log probabilities"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("response_format/text.format[type!=text]"),
+                StringSlice("Kiro ACP does not guarantee structured output"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("tool_choice!=auto"),
+                StringSlice("Kiro ACP owns tool selection"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("tools/web_search_options"),
+                StringSlice("Kiro ACP owns its tool and web-search inventory"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("parallel_tool_calls=false"),
+                StringSlice("Kiro ACP does not expose parallel tool-call control"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("input[*].content[type!=text]"),
+                StringSlice("Kiro ACP is initialized as a text-only client"),
+            )
+            or not kiro_put_supported_param(
+                writer,
+                first_ptr,
+                StringSlice("max_output_tokens/max_tokens/max_completion_tokens"),
+                token_limit_reason,
+            )
+        ):
+            return False
+    return kiro_put_literal(writer, StringSlice("]}"))
+
 def kiro_write_operation(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     input: ProdexKiroKernelInput,
@@ -1391,6 +1570,8 @@ def kiro_write_operation(
         if input.input_present == 0:
             return kiro_put_literal(writer, StringSlice("Esummary"))
         return kiro_raw_semantic_compact_summary(writer, input.input)
+    if operation == KIRO_SUPPORTED_PARAMS:
+        return kiro_write_supported_params(writer, input)
     if operation == KIRO_REQUEST_VALIDATION_ERROR:
         return kiro_write_request_validation_error(writer, input)
     if operation == KIRO_ANTHROPIC_REQUEST_REWRITE:

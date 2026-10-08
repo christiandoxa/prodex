@@ -63,6 +63,122 @@ fn kiro_provider_core_shapes_acp_model_value() {
 }
 
 #[test]
+fn kiro_supported_parameter_catalog_preserves_mojo_order_and_messages_exception() {
+    fn assert_catalog(actual: crate::ProviderParamSupport, expected: &[(&str, &str)]) {
+        assert!(actual.supported);
+        assert_eq!(
+            actual
+                .unsupported
+                .iter()
+                .map(|item| (item.field.as_str(), item.reason.as_str()))
+                .collect::<Vec<_>>(),
+            expected,
+        );
+    }
+
+    let chat = KiroTranslator.supported_params(crate::ProviderEndpoint::ChatCompletions, "auto");
+    assert_catalog(
+        chat,
+        &[
+            (
+                "response_format(json_schema/json_object)",
+                "Kiro currently supports only text chat response_format",
+            ),
+            (
+                "n>1",
+                "Kiro currently supports only one chat completion choice",
+            ),
+            (
+                "stop",
+                "Kiro does not currently support non-empty chat stop sequences",
+            ),
+            (
+                "temperature",
+                "Kiro does not currently support non-default chat temperature",
+            ),
+            (
+                "top_p",
+                "Kiro does not currently support non-default chat top_p",
+            ),
+            (
+                "presence_penalty",
+                "Kiro does not currently support non-default chat presence_penalty",
+            ),
+            (
+                "frequency_penalty",
+                "Kiro does not currently support non-default chat frequency_penalty",
+            ),
+            ("seed", "Kiro does not currently support chat seed"),
+            (
+                "parallel_tool_calls",
+                "Kiro does not currently support chat parallel_tool_calls=false",
+            ),
+            ("user", "Kiro ignores chat user metadata"),
+            (
+                "max_output_tokens/max_tokens/max_completion_tokens",
+                "Kiro ACP does not expose chat token-limit controls",
+            ),
+            (
+                "tool_choice!=auto/function_call",
+                "Kiro ACP owns tool selection",
+            ),
+            (
+                "logprobs/top_logprobs",
+                "Kiro ACP does not expose log probabilities",
+            ),
+        ],
+    );
+
+    let responses = KiroTranslator.supported_params(crate::ProviderEndpoint::Responses, "auto");
+    assert_catalog(
+        responses,
+        &[
+            (
+                "temperature/top_p",
+                "Kiro ACP does not expose sampling controls",
+            ),
+            (
+                "stop/stop_sequences",
+                "Kiro ACP does not expose stop-sequence controls",
+            ),
+            (
+                "logprobs/top_logprobs",
+                "Kiro ACP does not expose log probabilities",
+            ),
+            (
+                "response_format/text.format[type!=text]",
+                "Kiro ACP does not guarantee structured output",
+            ),
+            ("tool_choice!=auto", "Kiro ACP owns tool selection"),
+            (
+                "tools/web_search_options",
+                "Kiro ACP owns its tool and web-search inventory",
+            ),
+            (
+                "parallel_tool_calls=false",
+                "Kiro ACP does not expose parallel tool-call control",
+            ),
+            (
+                "input[*].content[type!=text]",
+                "Kiro ACP is initialized as a text-only client",
+            ),
+            (
+                "max_output_tokens/max_tokens/max_completion_tokens",
+                "Kiro ACP does not expose output token-limit controls",
+            ),
+        ],
+    );
+
+    let messages = KiroTranslator.supported_params(crate::ProviderEndpoint::Messages, "auto");
+    assert_eq!(
+        messages.unsupported.last().map(|item| item.reason.as_str()),
+        Some(
+            "Kiro Messages accepts the required token limit for compatibility, but ACP cannot enforce it"
+        ),
+    );
+}
+
+#[test]
 fn kiro_provider_core_shapes_acp_requests() {
     assert_eq!(
         kiro_provider_core_acp_initialize_request(1, "prodex", "Prodex", "0.1.0"),
