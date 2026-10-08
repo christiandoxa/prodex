@@ -1,4 +1,5 @@
 use super::super::{
+    gemini_provider_core_buffered_responses_value_with_fallback_ids,
     gemini_provider_core_citation_text, gemini_provider_core_runtime_responses_value,
     gemini_provider_core_web_search_call_from_grounding,
 };
@@ -154,6 +155,43 @@ fn gemini_provider_core_buffered_response_preserves_content_grounding_and_order(
         value["output"][4]["content"][0]["text"],
         "Citations:\n(Source) https://example.com/source"
     );
+}
+
+#[test]
+fn gemini_provider_core_buffered_response_suppresses_visible_text_across_tool_calls() {
+    let response = serde_json::json!({
+        "responseId": "resp_tool_text",
+        "candidates": [{
+            "content": {"parts": [
+                {"text": "hidden before"},
+                {"functionCall": null},
+                {"text": "hidden after"}
+            ]}
+        }]
+    });
+    let value = gemini_provider_core_buffered_responses_value_with_fallback_ids(
+        &response,
+        None,
+        |_, _| None,
+        || "resp_fallback".to_string(),
+        |_| "call_fallback".to_string(),
+    );
+
+    assert_eq!(value["output"].as_array().unwrap().len(), 1);
+    assert_eq!(value["output"][0]["type"], "function_call");
+    assert_eq!(value["output"][0]["name"], "tool_call");
+
+    let plain = gemini_provider_core_buffered_responses_value_with_fallback_ids(
+        &serde_json::json!({
+            "responseId": "resp_plain_text",
+            "candidates": [{"content": {"parts": [{"text": "visible"}]}}]
+        }),
+        None,
+        |_, _| None,
+        || "resp_fallback".to_string(),
+        |_| "call_fallback".to_string(),
+    );
+    assert_eq!(plain["output"][0]["content"][0]["text"], "visible");
 }
 
 #[test]

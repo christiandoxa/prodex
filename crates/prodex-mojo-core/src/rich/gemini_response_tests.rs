@@ -55,3 +55,41 @@ fn stream_completed_tool_call_item_emits_exact_mojo_bytes_for_each_branch() {
         br#"{"type":"message","role":"assistant","content":[{"type":"output_text","text":"blocked \"quote\"\n"}]}"#,
     );
 }
+
+#[test]
+fn buffered_response_uses_mojo_part_presence_for_text_precedence() {
+    let call = r#"[{"type":"function_call","call_id":"call_1","name":"tool","arguments":"{}"}]"#;
+    let mut suppressed =
+        GeminiResponseKernelInput::new(GeminiResponseKernelOperation::BufferedResponse);
+    suppressed.response_id = Some("resp_1");
+    suppressed.model = Some("gemini-test");
+    suppressed.response = Some("01");
+    suppressed.reason_present = true;
+    suppressed.delta = Some("hidden text");
+    suppressed.output = Some(call);
+    assert_eq!(
+        gemini_buffered_response_kernel(suppressed).unwrap(),
+        br#"{"id":"resp_1","object":"response","model":"gemini-test","output":[{"type":"function_call","call_id":"call_1","name":"tool","arguments":"{}"}]}"#,
+    );
+
+    let mut no_calls =
+        GeminiResponseKernelInput::new(GeminiResponseKernelOperation::BufferedResponse);
+    no_calls.response_id = Some("resp_1");
+    no_calls.model = Some("gemini-test");
+    no_calls.response = Some("0");
+    no_calls.reason_present = true;
+    no_calls.delta = Some("visible text");
+    no_calls.output = Some("[]");
+    assert_eq!(
+        gemini_buffered_response_kernel(no_calls).unwrap(),
+        br#"{"id":"resp_1","object":"response","model":"gemini-test","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"visible text"}]}]}"#,
+    );
+
+    let mut malformed_flags =
+        GeminiResponseKernelInput::new(GeminiResponseKernelOperation::BufferedResponse);
+    malformed_flags.response = Some("0x");
+    assert!(matches!(
+        gemini_buffered_response_kernel(malformed_flags),
+        Err(GeminiBufferedResponseError::Kernel(_))
+    ));
+}
