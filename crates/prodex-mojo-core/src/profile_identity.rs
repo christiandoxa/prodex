@@ -5,6 +5,7 @@ const PROFILE_IDENTITY_RECORD_EMAIL_PRESENT: i64 = 1;
 const PROFILE_IDENTITY_RECORD_ACCOUNT_PRESENT: i64 = 2;
 const PROFILE_PRIMARY_PRESENT: i64 = 1;
 const PROFILE_SECONDARY_PRESENT: i64 = 2;
+const PROFILE_MANAGEMENT_STATUS_ABI_VERSION: i64 = 1;
 
 #[repr(i64)]
 #[derive(Clone, Copy)]
@@ -96,6 +97,97 @@ pub enum AddProfileSourcePlan {
     CopyConflict,
 }
 
+/// Inputs projected from the state adapter for the profile-management screen.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProfileManagementStatusInput {
+    pub active: bool,
+    pub managed: bool,
+    pub identity_present: bool,
+}
+
+/// The screen-level state selected by the Mojo profile-management policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfileManagementScreenStatus {
+    NoActive,
+    OnlyProfile,
+    Active,
+}
+
+/// The current/storage state selected for one profile row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfileManagementRowStatus {
+    ActiveManagedWithIdentity,
+    ActiveManagedWithoutIdentity,
+    InactiveManagedWithIdentity,
+    InactiveManagedWithoutIdentity,
+    ActiveExternalWithIdentity,
+    ActiveExternalWithoutIdentity,
+    InactiveExternalWithIdentity,
+    InactiveExternalWithoutIdentity,
+}
+
+impl ProfileManagementRowStatus {
+    /// Render the stable current label for this row status.
+    pub fn current_label(self) -> &'static str {
+        match self {
+            Self::ActiveManagedWithIdentity
+            | Self::ActiveManagedWithoutIdentity
+            | Self::ActiveExternalWithIdentity
+            | Self::ActiveExternalWithoutIdentity => "Yes",
+            Self::InactiveManagedWithIdentity
+            | Self::InactiveManagedWithoutIdentity
+            | Self::InactiveExternalWithIdentity
+            | Self::InactiveExternalWithoutIdentity => "No",
+        }
+    }
+
+    /// Render the stable storage-kind label for this row status.
+    pub fn kind_label(self) -> &'static str {
+        match self {
+            Self::ActiveManagedWithIdentity
+            | Self::ActiveManagedWithoutIdentity
+            | Self::InactiveManagedWithIdentity
+            | Self::InactiveManagedWithoutIdentity => "managed",
+            Self::ActiveExternalWithIdentity
+            | Self::ActiveExternalWithoutIdentity
+            | Self::InactiveExternalWithIdentity
+            | Self::InactiveExternalWithoutIdentity => "external",
+        }
+    }
+
+    /// Render the stable managed/external boolean label for this row status.
+    pub fn managed_label(self) -> &'static str {
+        match self {
+            Self::ActiveManagedWithIdentity
+            | Self::ActiveManagedWithoutIdentity
+            | Self::InactiveManagedWithIdentity
+            | Self::InactiveManagedWithoutIdentity => "Yes",
+            Self::ActiveExternalWithIdentity
+            | Self::ActiveExternalWithoutIdentity
+            | Self::InactiveExternalWithIdentity
+            | Self::InactiveExternalWithoutIdentity => "No",
+        }
+    }
+
+    /// Whether this row contains a stored profile identity.
+    pub fn identity_present(self) -> bool {
+        matches!(
+            self,
+            Self::ActiveManagedWithIdentity
+                | Self::InactiveManagedWithIdentity
+                | Self::ActiveExternalWithIdentity
+                | Self::InactiveExternalWithIdentity
+        )
+    }
+}
+
+/// Complete deterministic decision for a profile-management screen snapshot.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProfileManagementStatusPlan {
+    pub screen: ProfileManagementScreenStatus,
+    pub rows: Vec<ProfileManagementRowStatus>,
+}
+
 unsafe extern "C" {
     fn prodex_mojo_profile_identity_v1(
         abi_version: i64,
@@ -111,6 +203,15 @@ unsafe extern "C" {
         output_capacity: i64,
         written_address: u64,
         result_address: u64,
+    ) -> i64;
+    fn prodex_profile_management_status_v1(
+        abi_version: i64,
+        active_profile_present: i64,
+        profile_count: i64,
+        flags_address: u64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
     ) -> i64;
 }
 
@@ -597,6 +698,70 @@ pub fn profile_home_delete_plan(
         2 => Ok(ProfileHomeDeletePlan::RejectExternal),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+/// Ask Mojo to choose the profile-management screen and row status matrix.
+pub fn profile_management_status(
+    active_profile_present: bool,
+    inputs: &[ProfileManagementStatusInput],
+) -> Result<ProfileManagementStatusPlan, MojoError> {
+    let profile_count = i64::try_from(inputs.len()).map_err(|_| MojoError::InvalidInput)?;
+    let mut flags = Vec::with_capacity(inputs.len().saturating_mul(3));
+    for input in inputs {
+        flags.extend([
+            i64::from(input.active),
+            i64::from(input.managed),
+            i64::from(input.identity_present),
+        ]);
+    }
+    let output_capacity = 1_usize
+        .checked_add(inputs.len())
+        .ok_or(MojoError::InvalidInput)?;
+    let mut output = vec![-1_i64; output_capacity];
+    let mut written = 0_i64;
+    let status = unsafe {
+        prodex_profile_management_status_v1(
+            PROFILE_MANAGEMENT_STATUS_ABI_VERSION,
+            i64::from(active_profile_present),
+            profile_count,
+            flags.as_ptr() as usize as u64,
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        2 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    if written != i64::try_from(output_capacity).map_err(|_| MojoError::InvalidOutput)? {
+        return Err(MojoError::InvalidOutput);
+    }
+    let screen = match output[0] {
+        0 => ProfileManagementScreenStatus::NoActive,
+        1 => ProfileManagementScreenStatus::OnlyProfile,
+        2 => ProfileManagementScreenStatus::Active,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let mut rows = Vec::with_capacity(inputs.len());
+    for index in 0..inputs.len() {
+        let row_status = match output[1 + index] {
+            0 => ProfileManagementRowStatus::ActiveManagedWithIdentity,
+            1 => ProfileManagementRowStatus::ActiveManagedWithoutIdentity,
+            2 => ProfileManagementRowStatus::InactiveManagedWithIdentity,
+            3 => ProfileManagementRowStatus::InactiveManagedWithoutIdentity,
+            4 => ProfileManagementRowStatus::ActiveExternalWithIdentity,
+            5 => ProfileManagementRowStatus::ActiveExternalWithoutIdentity,
+            6 => ProfileManagementRowStatus::InactiveExternalWithIdentity,
+            7 => ProfileManagementRowStatus::InactiveExternalWithoutIdentity,
+            _ => return Err(MojoError::InvalidOutput),
+        };
+        rows.push(row_status);
+    }
+    Ok(ProfileManagementStatusPlan { screen, rows })
 }
 
 #[cfg(test)]
