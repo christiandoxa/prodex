@@ -13,6 +13,7 @@ comptime MODE_CACHED_SOURCE: Int64 = 4
 comptime MODE_MODEL_CACHED_SOURCE: Int64 = 5
 comptime MODE_MODEL_FINALIZE: Int64 = 6
 comptime MODE_UNKNOWN_WINDOW: Int64 = 7
+comptime MODE_USAGE_SNAPSHOT_RETAIN: Int64 = 8
 
 comptime CACHED_SUMMARY_UNKNOWN: Int64 = 0
 comptime CACHED_SUMMARY_LIVE: Int64 = 1
@@ -231,7 +232,7 @@ def prodex_runtime_state_quota_policy_v1(
 ) abi("C") -> Int64:
     if abi_version != RUNTIME_STATE_QUOTA_ABI_VERSION:
         return RUNTIME_STATE_QUOTA_ABI
-    if mode < MODE_TIMESTAMP_PERSIST or mode > MODE_UNKNOWN_WINDOW or output_address == 0:
+    if mode < MODE_TIMESTAMP_PERSIST or mode > MODE_USAGE_SNAPSHOT_RETAIN or output_address == 0:
         return RUNTIME_STATE_QUOTA_INVALID
 
     var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
@@ -365,6 +366,15 @@ def prodex_runtime_state_quota_policy_v1(
         output[unsafe_offset=0] = Int64(input0 == 0)
         if input0 == 0:
             output[unsafe_offset=1] = input2 if input1 == 1 else INT64_MAX
+        return RUNTIME_STATE_QUOTA_OK
+
+    if mode == MODE_USAGE_SNAPSHOT_RETAIN:
+        if not state_quota_valid_bool(input0):
+            return RUNTIME_STATE_QUOTA_INVALID
+        output[unsafe_offset=0] = Int64(
+            input0 == 1
+            and input1 >= state_quota_saturating_sub(input2, input3)
+        )
         return RUNTIME_STATE_QUOTA_OK
 
     # probe apply:

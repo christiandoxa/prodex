@@ -9,6 +9,7 @@ const MODE_CACHED_SOURCE: i64 = 4;
 const MODE_MODEL_CACHED_SOURCE: i64 = 5;
 const MODE_MODEL_FINALIZE: i64 = 6;
 const MODE_UNKNOWN_WINDOW: i64 = 7;
+const MODE_USAGE_SNAPSHOT_RETAIN: i64 = 8;
 
 pub const CACHED_MODEL_STANDARD: i64 = 0;
 pub const CACHED_MODEL_LUNA: i64 = 1;
@@ -199,6 +200,32 @@ pub fn probe_cache_freshness(
         2 => Ok(ProbeCacheFreshness::Expired),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+pub fn usage_snapshot_should_retain(
+    profile_present: bool,
+    checked_at: i64,
+    now: i64,
+    retention_seconds: i64,
+) -> Result<bool, MojoError> {
+    bool_output(
+        call(
+            MODE_USAGE_SNAPSHOT_RETAIN,
+            [
+                i64::from(profile_present),
+                checked_at,
+                now,
+                retention_seconds,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ],
+        )?[0],
+    )
 }
 
 pub fn snapshot_usability(
@@ -486,6 +513,10 @@ mod tests {
     #[test]
     fn runtime_state_quota_kernel_smoke() {
         assert!(timestamp_touch_should_persist(0, 11, 10).unwrap());
+        assert!(usage_snapshot_should_retain(true, 130, 250, 120).unwrap());
+        assert!(!usage_snapshot_should_retain(true, 129, 250, 120).unwrap());
+        assert!(!usage_snapshot_should_retain(false, 200, 250, 120).unwrap());
+        assert!(usage_snapshot_should_retain(true, i64::MIN, i64::MIN, i64::MAX).unwrap());
         assert_eq!(
             probe_cache_freshness(90, 100, 5, 20).unwrap(),
             ProbeCacheFreshness::StaleUsable
