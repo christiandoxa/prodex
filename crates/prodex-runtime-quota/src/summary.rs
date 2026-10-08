@@ -424,14 +424,16 @@ pub fn runtime_quota_soft_affinity_rejection_reason(
 }
 
 pub fn runtime_quota_summary_log_fields(summary: RuntimeQuotaSummary) -> String {
-    format!(
-        "quota_band={} five_hour_status={} five_hour_remaining={} five_hour_reset_at={} weekly_status={} weekly_remaining={} weekly_reset_at={}",
-        runtime_quota_pressure_band_reason(summary.route_band),
-        runtime_quota_window_status_reason(summary.five_hour.status),
-        summary.five_hour.remaining_percent,
-        summary.five_hour.reset_at,
-        runtime_quota_window_status_reason(summary.weekly.status),
-        summary.weekly.remaining_percent,
-        summary.weekly.reset_at,
+    prodex_mojo_core::runtime_state_quota::format_quota_summary_log_fields(
+        prodex_mojo_core::runtime_state_quota::QuotaSummaryLogFields {
+            pressure_band: runtime_quota_pressure_band_reason(summary.route_band),
+            five_hour_status: runtime_quota_window_status_reason(summary.five_hour.status),
+            five_hour_remaining: summary.five_hour.remaining_percent,
+            five_hour_reset_at: summary.five_hour.reset_at,
+            weekly_status: runtime_quota_window_status_reason(summary.weekly.status),
+            weekly_remaining: summary.weekly.remaining_percent,
+            weekly_reset_at: summary.weekly.reset_at,
+        },
     )
+    .expect("Mojo runtime quota summary formatter returned invalid output")
 }
