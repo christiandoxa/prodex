@@ -1,5 +1,17 @@
 use super::*;
 
+const RUNTIME_RESPONSE_EVENT_KIND_ABI_VERSION: i64 = 1;
+
+unsafe extern "C" {
+    fn prodex_runtime_response_metadata_event_kind_v1(
+        abi_version: i64,
+        event_address: u64,
+        event_length: i64,
+        event_present: i64,
+        output_address: u64,
+    ) -> i64;
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeResponseMetadataJsonPlan {
     pub response_ids: [Option<(usize, usize)>; 3],
@@ -8,6 +20,26 @@ pub struct RuntimeResponseMetadataJsonPlan {
     pub headers_turn_state: Option<(usize, usize)>,
     pub token_usage_present: bool,
     pub token_usage_spans: [Option<(usize, usize)>; 4],
+}
+
+pub fn runtime_response_event_is_completed(event_type: Option<&str>) -> Result<bool, MojoError> {
+    let event_present = i64::from(event_type.is_some());
+    let event_type = event_type.unwrap_or_default();
+    let mut output = [-1_i64; 1];
+    status(unsafe {
+        prodex_runtime_response_metadata_event_kind_v1(
+            RUNTIME_RESPONSE_EVENT_KIND_ABI_VERSION,
+            event_type.as_ptr() as u64,
+            signed(event_type.len())?,
+            event_present,
+            output.as_mut_ptr() as u64,
+        )
+    })?;
+    match output[0] {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 fn validated_optional_number_span(

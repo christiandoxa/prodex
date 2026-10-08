@@ -11,13 +11,14 @@ from json_view import (
     deepseek_json_value_end,
 )
 from kiro import kiro_raw_string_nonblank
-from rich_text import rich_view_ptr, rich_view_valid
+from rich_text import rich_view_matches_literal, rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
 
 comptime RUNTIME_RESPONSE_METADATA_ABI_VERSION: Int64 = 1
 comptime RUNTIME_RESPONSE_METADATA_INVALID: Int64 = 1
 comptime RUNTIME_RESPONSE_METADATA_SCAN_LIMIT: Int64 = 2048
 comptime RUNTIME_RESPONSE_METADATA_MAX_DEPTH: Int64 = 256
+comptime RUNTIME_RESPONSE_EVENT_KIND_ABI_VERSION: Int64 = 1
 
 
 def runtime_response_raw_present(bounds: Array[Int64, 2]) -> Bool:
@@ -497,6 +498,38 @@ def runtime_response_raw_scan_usage(
                 return False
             break
     return False
+
+
+@export("prodex_runtime_response_metadata_event_kind_v1")
+def prodex_runtime_response_metadata_event_kind_v1(
+    abi_version: Int64,
+    event_address: UInt,
+    event_length: Int64,
+    event_present: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != RUNTIME_RESPONSE_EVENT_KIND_ABI_VERSION
+        or event_present < 0
+        or event_present > 1
+        or event_length < 0
+        or output_address == 0
+        or (event_present == 1 and event_length > 0 and event_address == 0)
+    ):
+        return RUNTIME_RESPONSE_METADATA_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 0
+    if event_present == 0:
+        return 0
+    if event_length > 4_096:
+        return 0
+    var event = ProdexRichStringView(event_address, UInt(event_length))
+    if not rich_view_valid(event, 4_096):
+        return RUNTIME_RESPONSE_METADATA_INVALID
+    output[] = Int64(rich_view_matches_literal["response.completed"](event, False))
+    return 0
 
 
 @export("prodex_runtime_response_metadata_json_v1")

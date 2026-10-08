@@ -470,7 +470,8 @@ impl RuntimeWebsocketResponseLoop<'_> {
         inspected: &runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame,
     ) -> Result<bool> {
         let event_type = inspected.event_type.as_deref();
-        let generation_ms = (event_type == Some("response.completed"))
+        let generation_ms = prodex_mojo_core::json::runtime_response_event_is_completed(event_type)
+            .expect("Mojo websocket response event classification returned an invalid result")
             .then(|| runtime_proxy_crate::runtime_generation_elapsed_ms(self.generation_started_at))
             .flatten();
         if runtime_proxy_crate::runtime_response_ids_should_record(inspected.precommit_hold) {

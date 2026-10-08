@@ -189,6 +189,22 @@ pub(super) fn websocket_unused_local_addr() -> std::net::SocketAddr {
 }
 
 #[test]
+fn websocket_response_completion_classifier_is_mojo_owned() {
+    assert!(
+        prodex_mojo_core::json::runtime_response_event_is_completed(Some("response.completed"))
+            .expect("Mojo response event classification should succeed")
+    );
+    assert!(
+        !prodex_mojo_core::json::runtime_response_event_is_completed(Some("response.failed"))
+            .expect("Mojo response event classification should succeed")
+    );
+    assert!(
+        !prodex_mojo_core::json::runtime_response_event_is_completed(None)
+            .expect("Mojo response event classification should accept absent events")
+    );
+}
+
+#[test]
 fn websocket_presidio_fail_open_preserves_text_when_local_inspection_hits_limits() {
     let mut shared = websocket_test_shared("presidio-local-limit-fail-open");
     shared.async_runtime = Arc::new(
