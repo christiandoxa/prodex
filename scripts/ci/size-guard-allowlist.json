@@ -46,8 +46,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_upstream.rs",
-    "maxLines": 1980,
-    "reason": "Upstream transport remains one audited I/O boundary after extracting binding-candidate policy; cap tracks measured production LOC without restoring policy fallbacks."
+    "maxLines": 1994,
+    "reason": "Upstream transport remains one audited I/O boundary after extracting binding-candidate policy and OpenAI retry gates; cap tracks the exact reviewed production LOC without restoring policy fallbacks."
   },
   {
     "file": "crates/prodex-app/src/runtime_proxy/presidio/tests.rs",
