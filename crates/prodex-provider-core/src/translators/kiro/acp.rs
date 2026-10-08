@@ -153,32 +153,34 @@ pub fn kiro_provider_core_acp_metadata(
 }
 
 pub fn kiro_provider_core_acp_stop_reason(result: Option<&Value>) -> Option<String> {
-    result
-        .and_then(|result| {
-            result
-                .get("stopReason")
-                .or_else(|| result.get("stop_reason"))
-                .or_else(|| result.get("status"))
-        })
-        .and_then(Value::as_str)
-        .map(str::to_string)
+    let result =
+        result.map(|result| serde_json::to_string(result).expect("Kiro ACP result serializes"));
+    let mut input = KiroKernelInput::new(KiroKernelOperation::AcpStopReason);
+    input.input = result.as_deref();
+    serde_json::from_slice(&kiro_mojo_body(input))
+        .expect("Mojo Kiro ACP stop reason is a JSON string or null")
 }
 
 pub fn kiro_provider_core_acp_incomplete_details(
     stop_reason: Option<&str>,
 ) -> Option<(&'static str, &'static str)> {
-    match stop_reason {
-        Some("max_tokens") => Some((
+    let mut input = KiroKernelInput::new(KiroKernelOperation::AcpIncompleteReason);
+    input.status = stop_reason;
+    let tag: u8 = serde_json::from_slice(&kiro_mojo_body(input))
+        .expect("Mojo Kiro ACP incomplete reason is a JSON tag");
+    match tag {
+        0 => None,
+        1 => Some((
             "max_output_tokens",
             "Kiro stopped before end_turn because the model hit its output limit.",
         )),
-        Some("max_turn_requests") => Some((
+        2 => Some((
             "max_turn_requests",
             "Kiro stopped before end_turn because the turn hit its request limit.",
         )),
-        Some("refusal") => Some(("refusal", "Kiro refused to continue the turn.")),
-        Some("cancelled") => Some(("cancelled", "Kiro cancelled the turn before completion.")),
-        _ => None,
+        3 => Some(("refusal", "Kiro refused to continue the turn.")),
+        4 => Some(("cancelled", "Kiro cancelled the turn before completion.")),
+        _ => panic!("Mojo Kiro ACP incomplete reason returned an invalid tag: {tag}"),
     }
 }
 

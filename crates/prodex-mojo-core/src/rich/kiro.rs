@@ -64,6 +64,8 @@ pub enum KiroKernelOperation {
     SemanticCompactRequest = 55,
     SemanticCompactSummary = 56,
     SupportedParams = 57,
+    AcpStopReason = 58,
+    AcpIncompleteReason = 59,
 }
 
 /// Inputs for one bounded Kiro JSON or text transformation.
@@ -417,6 +419,8 @@ fn operation_code(operation: KiroKernelOperation) -> i64 {
         KiroKernelOperation::SemanticCompactRequest => 55,
         KiroKernelOperation::SemanticCompactSummary => 56,
         KiroKernelOperation::SupportedParams => 57,
+        KiroKernelOperation::AcpStopReason => 58,
+        KiroKernelOperation::AcpIncompleteReason => 59,
     }
 }
 

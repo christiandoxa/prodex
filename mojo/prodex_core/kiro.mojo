@@ -87,6 +87,8 @@ comptime KIRO_SEMANTIC_COMPACT_INSTRUCTIONS: Int64 = 54
 comptime KIRO_SEMANTIC_COMPACT_REQUEST: Int64 = 55
 comptime KIRO_SEMANTIC_COMPACT_SUMMARY: Int64 = 56
 comptime KIRO_SUPPORTED_PARAMS: Int64 = 57
+comptime KIRO_ACP_STOP_REASON: Int64 = 58
+comptime KIRO_ACP_INCOMPLETE_REASON: Int64 = 59
 
 comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
 comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
@@ -1780,6 +1782,41 @@ def kiro_write_operation(
             and kiro_put_json_string(writer, input.content)
             and kiro_put_byte(writer, 125)
         )
+    if operation == KIRO_ACP_STOP_REASON:
+        if input.input_present == 0:
+            return kiro_put_literal(writer, StringSlice("null"))
+        var start = kiro_json_skip_ws(input.input, 0, Int64(input.input.len))
+        var end = kiro_json_value_end(input.input, start, Int64(input.input.len), 0)
+        if (
+            start >= Int64(input.input.len)
+            or end < 0
+            or kiro_json_skip_ws(input.input, end, Int64(input.input.len)) != Int64(input.input.len)
+        ):
+            return False
+        if kiro_json_byte(input.input, start) != 123:
+            return kiro_put_literal(writer, StringSlice("null"))
+        var root = Array[Int64, 2](fill=-1)
+        root[0] = start
+        root[1] = end
+        for key in [StringSlice("stopReason"), StringSlice("stop_reason"), StringSlice("status")]:
+            var reason = kiro_raw_member(input.input, root, key)
+            if kiro_raw_present(reason):
+                if kiro_json_byte(input.input, reason[0]) == 34:
+                    return kiro_put_view_range(writer, input.input, reason[0], reason[1])
+                return kiro_put_literal(writer, StringSlice("null"))
+        return kiro_put_literal(writer, StringSlice("null"))
+    if operation == KIRO_ACP_INCOMPLETE_REASON:
+        if input.status_present == 0:
+            return kiro_put_literal(writer, StringSlice("0"))
+        if rich_view_matches_literal["max_tokens"](input.status, False):
+            return kiro_put_literal(writer, StringSlice("1"))
+        if rich_view_matches_literal["max_turn_requests"](input.status, False):
+            return kiro_put_literal(writer, StringSlice("2"))
+        if rich_view_matches_literal["refusal"](input.status, False):
+            return kiro_put_literal(writer, StringSlice("3"))
+        if rich_view_matches_literal["cancelled"](input.status, False):
+            return kiro_put_literal(writer, StringSlice("4"))
+        return kiro_put_literal(writer, StringSlice("0"))
     if operation == KIRO_RESPONSE_HAS_TOOL_CALLS:
         var result = kiro_output_types_has_function_call(input.output)
         if result < 0:
