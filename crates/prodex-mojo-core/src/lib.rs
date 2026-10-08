@@ -139,6 +139,8 @@ pub mod profile_identity;
 mod profile_import_lifecycle;
 #[cfg(feature = "mojo-runtime")]
 pub mod profile_login_policy;
+#[cfg(feature = "mojo-runtime")]
+pub mod profile_ui_policy;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_constraints;
 #[cfg(feature = "mojo-provider-constraints")]

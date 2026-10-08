@@ -1352,6 +1352,26 @@
         "operations": [
           "status_command_presentation_policy"
         ]
+      },
+      {
+        "path": "mojo/prodex_core/profile_ui_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "profile_screen_geometry_and_value_color_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/profile_ui_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "profile_screen_geometry_and_value_color_policy"
+        ]
       }
     ],
     "removed": [
@@ -6216,6 +6236,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde JSON/SSE acquisition, Document tree construction, and bounded Mojo result decoding"
+    },
+    {
+      "name": "profile_screen_geometry_and_value_color_policy",
+      "domain": "profile/ui",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust selected profile-screen geometry bounds and semantic value colors",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_profile_ui_numeric_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/profile_ui_policy.mojo",
+      "consumer": "crates/prodex-app/src/profile_commands/manage.rs",
+      "consumer_marker": "prodex_mojo_core::profile_ui_policy",
+      "production_consumers": [
+        "crates/prodex-app/src/profile_commands/manage.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/profile_ui_policy.rs",
+      "rust_owner_before": "Profile list terminal-height normalization, scroll geometry, inline height bounds, and status value color classification",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "compiled ABI boundary tests cover zero-height fallback, scroll bounds, TUI height clipping, and color precedence",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "terminal API reads, ratatui style construction, and mapping Mojo color classes to terminal colors"
     }
   ],
   "rust_semantic_reductions": [
@@ -7105,6 +7148,32 @@
         }
       },
       "cleanup_evidence": "The full 314-line Rust parser module is deleted after replacing its 285 official semantic lines with the versioned Mojo operation. The file exists in the frozen tree but is absent from its counting inventory, so this is source-cleanup evidence rather than frozen migration-volume credit."
+    },
+    {
+      "file": "crates/prodex-app/src/profile_commands/manage.rs",
+      "symbol": "profile_value_color",
+      "operation": "profile_screen_geometry_and_value_color_policy",
+      "previous_responsibility": "Rust profile screen normalization, scroll geometry, inline TUI bounds, and semantic value color selection",
+      "final_state": "adapter-only",
+      "rust_before": "crates/prodex-app/src/profile_commands/manage.rs::normalized_terminal_height, profile_scroll_body_height, profile_scroll_max_offset, profile_tui_height, and profile_value_color",
+      "rust_after": "Rust reads terminal dimensions and maps Mojo's typed geometry/color result into ratatui; deterministic decisions are deleted from Rust",
+      "mojo_owner": "mojo/prodex_core/profile_ui_policy.mojo::prodex_profile_ui_numeric_v1",
+      "mojo_source": "mojo/prodex_core/profile_ui_policy.mojo",
+      "mojo_entry": "prodex_profile_ui_numeric_v1",
+      "production_consumer": "crates/prodex-app/src/profile_commands/manage.rs",
+      "parity_test": "crates/prodex-mojo-core/tests/profile_ui_policy.rs",
+      "cleanup_loc": 16,
+      "cleanup_source": {
+        "kind": "collapsed-adapter",
+        "path": "crates/prodex-app/src/profile_commands/manage.rs",
+        "baseline_range": {
+          "start": 641,
+          "end": 656
+        },
+        "release_symbol": "fn mojo_profile_value_color",
+        "release_marker": "prodex_mojo_core::profile_ui_policy::value_color"
+      },
+      "cleanup_evidence": "Pure profile-screen geometry and color branches now execute through the Mojo ABI; Rust retains only terminal/ratatui effects and typed adaptation."
     }
   ],
   "deleted_authoritative_operations": [
