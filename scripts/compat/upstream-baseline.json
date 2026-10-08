@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.160.1 release",
+      "baseline_source": "openai/codex rust-v0.161.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -251,7 +251,7 @@
         },
         {
           "path": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
-          "reason": "Owns the Codex static Amazon Bedrock model catalog. Codex 0.159.1 adds GPT-6.1 Sol as the default while retaining GPT-6 Sol/Luna and GPT-5.6 compatibility entries plus Bedrock-specific reasoning/service-tier normalization.",
+          "reason": "Codex 0.161 retains provider catalog reasoning levels and multi-agent versions instead of removing Ultra or forcing V1. Unsupported service tiers, multimodal search, responses-lite, and tool-mode normalization remain upstream-owned.",
           "required_contains": [
             "static_model_catalog",
             "normalize_bedrock_catalog",
@@ -260,8 +260,6 @@
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID",
-            "ReasoningEffort::Ultra",
-            ".retain(|level| level.effort != ReasoningEffort::Ultra)",
             "model.additional_speed_tiers.clear()",
             "model.service_tiers.clear()",
             "model.default_service_tier = None",
@@ -269,7 +267,10 @@
             "model.use_responses_lite = false",
             "model.tool_mode = None",
             "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
-            "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID"
+            "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
+            "configured_bedrock_catalogs_normalize_unsupported_model_capabilities",
+            "model.multi_agent_version = version",
+            "Some(MultiAgentVersion::V2)"
           ]
         },
         {
@@ -421,7 +422,12 @@
             "ResponseEvent::SafetyBuffering",
             "treatment_from_headers",
             "SafetyBufferingTreatment",
-            "safety_buffering(treatment)"
+            "safety_buffering(treatment)",
+            "WsError::Http(response)",
+            "let headers = response.headers().clone()",
+            "let retry_after = RetryAfter::from_headers(&headers)",
+            "headers: Some(headers)",
+            "retry_after,"
           ]
         },
         {
@@ -937,16 +943,43 @@
         },
         {
           "path": "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
-          "reason": "Codex 0.160.1 remote stdio MCP launchers with explicit remote environment variables must preserve Windows executor bootstrap and temporary-directory variables without broadening the allowlist to unrelated secrets.",
+          "reason": "Guard the exact 0.161 default-plus-explicit remote environment allowlist and rejection of unrelated secrets. This tag lacks the 0.160.1 cross-OS Windows bootstrap preservation; the known upstream limitation is recorded in codex-rust-v0.161.0-audit.md rather than claiming that invariant still holds.",
           "required_contains": [
             "fn remote_env_policy(remote_env_vars: &[String])",
             "crate::utils::DEFAULT_ENV_VARS",
-            ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
             "remote_env_vars.iter().cloned()",
             "include_only,",
-            "env.get(\"SystemRoot\")",
-            "for name in [\"TEMP\", \"TMP\"]",
-            "env.get(\"REMOTE_TOKEN\")"
+            "env.get(\"REMOTE_TOKEN\")",
+            "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/responses_retry.rs",
+          "reason": "Sampling and compaction retry/fallback retain the server deadline without extending configured retry counts; exhausted advice is turn-scoped. Prodex preserves upstream retry headers rather than implementing a second Codex retry owner.",
+          "required_contains": [
+            "ResponsesStreamRetryState",
+            "ResponsesStreamRequest::RemoteCompactionV2",
+            "let retry_after = err.retry_after()",
+            "retry_state.retries >= max_retries",
+            "try_switch_fallback_transport",
+            "tokio::time::sleep_until(retry_after.deadline()).await",
+            "retry_state.retries < max_retries",
+            "retry_after.map(RetryAfter::deadline).unwrap_or(now + delay)",
+            "ExhaustedResponseRetry",
+            "turn_id: turn_context.sub_id.clone()"
+          ]
+        },
+        {
+          "path": "codex-rs/codex-api/src/common.rs",
+          "reason": "HTTP and WebSocket serializers place model/stream/service_tier before potentially large input while preserving payload semantics and continuation identity. Prodex parses keys independently of object field order.",
+          "required_contains": [
+            "pub struct ResponsesApiRequest",
+            "pub struct ResponseCreateWsRequest",
+            "pub model: String,\n    pub stream: bool,",
+            "pub model: &'a str,\n    pub stream: bool,",
+            "pub service_tier: Option<String>",
+            "pub service_tier: Option<&'a str>",
+            "pub previous_response_id: Option<String>"
           ]
         }
       ],
@@ -1334,7 +1367,7 @@
           "id": "model-provider.bedrock-gpt-6-catalog",
           "kind": "provider_catalog",
           "file": "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
-          "reason": "Codex 0.159.1 adds GPT-6.1 Sol to the static Bedrock catalog and makes it the default while retaining GPT-6 Sol/Luna, GPT-5.6 compatibility entries, Bedrock reasoning normalization, disabled Responses Lite/tool mode, and default-only service tiers.",
+          "reason": "Codex 0.161 retains provider catalog reasoning levels and multi-agent versions instead of removing Ultra or forcing V1. Unsupported service tiers, multimodal search, responses-lite, and tool-mode normalization remain upstream-owned.",
           "file_contains_all": [
             "static_model_catalog",
             "normalize_bedrock_catalog",
@@ -1343,8 +1376,6 @@
             "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
             "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID",
-            "ReasoningEffort::Ultra",
-            ".retain(|level| level.effort != ReasoningEffort::Ultra)",
             "model.additional_speed_tiers.clear()",
             "model.service_tiers.clear()",
             "model.default_service_tier = None",
@@ -1352,7 +1383,10 @@
             "model.use_responses_lite = false",
             "model.tool_mode = None",
             "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
-            "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID"
+            "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
+            "configured_bedrock_catalogs_normalize_unsupported_model_capabilities",
+            "model.multi_agent_version = version",
+            "Some(MultiAgentVersion::V2)"
           ]
         },
         {
@@ -2053,23 +2087,67 @@
           ]
         },
         {
-          "id": "rmcp.remote-stdio-windows-bootstrap-env",
+          "id": "rmcp.remote-stdio-env-allowlist",
           "kind": "remote_mcp_environment",
           "file": "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
-          "reason": "Remote stdio MCP allowlists must retain SYSTEMROOT/TEMP/TMP on Windows executors while still filtering unrequested environment variables.",
+          "reason": "Guard the exact 0.161 default-plus-explicit remote environment allowlist and rejection of unrelated secrets. This tag lacks the 0.160.1 cross-OS Windows bootstrap preservation; the known upstream limitation is recorded in codex-rust-v0.161.0-audit.md rather than claiming that invariant still holds.",
           "file_contains_all": [
             "fn remote_env_policy(remote_env_vars: &[String])",
             "crate::utils::DEFAULT_ENV_VARS",
-            ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
             "remote_env_vars.iter().cloned()",
             "include_only,",
-            "env.get(\"SystemRoot\")",
-            "for name in [\"TEMP\", \"TMP\"]",
-            "env.get(\"REMOTE_TOKEN\")"
+            "env.get(\"REMOTE_TOKEN\")",
+            "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))"
+          ]
+        },
+        {
+          "id": "responses.server-retry-guidance",
+          "kind": "retry_lifecycle",
+          "file": "codex-rs/core/src/responses_retry.rs",
+          "reason": "Sampling and compaction retry/fallback retain the server deadline without extending configured retry counts; exhausted advice is turn-scoped. Prodex preserves upstream retry headers rather than implementing a second Codex retry owner.",
+          "file_contains_all": [
+            "ResponsesStreamRetryState",
+            "ResponsesStreamRequest::RemoteCompactionV2",
+            "let retry_after = err.retry_after()",
+            "retry_state.retries >= max_retries",
+            "try_switch_fallback_transport",
+            "tokio::time::sleep_until(retry_after.deadline()).await",
+            "retry_state.retries < max_retries",
+            "retry_after.map(RetryAfter::deadline).unwrap_or(now + delay)",
+            "ExhaustedResponseRetry",
+            "turn_id: turn_context.sub_id.clone()"
+          ]
+        },
+        {
+          "id": "responses.routing-fields-before-input",
+          "kind": "serialization",
+          "file": "codex-rs/codex-api/src/common.rs",
+          "reason": "HTTP and WebSocket serializers place model/stream/service_tier before potentially large input while preserving payload semantics and continuation identity. Prodex parses keys independently of object field order.",
+          "file_contains_all": [
+            "pub struct ResponsesApiRequest",
+            "pub struct ResponseCreateWsRequest",
+            "pub model: String,\n    pub stream: bool,",
+            "pub model: &'a str,\n    pub stream: bool,",
+            "pub service_tier: Option<String>",
+            "pub service_tier: Option<&'a str>",
+            "pub previous_response_id: Option<String>"
+          ]
+        },
+        {
+          "id": "websocket.handshake-retry-after",
+          "kind": "retry_metadata",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "WebSocket upgrade failures retain Retry-After from response headers for subsequent Codex retry and HTTP fallback.",
+          "file_contains_all": [
+            "WsError::Http(response)",
+            "let headers = response.headers().clone()",
+            "let retry_after = RetryAfter::from_headers(&headers)",
+            "headers: Some(headers)",
+            "retry_after,"
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.160.1",
+      "tested_codex_release": "rust-v0.161.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -2404,6 +2482,22 @@
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.160.1, guard the remote stdio MCP Windows bootstrap environment allowlist, and keep Prodex routing/auth/quota/session behavior unchanged.",
           "compatibility_evidence": "Exact 0.160.0 and 0.160.1 tagged source archives, GitHub release/tag metadata, upstream remote-MCP semantic markers, official Linux musl CLI and app-server checksum/version verification, isolated app-server initialize, and Prodex compatibility guards are recorded in migration/codex-rust-v0.160.1-audit.md."
+        },
+        {
+          "from": "rust-v0.160.1",
+          "to": "rust-v0.161.0",
+          "upstream_commit": "979011409de0a60b52f179721948e65531d26144",
+          "upstream_tag_object": "7e21416b38834816c224ea0dfd135c3de94b2f15",
+          "upstream_release_date": "2026-10-07T15:58:45Z",
+          "tree_comparison": "Exact source archives: 1195 changed files; all critical-file and semantic markers replayed against the tagged source. The GitHub compare API file list is capped at 300 and was not treated as a full-tree comparison.",
+          "runtime_changes": [
+            "Responses retries and WebSocket-to-HTTP fallback honor server Retry-After deadlines while preserving configured retry limits.",
+            "HTTP/WebSocket request routing fields are serialized before large input; compaction retains user goal message identities, and app-server error decoding accepts additive string/object variants.",
+            "Bedrock preserves model-advertised Ultra reasoning and multi-agent V2; existing unsupported transport/service-tier normalization remains.",
+            "The 0.161 tagged remote stdio MCP implementation lacks the 0.160.1 explicit SYSTEMROOT/TEMP/TMP cross-OS preservation. This is a documented upstream limitation, not a Prodex guarantee."
+          ],
+          "prodex_action": "Qualify the current OpenAI runtime transport and app-server surfaces, add retry/serialization baseline checks, and document the cross-OS remote-MCP limitation. Do not replace user Codex binaries, change the capability-based minimum, or duplicate Codex retry/compaction semantics.",
+          "compatibility_evidence": "migration/codex-rust-v0.161.0-audit.md records exact tag/source provenance, marker replay, official binary digest verification, isolated credential-free app-server initialize, and Prodex boundary tests."
         }
       ],
       "app_server_protocol": {
@@ -2426,15 +2520,23 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.160.1",
-      "name": "0.160.1",
-      "published_at": "2026-10-05T18:29:37Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.160.1",
+      "tag_name": "rust-v0.161.0",
+      "name": "0.161.0",
+      "published_at": "2026-10-07T15:58:45Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.161.0",
       "body_head": [
+        "## New Features",
+        "- GPT-6.1 Sol is now the default model in the bundled and Amazon Bedrock catalogs. (#49318, #49339)",
+        "- Amazon Bedrock supports multi-agent V2 and Ultra reasoning on compatible models; Bedrock Mantle also accepts AWS GovCloud regions. (#49345, #49813)",
+        "- Sign in to MCP servers from an active terminal session with `/mcp login <name>`. (#49290)",
+        "- Choose your microphone, speaker, and microphone input channels for voice conversations, with preferences saved locally. (#49437, #49836)",
+        "- Daybreak is opt-in through `--enable cli_daybreak` or `features.cli_daybreak=true`; `daybreak=true` alone is insufficient. By default, controls and indicators are hidden, `/daybreak` is unavailable, and automatic Cyber routing is omitted—even for saved Daybreak threads. Saved preferences remain intact. Opt-in routing requires eligible ChatGPT sign-in, the OpenAI provider, and advertised model/program support. (#49856, #49858, #49859, #49861, #51207)",
+        "- Select a Cyber access program per turn with `codex exec --cyber-access-program` or the TypeScript SDK’s `cyberAccessProgram` option. The explicit exec override remains available with `cli_daybreak` disabled and leaves the saved choice unchanged. (#49939, #51207)",
         "## Bug Fixes",
-        "- Preserve `SYSTEMROOT`, `TEMP`, and `TMP` when launching remote stdio MCP servers with explicitly configured remote environment variables, allowing Unix hosts to retain the Windows executor's startup environment.",
-        "## Changelog",
-        "- [#51121](https://github.com/openai/codex/pull/51121): Backport Windows remote MCP environment preservation to 0.160."
+        "- Approved filesystem escalation can now grant broader write access while preserving denied reads and network restrictions. Background tasks retain their originating turn’s permissions. (#49353, #49880)",
+        "- Explicit launch permissions survive terminal reconnects and new sessions, while implicit client settings no longer overwrite server or saved-thread web-search settings. (#49809, #49799)",
+        "- Elevated Windows terminal sessions can start using an embedded server, and sandboxed PowerShell preserves relative paths beneath protected user profiles. (#49855, #49690)",
+        "- Enter correctly submits buffered input after paste detection expires, including in Vim insert mode. (#49810)"
       ]
     }
   },

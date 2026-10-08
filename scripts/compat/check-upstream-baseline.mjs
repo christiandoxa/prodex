@@ -66,6 +66,8 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/core/src/session/environment.rs",
   "codex-rs/core/src/agent/control/spawn.rs",
   "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
+  "codex-rs/core/src/responses_retry.rs",
+  "codex-rs/codex-api/src/common.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -270,8 +272,6 @@ const REQUIRED_FILE_CONTAINS = {
     "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
     "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
     "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID",
-    "ReasoningEffort::Ultra",
-    ".retain(|level| level.effort != ReasoningEffort::Ultra)",
     "model.additional_speed_tiers.clear()",
     "model.service_tiers.clear()",
     "model.default_service_tier = None",
@@ -280,6 +280,9 @@ const REQUIRED_FILE_CONTAINS = {
     "model.tool_mode = None",
     "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
     "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
+    "configured_bedrock_catalogs_normalize_unsupported_model_capabilities",
+    "model.multi_agent_version = version",
+    "Some(MultiAgentVersion::V2)",
   ],
   "codex-rs/model-provider/src/provider.rs": [
     "RemoteCompactionSupport",
@@ -376,24 +379,29 @@ const REQUIRED_FILE_CONTAINS = {
     "websocket_url_for_path(\"/responses\")",
     "merge_request_headers",
     "add_auth_headers",
-    "treatment_from_headers",
-    "SafetyBufferingTreatment",
-    "safety_buffering(treatment)",
     "x-codex-turn-state",
     "response.completed",
     "codex.rate_limits",
     "openai-model",
     "x-reasoning-included",
     "x-models-etag",
-    "serialize_websocket_request",
-    "SafetyBuffering",
-    "safety_buffering",
-    "ResponseEvent::SafetyBuffering",
     "parse_wrapped_websocket_error_event",
     "websocket_connection_limit_reached",
     "PREVIOUS_RESPONSE_NOT_FOUND_CODE",
     "previous_response_not_found",
     "PREVIOUS_RESPONSE_NOT_FOUND_MESSAGE",
+    "serialize_websocket_request",
+    "SafetyBuffering",
+    "safety_buffering",
+    "ResponseEvent::SafetyBuffering",
+    "treatment_from_headers",
+    "SafetyBufferingTreatment",
+    "safety_buffering(treatment)",
+    "WsError::Http(response)",
+    "let headers = response.headers().clone()",
+    "let retry_after = RetryAfter::from_headers(&headers)",
+    "headers: Some(headers)",
+    "retry_after,",
   ],
   "codex-rs/config/src/project_trust.rs": [
     "ProjectTrustPath",
@@ -740,14 +748,33 @@ const REQUIRED_FILE_CONTAINS = {
   "codex-rs/rmcp-client/src/stdio_server_launcher.rs": [
     "fn remote_env_policy(remote_env_vars: &[String])",
     "crate::utils::DEFAULT_ENV_VARS",
-    '.chain(["SYSTEMROOT", "TEMP", "TMP"].iter())',
     "remote_env_vars.iter().cloned()",
     "include_only,",
-    'env.get("SystemRoot")',
-    'for name in ["TEMP", "TMP"]',
-    'env.get("REMOTE_TOKEN")',
+    "env.get(\"REMOTE_TOKEN\")",
+    "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))",
   ],
 
+  "codex-rs/core/src/responses_retry.rs": [
+    "ResponsesStreamRetryState",
+    "ResponsesStreamRequest::RemoteCompactionV2",
+    "let retry_after = err.retry_after()",
+    "retry_state.retries >= max_retries",
+    "try_switch_fallback_transport",
+    "tokio::time::sleep_until(retry_after.deadline()).await",
+    "retry_state.retries < max_retries",
+    "retry_after.map(RetryAfter::deadline).unwrap_or(now + delay)",
+    "ExhaustedResponseRetry",
+    "turn_id: turn_context.sub_id.clone()",
+  ],
+  "codex-rs/codex-api/src/common.rs": [
+    "pub struct ResponsesApiRequest",
+    "pub struct ResponseCreateWsRequest",
+    "pub model: String,\n    pub stream: bool,",
+    "pub model: &'a str,\n    pub stream: bool,",
+    "pub service_tier: Option<String>",
+    "pub service_tier: Option<&'a str>",
+    "pub previous_response_id: Option<String>",
+  ],
 };
 
 const REQUIRED_EXPECTED_HEADERS = [
@@ -1125,8 +1152,6 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "AMAZON_BEDROCK_GPT_5_6_TERRA_MODEL_ID",
       "AMAZON_BEDROCK_GPT_5_6_LUNA_MODEL_ID",
       "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID",
-      "ReasoningEffort::Ultra",
-      ".retain(|level| level.effort != ReasoningEffort::Ultra)",
       "model.additional_speed_tiers.clear()",
       "model.service_tiers.clear()",
       "model.default_service_tier = None",
@@ -1135,6 +1160,9 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "model.tool_mode = None",
       "AMAZON_BEDROCK_GPT_6_SOL_MODEL_ID",
       "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
+      "configured_bedrock_catalogs_normalize_unsupported_model_capabilities",
+      "model.multi_agent_version = version",
+      "Some(MultiAgentVersion::V2)",
     ],
   },
   {
@@ -1684,21 +1712,62 @@ const REQUIRED_SEMANTIC_CHECKS = [
     ],
   },
   {
-    id: "rmcp.remote-stdio-windows-bootstrap-env",
+    id: "rmcp.remote-stdio-env-allowlist",
     kind: "remote_mcp_environment",
     file: "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
     file_contains_all: [
       "fn remote_env_policy(remote_env_vars: &[String])",
       "crate::utils::DEFAULT_ENV_VARS",
-      '.chain(["SYSTEMROOT", "TEMP", "TMP"].iter())',
       "remote_env_vars.iter().cloned()",
       "include_only,",
-      'env.get("SystemRoot")',
-      'for name in ["TEMP", "TMP"]',
-      'env.get("REMOTE_TOKEN")',
+      "env.get(\"REMOTE_TOKEN\")",
+      "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))",
     ],
   },
 
+  {
+    id: "responses.server-retry-guidance",
+    kind: "retry_lifecycle",
+    file: "codex-rs/core/src/responses_retry.rs",
+    file_contains_all: [
+      "ResponsesStreamRetryState",
+      "ResponsesStreamRequest::RemoteCompactionV2",
+      "let retry_after = err.retry_after()",
+      "retry_state.retries >= max_retries",
+      "try_switch_fallback_transport",
+      "tokio::time::sleep_until(retry_after.deadline()).await",
+      "retry_state.retries < max_retries",
+      "retry_after.map(RetryAfter::deadline).unwrap_or(now + delay)",
+      "ExhaustedResponseRetry",
+      "turn_id: turn_context.sub_id.clone()",
+    ],
+  },
+  {
+    id: "responses.routing-fields-before-input",
+    kind: "serialization",
+    file: "codex-rs/codex-api/src/common.rs",
+    file_contains_all: [
+      "pub struct ResponsesApiRequest",
+      "pub struct ResponseCreateWsRequest",
+      "pub model: String,\n    pub stream: bool,",
+      "pub model: &'a str,\n    pub stream: bool,",
+      "pub service_tier: Option<String>",
+      "pub service_tier: Option<&'a str>",
+      "pub previous_response_id: Option<String>",
+    ],
+  },
+  {
+    id: "websocket.handshake-retry-after",
+    kind: "retry_metadata",
+    file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    file_contains_all: [
+      "WsError::Http(response)",
+      "let headers = response.headers().clone()",
+      "let retry_after = RetryAfter::from_headers(&headers)",
+      "headers: Some(headers)",
+      "retry_after,",
+    ],
+  },
 ];
 
 const SEMANTIC_LIST_FIELDS = [
@@ -2273,6 +2342,18 @@ function runSelfTest() {
     },
     expectedMessage:
       'codex.compatibility.semantic_checks.model-provider.bedrock-gpt-6-catalog.file_contains_all missing "AMAZON_BEDROCK_GPT_6_1_SOL_MODEL_ID"',
+  });
+
+  assertSelfTestError({
+    name: "missing server-directed transport fallback deadline",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "responses.server-retry-guidance");
+      check.file_contains_all = check.file_contains_all.filter(
+        (value) => value !== "tokio::time::sleep_until(retry_after.deadline()).await",
+      );
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.responses.server-retry-guidance.file_contains_all missing "tokio::time::sleep_until(retry_after.deadline()).await"',
   });
 
   assertSelfTestError({
