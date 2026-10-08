@@ -50,6 +50,7 @@ pub enum DeepSeekKernelOperation {
     ResponseToolCallItem = 40,
     ResponsesHistoryCallId = 42,
     ResponsesHistoryContainsCallId = 43,
+    ResponseUsage = 44,
 }
 
 #[repr(i64)]
@@ -303,6 +304,7 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::ResponseToolCallItem => 40,
         DeepSeekKernelOperation::ResponsesHistoryCallId => 42,
         DeepSeekKernelOperation::ResponsesHistoryContainsCallId => 43,
+        DeepSeekKernelOperation::ResponseUsage => 44,
     }
 }
 
@@ -376,6 +378,7 @@ fn kernel_input_limit(operation: DeepSeekKernelOperation) -> usize {
         | DeepSeekKernelOperation::ResponsesHistoryContainsCallId => {
             DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES
         }
+        DeepSeekKernelOperation::ResponseUsage => DEEPSEEK_KERNEL_MAX_BYTES,
         _ => DEEPSEEK_KERNEL_MAX_BYTES,
     }
 }

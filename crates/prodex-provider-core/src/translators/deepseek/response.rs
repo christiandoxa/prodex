@@ -1,7 +1,5 @@
 use super::tooling::deepseek_responses_tool_call_item;
-use crate::bridge::{
-    provider_core_chat_compatible_created_at, provider_core_chat_compatible_responses_usage,
-};
+use crate::bridge::provider_core_chat_compatible_created_at;
 use serde_json::{Value, json};
 
 use prodex_mojo_core::rich::{DeepSeekKernelInput, DeepSeekKernelOperation, deepseek_kernel};
@@ -94,7 +92,20 @@ pub(super) fn deepseek_responses_value_from_chat_value(value: &Value) -> Result<
 }
 
 pub(super) fn deepseek_responses_usage(usage: &Value) -> Option<Value> {
-    provider_core_chat_compatible_responses_usage(usage, "deepseek")
+    deepseek_responses_usage_for_provider(usage, "deepseek")
+}
+
+pub(super) fn deepseek_responses_usage_for_provider(
+    usage: &Value,
+    provider_label: &str,
+) -> Option<Value> {
+    let raw = serde_json::to_string(usage).expect("DeepSeek response usage serializes");
+    let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ResponseUsage);
+    input.role = Some(provider_label);
+    input.usage = Some(&raw);
+    let body = prodex_mojo_core::rich::deepseek_kernel(input).ok()?;
+    let output = serde_json::from_slice(&body).ok()?;
+    (!output.is_null()).then_some(output)
 }
 
 pub(super) fn deepseek_created_at() -> u64 {
@@ -103,8 +114,34 @@ pub(super) fn deepseek_created_at() -> u64 {
 
 #[cfg(test)]
 mod tests {
-    use super::deepseek_responses_value_from_chat_value;
+    use super::{deepseek_responses_usage_for_provider, deepseek_responses_value_from_chat_value};
     use serde_json::json;
+
+    #[test]
+    fn response_usage_mapping_uses_the_versioned_mojo_provider_boundary() {
+        assert_eq!(
+            deepseek_responses_usage_for_provider(
+                &json!({
+                    "prompt_tokens": 3,
+                    "completion_tokens": 4,
+                    "prompt_cache_miss_tokens": 2,
+                }),
+                "deepseek-test",
+            )
+            .expect("Mojo usage mapping"),
+            json!({
+                "input_tokens": 3,
+                "output_tokens": 4,
+                "total_tokens": 7,
+                "metadata": {
+                    "deepseek-test": {
+                        "prompt_cache_hit_tokens": 0,
+                        "prompt_cache_miss_tokens": 2,
+                    }
+                }
+            })
+        );
+    }
 
     #[test]
     fn buffered_response_matches_expected_text_tool_usage_and_metadata() {
