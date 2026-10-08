@@ -27,6 +27,7 @@ enum Operation {
     SlotPlanStep = 10,
     SlotLockErrorAction = 11,
     ChildOutcome = 12,
+    ConfigValidation = 13,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -126,6 +127,32 @@ pub enum ChildOutcomeAction {
     },
     OutputIncomplete,
     NoOutput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigReasoningState {
+    Absent,
+    Valid,
+    InvalidCatalog,
+    Unsupported,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigUrlState {
+    Absent,
+    Invalid,
+    Valid,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConfigValidationAction {
+    Valid,
+    ModelNonempty,
+    InvalidReasoningCatalog,
+    UnsupportedReasoning,
+    InvalidUrl,
+    LocalRequiresUrl,
+    NonLocalRejectsUrl,
 }
 
 unsafe extern "C" {
@@ -468,6 +495,46 @@ pub fn child_outcome(
     }
 }
 
+/// Chooses the first sub-agent configuration error after Rust has acquired and
+/// validated provider-catalog and URL facts.
+pub fn config_validation_plan(
+    model: Option<&str>,
+    reasoning: ConfigReasoningState,
+    url: ConfigUrlState,
+    provider_is_local: bool,
+) -> Result<ConfigValidationAction, MojoError> {
+    let reasoning = match reasoning {
+        ConfigReasoningState::Absent => 0,
+        ConfigReasoningState::Valid => 1,
+        ConfigReasoningState::InvalidCatalog => 2,
+        ConfigReasoningState::Unsupported => 3,
+    };
+    let url = match url {
+        ConfigUrlState::Absent => 0,
+        ConfigUrlState::Invalid => 1,
+        ConfigUrlState::Valid => 2,
+    };
+    let scalar = i64::from(reasoning)
+        | (i64::from(url) << 2)
+        | (i64::from(provider_is_local) << 4)
+        | (i64::from(model.is_some()) << 5);
+    let result = call(
+        Operation::ConfigValidation,
+        model.unwrap_or_default(),
+        scalar,
+    )?;
+    match result[0] {
+        0 => Ok(ConfigValidationAction::Valid),
+        1 => Ok(ConfigValidationAction::ModelNonempty),
+        2 => Ok(ConfigValidationAction::InvalidReasoningCatalog),
+        3 => Ok(ConfigValidationAction::UnsupportedReasoning),
+        4 => Ok(ConfigValidationAction::InvalidUrl),
+        5 => Ok(ConfigValidationAction::LocalRequiresUrl),
+        6 => Ok(ConfigValidationAction::NonLocalRejectsUrl),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -729,6 +796,57 @@ mod tests {
         assert_eq!(
             child_outcome(false, true, false, true).unwrap(),
             ChildOutcomeAction::Success
+        );
+
+        assert_eq!(
+            config_validation_plan(
+                Some(" \t"),
+                ConfigReasoningState::Unsupported,
+                ConfigUrlState::Invalid,
+                true,
+            )
+            .unwrap(),
+            ConfigValidationAction::ModelNonempty
+        );
+        assert_eq!(
+            config_validation_plan(
+                Some("model"),
+                ConfigReasoningState::Unsupported,
+                ConfigUrlState::Invalid,
+                true,
+            )
+            .unwrap(),
+            ConfigValidationAction::UnsupportedReasoning
+        );
+        assert_eq!(
+            config_validation_plan(
+                Some("model"),
+                ConfigReasoningState::Valid,
+                ConfigUrlState::Invalid,
+                true,
+            )
+            .unwrap(),
+            ConfigValidationAction::InvalidUrl
+        );
+        assert_eq!(
+            config_validation_plan(
+                Some("model"),
+                ConfigReasoningState::Absent,
+                ConfigUrlState::Absent,
+                true,
+            )
+            .unwrap(),
+            ConfigValidationAction::LocalRequiresUrl
+        );
+        assert_eq!(
+            config_validation_plan(
+                None,
+                ConfigReasoningState::Absent,
+                ConfigUrlState::Absent,
+                false,
+            )
+            .unwrap(),
+            ConfigValidationAction::Valid
         );
     }
 }

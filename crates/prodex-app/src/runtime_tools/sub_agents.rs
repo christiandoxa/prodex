@@ -5,9 +5,10 @@ use prodex_cli::{
     SuperLaunchTarget,
 };
 use prodex_mojo_core::sub_agent_policy::{
-    ChildArgvAction, ChildOutcomeAction, ChildSpecScalarViolation, ProviderUrlViolation,
-    RecursionDecision, SlotLockErrorAction, SlotPlanStep, child_argv_plan, child_outcome,
-    child_spec_scalar_violation, model_nonempty, provider_url_violation, recursion_decision,
+    ChildArgvAction, ChildOutcomeAction, ChildSpecScalarViolation, ConfigReasoningState,
+    ConfigUrlState, ConfigValidationAction, ProviderUrlViolation, RecursionDecision,
+    SlotLockErrorAction, SlotPlanStep, child_argv_plan, child_outcome, child_spec_scalar_violation,
+    config_validation_plan, model_nonempty, provider_url_violation, recursion_decision,
     slot_lock_error_action, slot_plan_step,
 };
 use prodex_provider_core::{
@@ -158,59 +159,75 @@ pub(crate) fn resolve_super_sub_agent_config(
     target: SuperLaunchTarget,
 ) -> Result<ResolvedSuperSubAgent> {
     let provider = config.provider;
-    if let Some(model) = config.model.as_deref()
-        && !model_nonempty(model).expect("Mojo sub-agent model validator returned invalid output")
-    {
-        bail!("--sub-agent-model must be nonempty");
-    }
-    let model = config.model.as_deref().map(|model| {
+    let model_input = config.model.as_deref();
+    let model = model_input.map(|model| {
         provider_model_spec(provider, model)
             .map(|spec| spec.id.to_string())
             .unwrap_or_else(|| model.to_string())
     });
-    if let Some(effort) = config.model_reasoning_effort {
-        match provider_model_reasoning_resolution(provider, model.as_deref(), Some(effort.as_str()))
-        {
-            Ok(_) => {}
+    let reasoning = match config.model_reasoning_effort {
+        None => ConfigReasoningState::Absent,
+        Some(effort) => match provider_model_reasoning_resolution(
+            provider,
+            model.as_deref(),
+            Some(effort.as_str()),
+        ) {
+            Ok(_) => ConfigReasoningState::Valid,
             Err(ProviderModelReasoningError::UnsupportedEffort) => {
-                let effort_model = model
-                    .as_deref()
-                    .or_else(|| {
-                        prodex_provider_core::provider_runtime_metadata(provider)
-                            .map(|metadata| metadata.default_model)
-                    })
-                    .unwrap_or("unknown");
-                bail!(
-                    "reasoning effort {} is unsupported for {} model {}; choose a catalogued effort or omit the explicit effort",
-                    effort.as_str(),
-                    provider.label(),
-                    effort_model
-                );
+                ConfigReasoningState::Unsupported
             }
             Err(ProviderModelReasoningError::InvalidCatalog) => {
-                bail!("provider model reasoning catalog is invalid");
+                ConfigReasoningState::InvalidCatalog
             }
-        }
-    }
-    let url = config
-        .url
-        .map(|url| {
-            prodex_cli::parse_sub_agent_url(&url)
-                .map(|_| url)
-                .map_err(anyhow::Error::msg)
-        })
-        .transpose()?;
-    match provider_url_violation(provider == ProviderId::Local, url.is_some())
-        .expect("Mojo sub-agent provider/URL policy returned invalid output")
+        },
+    };
+    let parsed_url = config.url.as_deref().map(prodex_cli::parse_sub_agent_url);
+    let url = match parsed_url.as_ref() {
+        None => ConfigUrlState::Absent,
+        Some(Ok(_)) => ConfigUrlState::Valid,
+        Some(Err(_)) => ConfigUrlState::Invalid,
+    };
+    match config_validation_plan(model_input, reasoning, url, provider == ProviderId::Local)
+        .expect("Mojo sub-agent configuration policy returned invalid output")
     {
-        Some(ProviderUrlViolation::LocalRequiresUrl) => {
+        ConfigValidationAction::Valid => {}
+        ConfigValidationAction::ModelNonempty => bail!("--sub-agent-model must be nonempty"),
+        ConfigValidationAction::InvalidReasoningCatalog => {
+            bail!("provider model reasoning catalog is invalid")
+        }
+        ConfigValidationAction::UnsupportedReasoning => {
+            let effort = config
+                .model_reasoning_effort
+                .expect("unsupported reasoning requires an explicit effort");
+            let effort_model = model
+                .as_deref()
+                .or_else(|| {
+                    prodex_provider_core::provider_runtime_metadata(provider)
+                        .map(|metadata| metadata.default_model)
+                })
+                .unwrap_or("unknown");
+            bail!(
+                "reasoning effort {} is unsupported for {} model {}; choose a catalogued effort or omit the explicit effort",
+                effort.as_str(),
+                provider.label(),
+                effort_model
+            );
+        }
+        ConfigValidationAction::InvalidUrl => {
+            let error = parsed_url
+                .as_ref()
+                .and_then(|result| result.as_ref().err())
+                .expect("invalid URL policy requires a parser error");
+            bail!("{error}");
+        }
+        ConfigValidationAction::LocalRequiresUrl => {
             bail!("local sub-agent provider requires --sub-agent-url");
         }
-        Some(ProviderUrlViolation::NonLocalRejectsUrl) => {
+        ConfigValidationAction::NonLocalRejectsUrl => {
             bail!("--sub-agent-url is only supported with the local sub-agent provider");
         }
-        None => {}
     }
+    let url = parsed_url.transpose().map_err(anyhow::Error::msg)?;
 
     Ok(ResolvedSuperSubAgent {
         provider,
@@ -690,6 +707,70 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.model.as_deref(), Some("account/model"));
         assert_eq!(resolved.effort, Some(SubAgentReasoningEffort::Ultra));
+    }
+
+    #[test]
+    fn resolver_preserves_mojo_error_precedence_across_facts() {
+        let model_error = resolve_super_sub_agent_config(
+            SubAgentConfig {
+                model: Some(" \t".to_string()),
+                url: Some("not-a-url".to_string()),
+                ..SubAgentConfig::default()
+            },
+            SuperLaunchTarget::Fresh,
+        )
+        .unwrap_err();
+        assert!(
+            model_error
+                .to_string()
+                .contains("--sub-agent-model must be nonempty")
+        );
+
+        let reasoning_error = resolve_super_sub_agent_config(
+            SubAgentConfig {
+                model: Some("gpt-5.6-luna".to_string()),
+                model_reasoning_effort: Some(SubAgentReasoningEffort::Ultra),
+                url: Some("not-a-url".to_string()),
+                ..SubAgentConfig::default()
+            },
+            SuperLaunchTarget::Fresh,
+        )
+        .unwrap_err();
+        assert!(
+            reasoning_error
+                .to_string()
+                .contains("reasoning effort ultra is unsupported")
+        );
+
+        let url_error = resolve_super_sub_agent_config(
+            SubAgentConfig {
+                model: Some("account/model".to_string()),
+                url: Some("not-a-url".to_string()),
+                ..SubAgentConfig::default()
+            },
+            SuperLaunchTarget::Fresh,
+        )
+        .unwrap_err();
+        assert!(
+            !url_error
+                .to_string()
+                .contains("--sub-agent-url is only supported with the local sub-agent provider")
+        );
+
+        let provider_url_error = resolve_super_sub_agent_config(
+            SubAgentConfig {
+                model: Some("account/model".to_string()),
+                url: Some("http://127.0.0.1:11434/v1".to_string()),
+                ..SubAgentConfig::default()
+            },
+            SuperLaunchTarget::Fresh,
+        )
+        .unwrap_err();
+        assert!(
+            provider_url_error
+                .to_string()
+                .contains("--sub-agent-url is only supported with the local sub-agent provider")
+        );
     }
 
     #[test]
