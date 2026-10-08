@@ -1000,6 +1000,7 @@ const DEEPSEEK_STRICT_SCHEMA_FILE = "crates/prodex-provider-core/src/deepseek_br
 const PROVIDER_ERROR_FILE = "crates/prodex-provider-core/src/errors.rs";
 const PROVIDER_SURFACE_FILE = "crates/prodex-provider-core/src/surface.rs";
 const PROVIDER_CONSTRAINTS_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints.rs";
+const PROVIDER_CONSTRAINTS_SCALAR_ADAPTER_FILE = "crates/prodex-mojo-core/src/provider_constraints/scalar_policy.rs";
 const WEBSOCKET_PROXY_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/websocket_proxy_policy.rs";
 const WEBSOCKET_PROXY_POLICY_FILE = "crates/prodex-runtime-proxy/src/websocket_proxy.rs";
 const TRANSPORT_FAILURE_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/transport_failure_policy.rs";
@@ -3320,12 +3321,24 @@ export function findViolations(files) {
         "prodex_provider_bridge_label_v1(",
         "prodex_provider_bridge_function_tool_name_max_bytes_v1(",
         "prodex_provider_bridge_native_passthrough_v1(",
-        "prodex_provider_reasoning_effort_label_v1(",
+        "pub use scalar_policy::{",
         "prodex_provider_surface_label_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
         .map((call) => filePath + ": provider bridge metadata adapter must retain Mojo ABI " + call);
+    }
+    if (filePath === PROVIDER_CONSTRAINTS_SCALAR_ADAPTER_FILE) {
+      const required = [
+        "prodex_provider_scalar_policy_v1(",
+        "prodex_provider_reasoning_effort_label_v1(",
+        "pub fn provider_reasoning_effort_class(",
+        "pub fn provider_boolean_token(",
+        "pub fn provider_copilot_prompt_token_limit(",
+      ];
+      return required
+        .filter((call) => !contents.includes(call))
+        .map((call) => filePath + ": extracted provider scalar adapter must retain Mojo ABI " + call);
     }
     if (filePath === PROVIDER_BRIDGE_ROUTING_FILE) {
       const body = contents.match(/\bfn\s+runtime_provider_native_passthrough\([^]*?^\}/mu)?.[0];
