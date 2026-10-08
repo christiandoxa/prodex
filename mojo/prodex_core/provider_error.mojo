@@ -513,9 +513,9 @@ def prodex_provider_error_classify_v1(
 # The response-body merge policy is a separate canonical semantic decision
 # from classifying one individual provider status/code/text. It must not be
 # reproduced in the Rust traversal or proxy adapter.
-comptime PROVIDER_ERROR_BODY_POLICY_ABI_VERSION: Int64 = 1
+comptime PROVIDER_ERROR_BODY_POLICY_ABI_VERSION: Int64 = 2
 comptime PROVIDER_ERROR_BODY_INCLUDE_STATUS: Int64 = 1
-comptime PROVIDER_ERROR_BODY_PREFER_CLASSIFICATION: Int64 = 2
+comptime PROVIDER_ERROR_BODY_SELECT_CANDIDATE: Int64 = 2
 
 
 def provider_error_body_class_rank(code: Int64) -> Int64:
@@ -532,20 +532,20 @@ def provider_error_body_class_rank(code: Int64) -> Int64:
     return 5
 
 
-@export("prodex_provider_error_body_policy_v1")
-def prodex_provider_error_body_policy_v1(
+@export("prodex_provider_error_body_policy_v2")
+def prodex_provider_error_body_policy_v2(
     abi_version: Int64,
     operation: Int64,
     http_status: Int64,
-    previous_class: Int64,
-    incoming_class: Int64,
+    candidate_classes_address: UInt64,
+    candidate_count: Int64,
     result_address: UInt64,
 ) abi("C") -> Int64:
     if abi_version != PROVIDER_ERROR_BODY_POLICY_ABI_VERSION:
         return 4
     if result_address == 0 or (
         operation != PROVIDER_ERROR_BODY_INCLUDE_STATUS
-        and operation != PROVIDER_ERROR_BODY_PREFER_CLASSIFICATION
+        and operation != PROVIDER_ERROR_BODY_SELECT_CANDIDATE
     ):
         return 1
     var decision = Pointer[mut=True, Int64, MutUntrackedOrigin](
@@ -557,17 +557,24 @@ def prodex_provider_error_body_policy_v1(
         decision[] = 0 if http_status == 429 else 1
         return 0
 
-    if (
-        previous_class < PROVIDER_ERROR_CLASS_AUTH
-        or previous_class > PROVIDER_ERROR_CLASS_OTHER
-        or incoming_class < PROVIDER_ERROR_CLASS_AUTH
-        or incoming_class > PROVIDER_ERROR_CLASS_OTHER
-    ):
+    if candidate_count < 0 or (candidate_count > 0 and candidate_classes_address == 0):
         return 1
-    decision[] = (
-        1
-        if provider_error_body_class_rank(incoming_class)
-        < provider_error_body_class_rank(previous_class)
-        else 0
+    if candidate_count == 0:
+        decision[] = -1
+        return 0
+
+    var candidates = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(candidate_classes_address)
     )
+    var winner: Int64 = -1
+    var winner_rank = Int64(6)
+    for index in range(candidate_count):
+        var candidate = candidates[unsafe_offset=index]
+        if candidate < PROVIDER_ERROR_CLASS_AUTH or candidate > PROVIDER_ERROR_CLASS_OTHER:
+            return 1
+        var rank = provider_error_body_class_rank(candidate)
+        if rank < winner_rank:
+            winner = index
+            winner_rank = rank
+    decision[] = winner
     return 0
