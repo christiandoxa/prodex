@@ -2,7 +2,8 @@
 //! parsing and compatibility serialization remain outside the Mojo bridge.
 mod response_metadata;
 pub use self::response_metadata::{
-    RuntimeResponseMetadataJsonPlan, runtime_response_metadata_json,
+    RuntimeResponseMetadataJsonPlan, runtime_response_event_is_completed,
+    runtime_response_metadata_json,
 };
 mod session_report;
 pub use self::session_report::{
