@@ -915,6 +915,10 @@ const QUOTA_GEMINI_DISPLAY_FILE = "crates/prodex-quota/src/render/gemini.rs";
 const QUOTA_REPORTS_FILE = "crates/prodex-quota/src/render/reports.rs";
 const QUOTA_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota.rs";
 const QUOTA_WINDOWS_FILE = "crates/prodex-quota/src/render/windows.rs";
+const QUOTA_WATCH_CALLER_FILE = "crates/prodex-app/src/quota_support/adaptive_refresh.rs";
+const QUOTA_WATCH_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota_watch_policy.rs";
+const QUOTA_WATCH_MOJO_FILE = "mojo/prodex_core/quota_watch_policy.mojo";
+
 const QUOTA_RESET_EPOCH_ADAPTER_FILE = "crates/prodex-mojo-core/src/quota/reset_epoch.rs";
 const QUOTA_RESET_EPOCH_MOJO_FILE = "mojo/prodex_core/quota.mojo";
 const QUOTA_RESET_EPOCH_TEST_FILE = "crates/prodex-mojo-core/tests/quota_reset_epoch.rs";
@@ -1086,6 +1090,51 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const quotaWatchViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === QUOTA_WATCH_CALLER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "quota_watch_policy::refresh_seconds(",
+        "quota_watch_policy::cache_alive_until(",
+        "quota_watch_policy::cache_remaining_seconds(",
+        "quota_watch_policy::cache_is_live(",
+      ];
+      const violations = required.filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: quota-watch policy must remain Mojo-owned through ${marker}`);
+      for (const legacy of [
+        "ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS",
+        "ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS",
+        "ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS",
+        "ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS",
+        "ALL_QUOTA_WATCH_NEAR_RESET_SECONDS",
+      ]) {
+        if (production.includes(legacy)) {
+          violations.push(`${filePath}: contains restored Rust quota-watch timing oracle ${legacy}`);
+        }
+      }
+      return violations;
+    }
+    if (filePath === QUOTA_WATCH_ADAPTER_FILE) {
+      return [
+        "prodex_quota_watch_refresh_v1(",
+        "prodex_quota_watch_cache_alive_until_v1(",
+        "prodex_quota_watch_cache_remaining_v1(",
+        "prodex_quota_watch_cache_live_v1(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: quota-watch ABI adapter must retain ${marker}`);
+    }
+    if (filePath === QUOTA_WATCH_MOJO_FILE) {
+      return [
+        '@export("prodex_quota_watch_refresh_v1")',
+        '@export("prodex_quota_watch_cache_alive_until_v1")',
+        '@export("prodex_quota_watch_cache_remaining_v1")',
+        '@export("prodex_quota_watch_cache_live_v1")',
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: quota-watch Mojo owner must retain ${marker}`);
+    }
+    return [];
+  });
+
   const smartContextCapsuleOrderViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === SMART_CONTEXT_CAPSULE_ORDER_FILE) {
       const body = contents.match(
@@ -5656,7 +5705,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -6973,6 +7022,38 @@ function selfTest() {
   ]]).join("\n"), /must not cap aggregate ID bytes/u);
   assert.match(findViolations([[SMART_CONTEXT_CAPSULE_ORDER_MOJO_FILE,
     '@export("prodex_mojo_smart_context_capsule_order_v1")']]).join("\n"), /must remain Mojo-owned/u);
+  const quotaWatchProduction = [
+    "quota_watch_policy::refresh_seconds(",
+    "quota_watch_policy::cache_alive_until(",
+    "quota_watch_policy::cache_remaining_seconds(",
+    "quota_watch_policy::cache_is_live(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[QUOTA_WATCH_CALLER_FILE, quotaWatchProduction]]), []);
+  assert.match(findViolations([[QUOTA_WATCH_CALLER_FILE,
+    quotaWatchProduction + "\nconst ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS: u64 = 10;",
+  ]]).join("\n"), /restored Rust quota-watch timing oracle/u);
+  assert.match(findViolations([[QUOTA_WATCH_CALLER_FILE, "fn stale_rust_refresh() {}"]]).join("\n"),
+    /must remain Mojo-owned/u);
+  const quotaWatchAbi = [
+    "prodex_quota_watch_refresh_v1(",
+    "prodex_quota_watch_cache_alive_until_v1(",
+    "prodex_quota_watch_cache_remaining_v1(",
+    "prodex_quota_watch_cache_live_v1(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[QUOTA_WATCH_ADAPTER_FILE, quotaWatchAbi]]), []);
+  assert.match(findViolations([[QUOTA_WATCH_ADAPTER_FILE, "fn legacy_quota_policy() {}"]]).join("\n"),
+    /ABI adapter must retain/u);
+  const quotaWatchMojo = [
+    '@export("prodex_quota_watch_refresh_v1")',
+    '@export("prodex_quota_watch_cache_alive_until_v1")',
+    '@export("prodex_quota_watch_cache_remaining_v1")',
+    '@export("prodex_quota_watch_cache_live_v1")',
+  ].join("\n");
+  assert.deepEqual(findViolations([[QUOTA_WATCH_MOJO_FILE, quotaWatchMojo]]), []);
+  assert.match(findViolations([[QUOTA_WATCH_MOJO_FILE,
+    '@export("prodex_quota_watch_refresh_v1")',
+  ]]).join("\n"), /Mojo owner must retain/u);
+
 }
 
 async function main() {

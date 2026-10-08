@@ -149,6 +149,8 @@ pub mod quota;
 #[cfg(feature = "mojo-quota")]
 pub mod quota_pool;
 #[cfg(feature = "mojo-runtime")]
+pub mod quota_watch_policy;
+#[cfg(feature = "mojo-runtime")]
 pub mod redaction;
 #[cfg(feature = "mojo-rich")]
 pub mod rich;

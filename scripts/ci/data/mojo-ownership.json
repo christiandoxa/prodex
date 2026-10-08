@@ -579,6 +579,26 @@
     },
     "additions": [
       {
+        "path": "mojo/prodex_core/quota_watch_policy.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "quota_watch_cadence_cache_lifetime"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/quota_watch_policy.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "quota_watch_cadence_cache_lifetime"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/runtime_auto_redeem.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -1328,6 +1348,30 @@
     "deepseek_chat_stream_event_translation"
   ],
   "authoritative_operations": [
+    {
+      "name": "quota_watch_cadence_cache_lifetime",
+      "domain": "runtime/quota-watch",
+      "introduced_in": "0.436.0",
+      "baseline_state": "Rust selected reset-urgency intervals, profile-count minimums, cache TTL, and expiry/remaining intervals",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_quota_watch_refresh_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/quota_watch_policy.mojo",
+      "consumer": "crates/prodex-app/src/quota_support/adaptive_refresh.rs",
+      "consumer_marker": "quota_watch_policy::refresh_seconds(",
+      "production_consumers": [
+        "crates/prodex-app/src/quota_support/adaptive_refresh.rs",
+        "crates/prodex-app/src/app_commands/log_tui.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/quota_watch_policy.rs",
+      "rust_owner_before": "deadline and reset-window arithmetic with saturation, earliest reset precedence, cache read freshness and one-shot quota watch pacing",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI and quota-watch app caller regressions exercise exact window, overflow and cache-expiry boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "clock capture, persistence and refresh scheduler IO, borrowed reset-window marshalling, checked duration materialization"
+    },
     {
       "name": "runtime_precommit_retry_exhaustion",
       "domain": "runtime/retry-budget",
