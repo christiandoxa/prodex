@@ -46,7 +46,14 @@ pub fn classify_provider_error_body(
     mut classify: impl FnMut(Option<u16>, Option<&str>, Option<&str>) -> ProviderErrorClassification,
 ) -> ProviderErrorClassification {
     let text = std::str::from_utf8(body).ok();
-    let mut best = if status == 429 {
+    // Mojo owns whether the bare status/text may be trusted. A generic 429
+    // cannot trigger provider rotation without a structured error code.
+    let include_status =
+        prodex_mojo_core::provider_error_policy::provider_error_body_include_unstructured_status(
+            status,
+        )
+        .expect("Mojo provider error body policy failed");
+    let mut best = if !include_status {
         ProviderErrorClassification {
             class: ProviderErrorClass::Other,
             cooldown_ms: 0,
@@ -58,12 +65,15 @@ pub fn classify_provider_error_body(
         // A bare 429 is deliberately omitted here: retry eligibility must come
         // from the structured provider code, never the status or message alone.
         let candidate = classify(
-            (status != 429).then_some(status),
+            include_status.then_some(status),
             Some(&token),
-            (status != 429).then_some(token.as_str()),
+            include_status.then_some(token.as_str()),
         );
-        if provider_error_classification_rank(candidate.class)
-            < provider_error_classification_rank(best.class)
+        if prodex_mojo_core::provider_error_policy::provider_error_body_prefer_classification(
+            best.class as i64,
+            candidate.class as i64,
+        )
+        .expect("Mojo provider error precedence failed")
         {
             best = candidate;
         }
@@ -86,17 +96,6 @@ pub fn provider_error_rejects_request_member(body: &[u8], member: &str) -> bool 
     // An ABI error must not trigger an unsupported-field retry.
     prodex_mojo_core::json::provider_error_rejects_member(&document.nodes, raw, member)
         .unwrap_or(false)
-}
-
-fn provider_error_classification_rank(class: ProviderErrorClass) -> u8 {
-    match class {
-        ProviderErrorClass::Auth => 0,
-        ProviderErrorClass::Quota => 1,
-        ProviderErrorClass::RateLimit => 2,
-        ProviderErrorClass::NotFound => 3,
-        ProviderErrorClass::Transient => 4,
-        ProviderErrorClass::Other => 5,
-    }
 }
 
 #[cfg(test)]
@@ -302,8 +301,8 @@ mod classifier_tests {
 #[cfg(test)]
 mod tests {
     use super::{
-        ProviderErrorClass, classify_provider_error, classify_provider_error_body,
-        provider_error_rejects_request_member,
+        ProviderErrorClass, ProviderErrorClassification, classify_provider_error,
+        classify_provider_error_body, provider_error_rejects_request_member,
     };
 
     #[test]
@@ -382,6 +381,71 @@ mod tests {
         let classified = classify_provider_error_body(400, body, classify_provider_error);
 
         assert_eq!(classified.class, ProviderErrorClass::NotFound);
+    }
+
+    #[test]
+    fn error_body_mojo_429_never_invokes_unstructured_classifier_or_status() {
+        let body = br#"{"error":{"code":"rate_limit_exceeded"}}"#;
+        let mut calls = Vec::new();
+        let result = classify_provider_error_body(429, body, |status, code, text| {
+            calls.push((status, code.map(str::to_owned), text.map(str::to_owned)));
+            ProviderErrorClassification {
+                class: ProviderErrorClass::RateLimit,
+                cooldown_ms: 60_000,
+            }
+        });
+        assert_eq!(result.class, ProviderErrorClass::RateLimit);
+        assert_eq!(
+            calls,
+            vec![(None, Some("rate_limit_exceeded".into()), None)]
+        );
+    }
+
+    #[test]
+    fn error_body_mojo_not_found_outweighs_a_prior_transient_error() {
+        let body = br#"{"error":[{"code":"server_is_overloaded"},{"code":"not_found_error"}]}"#;
+        let decision = classify_provider_error_body(429, body, classify_provider_error);
+        assert_eq!(decision.class, ProviderErrorClass::NotFound);
+    }
+
+    #[test]
+    fn error_body_mojo_precise_rank_beats_transient_and_preserves_first_tie() {
+        let body = br#"{"error":[{"code":"server_is_overloaded"},{"code":"not_found_error"},{"code":"slow_down"},{"code":"rate_limit_exceeded"}]}"#;
+        let mut calls = Vec::new();
+        let result = classify_provider_error_body(429, body, |_status, code, _text| {
+            let code = code.expect("Mojo excludes unstructured 429 classification");
+            calls.push(code.to_owned());
+            match code {
+                "server_is_overloaded" => ProviderErrorClassification {
+                    class: ProviderErrorClass::Transient,
+                    cooldown_ms: 10,
+                },
+                "not_found_error" => ProviderErrorClassification {
+                    class: ProviderErrorClass::NotFound,
+                    cooldown_ms: 20,
+                },
+                "slow_down" => ProviderErrorClassification {
+                    class: ProviderErrorClass::RateLimit,
+                    cooldown_ms: 30,
+                },
+                "rate_limit_exceeded" => ProviderErrorClassification {
+                    class: ProviderErrorClass::RateLimit,
+                    cooldown_ms: 40,
+                },
+                _ => panic!("unexpected structured code"),
+            }
+        });
+        assert_eq!(result.class, ProviderErrorClass::RateLimit);
+        assert_eq!(result.cooldown_ms, 30, "first equal-rank cooldown wins");
+        assert_eq!(
+            calls,
+            [
+                "server_is_overloaded",
+                "not_found_error",
+                "slow_down",
+                "rate_limit_exceeded"
+            ]
+        );
     }
 
     #[test]

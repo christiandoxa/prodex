@@ -137,6 +137,8 @@ pub mod profile_identity;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_constraints;
 #[cfg(feature = "mojo-provider-constraints")]
+pub mod provider_error_policy;
+#[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_registry;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_usage;
