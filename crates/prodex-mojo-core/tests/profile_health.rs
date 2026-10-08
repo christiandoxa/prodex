@@ -1,7 +1,8 @@
 #![cfg(feature = "mojo-runtime")]
 
 use prodex_mojo_core::runtime::{
-    ProfileHealthScoreInput, profile_circuit_half_open_seconds, profile_health_sort_key_batch,
+    ProfileBackoffMergeAction, ProfileHealthScoreInput, profile_backoff_merge_action,
+    profile_circuit_half_open_seconds, profile_health_sort_key_batch,
 };
 
 #[test]
@@ -84,4 +85,45 @@ fn profile_health_batch_rejects_more_than_abi_capacity() {
     };
     let inputs = vec![input; 257];
     assert!(profile_health_sort_key_batch(&inputs, 0, 2, 4, 8).is_err());
+}
+
+#[test]
+fn backoff_merge_action_handles_missing_ties_and_signed_extremes() {
+    for (existing, incoming, value_present, expected) in [
+        (None, None, true, ProfileBackoffMergeAction::Insert),
+        (
+            None,
+            Some(i64::MIN),
+            true,
+            ProfileBackoffMergeAction::Insert,
+        ),
+        (Some(10), Some(11), true, ProfileBackoffMergeAction::Insert),
+        (Some(10), Some(10), true, ProfileBackoffMergeAction::Insert),
+        (Some(11), Some(10), true, ProfileBackoffMergeAction::Keep),
+        (
+            Some(i64::MIN),
+            Some(i64::MAX),
+            true,
+            ProfileBackoffMergeAction::Insert,
+        ),
+        (
+            Some(i64::MAX),
+            Some(i64::MIN),
+            true,
+            ProfileBackoffMergeAction::Keep,
+        ),
+        (
+            Some(i64::MAX),
+            Some(i64::MAX),
+            false,
+            ProfileBackoffMergeAction::Remove,
+        ),
+    ] {
+        assert_eq!(
+            profile_backoff_merge_action(existing, incoming, value_present)
+                .expect("valid backoff update timestamps"),
+            expected,
+            "existing={existing:?} incoming={incoming:?} value_present={value_present}"
+        );
+    }
 }

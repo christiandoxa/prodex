@@ -84,12 +84,20 @@ pub fn merge_runtime_profile_backoffs(
         updated_at: existing.updated_at.clone(),
     };
     for (key, updated_at) in &incoming.updated_at {
-        if merged
-            .updated_at
-            .get(key)
-            .is_none_or(|current| updated_at >= current)
+        match prodex_mojo_core::runtime::profile_backoff_merge_action(
+            merged.updated_at.get(key).copied(),
+            Some(*updated_at),
+            true,
+        )
+        .expect("Mojo backoff timestamp merge policy returned invalid output")
         {
-            merged.updated_at.insert(key.clone(), *updated_at);
+            prodex_mojo_core::runtime::ProfileBackoffMergeAction::Keep => {}
+            prodex_mojo_core::runtime::ProfileBackoffMergeAction::Insert => {
+                merged.updated_at.insert(key.clone(), *updated_at);
+            }
+            prodex_mojo_core::runtime::ProfileBackoffMergeAction::Remove => {
+                panic!("Mojo timestamp merge cannot remove an incoming update")
+            }
         }
     }
     compact_runtime_profile_backoffs(merged, profiles, now)
