@@ -306,3 +306,24 @@ fn cookie_jar_debug_redacts_cookie_values() {
     assert!(debug.contains("<redacted>"), "{debug}");
     assert!(!debug.contains("synthetic-cookie-value"), "{debug}");
 }
+
+#[test]
+fn cookie_jar_prunes_oldest_host_cookie_through_mojo_policy() {
+    let jar = RuntimeProxyCookieJar::new();
+    let headers = (0..33)
+        .map(|index| format!("cookie{index:02}=value; Path=/"))
+        .collect::<Vec<_>>();
+    jar.capture_set_cookie_headers(
+        "",
+        "alpha",
+        "chatgpt.com",
+        "/",
+        true,
+        headers.iter().map(String::as_str),
+    );
+
+    let merged = merged(&jar, "alpha", "https://chatgpt.com/", &[])
+        .expect("cookie jar should retain the host after pruning");
+    assert!(!merged.contains("cookie00=value"), "{merged}");
+    assert!(merged.contains("cookie32=value"), "{merged}");
+}

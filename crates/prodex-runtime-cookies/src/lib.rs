@@ -441,14 +441,17 @@ fn runtime_proxy_cookie_prune_host_locked(
     cookies: &mut BTreeMap<RuntimeProxyCookieIdentity, RuntimeProxyCookieEntry>,
 ) {
     while cookies.len() > RUNTIME_PROXY_COOKIE_MAX_PER_HOST {
-        let Some(oldest_identity) = cookies
+        let candidates = cookies
             .iter()
-            .min_by_key(|(_, entry)| entry.updated_at)
-            .map(|(identity, _)| identity.clone())
-        else {
+            .map(|(identity, entry)| (identity.clone(), entry.updated_at))
+            .collect::<Vec<_>>();
+        let Some(oldest_index) = prodex_mojo_core::runtime_cookie_policy::oldest_timestamp_index(
+            &candidates.iter().map(|(_, updated_at)| *updated_at).collect::<Vec<_>>(),
+        )
+        .expect("Mojo cookie eviction policy returned invalid output") else {
             break;
         };
-        cookies.remove(&oldest_identity);
+        cookies.remove(&candidates[oldest_index].0);
     }
 }
 
@@ -459,21 +462,19 @@ fn runtime_proxy_cookie_prune_global_locked(
     >,
 ) {
     while jar.len() > RUNTIME_PROXY_COOKIE_MAX_HOSTS {
-        let Some(oldest_key) = jar
+        let candidates = jar
             .iter()
-            .filter_map(|(key, cookies)| {
-                cookies
-                    .values()
-                    .map(|entry| entry.updated_at)
-                    .min()
-                    .map(|updated_at| (key.clone(), updated_at))
+            .flat_map(|(key, cookies)| {
+                cookies.values().map(move |entry| (key.clone(), entry.updated_at))
             })
-            .min_by_key(|(_, updated_at)| *updated_at)
-            .map(|(key, _)| key)
-        else {
+            .collect::<Vec<_>>();
+        let Some(oldest_index) = prodex_mojo_core::runtime_cookie_policy::oldest_timestamp_index(
+            &candidates.iter().map(|(_, updated_at)| *updated_at).collect::<Vec<_>>(),
+        )
+        .expect("Mojo cookie eviction policy returned invalid output") else {
             break;
         };
-        jar.remove(&oldest_key);
+        jar.remove(&candidates[oldest_index].0);
     }
 }
 
