@@ -53,32 +53,32 @@ pub fn classify_provider_error_body(
             status,
         )
         .expect("Mojo provider error body policy failed");
-    let mut best = if !include_status {
-        ProviderErrorClassification {
-            class: ProviderErrorClass::Other,
-            cooldown_ms: 0,
-        }
-    } else {
-        classify(Some(status), None, text)
-    };
+    let mut candidates = Vec::new();
+    if include_status {
+        candidates.push(classify(Some(status), None, text));
+    }
     for token in provider_error_codes(body) {
-        // A bare 429 is deliberately omitted here: retry eligibility must come
-        // from the structured provider code, never the status or message alone.
-        let candidate = classify(
+        // On 429, only a structured provider code may take part in selection.
+        candidates.push(classify(
             include_status.then_some(status),
             Some(&token),
             include_status.then_some(token.as_str()),
-        );
-        if prodex_mojo_core::provider_error_policy::provider_error_body_prefer_classification(
-            best.class as i64,
-            candidate.class as i64,
-        )
-        .expect("Mojo provider error precedence failed")
-        {
-            best = candidate;
-        }
+        ));
     }
-    best
+    let classes = candidates
+        .iter()
+        .map(|candidate| candidate.class as i64)
+        .collect::<Vec<_>>();
+    let winner =
+        prodex_mojo_core::provider_error_policy::provider_error_body_select_candidate(&classes)
+            .expect("Mojo provider error precedence failed");
+    winner.map_or(
+        ProviderErrorClassification {
+            class: ProviderErrorClass::Other,
+            cooldown_ms: 0,
+        },
+        |index| candidates[index],
+    )
 }
 
 /// True only when the provider error explicitly identifies a request member as rejected.
@@ -446,6 +446,32 @@ mod tests {
                 "rate_limit_exceeded"
             ]
         );
+    }
+
+    #[test]
+    fn provider_error_body_real_classifier_selects_structured_precedence() {
+        let body = br#"{"error":[{"code":"server_is_overloaded"},{"code":"not_found_error"},{"code":"rate_limit_exceeded"},{"code":"slow_down"}]}"#;
+        assert_eq!(
+            classify_provider_error_body(429, body, classify_provider_error),
+            ProviderErrorClassification {
+                class: ProviderErrorClass::RateLimit,
+                cooldown_ms: 60_000,
+            }
+        );
+    }
+
+    #[test]
+    fn provider_error_body_empty_malformed_and_plain_429_are_non_rotatable() {
+        for body in [b"".as_slice(), b"{broken", b"too many requests"] {
+            assert_eq!(
+                classify_provider_error_body(429, body, classify_provider_error),
+                ProviderErrorClassification {
+                    class: ProviderErrorClass::Other,
+                    cooldown_ms: 0,
+                },
+                "{body:?}"
+            );
+        }
     }
 
     #[test]
