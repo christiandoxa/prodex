@@ -69,12 +69,6 @@ enum LoginMethod {
     Status,
 }
 
-impl LoginMethod {
-    fn mojo_tag(self) -> i64 {
-        self as i64
-    }
-}
-
 struct LoginRequest {
     method: LoginMethod,
     codex_args: Vec<OsString>,
@@ -199,7 +193,7 @@ fn auto_login_route(
     login_method: LoginMethod,
     auth_label: Option<&str>,
 ) -> prodex_mojo_core::profile_login_policy::AutoLoginRoute {
-    prodex_mojo_core::profile_login_policy::auto_login_route(login_method.mojo_tag(), auth_label)
+    prodex_mojo_core::profile_login_policy::auto_login_route(login_method as i64, auth_label)
         .expect("Mojo profile-login auto route returned invalid output")
 }
 
@@ -386,7 +380,7 @@ fn finish_auto_login_for_new_profile(
 
 fn run_codex_login(codex_home: &Path, login_request: &LoginRequest) -> Result<ExitStatus> {
     let method_plan = prodex_mojo_core::profile_login_policy::login_method_plan(
-        login_request.method.mojo_tag(),
+        login_request.method as i64,
         login_request.api_key.is_some(),
     )
     .expect("Mojo profile-login method route returned invalid output");
@@ -418,7 +412,7 @@ fn run_codex_login(codex_home: &Path, login_request: &LoginRequest) -> Result<Ex
         None,
     )?;
     let execution =
-        prodex_mojo_core::profile_login_policy::login_execution(login_request.method.mojo_tag())
+        prodex_mojo_core::profile_login_policy::login_execution(login_request.method as i64)
             .expect("Mojo profile-login execution policy returned invalid output");
     if status.success()
         && matches!(
