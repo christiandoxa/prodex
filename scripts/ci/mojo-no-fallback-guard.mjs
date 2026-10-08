@@ -130,6 +130,7 @@ const PROMOTED_FILES = [
   "crates/prodex-cli/src/sub_agent.rs",
   "crates/prodex-cli/src/runtime_args/super_validation.rs",
   "crates/prodex-app/src/runtime_tools/sub_agents.rs",
+  "crates/prodex-app/src/runtime_tools/sub_agents/config.rs",
   "crates/prodex-app/src/runtime_tools/sub_agent_rendering.rs",
   "crates/prodex-app/src/runtime_tools/sub_agent_catalog.rs",
   "crates/prodex-mojo-core/src/runtime_overlay_policy.rs",
@@ -905,6 +906,7 @@ const SUB_AGENT_CLI_VALIDATION_FILE = "crates/prodex-cli/src/runtime_args/super_
 const SUB_AGENT_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy.rs";
 const SUB_AGENT_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/sub_agent_policy/rendering.rs";
 const SUB_AGENT_CHILD_FILE = "crates/prodex-app/src/runtime_tools/sub_agents.rs";
+const SUB_AGENT_CONFIG_FILE = "crates/prodex-app/src/runtime_tools/sub_agents/config.rs";
 const SUB_AGENT_RENDERING_FILE = "crates/prodex-app/src/runtime_tools/sub_agent_rendering.rs";
 const RUNTIME_OVERLAY_POLICY_FILE = "crates/prodex-app/src/runtime_tools/overlay.rs";
 const RUNTIME_OVERLAY_POLICY_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_overlay_policy.rs";
@@ -2849,7 +2851,9 @@ export function findViolations(files) {
       if (!contents.includes("child_argv_plan(")) {
         violations.push(filePath + ": sub-agent child argv construction must retain Mojo planner");
       }
-      if (!contents.includes("provider_model_reasoning_resolution(")) {
+      const configContents = files.find(([candidate]) => candidate === SUB_AGENT_CONFIG_FILE)?.[1] ?? "";
+      if (!contents.includes("provider_model_reasoning_resolution(") &&
+          !configContents.includes("provider_model_reasoning_resolution(")) {
         violations.push(filePath + ": sub-agent reasoning compatibility must retain canonical Mojo-backed catalog resolver");
       }
       const production = contents.split("#[cfg(test)]", 1)[0];
