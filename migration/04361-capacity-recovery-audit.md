@@ -98,3 +98,38 @@ Local PDX verification:
 
 These results supplement the capacity-recovery regressions above; they do not
 claim that provider-wide capacity is guaranteed or that BRP was modified.
+
+## Windows replay-deadline fixture qualification
+
+Exact-SHA CI run `37752748457` completed with 65 successful jobs and one failing
+Windows library partition. Its only failure was the hard-affinity rate-limit
+replay fixture: expected accounts `[main, second]`, observed `[main, main, second]`.
+The fixture's upstream response requested a one-second retry delay. A deliberate
+2.2-second client replay delay on Linux reproduced that exact sequence, while the
+initial hard-affinity request still correctly returned the full-context replay
+signal after only one upstream attempt. Retrying the original profile after its
+hold expires is valid production behavior, not a failure to release affinity.
+
+The focused fixture now uses an explicit 30-second server-requested hold and
+retains the 2.2-second delayed-client regression. Account-order assertions remain
+strict, with an additional assertion that no alternate profile is attempted
+before the client supplies full history. No production backoff, retry, or quota
+policy changed. All 12 hard-affinity replay tests pass; formatting, size,
+no-fallback, and Mojo authority guards pass.
+
+## Executable-level single-profile capacity recovery
+
+A supplemental credential-free artifact smoke on PDX starts the built
+`0.436.1` executable, one synthetic Ready profile, and a loopback upstream that
+flushes HTTP 200 headers, waits 200 ms, then returns `server_is_overloaded`.
+The same broker retries that profile, returns a successful stream, and accepts
+the next request with the same session ID without restarting. Exactly three
+upstream requests occur: one failed attempt, one recovered response, and one
+successful follow-up. The failed event does not reach either client response.
+The unchanged general release artifact smoke also passes.
+
+The supplemental fixture must seed a fresh Ready quota snapshot. The original
+success-only fixture had no such snapshot; its synthetic credentials cannot
+establish quota eligibility, so using it unchanged for recovery timed out.
+Adding the synthetic snapshot corrected that fixture, without bypassing quota
+checks or changing production selection policy. BRP remains read-only.
