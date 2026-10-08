@@ -14,6 +14,7 @@ comptime RESPONSE_FORWARDING_COMMITTED_PREVIOUS_RESPONSE_NOT_FOUND: Int64 = 6
 comptime RESPONSE_FORWARDING_GENERATION_START_ONCE: Int64 = 7
 comptime RESPONSE_FORWARDING_USAGE_EVENT_LIVE: Int64 = 8
 comptime RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT: Int64 = 9
+comptime RESPONSE_FORWARDING_TAP_PLAN: Int64 = 10
 
 comptime RESPONSE_ATTEMPT_SUCCESS: Int64 = 0
 comptime RESPONSE_ATTEMPT_AUTH_FAILED: Int64 = 1
@@ -182,7 +183,7 @@ def prodex_runtime_response_forwarding_classify_v1(
 ) abi("C") -> Int64:
     if (
         operation < RESPONSE_FORWARDING_SKIP_HEADER
-        or operation > RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT
+        or operation > RESPONSE_FORWARDING_TAP_PLAN
         or present < 0
         or present > 1
         or length < 0
@@ -257,6 +258,14 @@ def prodex_runtime_response_forwarding_classify_v1(
         var committed = _numeric & 1
         var previous_response_not_found = (_numeric >> 1) & 1
         return Int64(committed == 1 and previous_response_not_found == 1)
+
+    if operation == RESPONSE_FORWARDING_TAP_PLAN:
+        # Bits: generation-start, completed, live-usage, loggable-usage.
+        var generation = present == 1 and response_generation_start(address, length)
+        var completed = present == 1 and response_equals(address, length, StringSlice("response.completed"))
+        var live = generation and _numeric > 0
+        var loggable = present == 0 or completed or response_equals(address, length, StringSlice("response.failed")) or response_ends_with(address, length, StringSlice(".completed"))
+        return Int64(generation) | (Int64(completed) << 1) | (Int64(live) << 2) | (Int64(loggable) << 3)
 
     if operation == RESPONSE_FORWARDING_GENERATION_START_ONCE:
         var already_started = _numeric & 1
