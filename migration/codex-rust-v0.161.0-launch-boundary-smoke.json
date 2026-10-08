@@ -1,0 +1,91 @@
+{
+  "schema": "prodex-codex-launch-smoke-v1",
+  "codex_version": "0.161.0",
+  "candidate_base_version": "prodex 0.435.9",
+  "synthetic_credentials_only": true,
+  "cases": [
+    {
+      "case": "standard",
+      "flow": "run",
+      "profile_count": 1,
+      "production_dry_run": "passed",
+      "governed_provider_config_present": false,
+      "option_value_adjacent": true,
+      "official_codex_validation": "review-rejected-before-launch",
+      "model_turn_sent": false
+    },
+    {
+      "case": "daybreak_blue",
+      "flow": "run",
+      "profile_count": 1,
+      "production_dry_run": "passed",
+      "governed_provider_config_present": false,
+      "option_value_adjacent": true,
+      "official_codex_validation": "review-rejected-before-launch",
+      "model_turn_sent": false
+    },
+    {
+      "case": "daybreak_red",
+      "flow": "run",
+      "profile_count": 1,
+      "production_dry_run": "passed",
+      "governed_provider_config_present": false,
+      "option_value_adjacent": true,
+      "official_codex_validation": "review-rejected-before-launch",
+      "model_turn_sent": false
+    },
+    {
+      "case": "daybreak-blue",
+      "flow": "run",
+      "profile_count": 1,
+      "production_dry_run": "passed",
+      "governed_provider_config_present": false,
+      "option_value_adjacent": true,
+      "official_codex_validation": "invalid-program-rejected-by-Codex",
+      "model_turn_sent": false
+    },
+    {
+      "case": "standard",
+      "flow": "super",
+      "profile_count": 1,
+      "production_dry_run": "passed",
+      "governed_provider_config_present": true,
+      "option_value_adjacent": true,
+      "official_codex_validation": "review-rejected-before-launch",
+      "model_turn_sent": false
+    },
+    {
+      "case": "daybreak_blue",
+      "flow": "super",
+      "profile_count": 1,
+      "production_dry_run": "passed",
+      "governed_provider_config_present": true,
+      "option_value_adjacent": true,
+      "official_codex_validation": "review-rejected-before-launch",
+      "model_turn_sent": false
+    },
+    {
+      "case": "daybreak_red",
+      "flow": "super",
+      "profile_count": 1,
+      "production_dry_run": "passed",
+      "governed_provider_config_present": true,
+      "option_value_adjacent": true,
+      "official_codex_validation": "review-rejected-before-launch",
+      "model_turn_sent": false
+    },
+    {
+      "case": "daybreak-blue",
+      "flow": "super",
+      "profile_count": 1,
+      "production_dry_run": "passed",
+      "governed_provider_config_present": true,
+      "option_value_adjacent": true,
+      "official_codex_validation": "invalid-program-rejected-by-Codex",
+      "model_turn_sent": false
+    }
+  ],
+  "qualification_target": "0.436.0",
+  "codex_tag": "rust-v0.161.0",
+  "codex_archive_sha256": "b1efb95097660d7f2e5a3887618a23f2ea1b0d548078bf92b0f7a5d229a0cef2"
+}
