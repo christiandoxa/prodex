@@ -154,6 +154,19 @@ fn read_recent_audit_events_applies_tail_and_filters() {
     assert_eq!(filtered[0].action, "add");
     assert_eq!(filtered[1].action, "use");
 
+    let filtered_tail = read_recent_audit_events(
+        &path,
+        &AuditLogQuery {
+            tail: 1,
+            component: Some("profile".to_string()),
+            action: None,
+            outcome: None,
+        },
+    )
+    .unwrap();
+    assert_eq!(filtered_tail.len(), 1);
+    assert_eq!(filtered_tail[0].action, "use");
+
     let tailed = read_recent_audit_events(
         &path,
         &AuditLogQuery {

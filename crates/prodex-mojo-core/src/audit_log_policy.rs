@@ -197,6 +197,21 @@ unsafe extern "C" {
         written_address: u64,
         present_address: u64,
     ) -> i64;
+    fn prodex_audit_line_window_v1(
+        abi_version: i64,
+        input_address: u64,
+        input_length: i64,
+        discard_partial_first_line: i64,
+        tail_present: i64,
+        tail: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_audit_tail_start_v1(
+        abi_version: i64,
+        item_count: u64,
+        tail: u64,
+        output_address: u64,
+    ) -> i64;
 }
 
 fn status(value: i64) -> Result<(), MojoError> {
@@ -605,6 +620,48 @@ pub fn email_domain(value: Option<&str>) -> Result<Option<String>, MojoError> {
     metadata_text(prodex_audit_email_domain_v1, value)
 }
 
+pub fn line_window_start(
+    input: &str,
+    discard_partial_first_line: bool,
+    tail: Option<usize>,
+) -> Result<usize, MojoError> {
+    let mut output = -1_i64;
+    status(unsafe {
+        prodex_audit_line_window_v1(
+            ABI_VERSION,
+            input.as_ptr() as usize as u64,
+            i64::try_from(input.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(discard_partial_first_line),
+            i64::from(tail.is_some()),
+            tail.map(|tail| i64::try_from(tail).unwrap_or(i64::MAX))
+                .unwrap_or_default(),
+            (&mut output as *mut i64) as usize as u64,
+        )
+    })?;
+    let output = usize::try_from(output).map_err(|_| MojoError::InvalidOutput)?;
+    if output > input.len() || !input.is_char_boundary(output) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(output)
+}
+
+pub fn tail_start_index(item_count: usize, tail: usize) -> Result<usize, MojoError> {
+    let mut output = u64::MAX;
+    status(unsafe {
+        prodex_audit_tail_start_v1(
+            ABI_VERSION,
+            u64::try_from(item_count).map_err(|_| MojoError::InvalidInput)?,
+            u64::try_from(tail).unwrap_or(u64::MAX),
+            (&mut output as *mut u64) as usize as u64,
+        )
+    })?;
+    let output = usize::try_from(output).map_err(|_| MojoError::InvalidOutput)?;
+    if output > item_count {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(output)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -761,5 +818,23 @@ mod tests {
             Some("example.com".to_string())
         );
         assert_eq!(email_domain(Some("missing-at")).unwrap(), None);
+    }
+
+    #[test]
+    fn audit_line_window_drops_partial_prefix_and_keeps_requested_tail() {
+        assert_eq!(
+            line_window_start("partial\nfirst\r\nsecond\r\n", true, Some(1)).unwrap(),
+            15
+        );
+        assert_eq!(
+            line_window_start("first\nsecond\nthird", false, Some(2)).unwrap(),
+            6
+        );
+        assert_eq!(line_window_start("first\n\n", false, Some(1)).unwrap(), 6);
+        assert_eq!(line_window_start("partial", true, None).unwrap(), 7);
+        assert_eq!(line_window_start("\ncomplete", true, None).unwrap(), 0);
+        assert_eq!(tail_start_index(4, 2).unwrap(), 2);
+        assert_eq!(tail_start_index(4, 0).unwrap(), 4);
+        assert_eq!(tail_start_index(2, usize::MAX).unwrap(), 0);
     }
 }
