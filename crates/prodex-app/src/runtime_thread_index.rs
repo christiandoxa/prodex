@@ -1,8 +1,12 @@
 use crate::{AppPaths, ChildProcessPlan};
 use anyhow::{Context, Result, bail};
+use prodex_mojo_core::json::{JsonKind, JsonNode};
+pub(crate) use prodex_mojo_core::runtime::thread_index::ThreadIndexState as LatestThreadIndexState;
+use prodex_mojo_core::runtime::thread_index::{
+    self as thread_index_mojo, ThreadIndexProtocol, ThreadIndexProtocolStep,
+    ThreadIndexRepairAction, ThreadIndexRepairProgress, ThreadIndexScope,
+};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
-use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{BufRead, BufReader, BufWriter, Write};
@@ -12,23 +16,18 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-const THREAD_INDEX_PAGE_LIMIT: u64 = 100;
 const THREAD_INDEX_TIMEOUT: Duration = Duration::from_secs(60);
 const TARGETED_THREAD_INDEX_TIMEOUT: Duration = Duration::from_secs(3);
 const THREAD_INDEX_CLEANUP_TIMEOUT: Duration = Duration::from_secs(1);
 const THREAD_INDEX_DIRTY_FILE: &str = "thread-index-dirty.json";
-const THREAD_INDEX_DIRTY_SCHEMA_VERSION: u8 = 1;
+// ponytail: cap each ABI frame at 4 MiB / 65k nodes; raise together if a real Codex page needs more.
+const THREAD_INDEX_MAX_JSON_BYTES: usize = 4 * 1024 * 1024;
+const THREAD_INDEX_MAX_JSON_NODES: usize = 65_536;
 
-#[derive(Clone, Copy)]
-enum ThreadIndexRepairScope {
-    Full,
-    Latest,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct ThreadIndexDirtyMarker {
-    schema_version: u8,
-    rollout_path: String,
+#[derive(serde::Deserialize)]
+struct ThreadIndexDirtyMarkerBoundary {
+    schema_version: serde_json::Value,
+    rollout_path: serde_json::Value,
 }
 
 /// Runs Codex's own scan-and-repair listing against the exact child home and environment.
@@ -42,7 +41,7 @@ pub(crate) fn reconcile_codex_thread_index(
     reconcile_codex_thread_index_with_scope(
         codex_binary,
         child,
-        ThreadIndexRepairScope::Full,
+        ThreadIndexScope::Full,
         THREAD_INDEX_TIMEOUT,
     )
 }
@@ -55,7 +54,7 @@ pub(crate) fn reconcile_latest_codex_thread_index(
     reconcile_codex_thread_index_with_scope(
         codex_binary,
         child,
-        ThreadIndexRepairScope::Latest,
+        ThreadIndexScope::Latest,
         TARGETED_THREAD_INDEX_TIMEOUT,
     )
 }
@@ -63,7 +62,7 @@ pub(crate) fn reconcile_latest_codex_thread_index(
 fn reconcile_codex_thread_index_with_scope(
     codex_binary: &OsStr,
     child: &ChildProcessPlan,
-    scope: ThreadIndexRepairScope,
+    scope: ThreadIndexScope,
     timeout: Duration,
 ) -> Result<()> {
     crate::validate_selected_codex_binary(codex_binary)?;
@@ -135,136 +134,200 @@ pub(crate) fn reconcile_codex_thread_index_protocol(
     reader: &mut impl BufRead,
     writer: &mut impl Write,
 ) -> Result<()> {
-    reconcile_codex_thread_index_protocol_with_scope(reader, writer, ThreadIndexRepairScope::Full)
+    reconcile_codex_thread_index_protocol_with_scope(reader, writer, ThreadIndexScope::Full)
 }
 
 fn reconcile_codex_thread_index_protocol_with_scope(
     reader: &mut impl BufRead,
     writer: &mut impl Write,
-    scope: ThreadIndexRepairScope,
+    scope: ThreadIndexScope,
 ) -> Result<()> {
-    let mut request_id = 1_u64;
-    write_app_server_message(
-        writer,
-        &serde_json::json!({
-            "id": request_id,
-            "method": "initialize",
-            "params": {
-                "clientInfo": {
-                    "name": "prodex-thread-index-reconciliation",
-                    "version": env!("CARGO_PKG_VERSION"),
+    let (mut protocol, step) =
+        mojo_result(ThreadIndexProtocol::start(scope, env!("CARGO_PKG_VERSION")))?;
+    if write_protocol_step(writer, step)? {
+        return Ok(());
+    }
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            if write_protocol_step(writer, mojo_result(protocol.eof())?)? {
+                return Ok(());
+            }
+            continue;
+        }
+        if line.len() > THREAD_INDEX_MAX_JSON_BYTES {
+            return Err(anyhow::anyhow!(
+                "Mojo thread-index JSON input exceeded its ABI bound"
+            ));
+        }
+        let step = match serde_json::from_str::<serde_json::Value>(&line) {
+            Ok(value) => {
+                let tree = thread_index_json_tree(&value)?;
+                mojo_result(protocol.response(&tree.nodes, &tree.raw, line.len()))?
+            }
+            Err(error) => {
+                let step = mojo_result(protocol.invalid_json(line.len()))?;
+                if write_invalid_json_step(writer, step, error)? {
+                    return Ok(());
                 }
+                continue;
             }
-        }),
-    )?;
-    read_app_server_response(reader, request_id)?;
-    write_app_server_message(writer, &serde_json::json!({"method": "initialized"}))?;
-
-    let archives = match scope {
-        ThreadIndexRepairScope::Full => [false, true].as_slice(),
-        ThreadIndexRepairScope::Latest => [false].as_slice(),
-    };
-    for &archived in archives {
-        let mut cursor = None;
-        let mut seen_cursors = HashSet::new();
-        loop {
-            request_id += 1;
-            write_app_server_message(
-                writer,
-                &serde_json::json!({
-                    "id": request_id,
-                    "method": "thread/list",
-                    "params": {
-                        "archived": archived,
-                        "cursor": cursor,
-                        "limit": match scope {
-                            ThreadIndexRepairScope::Full => THREAD_INDEX_PAGE_LIMIT,
-                            ThreadIndexRepairScope::Latest => 1,
-                        },
-                        "modelProviders": [],
-                        "sortKey": "updated_at",
-                        "sourceKinds": [],
-                        "useStateDbOnly": false,
-                    }
-                }),
-            )?;
-            let result = read_app_server_response(reader, request_id)?;
-            let next_cursor = match result.get("nextCursor") {
-                None | Some(serde_json::Value::Null) => None,
-                Some(serde_json::Value::String(cursor)) => Some(cursor.clone()),
-                Some(_) => bail!("Codex app-server returned an invalid thread list cursor"),
-            };
-            let Some(next_cursor) = next_cursor else {
-                break;
-            };
-            if matches!(scope, ThreadIndexRepairScope::Latest) {
-                break;
-            }
-            if !seen_cursors.insert(next_cursor.clone()) {
-                bail!("Codex app-server repeated a thread list cursor");
-            }
-            cursor = Some(next_cursor);
+        };
+        if write_protocol_step(writer, step)? {
+            return Ok(());
         }
     }
-    Ok(())
 }
 
-fn write_app_server_message(writer: &mut impl Write, message: &serde_json::Value) -> Result<()> {
-    serde_json::to_writer(&mut *writer, message).context("failed to encode app-server request")?;
+fn mojo_result<T>(result: std::result::Result<T, prodex_mojo_core::MojoError>) -> Result<T> {
+    result.map_err(|error| anyhow::anyhow!("Mojo thread-index ABI failed: {error:?}"))
+}
+
+fn write_protocol_step(writer: &mut impl Write, step: ThreadIndexProtocolStep) -> Result<bool> {
+    match step {
+        ThreadIndexProtocolStep::Ignore => Ok(false),
+        ThreadIndexProtocolStep::Send(messages) => {
+            for message in messages {
+                write_app_server_message(writer, &message)?;
+            }
+            Ok(false)
+        }
+        ThreadIndexProtocolStep::Done => Ok(true),
+        ThreadIndexProtocolStep::Error(message) => bail!("{message}"),
+    }
+}
+
+fn write_invalid_json_step(
+    writer: &mut impl Write,
+    step: ThreadIndexProtocolStep,
+    parse_error: serde_json::Error,
+) -> Result<bool> {
+    match step {
+        ThreadIndexProtocolStep::Error(message) => {
+            Err(anyhow::Error::new(parse_error).context(message))
+        }
+        step => write_protocol_step(writer, step),
+    }
+}
+
+fn write_app_server_message(writer: &mut impl Write, message: &[u8]) -> Result<()> {
+    writer.write_all(message)?;
     writer.write_all(b"\n")?;
     writer.flush().context("failed to send app-server request")
 }
 
-fn read_app_server_response(
-    reader: &mut impl BufRead,
-    request_id: u64,
-) -> Result<serde_json::Value> {
-    loop {
-        let mut line = String::new();
-        if reader.read_line(&mut line)? == 0 {
-            bail!("Codex app-server stopped during thread index reconciliation");
+struct ThreadIndexJsonTree<'a> {
+    nodes: Vec<JsonNode<'a>>,
+    raw: Vec<u8>,
+}
+
+fn thread_index_json_tree(value: &serde_json::Value) -> Result<ThreadIndexJsonTree<'_>> {
+    let mut tree = ThreadIndexJsonTree {
+        nodes: Vec::new(),
+        raw: Vec::new(),
+    };
+    append_thread_index_json_node(value, "", None, &mut tree)?;
+    if tree.raw.len() > THREAD_INDEX_MAX_JSON_BYTES {
+        bail!("Mojo thread-index normalized JSON exceeded its ABI bound");
+    }
+    Ok(tree)
+}
+
+fn append_thread_index_json_node<'a>(
+    value: &'a serde_json::Value,
+    key: &'a str,
+    parent: Option<usize>,
+    tree: &mut ThreadIndexJsonTree<'a>,
+) -> Result<usize> {
+    if tree.nodes.len() >= THREAD_INDEX_MAX_JSON_NODES {
+        bail!("Mojo thread-index JSON tree exceeded its ABI bound");
+    }
+    tree.nodes
+        .try_reserve(1)
+        .map_err(|_| anyhow::anyhow!("failed to allocate thread-index JSON nodes"))?;
+    let index = tree.nodes.len();
+    let start = tree.raw.len();
+    let kind = match value {
+        serde_json::Value::Null => JsonKind::Null,
+        serde_json::Value::Bool(false) => JsonKind::False,
+        serde_json::Value::Bool(true) => JsonKind::True,
+        serde_json::Value::Number(_) => JsonKind::Number,
+        serde_json::Value::String(_) => JsonKind::String,
+        serde_json::Value::Array(_) => JsonKind::Array,
+        serde_json::Value::Object(_) => JsonKind::Object,
+    };
+    tree.nodes.push(JsonNode {
+        kind,
+        first_child: None,
+        next_sibling: None,
+        parent,
+        key,
+        text: value.as_str().unwrap_or_default(),
+        raw_start: start,
+        raw_length: 0,
+    });
+    let mut previous = None;
+    match value {
+        serde_json::Value::Array(values) => {
+            tree.raw.push(b'[');
+            for value in values {
+                if previous.is_some() {
+                    tree.raw.push(b',');
+                }
+                let child = append_thread_index_json_node(value, "", Some(index), tree)?;
+                link_thread_index_json_node(&mut tree.nodes, index, &mut previous, child);
+            }
+            tree.raw.push(b']');
         }
-        let mut message: serde_json::Value = serde_json::from_str(&line)
-            .context("Codex app-server returned invalid JSON during thread index reconciliation")?;
-        if message.get("id").and_then(serde_json::Value::as_u64) != Some(request_id) {
-            continue;
+        serde_json::Value::Object(values) => {
+            tree.raw.push(b'{');
+            for (key, value) in values {
+                if previous.is_some() {
+                    tree.raw.push(b',');
+                }
+                serde_json::to_writer(&mut tree.raw, key)
+                    .context("failed to encode thread-index JSON key")?;
+                tree.raw.push(b':');
+                let child = append_thread_index_json_node(value, key, Some(index), tree)?;
+                link_thread_index_json_node(&mut tree.nodes, index, &mut previous, child);
+            }
+            tree.raw.push(b'}');
         }
-        if let Some(error) = message.get("error") {
-            let detail = error
-                .get("message")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or("unknown app-server error");
-            bail!("Codex thread index reconciliation failed: {detail}");
-        }
-        return message
-            .get_mut("result")
-            .map(serde_json::Value::take)
-            .context("Codex app-server response is missing its result");
+        _ => serde_json::to_writer(&mut tree.raw, value)
+            .context("failed to encode thread-index JSON value")?,
+    }
+    tree.nodes[index].raw_length = tree.raw.len() - start;
+    Ok(index)
+}
+
+fn link_thread_index_json_node(
+    nodes: &mut [JsonNode<'_>],
+    parent: usize,
+    previous: &mut Option<usize>,
+    child: usize,
+) {
+    if let Some(previous) = previous.replace(child) {
+        nodes[previous].next_sibling = Some(child);
+    } else {
+        nodes[parent].first_child = Some(child);
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LatestThreadIndexState {
-    Present,
-    Stale,
-    Missing,
-    Unavailable,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DatabaseThreadIndexState {
-    Present,
-    Stale,
-    Missing,
-    Unavailable,
+fn dirty_marker_value(contents: &[u8]) -> Option<serde_json::Value> {
+    let text = std::str::from_utf8(contents).ok()?;
+    let boundary = serde_json::from_str::<ThreadIndexDirtyMarkerBoundary>(text).ok()?;
+    Some(serde_json::Value::Object(serde_json::Map::from_iter([
+        ("schema_version".to_string(), boundary.schema_version),
+        ("rollout_path".to_string(), boundary.rollout_path),
+    ])))
 }
 
 pub(crate) fn latest_thread_index_state(
     child: &ChildProcessPlan,
     session_file: &Path,
-) -> LatestThreadIndexState {
+) -> Result<LatestThreadIndexState> {
     let Some(session_id) = codex_session_id_from_path(session_file) else {
-        return LatestThreadIndexState::Unavailable;
+        return Ok(LatestThreadIndexState::Unavailable);
     };
     let sqlite_home = child
         .extra_env
@@ -273,29 +336,18 @@ pub(crate) fn latest_thread_index_state(
         .map(|(_, value)| Path::new(value))
         .unwrap_or(&child.codex_home);
     let Ok(entries) = fs::read_dir(sqlite_home) else {
-        return LatestThreadIndexState::Unavailable;
+        return Ok(LatestThreadIndexState::Unavailable);
     };
-    let mut queryable_database = false;
-    let mut stale_row = false;
+    let mut state = LatestThreadIndexState::Unavailable;
     for entry in entries.flatten() {
-        match inspect_thread_index_database(&entry, sqlite_home, session_file, &session_id) {
-            DatabaseThreadIndexState::Present => return LatestThreadIndexState::Present,
-            DatabaseThreadIndexState::Stale => {
-                queryable_database = true;
-                stale_row = true;
-            }
-            DatabaseThreadIndexState::Missing => queryable_database = true,
-            DatabaseThreadIndexState::Unavailable => {}
+        let observation =
+            inspect_thread_index_database(&entry, sqlite_home, session_file, &session_id);
+        state = mojo_result(thread_index_mojo::combine_state(state, observation))?;
+        if state == LatestThreadIndexState::Present {
+            return Ok(state);
         }
     }
-    if stale_row {
-        return LatestThreadIndexState::Stale;
-    }
-    if queryable_database {
-        LatestThreadIndexState::Missing
-    } else {
-        LatestThreadIndexState::Unavailable
-    }
+    Ok(state)
 }
 
 const THREAD_PREFERENCE_SCAN_LIMIT: usize = 4_096;
@@ -435,48 +487,48 @@ fn inspect_thread_index_database(
     sqlite_home: &Path,
     session_file: &Path,
     session_id: &str,
-) -> DatabaseThreadIndexState {
+) -> LatestThreadIndexState {
     let path = entry.path();
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
-        return DatabaseThreadIndexState::Unavailable;
+        return LatestThreadIndexState::Unavailable;
     };
     if !name.starts_with("state_") || !name.ends_with(".sqlite") {
-        return DatabaseThreadIndexState::Unavailable;
+        return LatestThreadIndexState::Unavailable;
     }
     let Ok(metadata) = entry.file_type() else {
-        return DatabaseThreadIndexState::Unavailable;
+        return LatestThreadIndexState::Unavailable;
     };
     if !metadata.is_file() || metadata.is_symlink() {
-        return DatabaseThreadIndexState::Unavailable;
+        return LatestThreadIndexState::Unavailable;
     }
     let Ok(connection) = Connection::open_with_flags(
         &path,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     ) else {
-        return DatabaseThreadIndexState::Unavailable;
+        return LatestThreadIndexState::Unavailable;
     };
     let Ok(mut statement) =
         connection.prepare("SELECT rollout_path FROM threads WHERE id = ?1 OR id = ?2")
     else {
-        return DatabaseThreadIndexState::Unavailable;
+        return LatestThreadIndexState::Unavailable;
     };
     let thread_id = format!("thread_{session_id}");
     let Ok(rows) = statement.query_map(rusqlite::params![session_id, thread_id], |row| {
         row.get::<_, String>(0)
     }) else {
-        return DatabaseThreadIndexState::Unavailable;
+        return LatestThreadIndexState::Unavailable;
     };
     let mut found_row = false;
     for row in rows.flatten() {
         found_row = true;
         if state_db_rollout_path_matches(sqlite_home, session_file, &row) {
-            return DatabaseThreadIndexState::Present;
+            return LatestThreadIndexState::Present;
         }
     }
     if found_row {
-        DatabaseThreadIndexState::Stale
+        LatestThreadIndexState::Stale
     } else {
-        DatabaseThreadIndexState::Missing
+        LatestThreadIndexState::Missing
     }
 }
 
@@ -537,7 +589,7 @@ pub(crate) fn repair_dirty_thread_index(paths: &AppPaths, child: &ChildProcessPl
         return;
     };
     let started = std::time::Instant::now();
-    repair_latest_thread_index(paths, child, &session_file);
+    let _ = repair_latest_thread_index(paths, child, &session_file);
     crate::runtime_launch::emit_runtime_timing("startup.thread_index_targeted_repair_ms", started);
 }
 
@@ -547,36 +599,59 @@ pub(crate) fn repair_latest_thread_index_after_child(
     session_file: &Path,
 ) {
     let started = std::time::Instant::now();
-    repair_latest_thread_index(paths, child, session_file);
+    let _ = repair_latest_thread_index(paths, child, session_file);
     crate::runtime_launch::emit_runtime_timing("shutdown.thread_index_targeted_repair_ms", started);
 }
 
-fn repair_latest_thread_index(paths: &AppPaths, child: &ChildProcessPlan, session_file: &Path) {
+fn repair_latest_thread_index(
+    paths: &AppPaths,
+    child: &ChildProcessPlan,
+    session_file: &Path,
+) -> Result<()> {
     let index_child = persistent_index_child(paths, child, session_file);
-    match latest_thread_index_state(&index_child, session_file) {
-        LatestThreadIndexState::Present => {
-            if dirty_marker_targets(paths, session_file) {
+    let initial_state = latest_thread_index_state(&index_child, session_file)?;
+    let mut progress = ThreadIndexRepairProgress::Initial;
+    loop {
+        let action = mojo_result(thread_index_mojo::repair_action(initial_state, progress))?;
+        match action {
+            ThreadIndexRepairAction::CheckDatabaseFiles => {
+                progress = ThreadIndexRepairProgress::DatabaseFilesChecked {
+                    exist: state_db_files_exist(&index_child),
+                };
+            }
+            ThreadIndexRepairAction::Reconcile => {
+                let succeeded =
+                    reconcile_latest_codex_thread_index(&index_child.binary, &index_child).is_ok();
+                let verified_state = if succeeded {
+                    latest_thread_index_state(&index_child, session_file)?
+                } else {
+                    LatestThreadIndexState::Unavailable
+                };
+                progress = ThreadIndexRepairProgress::ReconciliationFinished {
+                    succeeded,
+                    verified_state,
+                };
+            }
+            ThreadIndexRepairAction::CheckDirtyMarker => {
+                let after_reconciliation = matches!(
+                    progress,
+                    ThreadIndexRepairProgress::ReconciliationFinished { .. }
+                );
+                progress = ThreadIndexRepairProgress::DirtyMarkerChecked {
+                    matches: dirty_marker_targets(paths, session_file)?,
+                    after_reconciliation,
+                };
+            }
+            ThreadIndexRepairAction::ClearDirtyMarker => {
                 clear_dirty_marker(&paths.root.join(THREAD_INDEX_DIRTY_FILE));
+                return Ok(());
             }
-        }
-        LatestThreadIndexState::Stale | LatestThreadIndexState::Missing => {
-            if reconcile_latest_codex_thread_index(&index_child.binary, &index_child).is_ok()
-                && matches!(
-                    latest_thread_index_state(&index_child, session_file),
-                    LatestThreadIndexState::Present
-                )
-            {
-                if dirty_marker_targets(paths, session_file) {
-                    clear_dirty_marker(&paths.root.join(THREAD_INDEX_DIRTY_FILE));
-                }
-            } else {
-                save_dirty_marker(paths, session_file);
+            ThreadIndexRepairAction::SaveDirtyMarker => {
+                save_dirty_marker(paths, session_file)?;
+                return Ok(());
             }
+            ThreadIndexRepairAction::Noop => return Ok(()),
         }
-        LatestThreadIndexState::Unavailable if state_db_files_exist(&index_child) => {
-            save_dirty_marker(paths, session_file)
-        }
-        LatestThreadIndexState::Unavailable => {}
     }
 }
 
@@ -618,11 +693,21 @@ fn state_db_files_exist(child: &ChildProcessPlan) -> bool {
 
 fn dirty_marker_session_file(paths: &AppPaths, marker_path: &Path) -> Option<PathBuf> {
     let contents = fs::read(marker_path).ok()?;
-    let marker: ThreadIndexDirtyMarker = serde_json::from_slice(&contents).ok()?;
-    if marker.schema_version != THREAD_INDEX_DIRTY_SCHEMA_VERSION {
+    if contents.len() > THREAD_INDEX_MAX_JSON_BYTES {
         return None;
     }
-    let relative = Path::new(&marker.rollout_path);
+    let rollout_path = match dirty_marker_value(&contents) {
+        Some(value) => {
+            let tree = thread_index_json_tree(&value).ok()?;
+            mojo_result(thread_index_mojo::dirty_marker_path(
+                Some((&tree.nodes, &tree.raw)),
+                contents.len(),
+            ))
+            .ok()??
+        }
+        None => mojo_result(thread_index_mojo::dirty_marker_path(None, contents.len())).ok()??,
+    };
+    let relative = Path::new(&rollout_path);
     if relative.is_absolute()
         || relative
             .components()
@@ -635,42 +720,49 @@ fn dirty_marker_session_file(paths: &AppPaths, marker_path: &Path) -> Option<Pat
     (metadata.file_type().is_file() && !metadata.file_type().is_symlink()).then_some(path)
 }
 
-fn save_dirty_marker(paths: &AppPaths, session_file: &Path) {
+fn save_dirty_marker(paths: &AppPaths, session_file: &Path) -> Result<()> {
     let Ok(relative) = session_file.strip_prefix(&paths.shared_codex_root) else {
-        return;
+        return Ok(());
     };
-    let marker = ThreadIndexDirtyMarker {
-        schema_version: THREAD_INDEX_DIRTY_SCHEMA_VERSION,
-        rollout_path: relative.to_string_lossy().into_owned(),
-    };
-    let Ok(contents) = serde_json::to_vec(&marker) else {
-        return;
-    };
+    let rollout_path = relative.to_string_lossy();
+    let contents = mojo_result(thread_index_mojo::dirty_marker_contents(&rollout_path))?;
     if fs::create_dir_all(&paths.root).is_ok() {
         let _ = crate::runtime_store::write_private_file_atomic(
             &paths.root.join(THREAD_INDEX_DIRTY_FILE),
             &contents,
         );
     }
+    Ok(())
 }
 
 fn clear_dirty_marker(path: &Path) {
     let _ = fs::remove_file(path);
 }
 
-fn dirty_marker_targets(paths: &AppPaths, session_file: &Path) -> bool {
+fn dirty_marker_targets(paths: &AppPaths, session_file: &Path) -> Result<bool> {
     let Ok(relative) = session_file.strip_prefix(&paths.shared_codex_root) else {
-        return false;
+        return Ok(false);
     };
     let marker_path = paths.root.join(THREAD_INDEX_DIRTY_FILE);
     let Ok(contents) = fs::read(marker_path) else {
-        return false;
+        return Ok(false);
     };
-    let Ok(marker) = serde_json::from_slice::<ThreadIndexDirtyMarker>(&contents) else {
-        return false;
+    if contents.len() > THREAD_INDEX_MAX_JSON_BYTES {
+        return Ok(false);
+    }
+    let target = relative.to_string_lossy();
+    let matched = match dirty_marker_value(&contents) {
+        Some(value) => {
+            let tree = thread_index_json_tree(&value)?;
+            thread_index_mojo::dirty_marker_targets(
+                Some((&tree.nodes, &tree.raw)),
+                &target,
+                contents.len(),
+            )
+        }
+        None => thread_index_mojo::dirty_marker_targets(None, &target, contents.len()),
     };
-    marker.schema_version == THREAD_INDEX_DIRTY_SCHEMA_VERSION
-        && marker.rollout_path == relative.to_string_lossy()
+    mojo_result(matched)
 }
 
 #[cfg(test)]

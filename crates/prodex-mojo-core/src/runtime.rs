@@ -11,6 +11,7 @@ mod prompt_cache_affinity;
 mod quota_decisions;
 mod quota_route_score;
 mod selection_planning;
+pub mod thread_index;
 pub use auto_redeem::{
     AutoRedeemCandidateInput, RUNTIME_AUTO_REDEEM_PLAN_MAX_COUNT, auto_redeem_plan_batch,
     auto_redeem_plan_self_test,
