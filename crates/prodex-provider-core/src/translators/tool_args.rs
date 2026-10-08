@@ -1,7 +1,6 @@
 use serde_json::Value;
 
 mod rtk;
-mod rtk_noisy;
 
 pub(crate) use self::rtk::{
     chat_compatible_rtk_wrapped_tool_arguments, rtk_prefixed_noisy_shell_command,

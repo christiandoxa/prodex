@@ -1,35 +1,18 @@
 //! RTK shell-command argument wrapping.
 
-use serde_json::Value;
-
 #[path = "rtk/shell.rs"]
 mod shell;
 
 pub(crate) use self::shell::rtk_prefixed_noisy_shell_command;
-use self::shell::rtk_wrapped_shell_command;
 
 pub(crate) fn chat_compatible_rtk_wrapped_tool_arguments(name: &str, arguments: &str) -> String {
     if !matches!(name, "shell" | "exec_command") {
         return arguments.to_string();
     }
-    let Ok(mut value) = serde_json::from_str::<Value>(arguments) else {
-        return arguments.to_string();
-    };
-    let Some(object) = value.as_object_mut() else {
-        return arguments.to_string();
-    };
-    for key in ["cmd", "command"] {
-        let Some(wrapped) = object
-            .get(key)
-            .and_then(Value::as_str)
-            .and_then(rtk_wrapped_shell_command)
-        else {
-            continue;
-        };
-        object.insert(key.to_string(), Value::String(wrapped));
-        return serde_json::to_string(&value).unwrap_or_else(|_| arguments.to_string());
-    }
-    arguments.to_string()
+    super::wrap_json_string_arg_with(arguments, &["cmd", "command"], |command| {
+        prodex_mojo_core::rtk_noisy::wrapped_shell_command(command)
+            .unwrap_or_else(|error| panic!("Mojo RTK rewrite failed: {error:?}"))
+    })
 }
 
 #[cfg(test)]
@@ -53,5 +36,34 @@ mod tests {
         let arguments: serde_json::Value = serde_json::from_str(&arguments).unwrap();
 
         assert_eq!(arguments["cmd"], "pwd");
+    }
+
+    #[test]
+    fn chat_compatible_rtk_wrapped_tool_arguments_respects_shell_syntax() {
+        for (command, expected) in [
+            (
+                "printf 'a; b' && cargo test",
+                "printf 'a; b' && rtk cargo test",
+            ),
+            ("pwd; cargo test", "pwd; rtk cargo test"),
+            ("pwd||cargo test", "pwd||rtk cargo test"),
+            ("pwd | cargo test", "pwd | rtk cargo test"),
+            ("pwd\ncargo test", "pwd\nrtk cargo test"),
+            (
+                "RUST_LOG=é\u{3000}cargo\u{3000}test",
+                "RUST_LOG=é\u{3000}rtk cargo\u{3000}test",
+            ),
+            ("echo 'cargo test'", "rtk echo 'cargo test'"),
+            ("git 'cargo test'", "git 'cargo test'"),
+            ("git status", "rtk git status"),
+            ("git branch", "git branch"),
+        ] {
+            let arguments = chat_compatible_rtk_wrapped_tool_arguments(
+                "shell",
+                &serde_json::json!({"cmd": command}).to_string(),
+            );
+            let arguments: serde_json::Value = serde_json::from_str(&arguments).unwrap();
+            assert_eq!(arguments["cmd"], expected);
+        }
     }
 }
