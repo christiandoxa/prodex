@@ -308,19 +308,33 @@ mod tests {
         };
         fs::create_dir_all(&paths.managed_profiles_root)
             .expect("managed profiles root should be created");
-        let profile_home = paths.managed_profiles_root.join("main");
-        create_codex_home_if_missing(&profile_home).expect("profile home should be created");
+        let active_home = paths.managed_profiles_root.join("main");
+        let selected_home = paths.managed_profiles_root.join("selected");
+        create_codex_home_if_missing(&active_home).expect("active profile home should be created");
+        create_codex_home_if_missing(&selected_home)
+            .expect("selected profile home should be created");
         AppState {
             active_profile: Some("main".to_string()),
-            profiles: std::collections::BTreeMap::from([(
-                "main".to_string(),
-                ProfileEntry {
-                    codex_home: profile_home.clone(),
-                    managed: true,
-                    email: None,
-                    provider: ProfileProvider::Openai,
-                },
-            )]),
+            profiles: std::collections::BTreeMap::from([
+                (
+                    "main".to_string(),
+                    ProfileEntry {
+                        codex_home: active_home,
+                        managed: true,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+                (
+                    "selected".to_string(),
+                    ProfileEntry {
+                        codex_home: selected_home.clone(),
+                        managed: true,
+                        email: None,
+                        provider: ProfileProvider::Openai,
+                    },
+                ),
+            ]),
             ..AppState::default()
         }
         .save(&paths)
@@ -341,7 +355,7 @@ mod tests {
 
         let status = login_into_profile(
             &paths,
-            "main",
+            "selected",
             &LoginRequest {
                 method: LoginMethod::Status,
                 codex_args: Vec::new(),
@@ -356,7 +370,7 @@ mod tests {
         assert!(status.success());
         assert_eq!(
             fs::read_to_string(&capture).expect("fake login should capture CODEX_HOME"),
-            profile_home.display().to_string()
+            selected_home.display().to_string()
         );
         assert!(
             fs::read_dir(&paths.managed_profiles_root)
