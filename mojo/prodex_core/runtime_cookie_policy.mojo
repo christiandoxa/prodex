@@ -24,6 +24,7 @@ comptime COOKIE_ATTR_SECURE: Int64 = 1
 comptime COOKIE_ATTR_PATH: Int64 = 2
 comptime COOKIE_ATTR_MAX_AGE: Int64 = 3
 comptime COOKIE_ATTR_EXPIRES: Int64 = 4
+comptime COOKIE_POLICY_MAX_EVICTION_TIMESTAMPS: Int64 = 4_128
 
 
 def cookie_ascii_lower(byte: UInt8) -> UInt8:
@@ -102,6 +103,25 @@ def cookie_exact_equals_literal(
         if ptr[unsafe_offset=start + index] != expected[unsafe_offset=index]:
             return False
     return True
+
+
+def cookie_timestamp_is_earlier(
+    candidate_after_epoch: UInt64,
+    candidate_seconds: UInt64,
+    candidate_nanoseconds: UInt64,
+    selected_after_epoch: UInt64,
+    selected_seconds: UInt64,
+    selected_nanoseconds: UInt64,
+) -> Bool:
+    if candidate_after_epoch != selected_after_epoch:
+        return candidate_after_epoch == 0
+    if candidate_seconds != selected_seconds:
+        if candidate_after_epoch == 0:
+            return candidate_seconds > selected_seconds
+        return candidate_seconds < selected_seconds
+    if candidate_after_epoch == 0:
+        return candidate_nanoseconds > selected_nanoseconds
+    return candidate_nanoseconds < selected_nanoseconds
 
 
 def cookie_name_byte_safe(byte: UInt8) -> Bool:
@@ -491,4 +511,60 @@ def prodex_runtime_cookie_host_normalize_v1(
             ptr[unsafe_offset=start + index]
         )
     written[] = length
+    return COOKIE_POLICY_OK
+
+
+@export("prodex_runtime_cookie_oldest_timestamp_index_v1")
+def prodex_runtime_cookie_oldest_timestamp_index_v1(
+    abi_version: Int64,
+    timestamps_address: UInt,
+    count: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != COOKIE_POLICY_ABI_VERSION:
+        return COOKIE_POLICY_ABI
+    if (
+        count < 0
+        or count > COOKIE_POLICY_MAX_EVICTION_TIMESTAMPS
+        or (count > 0 and timestamps_address == 0)
+        or output_address == 0
+    ):
+        return COOKIE_POLICY_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = -1
+    if count == 0:
+        return COOKIE_POLICY_OK
+
+    var timestamps = Pointer[mut=False, UInt64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(timestamps_address)
+    )
+    var selected_index: Int64 = -1
+    var selected_after_epoch: UInt64 = 0
+    var selected_seconds: UInt64 = 0
+    var selected_nanoseconds: UInt64 = 0
+    for index in range(count):
+        var offset = index * 3
+        var after_epoch = timestamps[unsafe_offset=offset]
+        var seconds = timestamps[unsafe_offset=offset + 1]
+        var nanoseconds = timestamps[unsafe_offset=offset + 2]
+        if after_epoch > 1 or nanoseconds >= UInt64(1_000_000_000):
+            return COOKIE_POLICY_INVALID
+        if selected_index < 0 or cookie_timestamp_is_earlier(
+            after_epoch,
+            seconds,
+            nanoseconds,
+            selected_after_epoch,
+            selected_seconds,
+            selected_nanoseconds,
+        ):
+            selected_index = index
+            selected_after_epoch = after_epoch
+            selected_seconds = seconds
+            selected_nanoseconds = nanoseconds
+
+    # Strict comparison keeps the first candidate when timestamps tie.
+    output[] = selected_index
     return COOKIE_POLICY_OK

@@ -1,9 +1,11 @@
 use crate::MojoError;
 use std::ops::Range;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const ABI_VERSION: i64 = 1;
 const PAIR_SET_COOKIE: i64 = 0;
 const PAIR_CALLER_NAME: i64 = 1;
+const MAX_EVICTION_TIMESTAMPS: usize = 129 * 32;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CookiePairPlan {
@@ -69,6 +71,12 @@ unsafe extern "C" {
         output_address: u64,
         output_capacity: i64,
         written_address: u64,
+    ) -> i64;
+    fn prodex_runtime_cookie_oldest_timestamp_index_v1(
+        abi_version: i64,
+        timestamps_address: u64,
+        count: i64,
+        output_address: u64,
     ) -> i64;
 }
 
@@ -259,6 +267,49 @@ pub fn normalize_host(host: &str) -> Result<Option<String>, MojoError> {
     Ok(Some(
         String::from_utf8(output[..written].to_vec()).map_err(|_| MojoError::InvalidOutput)?,
     ))
+}
+
+pub fn oldest_timestamp_index(
+    timestamps: &[SystemTime],
+) -> Result<Option<usize>, MojoError> {
+    if timestamps.len() > MAX_EVICTION_TIMESTAMPS {
+        return Err(MojoError::InvalidInput);
+    }
+
+    let mut input = Vec::with_capacity(timestamps.len() * 3);
+    for timestamp in timestamps {
+        let (after_epoch, duration) = match timestamp.duration_since(UNIX_EPOCH) {
+            Ok(duration) => (1, duration),
+            Err(error) => (0, error.duration()),
+        };
+        input.extend([
+            after_epoch,
+            duration.as_secs(),
+            u64::from(duration.subsec_nanos()),
+        ]);
+    }
+
+    let mut output = -2_i64;
+    status(unsafe {
+        prodex_runtime_cookie_oldest_timestamp_index_v1(
+            ABI_VERSION,
+            input.as_ptr() as usize as u64,
+            i64::try_from(timestamps.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut output as *mut i64) as usize as u64,
+        )
+    })?;
+    match output {
+        -1 => Ok(None),
+        index if index >= 0 => {
+            let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+            if index < timestamps.len() {
+                Ok(Some(index))
+            } else {
+                Err(MojoError::InvalidOutput)
+            }
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 #[cfg(test)]
