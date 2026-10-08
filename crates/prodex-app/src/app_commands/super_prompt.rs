@@ -7,8 +7,8 @@ use crate::{
 use anyhow::{Result, bail};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use prodex_cli::{
-    DEFAULT_SUB_AGENT_MAX_CONCURRENCY, HARD_MAX_SUB_AGENT_CONCURRENCY, SubAgentConfig,
-    SubAgentMaxConcurrency, SubAgentPreference, SuperArgs,
+    DEFAULT_SUB_AGENT_MAX_CONCURRENCY, HARD_MAX_SUB_AGENT_CONCURRENCY, SubAgentConcurrencySource,
+    SubAgentConfig, SubAgentMaxConcurrency, SubAgentPreference, SuperArgs,
 };
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::Modifier;
@@ -299,17 +299,36 @@ pub(super) fn run_super_sub_agent_prompt_steps(
 }
 
 fn prompt_super_sub_agent_max_concurrency() -> Result<SubAgentMaxConcurrency> {
+    prompt_super_sub_agent_max_concurrency_with(
+        |choices| prompt_super_choice("Maximum active sub-agents", choices, 0, false),
+        prompt_super_sub_agent_custom_concurrency,
+    )
+}
+
+fn prompt_super_sub_agent_max_concurrency_with(
+    mut select: impl FnMut(&[String]) -> Result<usize>,
+    mut prompt_custom: impl FnMut() -> Result<Option<SubAgentMaxConcurrency>>,
+) -> Result<SubAgentMaxConcurrency> {
     let choices = super_sub_agent_concurrency_choices();
     loop {
-        match prompt_super_choice("Maximum active sub-agents", &choices, 0, false)? {
-            0 => return Ok(SubAgentMaxConcurrency::default()),
-            index if index <= prodex_cli::SUB_AGENT_MAX_CONCURRENCY_PRESETS.len() => {
-                return choices[index]
-                    .parse::<SubAgentMaxConcurrency>()
+        let index = select(&choices)?;
+        let (_, selected) = prodex_mojo_core::rich::super_expose_concurrency_plan(
+            DEFAULT_SUB_AGENT_MAX_CONCURRENCY,
+            &prodex_cli::SUB_AGENT_MAX_CONCURRENCY_PRESETS,
+            HARD_MAX_SUB_AGENT_CONCURRENCY,
+            Some(index),
+        )
+        .expect("Mojo Super expose concurrency planner returned invalid output");
+        match selected.expect("selected concurrency choice must be present") {
+            prodex_mojo_core::rich::SuperExposeConcurrencyChoice::Default => {
+                return Ok(SubAgentMaxConcurrency::default());
+            }
+            prodex_mojo_core::rich::SuperExposeConcurrencyChoice::Preset(value) => {
+                return SubAgentMaxConcurrency::new(value, SubAgentConcurrencySource::Preset)
                     .map_err(anyhow::Error::msg);
             }
-            _ => {
-                if let Some(limit) = prompt_super_sub_agent_custom_concurrency()? {
+            prodex_mojo_core::rich::SuperExposeConcurrencyChoice::Custom => {
+                if let Some(limit) = prompt_custom()? {
                     return Ok(limit);
                 }
             }
@@ -318,14 +337,23 @@ fn prompt_super_sub_agent_max_concurrency() -> Result<SubAgentMaxConcurrency> {
 }
 
 pub(super) fn super_sub_agent_concurrency_choices() -> Vec<String> {
-    let mut choices = vec![format!("default ({DEFAULT_SUB_AGENT_MAX_CONCURRENCY})")];
-    choices.extend(
-        prodex_cli::SUB_AGENT_MAX_CONCURRENCY_PRESETS
-            .iter()
-            .map(u16::to_string),
-    );
-    choices.push("custom...".to_string());
-    choices
+    prodex_mojo_core::rich::super_expose_concurrency_plan(
+        DEFAULT_SUB_AGENT_MAX_CONCURRENCY,
+        &prodex_cli::SUB_AGENT_MAX_CONCURRENCY_PRESETS,
+        HARD_MAX_SUB_AGENT_CONCURRENCY,
+        None,
+    )
+    .expect("Mojo Super expose concurrency planner returned invalid output")
+    .0
+    .into_iter()
+    .map(|choice| match choice {
+        prodex_mojo_core::rich::SuperExposeConcurrencyChoice::Default => {
+            format!("default ({DEFAULT_SUB_AGENT_MAX_CONCURRENCY})")
+        }
+        prodex_mojo_core::rich::SuperExposeConcurrencyChoice::Preset(value) => value.to_string(),
+        prodex_mojo_core::rich::SuperExposeConcurrencyChoice::Custom => "custom...".to_string(),
+    })
+    .collect()
 }
 
 fn prompt_super_sub_agent_custom_concurrency() -> Result<Option<SubAgentMaxConcurrency>> {
@@ -733,5 +761,38 @@ mod super_choice_policy_tests {
             Some(4)
         );
         assert!(update_super_choice_selection(key(KeyCode::Esc), &mut escaped, 5, false).is_err());
+    }
+
+    #[test]
+    fn concurrency_picker_uses_mojo_menu_and_selection_plan() {
+        assert_eq!(
+            super_sub_agent_concurrency_choices(),
+            ["default (4)", "4", "8", "16", "32", "custom..."]
+        );
+
+        let default = prompt_super_sub_agent_max_concurrency_with(
+            |choices| {
+                assert_eq!(choices[0], "default (4)");
+                Ok(0)
+            },
+            || panic!("default selection must skip custom input"),
+        )
+        .unwrap();
+        assert_eq!(default, SubAgentMaxConcurrency::default());
+
+        let preset = prompt_super_sub_agent_max_concurrency_with(
+            |_| Ok(2),
+            || panic!("preset selection must skip custom input"),
+        )
+        .unwrap();
+        assert_eq!(preset.get(), 8);
+        assert_eq!(preset.source(), SubAgentConcurrencySource::Preset);
+
+        let custom = prompt_super_sub_agent_max_concurrency_with(
+            |_| Ok(5),
+            || Ok(Some("23".parse().unwrap())),
+        )
+        .unwrap();
+        assert_eq!(custom.get(), 23);
     }
 }
