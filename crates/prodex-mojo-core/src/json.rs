@@ -441,10 +441,10 @@ pub fn transform_chat_tools(
     )
 }
 
-pub(super) type JsonKernel =
+pub(crate) type JsonKernel =
     unsafe extern "C" fn(i64, i64, i64, u64, i64, u64, i64, u64, i64, i64, u64, i64, u64) -> i64;
 
-pub(super) fn transform_json(
+pub(crate) fn transform_json(
     nodes: &[JsonNode<'_>],
     raw: &str,
     operation: i64,

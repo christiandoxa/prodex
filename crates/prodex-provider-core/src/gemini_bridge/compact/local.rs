@@ -7,7 +7,7 @@ mod text;
 pub use self::semantic::gemini_provider_core_semantic_compact_continuation_summary;
 use self::snippet::gemini_provider_core_local_compact_snippet;
 use self::text::gemini_provider_core_local_compact_text_from_content;
-use prodex_mojo_core::rich::format_gemini_local_compact_summary;
+use prodex_mojo_core::rich::{format_gemini_local_compact_summary, gemini_compact_response_body};
 
 pub const GEMINI_PROVIDER_CORE_LOCAL_COMPACT_SUMMARY_PREFIX: &str = "Another language model started to solve this problem and produced a summary of its thinking process. You also have access to the state of the tools that were used by that language model. Use this to build on the work that has already been done and avoid duplicating work. Here is the summary produced by the other language model, use the information in this summary to assist with your own analysis:";
 const GEMINI_PROVIDER_CORE_LOCAL_COMPACT_MAX_SNIPPET_BYTES: usize = 768;
@@ -40,22 +40,8 @@ pub fn gemini_provider_core_local_compact_summary(body: &[u8]) -> String {
 }
 
 pub fn gemini_provider_core_compact_response_body(summary: &str) -> Vec<u8> {
-    let text = format!(
-        "{}\n\n{}",
-        GEMINI_PROVIDER_CORE_LOCAL_COMPACT_SUMMARY_PREFIX,
-        summary.trim()
-    );
-    serde_json::to_vec(&serde_json::json!({
-        "output": [{
-            "type": "message",
-            "role": "user",
-            "content": [{
-                "type": "input_text",
-                "text": text,
-            }],
-        }],
-    }))
-    .unwrap_or_else(|_| b"{\"output\":[]}".to_vec())
+    gemini_compact_response_body(summary)
+        .expect("Mojo Gemini compact response body formatter failed")
 }
 
 #[cfg(test)]

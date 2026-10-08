@@ -85,6 +85,12 @@ pub use gemini_compact_snippet::{
     format_gemini_semantic_continuation_summary, plan_gemini_semantic_compact_indices,
     truncate_gemini_compact_utf8, truncate_gemini_compact_utf8_edges,
 };
+#[path = "rich/gemini_compact_rewrite.rs"]
+mod gemini_compact_rewrite;
+pub use gemini_compact_rewrite::{
+    GeminiCompactErrorReason, gemini_compact_error_reason, gemini_compact_request_json,
+    gemini_compact_response_body, gemini_compact_summary_json,
+};
 #[path = "rich/gemini_config.rs"]
 mod gemini_config;
 pub use gemini_config::{
