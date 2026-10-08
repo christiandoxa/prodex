@@ -168,49 +168,58 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         selection_attempts: usize,
         pressure_mode: bool,
     ) -> Result<bool> {
-        if std::mem::take(&mut self.websocket_reuse_fresh_retry_pending) {
-            return Ok(false);
-        }
-        let exhausted = runtime_proxy_precommit_budget_exhausted_for_route(
-            self.shared,
-            selection_started_at,
-            selection_attempts,
-            self.has_continuation_priority(),
-            pressure_mode,
-        )?;
-        if !self.has_continuation_priority()
-            && (self.saw_overload_failure
-                || self.saw_rate_limit_failure
-                || self.saw_transport_failure)
-            && runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Websocket)?
-        {
-            return Ok(false);
-        }
-        if self.recovery_sweeps == 0 {
-            if self.saw_transport_failure
-                && !self.has_continuation_priority()
-                && !exhausted
-                && selection_attempts < self.profile_count()?
-            {
-                return Ok(false);
+        let fresh_retry_pending = std::mem::take(&mut self.websocket_reuse_fresh_retry_pending);
+        let continuation = self.has_continuation_priority();
+        let budget_exhausted = if fresh_retry_pending {
+            false
+        } else {
+            runtime_proxy_precommit_budget_exhausted_for_route(
+                self.shared,
+                selection_started_at,
+                selection_attempts,
+                continuation,
+                pressure_mode,
+            )?
+        };
+        let retryable_failure =
+            self.saw_overload_failure || self.saw_rate_limit_failure || self.saw_transport_failure;
+        let route_has_retryable_profile =
+            if !fresh_retry_pending && !continuation && retryable_failure {
+                runtime_route_has_retryable_profile(self.shared, RuntimeRouteKind::Websocket)?
+            } else {
+                false
+            };
+        let mut profile_count = 0;
+        let mut attempt_limit = 0;
+        if !fresh_retry_pending && !route_has_retryable_profile {
+            if self.recovery_sweeps > 0 {
+                profile_count = self.profile_count()?;
+                attempt_limit = runtime_proxy_precommit_budget_for_profile_count(
+                    continuation,
+                    pressure_mode,
+                    profile_count,
+                )
+                .0;
+            } else if self.saw_transport_failure && !continuation && !budget_exhausted {
+                profile_count = self.profile_count()?;
             }
-            return Ok(exhausted);
         }
-        let profile_count = self
-            .shared
-            .runtime
-            .lock()
-            .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
-            .state
-            .profiles
-            .len()
-            .max(1);
-        let (attempt_limit, _) = runtime_proxy_precommit_budget_for_profile_count(
-            self.has_continuation_priority(),
-            pressure_mode,
-            profile_count,
-        );
-        Ok(selection_attempts >= attempt_limit)
+        prodex_mojo_core::runtime::websocket_precommit_budget_exhausted(
+            prodex_mojo_core::runtime::WebsocketPrecommitBudgetInput {
+                fresh_retry_pending,
+                budget_exhausted,
+                attempts: selection_attempts,
+                continuation,
+                saw_overload_failure: self.saw_overload_failure,
+                saw_rate_limit_failure: self.saw_rate_limit_failure,
+                saw_transport_failure: self.saw_transport_failure,
+                route_has_retryable_profile,
+                recovery_sweeps: self.recovery_sweeps,
+                profile_count,
+                attempt_limit,
+            },
+        )
+        .map_err(|error| anyhow::anyhow!("websocket precommit policy failed: {error:?}"))
     }
 
     fn profile_count(&self) -> Result<usize> {

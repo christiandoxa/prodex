@@ -90,6 +90,28 @@ fn transport_failure_cannot_bypass_expired_budget() {
 }
 
 #[test]
+fn retryable_pool_extends_fresh_budget_but_not_continuation_budget() {
+    let _guard = acquire_test_runtime_lock();
+    let shared = capacity_ready_shared("loop-retryable-transport-budget");
+    let (mut local_socket, _client_socket) = test_runtime_local_websocket_pair();
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let mut flow = test_runtime_websocket_flow(&mut local_socket, &shared, &mut websocket_session);
+    flow.saw_transport_failure = true;
+    let expired = Instant::now() - Duration::from_secs(60);
+
+    assert!(
+        !flow
+            .precommit_budget_exhausted(expired, 1, false)
+            .expect("fresh retryable pool should defer exhaustion")
+    );
+    flow.previous_response_id = Some("resp-1".to_string());
+    assert!(
+        flow.precommit_budget_exhausted(expired, 1, false)
+            .expect("continuation affinity should keep the retry budget authoritative")
+    );
+}
+
+#[test]
 fn cold_start_probe_wait_is_one_shot() {
     let _guard = acquire_test_runtime_lock();
     let shared = test_runtime_shared("loop-cold-start");

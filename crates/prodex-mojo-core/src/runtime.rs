@@ -14,6 +14,7 @@ mod quota_decisions;
 mod quota_route_score;
 mod selection_planning;
 pub mod thread_index;
+mod websocket_loop_control;
 pub use auto_redeem::{
     AutoRedeemCandidateInput, RUNTIME_AUTO_REDEEM_PLAN_MAX_COUNT, auto_redeem_plan_batch,
     auto_redeem_plan_self_test,
@@ -77,6 +78,9 @@ pub use selection_planning::{
     waitable_candidate_eligible, websocket_failure_disposition_plan,
     websocket_full_context_signal_eligible, websocket_invalid_previous_response_plan,
     websocket_quota_fallback_plan, websocket_response_plan, websocket_transport_failure_plan,
+};
+pub use websocket_loop_control::{
+    WebsocketPrecommitBudgetInput, websocket_precommit_budget_exhausted,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
