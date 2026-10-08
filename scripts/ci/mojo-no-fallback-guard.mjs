@@ -4566,9 +4566,16 @@ export function findViolations(files) {
   });
   const deepseekStreamFallbackViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === DEEPSEEK_SHAPING_FILE) {
-      return DEEPSEEK_STREAM_PROMOTED_OPERATIONS
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const violations = [];
+      if (!contents.includes("deepseek_responses_usage_for_provider") ||
+          production.includes("provider_core_chat_compatible_responses_usage")) {
+        violations.push(`${filePath}: DeepSeek stream usage mapping must use the versioned Mojo operation`);
+      }
+      violations.push(...DEEPSEEK_STREAM_PROMOTED_OPERATIONS
         .filter((marker) => !contents.includes(marker))
-        .map((marker) => `${filePath}: DeepSeek stream hard replacement must retain ${marker}`);
+        .map((marker) => `${filePath}: DeepSeek stream hard replacement must retain ${marker}`));
+      return violations;
     }
     if (filePath === DEEPSEEK_STREAM_RESPONSE_VALUES_FILE) {
       return ["DeepSeekKernelOperation::StreamResponseValue", "DeepSeekKernelOperation::StreamAssistantMessage"]
@@ -4580,6 +4587,16 @@ export function findViolations(files) {
       const production = contents.split("#[cfg(test)]", 1)[0];
       if (production.includes(".get(\"choices\")") || production.includes(".get(\"reasoning_content\")") || production.includes(".get(\"annotations\")") || production.includes(".get(\"finish_reason\")") || production.includes(".get(\"system_fingerprint\")") || production.includes("let mut metadata = serde_json::Map::new()")) {
         violations.push(filePath + ": contains restored Rust DeepSeek response metadata extraction");
+      }
+      return violations;
+    }
+    if (filePath === DEEPSEEK_RESPONSE_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const violations = production.includes("DeepSeekKernelOperation::ResponseUsage")
+        ? []
+        : [`${filePath}: DeepSeek response usage mapping must use the versioned Mojo operation`];
+      if (production.includes("provider_core_chat_compatible_responses_usage")) {
+        violations.push(`${filePath}: contains restored Rust DeepSeek response usage extraction`);
       }
       return violations;
     }
@@ -7008,6 +7025,14 @@ function selfTest() {
   assert.match(findViolations([[DEEPSEEK_RESPONSE_FILE,
     '#[cfg(not(feature = "mojo"))] pub(super) fn deepseek_stream_event_from_chat_value() {}']]).join("\n"),
     /replaced Rust semantic implementation/u);
+  assert.deepEqual(findViolations([[DEEPSEEK_RESPONSE_FILE,
+    "fn usage() { DeepSeekKernelOperation::ResponseUsage; }"]]), []);
+  assert.match(findViolations([[DEEPSEEK_RESPONSE_FILE,
+    "fn usage() { provider_core_chat_compatible_responses_usage(value, \"deepseek\"); }"]]).join("\n"),
+    /restored Rust DeepSeek response usage extraction/u);
+  assert.match(findViolations([[DEEPSEEK_SHAPING_FILE,
+    "fn usage() { provider_core_chat_compatible_responses_usage(value, \"deepseek\"); }"]]).join("\n"),
+    /DeepSeek stream usage mapping must use the versioned Mojo operation/u);
   assert.match(findViolations([[DEEPSEEK_RESPONSE_TOOL_CALLS_FILE,
     "fn deepseek_split_flat_namespace_tool_name() {}"]]).join("\n"),
     /response tool-call shaping must use the Mojo kernel/u);

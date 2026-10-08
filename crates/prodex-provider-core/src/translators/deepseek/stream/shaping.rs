@@ -196,7 +196,7 @@ pub fn deepseek_provider_core_stream_chunk_metadata(
             .filter(|value| !value.is_empty())
             .map(str::to_string),
         usage: projected.get("usage").and_then(|usage| {
-            crate::bridge::provider_core_chat_compatible_responses_usage(usage, provider_label)
+            super::super::response::deepseek_responses_usage_for_provider(usage, provider_label)
         }),
     }
 }

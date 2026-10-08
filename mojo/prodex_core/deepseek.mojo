@@ -91,7 +91,9 @@ comptime DEEPSEEK_RAW_BRIDGE_INPUT_ITEM: Int64 = 39
 comptime DEEPSEEK_RESPONSE_TOOL_CALL_ITEM: Int64 = 40
 comptime DEEPSEEK_RESPONSES_HISTORY_CALL_ID: Int64 = 42
 comptime DEEPSEEK_RESPONSES_HISTORY_CONTAINS_CALL_ID: Int64 = 43
+comptime DEEPSEEK_RESPONSE_USAGE: Int64 = 44
 comptime DEEPSEEK_JSON_MAX_DEPTH: Int64 = 256
+comptime DEEPSEEK_UINT64_MAX: UInt64 = 18_446_744_073_709_551_615
 
 
 @fieldwise_init
@@ -3231,6 +3233,129 @@ def deepseek_put_response_metadata(
     return deepseek_put_literal(writer, StringSlice("}}"))
 
 
+def deepseek_raw_u64(
+    view: ProdexRichStringView, bounds: Array[Int64, 2]
+) -> Array[UInt64, 2]:
+    var result = Array[UInt64, 2](fill=0)
+    if not deepseek_raw_present(bounds):
+        return result^
+    var value: UInt64 = 0
+    for index in range(bounds[0], bounds[1]):
+        var byte = deepseek_json_byte(view, index)
+        if byte < 48 or byte > 57:
+            return result^
+        var digit = UInt64(byte - 48)
+        if (
+            value > UInt64(1_844_674_407_370_955_161)
+            or (
+                value == UInt64(1_844_674_407_370_955_161)
+                and digit > UInt64(5)
+            )
+        ):
+            return result^
+        value = value * UInt64(10) + digit
+    result[0] = UInt64(1)
+    result[1] = value
+    return result^
+
+
+def deepseek_put_response_usage(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    input: ProdexDeepSeekKernelInput,
+) -> Bool:
+    if input.usage_present != 1 or not deepseek_json_fragment_valid(input.usage):
+        return False
+    var view = input.usage.copy()
+    var root = deepseek_raw_root(view)
+    var prompt = Array[UInt64, 2](fill=0)
+    var completion = Array[UInt64, 2](fill=0)
+    var total = Array[UInt64, 2](fill=0)
+    var cache_hit = Array[UInt64, 2](fill=0)
+    var cache_miss = Array[UInt64, 2](fill=0)
+    var reasoning = Array[UInt64, 2](fill=0)
+    if root[0] >= 0:
+        prompt = deepseek_raw_u64(
+            view, deepseek_raw_member(view, root, StringSlice("prompt_tokens"))
+        )
+        completion = deepseek_raw_u64(
+            view, deepseek_raw_member(view, root, StringSlice("completion_tokens"))
+        )
+        total = deepseek_raw_u64(
+            view, deepseek_raw_member(view, root, StringSlice("total_tokens"))
+        )
+        cache_hit = deepseek_raw_u64(
+            view,
+            deepseek_raw_member(view, root, StringSlice("prompt_cache_hit_tokens")),
+        )
+        cache_miss = deepseek_raw_u64(
+            view,
+            deepseek_raw_member(view, root, StringSlice("prompt_cache_miss_tokens")),
+        )
+        var details = deepseek_raw_member(
+            view, root, StringSlice("completion_tokens_details")
+        )
+        if deepseek_raw_present(details) and deepseek_json_byte(view, details[0]) == 123:
+            reasoning = deepseek_raw_u64(
+                view,
+                deepseek_raw_member(view, details, StringSlice("reasoning_tokens")),
+            )
+    var total_value = total[1]
+    if total[0] == 0:
+        if completion[1] > DEEPSEEK_UINT64_MAX - prompt[1]:
+            total_value = DEEPSEEK_UINT64_MAX
+        else:
+            total_value = prompt[1] + completion[1]
+    if not deepseek_put_literal(writer, StringSlice("{\"input_tokens\":")):
+        return False
+    if not deepseek_put_u64(writer, prompt[1]):
+        return False
+    if (
+        not deepseek_put_literal(writer, StringSlice(",\"output_tokens\":"))
+        or not deepseek_put_u64(writer, completion[1])
+        or not deepseek_put_literal(writer, StringSlice(",\"total_tokens\":"))
+        or not deepseek_put_u64(writer, total_value)
+    ):
+        return False
+    if cache_hit[0] == 1:
+        if (
+            not deepseek_put_literal(
+                writer, StringSlice(',"input_tokens_details":{"cached_tokens":')
+            )
+            or not deepseek_put_u64(writer, cache_hit[1])
+            or not deepseek_put_byte(writer, 125)
+        ):
+            return False
+    if reasoning[0] == 1:
+        if (
+            not deepseek_put_literal(
+                writer, StringSlice(',"output_tokens_details":{"reasoning_tokens":')
+            )
+            or not deepseek_put_u64(writer, reasoning[1])
+            or not deepseek_put_byte(writer, 125)
+        ):
+            return False
+    if cache_hit[0] == 1 or cache_miss[0] == 1:
+        if (
+            not deepseek_put_literal(
+                writer, StringSlice(',"metadata":{')
+            )
+            or input.role_present != 1
+            or input.role.len == 0
+            or not deepseek_put_json_string(writer, input.role)
+            or not deepseek_put_literal(
+                writer, StringSlice(':{"prompt_cache_hit_tokens":')
+            )
+            or not deepseek_put_u64(writer, cache_hit[1])
+            or not deepseek_put_literal(
+                writer, StringSlice(',"prompt_cache_miss_tokens":')
+            )
+            or not deepseek_put_u64(writer, cache_miss[1])
+            or not deepseek_put_literal(writer, StringSlice("}}"))
+        ):
+            return False
+    return deepseek_put_byte(writer, 125)
+
+
 def deepseek_write_operation(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     input: ProdexDeepSeekKernelInput,
@@ -3498,6 +3623,8 @@ def deepseek_write_operation(
         return deepseek_put_stream_response_metadata(writer, input)
     if operation == DEEPSEEK_RESPONSE_METADATA:
         return deepseek_put_response_metadata(writer, input)
+    if operation == DEEPSEEK_RESPONSE_USAGE:
+        return deepseek_put_response_usage(writer, input)
     return False
 
 
@@ -3508,7 +3635,7 @@ def deepseek_flag_valid(value: Int64) -> Bool:
 def deepseek_input_valid(input: ProdexDeepSeekKernelInput) -> Bool:
     return (
         input.operation >= DEEPSEEK_REQUEST_BODY
-        and input.operation <= DEEPSEEK_RESPONSES_HISTORY_CONTAINS_CALL_ID
+        and input.operation <= DEEPSEEK_RESPONSE_USAGE
         and
         deepseek_flag_valid(input.stream)
         and deepseek_flag_valid(input.response_id_present)

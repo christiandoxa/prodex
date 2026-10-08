@@ -730,7 +730,8 @@
           "deepseek_stream_shape_fallbacks",
           "deepseek_response_format_shape_policy",
           "deepseek_request_metadata_shape_policy",
-          "deepseek_json_guidance_policy"
+          "deepseek_json_guidance_policy",
+          "deepseek_response_usage_mapping"
         ]
       },
       {
@@ -764,7 +765,8 @@
           "deepseek_stream_shape_fallbacks",
           "deepseek_response_format_shape_policy",
           "deepseek_request_metadata_shape_policy",
-          "deepseek_json_guidance_policy"
+          "deepseek_json_guidance_policy",
+          "deepseek_response_usage_mapping"
         ]
       },
       {
@@ -6379,6 +6381,34 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde Value acquisition, caller-owned JSON-tree construction, bounded ABI invocation, and returned JSON decoding; response ordering and envelope assembly remain Rust adapters"
+    },
+    {
+      "name": "deepseek_response_usage_mapping",
+      "domain": "provider/deepseek",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust extracted DeepSeek token counts, cache-hit/miss details, reasoning-token details, total-token fallback, and provider metadata from response usage JSON",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_deepseek_kernel_v2",
+      "mojo_abi_version": 3,
+      "mojo_operation_ids": {
+        "response_usage": 44
+      },
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
+      "mojo_semantic_source": "mojo/prodex_core/deepseek.mojo",
+      "consumer": "crates/prodex-provider-core/src/translators/deepseek/response.rs",
+      "consumer_marker": "DeepSeekKernelOperation::ResponseUsage",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/translators/deepseek/response.rs",
+        "crates/prodex-provider-core/src/translators/deepseek/stream/shaping.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/deepseek_response_usage.rs",
+      "rust_owner_before": "DeepSeek response usage JSON extraction and normalized Responses usage output planning",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; the direct ABI and provider boundary tests cover cache, reasoning, invalid-type defaults, total-token saturation, and custom provider labels",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde response acquisition and serialization, bounded Mojo invocation, JSON decoding, and provider-label mapping"
     }
   ],
   "rust_semantic_reductions": [

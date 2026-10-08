@@ -5343,3 +5343,17 @@ Required-Mojo verification passed: the direct `gemini_local_compact_summary_form
 `gemini_compact_snippet.mojo` now owns semantic continuation section suppression and rendering through `prodex_mojo_gemini_compact_semantic_summary_v1`: trim/blank handling for active-user and latest-tool sections, exact section labels, semantic-summary trimming, continuation guidance, and final UTF-8-safe summary byte capping. Rust retains request JSON parsing, active-user/latest-tool index traversal, content extraction, and Mojo edge-truncation calls; the former Rust `String` builder and blank filters are deleted with no formatter fallback. The now-unused Rust tail-truncation wrapper was also deleted; production tail truncation remains internal to the Mojo formatters.
 
 Required-Mojo direct and provider-boundary targets each listed one test and passed. Mutation proof changed the exact Mojo label `Semantic continuation summary:` to `Semantic continuation state:`; the provider exact-output regression failed with the mutated label. Restoring the Mojo source was byte-exact with SHA-256 `f8ed3736e90d86e8f2a596ae2d6711da94e15701f8f7e6699601f57412e39e39`, and the caller regression passed again.
+
+## DeepSeek response usage mapping migration
+
+DeepSeek response usage mapping now runs through operation 44 of the versioned
+`prodex_mojo_deepseek_kernel_v2` ABI. Mojo owns bounded usage JSON parsing,
+cache-hit/miss and reasoning-detail extraction, saturating total-token fallback,
+and normalized provider metadata output. Rust retains response JSON acquisition,
+serialization, Mojo result decoding, and provider-label wiring; the previous
+Rust usage mapper is not a fallback path.
+
+The ownership manifest records `deepseek_response_usage_mapping` with
+`production_fallback`, `duplicate_production_owner`, and `platform_fallback` all
+false. Direct ABI and provider-boundary tests cover complete usage details,
+invalid-type defaults, overflow-safe totals, and custom provider labels.
