@@ -91,6 +91,7 @@ def launch_takes_value(arg: LaunchArgView) -> Bool:
         or launch_is["--output-schema"](arg) or launch_is["-o"](arg)
         or launch_is["--output-last-message"](arg) or launch_is["--color"](arg)
         or launch_is["--thread-source"](arg)
+        or launch_is["--cyber-access-program"](arg)
     )
 
 

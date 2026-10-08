@@ -464,7 +464,7 @@
         },
         {
           "path": "codex-rs/features/src/lib.rs",
-          "reason": "Owns upstream feature registry keys that Prodex passes as Codex config overrides, including system proxy handling and Codex-owned compaction image budgeting.",
+          "reason": "Owns upstream feature registry keys that Prodex passes as Codex config overrides, including system proxy handling and Codex-owned compaction image budgeting. The CLI Daybreak feature is off by default. The default must stay tied to its feature block rather than an unrelated false marker elsewhere in the registry.",
           "required_contains": [
             "RespectSystemProxy",
             "respect_system_proxy",
@@ -476,7 +476,8 @@
             "Feature::InstantInterrupt",
             "key: \"instant_interrupt\"",
             "Stage::UnderDevelopment",
-            "default_enabled: false"
+            "default_enabled: false",
+            "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
           ]
         },
         {
@@ -614,23 +615,37 @@
         },
         {
           "path": "codex-rs/exec/src/cli.rs",
-          "reason": "Owns the global codex exec --thread-source SOURCE option that Prodex must preserve as an opaque option/value pair.",
+          "reason": "Owns the global codex exec --thread-source SOURCE option that Prodex must preserve as an opaque option/value pair. Prodex must preserve the global per-turn program option and its single opaque value during managed launch, resume inspection, proxy configuration, and recovery retargeting. Codex owns value and provider eligibility validation.",
           "required_contains": [
             "ThreadSource",
             "long = \"thread-source\"",
             "value_name = \"SOURCE\"",
             "global = true",
-            "pub thread_source: Option<ThreadSource>"
+            "pub thread_source: Option<ThreadSource>",
+            "#[arg(long, value_enum, value_name = \"PROGRAM\", global = true)]",
+            "pub cyber_access_program: Option<CyberAccessProgramCliArg>",
+            "pub enum CyberAccessProgramCliArg",
+            "Standard,",
+            "DaybreakBlue,",
+            "DaybreakRed,",
+            "#[value(rename_all = \"snake_case\")]"
           ]
         },
         {
           "path": "codex-rs/exec/src/lib.rs",
-          "reason": "Owns default-user thread classification plus propagation to newly started and forked threads without changing resumed thread metadata.",
+          "reason": "Owns default-user thread classification plus propagation to newly started and forked threads without changing resumed thread metadata. Automatic Daybreak selection is gated, while an explicit per-turn program remains independent of that feature gate and saved preferences. Prodex forwards user choices without synthesizing opt-in or duplicating upstream routing.",
           "required_contains": [
             "ThreadSource::User",
             "ThreadForkParams",
             "thread_start_params_from_config",
-            "thread_source: Some(thread_source.clone())"
+            "thread_source: Some(thread_source.clone())",
+            "let cyber_access_program = match cyber_access_program {",
+            "Some(program) => Some(program),",
+            "None if config.features.enabled(Feature::CliDaybreak) => {",
+            "daybreak::program_for_turn(",
+            "None => None,",
+            "daybreak_override",
+            "ClientRequest::TurnStart"
           ]
         },
         {
@@ -980,6 +995,18 @@
             "pub service_tier: Option<String>",
             "pub service_tier: Option<&'a str>",
             "pub previous_response_id: Option<String>"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/cyber_access_program.rs",
+          "reason": "Codex filters explicit programs to the built-in OpenAI provider and owns authentication eligibility. Preserving CLI arguments does not enable Cyber routing for the Prodex governed custom provider; do not synthesize access-program policy or bypass this restriction.",
+          "required_contains": [
+            "pub(crate) fn for_provider(",
+            "program.filter(|_| provider_id == OPENAI_PROVIDER_ID)",
+            "if config.model_provider_id != OPENAI_PROVIDER_ID {",
+            "Feature::ApiKeyCyberAccessPrograms",
+            "if auth.is_chatgpt_auth()",
+            "if !auth.is_api_key_auth()"
           ]
         }
       ],
@@ -2144,6 +2171,59 @@
             "let retry_after = RetryAfter::from_headers(&headers)",
             "headers: Some(headers)",
             "retry_after,"
+          ]
+        },
+        {
+          "id": "exec.cyber-access-program",
+          "kind": "cli_contract",
+          "file": "codex-rs/exec/src/cli.rs",
+          "reason": "Prodex must preserve the global per-turn program option and its single opaque value during managed launch, resume inspection, proxy configuration, and recovery retargeting. Codex owns value and provider eligibility validation.",
+          "file_contains_all": [
+            "#[arg(long, value_enum, value_name = \"PROGRAM\", global = true)]",
+            "pub cyber_access_program: Option<CyberAccessProgramCliArg>",
+            "pub enum CyberAccessProgramCliArg",
+            "Standard,",
+            "DaybreakBlue,",
+            "DaybreakRed,",
+            "#[value(rename_all = \"snake_case\")]"
+          ]
+        },
+        {
+          "id": "exec.daybreak-explicit-opt-in",
+          "kind": "feature_gate",
+          "file": "codex-rs/exec/src/lib.rs",
+          "reason": "Automatic Daybreak selection is gated, while an explicit per-turn program remains independent of that feature gate and saved preferences. Prodex forwards user choices without synthesizing opt-in or duplicating upstream routing.",
+          "file_contains_all": [
+            "let cyber_access_program = match cyber_access_program {",
+            "Some(program) => Some(program),",
+            "None if config.features.enabled(Feature::CliDaybreak) => {",
+            "daybreak::program_for_turn(",
+            "None => None,",
+            "daybreak_override",
+            "ClientRequest::TurnStart"
+          ]
+        },
+        {
+          "id": "features.cli-daybreak-opt-in",
+          "kind": "feature_gate",
+          "file": "codex-rs/features/src/lib.rs",
+          "reason": "The CLI Daybreak feature is off by default. The default must stay tied to its feature block rather than an unrelated false marker elsewhere in the registry.",
+          "file_contains_all": [
+            "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+          ]
+        },
+        {
+          "id": "cyber-access-program.provider-eligibility",
+          "kind": "provider_boundary",
+          "file": "codex-rs/core/src/cyber_access_program.rs",
+          "reason": "Codex filters explicit programs to the built-in OpenAI provider and owns authentication eligibility. Preserving CLI arguments does not enable Cyber routing for the Prodex governed custom provider; do not synthesize access-program policy or bypass this restriction.",
+          "file_contains_all": [
+            "pub(crate) fn for_provider(",
+            "program.filter(|_| provider_id == OPENAI_PROVIDER_ID)",
+            "if config.model_provider_id != OPENAI_PROVIDER_ID {",
+            "Feature::ApiKeyCyberAccessPrograms",
+            "if auth.is_chatgpt_auth()",
+            "if !auth.is_api_key_auth()"
           ]
         }
       ],

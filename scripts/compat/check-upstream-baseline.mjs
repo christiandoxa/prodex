@@ -68,6 +68,7 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
   "codex-rs/core/src/responses_retry.rs",
   "codex-rs/codex-api/src/common.rs",
+  "codex-rs/core/src/cyber_access_program.rs",
 ];
 
 const REQUIRED_FILE_CONTAINS = {
@@ -437,6 +438,7 @@ const REQUIRED_FILE_CONTAINS = {
     "key: \"instant_interrupt\"",
     "Stage::UnderDevelopment",
     "default_enabled: false",
+    "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,",
   ],
   "codex-rs/app-server-protocol/src/protocol/v2/mcp.rs": [
     "McpServerEventStreamStartParams",
@@ -562,12 +564,26 @@ const REQUIRED_FILE_CONTAINS = {
     "value_name = \"SOURCE\"",
     "global = true",
     "pub thread_source: Option<ThreadSource>",
+    "#[arg(long, value_enum, value_name = \"PROGRAM\", global = true)]",
+    "pub cyber_access_program: Option<CyberAccessProgramCliArg>",
+    "pub enum CyberAccessProgramCliArg",
+    "Standard,",
+    "DaybreakBlue,",
+    "DaybreakRed,",
+    "#[value(rename_all = \"snake_case\")]",
   ],
   "codex-rs/exec/src/lib.rs": [
     "ThreadSource::User",
     "ThreadForkParams",
     "thread_start_params_from_config",
     "thread_source: Some(thread_source.clone())",
+    "let cyber_access_program = match cyber_access_program {",
+    "Some(program) => Some(program),",
+    "None if config.features.enabled(Feature::CliDaybreak) => {",
+    "daybreak::program_for_turn(",
+    "None => None,",
+    "daybreak_override",
+    "ClientRequest::TurnStart",
   ],
   "codex-rs/protocol/src/protocol.rs": [
     "pub enum ThreadSource",
@@ -774,6 +790,14 @@ const REQUIRED_FILE_CONTAINS = {
     "pub service_tier: Option<String>",
     "pub service_tier: Option<&'a str>",
     "pub previous_response_id: Option<String>",
+  ],
+  "codex-rs/core/src/cyber_access_program.rs": [
+    "pub(crate) fn for_provider(",
+    "program.filter(|_| provider_id == OPENAI_PROVIDER_ID)",
+    "if config.model_provider_id != OPENAI_PROVIDER_ID {",
+    "Feature::ApiKeyCyberAccessPrograms",
+    "if auth.is_chatgpt_auth()",
+    "if !auth.is_api_key_auth()",
   ],
 };
 
@@ -1768,6 +1792,55 @@ const REQUIRED_SEMANTIC_CHECKS = [
       "retry_after,",
     ],
   },
+  {
+    "id": "exec.cyber-access-program",
+    "kind": "cli_contract",
+    "file": "codex-rs/exec/src/cli.rs",
+    "file_contains_all": [
+      "#[arg(long, value_enum, value_name = \"PROGRAM\", global = true)]",
+      "pub cyber_access_program: Option<CyberAccessProgramCliArg>",
+      "pub enum CyberAccessProgramCliArg",
+      "Standard,",
+      "DaybreakBlue,",
+      "DaybreakRed,",
+      "#[value(rename_all = \"snake_case\")]"
+    ]
+  },
+  {
+    "id": "exec.daybreak-explicit-opt-in",
+    "kind": "feature_gate",
+    "file": "codex-rs/exec/src/lib.rs",
+    "file_contains_all": [
+      "let cyber_access_program = match cyber_access_program {",
+      "Some(program) => Some(program),",
+      "None if config.features.enabled(Feature::CliDaybreak) => {",
+      "daybreak::program_for_turn(",
+      "None => None,",
+      "daybreak_override",
+      "ClientRequest::TurnStart"
+    ]
+  },
+  {
+    "id": "features.cli-daybreak-opt-in",
+    "kind": "feature_gate",
+    "file": "codex-rs/features/src/lib.rs",
+    "file_contains_all": [
+      "id: Feature::CliDaybreak,\n        key: \"cli_daybreak\",\n        stage: Stage::UnderDevelopment,\n        default_enabled: false,"
+    ]
+  },
+  {
+    "id": "cyber-access-program.provider-eligibility",
+    "kind": "provider_boundary",
+    "file": "codex-rs/core/src/cyber_access_program.rs",
+    "file_contains_all": [
+      "pub(crate) fn for_provider(",
+      "program.filter(|_| provider_id == OPENAI_PROVIDER_ID)",
+      "if config.model_provider_id != OPENAI_PROVIDER_ID {",
+      "Feature::ApiKeyCyberAccessPrograms",
+      "if auth.is_chatgpt_auth()",
+      "if !auth.is_api_key_auth()"
+    ]
+  },
 ];
 
 const SEMANTIC_LIST_FIELDS = [
@@ -2354,6 +2427,18 @@ function runSelfTest() {
     },
     expectedMessage:
       'codex.compatibility.semantic_checks.responses.server-retry-guidance.file_contains_all missing "tokio::time::sleep_until(retry_after.deadline()).await"',
+  });
+
+  assertSelfTestError({
+    name: "missing explicit per-turn program before Daybreak fallback",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "exec.daybreak-explicit-opt-in");
+      check.file_contains_all = check.file_contains_all.filter(
+        (value) => value !== "Some(program) => Some(program),",
+      );
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.exec.daybreak-explicit-opt-in.file_contains_all missing "Some(program) => Some(program),"',
   });
 
   assertSelfTestError({
