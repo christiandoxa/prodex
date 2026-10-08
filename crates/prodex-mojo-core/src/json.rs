@@ -170,6 +170,21 @@ unsafe extern "C" {
         prefix_capacity: i64,
         output: u64,
     ) -> i64;
+    fn prodex_mojo_provider_error_codes_v1(
+        abi: i64,
+        operation: i64,
+        flag: i64,
+        nodes: u64,
+        count: i64,
+        raw: u64,
+        raw_length: i64,
+        scratch: u64,
+        scratch_count: i64,
+        measuring: i64,
+        output: u64,
+        capacity: i64,
+        metadata: u64,
+    ) -> i64;
     fn prodex_runtime_proxy_request_shape_v1(
         abi: i64,
         raw: u64,
@@ -507,6 +522,14 @@ pub(crate) fn transform_json(
     }
     std::str::from_utf8(&output).map_err(|_| MojoError::InvalidOutput)?;
     Ok(Some(output))
+}
+
+/// Extracts normalized structured provider-error codes from one parsed body.
+/// JSON parsing and SSE framing stay with the caller; Mojo owns recursive
+/// field traversal, token trimming, and ASCII case normalization.
+pub fn provider_error_codes_json(nodes: &[JsonNode<'_>], raw: &str) -> Result<Vec<u8>, MojoError> {
+    transform_json(nodes, raw, 0, false, prodex_mojo_provider_error_codes_v1)?
+        .ok_or(MojoError::InvalidOutput)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
