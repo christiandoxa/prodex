@@ -510,8 +510,11 @@ fn print_profile_panels_scrollable(panels: &[ProfilePanel]) -> Result<()> {
     loop {
         let total_lines = profile_tui_lines(panels).len();
         let size = tui.terminal.size()?;
-        let body_height = profile_scroll_body_height(size.height);
-        let max_scroll = profile_scroll_max_offset(total_lines, body_height);
+        let body_height = prodex_mojo_core::profile_ui_policy::scroll_body_height(size.height)
+            .expect("Mojo profile scroll-body policy returned invalid output");
+        let max_scroll =
+            prodex_mojo_core::profile_ui_policy::scroll_max_offset(total_lines, body_height)
+                .expect("Mojo profile scroll-bound policy returned invalid output");
         scroll_offset = scroll_offset.min(max_scroll);
         tui.terminal
             .draw(|frame| render_profile_panels_scroll_tui(frame, panels, scroll_offset))
@@ -587,13 +590,27 @@ fn render_profile_panels_scroll_tui(
     .wrap(Wrap { trim: false });
     frame.render_widget(body, chunks[1]);
 
-    let max_scroll = profile_scroll_max_offset(total_lines.len(), body_height);
+    let max_scroll =
+        prodex_mojo_core::profile_ui_policy::scroll_max_offset(total_lines.len(), body_height)
+            .expect("Mojo profile scroll-bound policy returned invalid output");
     let footer = Paragraph::new(Line::styled(
         profile_scroll_footer(scroll_offset, max_scroll),
         tui_hint_style().add_modifier(Modifier::BOLD),
     ))
     .block(tui_connected_footer_block(tui_border_style()));
     frame.render_widget(footer, chunks[2]);
+}
+
+fn profile_scroll_footer(scroll_offset: usize, max_scroll: usize) -> String {
+    if max_scroll == 0 {
+        "q close".to_string()
+    } else {
+        format!(
+            "j/k scroll | pgup/pgdn page | home/end | q close | line {}/{}",
+            scroll_offset.saturating_add(1),
+            max_scroll.saturating_add(1)
+        )
+    }
 }
 
 fn profile_tui_should_scroll(panels: &[ProfilePanel]) -> bool {
@@ -615,41 +632,16 @@ fn profile_scroll_tui_allowed() -> bool {
 }
 
 fn terminal_height() -> usize {
-    terminal::size()
-        .map(|(_, height)| normalized_terminal_height(height))
-        .unwrap_or(24)
-}
-
-fn normalized_terminal_height(height: u16) -> usize {
-    if height == 0 { 24 } else { usize::from(height) }
-}
-
-fn profile_scroll_body_height(terminal_height: u16) -> usize {
-    usize::from(terminal_height).saturating_sub(6).max(1)
-}
-
-fn profile_scroll_max_offset(total_lines: usize, body_height: usize) -> usize {
-    total_lines.saturating_sub(body_height.max(1))
-}
-
-fn profile_scroll_footer(scroll_offset: usize, max_scroll: usize) -> String {
-    if max_scroll == 0 {
-        "q close".to_string()
-    } else {
-        format!(
-            "j/k scroll | pgup/pgdn page | home/end | q close | line {}/{}",
-            scroll_offset.saturating_add(1),
-            max_scroll.saturating_add(1)
-        )
-    }
+    let raw_height = terminal::size().map(|(_, height)| height).unwrap_or(24);
+    prodex_mojo_core::profile_ui_policy::normalized_terminal_height(raw_height)
+        .expect("Mojo profile terminal-height policy returned invalid output")
 }
 
 fn profile_tui_height(panels: &[ProfilePanel]) -> u16 {
     let rows = profile_tui_lines(panels).len().saturating_add(4).max(4);
-    let terminal_height = terminal::size()
-        .map(|(_, height)| normalized_terminal_height(height))
-        .unwrap_or(24);
-    rows.min(terminal_height).max(1) as u16
+    let terminal_height = terminal::size().map(|(_, height)| height).unwrap_or(24);
+    prodex_mojo_core::profile_ui_policy::tui_height(rows, terminal_height)
+        .expect("Mojo profile TUI-height policy returned invalid output")
 }
 
 fn profile_tui_text(panels: &[ProfilePanel]) -> Text<'static> {
@@ -678,7 +670,7 @@ fn profile_tui_lines(panels: &[ProfilePanel]) -> Vec<Line<'static>> {
                 ),
                 Span::styled(
                     value.clone(),
-                    Style::default().fg(profile_value_color(label, value)),
+                    Style::default().fg(mojo_profile_value_color(label, value)),
                 ),
             ]));
         }
@@ -686,20 +678,14 @@ fn profile_tui_lines(panels: &[ProfilePanel]) -> Vec<Line<'static>> {
     lines
 }
 
-fn profile_value_color(label: &str, value: &str) -> Color {
-    let lower = value.to_ascii_lowercase();
-    if lower.contains("no active") || lower.contains("missing") || lower.contains("error") {
-        Color::Red
-    } else if lower.contains("active") || lower == "yes" || label == "Active" {
-        Color::Green
-    } else if label == "Provider"
-        || label == "Auth"
-        || label == "Runtime route"
-        || label == "Identity"
+fn mojo_profile_value_color(label: &str, value: &str) -> Color {
+    match prodex_mojo_core::profile_ui_policy::value_color(label, value)
+        .expect("Mojo profile value-color policy returned invalid output")
     {
-        Color::Cyan
-    } else {
-        Color::Reset
+        prodex_mojo_core::profile_ui_policy::ProfileValueColor::Reset => Color::Reset,
+        prodex_mojo_core::profile_ui_policy::ProfileValueColor::Red => Color::Red,
+        prodex_mojo_core::profile_ui_policy::ProfileValueColor::Green => Color::Green,
+        prodex_mojo_core::profile_ui_policy::ProfileValueColor::Cyan => Color::Cyan,
     }
 }
 
@@ -745,26 +731,44 @@ mod tests {
 
     #[test]
     fn profile_value_color_highlights_status() {
-        assert_eq!(profile_value_color("Active", "main"), Color::Green);
+        assert_eq!(mojo_profile_value_color("Active", "main"), Color::Green);
         assert_eq!(
-            profile_value_color("Status", "No active profile."),
+            mojo_profile_value_color("Status", "No active profile."),
             Color::Red
         );
-        assert_eq!(profile_value_color("Provider", "OpenAI"), Color::Cyan);
+        assert_eq!(mojo_profile_value_color("Provider", "OpenAI"), Color::Cyan);
     }
 
     #[test]
     fn zero_height_terminal_uses_sane_profile_tui_fallback() {
-        assert_eq!(normalized_terminal_height(0), 24);
-        assert_eq!(normalized_terminal_height(10), 10);
+        assert_eq!(
+            prodex_mojo_core::profile_ui_policy::normalized_terminal_height(0).unwrap(),
+            24
+        );
+        assert_eq!(
+            prodex_mojo_core::profile_ui_policy::normalized_terminal_height(10).unwrap(),
+            10
+        );
     }
 
     #[test]
     fn profile_scroll_bounds_allow_full_overflow_range() {
-        assert_eq!(profile_scroll_body_height(10), 4);
-        assert_eq!(profile_scroll_max_offset(20, 4), 16);
-        assert_eq!(profile_scroll_max_offset(4, 4), 0);
-        assert_eq!(profile_scroll_max_offset(3, 4), 0);
+        assert_eq!(
+            prodex_mojo_core::profile_ui_policy::scroll_body_height(10).unwrap(),
+            4
+        );
+        assert_eq!(
+            prodex_mojo_core::profile_ui_policy::scroll_max_offset(20, 4).unwrap(),
+            16
+        );
+        assert_eq!(
+            prodex_mojo_core::profile_ui_policy::scroll_max_offset(4, 4).unwrap(),
+            0
+        );
+        assert_eq!(
+            prodex_mojo_core::profile_ui_policy::scroll_max_offset(3, 4).unwrap(),
+            0
+        );
     }
 
     #[test]
