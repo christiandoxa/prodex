@@ -17,6 +17,12 @@ comptime RUNTIME_OVERLAY_ABI: Int64 = 4
 comptime FRESH_ACTION_KEEP: Int64 = 0
 comptime FRESH_ACTION_CONFIG_ARG: Int64 = 1
 comptime FRESH_ACTION_FEATURE: Int64 = 2
+comptime OVERLAY_OPTIONAL_TOOL_LIMIT: Int64 = 6
+comptime OVERLAY_TOOL_STATUS_INSTALLED: Int64 = 0
+comptime OVERLAY_TOOL_STATUS_INVALID: Int64 = 2
+comptime OVERLAY_TOOL_PLAN_READY: Int64 = 0
+comptime OVERLAY_TOOL_PLAN_REQUIRED_UNAVAILABLE: Int64 = 1
+comptime OVERLAY_TOOL_PLAN_SKIP_INCOMPATIBLE: Int64 = 2
 
 
 @fieldwise_init
@@ -373,4 +379,54 @@ def prodex_runtime_overlay_fresh_projection_v1(
         index += 1
 
     written_ptr[] = written
+    return RUNTIME_OVERLAY_OK
+
+
+@export("prodex_runtime_overlay_optional_tool_plan_v1")
+def prodex_runtime_overlay_optional_tool_plan_v1(
+    abi_version: Int64,
+    availability_mask: Int64,
+    required_mask: Int64,
+    count: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_OVERLAY_ABI_VERSION:
+        return RUNTIME_OVERLAY_ABI
+    if (
+        count < 0
+        or count > OVERLAY_OPTIONAL_TOOL_LIMIT
+        or availability_mask < 0
+        or required_mask < 0
+        or (availability_mask >> (count * 2)) != 0
+        or (required_mask >> count) != 0
+        or result_address == 0
+    ):
+        return RUNTIME_OVERLAY_INVALID
+
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = OVERLAY_TOOL_PLAN_READY
+    result[unsafe_offset=1] = -1
+    result[unsafe_offset=2] = 0
+
+    var first_required_unavailable: Int64 = -1
+    var optional_incompatible_mask: Int64 = 0
+    for index in range(count):
+        var tool_status = (availability_mask >> (index * 2)) & 3
+        var is_required = (required_mask >> index) & 1
+        if tool_status == OVERLAY_TOOL_STATUS_INSTALLED:
+            return RUNTIME_OVERLAY_INVALID
+        if is_required == 1 and first_required_unavailable < 0:
+            first_required_unavailable = index
+        elif is_required == 0 and tool_status == OVERLAY_TOOL_STATUS_INVALID:
+            optional_incompatible_mask |= 1 << index
+
+    if first_required_unavailable >= 0:
+        result[unsafe_offset=0] = OVERLAY_TOOL_PLAN_REQUIRED_UNAVAILABLE
+        result[unsafe_offset=1] = first_required_unavailable
+        return RUNTIME_OVERLAY_OK
+    if optional_incompatible_mask > 0:
+        result[unsafe_offset=0] = OVERLAY_TOOL_PLAN_SKIP_INCOMPATIBLE
+    result[unsafe_offset=2] = optional_incompatible_mask
     return RUNTIME_OVERLAY_OK
