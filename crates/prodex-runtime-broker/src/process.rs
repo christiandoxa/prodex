@@ -497,8 +497,9 @@ fn runtime_broker_instance_id_is_valid(instance_id: &str) -> bool {
 }
 
 pub fn runtime_broker_startup_grace_seconds(ready_timeout_ms: u64, idle_grace_seconds: i64) -> i64 {
-    let ready_timeout_seconds = ready_timeout_ms.div_ceil(1_000) as i64;
-    ready_timeout_seconds
-        .saturating_add(1)
-        .max(idle_grace_seconds)
+    prodex_mojo_core::runtime_broker_continuity::startup_grace_seconds(
+        ready_timeout_ms,
+        idle_grace_seconds,
+    )
+    .expect("Mojo runtime broker startup-grace policy returned invalid output")
 }

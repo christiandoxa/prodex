@@ -903,7 +903,9 @@
           "broker_health_key_classification",
           "broker_binary_identity_policy",
           "broker_version_guard_planning",
-          "broker_version_output_parsing"
+          "broker_version_output_parsing",
+          "broker_registry_reuse_planning",
+          "broker_startup_grace_planning"
         ]
       },
       {
@@ -3078,6 +3080,52 @@
       "rust_owner_before": "route-health/internal/profile key prefix classification",
       "rust_test_oracle": "deleted; degraded-health metrics fixtures cover route, profile and internal keys",
       "rust_adapter_scope": "metric counter mutation after validated key-kind tag"
+    },
+    {
+      "domain": "runtime-broker/registry",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust registry launch-configuration and health-match reuse decision",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/registry.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/registry.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_registry_reuse_planning",
+      "mojo_entry": "prodex_runtime_broker_registry_reuse_plan_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::registry_reuse_plan",
+      "rust_owner_before": "Registry URL/flag equality and matching-health precedence for broker reuse",
+      "rust_test_oracle": "deleted; direct Mojo matrix and broker registry tests cover matching, mismatch, and missing health",
+      "rust_adapter_scope": "Registry DTO projection, health observation, and public decision enum reconstruction"
+    },
+    {
+      "domain": "runtime-broker/process",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust startup-grace timeout rounding and idle-floor planning",
+      "final_state": "authoritative",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_broker_continuity.mojo",
+      "consumer": "crates/prodex-runtime-broker/src/process.rs",
+      "production_consumers": [
+        "crates/prodex-runtime-broker/src/process.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_broker_continuity.rs",
+      "rust_state_after": "adapter-only",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "name": "broker_startup_grace_planning",
+      "mojo_entry": "prodex_runtime_broker_startup_grace_seconds_v1",
+      "consumer_marker": "prodex_mojo_core::runtime_broker_continuity::startup_grace_seconds",
+      "rust_owner_before": "Ready-timeout ceiling, startup cushion, and configured idle-grace floor arithmetic",
+      "rust_test_oracle": "deleted; direct Mojo boundary and runtime broker startup-grace tests cover sub-second, exact, and maximum timeouts",
+      "rust_adapter_scope": "Scalar input projection and checked result mapping"
     },
     {
       "name": "runtime_proxy_request_metadata_policy",

@@ -102,10 +102,24 @@ impl RuntimeBrokerRegistry {
         upstream_no_proxy: bool,
         smart_context_enabled: bool,
     ) -> bool {
-        self.upstream_base_url == upstream_base_url
-            && self.include_code_review == include_code_review
-            && self.upstream_no_proxy == upstream_no_proxy
-            && self.smart_context_enabled == smart_context_enabled
+        prodex_mojo_core::runtime_broker_continuity::registry_reuse_plan(
+            prodex_mojo_core::runtime_broker_continuity::BrokerRegistryReuseInput {
+                registry_upstream_base_url: &self.upstream_base_url,
+                registry_include_code_review: self.include_code_review,
+                registry_upstream_no_proxy: self.upstream_no_proxy,
+                registry_smart_context_enabled: self.smart_context_enabled,
+                launch_upstream_base_url: upstream_base_url,
+                launch_include_code_review: include_code_review,
+                launch_upstream_no_proxy: upstream_no_proxy,
+                launch_smart_context_enabled: smart_context_enabled,
+                health_present: false,
+                health_matches: false,
+            },
+        )
+        .is_ok_and(|decision| {
+            decision
+                != prodex_mojo_core::runtime_broker_continuity::BrokerRegistryReuseDecision::LaunchConfigMismatch
+        })
     }
 }
 
@@ -265,12 +279,29 @@ pub fn runtime_broker_registry_reuse_decision(
     health: Option<&RuntimeBrokerHealth>,
     launch_config: RuntimeBrokerLaunchConfig<'_>,
 ) -> RuntimeBrokerRegistryReuseDecision {
-    if !launch_config.matches_registry(registry) {
-        return RuntimeBrokerRegistryReuseDecision::LaunchConfigMismatch;
-    }
-    if health.is_some_and(|health| health.matches_registry_instance(registry)) {
-        RuntimeBrokerRegistryReuseDecision::Reuse
-    } else {
-        RuntimeBrokerRegistryReuseDecision::MissingMatchingHealth
+    match prodex_mojo_core::runtime_broker_continuity::registry_reuse_plan(
+        prodex_mojo_core::runtime_broker_continuity::BrokerRegistryReuseInput {
+            registry_upstream_base_url: &registry.upstream_base_url,
+            registry_include_code_review: registry.include_code_review,
+            registry_upstream_no_proxy: registry.upstream_no_proxy,
+            registry_smart_context_enabled: registry.smart_context_enabled,
+            launch_upstream_base_url: launch_config.upstream_base_url,
+            launch_include_code_review: launch_config.include_code_review,
+            launch_upstream_no_proxy: launch_config.upstream_no_proxy,
+            launch_smart_context_enabled: launch_config.smart_context_enabled,
+            health_present: health.is_some(),
+            health_matches: health.is_some_and(|health| health.matches_registry_instance(registry)),
+        },
+    )
+    .expect("Mojo runtime broker registry reuse policy returned invalid output") {
+        prodex_mojo_core::runtime_broker_continuity::BrokerRegistryReuseDecision::Reuse => {
+            RuntimeBrokerRegistryReuseDecision::Reuse
+        }
+        prodex_mojo_core::runtime_broker_continuity::BrokerRegistryReuseDecision::LaunchConfigMismatch => {
+            RuntimeBrokerRegistryReuseDecision::LaunchConfigMismatch
+        }
+        prodex_mojo_core::runtime_broker_continuity::BrokerRegistryReuseDecision::MissingMatchingHealth => {
+            RuntimeBrokerRegistryReuseDecision::MissingMatchingHealth
+        }
     }
 }
