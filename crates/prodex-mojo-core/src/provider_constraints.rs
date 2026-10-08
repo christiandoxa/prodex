@@ -37,6 +37,8 @@ pub fn self_test() -> bool {
             .is_ok_and(|value| value == Some(922_000))
         && provider_retry_plan(1, 1, 0, 4, 0)
             .is_ok_and(|plan| plan.decision == 0 && plan.remaining_precommit_retries == 1)
+        && provider_precommit_openai_credential_retry(401, false, false, true)
+            .is_ok_and(|retry| retry)
 }
 
 #[cfg(test)]
@@ -120,6 +122,10 @@ mod scalar_policy_tests {
         assert!(provider_precommit_native_first_should_prefetch(true, 200, true, true).unwrap());
         assert!(!provider_precommit_native_first_should_prefetch(false, 200, true, true).unwrap());
         assert!(!provider_precommit_native_first_should_prefetch(true, 400, true, true).unwrap());
+        assert!(provider_precommit_openai_credential_retry(401, false, false, true).unwrap());
+        assert!(provider_precommit_openai_credential_retry(429, true, false, true).unwrap());
+        assert!(!provider_precommit_openai_credential_retry(429, false, false, true).unwrap());
+        assert!(!provider_precommit_openai_credential_retry(401, false, true, true).unwrap());
         assert_eq!(
             provider_precommit_sse_action(false, false, false, false, true).unwrap(),
             ProviderPrecommitSseAction::None
@@ -186,6 +192,7 @@ enum ProviderPrecommitOperation {
     HealthAction = 4,
     MetricClass = 5,
     NativeFirstPrefetch = 6,
+    OpenAiCredentialRetry = 7,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -652,6 +659,30 @@ pub fn provider_precommit_native_first_should_prefetch(
             i64::from(status),
             i64::from(content_type_event_stream),
             i64::from(prefix_empty),
+            0,
+            0,
+        ],
+    )? {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
+}
+
+/// Combines the OpenAI credential retry gates after Rust has classified the response body.
+pub fn provider_precommit_openai_credential_retry(
+    status: u16,
+    retryable_429: bool,
+    hard_binding: bool,
+    provider_retry_allowed: bool,
+) -> Result<bool, crate::MojoError> {
+    match provider_precommit_policy(
+        ProviderPrecommitOperation::OpenAiCredentialRetry,
+        [
+            i64::from(status),
+            i64::from(retryable_429),
+            i64::from(hard_binding),
+            i64::from(provider_retry_allowed),
             0,
             0,
         ],
