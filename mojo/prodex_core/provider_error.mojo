@@ -509,3 +509,65 @@ def prodex_provider_error_classify_v1(
     output[unsafe_offset=0] = classification
     output[unsafe_offset=1] = cooldown
     return 0
+
+# The response-body merge policy is a separate canonical semantic decision
+# from classifying one individual provider status/code/text. It must not be
+# reproduced in the Rust traversal or proxy adapter.
+comptime PROVIDER_ERROR_BODY_POLICY_ABI_VERSION: Int64 = 1
+comptime PROVIDER_ERROR_BODY_INCLUDE_STATUS: Int64 = 1
+comptime PROVIDER_ERROR_BODY_PREFER_CLASSIFICATION: Int64 = 2
+
+
+def provider_error_body_class_rank(code: Int64) -> Int64:
+    if code == PROVIDER_ERROR_CLASS_AUTH:
+        return 0
+    if code == PROVIDER_ERROR_CLASS_QUOTA:
+        return 1
+    if code == PROVIDER_ERROR_CLASS_RATE_LIMIT:
+        return 2
+    if code == PROVIDER_ERROR_CLASS_NOT_FOUND:
+        return 3
+    if code == PROVIDER_ERROR_CLASS_TRANSIENT:
+        return 4
+    return 5
+
+
+@export("prodex_provider_error_body_policy_v1")
+def prodex_provider_error_body_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    http_status: Int64,
+    previous_class: Int64,
+    incoming_class: Int64,
+    result_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != PROVIDER_ERROR_BODY_POLICY_ABI_VERSION:
+        return 4
+    if result_address == 0 or (
+        operation != PROVIDER_ERROR_BODY_INCLUDE_STATUS
+        and operation != PROVIDER_ERROR_BODY_PREFER_CLASSIFICATION
+    ):
+        return 1
+    var decision = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    if operation == PROVIDER_ERROR_BODY_INCLUDE_STATUS:
+        if http_status < 0 or http_status > 65535:
+            return 1
+        decision[] = 0 if http_status == 429 else 1
+        return 0
+
+    if (
+        previous_class < PROVIDER_ERROR_CLASS_AUTH
+        or previous_class > PROVIDER_ERROR_CLASS_OTHER
+        or incoming_class < PROVIDER_ERROR_CLASS_AUTH
+        or incoming_class > PROVIDER_ERROR_CLASS_OTHER
+    ):
+        return 1
+    decision[] = (
+        1
+        if provider_error_body_class_rank(incoming_class)
+        < provider_error_body_class_rank(previous_class)
+        else 0
+    )
+    return 0
