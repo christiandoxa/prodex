@@ -532,10 +532,9 @@ pub fn read_recent_audit_events_with_scope(
         }
     }
 
-    if matches.len() > query.tail {
-        let keep_from = matches.len().saturating_sub(query.tail);
-        matches = matches.split_off(keep_from);
-    }
+    let keep_from = prodex_mojo_core::audit_log_policy::tail_start_index(matches.len(), query.tail)
+        .map_err(|error| anyhow::anyhow!("Mojo audit tail policy failed: {error:?}"))?;
+    matches = matches.split_off(keep_from);
 
     Ok(AuditLogReadResult {
         events: matches,
@@ -665,16 +664,13 @@ fn read_recent_audit_lines(path: &Path, tail: Option<usize>) -> Result<AuditLogL
         .with_context(|| format!("failed to seek {}", path.display()))?;
     let content = read_utf8_bounded(&mut reader, AUDIT_LOG_READ_MAX_BYTES, "audit log")
         .with_context(|| format!("failed to read {}", path.display()))?;
-    let mut lines = content.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
-    if start > 0 && !content.starts_with('\n') && !lines.is_empty() {
-        lines.remove(0);
-    }
-    if let Some(tail) = tail
-        && lines.len() > tail
-    {
-        let keep_from = lines.len().saturating_sub(tail);
-        lines = lines.split_off(keep_from);
-    }
+    let line_start =
+        prodex_mojo_core::audit_log_policy::line_window_start(&content, start > 0, tail)
+            .map_err(|error| anyhow::anyhow!("Mojo audit line-window policy failed: {error:?}"))?;
+    let lines = content[line_start..]
+        .lines()
+        .map(ToOwned::to_owned)
+        .collect::<Vec<_>>();
     Ok(AuditLogLineRead {
         lines,
         search_scope: AuditLogSearchScope::searched_window(

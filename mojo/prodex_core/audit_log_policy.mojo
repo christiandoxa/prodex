@@ -978,3 +978,95 @@ def prodex_audit_email_domain_v1(
     written[] = output_length
     present[] = 1
     return AUDIT_LOG_POLICY_OK
+
+
+def audit_tail_start(item_count: UInt64, tail: UInt64) -> UInt64:
+    if tail >= item_count:
+        return UInt64(0)
+    return item_count - tail
+
+
+@export("prodex_audit_tail_start_v1")
+def prodex_audit_tail_start_v1(
+    abi_version: Int64,
+    item_count: UInt64,
+    tail: UInt64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != AUDIT_LOG_POLICY_ABI_VERSION:
+        return AUDIT_LOG_POLICY_ABI
+    if item_count > UInt64(AUDIT_LOG_POLICY_MAX_ROWS) or output_address == 0:
+        return AUDIT_LOG_POLICY_INVALID
+
+    var output = Pointer[mut=True, UInt64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = audit_tail_start(item_count, tail)
+    return AUDIT_LOG_POLICY_OK
+
+
+@export("prodex_audit_line_window_v1")
+def prodex_audit_line_window_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    input_length: Int64,
+    discard_partial_first_line: Int64,
+    tail_present: Int64,
+    tail: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != AUDIT_LOG_POLICY_ABI_VERSION:
+        return AUDIT_LOG_POLICY_ABI
+    if (
+        input_length < 0
+        or input_length > AUDIT_LOG_POLICY_MAX_TEXT_BYTES
+        or (input_length > 0 and input_address == 0)
+        or (discard_partial_first_line != 0 and discard_partial_first_line != 1)
+        or (tail_present != 0 and tail_present != 1)
+        or tail < 0
+        or output_address == 0
+    ):
+        return AUDIT_LOG_POLICY_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(input_address)
+    )
+    var selected_start: Int64 = 0
+    if (
+        discard_partial_first_line == 1
+        and input_length > 0
+        and source[unsafe_offset=0] != 10
+    ):
+        selected_start = input_length
+        for index in range(input_length):
+            if source[unsafe_offset=index] == 10:
+                selected_start = index + 1
+                break
+
+    if tail_present == 1:
+        if tail == 0:
+            selected_start = input_length
+        else:
+            var line_count: Int64 = 0
+            for index in range(selected_start, input_length):
+                if source[unsafe_offset=index] == 10:
+                    line_count += 1
+            if (
+                input_length > selected_start
+                and source[unsafe_offset=input_length - 1] != 10
+            ):
+                line_count += 1
+
+            var remaining = Int64(
+                audit_tail_start(UInt64(line_count), UInt64(tail))
+            )
+            while selected_start < input_length and remaining > 0:
+                if source[unsafe_offset=selected_start] == 10:
+                    remaining -= 1
+                selected_start += 1
+
+    output[] = selected_start
+    return AUDIT_LOG_POLICY_OK

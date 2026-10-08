@@ -1366,6 +1366,8 @@ export function findViolations(files) {
         "prodex_mojo_core::audit_log_policy::profile_name(",
         "prodex_mojo_core::audit_log_policy::account_hint(",
         "prodex_mojo_core::audit_log_policy::email_domain(",
+        "prodex_mojo_core::audit_log_policy::line_window_start(",
+        "prodex_mojo_core::audit_log_policy::tail_start_index(",
       ];
       const violations = required
         .filter((call) => !contents.includes(call))
@@ -1408,6 +1410,8 @@ export function findViolations(files) {
         "prodex_audit_profile_name_v1(",
         "prodex_audit_account_hint_v1(",
         "prodex_audit_email_domain_v1(",
+        "prodex_audit_line_window_v1(",
+        "prodex_audit_tail_start_v1(",
       ];
       return required
         .filter((call) => !contents.includes(call))
