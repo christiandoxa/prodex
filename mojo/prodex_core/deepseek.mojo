@@ -8,6 +8,7 @@ from rich_text import (
     rich_trim_bounds,
     rich_unicode_space,
     rich_view_matches_literal,
+    rich_view_prefix,
     rich_view_ptr,
     rich_view_valid,
 )
@@ -3772,6 +3773,52 @@ def deepseek_raw_put_default_or_string(
         return deepseek_put_view_range(writer, view, bounds[0], bounds[1])
     return deepseek_put_literal(writer, default_value)
 
+def deepseek_model_trimmed(value: ProdexRichStringView) -> ProdexRichStringView:
+    var bounds = rich_trim_bounds(value)
+    return ProdexRichStringView(
+        value.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+    )
+
+def deepseek_model_combo_first(value: ProdexRichStringView) -> ProdexRichStringView:
+    if not rich_view_prefix["combo:"](value, False):
+        return value.copy()
+    var ptr = rich_view_ptr(value)
+    var start: Int64 = 6
+    var cursor = start
+    while cursor <= Int64(value.len):
+        if cursor == Int64(value.len) or (
+            ptr[unsafe_offset=cursor] == 44
+            or ptr[unsafe_offset=cursor] == 59
+            or ptr[unsafe_offset=cursor] == 124
+            or ptr[unsafe_offset=cursor] == 62
+        ):
+            var component = deepseek_model_trimmed(
+                ProdexRichStringView(
+                    value.ptr + UInt(start), UInt(cursor - start)
+                )
+            )
+            if component.len > 0:
+                return component.copy()
+            start = cursor + 1
+        cursor += 1
+    return value.copy()
+
+def deepseek_raw_put_model(
+    writer: Pointer[mut=True, DeepSeekResponseWriter, _],
+    value: ProdexRichStringView,
+) -> Bool:
+    var trimmed = deepseek_model_trimmed(value)
+    var combo = rich_view_prefix["combo:"](trimmed, False)
+    var model = deepseek_model_combo_first(trimmed)
+    if not combo and (
+        rich_view_matches_literal["auto"](model, True)
+        or rich_view_matches_literal["pro"](model, True)
+    ):
+        return deepseek_put_literal(writer, StringSlice('"deepseek-v4-pro"'))
+    if not combo and rich_view_matches_literal["flash"](model, True):
+        return deepseek_put_literal(writer, StringSlice('"deepseek-v4-flash"'))
+    return deepseek_put_json_string(writer, model)
+
 def deepseek_raw_first_of(
     view: ProdexRichStringView,
     root: Array[Int64, 2],
@@ -4054,8 +4101,8 @@ def deepseek_raw_common_request(
     return deepseek_raw_common_request_fields(
         writer,
         input.input.copy(),
-        ProdexRichStringView(0, 0),
-        False,
+        input.model,
+        input.model_present == 1,
         input.content,
         input.content_present == 1,
         input.reasoning_content,
@@ -4068,8 +4115,8 @@ def deepseek_raw_common_request(
 def deepseek_raw_common_request_fields(
     writer: Pointer[mut=True, DeepSeekResponseWriter, _],
     source: ProdexRichStringView,
-    canonical_model: ProdexRichStringView,
-    canonical_model_present: Bool,
+    requested_model: ProdexRichStringView,
+    requested_model_present: Bool,
     user_id: ProdexRichStringView,
     user_id_present: Bool,
     instructions: ProdexRichStringView,
@@ -4114,8 +4161,8 @@ def deepseek_raw_common_request_fields(
         not deepseek_put_literal(writer, StringSlice('{"model":'))
     ):
         return False
-    if canonical_model_present:
-        if not deepseek_put_json_string(writer, canonical_model):
+    if requested_model_present:
+        if not deepseek_raw_put_model(writer, requested_model):
             return False
     elif not deepseek_raw_put_default_or_string(
             writer, source, model, StringSlice('"deepseek-chat"')
@@ -4471,15 +4518,25 @@ def deepseek_responses_request_v1(
                                 var instructions_present = pj_nonblank(
                                     tree, instructions_node
                                 )
-                                var canonical_model_node = pj_field(
-                                    tree, 0, StringSlice("canonical_model")
+                                var request_model_node = pj_field(
+                                    tree, request, StringSlice("model")
                                 )
-                                var canonical_model = pj_text(
-                                    tree, canonical_model_node
-                                )
-                                var canonical_model_present = (
-                                    pj_kind(tree, canonical_model_node) == JSON_STRING
-                                )
+                                var requested_model = ProdexRichStringView(0, 0)
+                                var requested_model_present = False
+                                if pj_nonblank(tree, request_model_node):
+                                    requested_model = pj_text(
+                                        tree, request_model_node
+                                    )
+                                    requested_model_present = True
+                                elif pj_kind(tree, request_model_node) != JSON_STRING:
+                                    var adapter_model_node = pj_field(
+                                        tree, 0, StringSlice("adapter_model")
+                                    )
+                                    if pj_nonblank(tree, adapter_model_node):
+                                        requested_model = pj_text(
+                                            tree, adapter_model_node
+                                        )
+                                        requested_model_present = True
                                 var user_id_present = (
                                     user_id >= 0 and user_id_plan[2] > user_id_plan[1]
                                 )
@@ -4506,8 +4563,8 @@ def deepseek_responses_request_v1(
                                 if not deepseek_raw_common_request_fields(
                                     body_writer_ptr,
                                     source,
-                                    canonical_model,
-                                    canonical_model_present,
+                                    requested_model,
+                                    requested_model_present,
                                     ProdexRichStringView(
                                         user_id_text.ptr + UInt(user_id_plan[1]),
                                         UInt(user_id_plan[2] - user_id_plan[1]),
