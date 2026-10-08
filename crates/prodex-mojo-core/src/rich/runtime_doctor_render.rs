@@ -9,6 +9,8 @@ pub const RUNTIME_DOCTOR_RENDER_REQUEST_TIMELINE_DETAIL: i64 = 22;
 pub const RUNTIME_DOCTOR_RENDER_LAST_MARKER_LINE_TRUNCATION: i64 = 23;
 /// Mojo renderer operation for compact chain-event summaries.
 pub const RUNTIME_DOCTOR_RENDER_CHAIN_EVENT_SUMMARY: i64 = 24;
+/// Mojo renderer operation for doctor configuration status.
+pub const RUNTIME_DOCTOR_RENDER_CONFIGURATION_STATUS: i64 = 25;
 const RUNTIME_DOCTOR_RENDER_VALUE_COUNT: usize = 16;
 
 pub struct RuntimeDoctorRenderInput<'a> {
@@ -39,7 +41,7 @@ unsafe extern "C" {
 
 pub fn runtime_doctor_render(input: RuntimeDoctorRenderInput<'_>) -> Result<String, MojoError> {
     ensure_rich_abi()?;
-    if !(0..=RUNTIME_DOCTOR_RENDER_CHAIN_EVENT_SUMMARY).contains(&input.operation)
+    if !(0..=RUNTIME_DOCTOR_RENDER_CONFIGURATION_STATUS).contains(&input.operation)
         || !(0..=799).contains(&input.detail)
         || input.values.len() > RUNTIME_DOCTOR_RENDER_VALUE_COUNT
         || input
@@ -94,6 +96,15 @@ pub fn runtime_doctor_render(input: RuntimeDoctorRenderInput<'_>) -> Result<Stri
     String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
 }
 
+/// Render the redaction-safe human status for runtime configuration parsing.
+pub fn runtime_doctor_configuration_status(error: Option<&str>) -> Result<String, MojoError> {
+    runtime_doctor_render(RuntimeDoctorRenderInput {
+        operation: RUNTIME_DOCTOR_RENDER_CONFIGURATION_STATUS,
+        detail: 0,
+        values: &[error],
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -109,6 +120,16 @@ mod tests {
             })
             .unwrap(),
             "Refresh credentials for profile 配置 with `prodex login --profile 配置` and retry route responses; latest recovery error: expired."
+        );
+    }
+
+    #[test]
+    fn configuration_status_uses_mojo_precedence() {
+        assert_eq!(runtime_doctor_configuration_status(None).unwrap(), "Valid");
+        assert_eq!(
+            runtime_doctor_configuration_status(Some("worker count must be greater than zero"))
+                .unwrap(),
+            "Invalid: worker count must be greater than zero"
         );
     }
 

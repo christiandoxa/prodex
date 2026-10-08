@@ -113,6 +113,27 @@ comptime PLAN_SETTING_DNS_QUEUE: Int64 = 12
 comptime PLAN_SETTING_DNS_OVERFLOW: Int64 = 13
 comptime PLAN_SETTING_PRESSURE_WAIT: Int64 = 14
 
+comptime RUNTIME_DOCTOR_REPORT_PLAN_ABI_VERSION: Int64 = 1
+comptime REPORT_OP_COMMAND: Int64 = 0
+comptime REPORT_OP_PROFILE: Int64 = 1
+comptime REPORT_MODE_HUMAN: Int64 = 0
+comptime REPORT_MODE_RUNTIME_JSON: Int64 = 1
+comptime REPORT_MODE_INSTALL_ONLY: Int64 = 2
+comptime REPORT_PROVIDER_OPENAI: Int64 = 0
+comptime REPORT_PROVIDER_GEMINI: Int64 = 1
+comptime REPORT_PROVIDER_EXTERNAL: Int64 = 2
+comptime REPORT_PROVIDER_COPILOT: Int64 = 3
+comptime REPORT_FIELD_CURRENT: Int64 = 0
+comptime REPORT_FIELD_KIND: Int64 = 1
+comptime REPORT_FIELD_PROVIDER: Int64 = 2
+comptime REPORT_FIELD_RUNTIME_ROUTE: Int64 = 3
+comptime REPORT_FIELD_QUOTA_SHAPE: Int64 = 4
+comptime REPORT_FIELD_AUTH: Int64 = 5
+comptime REPORT_FIELD_IDENTITY: Int64 = 6
+comptime REPORT_FIELD_PATH: Int64 = 7
+comptime REPORT_FIELD_EXISTS: Int64 = 8
+comptime REPORT_FIELD_MIGRATION: Int64 = 9
+
 
 @fieldwise_init
 struct ProdexRuntimeDoctorPlanMarkerCounts(Copyable):
@@ -213,6 +234,32 @@ struct ProdexRuntimeDoctorPlan(Copyable):
     var selected_marker: Int64
     var selected_source: Int64
     var suggestion_count: Int64
+
+
+@fieldwise_init
+struct ProdexRuntimeDoctorReportPlanInput(Copyable):
+    var operation: Int64
+    var install: Int64
+    var quota: Int64
+    var runtime: Int64
+    var repair_import_auth_journals: Int64
+    var repair_session_index: Int64
+    var bundle: Int64
+    var json: Int64
+    var suggest_policy: Int64
+    var runtime_config_valid: Int64
+    var provider_kind: Int64
+
+
+@fieldwise_init
+struct ProdexRuntimeDoctorReportPlan(Copyable):
+    var abi_version: Int64
+    var mode: Int64
+    var include_runtime: Int64
+    var include_install: Int64
+    var include_quota: Int64
+    var include_suggestions: Int64
+    var field_count: Int64
 
 
 @fieldwise_init
@@ -935,6 +982,123 @@ def prodex_mojo_rich_runtime_doctor_plan_v1(
         runtime_doctor_fill_suggestions(input, output, buffers)
     else:
         runtime_doctor_fill_next(input, output)
+    return 0
+
+
+def runtime_doctor_report_bool_valid(value: Int64) -> Bool:
+    return value == 0 or value == 1
+
+
+def runtime_doctor_report_input_valid(
+    input: ProdexRuntimeDoctorReportPlanInput,
+) -> Bool:
+    return (
+        input.operation >= REPORT_OP_COMMAND
+        and input.operation <= REPORT_OP_PROFILE
+        and runtime_doctor_report_bool_valid(input.install)
+        and runtime_doctor_report_bool_valid(input.quota)
+        and runtime_doctor_report_bool_valid(input.runtime)
+        and runtime_doctor_report_bool_valid(input.repair_import_auth_journals)
+        and runtime_doctor_report_bool_valid(input.repair_session_index)
+        and runtime_doctor_report_bool_valid(input.bundle)
+        and runtime_doctor_report_bool_valid(input.json)
+        and runtime_doctor_report_bool_valid(input.suggest_policy)
+        and runtime_doctor_report_bool_valid(input.runtime_config_valid)
+        and input.provider_kind >= REPORT_PROVIDER_OPENAI
+        and input.provider_kind <= REPORT_PROVIDER_COPILOT
+    )
+
+
+def runtime_doctor_report_reset_output(
+    output: Pointer[mut=True, ProdexRuntimeDoctorReportPlan, _],
+    fields_address: UInt,
+) -> None:
+    output[].abi_version = RUNTIME_DOCTOR_REPORT_PLAN_ABI_VERSION
+    output[].mode = REPORT_MODE_HUMAN
+    output[].include_runtime = 0
+    output[].include_install = 0
+    output[].include_quota = 0
+    output[].include_suggestions = 0
+    output[].field_count = 0
+    var fields = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    for index in range(10):
+        fields[unsafe_offset=index] = -1
+
+
+def runtime_doctor_fill_report_command(
+    input: ProdexRuntimeDoctorReportPlanInput,
+    output: Pointer[mut=True, ProdexRuntimeDoctorReportPlan, _],
+) -> None:
+    output[].include_runtime = input.runtime
+    output[].include_install = input.install
+    output[].include_quota = input.quota
+    output[].include_suggestions = (
+        input.runtime * input.suggest_policy * input.runtime_config_valid
+    )
+    if (
+        input.install == 1
+        and input.quota == 0
+        and input.runtime == 0
+        and input.repair_import_auth_journals == 0
+        and input.repair_session_index == 0
+        and input.bundle == 0
+    ):
+        output[].mode = REPORT_MODE_INSTALL_ONLY
+    elif input.runtime == 1 and input.json == 1:
+        output[].mode = REPORT_MODE_RUNTIME_JSON
+
+
+def runtime_doctor_fill_report_profile(
+    input: ProdexRuntimeDoctorReportPlanInput,
+    output: Pointer[mut=True, ProdexRuntimeDoctorReportPlan, _],
+    fields_address: UInt,
+) -> None:
+    var fields = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    fields[unsafe_offset=0] = REPORT_FIELD_CURRENT
+    fields[unsafe_offset=1] = REPORT_FIELD_KIND
+    fields[unsafe_offset=2] = REPORT_FIELD_PROVIDER
+    fields[unsafe_offset=3] = REPORT_FIELD_RUNTIME_ROUTE
+    fields[unsafe_offset=4] = REPORT_FIELD_QUOTA_SHAPE
+    fields[unsafe_offset=5] = REPORT_FIELD_AUTH
+    fields[unsafe_offset=6] = REPORT_FIELD_IDENTITY
+    fields[unsafe_offset=7] = REPORT_FIELD_PATH
+    fields[unsafe_offset=8] = REPORT_FIELD_EXISTS
+    output[].field_count = 9
+    if input.provider_kind == REPORT_PROVIDER_GEMINI:
+        fields[unsafe_offset=9] = REPORT_FIELD_MIGRATION
+        output[].field_count = 10
+
+@export("prodex_mojo_rich_runtime_doctor_report_plan_v1")
+def prodex_mojo_rich_runtime_doctor_report_plan_v1(
+    abi_version: Int64,
+    input_address: UInt,
+    output_address: UInt,
+    fields_address: UInt,
+) abi("C") -> Int64:
+    if output_address == 0 or fields_address == 0:
+        return 1
+    var output = Pointer[
+        mut=True, ProdexRuntimeDoctorReportPlan, MutUntrackedOrigin
+    ](unsafe_from_address=Int(output_address))
+    runtime_doctor_report_reset_output(output, fields_address)
+    if abi_version != RUNTIME_DOCTOR_REPORT_PLAN_ABI_VERSION:
+        return 4
+    if input_address == 0:
+        return 1
+    var input_pointer = Pointer[
+        mut=False, ProdexRuntimeDoctorReportPlanInput, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(input_address))
+    var input = input_pointer[].copy()
+    if not runtime_doctor_report_input_valid(input):
+        return 1
+    if input.operation == REPORT_OP_COMMAND:
+        runtime_doctor_fill_report_command(input, output)
+    else:
+        runtime_doctor_fill_report_profile(input, output, fields_address)
     return 0
 
 

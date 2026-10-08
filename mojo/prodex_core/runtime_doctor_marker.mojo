@@ -5,8 +5,14 @@ from rich_types import ProdexRichStringView
 
 comptime RUNTIME_DOCTOR_MARKER_ABI_VERSION: Int64 = 1
 comptime RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: Int64 = 2
+comptime RUNTIME_DOCTOR_PROFILE_PROVIDER_KIND_ABI_VERSION: Int64 = 1
 comptime RUNTIME_DOCTOR_MESSAGE_PARSE_ABI_VERSION: Int64 = 2
 comptime RUNTIME_DOCTOR_MARKER_MAX_BYTES: Int64 = 256
+
+comptime PROFILE_PROVIDER_OPENAI: Int64 = 0
+comptime PROFILE_PROVIDER_GEMINI: Int64 = 1
+comptime PROFILE_PROVIDER_EXTERNAL: Int64 = 2
+comptime PROFILE_PROVIDER_COPILOT: Int64 = 3
 
 def runtime_doctor_marker_known(view: ProdexRichStringView) -> Bool:
     if rich_view_matches_literal["chain_retried_owner"](view, False):
@@ -461,6 +467,35 @@ def prodex_mojo_runtime_doctor_marker_known_v1(
     # A parser event can be a long unknown token. The catalog bound limits
     # matching work, not valid input length; unknown text must not crash doctor.
     known[] = 1 if marker.len <= UInt(RUNTIME_DOCTOR_MARKER_MAX_BYTES) and runtime_doctor_marker_known(marker) else 0
+    return 0
+
+
+@export("prodex_mojo_runtime_doctor_profile_provider_kind_v1")
+def prodex_mojo_runtime_doctor_profile_provider_kind_v1(
+    abi_version: Int64, provider_address: UInt, kind_address: UInt
+) abi("C") -> Int64:
+    if (
+        abi_version != RUNTIME_DOCTOR_PROFILE_PROVIDER_KIND_ABI_VERSION
+        or provider_address == 0
+        or kind_address == 0
+    ):
+        return 1
+    var provider = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(provider_address))[].copy()
+    if not rich_view_valid(provider, 0x7FFFFFFFFFFFFFFF):
+        return 2
+    var kind = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(kind_address)
+    )
+    if rich_view_matches_literal["openai"](provider, False):
+        kind[] = PROFILE_PROVIDER_OPENAI
+    elif rich_view_matches_literal["gemini"](provider, False):
+        kind[] = PROFILE_PROVIDER_GEMINI
+    elif rich_view_matches_literal["copilot"](provider, False):
+        kind[] = PROFILE_PROVIDER_COPILOT
+    else:
+        kind[] = PROFILE_PROVIDER_EXTERNAL
     return 0
 
 comptime RUNTIME_DOCTOR_MARKER_PHASE_NONE: Int64 = 0
