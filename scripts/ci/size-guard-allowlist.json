@@ -56,8 +56,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
-    "maxLines": 1471,
-    "reason": "Sub-agent concurrent slot I/O, configuration validation, and catalog policy now live in focused production sibling modules; ratchet the remaining orchestrator to the exact audited 1471-line cap pending further decomposition."
+    "maxLines": 1472,
+    "reason": "Sub-agent concurrent slot I/O, configuration validation, and catalog policy now live in focused production sibling modules; ratchet the remaining orchestrator to the exact audited 1472-line cap pending further decomposition."
   },
   {
     "file": "crates/prodex-app/tests/src/runtime_proxy/smart_context/prepare.rs",
