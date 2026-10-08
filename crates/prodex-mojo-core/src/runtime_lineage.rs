@@ -17,6 +17,15 @@ unsafe extern "C" {
         address: u64,
         length: i64,
     ) -> i64;
+    fn prodex_runtime_lineage_identity_fallback_v1(
+        abi_version: i64,
+        response_address: u64,
+        response_length: i64,
+        turn_state_address: u64,
+        turn_state_length: i64,
+        session_address: u64,
+        session_length: i64,
+    ) -> i64;
     fn prodex_runtime_lineage_build_v1(
         abi_version: i64,
         kind: i64,
@@ -114,6 +123,46 @@ pub fn is_response_turn_key(value: &str) -> Result<bool, MojoError> {
 
 pub fn is_compact_session_key(value: &str) -> Result<bool, MojoError> {
     classify(CLASS_COMPACT_SESSION_KEY, value)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RuntimeLineageIdentityFallback {
+    Empty,
+    Invalid,
+}
+
+fn optional_string_parts(value: Option<&str>) -> Result<(u64, i64), MojoError> {
+    match value {
+        Some(value) => Ok((value.as_ptr() as usize as u64, signed_len(value)?)),
+        None => Ok((0, 0)),
+    }
+}
+
+pub fn identity_fallback_plan(
+    response_id: Option<&str>,
+    turn_state: Option<&str>,
+    session_id: Option<&str>,
+) -> Result<RuntimeLineageIdentityFallback, MojoError> {
+    let (response_address, response_length) = optional_string_parts(response_id)?;
+    let (turn_state_address, turn_state_length) = optional_string_parts(turn_state)?;
+    let (session_address, session_length) = optional_string_parts(session_id)?;
+    match unsafe {
+        prodex_runtime_lineage_identity_fallback_v1(
+            ABI_VERSION,
+            response_address,
+            response_length,
+            turn_state_address,
+            turn_state_length,
+            session_address,
+            session_length,
+        )
+    } {
+        0 => Ok(RuntimeLineageIdentityFallback::Empty),
+        1 => Ok(RuntimeLineageIdentityFallback::Invalid),
+        -4 => Err(MojoError::AbiMismatch),
+        -1 => Err(MojoError::InvalidInput),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 fn build(kind: i64, first: &str, second: Option<&str>) -> Result<String, MojoError> {
