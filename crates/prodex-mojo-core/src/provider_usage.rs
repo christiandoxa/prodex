@@ -1,6 +1,57 @@
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
+const ESTIMATE_JSON_VALUE: i64 = 1;
+const ESTIMATE_TEXT: i64 = 2;
+const ESTIMATE_REQUEST: i64 = 3;
+
+/// Borrowed JSON facts marshalled to the provider usage estimator.
+#[derive(Clone, Copy, Debug)]
+pub struct ProviderUsageJsonNode<'a> {
+    pub kind: i64,
+    pub first_child: Option<usize>,
+    pub next_sibling: Option<usize>,
+    pub parent: Option<usize>,
+    pub key: &'a str,
+    pub text: &'a str,
+    pub raw_start: usize,
+    pub raw_length: usize,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct UsageStringView {
+    address: u64,
+    length: u64,
+}
+
+impl From<&str> for UsageStringView {
+    fn from(value: &str) -> Self {
+        Self {
+            address: value.as_ptr() as usize as u64,
+            length: value.len() as u64,
+        }
+    }
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct UsageJsonNode {
+    kind: i64,
+    first_child: i64,
+    next_sibling: i64,
+    parent: i64,
+    key: UsageStringView,
+    text: UsageStringView,
+    raw_start: i64,
+    raw_length: i64,
+}
+
+const _: () = {
+    assert!(std::mem::size_of::<UsageStringView>() == 16);
+    assert!(std::mem::size_of::<UsageJsonNode>() == 80);
+    assert!(std::mem::align_of::<UsageJsonNode>() == 8);
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct ProviderUsagePlan {
@@ -54,6 +105,18 @@ unsafe extern "C" {
         incoming_total_tokens: u64,
         result_address: u64,
     ) -> i64;
+    fn prodex_provider_usage_estimate_v1(
+        abi_version: i64,
+        operation: i64,
+        nodes_address: u64,
+        nodes_count: i64,
+        raw_address: u64,
+        raw_length: i64,
+        text_address: u64,
+        text_length: i64,
+        body_empty: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 fn status(code: i64) -> Result<(), MojoError> {
@@ -79,6 +142,112 @@ fn output_option(flag: u64, value: u64) -> Result<Option<u64>, MojoError> {
         1 => Ok(Some(value)),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+fn signed(value: usize) -> Result<i64, MojoError> {
+    i64::try_from(value).map_err(|_| MojoError::InvalidInput)
+}
+
+fn optional_node_index(value: Option<usize>, count: usize) -> Result<i64, MojoError> {
+    match value {
+        None => Ok(-1),
+        Some(value) if value < count => signed(value),
+        _ => Err(MojoError::InvalidInput),
+    }
+}
+
+fn estimate_nodes(
+    nodes: &[ProviderUsageJsonNode<'_>],
+    raw: &[u8],
+) -> Result<Vec<UsageJsonNode>, MojoError> {
+    if nodes.is_empty() || nodes.len() > i64::MAX as usize / 80 {
+        return Err(MojoError::InvalidInput);
+    }
+    nodes
+        .iter()
+        .map(|node| {
+            let end = node
+                .raw_start
+                .checked_add(node.raw_length)
+                .ok_or(MojoError::InvalidInput)?;
+            raw.get(node.raw_start..end)
+                .ok_or(MojoError::InvalidInput)?;
+            Ok(UsageJsonNode {
+                kind: node.kind,
+                first_child: optional_node_index(node.first_child, nodes.len())?,
+                next_sibling: optional_node_index(node.next_sibling, nodes.len())?,
+                parent: optional_node_index(node.parent, nodes.len())?,
+                key: node.key.into(),
+                text: node.text.into(),
+                raw_start: signed(node.raw_start)?,
+                raw_length: signed(node.raw_length)?,
+            })
+        })
+        .collect()
+}
+
+fn estimate(
+    operation: i64,
+    tree: Option<(&[ProviderUsageJsonNode<'_>], &[u8])>,
+    text: &str,
+    body_empty: bool,
+) -> Result<Option<u64>, MojoError> {
+    let (nodes, raw) = tree.unwrap_or((&[], &[]));
+    let ffi_nodes = if nodes.is_empty() {
+        Vec::new()
+    } else {
+        estimate_nodes(nodes, raw)?
+    };
+    let mut output = [0_u64; 2];
+    status(unsafe {
+        prodex_provider_usage_estimate_v1(
+            ABI_VERSION,
+            operation,
+            if ffi_nodes.is_empty() {
+                0
+            } else {
+                ffi_nodes.as_ptr() as usize as u64
+            },
+            signed(ffi_nodes.len())?,
+            if raw.is_empty() {
+                0
+            } else {
+                raw.as_ptr() as usize as u64
+            },
+            signed(raw.len())?,
+            if text.is_empty() {
+                0
+            } else {
+                text.as_ptr() as usize as u64
+            },
+            signed(text.len())?,
+            i64::from(body_empty),
+            output.as_mut_ptr() as usize as u64,
+        )
+    })?;
+    output_option(output[0], output[1])
+}
+
+/// Estimate request input tokens from a Serde-built JSON tree or its text form.
+pub fn estimate_request_tokens(
+    tree: Option<(&[ProviderUsageJsonNode<'_>], &[u8])>,
+    text: &str,
+    body_empty: bool,
+) -> Result<u64, MojoError> {
+    estimate(ESTIMATE_REQUEST, tree, text, body_empty)?.ok_or(MojoError::InvalidOutput)
+}
+
+/// Estimate selected text fields from a Serde-built JSON value.
+pub fn estimate_json_tokens(
+    nodes: &[ProviderUsageJsonNode<'_>],
+    raw: &[u8],
+) -> Result<Option<u64>, MojoError> {
+    estimate(ESTIMATE_JSON_VALUE, Some((nodes, raw)), "", false)
+}
+
+/// Estimate tokens in already-decoded text.
+pub fn estimate_text_tokens(text: &str) -> Result<u64, MojoError> {
+    estimate(ESTIMATE_TEXT, None, text, false)?.ok_or(MojoError::InvalidOutput)
 }
 
 pub fn extract_json(source: &str) -> Result<ProviderUsagePlan, MojoError> {
