@@ -6259,6 +6259,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "terminal API reads, ratatui style construction, and mapping Mojo color classes to terminal colors"
+    },
+    {
+      "name": "runtime_proxy_body_limit_policy",
+      "domain": "runtime-proxy/body-limit",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust rejected declared Content-Length and observed request bodies above the configured byte limit",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_proxy_body_limit_exceeds_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_proxy_body_limit.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/dispatch.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_proxy_body_limit::runtime_proxy_body_size_exceeds_limit",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/dispatch.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_proxy_body_limit.rs",
+      "rust_owner_before": "Declared and observed runtime proxy request body size threshold decisions",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "compiled ABI boundary test covers exact-limit acceptance, limit-plus-one rejection, and the u64 maximum",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Content-Length extraction, bounded request body reads, error classification, and HTTP response construction"
     }
   ],
   "rust_semantic_reductions": [

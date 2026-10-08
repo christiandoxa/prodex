@@ -176,6 +176,8 @@ pub mod runtime_lineage;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_overlay_policy;
 #[cfg(feature = "mojo-runtime")]
+pub mod runtime_proxy_body_limit;
+#[cfg(feature = "mojo-runtime")]
 pub mod runtime_repo_map;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime_route_reason;

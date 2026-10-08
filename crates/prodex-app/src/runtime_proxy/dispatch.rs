@@ -421,7 +421,7 @@ fn capture_runtime_proxy_request_with_max(
     max_body_bytes: u64,
 ) -> Result<RuntimeProxyRequest> {
     if let Some(content_length) = runtime_proxy_request_content_length(request)
-        && content_length > max_body_bytes
+        && runtime_proxy_request_body_exceeds_limit(max_body_bytes, content_length)?
     {
         return Err(RuntimeProxyBodyTooLarge {
             limit: max_body_bytes,
@@ -436,7 +436,7 @@ fn capture_runtime_proxy_request_with_max(
         .take(max_body_bytes.saturating_add(1))
         .read_to_end(&mut body)
         .context("failed to read proxied Codex request body")?;
-    if body.len() as u64 > max_body_bytes {
+    if runtime_proxy_request_body_exceeds_limit(max_body_bytes, body.len() as u64)? {
         return Err(RuntimeProxyBodyTooLarge {
             limit: max_body_bytes,
             actual: None,
@@ -469,6 +469,14 @@ fn runtime_proxy_request_content_length(request: &tiny_http::Request) -> Option<
             .flatten()
     })
 }
+
+fn runtime_proxy_request_body_exceeds_limit(limit: u64, observed: u64) -> Result<bool> {
+    prodex_mojo_core::runtime_proxy_body_limit::runtime_proxy_body_size_exceeds_limit(
+        limit, observed,
+    )
+    .map_err(|error| anyhow::anyhow!("runtime proxy body-limit plan failed: {error:?}"))
+}
+
 pub(crate) fn runtime_proxy_request_headers(request: &tiny_http::Request) -> Vec<(String, String)> {
     request
         .headers()
