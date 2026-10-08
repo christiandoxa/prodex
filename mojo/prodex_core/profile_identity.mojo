@@ -3,7 +3,7 @@ from std.memory import Pointer
 from rich_text import rich_codepoint, rich_codepoint_width, rich_trim_bounds, rich_view_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
 
-comptime PROFILE_IDENTITY_ABI_VERSION: Int64 = 1
+comptime PROFILE_IDENTITY_ABI_VERSION: Int64 = 2
 comptime PROFILE_IDENTITY_OK: Int64 = 0
 comptime PROFILE_IDENTITY_INVALID: Int64 = 1
 comptime PROFILE_IDENTITY_CAPACITY: Int64 = 2
@@ -29,6 +29,7 @@ comptime PROFILE_IDENTITY_OPTIONAL_NONEMPTY_CASEFOLD_EQUAL: Int64 = 16
 comptime PROFILE_IDENTITY_FIRST_PRESENT_SOURCE: Int64 = 17
 comptime PROFILE_IDENTITY_REMOVED_ACTIVE_CHOICE: Int64 = 18
 comptime PROFILE_IDENTITY_NAME_CANDIDATE: Int64 = 19
+comptime PROFILE_IDENTITY_TRIMMED_NONEMPTY: Int64 = 20
 
 comptime PROFILE_MANAGEMENT_STATUS_ABI_VERSION: Int64 = 1
 comptime PROFILE_MANAGEMENT_STATUS_OK: Int64 = 0
@@ -625,8 +626,8 @@ def profile_optional_nonempty_casefold_equal(
     return profile_normalized_equal(left, right, True)
 
 
-@export("prodex_mojo_profile_identity_v1")
-def prodex_mojo_profile_identity_v1(
+@export("prodex_mojo_profile_identity_v2")
+def prodex_mojo_profile_identity_v2(
     abi_version: Int64,
     operation: Int64,
     primary_address: UInt,
@@ -645,7 +646,7 @@ def prodex_mojo_profile_identity_v1(
         return PROFILE_IDENTITY_ABI
     if (
         operation < 0
-        or operation > PROFILE_IDENTITY_NAME_CANDIDATE
+        or operation > PROFILE_IDENTITY_TRIMMED_NONEMPTY
         or primary_length < 0
         or secondary_length < 0
         or record_count < 0
@@ -902,6 +903,11 @@ def prodex_mojo_profile_identity_v1(
                 secondary_present,
             )
         )
+        return PROFILE_IDENTITY_OK
+
+    if operation == PROFILE_IDENTITY_TRIMMED_NONEMPTY:
+        var bounds = rich_trim_bounds(primary)
+        result[] = Int64(bounds[1] > bounds[0])
         return PROFILE_IDENTITY_OK
 
     return PROFILE_IDENTITY_INVALID

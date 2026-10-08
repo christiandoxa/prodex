@@ -14,15 +14,13 @@ pub struct ProfileIdentity {
 
 impl ProfileIdentity {
     pub fn has_email(&self) -> bool {
-        self.email
-            .as_deref()
-            .is_some_and(|email| !email.trim().is_empty())
+        mojo_profile_identity::is_trimmed_nonempty(self.email.as_deref().unwrap_or_default())
+            .expect("Mojo profile email presence check returned invalid output")
     }
 
     pub fn has_account_id(&self) -> bool {
-        self.account_id
-            .as_deref()
-            .is_some_and(|account_id| !account_id.trim().is_empty())
+        mojo_profile_identity::is_trimmed_nonempty(self.account_id.as_deref().unwrap_or_default())
+            .expect("Mojo profile account presence check returned invalid output")
     }
 }
 

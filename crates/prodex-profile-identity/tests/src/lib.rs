@@ -180,6 +180,27 @@ fn normalizes_email_and_account_id() {
 }
 
 #[test]
+fn profile_identity_presence_uses_mojo_unicode_trim() {
+    let blank = ProfileIdentity {
+        email: Some("\u{2003}\u{3000}".to_string()),
+        account_id: Some("\u{00a0}\u{202f}".to_string()),
+    };
+    assert!(!blank.has_email());
+    assert!(!blank.has_account_id());
+
+    let populated = ProfileIdentity {
+        email: Some("\u{2003}user@example.com\u{3000}".to_string()),
+        account_id: Some("\u{00a0}acct-one\u{202f}".to_string()),
+    };
+    assert!(populated.has_email());
+    assert!(populated.has_account_id());
+
+    let absent = ProfileIdentity::default();
+    assert!(!absent.has_email());
+    assert!(!absent.has_account_id());
+}
+
+#[test]
 fn canonical_identity_key_combines_normalized_account_and_email() {
     assert_eq!(
         canonical_profile_identity_key(Some(" acct "), Some("User@Example.COM")),

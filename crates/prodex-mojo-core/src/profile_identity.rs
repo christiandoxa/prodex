@@ -1,6 +1,6 @@
 use crate::MojoError;
 
-const PROFILE_IDENTITY_ABI_VERSION: i64 = 1;
+const PROFILE_IDENTITY_ABI_VERSION: i64 = 2;
 const PROFILE_IDENTITY_RECORD_EMAIL_PRESENT: i64 = 1;
 const PROFILE_IDENTITY_RECORD_ACCOUNT_PRESENT: i64 = 2;
 const PROFILE_PRIMARY_PRESENT: i64 = 1;
@@ -30,6 +30,7 @@ enum ProfileIdentityOperation {
     FirstPresentSource = 17,
     RemovedActiveChoice = 18,
     NameCandidate = 19,
+    TrimmedNonempty = 20,
 }
 
 #[repr(C)]
@@ -146,7 +147,7 @@ pub struct ProfileManagementStatusPlan {
 }
 
 unsafe extern "C" {
-    fn prodex_mojo_profile_identity_v1(
+    fn prodex_mojo_profile_identity_v2(
         abi_version: i64,
         operation: i64,
         primary_address: u64,
@@ -226,7 +227,7 @@ fn call_kernel(
     let mut written = 0_i64;
     let mut result = 0_i64;
     let status = unsafe {
-        prodex_mojo_profile_identity_v1(
+        prodex_mojo_profile_identity_v2(
             PROFILE_IDENTITY_ABI_VERSION,
             operation as i64,
             ptr(primary),
@@ -504,6 +505,23 @@ pub fn trimmed_casefold_equal(left: &str, right: &str) -> Result<bool, MojoError
     )
 }
 
+pub fn is_trimmed_nonempty(value: &str) -> Result<bool, MojoError> {
+    let result = call_kernel(
+        ProfileIdentityOperation::TrimmedNonempty,
+        value,
+        "",
+        0,
+        0,
+        0,
+        1,
+    )?;
+    match result.result {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 pub fn optional_trimmed_casefold_equal(
     left: Option<&str>,
     right: Option<&str>,
@@ -772,6 +790,8 @@ mod tests {
         assert!(trimmed_equal(" GitHub.COM ", "GitHub.COM").unwrap());
         assert!(!trimmed_equal("GitHub.COM", "github.com").unwrap());
         assert!(trimmed_casefold_equal(" User@Example.COM ", "user@example.com").unwrap());
+        assert!(!is_trimmed_nonempty(" \u{2003}\u{3000}").unwrap());
+        assert!(is_trimmed_nonempty("\u{2003}user@example.com\u{3000}").unwrap());
         assert!(optional_trimmed_casefold_equal(Some(" ACCT "), Some("acct")).unwrap());
         assert!(!optional_trimmed_casefold_equal(Some(""), None).unwrap());
         assert!(optional_trimmed_casefold_wildcard(None, Some("oauth")).unwrap());
