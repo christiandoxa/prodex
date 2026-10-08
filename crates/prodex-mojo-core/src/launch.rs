@@ -15,6 +15,8 @@ const SCAN_SUPER_OVERRIDES: i64 = 10;
 const FIND_SUPER_EXPOSE_ALIAS: i64 = 11;
 const LOGIN_POLICY: i64 = 12;
 const CLI_DEFAULT_RUN: i64 = 13;
+const SUPER_VALIDATE: i64 = 14;
+const SUPER_VALIDATE_SUB_AGENT: i64 = 15;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(i64)]
@@ -62,6 +64,86 @@ pub struct LoginArgumentPlan {
     pub method: LoginArgumentMethod,
     pub removed_gemini_oauth: bool,
     pub base_url_allowed: bool,
+}
+
+/// Raw facts from parsed Super arguments used by the Mojo validation plan.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SuperValidationInput {
+    pub auto_rotate: bool,
+    pub no_auto_rotate: bool,
+    pub presidio: bool,
+    pub no_presidio: bool,
+    pub required_presidio: bool,
+    pub provider: bool,
+    pub url: bool,
+    pub base_url: bool,
+    pub api_key: bool,
+    pub local_context_window: bool,
+    pub local_auto_compact_token_limit: bool,
+    pub sub_agent: bool,
+    pub no_sub_agent: bool,
+    pub sub_agent_provider: bool,
+    pub sub_agent_model: bool,
+    pub sub_agent_model_nonempty: bool,
+    pub sub_agent_reasoning_effort: bool,
+    pub sub_agent_url: bool,
+    pub sub_agent_max_concurrency: bool,
+    pub provider_url_violation: Option<crate::sub_agent_policy::ProviderUrlViolation>,
+}
+
+/// Limits validation to the sub-agent checks run immediately after tail extraction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuperValidationScope {
+    SubAgentOnly,
+    Full,
+}
+
+/// First failed compatibility check in the Super argument validation order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuperValidationViolation {
+    SubAgentConflict,
+    SubAgentDetailsRequireEnable,
+    SubAgentModelEmpty,
+    LocalSubAgentRequiresUrl,
+    SubAgentUrlRequiresLocal,
+    AutoRotateConflict,
+    PresidioConflict,
+    NoPresidioRequiresPresidioTool,
+    ProviderUrlConflict,
+    BaseUrlUrlConflict,
+    ApiKeyRequiresProvider,
+    ContextWindowRequiresProviderOrUrl,
+    SubAgentUnsupportedWithDesktop,
+}
+
+impl SuperValidationInput {
+    fn abi_flags(self) -> i64 {
+        let mut flags = i64::from(self.auto_rotate)
+            | (i64::from(self.no_auto_rotate) << 1)
+            | (i64::from(self.presidio) << 2)
+            | (i64::from(self.no_presidio) << 3)
+            | (i64::from(self.required_presidio) << 4)
+            | (i64::from(self.provider) << 5)
+            | (i64::from(self.url) << 6)
+            | (i64::from(self.base_url) << 7)
+            | (i64::from(self.api_key) << 8)
+            | (i64::from(self.local_context_window) << 9)
+            | (i64::from(self.local_auto_compact_token_limit) << 10)
+            | (i64::from(self.sub_agent) << 11)
+            | (i64::from(self.no_sub_agent) << 12)
+            | (i64::from(self.sub_agent_provider) << 13)
+            | (i64::from(self.sub_agent_model) << 14)
+            | (i64::from(self.sub_agent_model_nonempty) << 15)
+            | (i64::from(self.sub_agent_reasoning_effort) << 16)
+            | (i64::from(self.sub_agent_url) << 17)
+            | (i64::from(self.sub_agent_max_concurrency) << 18);
+        flags |= match self.provider_url_violation {
+            None => 0,
+            Some(crate::sub_agent_policy::ProviderUrlViolation::LocalRequiresUrl) => 1 << 19,
+            Some(crate::sub_agent_policy::ProviderUrlViolation::NonLocalRejectsUrl) => 1 << 20,
+        };
+        flags
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -493,6 +575,61 @@ pub fn default_cli_invocation_to_run(arguments: &[Option<&str>]) -> Result<bool,
         )
     })?;
     boolean(meta[0])
+}
+
+/// Return the first Super argument validation failure selected by Mojo.
+///
+/// Rust supplies facts acquired from Clap fields and the first Codex argument;
+/// Mojo owns validation order and first-error selection.
+pub fn plan_super_validation(
+    input: SuperValidationInput,
+    codex_arguments: &[Option<&str>],
+    scope: SuperValidationScope,
+) -> Result<Option<SuperValidationViolation>, MojoError> {
+    let arguments = views(codex_arguments)?;
+    let operation = match scope {
+        SuperValidationScope::SubAgentOnly => SUPER_VALIDATE_SUB_AGENT,
+        SuperValidationScope::Full => SUPER_VALIDATE,
+    };
+    let mut meta = [0_i64; METADATA_WORDS];
+    // SAFETY: views and metadata have the declared C layouts and live through
+    // the synchronous call. Validation writes only metadata[0].
+    status(unsafe {
+        prodex_mojo_launch_args_v1(
+            ABI_VERSION,
+            operation,
+            input.abi_flags(),
+            arguments.as_ptr() as u64,
+            arguments.len() as i64,
+            0,
+            0,
+            0,
+            meta.as_mut_ptr() as u64,
+        )
+    })?;
+    match meta[0] {
+        0 => Ok(None),
+        1 => Ok(Some(SuperValidationViolation::SubAgentConflict)),
+        2 => Ok(Some(SuperValidationViolation::SubAgentDetailsRequireEnable)),
+        3 => Ok(Some(SuperValidationViolation::SubAgentModelEmpty)),
+        4 => Ok(Some(SuperValidationViolation::LocalSubAgentRequiresUrl)),
+        5 => Ok(Some(SuperValidationViolation::SubAgentUrlRequiresLocal)),
+        6 => Ok(Some(SuperValidationViolation::AutoRotateConflict)),
+        7 => Ok(Some(SuperValidationViolation::PresidioConflict)),
+        8 => Ok(Some(
+            SuperValidationViolation::NoPresidioRequiresPresidioTool,
+        )),
+        9 => Ok(Some(SuperValidationViolation::ProviderUrlConflict)),
+        10 => Ok(Some(SuperValidationViolation::BaseUrlUrlConflict)),
+        11 => Ok(Some(SuperValidationViolation::ApiKeyRequiresProvider)),
+        12 => Ok(Some(
+            SuperValidationViolation::ContextWindowRequiresProviderOrUrl,
+        )),
+        13 => Ok(Some(
+            SuperValidationViolation::SubAgentUnsupportedWithDesktop,
+        )),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn inspect_launch_arguments<'a>(

@@ -502,6 +502,34 @@ fn sub_agent_url_requires_local_and_local_requires_a_resolved_url() {
 }
 
 #[test]
+fn super_argument_validation_keeps_mojo_order_and_cli_error_text() {
+    let mut args = super_command(&[
+        "--presidio",
+        SESSION_ID,
+        "--no-presidio",
+        "--require-tool",
+        "presidio",
+        "--provider",
+        "gemini",
+        "--url",
+        "http://127.0.0.1:8131/v1",
+    ]);
+    args.extract_super_overrides_from_codex_args().unwrap();
+    assert_eq!(
+        args.validate_urls().unwrap_err(),
+        "--presidio conflicts with --no-presidio"
+    );
+
+    let mut args = super_command(&["--sub-agent"]);
+    args.sub_agent_model = Some("\u{3000}\t".to_string());
+    args.sub_agent_provider = Some(ProviderId::Local);
+    assert_eq!(
+        args.validate_urls().unwrap_err(),
+        "--sub-agent-model must be nonempty"
+    );
+}
+
+#[test]
 fn sub_agent_preference_and_config_are_typed() {
     let disabled = super_command(&["--no-sub-agent"]);
     assert_eq!(
