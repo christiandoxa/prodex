@@ -4,6 +4,8 @@ use super::super::import_export::{
     prepare_existing_profile_lifecycle, write_profile_lifecycle_plan,
 };
 use super::super::manage::print_profile_panel;
+use super::LoginMethod;
+use super::lifecycle_support::validate_profile_login_provider;
 use super::unique_profile_name_for_slug;
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, activate_profile,
@@ -11,7 +13,7 @@ use crate::{
     copy_claude_oauth_credentials, managed_profile_home_path, prepare_claude_profile_codex_home,
     read_external_claude_credentials_text, remove_dir_if_exists,
 };
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 
 pub(super) fn prepare_anthropic_profile_login_home(
@@ -23,16 +25,7 @@ pub(super) fn prepare_anthropic_profile_login_home(
         .profiles
         .get(profile_name)
         .with_context(|| format!("profile '{}' is missing", profile_name))?;
-    if matches!(
-        profile.provider,
-        ProfileProvider::Gemini { .. } | ProfileProvider::Copilot { .. }
-    ) {
-        bail!(
-            "profile '{}' uses {}. Claude sign-in supports OpenAI/Codex placeholders or Anthropic Claude profiles.",
-            profile_name,
-            profile.provider.display_name()
-        );
-    }
+    validate_profile_login_provider(profile_name, &profile.provider, LoginMethod::Claude)?;
     prepare_claude_profile_codex_home(paths, profile)?;
     Ok(profile.codex_home.clone())
 }
