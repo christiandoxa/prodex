@@ -8,6 +8,7 @@ const RUNTIME_DOCTOR_SMART_CONTEXT_DECISION_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_LOG_VALUE_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SEMANTICS_ABI_VERSION: i64 = 2;
+const RUNTIME_DOCTOR_PROFILE_PROVIDER_KIND_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MESSAGE_PARSE_ABI_VERSION: i64 = 2;
 const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_ABI_VERSION: i64 = 1;
 const RUNTIME_DOCTOR_MARKER_SUMMARY_COUNTS_MAX_BATCH: usize = 256;
@@ -30,6 +31,11 @@ const RUNTIME_DOCTOR_COMPACT_EXIT_COUNT_LABELS: [&str; 11] = [
 unsafe extern "C" {
     fn prodex_mojo_runtime_doctor_marker_known_v1(abi_version: i64, marker: u64, known: u64)
     -> i64;
+    fn prodex_mojo_runtime_doctor_profile_provider_kind_v1(
+        abi_version: i64,
+        provider: u64,
+        kind: u64,
+    ) -> i64;
     fn prodex_mojo_runtime_doctor_smart_context_decision_is_fallback_v1(
         abi_version: i64,
         decision: u64,
@@ -108,6 +114,10 @@ pub const RUNTIME_DOCTOR_MARKER_FAILURE_CLASS_TRANSPORT: i64 = 6;
 pub const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_EVENT_REASONS: i64 = 1;
 pub const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK: i64 = 2;
 pub const RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_DECISION: i64 = 3;
+pub const RUNTIME_DOCTOR_PROFILE_PROVIDER_OPENAI: i64 = 0;
+pub const RUNTIME_DOCTOR_PROFILE_PROVIDER_GEMINI: i64 = 1;
+pub const RUNTIME_DOCTOR_PROFILE_PROVIDER_EXTERNAL: i64 = 2;
+pub const RUNTIME_DOCTOR_PROFILE_PROVIDER_COPILOT: i64 = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RuntimeDoctorMarkerSemantics {
@@ -504,6 +514,32 @@ pub fn runtime_doctor_marker_known(marker: &str) -> Result<bool, MojoError> {
     }
 }
 
+/// Classify the provider family used by a doctor profile report.
+pub fn runtime_doctor_profile_provider_kind(provider: &str) -> Result<i64, MojoError> {
+    ensure_rich_abi()?;
+    let provider = view(provider);
+    let mut kind = -1_i64;
+    let status = unsafe {
+        prodex_mojo_runtime_doctor_profile_provider_kind_v1(
+            RUNTIME_DOCTOR_PROFILE_PROVIDER_KIND_ABI_VERSION,
+            mojo_pointer_address(&provider),
+            mojo_mut_pointer_address(&mut kind),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            2 => MojoError::InvalidOutput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    (RUNTIME_DOCTOR_PROFILE_PROVIDER_OPENAI..=RUNTIME_DOCTOR_PROFILE_PROVIDER_COPILOT)
+        .contains(&kind)
+        .then_some(kind)
+        .ok_or(MojoError::InvalidOutput)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -596,6 +632,26 @@ mod tests {
         assert!(runtime_doctor_marker_known("selection_pick").unwrap());
         assert!(runtime_doctor_marker_known("websocket_connect_overflow_rejected").unwrap());
         assert!(!runtime_doctor_marker_known("not_a_runtime_marker").unwrap());
+    }
+
+    #[test]
+    fn runtime_doctor_profile_provider_kind_is_mojo_owned() {
+        assert_eq!(
+            runtime_doctor_profile_provider_kind("openai").unwrap(),
+            RUNTIME_DOCTOR_PROFILE_PROVIDER_OPENAI
+        );
+        assert_eq!(
+            runtime_doctor_profile_provider_kind("gemini").unwrap(),
+            RUNTIME_DOCTOR_PROFILE_PROVIDER_GEMINI
+        );
+        assert_eq!(
+            runtime_doctor_profile_provider_kind("copilot").unwrap(),
+            RUNTIME_DOCTOR_PROFILE_PROVIDER_COPILOT
+        );
+        assert_eq!(
+            runtime_doctor_profile_provider_kind("anthropic").unwrap(),
+            RUNTIME_DOCTOR_PROFILE_PROVIDER_EXTERNAL
+        );
     }
 
     #[test]

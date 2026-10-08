@@ -13,6 +13,16 @@ use bundle::{
     DoctorRedactedBundleContext, doctor_redacted_bundle_json_value, doctor_runtime_policy_status,
     format_import_auth_journal_status, import_auth_journals_json_value, write_doctor_bundle_json,
 };
+use prodex_mojo_core::rich::{
+    RUNTIME_DOCTOR_REPORT_FIELD_AUTH, RUNTIME_DOCTOR_REPORT_FIELD_CURRENT,
+    RUNTIME_DOCTOR_REPORT_FIELD_EXISTS, RUNTIME_DOCTOR_REPORT_FIELD_IDENTITY,
+    RUNTIME_DOCTOR_REPORT_FIELD_KIND, RUNTIME_DOCTOR_REPORT_FIELD_MIGRATION,
+    RUNTIME_DOCTOR_REPORT_FIELD_PATH, RUNTIME_DOCTOR_REPORT_FIELD_PROVIDER,
+    RUNTIME_DOCTOR_REPORT_FIELD_QUOTA_SHAPE, RUNTIME_DOCTOR_REPORT_FIELD_RUNTIME_ROUTE,
+    RUNTIME_DOCTOR_REPORT_MODE_INSTALL_ONLY, RUNTIME_DOCTOR_REPORT_MODE_RUNTIME_JSON,
+    RuntimeDoctorReportPlan, RuntimeDoctorReportPlanInput, runtime_doctor_configuration_status,
+    runtime_doctor_profile_provider_kind, runtime_doctor_report_plan,
+};
 use render::{doctor_quota_error_summary, print_doctor_output};
 
 #[derive(Debug, Clone)]
@@ -34,9 +44,44 @@ struct DoctorContext<'a> {
     runtime_config_error: Option<&'a str>,
 }
 
+fn doctor_report_plan(
+    args: &DoctorArgs,
+    runtime_config_valid: bool,
+) -> anyhow::Result<RuntimeDoctorReportPlan> {
+    runtime_doctor_report_plan(RuntimeDoctorReportPlanInput {
+        operation: prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_OP_COMMAND,
+        install: i64::from(args.install),
+        quota: i64::from(args.quota),
+        runtime: i64::from(args.runtime),
+        repair_import_auth_journals: i64::from(args.repair_import_auth_journals),
+        repair_session_index: i64::from(args.repair_session_index),
+        bundle: i64::from(args.bundle.is_some()),
+        json: i64::from(args.json),
+        suggest_policy: i64::from(args.suggest_policy),
+        runtime_config_valid: i64::from(runtime_config_valid),
+        ..RuntimeDoctorReportPlanInput::default()
+    })
+    .map_err(|error| anyhow::anyhow!("runtime doctor report plan failed: {error:?}"))
+}
+
+fn doctor_profile_report_plan(
+    provider: &ProfileProvider,
+) -> anyhow::Result<RuntimeDoctorReportPlan> {
+    let provider_kind =
+        runtime_doctor_profile_provider_kind(provider.label()).map_err(|error| {
+            anyhow::anyhow!("runtime doctor provider classification failed: {error:?}")
+        })?;
+    runtime_doctor_report_plan(RuntimeDoctorReportPlanInput {
+        operation: prodex_mojo_core::rich::RUNTIME_DOCTOR_REPORT_OP_PROFILE,
+        provider_kind,
+        ..RuntimeDoctorReportPlanInput::default()
+    })
+    .map_err(|error| anyhow::anyhow!("runtime doctor profile report plan failed: {error:?}"))
+}
+
 pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     let paths = AppPaths::discover()?;
-    if doctor_install_only(&args) {
+    if doctor_install_only(&args)? {
         return print_doctor_output(
             &[DoctorPanel {
                 title: "Install Checks".to_string(),
@@ -99,13 +144,8 @@ pub(crate) fn handle_doctor(args: DoctorArgs) -> Result<()> {
     render_human_doctor(context)
 }
 
-fn doctor_install_only(args: &DoctorArgs) -> bool {
-    args.install
-        && !args.quota
-        && !args.runtime
-        && !args.repair_import_auth_journals
-        && !args.repair_session_index
-        && args.bundle.is_none()
+fn doctor_install_only(args: &DoctorArgs) -> Result<bool> {
+    Ok(doctor_report_plan(args, false)?.mode == RUNTIME_DOCTOR_REPORT_MODE_INSTALL_ONLY)
 }
 
 fn repair_session_index(paths: &AppPaths, state: &AppState) -> Result<()> {
@@ -159,11 +199,12 @@ fn handle_doctor_bundle(context: &DoctorContext<'_>) -> Result<bool> {
 }
 
 fn handle_doctor_runtime_json(context: &DoctorContext<'_>) -> Result<bool> {
-    if !context.args.runtime || !context.args.json {
+    let report_plan = doctor_report_plan(context.args, context.runtime_config.is_some())?;
+    if report_plan.mode != RUNTIME_DOCTOR_REPORT_MODE_RUNTIME_JSON {
         return Ok(false);
     }
     let summary = collect_runtime_doctor_summary_with_tail_bytes(context.args.tail_bytes);
-    let mut value = if context.args.suggest_policy {
+    let mut value = if report_plan.include_suggestions == 1 {
         context
             .runtime_config
             .map(|config| runtime_doctor_json_value_with_policy_suggestions(&summary, config))
@@ -172,7 +213,7 @@ fn handle_doctor_runtime_json(context: &DoctorContext<'_>) -> Result<bool> {
         runtime_doctor_json_value(&summary)
     };
     if let Some(object) = value.as_object_mut() {
-        append_doctor_runtime_json_fields(object, context);
+        append_doctor_runtime_json_fields(object, context, report_plan);
     }
     let json = serde_json::to_string_pretty(&value)
         .context("failed to serialize runtime doctor summary")?;
@@ -183,6 +224,7 @@ fn handle_doctor_runtime_json(context: &DoctorContext<'_>) -> Result<bool> {
 fn append_doctor_runtime_json_fields(
     object: &mut serde_json::Map<String, serde_json::Value>,
     context: &DoctorContext<'_>,
+    report_plan: RuntimeDoctorReportPlan,
 ) {
     object.insert(
         "runtime_policy".to_string(),
@@ -233,7 +275,7 @@ fn append_doctor_runtime_json_fields(
             context.repaired_import_auth_journals,
         ),
     );
-    if context.args.install {
+    if report_plan.include_install == 1 {
         object.insert(
             "install_checks".to_string(),
             serde_json::Value::Array(
@@ -244,7 +286,7 @@ fn append_doctor_runtime_json_fields(
             ),
         );
     }
-    if context.args.quota {
+    if report_plan.include_quota == 1 {
         object.insert(
             "quota_probes".to_string(),
             doctor_quota_reports_json_value(context.state),
@@ -338,6 +380,7 @@ fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
         runtime_config,
         runtime_config_error,
     } = context;
+    let report_plan = doctor_report_plan(args, runtime_config.is_some())?;
     let summary_fields = vec![
         ("Prodex root".to_string(), paths.root.display().to_string()),
         (
@@ -386,7 +429,9 @@ fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
         ),
         (
             "Runtime configuration".to_string(),
-            doctor_runtime_configuration_status(runtime_config_error),
+            runtime_doctor_configuration_status(runtime_config_error).map_err(|error| {
+                anyhow::anyhow!("runtime doctor configuration status failed: {error:?}")
+            })?,
         ),
         (
             "Runtime proxy contract".to_string(),
@@ -416,14 +461,14 @@ fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
     }];
     let mut suggestion_lines = Vec::new();
 
-    if args.install {
+    if report_plan.include_install == 1 {
         panels.push(DoctorPanel {
             title: "Install Checks".to_string(),
             fields: collect_install_check_rows(paths),
         });
     }
 
-    if args.runtime {
+    if report_plan.include_runtime == 1 {
         let summary = collect_runtime_doctor_summary_with_tail_bytes(args.tail_bytes);
         let fields =
             runtime_doctor_fields_for_summary(&summary, &runtime_proxy_latest_log_pointer_path());
@@ -431,7 +476,7 @@ fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
             title: "Runtime Proxy".to_string(),
             fields,
         });
-        if args.suggest_policy
+        if report_plan.include_suggestions == 1
             && let Some(runtime_config) = runtime_config.as_ref()
         {
             let suggestions = runtime_doctor_policy_suggestions(&summary, runtime_config);
@@ -444,38 +489,40 @@ fn render_human_doctor(context: DoctorContext<'_>) -> Result<()> {
         return Ok(());
     }
 
-    for report in collect_doctor_profile_reports(state, args.quota) {
-        panels.push(doctor_profile_panel(report));
+    for report in collect_doctor_profile_reports(state, report_plan.include_quota == 1) {
+        panels.push(doctor_profile_panel(report)?);
     }
 
     print_doctor_output(&panels, &suggestion_lines)?;
     Ok(())
 }
 
-fn doctor_runtime_configuration_status(error: Option<&str>) -> String {
-    error
-        .map(|error| format!("Invalid: {error}"))
-        .unwrap_or_else(|| "Valid".to_string())
-}
-
-fn doctor_profile_panel(report: DoctorProfileReport) -> DoctorPanel {
+fn doctor_profile_panel(report: DoctorProfileReport) -> Result<DoctorPanel> {
     let summary = report.summary;
-    let kind = if summary.managed {
-        "managed"
-    } else {
-        "external"
-    };
-    let mut fields = vec![
+    let report_plan = doctor_profile_report_plan(&summary.provider)?;
+    let field_values = [
         (
+            RUNTIME_DOCTOR_REPORT_FIELD_CURRENT,
             "Current".to_string(),
             if summary.active { "Yes" } else { "No" }.to_string(),
         ),
-        ("Kind".to_string(), kind.to_string()),
         (
+            RUNTIME_DOCTOR_REPORT_FIELD_KIND,
+            "Kind".to_string(),
+            if summary.managed {
+                "managed"
+            } else {
+                "external"
+            }
+            .to_string(),
+        ),
+        (
+            RUNTIME_DOCTOR_REPORT_FIELD_PROVIDER,
             "Provider".to_string(),
             summary.provider.display_name().to_string(),
         ),
         (
+            RUNTIME_DOCTOR_REPORT_FIELD_RUNTIME_ROUTE,
             "Runtime route".to_string(),
             summary
                 .provider
@@ -485,6 +532,7 @@ fn doctor_profile_panel(report: DoctorProfileReport) -> DoctorPanel {
                 .to_string(),
         ),
         (
+            RUNTIME_DOCTOR_REPORT_FIELD_QUOTA_SHAPE,
             "Quota shape".to_string(),
             summary
                 .provider
@@ -493,13 +541,23 @@ fn doctor_profile_panel(report: DoctorProfileReport) -> DoctorPanel {
                 .label()
                 .to_string(),
         ),
-        ("Auth".to_string(), summary.auth.label),
         (
+            RUNTIME_DOCTOR_REPORT_FIELD_AUTH,
+            "Auth".to_string(),
+            summary.auth.label,
+        ),
+        (
+            RUNTIME_DOCTOR_REPORT_FIELD_IDENTITY,
             "Identity".to_string(),
             summary.email.as_deref().unwrap_or("-").to_string(),
         ),
-        ("Path".to_string(), summary.codex_home.display().to_string()),
         (
+            RUNTIME_DOCTOR_REPORT_FIELD_PATH,
+            "Path".to_string(),
+            summary.codex_home.display().to_string(),
+        ),
+        (
+            RUNTIME_DOCTOR_REPORT_FIELD_EXISTS,
             "Exists".to_string(),
             if summary.codex_home.exists() {
                 "Yes"
@@ -508,20 +566,30 @@ fn doctor_profile_panel(report: DoctorProfileReport) -> DoctorPanel {
             }
             .to_string(),
         ),
-    ];
-    if matches!(summary.provider, ProfileProvider::Gemini { .. }) {
-        fields.push((
+        (
+            RUNTIME_DOCTOR_REPORT_FIELD_MIGRATION,
             "Migration".to_string(),
             GEMINI_OAUTH_DISABLED_GUIDANCE.to_string(),
-        ));
-    }
+        ),
+    ];
+    let mut fields = report_plan
+        .fields
+        .iter()
+        .take(report_plan.field_count as usize)
+        .filter_map(|field| {
+            field_values
+                .iter()
+                .find(|(id, _, _)| id == field)
+                .map(|(_, name, value)| (name.clone(), value.clone()))
+        })
+        .collect::<Vec<_>>();
     if let Some(quota) = report.quota {
         append_doctor_quota_fields(&mut fields, quota);
     }
-    DoctorPanel {
+    Ok(DoctorPanel {
         title: format!("Profile {}", summary.name),
         fields,
-    }
+    })
 }
 
 fn append_doctor_quota_fields(
@@ -631,7 +699,7 @@ mod install_only_tests {
             redacted: false,
         };
 
-        assert!(doctor_install_only(&args));
+        assert!(doctor_install_only(&args).unwrap());
     }
 
     #[test]
@@ -705,7 +773,7 @@ mod install_only_tests {
             quota: None,
         };
 
-        let panel = doctor_profile_panel(report);
+        let panel = doctor_profile_panel(report).unwrap();
         assert!(panel.fields.iter().any(|(name, value)| {
             name == "Migration" && value.contains("Gemini API key") && value.contains("Vertex AI")
         }));
@@ -713,9 +781,10 @@ mod install_only_tests {
 
     #[test]
     fn human_doctor_surfaces_invalid_runtime_configuration() {
-        assert_eq!(doctor_runtime_configuration_status(None), "Valid");
+        assert_eq!(runtime_doctor_configuration_status(None).unwrap(), "Valid");
         assert_eq!(
-            doctor_runtime_configuration_status(Some("worker count must be greater than zero")),
+            runtime_doctor_configuration_status(Some("worker count must be greater than zero"))
+                .unwrap(),
             "Invalid: worker count must be greater than zero"
         );
     }

@@ -31,6 +31,7 @@ comptime RENDER_POLICY_MARKER_NAME: Int64 = 21
 comptime RENDER_REQUEST_TIMELINE_DETAIL: Int64 = 22
 comptime RENDER_LAST_MARKER_LINE_TRUNCATION: Int64 = 23
 comptime RENDER_CHAIN_EVENT_SUMMARY: Int64 = 24
+comptime RENDER_CONFIGURATION_STATUS: Int64 = 25
 
 comptime DETAIL_CONTEXT_DEPENDENT: Int64 = 1
 comptime DETAIL_COMPACT_PRESSURE: Int64 = 2
@@ -127,6 +128,19 @@ def runtime_doctor_render_put_prefixed_if_present(
     ) and runtime_doctor_render_put_view(
         writer, runtime_doctor_render_input_value(input, index)
     )
+
+
+def runtime_doctor_render_configuration_status(
+    writer: Pointer[mut=True, RuntimeDoctorRenderWriter, _],
+    input: ProdexRuntimeDoctorRenderInput,
+) -> Bool:
+    if runtime_doctor_render_input_present(input, 0):
+        return runtime_doctor_render_put_literal(
+            writer, StringSlice("Invalid: ")
+        ) and runtime_doctor_render_put_view(
+            writer, runtime_doctor_render_input_value(input, 0)
+        )
+    return runtime_doctor_render_put_literal(writer, StringSlice("Valid"))
 
 
 def runtime_doctor_render_put_byte(
@@ -825,7 +839,7 @@ def prodex_mojo_runtime_doctor_render_v1(
         return 1
     var input_pointer = Pointer[mut=False, ProdexRuntimeDoctorRenderInput, ImmUntrackedOrigin](unsafe_from_address=Int(input_address))
     var input = input_pointer[].copy()
-    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_CHAIN_EVENT_SUMMARY or input.detail < 0 or input.detail > 799 or input.values_address == 0:
+    if input.operation < RENDER_PREVIOUS_RESPONSE or input.operation > RENDER_CONFIGURATION_STATUS or input.detail < 0 or input.detail > 799 or input.values_address == 0:
         return 1
     for index in range(16):
         if not rich_view_valid(runtime_doctor_render_input_value(input, index), RUNTIME_DOCTOR_RENDER_MAX_VALUE_BYTES):
@@ -834,6 +848,11 @@ def prodex_mojo_runtime_doctor_render_v1(
     var written = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))
     written[] = 0
     var writer = RuntimeDoctorRenderWriter(output, output_capacity, 0)
+    if input.operation == RENDER_CONFIGURATION_STATUS:
+        if not runtime_doctor_render_configuration_status(Pointer(to=writer), input):
+            return 3
+        written[] = writer.written
+        return 0
     if not runtime_doctor_render_value(Pointer(to=writer), input):
         return 3
     written[] = writer.written

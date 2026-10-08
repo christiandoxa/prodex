@@ -153,12 +153,45 @@ pub struct RuntimeDoctorPlan {
         [i64; RUNTIME_DOCTOR_PLAN_MAX_SUGGESTIONS * RUNTIME_DOCTOR_PLAN_MAX_SETTINGS],
 }
 
+/// Input for deterministic doctor command and profile-report selection.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuntimeDoctorReportPlanInput {
+    pub operation: i64,
+    pub install: i64,
+    pub quota: i64,
+    pub runtime: i64,
+    pub repair_import_auth_journals: i64,
+    pub repair_session_index: i64,
+    pub bundle: i64,
+    pub json: i64,
+    pub suggest_policy: i64,
+    pub runtime_config_valid: i64,
+    pub provider_kind: i64,
+}
+
+/// Mojo-selected report mode and ordered profile fields.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RuntimeDoctorReportPlan {
+    pub abi_version: i64,
+    pub mode: i64,
+    pub include_runtime: i64,
+    pub include_install: i64,
+    pub include_quota: i64,
+    pub include_suggestions: i64,
+    pub field_count: i64,
+    pub fields: [i64; 10],
+}
+
 const _: () = {
     assert!(std::mem::size_of::<RuntimeDoctorPlanMarkerCounts>() == 32 * 8);
     assert!(std::mem::size_of::<RuntimeDoctorPlanObservations>() == 18 * 8);
     assert!(std::mem::size_of::<RuntimeDoctorPlanTuning>() == 15 * 8);
     assert!(std::mem::size_of::<RuntimeDoctorPlanInput>() == 71 * 8);
     assert!(std::mem::size_of::<RuntimeDoctorPlanOutput>() == 6 * 8);
+    assert!(std::mem::size_of::<RuntimeDoctorReportPlanInput>() == 11 * 8);
+    assert!(std::mem::size_of::<RuntimeDoctorReportPlan>() == 17 * 8);
 };
 
 unsafe extern "C" {
@@ -174,6 +207,12 @@ unsafe extern "C" {
         setting_keys: u64,
         setting_current_values: u64,
         setting_suggested_values: u64,
+    ) -> i64;
+    fn prodex_mojo_rich_runtime_doctor_report_plan_v1(
+        abi_version: i64,
+        input: u64,
+        output: u64,
+        fields: u64,
     ) -> i64;
 }
 
@@ -302,6 +341,53 @@ pub fn runtime_doctor_plan_self_test() -> bool {
             && plan.suggestion_setting_counts[0] >= 1
             && plan.setting_suggested_values[0] > plan.setting_current_values[0]
     })
+}
+
+fn runtime_doctor_report_plan_output_is_valid(output: &RuntimeDoctorReportPlan) -> bool {
+    output.abi_version == RUNTIME_DOCTOR_REPORT_PLAN_ABI_VERSION
+        && (RUNTIME_DOCTOR_REPORT_MODE_HUMAN..=RUNTIME_DOCTOR_REPORT_MODE_INSTALL_ONLY)
+            .contains(&output.mode)
+        && (0..=1).contains(&output.include_runtime)
+        && (0..=1).contains(&output.include_install)
+        && (0..=1).contains(&output.include_quota)
+        && (0..=1).contains(&output.include_suggestions)
+        && (0..=10).contains(&output.field_count)
+        && output
+            .fields
+            .iter()
+            .take(output.field_count as usize)
+            .all(|field| {
+                (RUNTIME_DOCTOR_REPORT_FIELD_CURRENT..=RUNTIME_DOCTOR_REPORT_FIELD_MIGRATION)
+                    .contains(field)
+            })
+}
+
+/// Run the Mojo-owned doctor command/profile report policy.
+pub fn runtime_doctor_report_plan(
+    input: RuntimeDoctorReportPlanInput,
+) -> Result<RuntimeDoctorReportPlan, MojoError> {
+    ensure_rich_abi()?;
+    let mut output = RuntimeDoctorReportPlan::default();
+    let mut fields = [-1_i64; 10];
+    let status = unsafe {
+        prodex_mojo_rich_runtime_doctor_report_plan_v1(
+            RUNTIME_DOCTOR_REPORT_PLAN_ABI_VERSION,
+            mojo_pointer_address(&input),
+            mojo_mut_pointer_address(&mut output),
+            mojo_mut_pointer_address(fields.as_mut_ptr()),
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    output.fields = fields;
+    runtime_doctor_report_plan_output_is_valid(&output)
+        .then_some(output)
+        .ok_or(MojoError::InvalidOutput)
 }
 
 #[repr(C)]
@@ -685,6 +771,62 @@ mod tests {
     #[test]
     fn plan_self_test_passes() {
         assert!(runtime_doctor_plan_self_test());
+    }
+
+    #[test]
+    fn report_plan_preserves_command_precedence_and_profile_order() {
+        let install = runtime_doctor_report_plan(RuntimeDoctorReportPlanInput {
+            operation: RUNTIME_DOCTOR_REPORT_OP_COMMAND,
+            install: 1,
+            ..RuntimeDoctorReportPlanInput::default()
+        })
+        .unwrap();
+        assert_eq!(install.mode, RUNTIME_DOCTOR_REPORT_MODE_INSTALL_ONLY);
+        assert_eq!(install.include_install, 1);
+
+        let install_with_repair = runtime_doctor_report_plan(RuntimeDoctorReportPlanInput {
+            operation: RUNTIME_DOCTOR_REPORT_OP_COMMAND,
+            install: 1,
+            repair_session_index: 1,
+            ..RuntimeDoctorReportPlanInput::default()
+        })
+        .unwrap();
+        assert_eq!(install_with_repair.mode, RUNTIME_DOCTOR_REPORT_MODE_HUMAN);
+        assert_eq!(install_with_repair.include_install, 1);
+
+        let runtime_json = runtime_doctor_report_plan(RuntimeDoctorReportPlanInput {
+            operation: RUNTIME_DOCTOR_REPORT_OP_COMMAND,
+            install: 1,
+            runtime: 1,
+            json: 1,
+            suggest_policy: 1,
+            runtime_config_valid: 1,
+            ..RuntimeDoctorReportPlanInput::default()
+        })
+        .unwrap();
+        assert_eq!(runtime_json.mode, RUNTIME_DOCTOR_REPORT_MODE_RUNTIME_JSON);
+        assert_eq!(runtime_json.include_install, 1);
+        assert_eq!(runtime_json.include_suggestions, 1);
+
+        let invalid_config = runtime_doctor_report_plan(RuntimeDoctorReportPlanInput {
+            operation: RUNTIME_DOCTOR_REPORT_OP_COMMAND,
+            runtime: 1,
+            suggest_policy: 1,
+            runtime_config_valid: 0,
+            ..RuntimeDoctorReportPlanInput::default()
+        })
+        .unwrap();
+        assert_eq!(invalid_config.include_suggestions, 0);
+
+        let profile = runtime_doctor_report_plan(RuntimeDoctorReportPlanInput {
+            operation: RUNTIME_DOCTOR_REPORT_OP_PROFILE,
+            provider_kind: RUNTIME_DOCTOR_REPORT_PROVIDER_GEMINI,
+            ..RuntimeDoctorReportPlanInput::default()
+        })
+        .unwrap();
+        assert_eq!(profile.field_count, 10);
+        assert_eq!(profile.fields[0], RUNTIME_DOCTOR_REPORT_FIELD_CURRENT);
+        assert_eq!(profile.fields[9], RUNTIME_DOCTOR_REPORT_FIELD_MIGRATION);
     }
 
     #[test]
