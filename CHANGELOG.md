@@ -2,11 +2,59 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
-## 0.435.9 - 2026-10-07
+## 0.435.9 - 2026-10-08
 
 ### Runtime
 
 - Keep queued fanout out of upstream retry budgets (`cfa0681`)
+# Prodex 0.435.9
+
+## New Features
+
+- No new command surface; this release fixes local fanout recovery under concurrent sessions.
+
+## Bug Fixes
+
+### Local fanout and runtime recovery
+
+- Keep local profile-capacity queue time out of the upstream pre-commit retry budget.
+  Unsent requests do not exhaust an upstream retry deadline; the first attempt
+  starts the clock, and later local capacity waits pause that clock without
+  clearing attempts, failures, or excluded profiles.
+- Publish released permits and their generation consistently. Recheck readiness
+  after raced or missed notifications instead of treating a stale saturated pool
+  as terminal exhaustion.
+- Keep retry exhaustion canonical in Mojo with a thin Rust ABI adapter.
+- Cover two parent groups with sixteen workers each through the actual WebSocket
+  proxy, verifying response isolation, exactly-once dispatch, and no local retry
+  exhaustion under deterministic capacity pressure.
+- Synchronize the cold-start recovery test with its observed recovery phase so
+  crossing a wall-clock second cannot skip the condition the test asserts.
+
+## Compatibility reference
+
+- Audit Codex `rust-v0.161.0` retry advice, HTTP/WebSocket field ordering, additive
+  app-server errors, and capability-preserving Bedrock catalog normalization.
+- Keep the capability-based minimum unchanged and do not replace user Codex binaries.
+- Record the upstream 0.161.0 cross-OS remote stdio MCP Windows-environment limitation
+  explicitly in `migration/codex-rust-v0.161.0-audit.md`; that historical 0.160.1
+  guarantee is not claimed for the new tag.
+
+## Scope of the fix
+
+Healthy work queued for local capacity must not become an upstream retry-budget
+failure. Genuine upstream authentication, quota, transport, or terminal errors
+remain distinguishable; this release does not promise immunity from provider or
+network outages. Load verification uses deterministic loopback mock upstreams.
+
+## Changelog
+
+- Separate local admission waiting from actual upstream retry budgets.
+- Keep permit release generations and selection wakeups consistent under fanout.
+- Make cold-start recovery verification deterministic.
+- Qualify current Codex transport boundaries without replacing user Codex binaries.
+
+Full Changelog: [0.435.8...0.435.9](https://github.com/christiandoxa/prodex/compare/0.435.8...0.435.9)
 
 ## 0.435.8 - 2026-10-07
 
