@@ -1636,6 +1636,77 @@ comptime GEMINI_REQUEST_CONTENT_CONTINUATION_METADATA: Int64 = 12
 # exclusively in Mojo, including a present invalid value blocking fallback.
 comptime GEMINI_SIGNATURE_CHOICE_ABI_VERSION: Int64 = 1
 
+# Canonical retry eligibility and conversation-history terminal policy for
+# Gemini responses. Response bodies remain in Rust; no JSON or Rust semantic
+# fallback crosses this small, versioned ABI.
+comptime GEMINI_FAILURE_POLICY_ABI_VERSION: Int64 = 1
+comptime GEMINI_FAILURE_RETRYABLE_REASON: Int64 = 1
+comptime GEMINI_FAILURE_TERMINAL_HISTORY: Int64 = 2
+
+
+def gemini_failure_text_equals(
+    text_address: UInt64,
+    text_length: Int64,
+    expected: StringSlice,
+) -> Bool:
+    if text_length != Int64(expected.byte_length()):
+        return False
+    var text = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(text_address)
+    )
+    var match_ptr = expected.unsafe_ptr()
+    for index in range(text_length):
+        if text[unsafe_offset=index] != match_ptr[unsafe_offset=index]:
+            return False
+    return True
+
+
+@export("prodex_gemini_failure_policy_v1")
+def prodex_gemini_failure_policy_v1(
+    abi_version: Int64,
+    operation: Int64,
+    text_address: UInt64,
+    text_length: Int64,
+    text_present: Int64,
+    has_error: Int64,
+    result_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_FAILURE_POLICY_ABI_VERSION:
+        return 4
+    if (
+        operation < GEMINI_FAILURE_RETRYABLE_REASON
+        or operation > GEMINI_FAILURE_TERMINAL_HISTORY
+        or text_length < 0
+        or text_present < 0
+        or text_present > 1
+        or has_error < 0
+        or has_error > 1
+        or (text_present == 1 and text_length > 0 and text_address == 0)
+        or (text_present == 0 and (text_length != 0 or text_address != 0))
+        or result_address == 0
+    ):
+        return 1
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    var selected = False
+    if operation == GEMINI_FAILURE_RETRYABLE_REASON:
+        selected = text_present == 1 and (
+            gemini_failure_text_equals(text_address, text_length, StringSlice("MALFORMED_FUNCTION_CALL"))
+            or gemini_failure_text_equals(text_address, text_length, StringSlice("UNEXPECTED_TOOL_CALL"))
+            or gemini_failure_text_equals(text_address, text_length, StringSlice("OTHER"))
+        )
+    else:
+        selected = has_error == 1 or (
+            text_present == 1 and (
+                gemini_failure_text_equals(text_address, text_length, StringSlice("failed"))
+                or gemini_failure_text_equals(text_address, text_length, StringSlice("incomplete"))
+            )
+        )
+    result[] = 1 if selected else 0
+    return 0
+
+
 @fieldwise_init
 struct GeminiSignatureChoiceField(Copyable):
     var present: Int64
