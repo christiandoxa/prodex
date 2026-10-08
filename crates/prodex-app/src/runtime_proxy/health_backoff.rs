@@ -22,6 +22,27 @@ pub(crate) use prodex_runtime_store::{
     runtime_profile_backoff_sort_key, runtime_profile_name_in_selection_backoff,
 };
 
+fn runtime_retryable_pool_candidate_eligible(
+    context_allowed: bool,
+    auth_compatible: bool,
+    supports_runtime: bool,
+    auth_failure_active: bool,
+    quota_blocked: bool,
+) -> bool {
+    prodex_mojo_core::runtime::waitable_candidate_eligible(
+        prodex_mojo_core::runtime::WaitableCandidateMode::RetryablePool,
+        prodex_mojo_core::runtime::WaitableCandidateInput {
+            context_allowed,
+            auth_compatible,
+            supports_runtime,
+            auth_failure_active,
+            quota_blocked,
+            ..Default::default()
+        },
+    )
+    .expect("Mojo recovery-candidate policy returned invalid output")
+}
+
 pub(crate) fn runtime_route_has_retryable_profile(
     shared: &RuntimeRotationProxyShared,
     route_kind: RuntimeRouteKind,
@@ -51,24 +72,13 @@ pub(crate) fn runtime_route_has_retryable_profile(
         );
         let quota_blocked =
             runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some();
-        if prodex_mojo_core::runtime::waitable_candidate_eligible(
-            prodex_mojo_core::runtime::WaitableCandidateMode::RetryablePool,
-            prodex_mojo_core::runtime::WaitableCandidateInput {
-                context_allowed: true,
-                auth_compatible,
-                supports_runtime: profile.provider.supports_codex_runtime(),
-                cached_probe_present: false,
-                soft_limited: false,
-                in_selection_backoff: false,
-                auth_failure_active,
-                health_penalized: false,
-                hard_limited: false,
-                snapshot_blocks: false,
-                quota_blocked,
-            },
-        )
-        .expect("Mojo retryable-pool candidate policy returned invalid output")
-        {
+        if runtime_retryable_pool_candidate_eligible(
+            true,
+            auth_compatible,
+            profile.provider.supports_codex_runtime(),
+            auth_failure_active,
+            quota_blocked,
+        ) {
             return Ok(true);
         }
     }
@@ -86,105 +96,30 @@ pub(crate) fn runtime_profile_recovery_wait_for_route(
         .lock()
         .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
     prune_runtime_profile_selection_backoff(&mut runtime, now);
-    let mut earliest: Option<i64> = None;
+    let mut candidates = Vec::with_capacity(runtime.state.profiles.len());
     for profile_name in runtime.state.profiles.keys() {
-        let Some(auth) = runtime_profile_cached_auth_summary_from_maps_for_selection(
+        let auth = runtime_profile_cached_auth_summary_from_maps_for_selection(
             profile_name,
             &runtime.profile_usage_auth,
             &runtime.profile_probe_cache,
-        ) else {
-            continue;
-        };
-        if !auth.quota_compatible
-            || runtime_profile_auth_failure_active_from_map(
-                &runtime.profile_health,
-                profile_name,
-                now,
-            )
-        {
-            continue;
-        }
+        );
         let (quota_summary, _) = runtime_profile_quota_summary_for_route_from_state(
             &runtime,
             profile_name,
             route_kind,
             now,
         );
-        if runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some() {
-            continue;
-        }
-        let retry_until = include_retry_backoff
-            .then(|| {
-                runtime
-                    .profile_retry_backoff_until
-                    .get(profile_name)
-                    .copied()
-                    .filter(|until| *until > now)
-            })
-            .flatten();
-        let transport_until = runtime_profile_transport_backoff_until_from_map(
-            &runtime.profile_transport_backoff_until,
-            profile_name,
-            route_kind,
-            now,
-        );
-        let circuit_until = runtime
-            .profile_route_circuit_open_until
-            .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
-            .copied()
-            .filter(|until| *until > now);
-        let recovery_at = prodex_mojo_core::runtime::profile_recovery_at(
-            retry_until,
-            transport_until,
-            circuit_until,
-            now,
-        )
-        .expect("Mojo profile recovery planner returned invalid output");
-        if let Some(next) = recovery_at {
-            earliest = Some(earliest.map_or(next, |current| current.min(next)));
-        }
-    }
-    Ok(earliest)
-}
-
-pub(crate) fn clear_runtime_recovered_profiles(
-    shared: &RuntimeRotationProxyShared,
-    excluded_profiles: &mut BTreeSet<String>,
-    route_kind: RuntimeRouteKind,
-    include_retry_backoff: bool,
-) -> Result<usize> {
-    let now = Local::now().timestamp();
-    let runtime = shared
-        .runtime
-        .lock()
-        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
-    let before = excluded_profiles.len();
-    excluded_profiles.retain(|profile_name| {
-        let Some(auth) = runtime_profile_cached_auth_summary_from_maps_for_selection(
-            profile_name,
-            &runtime.profile_usage_auth,
-            &runtime.profile_probe_cache,
-        ) else {
-            return true;
-        };
-        if !auth.quota_compatible
-            || runtime_profile_auth_failure_active_from_map(
+        let eligible = runtime_retryable_pool_candidate_eligible(
+            auth.is_some(),
+            auth.as_ref().is_some_and(|auth| auth.quota_compatible),
+            true,
+            runtime_profile_auth_failure_active_from_map(
                 &runtime.profile_health,
                 profile_name,
                 now,
-            )
-        {
-            return true;
-        }
-        let (quota_summary, _) = runtime_profile_quota_summary_for_route_from_state(
-            &runtime,
-            profile_name,
-            route_kind,
-            now,
+            ),
+            runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some(),
         );
-        if runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some() {
-            return true;
-        }
         let retry_until = include_retry_backoff
             .then(|| {
                 runtime
@@ -203,14 +138,90 @@ pub(crate) fn clear_runtime_recovered_profiles(
             .profile_route_circuit_open_until
             .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
             .copied();
-        prodex_mojo_core::runtime::profile_selection_backoff_active(
+        candidates.push(prodex_mojo_core::runtime::ProfileRecoveryCandidate {
+            eligible,
             retry_until,
             transport_until,
             circuit_until,
+        });
+    }
+    Ok(
+        prodex_mojo_core::runtime::profile_recovery_plan_batch(&candidates, now)
+            .expect("Mojo profile recovery planner returned invalid output")
+            .earliest_recovery_at,
+    )
+}
+
+pub(crate) fn clear_runtime_recovered_profiles(
+    shared: &RuntimeRotationProxyShared,
+    excluded_profiles: &mut BTreeSet<String>,
+    route_kind: RuntimeRouteKind,
+    include_retry_backoff: bool,
+) -> Result<usize> {
+    let now = Local::now().timestamp();
+    let runtime = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
+    let profile_names = excluded_profiles.iter().cloned().collect::<Vec<_>>();
+    let mut candidates = Vec::with_capacity(profile_names.len());
+    for profile_name in &profile_names {
+        let auth = runtime_profile_cached_auth_summary_from_maps_for_selection(
+            profile_name,
+            &runtime.profile_usage_auth,
+            &runtime.profile_probe_cache,
+        );
+        let (quota_summary, _) = runtime_profile_quota_summary_for_route_from_state(
+            &runtime,
+            profile_name,
+            route_kind,
             now,
-        )
-        .expect("Mojo selection-backoff policy returned invalid output")
-    });
+        );
+        let eligible = runtime_retryable_pool_candidate_eligible(
+            auth.is_some(),
+            auth.as_ref().is_some_and(|auth| auth.quota_compatible),
+            true,
+            runtime_profile_auth_failure_active_from_map(
+                &runtime.profile_health,
+                profile_name,
+                now,
+            ),
+            runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some(),
+        );
+        let retry_until = include_retry_backoff
+            .then(|| {
+                runtime
+                    .profile_retry_backoff_until
+                    .get(profile_name)
+                    .copied()
+            })
+            .flatten();
+        let transport_until = runtime_profile_transport_backoff_until_from_map(
+            &runtime.profile_transport_backoff_until,
+            profile_name,
+            route_kind,
+            now,
+        );
+        let circuit_until = runtime
+            .profile_route_circuit_open_until
+            .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
+            .copied();
+        candidates.push(prodex_mojo_core::runtime::ProfileRecoveryCandidate {
+            eligible,
+            retry_until,
+            transport_until,
+            circuit_until,
+        });
+    }
+    let plan = prodex_mojo_core::runtime::profile_recovery_plan_batch(&candidates, now)
+        .expect("Mojo profile recovery planner returned invalid output");
+    let recovered = profile_names
+        .into_iter()
+        .zip(plan.can_clear)
+        .filter_map(|(profile_name, can_clear)| can_clear.then_some(profile_name))
+        .collect::<BTreeSet<_>>();
+    let before = excluded_profiles.len();
+    excluded_profiles.retain(|profile_name| !recovered.contains(profile_name));
     Ok(before.saturating_sub(excluded_profiles.len()))
 }
 
