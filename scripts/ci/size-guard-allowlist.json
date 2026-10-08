@@ -56,8 +56,8 @@
   },
   {
     "file": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
-    "maxLines": 1499,
-    "reason": "Typed sub-agent launch/process orchestration remains one audited I/O boundary after Mojo argv, reasoning, and environment-policy migrations; 0.435.0 ratchets to measured production LOC without restoring Rust policy ownership."
+    "maxLines": 1480,
+    "reason": "Sub-agent concurrent slot I/O and validation now live in a focused production sibling module; ratchet the remaining orchestrator and inline unit tests to the exact audited 1480-line cap pending further decomposition."
   },
   {
     "file": "crates/prodex-app/tests/src/runtime_proxy/smart_context/prepare.rs",
