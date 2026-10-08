@@ -352,6 +352,10 @@ fn compact_final_failure_logs_quota_terminal_reason() {
         "unexpected compact quota response body: {body}"
     );
     assert!(
+        log.contains("compact_retryable_failure profile=main reason=quota"),
+        "compact retry decision should classify the upstream failure as quota: {log}"
+    );
+    assert!(
         log.contains("compact_final_failure exit=quota_fallback_exhausted reason=quota"),
         "compact quota terminal marker should identify quota exhaustion: {log}"
     );

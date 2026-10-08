@@ -60,6 +60,82 @@ def prodex_runtime_precommit_budget_exhausted_v1(
     return 0
 
 
+@export("prodex_runtime_compact_retry_decision_v1")
+def prodex_runtime_compact_retry_decision_v1(
+    stage: Int64,
+    overload: Int64,
+    auto_redeemed: Int64,
+    owner_retry_used: Int64,
+    owner_match: Int64,
+    quota_fallback_available: Int64,
+    previous_response_owner: Int64,
+    hard_affinity: Int64,
+    committed: Int64,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        stage < 0
+        or stage > 5
+        or overload < 0
+        or overload > 1
+        or auto_redeemed < 0
+        or auto_redeemed > 1
+        or owner_retry_used < 0
+        or owner_retry_used > 1
+        or owner_match < 0
+        or owner_match > 1
+        or quota_fallback_available < -1
+        or quota_fallback_available > 1
+        or previous_response_owner < 0
+        or previous_response_owner > 1
+        or hard_affinity < 0
+        or hard_affinity > 1
+        or committed < 0
+        or committed > 1
+        or (stage == 3 and (overload == 1 or quota_fallback_available == -1))
+        or (stage != 3 and quota_fallback_available != -1)
+    ):
+        return 1
+
+    output[unsafe_offset=1] = overload
+    if committed == 1:
+        output[unsafe_offset=0] = 11
+    elif stage == 0 or stage == 1:
+        if stage == 0 and overload == 0 and auto_redeemed == 0:
+            output[unsafe_offset=0] = 1
+        elif overload == 1 and owner_match == 1 and owner_retry_used == 0:
+            output[unsafe_offset=0] = 2
+        else:
+            output[unsafe_offset=0] = 3
+    elif stage == 2:
+        if overload == 1:
+            if hard_affinity == 1:
+                output[unsafe_offset=0] = 6
+            else:
+                output[unsafe_offset=0] = 10
+        else:
+            output[unsafe_offset=0] = 4
+    elif stage == 3:
+        if quota_fallback_available == 0:
+            output[unsafe_offset=0] = 5
+        elif hard_affinity == 1:
+            output[unsafe_offset=0] = 6
+        else:
+            output[unsafe_offset=0] = 7
+    elif stage == 4:
+        if hard_affinity == 1 and (overload == 1 or previous_response_owner == 1):
+            output[unsafe_offset=0] = 8
+        elif overload == 1:
+            output[unsafe_offset=0] = 10
+        else:
+            output[unsafe_offset=0] = 7
+    elif hard_affinity == 1:
+        output[unsafe_offset=0] = 8
+    else:
+        output[unsafe_offset=0] = 9
+    return 0
+
+
 def runtime_i64_saturating_sub(left: Int64, right: Int64) -> Int64:
     if right < 0 and left > INT64_MAX + right:
         return INT64_MAX
