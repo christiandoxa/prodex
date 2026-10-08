@@ -149,26 +149,31 @@ fn reconcile_codex_thread_index_protocol_with_scope(
             }
             continue;
         }
-        if line.len() > THREAD_INDEX_MAX_JSON_BYTES {
-            return Err(anyhow::anyhow!(
-                "Mojo thread-index JSON input exceeded its ABI bound"
-            ));
-        }
-        let step = match serde_json::from_str::<serde_json::Value>(&line) {
-            Ok(value) => {
-                let tree = thread_index_json_tree(&value)?;
-                mojo_result(protocol.response(&tree.nodes, &tree.raw, line.len()))?
-            }
-            Err(error) => {
-                let step = mojo_result(protocol.invalid_json(line.len()))?;
-                if write_invalid_json_step(writer, step, error)? {
-                    return Ok(());
-                }
-                continue;
-            }
-        };
-        if write_protocol_step(writer, step)? {
+        if write_thread_index_response(&mut protocol, writer, &line)? {
             return Ok(());
+        }
+    }
+}
+
+fn write_thread_index_response(
+    protocol: &mut ThreadIndexProtocol,
+    writer: &mut impl Write,
+    line: &str,
+) -> Result<bool> {
+    if line.len() > THREAD_INDEX_MAX_JSON_BYTES {
+        return Err(anyhow::anyhow!(
+            "Mojo thread-index JSON input exceeded its ABI bound"
+        ));
+    }
+    match serde_json::from_str::<serde_json::Value>(line) {
+        Ok(value) => {
+            let tree = thread_index_json_tree(&value)?;
+            let step = mojo_result(protocol.response(&tree.nodes, &tree.raw, line.len()))?;
+            write_protocol_step(writer, step)
+        }
+        Err(error) => {
+            let step = mojo_result(protocol.invalid_json(line.len()))?;
+            write_invalid_json_step(writer, step, error)
         }
     }
 }

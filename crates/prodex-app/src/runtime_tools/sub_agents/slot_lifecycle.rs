@@ -12,53 +12,16 @@ pub(super) fn reconcile_sub_agent_slots(slot_dir: &Path, limit: u16) -> Result<(
             .map_err(|error| anyhow::anyhow!("Mojo sub-agent slot planner failed: {error:?}"))?;
         match step {
             SlotPlanStep::Retire { index } => {
-                let slot = slot_dir.join(sub_agent_slot_name(index)?);
-                let file = match OpenOptions::new().read(true).write(true).open(&slot) {
-                    Ok(file) => file,
-                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
-                        cursor += 1;
-                        continue;
-                    }
-                    Err(error) => {
-                        return Err(error).with_context(|| {
-                            format!("failed to open stale concurrency slot {index}")
-                        });
-                    }
-                };
-                match file.try_lock_exclusive() {
-                    Ok(()) => stale.push((slot, file)),
-                    Err(error) => match sub_agent_slot_lock_error_action(&error, true)? {
-                        SlotLockErrorAction::BlockResize => bail!(
-                            "cannot reduce sub-agent concurrency while a child holds slot {index}; wait for active children to finish"
-                        ),
-                        SlotLockErrorAction::Propagate => {
-                            return Err(error)
-                                .context("failed to inspect stale sub-agent concurrency slot");
-                        }
-                        SlotLockErrorAction::TryNext => {
-                            bail!("Mojo returned an admission action while resizing slots");
-                        }
-                    },
+                if let Some(locked) = lock_stale_sub_agent_slot(slot_dir, index)? {
+                    stale.push(locked);
                 }
             }
             SlotPlanStep::Ensure { index } => {
                 if !stale_removed {
-                    for (slot, _) in &stale {
-                        fs::remove_file(slot).with_context(|| {
-                            format!("failed to remove stale concurrency slot {}", slot.display())
-                        })?;
-                    }
+                    remove_stale_sub_agent_slots(&stale)?;
                     stale_removed = true;
                 }
-                let slot = slot_dir.join(sub_agent_slot_name(index)?);
-                match OpenOptions::new().write(true).create_new(true).open(&slot) {
-                    Ok(_) => {}
-                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                    Err(error) => {
-                        return Err(error)
-                            .with_context(|| format!("failed to create {}", slot.display()));
-                    }
-                }
+                ensure_sub_agent_slot(slot_dir, index)?;
             }
             SlotPlanStep::Complete => break,
             SlotPlanStep::Candidate { .. } | SlotPlanStep::LimitReached { .. } => {
@@ -68,6 +31,50 @@ pub(super) fn reconcile_sub_agent_slots(slot_dir: &Path, limit: u16) -> Result<(
         cursor += 1;
     }
     Ok(())
+}
+
+fn lock_stale_sub_agent_slot(slot_dir: &Path, index: u16) -> Result<Option<(PathBuf, File)>> {
+    let slot = slot_dir.join(sub_agent_slot_name(index)?);
+    let file = match OpenOptions::new().read(true).write(true).open(&slot) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to open stale concurrency slot {index}"));
+        }
+    };
+    match file.try_lock_exclusive() {
+        Ok(()) => Ok(Some((slot, file))),
+        Err(error) => match sub_agent_slot_lock_error_action(&error, true)? {
+            SlotLockErrorAction::BlockResize => bail!(
+                "cannot reduce sub-agent concurrency while a child holds slot {index}; wait for active children to finish"
+            ),
+            SlotLockErrorAction::Propagate => {
+                Err(error).context("failed to inspect stale sub-agent concurrency slot")
+            }
+            SlotLockErrorAction::TryNext => {
+                bail!("Mojo returned an admission action while resizing slots")
+            }
+        },
+    }
+}
+
+fn remove_stale_sub_agent_slots(stale: &[(PathBuf, File)]) -> Result<()> {
+    for (slot, _) in stale {
+        fs::remove_file(slot).with_context(|| {
+            format!("failed to remove stale concurrency slot {}", slot.display())
+        })?;
+    }
+    Ok(())
+}
+
+fn ensure_sub_agent_slot(slot_dir: &Path, index: u16) -> Result<()> {
+    let slot = slot_dir.join(sub_agent_slot_name(index)?);
+    match OpenOptions::new().write(true).create_new(true).open(&slot) {
+        Ok(_) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("failed to create {}", slot.display())),
+    }
 }
 
 pub(super) fn create_private_directory(path: &Path) -> Result<()> {
