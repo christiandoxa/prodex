@@ -4,40 +4,35 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[test]
 fn usage_snapshot_compaction_prunes_missing_and_expired_profiles() {
-    let profiles = BTreeMap::from([("alpha".to_string(), profile())]);
+    let profiles = BTreeMap::from([
+        ("alpha".to_string(), profile()),
+        ("boundary".to_string(), profile()),
+        ("expired".to_string(), profile()),
+    ]);
+    let snapshot = |checked_at| RuntimeProfileUsageSnapshot {
+        plan_type: None,
+        checked_at,
+        five_hour_status: RuntimeQuotaWindowStatus::Ready,
+        five_hour_remaining_percent: 100,
+        five_hour_reset_at: 0,
+        weekly_status: RuntimeQuotaWindowStatus::Ready,
+        weekly_remaining_percent: 100,
+        weekly_reset_at: 0,
+    };
     let snapshots = BTreeMap::from([
-        (
-            "alpha".to_string(),
-            RuntimeProfileUsageSnapshot {
-                plan_type: None,
-                checked_at: 200,
-                five_hour_status: RuntimeQuotaWindowStatus::Ready,
-                five_hour_remaining_percent: 100,
-                five_hour_reset_at: 0,
-                weekly_status: RuntimeQuotaWindowStatus::Ready,
-                weekly_remaining_percent: 100,
-                weekly_reset_at: 0,
-            },
-        ),
-        (
-            "missing".to_string(),
-            RuntimeProfileUsageSnapshot {
-                plan_type: None,
-                checked_at: 200,
-                five_hour_status: RuntimeQuotaWindowStatus::Ready,
-                five_hour_remaining_percent: 100,
-                five_hour_reset_at: 0,
-                weekly_status: RuntimeQuotaWindowStatus::Ready,
-                weekly_remaining_percent: 100,
-                weekly_reset_at: 0,
-            },
-        ),
+        ("alpha".to_string(), snapshot(200)),
+        ("boundary".to_string(), snapshot(130)),
+        ("expired".to_string(), snapshot(129)),
+        ("missing".to_string(), snapshot(200)),
     ]);
 
     let compacted = compact_runtime_usage_snapshots(snapshots, &profiles, 250);
 
-    assert_eq!(compacted.len(), 1);
+    assert_eq!(compacted.len(), 2);
     assert!(compacted.contains_key("alpha"));
+    assert!(compacted.contains_key("boundary"));
+    assert!(!compacted.contains_key("expired"));
+    assert!(!compacted.contains_key("missing"));
 }
 
 #[test]

@@ -53,9 +53,14 @@ pub fn compact_runtime_usage_snapshots<W>(
     profiles: &BTreeMap<String, ProfileEntry>,
     now: i64,
 ) -> BTreeMap<String, RuntimeProfileUsageSnapshot<W>> {
-    let oldest_allowed = now.saturating_sub(crate::RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS);
     snapshots.retain(|profile_name, snapshot| {
-        profiles.contains_key(profile_name) && snapshot.checked_at >= oldest_allowed
+        prodex_mojo_core::runtime_state_quota::usage_snapshot_should_retain(
+            profiles.contains_key(profile_name),
+            snapshot.checked_at,
+            now,
+            crate::RUNTIME_USAGE_SNAPSHOT_RETENTION_SECONDS,
+        )
+        .expect("Mojo usage snapshot retention returned invalid output")
     });
     snapshots
 }
