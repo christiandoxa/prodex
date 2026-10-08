@@ -772,6 +772,48 @@ def prodex_mojo_rich_catalog_resolve_exact_v1(
     return RICH_STATUS_OK
 
 
+@export("prodex_mojo_rich_catalog_provider_indices_v1")
+def prodex_mojo_rich_catalog_provider_indices_v1(
+    abi_version: Int64,
+    provider_ids_address: UInt,
+    provider_count: Int64,
+    provider_id: Int64,
+    output_indices_address: UInt,
+    output_capacity: Int64,
+    output_count_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if (
+        provider_count < 0
+        or provider_count > CATALOG_MAX_MODELS
+        or output_capacity < 0
+        or output_capacity > provider_count
+        or output_count_address == 0
+        or provider_count > 0 and provider_ids_address == 0
+        or output_capacity > 0 and output_indices_address == 0
+    ):
+        return RICH_STATUS_INVALID
+    var provider_ids = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(provider_ids_address)
+    )
+    var output_indices = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_indices_address)
+    )
+    var output_count = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_count_address)
+    )
+    output_count[] = 0
+    for index in range(provider_count):
+        if provider_ids[unsafe_offset=index] != provider_id:
+            continue
+        if output_count[] >= output_capacity:
+            return RICH_STATUS_CAPACITY
+        output_indices[unsafe_offset=output_count[]] = index
+        output_count[] += 1
+    return RICH_STATUS_OK
+
+
 @export("prodex_mojo_rich_catalog_choices_v1")
 def prodex_mojo_rich_catalog_choices_v1(
     abi_version: Int64,
