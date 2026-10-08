@@ -4,6 +4,9 @@ use crate::json::JsonNode;
 const ABI_VERSION: i64 = 1;
 const MAX_JSON_BYTES: usize = 64 * 1024 * 1024;
 const MAX_JSON_NODES: usize = 1_048_576;
+// ponytail: cap untrusted rollout stems at 4 KiB; raise the ABI bound if Codex ever exceeds it.
+const MAX_SESSION_STEM_BYTES: usize = 4_096;
+const MAX_SESSION_ID_BYTES: usize = 45;
 // ponytail: cap cursor history at 65k entries / 16 MiB; raise both ABI bounds if scans exceed it.
 const MAX_SEEN_CURSORS: usize = 65_536;
 const MAX_SEEN_CURSOR_BYTES: usize = 16 * 1024 * 1024;
@@ -23,6 +26,14 @@ const CURSORS_CLEAR: i64 = 1;
 const CURSORS_APPEND: i64 = 2;
 
 unsafe extern "C" {
+    fn prodex_runtime_thread_index_session_id_v1(
+        abi_version: i64,
+        stem_address: u64,
+        stem_length: i64,
+        output_address: u64,
+        output_capacity: i64,
+        result_address: u64,
+    ) -> i64;
     fn prodex_runtime_thread_index_protocol_v1(
         abi_version: i64,
         operation: i64,
@@ -220,6 +231,39 @@ fn status(code: i64) -> Result<(), MojoError> {
 
 fn state_code(state: ThreadIndexState) -> i64 {
     state as i64
+}
+
+/// Extract the first UUID-shaped session component from a rollout file stem.
+pub fn session_id_from_stem(stem: &str) -> Result<Option<String>, MojoError> {
+    if stem.len() > MAX_SESSION_STEM_BYTES {
+        return Err(MojoError::Capacity);
+    }
+    let input = StringViewFfi::from(stem);
+    let mut output = [0_u8; MAX_SESSION_ID_BYTES];
+    let mut result = [-1_i64; 2];
+    status(unsafe {
+        prodex_runtime_thread_index_session_id_v1(
+            ABI_VERSION,
+            input.address,
+            i64::try_from(input.length).map_err(|_| MojoError::InvalidInput)?,
+            output.as_mut_ptr() as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            result.as_mut_ptr() as u64,
+        )
+    })?;
+    match result[0] {
+        0 if result[1] == 0 => Ok(None),
+        1 => {
+            let written = usize::try_from(result[1]).map_err(|_| MojoError::InvalidOutput)?;
+            if !matches!(written, 32 | 36 | 38 | 45) || written > output.len() {
+                return Err(MojoError::InvalidOutput);
+            }
+            String::from_utf8(output[..written].to_vec())
+                .map(Some)
+                .map_err(|_| MojoError::InvalidOutput)
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 /// Reduce one SQLite observation into the Mojo-owned latest-index state.

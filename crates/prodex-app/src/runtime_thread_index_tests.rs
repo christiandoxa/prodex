@@ -172,6 +172,18 @@ fn latest_thread_index_state_detects_missing_and_present_rows() {
         latest_thread_index_state(&child, &session_file).unwrap(),
         LatestThreadIndexState::Present
     );
+    for malformed_session_file in [
+        root.join("sessions")
+            .join(format!("rollout-{session_id}tail.jsonl")),
+        root.join("sessions")
+            .join("rollout-01900000-0000-7000-8000-00000000000g.jsonl"),
+        std::path::PathBuf::new(),
+    ] {
+        assert_eq!(
+            latest_thread_index_state(&child, &malformed_session_file).unwrap(),
+            LatestThreadIndexState::Unavailable
+        );
+    }
     let _ = fs::remove_dir_all(root);
 }
 
