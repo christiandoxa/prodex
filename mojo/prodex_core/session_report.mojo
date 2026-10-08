@@ -833,6 +833,63 @@ def session_meta_repair_fields(
     session_raw_write_span(output, 26, repair_provider)
 
 
+@export("prodex_session_report_record_shape_v1")
+def prodex_session_report_record_shape_v1(
+    abi_version: Int64,
+    raw_address: UInt,
+    raw_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_REPORT_ABI_VERSION
+        or raw_length <= 0
+        or raw_address == 0
+        or output_address == 0
+    ):
+        return SESSION_REPORT_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[] = 0
+    var view = ProdexRichStringView(raw_address, UInt(raw_length))
+    if not rich_view_valid(view, 0x7FFFFFFFFFFFFFFF):
+        return SESSION_REPORT_INVALID
+    if not deepseek_json_fragment_valid(view):
+        return SESSION_REPORT_OK
+    var root = session_raw_root(view)
+    if not session_raw_present(root):
+        return SESSION_REPORT_OK
+    var type_token = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("type")
+    )
+    var payload = deepseek_json_object_member(
+        view, root[0], root[1], StringSlice("payload")
+    )
+    if not session_raw_string_token(view, type_token) or not session_raw_present(payload):
+        return SESSION_REPORT_OK
+    if deepseek_json_raw_equals(
+        view, type_token[0], type_token[1], StringSlice("event_msg")
+    ) or deepseek_json_raw_equals(
+        view, type_token[0], type_token[1], StringSlice("response_item")
+    ):
+        if deepseek_json_byte(view, payload[0]) != 123:
+            return SESSION_REPORT_OK
+        var payload_type = deepseek_json_object_member(
+            view, payload[0], payload[1], StringSlice("type")
+        )
+        output[] = Int64(session_raw_string_token(view, payload_type))
+        return SESSION_REPORT_OK
+    if deepseek_json_raw_equals(
+        view, type_token[0], type_token[1], StringSlice("session_meta")
+    ) or deepseek_json_raw_equals(
+        view, type_token[0], type_token[1], StringSlice("turn_context")
+    ):
+        output[] = Int64(deepseek_json_byte(view, payload[0]) == 123)
+        return SESSION_REPORT_OK
+    output[] = 1
+    return SESSION_REPORT_OK
+
+
 @export("prodex_session_report_sort_v1")
 def prodex_session_report_sort_v1(
     keys_address: UInt,
@@ -1014,4 +1071,50 @@ def prodex_session_report_scroll_update_v1(
         output[unsafe_offset=1] = 0
     elif key_code == -6:
         output[unsafe_offset=1] = max_scroll
+    return SESSION_REPORT_OK
+
+
+comptime SESSION_PROMPT_WRITE_QUEUE_REJECTED: Int64 = 0
+comptime SESSION_PROMPT_WRITE_QUEUE_PREFLIGHT: Int64 = 1
+comptime SESSION_PROMPT_WRITE_QUEUE_ACCEPTED: Int64 = 2
+comptime SESSION_PROMPT_WRITE_QUEUE_AMBIGUOUS: Int64 = 3
+comptime SESSION_PROMPT_WRITE_ACTION_QUEUE_FAILED: Int64 = 0
+comptime SESSION_PROMPT_WRITE_ACTION_NOT_ADDRESSABLE: Int64 = 1
+comptime SESSION_PROMPT_WRITE_ACTION_AMBIGUOUS: Int64 = 2
+comptime SESSION_PROMPT_WRITE_ACTION_PENDING: Int64 = 3
+comptime SESSION_PROMPT_WRITE_ACTION_AWAIT_ROLLOUT: Int64 = 4
+
+
+@export("prodex_session_prompt_write_queue_plan_v1")
+def prodex_session_prompt_write_queue_plan_v1(
+    abi_version: Int64,
+    outcome: Int64,
+    queued: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_CLI_ABI_VERSION
+        or outcome < SESSION_PROMPT_WRITE_QUEUE_REJECTED
+        or outcome > SESSION_PROMPT_WRITE_QUEUE_AMBIGUOUS
+        or (queued != 0 and queued != 1)
+        or output_address == 0
+    ):
+        return SESSION_REPORT_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = Int64(
+        outcome == SESSION_PROMPT_WRITE_QUEUE_REJECTED
+        or outcome == SESSION_PROMPT_WRITE_QUEUE_PREFLIGHT
+    )
+    if outcome == SESSION_PROMPT_WRITE_QUEUE_REJECTED:
+        output[unsafe_offset=1] = SESSION_PROMPT_WRITE_ACTION_QUEUE_FAILED
+    elif outcome == SESSION_PROMPT_WRITE_QUEUE_PREFLIGHT:
+        output[unsafe_offset=1] = SESSION_PROMPT_WRITE_ACTION_NOT_ADDRESSABLE
+    elif outcome == SESSION_PROMPT_WRITE_QUEUE_AMBIGUOUS:
+        output[unsafe_offset=1] = SESSION_PROMPT_WRITE_ACTION_AMBIGUOUS
+    elif queued == 1:
+        output[unsafe_offset=1] = SESSION_PROMPT_WRITE_ACTION_PENDING
+    else:
+        output[unsafe_offset=1] = SESSION_PROMPT_WRITE_ACTION_AWAIT_ROLLOUT
     return SESSION_REPORT_OK

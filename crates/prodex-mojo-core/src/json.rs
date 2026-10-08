@@ -8,7 +8,8 @@ pub use self::response_metadata::{
 mod session_report;
 pub use self::session_report::{
     SessionReportOrderKey, SessionReportUpdatePlan, session_report_metadata_json,
-    session_report_order, session_report_timestamp_sort_key, session_report_update_json,
+    session_report_order, session_report_record_shape, session_report_timestamp_sort_key,
+    session_report_update_json,
 };
 mod session_selector;
 pub use self::session_selector::{session_selector_is_full, session_selector_matches};

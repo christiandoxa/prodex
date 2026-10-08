@@ -174,6 +174,17 @@ pub(crate) enum QueueRequestOutcome {
     Ambiguous,
 }
 
+impl QueueRequestOutcome {
+    pub(crate) const fn policy_tag(self) -> u8 {
+        match self {
+            Self::Rejected => 0,
+            Self::Preflight => 1,
+            Self::Accepted => 2,
+            Self::Ambiguous => 3,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub(crate) struct QueueInvocation {
     pub(crate) outcome: QueueRequestOutcome,

@@ -289,6 +289,24 @@ fn output_read_keeps_near_limit_user_message_records_bounded() {
 }
 
 #[test]
+fn output_read_uses_mojo_timestamp_boundary_at_caller() {
+    let fixture = fixture();
+    let path = fixture.root.join("timestamp-boundary.jsonl");
+    let record = serde_json::json!({
+        "timestamp": format!("{}tail", "é".repeat(128)),
+        "type": "event_msg",
+        "payload": {"type": "agent_message", "message": "bounded timestamp"}
+    });
+    std::fs::write(&path, format!("{record}\n")).unwrap();
+
+    let batch = read_output_events(&path, 0, 0, 10).unwrap();
+
+    assert_eq!(batch.events.len(), 1);
+    assert_eq!(batch.events[0].timestamp.chars().count(), 128);
+    assert_eq!(batch.events[0].text, "bounded timestamp");
+}
+
+#[test]
 fn output_read_wait_timeout_returns_empty_success() {
     let fixture = fixture();
     let service = service(&fixture, queue(&fixture, None));

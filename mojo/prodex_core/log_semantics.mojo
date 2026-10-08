@@ -705,6 +705,179 @@ def prodex_mojo_transcript_item_classify_v1(
     return 0
 
 
+comptime TRANSCRIPT_OUTPUT_KIND_ASSISTANT: Int64 = 0
+comptime TRANSCRIPT_OUTPUT_KIND_USER: Int64 = 1
+comptime TRANSCRIPT_OUTPUT_KIND_TOOL: Int64 = 2
+comptime TRANSCRIPT_OUTPUT_KIND_OTHER: Int64 = 3
+comptime TRANSCRIPT_OUTPUT_STATUS_NONE: Int64 = 0
+comptime TRANSCRIPT_OUTPUT_STATUS_STARTED: Int64 = 1
+comptime TRANSCRIPT_OUTPUT_STATUS_COMPLETED: Int64 = 2
+
+def transcript_output_starts_with(
+    view: ProdexRichStringView, literal: StringSlice
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if length > Int64(view.len):
+        return False
+    var source = rich_view_ptr(view)
+    var expected = literal.unsafe_ptr()
+    for index in range(length):
+        if source[unsafe_offset=index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+@export("prodex_mojo_transcript_output_event_plan_v1")
+def prodex_mojo_transcript_output_event_plan_v1(
+    abi_version: Int64,
+    source_address: UInt,
+    source_length: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != PRODEX_TRANSCRIPT_ABI_VERSION
+        or source_length < 0
+        or output_address == 0
+        or (source_length > 0 and source_address == 0)
+    ):
+        return 1
+    var source = ProdexRichStringView(source_address, UInt(source_length))
+    if not rich_view_valid(source, source_length):
+        return 2
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = TRANSCRIPT_OUTPUT_KIND_OTHER
+    output[unsafe_offset=2] = TRANSCRIPT_OUTPUT_STATUS_NONE
+    output[unsafe_offset=3] = -1
+    output[unsafe_offset=4] = -1
+    if rich_view_matches_literal["assistant"](source, False):
+        output[unsafe_offset=0] = 1
+        output[unsafe_offset=1] = TRANSCRIPT_OUTPUT_KIND_ASSISTANT
+    elif rich_view_matches_literal["user"](source, False):
+        output[unsafe_offset=0] = 1
+        output[unsafe_offset=1] = TRANSCRIPT_OUTPUT_KIND_USER
+    elif transcript_output_starts_with(source, StringSlice("tool-call:")):
+        output[unsafe_offset=0] = 1
+        output[unsafe_offset=1] = TRANSCRIPT_OUTPUT_KIND_TOOL
+        output[unsafe_offset=2] = TRANSCRIPT_OUTPUT_STATUS_STARTED
+        output[unsafe_offset=3] = 10
+        output[unsafe_offset=4] = source_length
+    elif rich_view_matches_literal["tool-output"](source, False):
+        output[unsafe_offset=0] = 1
+        output[unsafe_offset=1] = TRANSCRIPT_OUTPUT_KIND_TOOL
+        output[unsafe_offset=2] = TRANSCRIPT_OUTPUT_STATUS_COMPLETED
+    elif (
+        rich_view_matches_literal["mcp"](source, False)
+        or rich_view_matches_literal["agent"](source, False)
+        or rich_view_matches_literal["tool"](source, False)
+        or rich_view_matches_literal["terminal"](source, False)
+        or rich_view_matches_literal["error"](source, False)
+    ):
+        output[unsafe_offset=0] = 1
+    return 0
+
+comptime TRANSCRIPT_OUTPUT_MODE_TEXT: Int64 = 0
+comptime TRANSCRIPT_OUTPUT_MODE_TIMESTAMP: Int64 = 1
+comptime TRANSCRIPT_OUTPUT_MODE_NAME: Int64 = 2
+comptime TRANSCRIPT_OUTPUT_TEXT_MAX_BYTES: Int64 = 8_192
+comptime TRANSCRIPT_OUTPUT_TIMESTAMP_MAX_CHARS: Int64 = 128
+comptime TRANSCRIPT_OUTPUT_NAME_MAX_CHARS: Int64 = 256
+comptime TRANSCRIPT_OUTPUT_TEXT_MARKER = StringSlice(" …[text_truncated]")
+
+def transcript_output_copy_range(
+    source: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    written: Pointer[mut=True, Int64, _],
+):
+    var source_ptr = rich_view_ptr(source)
+    for index in range(start, end):
+        output[unsafe_offset=written[]] = source_ptr[unsafe_offset=index]
+        written[] += 1
+
+def transcript_output_copy_literal(
+    literal: StringSlice,
+    output: Pointer[mut=True, UInt8, _],
+    written: Pointer[mut=True, Int64, _],
+):
+    var source = literal.unsafe_ptr()
+    var length = Int64(literal.byte_length())
+    for index in range(length):
+        output[unsafe_offset=written[]] = source[unsafe_offset=index]
+        written[] += 1
+
+@export("prodex_mojo_transcript_output_text_v1")
+def prodex_mojo_transcript_output_text_v1(
+    abi_version: Int64,
+    mode: Int64,
+    value_address: UInt,
+    value_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != PRODEX_TRANSCRIPT_ABI_VERSION
+        or mode < TRANSCRIPT_OUTPUT_MODE_TEXT
+        or mode > TRANSCRIPT_OUTPUT_MODE_NAME
+        or value_length < 0
+        or output_capacity < 0
+        or written_address == 0
+        or (value_length > 0 and value_address == 0)
+        or (output_capacity > 0 and output_address == 0)
+    ):
+        return 1
+    var value = ProdexRichStringView(value_address, UInt(value_length))
+    if not rich_view_valid(value, value_length):
+        return 2
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if mode == TRANSCRIPT_OUTPUT_MODE_TEXT:
+        var marker_length = Int64(TRANSCRIPT_OUTPUT_TEXT_MARKER.byte_length())
+        var required = value_length
+        if required > TRANSCRIPT_OUTPUT_TEXT_MAX_BYTES:
+            required = TRANSCRIPT_OUTPUT_TEXT_MAX_BYTES
+        if output_capacity < required:
+            return 3
+        if value_length <= TRANSCRIPT_OUTPUT_TEXT_MAX_BYTES:
+            transcript_output_copy_range(value, 0, value_length, output, written)
+            return 0
+        var budget = TRANSCRIPT_OUTPUT_TEXT_MAX_BYTES - marker_length
+        var cursor: Int64 = 0
+        var source = rich_view_ptr(value)
+        while cursor < value_length:
+            var width = rich_codepoint_width(source[unsafe_offset=cursor])
+            if cursor + width > budget:
+                break
+            cursor += width
+        transcript_output_copy_range(value, 0, cursor, output, written)
+        transcript_output_copy_literal(TRANSCRIPT_OUTPUT_TEXT_MARKER, output, written)
+        return 0
+    var limit = (
+        TRANSCRIPT_OUTPUT_TIMESTAMP_MAX_CHARS
+        if mode == TRANSCRIPT_OUTPUT_MODE_TIMESTAMP
+        else TRANSCRIPT_OUTPUT_NAME_MAX_CHARS
+    )
+    if output_capacity < value_length:
+        return 3
+    var cursor: Int64 = 0
+    var count: Int64 = 0
+    var source = rich_view_ptr(value)
+    while cursor < value_length and count < limit:
+        var width = rich_codepoint_width(source[unsafe_offset=cursor])
+        cursor += width
+        count += 1
+    transcript_output_copy_range(value, 0, cursor, output, written)
+    return 0
+
+
 def transcript_codepoint_is_control(codepoint: Int64) -> Bool:
     return codepoint <= 31 or (codepoint >= 127 and codepoint <= 159)
 

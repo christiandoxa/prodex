@@ -1,7 +1,10 @@
 use super::{
-    QUEUE_COMMAND_TIMEOUT, QueueControl, QueueInvocation, QueueRequestOutcome, ResolvedTarget,
-    SessionBinding, SessionPromptWriteError, SessionPromptWriteRequest, SessionPromptWriteService,
+    QUEUE_COMMAND_TIMEOUT, QueueControl, QueueInvocation, ResolvedTarget, SessionBinding,
+    SessionPromptWriteError, SessionPromptWriteRequest, SessionPromptWriteService,
     output_source_id, rollout_contains_exact_user_message,
+};
+use prodex_mojo_core::session_cli_policy::{
+    self as session_cli_mojo, SessionPromptWriteQueueAction, SessionPromptWriteQueuePlan,
 };
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -108,14 +111,16 @@ where
         rollout_before: Option<&(PathBuf, u64, String)>,
         invocation: &QueueInvocation,
     ) -> std::result::Result<&'static str, SessionPromptWriteError> {
-        match invocation.outcome {
-            QueueRequestOutcome::Rejected => Err(SessionPromptWriteError::QueueFailed),
-            QueueRequestOutcome::Preflight => {
+        match Self::queue_policy(invocation)?.action {
+            SessionPromptWriteQueueAction::QueueFailed => Err(SessionPromptWriteError::QueueFailed),
+            SessionPromptWriteQueueAction::NotAddressable => {
                 Err(SessionPromptWriteError::SessionNotQueueAddressable)
             }
-            QueueRequestOutcome::Ambiguous => Err(SessionPromptWriteError::WriteAmbiguous),
-            QueueRequestOutcome::Accepted if invocation.queued => Ok("queue_pending_observed"),
-            QueueRequestOutcome::Accepted => {
+            SessionPromptWriteQueueAction::Ambiguous => {
+                Err(SessionPromptWriteError::WriteAmbiguous)
+            }
+            SessionPromptWriteQueueAction::PendingObserved => Ok("queue_pending_observed"),
+            SessionPromptWriteQueueAction::AwaitRollout => {
                 self.wait_for_rollout_user_message(
                     request,
                     workspace_root,
@@ -125,6 +130,16 @@ where
                 Ok("rollout_user_event_observed")
             }
         }
+    }
+
+    pub(super) fn queue_policy(
+        invocation: &QueueInvocation,
+    ) -> std::result::Result<SessionPromptWriteQueuePlan, SessionPromptWriteError> {
+        session_cli_mojo::prompt_write_queue_plan(
+            invocation.outcome.policy_tag(),
+            invocation.queued,
+        )
+        .map_err(|_| SessionPromptWriteError::VerificationInconclusive)
     }
 
     fn wait_for_rollout_user_message(
