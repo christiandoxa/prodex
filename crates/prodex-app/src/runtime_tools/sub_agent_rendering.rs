@@ -131,28 +131,9 @@ pub(crate) fn redact_super_session_args(args: &[OsString]) -> Vec<OsString> {
 
 fn redact_super_session_arg(arg: &OsString) -> Option<OsString> {
     let value = arg.to_str()?;
-    let mut redacted = String::with_capacity(value.len());
-    let mut last = 0;
-    let mut changed = false;
-    for (index, _) in value.char_indices() {
-        if index < last {
-            continue;
-        }
-        let end = index + 36;
-        if let Some(candidate) = value.get(index..end)
-            && uuid::Uuid::parse_str(candidate).is_ok()
-        {
-            redacted.push_str(&value[last..index]);
-            redacted.push_str("<SESSION_UUID>");
-            last = end;
-            changed = true;
-        }
-    }
-    if !changed {
-        return None;
-    }
-    redacted.push_str(&value[last..]);
-    Some(OsString::from(redacted))
+    let redacted = prodex_mojo_core::sub_agent_policy::redact_session_argument(value)
+        .expect("Mojo sub-agent session redactor returned invalid output");
+    (redacted != value).then(|| OsString::from(redacted))
 }
 
 #[cfg(test)]

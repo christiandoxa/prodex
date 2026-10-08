@@ -2,8 +2,9 @@ use crate::MojoError;
 
 mod rendering;
 pub use rendering::{
-    SubAgentDryRunRender, SubAgentOverlayRender, render_disabled_dry_run_report,
-    render_enabled_dry_run_report, render_overlay,
+    SubAgentDryRunRender, SubAgentOverlayRender, redact_session_argument,
+    render_disabled_dry_run_report, render_enabled_dry_run_report, render_overlay,
+    render_slot_lock_name,
 };
 
 const ABI_VERSION: i64 = 1;
@@ -18,6 +19,12 @@ enum Operation {
     ProviderUrlPolicy = 4,
     ChildSpecScalarPolicy = 5,
     PromptSteps = 6,
+    CatalogStatus = 7,
+    EffortSuggestionMask = 8,
+    RecursionDecision = 9,
+    SlotPlanStep = 10,
+    SlotLockErrorAction = 11,
+    ChildOutcome = 12,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -64,6 +71,61 @@ pub enum ChildSpecScalarViolation {
     InvalidTaskSize,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CatalogStatusPlan {
+    NoDynamicCatalog,
+    Available,
+    Degraded,
+}
+
+/// The normalized model id and visibility decision for one dynamic catalog entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CatalogEntryPlan {
+    /// Selected id field and its trimmed UTF-8 byte range in that field.
+    pub model_id: Option<(usize, usize, usize)>,
+    /// Whether the Rust JSON adapter should populate its canonical `id` field.
+    pub set_id: bool,
+    /// Whether the model should be offered to the caller.
+    pub selectable: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecursionDecision {
+    Allowed,
+    Disabled,
+    InternalLauncher,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotPlanStep {
+    Candidate { index: u16 },
+    Retire { index: u16 },
+    Ensure { index: u16 },
+    LimitReached { exit_code: i32 },
+    Complete,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotLockErrorAction {
+    TryNext,
+    BlockResize,
+    Propagate,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChildOutcomeAction {
+    Success,
+    Cancelled {
+        exit_code: i32,
+        output_incomplete: bool,
+    },
+    ChildFailed {
+        output_incomplete: bool,
+    },
+    OutputIncomplete,
+    NoOutput,
+}
+
 unsafe extern "C" {
     fn prodex_sub_agent_policy_v1(
         abi_version: i64,
@@ -84,6 +146,20 @@ unsafe extern "C" {
         action_capacity: i64,
         written_address: u64,
     ) -> i64;
+    fn prodex_sub_agent_catalog_entry_v1(
+        abi_version: i64,
+        fields_address: u64,
+        field_count: i64,
+        flags: i64,
+        result_address: u64,
+    ) -> i64;
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CatalogStringView {
+    ptr: u64,
+    len: u64,
 }
 
 fn call(operation: Operation, input: &str, scalar: i64) -> Result<[i64; 3], MojoError> {
@@ -312,6 +388,177 @@ pub fn child_spec_scalar_violation(
     }
 }
 
+/// Chooses the dynamic model-catalog status from observed entries and load state.
+pub fn catalog_status(has_models: bool, degraded: bool) -> Result<CatalogStatusPlan, MojoError> {
+    let scalar = i64::from(has_models) | (i64::from(degraded) << 1);
+    let result = call(Operation::CatalogStatus, "", scalar)?;
+    match result[0] {
+        0 => Ok(CatalogStatusPlan::NoDynamicCatalog),
+        1 => Ok(CatalogStatusPlan::Available),
+        2 => Ok(CatalogStatusPlan::Degraded),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Selects and normalizes one provider catalog entry using its JSON field values.
+pub fn catalog_entry_plan(
+    id_fields: [Option<&str>; 5],
+    supported_in_api_false: bool,
+    hidden_true: bool,
+    visibility: Option<&str>,
+) -> Result<CatalogEntryPlan, MojoError> {
+    let values = id_fields
+        .into_iter()
+        .chain([visibility])
+        .map(|value| -> Result<_, MojoError> {
+            let value = value.unwrap_or_default();
+            Ok(CatalogStringView {
+                ptr: value.as_ptr() as usize as u64,
+                len: u64::try_from(value.len()).map_err(|_| MojoError::InvalidInput)?,
+            })
+        })
+        .collect::<Result<Vec<_>, MojoError>>()?;
+    let flags = i64::from(supported_in_api_false)
+        | (i64::from(hidden_true) << 1)
+        | (i64::from(visibility.is_some()) << 2);
+    let mut result = [-1_i64; 5];
+    let status = unsafe {
+        prodex_sub_agent_catalog_entry_v1(
+            ABI_VERSION,
+            values.as_ptr() as usize as u64,
+            i64::try_from(values.len()).map_err(|_| MojoError::InvalidInput)?,
+            flags,
+            result.as_mut_ptr() as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let model_id = match result[0] {
+        -1 if result[1] == 0 && result[2] == 0 => None,
+        field if (0..5).contains(&field) => {
+            let field = usize::try_from(field).map_err(|_| MojoError::InvalidOutput)?;
+            let start = usize::try_from(result[1]).map_err(|_| MojoError::InvalidOutput)?;
+            let end = usize::try_from(result[2]).map_err(|_| MojoError::InvalidOutput)?;
+            let Some(value) = id_fields[field] else {
+                return Err(MojoError::InvalidOutput);
+            };
+            if start >= end || value.get(start..end).is_none() {
+                return Err(MojoError::InvalidOutput);
+            }
+            Some((field, start, end))
+        }
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let set_id = match result[3] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let selectable = match result[4] {
+        0 => false,
+        1 => true,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(CatalogEntryPlan {
+        model_id,
+        set_id,
+        selectable,
+    })
+}
+
+/// Uses the full effort list when a model is absent from the provider catalog.
+pub fn use_all_effort_suggestions(model_catalogued: bool) -> Result<bool, MojoError> {
+    let scalar = i64::from(model_catalogued);
+    let result = call(Operation::EffortSuggestionMask, "", scalar)?;
+    match result[0] {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Resolves the recursion marker and the hidden launcher's exact authorization value.
+pub fn recursion_decision(
+    recursion_marker_present: bool,
+    launcher_marker_is_one: bool,
+) -> Result<RecursionDecision, MojoError> {
+    let scalar = i64::from(recursion_marker_present) | (i64::from(launcher_marker_is_one) << 1);
+    let result = call(Operation::RecursionDecision, "", scalar)?;
+    match result[0] {
+        0 => Ok(RecursionDecision::Allowed),
+        1 => Ok(RecursionDecision::Disabled),
+        2 => Ok(RecursionDecision::InternalLauncher),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Plans one admission or slot-reconciliation step; Rust performs the file operations.
+pub fn slot_plan_step(limit: u16, cursor: u16, reconcile: bool) -> Result<SlotPlanStep, MojoError> {
+    let scalar = i64::from(reconcile) | (i64::from(limit) << 2) | (i64::from(cursor) << 9);
+    let result = call(Operation::SlotPlanStep, "", scalar)?;
+    let index = || u16::try_from(result[1]).map_err(|_| MojoError::InvalidOutput);
+    match result[0] {
+        0 if !reconcile && index()? == cursor => Ok(SlotPlanStep::Candidate { index: cursor }),
+        1 if reconcile => Ok(SlotPlanStep::Retire { index: index()? }),
+        2 if reconcile => Ok(SlotPlanStep::Ensure { index: index()? }),
+        3 if !reconcile => Ok(SlotPlanStep::LimitReached {
+            exit_code: i32::try_from(result[2]).map_err(|_| MojoError::InvalidOutput)?,
+        }),
+        4 if reconcile => Ok(SlotPlanStep::Complete),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Classifies a platform lock error and chooses the caller's next action.
+pub fn slot_lock_error_action(
+    reconcile: bool,
+    would_block: bool,
+    raw_code_matches_lock_contention: bool,
+) -> Result<SlotLockErrorAction, MojoError> {
+    let scalar = i64::from(reconcile)
+        | (i64::from(would_block) << 1)
+        | (i64::from(raw_code_matches_lock_contention) << 2);
+    let result = call(Operation::SlotLockErrorAction, "", scalar)?;
+    match result[0] {
+        0 => Ok(SlotLockErrorAction::TryNext),
+        1 => Ok(SlotLockErrorAction::BlockResize),
+        2 => Ok(SlotLockErrorAction::Propagate),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Classifies the child result after Rust has collected OS status and output facts.
+pub fn child_outcome(
+    cancelled: bool,
+    child_succeeded: bool,
+    output_incomplete: bool,
+    has_output: bool,
+) -> Result<ChildOutcomeAction, MojoError> {
+    let scalar = i64::from(cancelled)
+        | (i64::from(child_succeeded) << 1)
+        | (i64::from(output_incomplete) << 2)
+        | (i64::from(has_output) << 3);
+    let result = call(Operation::ChildOutcome, "", scalar)?;
+    let incomplete = result[2] == 1;
+    match result[0] {
+        0 if result[2] == 0 => Ok(ChildOutcomeAction::Success),
+        1 if result[2] == 0 || incomplete => Ok(ChildOutcomeAction::Cancelled {
+            exit_code: i32::try_from(result[1]).map_err(|_| MojoError::InvalidOutput)?,
+            output_incomplete: incomplete,
+        }),
+        2 if result[2] == 0 || incomplete => Ok(ChildOutcomeAction::ChildFailed {
+            output_incomplete: incomplete,
+        }),
+        3 if result[2] == 0 => Ok(ChildOutcomeAction::OutputIncomplete),
+        4 if result[2] == 0 => Ok(ChildOutcomeAction::NoOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -427,6 +674,152 @@ mod tests {
                 ChildArgvAction::Exec,
                 ChildArgvAction::Task,
             ]
+        );
+    }
+
+    #[test]
+    fn app_policy_plans_cover_slots_catalogs_recursion_and_child_results() {
+        assert_eq!(
+            catalog_status(false, true).unwrap(),
+            CatalogStatusPlan::Degraded
+        );
+        assert_eq!(
+            catalog_status(false, false).unwrap(),
+            CatalogStatusPlan::NoDynamicCatalog
+        );
+        assert_eq!(
+            catalog_status(true, false).unwrap(),
+            CatalogStatusPlan::Available
+        );
+        assert_eq!(
+            catalog_entry_plan(
+                [Some("  "), Some(" model "), None, None, None],
+                false,
+                false,
+                Some("LiSt"),
+            )
+            .unwrap(),
+            CatalogEntryPlan {
+                model_id: Some((1, 1, 6)),
+                set_id: true,
+                selectable: true,
+            }
+        );
+        assert_eq!(
+            catalog_entry_plan(
+                [Some(" canonical "), Some("lower"), None, None, None],
+                false,
+                false,
+                None,
+            )
+            .unwrap(),
+            CatalogEntryPlan {
+                model_id: Some((0, 1, 10)),
+                set_id: false,
+                selectable: true,
+            }
+        );
+        assert!(
+            !catalog_entry_plan([None, None, None, None, None], true, false, Some("list"))
+                .unwrap()
+                .selectable
+        );
+        assert!(
+            !catalog_entry_plan([None, None, None, None, None], false, true, Some("list"))
+                .unwrap()
+                .selectable
+        );
+        assert!(
+            !catalog_entry_plan([None, None, None, None, None], false, false, Some(" list "))
+                .unwrap()
+                .selectable
+        );
+        assert!(use_all_effort_suggestions(false).unwrap());
+        assert!(!use_all_effort_suggestions(true).unwrap());
+
+        assert_eq!(
+            recursion_decision(false, false).unwrap(),
+            RecursionDecision::Allowed
+        );
+        assert_eq!(
+            recursion_decision(true, false).unwrap(),
+            RecursionDecision::Disabled
+        );
+        assert_eq!(
+            recursion_decision(true, true).unwrap(),
+            RecursionDecision::InternalLauncher
+        );
+
+        assert_eq!(
+            slot_plan_step(2, 0, false).unwrap(),
+            SlotPlanStep::Candidate { index: 0 }
+        );
+        assert_eq!(
+            slot_plan_step(2, 1, false).unwrap(),
+            SlotPlanStep::Candidate { index: 1 }
+        );
+        assert_eq!(
+            slot_plan_step(2, 2, false).unwrap(),
+            SlotPlanStep::LimitReached { exit_code: 75 }
+        );
+        assert_eq!(
+            slot_plan_step(2, 0, true).unwrap(),
+            SlotPlanStep::Retire { index: 2 }
+        );
+        assert_eq!(
+            slot_plan_step(2, 61, true).unwrap(),
+            SlotPlanStep::Retire { index: 63 }
+        );
+        assert_eq!(
+            slot_plan_step(2, 62, true).unwrap(),
+            SlotPlanStep::Ensure { index: 0 }
+        );
+        assert_eq!(
+            slot_plan_step(2, 63, true).unwrap(),
+            SlotPlanStep::Ensure { index: 1 }
+        );
+        assert_eq!(slot_plan_step(2, 64, true).unwrap(), SlotPlanStep::Complete);
+        assert!(matches!(
+            slot_plan_step(0, 0, false),
+            Err(MojoError::InvalidInput)
+        ));
+        assert_eq!(
+            slot_lock_error_action(false, true, false).unwrap(),
+            SlotLockErrorAction::TryNext
+        );
+        assert_eq!(
+            slot_lock_error_action(true, false, true).unwrap(),
+            SlotLockErrorAction::BlockResize
+        );
+        assert_eq!(
+            slot_lock_error_action(false, false, false).unwrap(),
+            SlotLockErrorAction::Propagate
+        );
+
+        assert_eq!(
+            child_outcome(true, true, true, false).unwrap(),
+            ChildOutcomeAction::Cancelled {
+                exit_code: 130,
+                output_incomplete: true,
+            }
+        );
+        assert_eq!(
+            child_outcome(false, false, true, false).unwrap(),
+            ChildOutcomeAction::ChildFailed {
+                output_incomplete: true,
+            }
+        );
+        assert_eq!(
+            child_outcome(false, true, true, true).unwrap(),
+            ChildOutcomeAction::OutputIncomplete
+        );
+        assert_eq!(
+            child_outcome(false, true, false, false).unwrap(),
+            ChildOutcomeAction::NoOutput
+        );
+        assert_eq!(
+            child_outcome(false, true, false, true).unwrap(),
+            ChildOutcomeAction::Success
         );
     }
 }

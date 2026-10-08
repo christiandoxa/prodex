@@ -3,7 +3,8 @@ use crate::{
     ProfileProvider, parse_kiro_model_catalog_text, read_provider_model_catalog_text,
 };
 use prodex_cli::SubAgentReasoningEffort;
-use prodex_mojo_core::rich::{CatalogModel, ascii_casefold_equal_exact, merge_catalog_ids};
+use prodex_mojo_core::rich::{CatalogModel, merge_catalog_ids};
+use prodex_mojo_core::sub_agent_policy::{CatalogEntryPlan, CatalogStatusPlan};
 use prodex_provider_core::{
     PROVIDER_IMPLEMENTATION_ORDER, ProviderId, ProviderModelChoice,
     provider_implementation_registry, provider_model_reasoning_resolution,
@@ -139,8 +140,19 @@ fn append_catalog_entries(
     let mut candidates = entries
         .into_iter()
         .filter_map(|entry| {
-            let id = catalog_entry_model_id(&entry)?.to_string();
-            catalog_entry_is_selectable(&entry).then_some(Some((entry, id)))
+            let plan = catalog_entry_policy(&entry);
+            if !plan.selectable {
+                return None;
+            }
+            let Some((field, start, end)) = plan.model_id else {
+                return None;
+            };
+            let fields = catalog_id_fields(&entry);
+            let Some(id) = fields[field].and_then(|value| value.get(start..end)) else {
+                return None;
+            };
+            let id = id.to_string();
+            Some(Some((entry, id, plan.set_id)))
         })
         .collect::<Vec<_>>();
     if candidates.is_empty() {
@@ -157,17 +169,17 @@ fn append_catalog_entries(
         .collect::<Vec<_>>();
     let candidate_ids = candidates
         .iter()
-        .filter_map(|candidate| candidate.as_ref().map(|(_, id)| id.as_str()))
+        .filter_map(|candidate| candidate.as_ref().map(|(_, id, _)| id.as_str()))
         .collect::<Vec<_>>();
     let accepted =
         merge_catalog_ids(&existing, &candidate_ids).expect("Mojo sub-agent catalog merge failed");
 
     for index in accepted {
-        let (entry, id) = candidates
+        let (entry, id, set_id) = candidates
             .get_mut(index)
             .and_then(Option::take)
             .expect("Mojo catalog merge returned a valid candidate index");
-        models.push(catalog_entry_with_id(entry, provider, &id));
+        models.push(catalog_entry_with_id(entry, provider, &id, set_id));
         if models.len() >= model_limit {
             *degraded = true;
             break;
@@ -177,12 +189,12 @@ fn append_catalog_entries(
 }
 
 fn dynamic_catalog_status(models: &[Value], degraded: bool) -> DynamicCatalogStatus {
-    if degraded {
-        DynamicCatalogStatus::Degraded
-    } else if models.is_empty() {
-        DynamicCatalogStatus::NoDynamicCatalog
-    } else {
-        DynamicCatalogStatus::Available
+    match prodex_mojo_core::sub_agent_policy::catalog_status(!models.is_empty(), degraded)
+        .expect("Mojo sub-agent catalog status policy returned invalid output")
+    {
+        CatalogStatusPlan::NoDynamicCatalog => DynamicCatalogStatus::NoDynamicCatalog,
+        CatalogStatusPlan::Available => DynamicCatalogStatus::Available,
+        CatalogStatusPlan::Degraded => DynamicCatalogStatus::Degraded,
     }
 }
 
@@ -263,24 +275,29 @@ fn parse_catalog(provider: ProviderId, contents: &str) -> anyhow::Result<Vec<Val
 }
 
 fn catalog_entry_model_id(value: &Value) -> Option<&str> {
-    ["id", "model_id", "modelId", "slug", "model"]
-        .into_iter()
-        .find_map(|key| {
-            value
-                .get(key)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|id| !id.is_empty())
-        })
+    let plan = catalog_entry_policy(value);
+    let (field, start, end) = plan.model_id?;
+    catalog_id_fields(value)[field].and_then(|id| id.get(start..end))
 }
 
-fn catalog_entry_with_id(mut value: Value, provider: ProviderId, id: &str) -> Value {
+fn catalog_id_fields(value: &Value) -> [Option<&str>; 5] {
+    ["id", "model_id", "modelId", "slug", "model"]
+        .map(|field| value.get(field).and_then(Value::as_str))
+}
+
+fn catalog_entry_policy(value: &Value) -> CatalogEntryPlan {
+    prodex_mojo_core::sub_agent_policy::catalog_entry_plan(
+        catalog_id_fields(value),
+        value.get("supported_in_api").and_then(Value::as_bool) == Some(false),
+        value.get("hidden").and_then(Value::as_bool) == Some(true),
+        value.get("visibility").and_then(Value::as_str),
+    )
+    .expect("Mojo sub-agent catalog entry policy returned invalid output")
+}
+
+fn catalog_entry_with_id(mut value: Value, provider: ProviderId, id: &str, set_id: bool) -> Value {
     if let Some(object) = value.as_object_mut() {
-        if !object
-            .get("id")
-            .and_then(Value::as_str)
-            .is_some_and(|id| !id.trim().is_empty())
-        {
+        if set_id {
             object.insert("id".to_string(), Value::String(id.to_string()));
         }
         object.insert(
@@ -289,18 +306,6 @@ fn catalog_entry_with_id(mut value: Value, provider: ProviderId, id: &str) -> Va
         );
     }
     value
-}
-
-fn catalog_entry_is_selectable(value: &Value) -> bool {
-    value.get("supported_in_api").and_then(Value::as_bool) != Some(false)
-        && value.get("hidden").and_then(Value::as_bool) != Some(true)
-        && value
-            .get("visibility")
-            .and_then(Value::as_str)
-            .is_none_or(|visibility| {
-                ascii_casefold_equal_exact(visibility, "list")
-                    .expect("Mojo sub-agent catalog visibility comparison failed")
-            })
 }
 
 pub(crate) fn canonical_sub_agent_model_choices(
@@ -316,7 +321,11 @@ pub(crate) fn canonical_sub_agent_efforts(
 ) -> Vec<SubAgentReasoningEffort> {
     let resolution = provider_model_reasoning_resolution(provider, model, None)
         .expect("provider model reasoning resolution failed");
-    if resolution.model_index.is_none() {
+    if prodex_mojo_core::sub_agent_policy::use_all_effort_suggestions(
+        resolution.model_index.is_some(),
+    )
+    .expect("Mojo sub-agent reasoning suggestion policy returned invalid output")
+    {
         return SubAgentReasoningEffort::ALL.to_vec();
     }
 
@@ -332,4 +341,55 @@ pub(crate) fn provider_display_name(provider: ProviderId) -> &'static str {
         .get(provider)
         .map(|descriptor| descriptor.display_name())
         .unwrap_or(provider.label())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_id_schema_and_visibility_rules_use_mojo_policy() {
+        let entry = serde_json::json!({
+            "id": "  ",
+            "model_id": " model-from-id ",
+            "slug": "lower-priority"
+        });
+        assert_eq!(catalog_entry_model_id(&entry), Some("model-from-id"));
+        assert_eq!(
+            catalog_entry_model_id(&serde_json::json!({"modelId": " camel "})),
+            Some("camel")
+        );
+        assert_eq!(
+            catalog_entry_model_id(&serde_json::json!({"id": " \t"})),
+            None
+        );
+
+        assert!(catalog_entry_policy(&serde_json::json!({"visibility": "LIST"})).selectable);
+        assert!(
+            !catalog_entry_policy(&serde_json::json!({
+                "visibility": "list "
+            }))
+            .selectable
+        );
+        assert!(
+            !catalog_entry_policy(&serde_json::json!({
+                "supported_in_api": false
+            }))
+            .selectable
+        );
+        assert!(!catalog_entry_policy(&serde_json::json!({"hidden": true})).selectable);
+        assert!(catalog_entry_policy(&serde_json::json!({"visibility": 7})).selectable);
+        assert_eq!(
+            dynamic_catalog_status(&[], false),
+            DynamicCatalogStatus::NoDynamicCatalog
+        );
+        assert_eq!(
+            dynamic_catalog_status(&[], true),
+            DynamicCatalogStatus::Degraded
+        );
+        assert_eq!(
+            dynamic_catalog_status(&[serde_json::json!({"id": "model"})], false),
+            DynamicCatalogStatus::Available
+        );
+    }
 }
