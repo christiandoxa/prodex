@@ -1630,6 +1630,54 @@ comptime GEMINI_REQUEST_CONTENT_BUILTIN_TOOL: Int64 = 10
 comptime GEMINI_REQUEST_CONTENT_SYSTEM_INSTRUCTION_FROM_REQUEST: Int64 = 11
 comptime GEMINI_REQUEST_CONTENT_CONTINUATION_METADATA: Int64 = 12
 
+
+# Seven ABI fields in protocol-priority order. Rust marshals JSON tree
+# locations, but the first-present rule and Unicode whitespace policy live
+# exclusively in Mojo, including a present invalid value blocking fallback.
+comptime GEMINI_SIGNATURE_CHOICE_ABI_VERSION: Int64 = 1
+
+@fieldwise_init
+struct GeminiSignatureChoiceField(Copyable):
+    var present: Int64
+    var is_string: Int64
+    var text_address: UInt64
+    var text_length: UInt64
+
+
+@export("prodex_gemini_signature_choice_v1")
+def prodex_gemini_signature_choice_v1(
+    abi_version: Int64,
+    fields_address: UInt64,
+    selected_index_address: UInt64,
+) abi("C") -> Int64:
+    if abi_version != GEMINI_SIGNATURE_CHOICE_ABI_VERSION:
+        return 4
+    if fields_address == 0 or selected_index_address == 0:
+        return 1
+    var fields = Pointer[
+        mut=False, GeminiSignatureChoiceField, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(fields_address))
+    var selected = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(selected_index_address)
+    )
+    selected[] = -1
+    for index in range(7):
+        var field = fields[unsafe_offset=index].copy()
+        if (field.present != 0 and field.present != 1) or (field.is_string != 0 and field.is_string != 1):
+            return 1
+        if field.text_length > 0 and field.text_address == 0:
+            return 1
+        if field.present == 1:
+            if field.is_string == 1:
+                var view = ProdexRichStringView(
+                    UInt(field.text_address), UInt(field.text_length)
+                )
+                var bounds = rich_trim_bounds(view)
+                if bounds[1] > bounds[0]:
+                    selected[] = Int64(index)
+            return 0
+    return 0
+
 @fieldwise_init
 struct GeminiRequestContentStringView(Copyable):
     var ptr: UInt64

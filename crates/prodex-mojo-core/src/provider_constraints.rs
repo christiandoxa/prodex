@@ -1,6 +1,7 @@
 mod gemini_bridge_request;
 mod gemini_request;
 mod gemini_request_content;
+mod gemini_signature_choice;
 mod gemini_sse_tool_call_index;
 
 pub use gemini_bridge_request::{
@@ -13,6 +14,7 @@ pub use gemini_request::{
 pub use gemini_request_content::{
     GeminiRequestContentKernelInput, GeminiRequestContentOperation, gemini_request_content_kernel,
 };
+pub use gemini_signature_choice::{GeminiSignatureCandidate, gemini_signature_choice};
 pub use gemini_sse_tool_call_index::{
     GeminiToolCallIndexBinding, GeminiToolCallIndexRecord, gemini_tool_call_index,
     gemini_tool_response_part_order,
