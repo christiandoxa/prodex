@@ -154,6 +154,41 @@ fn hard_affinity_detects_no_rotate_sources() {
 }
 
 #[test]
+fn affinity_name_matching_is_mojo_owned_at_the_proxy_boundary() {
+    let mut affinity = RuntimeCandidateAffinity::new(
+        RuntimeRouteKind::Responses,
+        "owner",
+        Some("owner"),
+        Some("other"),
+        Some("other"),
+        None,
+        true,
+    );
+    assert_eq!(
+        runtime_candidate_no_rotate_affinity(affinity),
+        Some(RuntimeNoRotateAffinity::Strict)
+    );
+
+    affinity.candidate_name = "other";
+    assert_eq!(
+        runtime_candidate_no_rotate_affinity(affinity),
+        Some(RuntimeNoRotateAffinity::TurnState)
+    );
+
+    affinity.route_kind = RuntimeRouteKind::Compact;
+    affinity.turn_state_profile = None;
+    affinity.trusted_previous_response_affinity = false;
+    affinity.session_profile = Some("other");
+    assert_eq!(
+        runtime_candidate_no_rotate_affinity(affinity),
+        Some(RuntimeNoRotateAffinity::CompactSession)
+    );
+
+    affinity.session_profile = Some("owner");
+    assert_eq!(runtime_candidate_no_rotate_affinity(affinity), None);
+}
+
+#[test]
 fn hard_affinity_matrix_prioritizes_no_rotate_sources() {
     for route_kind in [
         RuntimeRouteKind::Responses,
