@@ -1,6 +1,6 @@
 from std.memory import Pointer
 
-from rich_text import rich_view_valid
+from rich_text import rich_view_valid, rich_views_equal
 from rich_types import ProdexRichStringView, rich_view_ptr
 
 comptime BROKER_CONTINUITY_ABI_VERSION: Int64 = 1
@@ -444,6 +444,78 @@ def prodex_runtime_broker_registry_identity_match_v1(
         if left_ptr[unsafe_offset=index] != right_ptr[unsafe_offset=index]:
             return 0
     return 1
+
+
+@export("prodex_runtime_broker_registry_reuse_plan_v1")
+def prodex_runtime_broker_registry_reuse_plan_v1(
+    abi_version: Int64,
+    registry_upstream_address: UInt,
+    registry_upstream_length: Int64,
+    registry_include_code_review: Int64,
+    registry_upstream_no_proxy: Int64,
+    registry_smart_context_enabled: Int64,
+    launch_upstream_address: UInt,
+    launch_upstream_length: Int64,
+    launch_include_code_review: Int64,
+    launch_upstream_no_proxy: Int64,
+    launch_smart_context_enabled: Int64,
+    health_present: Int64,
+    health_matches: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or registry_upstream_length < 0
+        or launch_upstream_length < 0
+        or (registry_upstream_length > 0 and registry_upstream_address == 0)
+        or (launch_upstream_length > 0 and launch_upstream_address == 0)
+        or not rich_view_valid(
+            broker_view(registry_upstream_address, registry_upstream_length),
+            registry_upstream_length,
+        )
+        or not rich_view_valid(
+            broker_view(launch_upstream_address, launch_upstream_length),
+            launch_upstream_length,
+        )
+        or (registry_include_code_review != 0 and registry_include_code_review != 1)
+        or (registry_upstream_no_proxy != 0 and registry_upstream_no_proxy != 1)
+        or (registry_smart_context_enabled != 0 and registry_smart_context_enabled != 1)
+        or (launch_include_code_review != 0 and launch_include_code_review != 1)
+        or (launch_upstream_no_proxy != 0 and launch_upstream_no_proxy != 1)
+        or (launch_smart_context_enabled != 0 and launch_smart_context_enabled != 1)
+        or (health_present != 0 and health_present != 1)
+        or (health_matches != 0 and health_matches != 1)
+        or (health_matches == 1 and health_present == 0)
+    ):
+        return BROKER_CONTINUITY_INVALID
+
+    var registry_upstream = broker_view(
+        registry_upstream_address, registry_upstream_length
+    )
+    var launch_upstream = broker_view(launch_upstream_address, launch_upstream_length)
+    if (
+        not rich_views_equal(registry_upstream, launch_upstream)
+        or registry_include_code_review != launch_include_code_review
+        or registry_upstream_no_proxy != launch_upstream_no_proxy
+        or registry_smart_context_enabled != launch_smart_context_enabled
+    ):
+        return 1
+    if health_present == 1 and health_matches == 1:
+        return 0
+    return 2
+
+
+@export("prodex_runtime_broker_startup_grace_seconds_v1")
+def prodex_runtime_broker_startup_grace_seconds_v1(
+    abi_version: Int64,
+    ready_timeout_ms: UInt64,
+    idle_grace_seconds: Int64,
+) abi("C") -> Int64:
+    if abi_version != BROKER_CONTINUITY_ABI_VERSION:
+        return BROKER_CONTINUITY_INVALID
+    var ready_timeout_seconds = ready_timeout_ms // UInt64(1_000)
+    if ready_timeout_ms % UInt64(1_000) != 0:
+        ready_timeout_seconds += 1
+    return max(Int64(ready_timeout_seconds) + 1, idle_grace_seconds)
 
 comptime BROKER_ID_VERSION: Int64 = 1
 comptime BROKER_ID_PATH: Int64 = 2

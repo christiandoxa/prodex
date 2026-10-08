@@ -70,6 +70,27 @@ pub struct BrokerRegistryStorePlan {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrokerRegistryReuseDecision {
+    Reuse,
+    LaunchConfigMismatch,
+    MissingMatchingHealth,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BrokerRegistryReuseInput<'a> {
+    pub registry_upstream_base_url: &'a str,
+    pub registry_include_code_review: bool,
+    pub registry_upstream_no_proxy: bool,
+    pub registry_smart_context_enabled: bool,
+    pub launch_upstream_base_url: &'a str,
+    pub launch_include_code_review: bool,
+    pub launch_upstream_no_proxy: bool,
+    pub launch_smart_context_enabled: bool,
+    pub health_present: bool,
+    pub health_matches: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrokerLogFingerprintRelation {
     Rebuild,
     Exact,
@@ -171,6 +192,28 @@ unsafe extern "C" {
         left_length: i64,
         right_address: u64,
         right_length: i64,
+    ) -> i64;
+
+    fn prodex_runtime_broker_registry_reuse_plan_v1(
+        abi_version: i64,
+        registry_upstream_address: u64,
+        registry_upstream_length: i64,
+        registry_include_code_review: i64,
+        registry_upstream_no_proxy: i64,
+        registry_smart_context_enabled: i64,
+        launch_upstream_address: u64,
+        launch_upstream_length: i64,
+        launch_include_code_review: i64,
+        launch_upstream_no_proxy: i64,
+        launch_smart_context_enabled: i64,
+        health_present: i64,
+        health_matches: i64,
+    ) -> i64;
+
+    fn prodex_runtime_broker_startup_grace_seconds_v1(
+        abi_version: i64,
+        ready_timeout_ms: u64,
+        idle_grace_seconds: i64,
     ) -> i64;
 
     fn prodex_runtime_broker_identity_policy_v1(
@@ -425,6 +468,50 @@ pub fn registry_instance_matches(left: &str, right: &str) -> Result<bool, MojoEr
         1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
+}
+
+pub fn registry_reuse_plan(
+    input: BrokerRegistryReuseInput<'_>,
+) -> Result<BrokerRegistryReuseDecision, MojoError> {
+    let output = unsafe {
+        prodex_runtime_broker_registry_reuse_plan_v1(
+            ABI_VERSION,
+            ptr(input.registry_upstream_base_url),
+            length(input.registry_upstream_base_url)?,
+            i64::from(input.registry_include_code_review),
+            i64::from(input.registry_upstream_no_proxy),
+            i64::from(input.registry_smart_context_enabled),
+            ptr(input.launch_upstream_base_url),
+            length(input.launch_upstream_base_url)?,
+            i64::from(input.launch_include_code_review),
+            i64::from(input.launch_upstream_no_proxy),
+            i64::from(input.launch_smart_context_enabled),
+            i64::from(input.health_present),
+            i64::from(input.health_matches),
+        )
+    };
+    match output {
+        0 => Ok(BrokerRegistryReuseDecision::Reuse),
+        1 => Ok(BrokerRegistryReuseDecision::LaunchConfigMismatch),
+        2 => Ok(BrokerRegistryReuseDecision::MissingMatchingHealth),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn startup_grace_seconds(
+    ready_timeout_ms: u64,
+    idle_grace_seconds: i64,
+) -> Result<i64, MojoError> {
+    let output = unsafe {
+        prodex_runtime_broker_startup_grace_seconds_v1(
+            ABI_VERSION,
+            ready_timeout_ms,
+            idle_grace_seconds,
+        )
+    };
+    (output >= 0)
+        .then_some(output)
+        .ok_or(MojoError::InvalidOutput)
 }
 
 fn identity_parts(

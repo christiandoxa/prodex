@@ -89,3 +89,78 @@ fn broker_continuity_kernel_smoke() {
     assert_eq!(lru_evict_index(&[5], Some(0)).unwrap(), Some(0));
     assert_eq!(lru_evict_index(&[], None).unwrap(), None);
 }
+
+#[test]
+fn broker_registry_reuse_plan_is_mojo_authoritative() {
+    let matching = registry_reuse_plan(BrokerRegistryReuseInput {
+        registry_upstream_base_url: "https://upstream.example",
+        registry_include_code_review: true,
+        registry_upstream_no_proxy: false,
+        registry_smart_context_enabled: true,
+        launch_upstream_base_url: "https://upstream.example",
+        launch_include_code_review: true,
+        launch_upstream_no_proxy: false,
+        launch_smart_context_enabled: true,
+        health_present: true,
+        health_matches: true,
+    })
+    .unwrap();
+    assert_eq!(matching, BrokerRegistryReuseDecision::Reuse);
+    assert_eq!(
+        registry_reuse_plan(BrokerRegistryReuseInput {
+            registry_upstream_base_url: "https://upstream.example",
+            registry_include_code_review: true,
+            registry_upstream_no_proxy: false,
+            registry_smart_context_enabled: true,
+            launch_upstream_base_url: "https://other.example",
+            launch_include_code_review: true,
+            launch_upstream_no_proxy: false,
+            launch_smart_context_enabled: true,
+            health_present: true,
+            health_matches: true,
+        })
+        .unwrap(),
+        BrokerRegistryReuseDecision::LaunchConfigMismatch
+    );
+    assert_eq!(
+        registry_reuse_plan(BrokerRegistryReuseInput {
+            registry_upstream_base_url: "https://upstream.example",
+            registry_include_code_review: true,
+            registry_upstream_no_proxy: false,
+            registry_smart_context_enabled: true,
+            launch_upstream_base_url: "https://upstream.example",
+            launch_include_code_review: true,
+            launch_upstream_no_proxy: false,
+            launch_smart_context_enabled: true,
+            health_present: false,
+            health_matches: false,
+        })
+        .unwrap(),
+        BrokerRegistryReuseDecision::MissingMatchingHealth
+    );
+    assert!(
+        registry_reuse_plan(BrokerRegistryReuseInput {
+            registry_upstream_base_url: "https://upstream.example",
+            registry_include_code_review: true,
+            registry_upstream_no_proxy: false,
+            registry_smart_context_enabled: true,
+            launch_upstream_base_url: "https://upstream.example",
+            launch_include_code_review: true,
+            launch_upstream_no_proxy: false,
+            launch_smart_context_enabled: true,
+            health_present: false,
+            health_matches: true,
+        })
+        .is_err()
+    );
+}
+
+#[test]
+fn broker_startup_grace_plan_preserves_timeout_rounding_and_idle_floor() {
+    assert_eq!(startup_grace_seconds(1_250, 5).unwrap(), 5);
+    assert_eq!(startup_grace_seconds(5_250, 1).unwrap(), 7);
+    assert_eq!(
+        startup_grace_seconds(u64::MAX, 0).unwrap(),
+        18_446_744_073_709_553
+    );
+}
