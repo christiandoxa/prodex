@@ -933,14 +933,22 @@ fn runtime_local_rewrite_openai_error_can_retry(
         parts.status,
         &parts.body,
     );
-    (parts.status != 429 || runtime_local_rewrite_retryable_429_body(&parts.body))
-        && !hard_binding
+    let retryable_429 =
+        parts.status == 429 && runtime_local_rewrite_retryable_429_body(&parts.body);
+    let provider_retry_allowed = !hard_binding
         && runtime_gateway_application_provider_retry_precommit(
             ProviderRetryCause::RotateCredential,
             class,
             attempt_index,
             attempt_count,
-        )
+        );
+    prodex_mojo_core::provider_constraints::provider_precommit_openai_credential_retry(
+        parts.status,
+        retryable_429,
+        hard_binding,
+        provider_retry_allowed,
+    )
+    .expect("Mojo OpenAI credential retry policy returned invalid output")
 }
 
 fn runtime_local_rewrite_openai_response(
@@ -1619,7 +1627,7 @@ mod tests {
     }
 
     #[test]
-    fn openai_error_retry_uses_mojo_provider_retry_policy() {
+    fn openai_error_retry_preserves_mojo_parity_and_mutation_guards() {
         let parts = |status, body: &[u8]| crate::RuntimeHeapTrimmedBufferedResponseParts {
             status,
             headers: Vec::new(),
@@ -1660,6 +1668,12 @@ mod tests {
             &parts(503, b"temporarily unavailable"),
             false,
             1,
+            2,
+        ));
+        assert!(!runtime_local_rewrite_openai_error_can_retry(
+            &parts(400, b"ordinary provider error"),
+            false,
+            0,
             2,
         ));
     }
