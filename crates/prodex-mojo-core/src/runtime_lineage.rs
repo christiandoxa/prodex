@@ -74,6 +74,11 @@ unsafe extern "C" {
         session_matches: i64,
         compact_session_matches: i64,
     ) -> i64;
+    fn prodex_runtime_lineage_dead_turn_state_plan_v1(
+        abi_version: i64,
+        binding_matches: i64,
+        surviving_lineage: i64,
+    ) -> i64;
     fn prodex_runtime_lineage_parts_v1(
         abi_version: i64,
         address: u64,
@@ -439,6 +444,25 @@ pub fn release_plan(
         session: mask & 4 != 0,
         compact_session: mask & 8 != 0,
     })
+}
+
+pub fn dead_turn_state_release_plan(
+    binding_matches: bool,
+    surviving_lineage: bool,
+) -> Result<bool, crate::MojoError> {
+    match unsafe {
+        prodex_runtime_lineage_dead_turn_state_plan_v1(
+            ABI_VERSION,
+            i64::from(binding_matches),
+            i64::from(surviving_lineage),
+        )
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        -4 => Err(crate::MojoError::AbiMismatch),
+        -1 => Err(crate::MojoError::InvalidInput),
+        _ => Err(crate::MojoError::InvalidOutput),
+    }
 }
 
 pub fn response_turn_state_parts(

@@ -326,3 +326,50 @@ fn clear_runtime_dead_response_bindings_clears_all_removed_turn_state_affinities
         Some(RuntimeContinuationBindingLifecycle::Dead)
     );
 }
+
+#[test]
+fn clear_runtime_dead_response_bindings_preserves_turn_state_owned_by_another_profile() {
+    let temp_dir = TestDir::isolated();
+    let shared = runtime_shared_for_dead_response_binding_cleanup(&temp_dir);
+    let response_ids = vec![String::from("resp-main")];
+
+    remember_runtime_response_ids_with_turn_state(
+        &shared,
+        "main",
+        &response_ids,
+        Some("turn-main"),
+        RuntimeRouteKind::Responses,
+    )
+    .expect("response affinity should be recorded");
+    wait_for_runtime_background_queues_idle();
+
+    shared
+        .runtime
+        .lock()
+        .expect("runtime lock should succeed")
+        .turn_state_bindings
+        .insert(
+            "turn-main".to_string(),
+            prodex_state::ResponseProfileBinding {
+                profile_name: "other".to_string(),
+                bound_at: 1,
+                binding_identity: None,
+            },
+        );
+
+    assert!(
+        clear_runtime_dead_response_bindings(&shared, "main", &response_ids, "test")
+            .expect("dead binding clear should succeed")
+    );
+    wait_for_runtime_background_queues_idle();
+
+    let runtime = shared.runtime.lock().expect("runtime lock should succeed");
+    assert_eq!(
+        runtime
+            .turn_state_bindings
+            .get("turn-main")
+            .map(|binding| binding.profile_name.as_str()),
+        Some("other"),
+        "dead lineage must not release another profile's turn-state affinity"
+    );
+}

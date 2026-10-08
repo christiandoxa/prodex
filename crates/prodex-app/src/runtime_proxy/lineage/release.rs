@@ -190,12 +190,16 @@ fn clear_runtime_dead_turn_state_bindings(
 ) -> bool {
     let mut changed = false;
     for turn_state in dead_turn_states {
-        if runtime
+        let binding_matches = runtime
             .turn_state_bindings
             .get(turn_state.as_str())
-            .is_some_and(|binding| binding.profile_name == profile_name)
-            && !surviving_turn_states.contains(turn_state.as_str())
-        {
+            .is_some_and(|binding| binding.profile_name == profile_name);
+        let release = prodex_mojo_core::runtime_lineage::dead_turn_state_release_plan(
+            binding_matches,
+            surviving_turn_states.contains(turn_state.as_str()),
+        )
+        .expect("Mojo dead turn-state release planner returned invalid output");
+        if release {
             changed = runtime
                 .turn_state_bindings
                 .remove(turn_state.as_str())

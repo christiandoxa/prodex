@@ -322,6 +322,7 @@ comptime LINEAGE_RELEASE_RESPONSE: Int64 = 1
 comptime LINEAGE_RELEASE_TURN_STATE: Int64 = 2
 comptime LINEAGE_RELEASE_SESSION: Int64 = 4
 comptime LINEAGE_RELEASE_COMPACT_SESSION: Int64 = 8
+comptime LINEAGE_RELEASE_DEAD_TURN_STATE: Int64 = 1
 
 
 @export("prodex_runtime_lineage_release_plan_v1")
@@ -364,6 +365,22 @@ def prodex_runtime_lineage_release_plan_v1(
         if compact_session_matches == 1:
             mask |= LINEAGE_RELEASE_COMPACT_SESSION
     return mask
+
+
+@export("prodex_runtime_lineage_dead_turn_state_plan_v1")
+def prodex_runtime_lineage_dead_turn_state_plan_v1(
+    abi_version: Int64,
+    binding_matches: Int64,
+    surviving_lineage: Int64,
+) abi("C") -> Int64:
+    if abi_version != LINEAGE_ABI_VERSION:
+        return -4
+    for value in [binding_matches, surviving_lineage]:
+        if value != 0 and value != 1:
+            return -1
+    if binding_matches == 1 and surviving_lineage == 0:
+        return LINEAGE_RELEASE_DEAD_TURN_STATE
+    return 0
 
 
 comptime LINEAGE_CANDIDATE_OWNER: Int64 = 1
