@@ -70,7 +70,10 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
             manifest_dir.join(source).display()
         );
     }
-    if sources.iter().any(|source| source.contains("rich_")) {
+    if sources
+        .iter()
+        .any(|source| source.contains("rich_") || source.ends_with("runtime_thread_index.mojo"))
+    {
         for source in [
             "../../mojo/prodex_core/rich_types.mojo",
             "../../mojo/prodex_core/rich_text.mojo",
@@ -476,6 +479,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/profile_export_policy.mojo");
         sources.push("../../mojo/prodex_core/runtime_state_background.mojo");
         sources.push("../../mojo/prodex_core/runtime_state_quota.mojo");
+        sources.push("../../mojo/prodex_core/runtime_thread_index.mojo");
         sources.push("../../mojo/prodex_core/runtime_repo_map.mojo");
         sources.push("../../mojo/prodex_core/runtime_lineage.mojo");
         sources.push("../../mojo/prodex_core/runtime_route_reason.mojo");
