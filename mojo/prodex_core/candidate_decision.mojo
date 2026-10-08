@@ -743,6 +743,53 @@ comptime AFFINITY_REASON_HARD_BINDING_UNAVAILABLE: Int64 = 3
 comptime AFFINITY_REASON_BOUND_PROFILE_UNAVAILABLE: Int64 = 4
 comptime AFFINITY_REASON_SELECTION_BACKOFF: Int64 = 5
 comptime AFFINITY_REASON_ROUTE_CIRCUIT_HALF_OPEN_PROBE_WAIT: Int64 = 6
+comptime AFFINITY_BINDING_CONFLICT_ABI_VERSION: Int64 = 1
+
+
+@export("prodex_runtime_affinity_binding_conflict_v1")
+def prodex_runtime_affinity_binding_conflict_v1(
+    abi_version: Int64,
+    profile_views: Pointer[mut=False, ProdexRichStringView, _],
+    profile_presence_mask: Int64,
+    route_kind: Int64,
+    conflict_profile_view: ProdexRichStringView,
+    output: Pointer[mut=True, Int64, _],
+) abi("C") -> Int64:
+    if (
+        abi_version != AFFINITY_BINDING_CONFLICT_ABI_VERSION
+        or route_kind < 0
+        or route_kind > 3
+        or profile_presence_mask < 0
+        or profile_presence_mask > 15
+    ):
+        return 1
+    if not rich_view_valid(conflict_profile_view, RICH_MAX_IDENTIFIER_BYTES):
+        return 2
+
+    var first_profile_index = -1
+    for profile_index in range(4):
+        if profile_index == 3 and route_kind != 1:
+            continue
+        if (profile_presence_mask & (Int64(1) << Int64(profile_index))) == 0:
+            continue
+
+        var profile = profile_views[unsafe_offset=profile_index].copy()
+        if not rich_view_valid(profile, RICH_MAX_IDENTIFIER_BYTES):
+            return 2
+        if rich_views_equal(profile, conflict_profile_view):
+            output[] = 1
+            return 0
+        if first_profile_index >= 0 and not rich_views_equal(
+            profile,
+            profile_views[unsafe_offset=first_profile_index].copy(),
+        ):
+            output[] = 1
+            return 0
+        if first_profile_index < 0:
+            first_profile_index = profile_index
+
+    output[] = 0
+    return 0
 
 
 @export("prodex_runtime_affinity_outcome_plan_v1")

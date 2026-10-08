@@ -29,6 +29,7 @@ pub const ADAPTIVE_PLAN_REASON_ADAPTIVE_ENABLED: i64 = 2;
 pub const ADAPTIVE_PLAN_REASON_SHADOW_EXPLORATION: i64 = 3;
 pub const ADAPTIVE_PLAN_REASON_ADAPTIVE_EXPLORATION: i64 = 4;
 const AFFINITY_PROFILE_MAX_BYTES: usize = 4_096;
+const AFFINITY_BINDING_CONFLICT_ABI_VERSION: i64 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SoftAffinityPolicyInput {
@@ -92,6 +93,19 @@ pub struct AffinityOutcomePlan {
     /// Stable reason tag; zero means no unavailable reason.
     pub reason: i64,
     pub unavailable_hard: bool,
+}
+
+/// Inputs for fail-closed validation of supplied profile affinities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AffinityBindingConflictInput<'a> {
+    /// Runtime route kind: responses=0, compact=1, websocket=2, standard=3.
+    pub route_kind: i64,
+    pub strict_affinity_profile: Option<&'a str>,
+    pub pinned_profile: Option<&'a str>,
+    pub turn_state_profile: Option<&'a str>,
+    /// Considered only for compact routes.
+    pub session_profile: Option<&'a str>,
+    pub conflict_profile: &'a str,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -216,6 +230,14 @@ unsafe extern "C" {
         hard_affinity: i64,
         soft_policy_allowed: i64,
         local_rejection: i64,
+        output: *mut i64,
+    ) -> i64;
+    fn prodex_runtime_affinity_binding_conflict_v1(
+        abi_version: i64,
+        profile_views: *const super::RuntimeStringView,
+        profile_presence_mask: i64,
+        route_kind: i64,
+        conflict_profile_view: super::RuntimeStringView,
         output: *mut i64,
     ) -> i64;
     fn prodex_runtime_affinity_selection_plan_v2(
@@ -407,6 +429,66 @@ pub fn affinity_outcome_plan(
         reason: output[1],
         unavailable_hard: output[2] == 1,
     })
+}
+
+pub fn affinity_binding_conflict(
+    input: AffinityBindingConflictInput<'_>,
+) -> Result<bool, MojoError> {
+    if !(0..=3).contains(&input.route_kind)
+        || input.conflict_profile.len() > AFFINITY_PROFILE_MAX_BYTES
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let profiles = [
+        input.strict_affinity_profile,
+        input.pinned_profile,
+        input.turn_state_profile,
+        input.session_profile,
+    ];
+    if profiles.iter().enumerate().any(|(index, profile)| {
+        (index != 3 || input.route_kind == 1)
+            && profile.is_some_and(|profile| profile.len() > AFFINITY_PROFILE_MAX_BYTES)
+    }) {
+        return Err(MojoError::InvalidInput);
+    }
+
+    let profile_views = profiles.map(|profile| {
+        profile.map_or(super::RuntimeStringView { ptr: 0, len: 0 }, |profile| {
+            super::RuntimeStringView {
+                ptr: profile.as_ptr() as usize as u64,
+                len: profile.len() as u64,
+            }
+        })
+    });
+    let profile_presence_mask = profiles
+        .iter()
+        .enumerate()
+        .fold(0_i64, |mask, (index, profile)| {
+            mask | (i64::from(profile.is_some()) << index)
+        });
+    let conflict_profile_view = super::RuntimeStringView {
+        ptr: input.conflict_profile.as_ptr() as usize as u64,
+        len: input.conflict_profile.len() as u64,
+    };
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_runtime_affinity_binding_conflict_v1(
+            AFFINITY_BINDING_CONFLICT_ABI_VERSION,
+            profile_views.as_ptr(),
+            profile_presence_mask,
+            input.route_kind,
+            conflict_profile_view,
+            &mut output,
+        )
+    };
+    if status != 0 {
+        return Err(MojoError::InvalidInput);
+    }
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(MojoError::InvalidOutput),
+    }
 }
 
 pub fn affinity_selection_plan(

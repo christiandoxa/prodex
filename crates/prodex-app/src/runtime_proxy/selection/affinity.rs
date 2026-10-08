@@ -122,7 +122,15 @@ pub(super) fn runtime_affinity_selection_decision(
     affinity_kind: RuntimeAffinitySelectionKind,
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<RuntimeAffinitySelectionDecision> {
-    let hard_binding_conflict = runtime_hard_binding_conflict(selection);
+    let hard_binding_conflict = runtime_proxy_crate::runtime_hard_binding_conflict(
+        runtime_proxy_crate::RuntimeHardBindingConflictInput {
+            route_kind: selection.route_kind,
+            strict_affinity_profile: selection.strict_affinity_profile,
+            pinned_profile: selection.pinned_profile,
+            turn_state_profile: selection.turn_state_profile,
+            session_profile: selection.session_profile,
+        },
+    )?;
     if hard_binding_conflict {
         return Ok(
             match runtime_proxy_crate::runtime_affinity_outcome(
@@ -404,30 +412,6 @@ fn runtime_profile_has_exact_binding_identity(
         }
     }
     Ok(found.then_some(exact))
-}
-
-fn runtime_hard_binding_conflict(selection: RuntimeResponseCandidateSelection<'_>) -> bool {
-    let mut owner = None;
-    for candidate in [
-        selection.strict_affinity_profile,
-        selection.pinned_profile,
-        selection.turn_state_profile,
-        selection
-            .session_profile
-            .filter(|_| selection.route_kind == RuntimeRouteKind::Compact),
-    ]
-    .into_iter()
-    .flatten()
-    {
-        if candidate == prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE {
-            return true;
-        }
-        if owner.is_some_and(|current| current != candidate) {
-            return true;
-        }
-        owner = Some(candidate);
-    }
-    false
 }
 
 fn record_runtime_unavailable_affinity(

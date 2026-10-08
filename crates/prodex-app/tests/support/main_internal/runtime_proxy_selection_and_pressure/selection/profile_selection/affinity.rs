@@ -103,24 +103,50 @@ fn response_selection_fails_closed_for_unavailable_bound_previous_response() {
 }
 
 #[test]
-fn response_selection_fails_closed_for_conflicting_supplied_affinity_keys() {
-    let temp_dir = TestDir::isolated();
-    let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+fn selection_applies_route_scoped_affinity_conflict_policy() {
+    for (route_kind, turn_state_profile, session_profile, expected_selected, expected_outcome) in [
+        (
+            RuntimeRouteKind::Responses,
+            Some("second"),
+            None,
+            None,
+            runtime_proxy_crate::RuntimeRouteDecisionTerminalOutcome::AffinityExhausted,
+        ),
+        (
+            RuntimeRouteKind::Compact,
+            None,
+            Some("second"),
+            None,
+            runtime_proxy_crate::RuntimeRouteDecisionTerminalOutcome::AffinityExhausted,
+        ),
+        (
+            RuntimeRouteKind::Responses,
+            None,
+            Some("second"),
+            Some("main"),
+            runtime_proxy_crate::RuntimeRouteDecisionTerminalOutcome::Selected,
+        ),
+    ] {
+        let temp_dir = TestDir::isolated();
+        let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+        let selected = select_runtime_response_candidate_for_route(
+            &shared,
+            RuntimeResponseCandidateSelection {
+                pinned_profile: Some("main"),
+                turn_state_profile,
+                session_profile,
+                ..RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), route_kind)
+            },
+        )
+        .expect("selection should succeed without an executable owner");
 
-    let selected = select_runtime_response_candidate_for_route(
-        &shared,
-        RuntimeResponseCandidateSelection {
-            pinned_profile: Some("main"),
-            turn_state_profile: Some("second"),
-            ..RuntimeResponseCandidateSelection::fresh(
-                &BTreeSet::new(),
-                RuntimeRouteKind::Responses,
-            )
-        },
-    )
-    .expect("selection should succeed without an executable owner");
-
-    assert_eq!(selected, None);
+        assert_eq!(selected.as_deref(), expected_selected);
+        assert_eq!(
+            selection_trace(&shared).terminal_outcome,
+            expected_outcome,
+            "{route_kind:?} affinity selection had the wrong terminal outcome"
+        );
+    }
 }
 
 #[test]
