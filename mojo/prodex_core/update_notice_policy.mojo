@@ -6,6 +6,7 @@ from rich_types import ProdexRichStringView
 comptime UPDATE_NOTICE_ABI_VERSION: Int64 = 1
 comptime UPDATE_NOTICE_OK: Int64 = 0
 comptime UPDATE_NOTICE_INVALID: Int64 = 1
+comptime UPDATE_NOTICE_CAPACITY: Int64 = 3
 comptime UPDATE_NOTICE_ABI: Int64 = 4
 comptime UPDATE_NOTICE_MAX_TEXT_BYTES: Int64 = 1_048_576
 
@@ -449,6 +450,133 @@ def update_notice_equals[
         if source[unsafe_offset=index] != literal_ptr[unsafe_offset=index]:
             return False
     return True
+
+
+@fieldwise_init
+struct UpdateNoticeWriter(Copyable):
+    var output: Pointer[mut=True, UInt8, MutUntrackedOrigin]
+    var capacity: Int64
+    var written: Int64
+
+
+def update_notice_put_byte(
+    writer: Pointer[mut=True, UpdateNoticeWriter, _], value: UInt8
+) -> Bool:
+    if writer[].written < 0 or writer[].written >= writer[].capacity:
+        return False
+    writer[].output[unsafe_offset=writer[].written] = value
+    writer[].written += 1
+    return True
+
+
+def update_notice_put_literal(
+    writer: Pointer[mut=True, UpdateNoticeWriter, _], value: StringSlice
+) -> Bool:
+    var source = value.unsafe_ptr()
+    for index in range(Int64(value.byte_length())):
+        if not update_notice_put_byte(writer, source[unsafe_offset=index]):
+            return False
+    return True
+
+
+def update_notice_put_view(
+    writer: Pointer[mut=True, UpdateNoticeWriter, _], value: ProdexRichStringView
+) -> Bool:
+    var source = rich_view_ptr(value)
+    for index in range(Int64(value.len)):
+        if not update_notice_put_byte(writer, source[unsafe_offset=index]):
+            return False
+    return True
+
+
+@export("prodex_update_notice_format_codex_version_v1")
+def prodex_update_notice_format_codex_version_v1(
+    abi_version: Int64,
+    current_address: UInt,
+    current_length: Int64,
+    current_present: Int64,
+    latest_address: UInt,
+    latest_length: Int64,
+    latest_present: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != UPDATE_NOTICE_ABI_VERSION
+        or current_length < 0
+        or latest_length < 0
+        or (current_present != 0 and current_present != 1)
+        or (latest_present != 0 and latest_present != 1)
+        or (current_length > 0 and current_address == 0)
+        or (latest_length > 0 and latest_address == 0)
+        or output_capacity < 0
+        or (output_capacity > 0 and output_address == 0)
+        or written_address == 0
+    ):
+        return UPDATE_NOTICE_INVALID
+
+    var current = ProdexRichStringView(current_address, UInt(current_length))
+    var latest = ProdexRichStringView(latest_address, UInt(latest_length))
+    if not rich_view_valid(current, 9_223_372_036_854_775_807) or not rich_view_valid(
+        latest, 9_223_372_036_854_775_807
+    ):
+        return UPDATE_NOTICE_INVALID
+
+    var update_available = False
+    if current_present == 1 and latest_present == 1:
+        if (
+            current_length > UPDATE_NOTICE_MAX_TEXT_BYTES
+            or latest_length > UPDATE_NOTICE_MAX_TEXT_BYTES
+        ):
+            return UPDATE_NOTICE_INVALID
+        update_available = (
+            update_notice_release_version_compare(latest, current, True) > 0
+        )
+
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    var writer = UpdateNoticeWriter(output, output_capacity, 0)
+    var ok = False
+    if current_present == 1:
+        ok = update_notice_put_view(Pointer(to=writer), current)
+        if ok and latest_present == 1 and update_available:
+            ok = (
+                update_notice_put_literal(
+                    Pointer(to=writer), StringSlice(" (update available: ")
+                )
+                and update_notice_put_view(Pointer(to=writer), latest)
+                and update_notice_put_byte(Pointer(to=writer), UInt8(41))
+            )
+        elif ok and latest_present == 1:
+            ok = update_notice_put_literal(
+                Pointer(to=writer), StringSlice(" (up to date)")
+            )
+        elif ok:
+            ok = update_notice_put_literal(
+                Pointer(to=writer), StringSlice(" (update check unavailable)")
+            )
+    elif latest_present == 1:
+        ok = (
+            update_notice_put_literal(
+                Pointer(to=writer), StringSlice("not detected (latest release: ")
+            )
+            and update_notice_put_view(Pointer(to=writer), latest)
+            and update_notice_put_byte(Pointer(to=writer), UInt8(41))
+        )
+    else:
+        ok = update_notice_put_literal(
+            Pointer(to=writer), StringSlice("not detected (update check unavailable)")
+        )
+    if not ok:
+        return UPDATE_NOTICE_CAPACITY
+    written[] = writer.written
+    return UPDATE_NOTICE_OK
 
 
 @export("prodex_update_notice_policy_v1")

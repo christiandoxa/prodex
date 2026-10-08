@@ -3,6 +3,7 @@ use std::cmp::Ordering;
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
+const CODEX_VERSION_FORMAT_ABI_VERSION: i64 = 1;
 const INSTALL_CHANNEL: i64 = 0;
 const EMIT_NOTICE: i64 = 1;
 const CACHE_FRESH: i64 = 2;
@@ -48,6 +49,19 @@ unsafe extern "C" {
         signed0: i64,
         signed1: i64,
         output_address: u64,
+    ) -> i64;
+
+    fn prodex_update_notice_format_codex_version_v1(
+        abi_version: i64,
+        current_address: u64,
+        current_length: i64,
+        current_present: i64,
+        latest_address: u64,
+        latest_length: i64,
+        latest_present: i64,
+        output_address: u64,
+        output_capacity: i64,
+        written_address: u64,
     ) -> i64;
 }
 
@@ -212,6 +226,48 @@ pub fn cache_is_fresh(
     }
 }
 
+pub fn format_codex_version(
+    current: Option<&str>,
+    latest: Option<&str>,
+) -> Result<String, MojoError> {
+    let current_text = current.unwrap_or_default();
+    let latest_text = latest.unwrap_or_default();
+    let capacity = current_text
+        .len()
+        .checked_add(latest_text.len())
+        .and_then(|length| length.checked_add(64))
+        .ok_or(MojoError::InvalidInput)?;
+    let mut output = vec![0_u8; capacity];
+    let mut written = -1_i64;
+    let status = unsafe {
+        prodex_update_notice_format_codex_version_v1(
+            CODEX_VERSION_FORMAT_ABI_VERSION,
+            current_text.as_ptr() as usize as u64,
+            i64::try_from(current_text.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(current.is_some()),
+            latest_text.as_ptr() as usize as u64,
+            i64::try_from(latest_text.len()).map_err(|_| MojoError::InvalidInput)?,
+            i64::from(latest.is_some()),
+            output.as_mut_ptr() as usize as u64,
+            i64::try_from(output.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut written as *mut i64) as usize as u64,
+        )
+    };
+    match status {
+        0 => {}
+        1 => return Err(MojoError::InvalidInput),
+        3 => return Err(MojoError::Capacity),
+        4 => return Err(MojoError::AbiMismatch),
+        _ => return Err(MojoError::InvalidOutput),
+    }
+    let written = usize::try_from(written).map_err(|_| MojoError::InvalidOutput)?;
+    if written > output.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    output.truncate(written);
+    String::from_utf8(output).map_err(|_| MojoError::InvalidOutput)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,6 +307,34 @@ mod tests {
         assert!(!cache_is_fresh(false, 100, 0, 300).unwrap());
         assert!(!cache_is_fresh(true, 300, 0, 300).unwrap());
         assert!(cache_is_fresh(true, i64::MIN, i64::MAX, 300).unwrap());
+    }
+
+    #[test]
+    fn codex_version_formatter_preserves_statuses_and_total_order() {
+        assert_eq!(
+            format_codex_version(Some("1.0.0+build.2"), Some("1.0.0+build.10")).unwrap(),
+            "1.0.0+build.2 (update available: 1.0.0+build.10)"
+        );
+        assert_eq!(
+            format_codex_version(Some("1.0.0"), Some("1.0.0-rc.1")).unwrap(),
+            "1.0.0 (up to date)"
+        );
+        assert_eq!(
+            format_codex_version(Some("unknown"), Some("1.0.0")).unwrap(),
+            "unknown (up to date)"
+        );
+        assert_eq!(
+            format_codex_version(Some("1.0.0"), None).unwrap(),
+            "1.0.0 (update check unavailable)"
+        );
+        assert_eq!(
+            format_codex_version(None, Some("1.0.0")).unwrap(),
+            "not detected (latest release: 1.0.0)"
+        );
+        assert_eq!(
+            format_codex_version(None, None).unwrap(),
+            "not detected (update check unavailable)"
+        );
     }
 
     #[test]
