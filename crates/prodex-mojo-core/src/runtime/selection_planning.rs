@@ -24,6 +24,7 @@ pub const ADAPTIVE_PLAN_REASON_SHADOW_ONLY: i64 = 1;
 pub const ADAPTIVE_PLAN_REASON_ADAPTIVE_ENABLED: i64 = 2;
 pub const ADAPTIVE_PLAN_REASON_SHADOW_EXPLORATION: i64 = 3;
 pub const ADAPTIVE_PLAN_REASON_ADAPTIVE_EXPLORATION: i64 = 4;
+const AFFINITY_PROFILE_MAX_BYTES: usize = 4_096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SoftAffinityPolicyInput {
@@ -90,12 +91,14 @@ pub struct AffinityOutcomePlan {
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct AffinitySelectionInput {
+pub struct AffinitySelectionInput<'a> {
     pub route_kind: i64,
-    pub strict_candidate_match: bool,
-    pub pinned_candidate_match: bool,
-    pub turn_state_candidate_match: bool,
-    pub session_candidate_match: bool,
+    pub candidate_name: Option<&'a str>,
+    pub strict_affinity_profile: Option<&'a str>,
+    pub pinned_profile: Option<&'a str>,
+    pub turn_state_profile: Option<&'a str>,
+    pub session_profile: Option<&'a str>,
+    pub compact_session_profile: Option<&'a str>,
     pub trusted_previous_response_affinity: bool,
     pub fresh_fallback_shape_present: bool,
     pub previous_response_present: bool,
@@ -108,7 +111,6 @@ pub struct AffinitySelectionInput {
     pub previous_response_fresh_fallback_used: bool,
     pub reuse_terminal_idle_ms: Option<u64>,
     pub reuse_stale_after_ms: u64,
-    pub compact_session_matches_session: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -277,12 +279,15 @@ unsafe extern "C" {
         local_rejection: i64,
         output: *mut i64,
     ) -> i64;
-    fn prodex_runtime_affinity_selection_plan_v1(
+    fn prodex_runtime_affinity_selection_plan_v2(
+        profile_views: *const super::RuntimeStringView,
         route_kind: i64,
-        strict_candidate_match: i64,
-        pinned_candidate_match: i64,
-        turn_state_candidate_match: i64,
-        session_candidate_match: i64,
+        candidate_name_present: i64,
+        strict_profile_present: i64,
+        pinned_profile_present_for_match: i64,
+        turn_state_profile_present_for_match: i64,
+        session_profile_present_for_match: i64,
+        compact_session_profile_present: i64,
         trusted_previous_response_affinity: i64,
         fresh_fallback_shape_present: i64,
         previous_response_present: i64,
@@ -296,7 +301,6 @@ unsafe extern "C" {
         reuse_terminal_idle_present: i64,
         reuse_terminal_idle_ms: u64,
         reuse_stale_after_ms: u64,
-        compact_session_matches_session: i64,
         output: *mut i64,
     ) -> i64;
     fn prodex_runtime_waitable_candidate_eligible_v1(
@@ -617,19 +621,45 @@ pub fn affinity_outcome_plan(
 }
 
 pub fn affinity_selection_plan(
-    input: AffinitySelectionInput,
+    input: AffinitySelectionInput<'_>,
 ) -> Result<AffinitySelectionPlan, MojoError> {
     if !(0..=3).contains(&input.route_kind) {
         return Err(MojoError::InvalidInput);
     }
+    let names = [
+        input.candidate_name,
+        input.strict_affinity_profile,
+        input.pinned_profile,
+        input.turn_state_profile,
+        input.session_profile,
+        input.compact_session_profile,
+    ];
+    if names
+        .into_iter()
+        .flatten()
+        .any(|name| name.len() > AFFINITY_PROFILE_MAX_BYTES)
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let profile_views = names.map(|name| {
+        name.map_or(super::RuntimeStringView { ptr: 0, len: 0 }, |name| {
+            super::RuntimeStringView {
+                ptr: name.as_ptr() as usize as u64,
+                len: name.len() as u64,
+            }
+        })
+    });
     let mut output = [0_i64; 8];
     let status = unsafe {
-        prodex_runtime_affinity_selection_plan_v1(
+        prodex_runtime_affinity_selection_plan_v2(
+            profile_views.as_ptr(),
             input.route_kind,
-            i64::from(input.strict_candidate_match),
-            i64::from(input.pinned_candidate_match),
-            i64::from(input.turn_state_candidate_match),
-            i64::from(input.session_candidate_match),
+            i64::from(input.candidate_name.is_some()),
+            i64::from(input.strict_affinity_profile.is_some()),
+            i64::from(input.pinned_profile.is_some()),
+            i64::from(input.turn_state_profile.is_some()),
+            i64::from(input.session_profile.is_some()),
+            i64::from(input.compact_session_profile.is_some()),
             i64::from(input.trusted_previous_response_affinity),
             i64::from(input.fresh_fallback_shape_present),
             i64::from(input.previous_response_present),
@@ -643,7 +673,6 @@ pub fn affinity_selection_plan(
             i64::from(input.reuse_terminal_idle_ms.is_some()),
             input.reuse_terminal_idle_ms.unwrap_or_default(),
             input.reuse_stale_after_ms,
-            i64::from(input.compact_session_matches_session),
             output.as_mut_ptr(),
         )
     };

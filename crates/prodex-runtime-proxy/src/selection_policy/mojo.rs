@@ -13,7 +13,7 @@ unsafe extern "C" {
 }
 
 fn plan(
-    input: prodex_mojo_core::runtime::AffinitySelectionInput,
+    input: prodex_mojo_core::runtime::AffinitySelectionInput<'_>,
 ) -> prodex_mojo_core::runtime::AffinitySelectionPlan {
     prodex_mojo_core::runtime::affinity_selection_plan(input)
         .expect("Mojo affinity selection planning returned an invalid result")
@@ -21,13 +21,14 @@ fn plan(
 
 fn affinity_input(
     affinity: RuntimeCandidateAffinity<'_>,
-) -> prodex_mojo_core::runtime::AffinitySelectionInput {
+) -> prodex_mojo_core::runtime::AffinitySelectionInput<'_> {
     prodex_mojo_core::runtime::AffinitySelectionInput {
         route_kind: affinity.route_kind as i64,
-        strict_candidate_match: affinity.strict_affinity_profile == Some(affinity.candidate_name),
-        pinned_candidate_match: affinity.pinned_profile == Some(affinity.candidate_name),
-        turn_state_candidate_match: affinity.turn_state_profile == Some(affinity.candidate_name),
-        session_candidate_match: affinity.session_profile == Some(affinity.candidate_name),
+        candidate_name: Some(affinity.candidate_name),
+        strict_affinity_profile: affinity.strict_affinity_profile,
+        pinned_profile: affinity.pinned_profile,
+        turn_state_profile: affinity.turn_state_profile,
+        session_profile: affinity.session_profile,
         trusted_previous_response_affinity: affinity.trusted_previous_response_affinity,
         ..Default::default()
     }
@@ -125,7 +126,10 @@ pub(super) fn wait_affinity_owner<'a>(
     trusted_previous_response_affinity: bool,
 ) -> Option<&'a str> {
     match plan(prodex_mojo_core::runtime::AffinitySelectionInput {
-        strict_candidate_match: strict_affinity_profile.is_some(),
+        strict_affinity_profile,
+        pinned_profile,
+        turn_state_profile,
+        session_profile,
         pinned_profile_present: pinned_profile.is_some(),
         turn_state_profile_present: turn_state_profile.is_some(),
         session_profile_present: session_profile.is_some(),
@@ -148,9 +152,9 @@ pub(super) fn noncompact_session_priority_profile<'a>(
     compact_session_profile: Option<&str>,
 ) -> Option<&'a str> {
     plan(prodex_mojo_core::runtime::AffinitySelectionInput {
+        session_profile,
+        compact_session_profile,
         session_profile_present: session_profile.is_some(),
-        compact_session_matches_session: compact_session_profile
-            .is_some_and(|profile_name| session_profile == Some(profile_name)),
         ..Default::default()
     })
     .noncompact_session_priority

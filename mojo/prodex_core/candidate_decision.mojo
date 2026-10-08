@@ -845,13 +845,16 @@ def prodex_runtime_websocket_reuse_stale_v1(
     )
 
 
-@export("prodex_runtime_affinity_selection_plan_v1")
-def prodex_runtime_affinity_selection_plan_v1(
+@export("prodex_runtime_affinity_selection_plan_v2")
+def prodex_runtime_affinity_selection_plan_v2(
+    profile_views: Pointer[mut=False, ProdexRichStringView, _],
     route_kind: Int64,
-    strict_candidate_match: Int64,
-    pinned_candidate_match: Int64,
-    turn_state_candidate_match: Int64,
-    session_candidate_match: Int64,
+    candidate_name_present: Int64,
+    strict_profile_present_for_match: Int64,
+    pinned_profile_present_for_match: Int64,
+    turn_state_profile_present_for_match: Int64,
+    session_profile_present_for_match: Int64,
+    compact_session_profile_present: Int64,
     trusted_previous_response_affinity: Int64,
     fresh_fallback_shape_present: Int64,
     previous_response_present: Int64,
@@ -865,51 +868,59 @@ def prodex_runtime_affinity_selection_plan_v1(
     reuse_terminal_idle_present: Int64,
     reuse_terminal_idle_ms: UInt64,
     reuse_stale_after_ms: UInt64,
-    compact_session_matches_session: Int64,
     output: Pointer[mut=True, Int64, _],
 ) abi("C") -> Int64:
     if route_kind < 0 or route_kind > 3:
         return 1
-    if (
-        strict_candidate_match < 0
-        or strict_candidate_match > 1
-        or pinned_candidate_match < 0
-        or pinned_candidate_match > 1
-        or turn_state_candidate_match < 0
-        or turn_state_candidate_match > 1
-        or session_candidate_match < 0
-        or session_candidate_match > 1
-        or trusted_previous_response_affinity < 0
-        or trusted_previous_response_affinity > 1
-        or fresh_fallback_shape_present < 0
-        or fresh_fallback_shape_present > 1
-        or previous_response_present < 0
-        or previous_response_present > 1
-        or pinned_profile_present < 0
-        or pinned_profile_present > 1
-        or request_turn_state_present < 0
-        or request_turn_state_present > 1
-        or turn_state_profile_present < 0
-        or turn_state_profile_present > 1
-        or session_profile_present < 0
-        or session_profile_present > 1
-        or saw_inflight_saturation < 0
-        or saw_inflight_saturation > 1
-        or saw_upstream_failure < 0
-        or saw_upstream_failure > 1
-        or previous_response_fresh_fallback_used < 0
-        or previous_response_fresh_fallback_used > 1
-        or reuse_terminal_idle_present < 0
-        or reuse_terminal_idle_present > 1
-        or compact_session_matches_session < 0
-        or compact_session_matches_session > 1
-    ):
-        return 1
+    for flag in [
+        candidate_name_present,
+        strict_profile_present_for_match,
+        pinned_profile_present_for_match,
+        turn_state_profile_present_for_match,
+        session_profile_present_for_match,
+        compact_session_profile_present,
+        trusted_previous_response_affinity,
+        fresh_fallback_shape_present,
+        previous_response_present,
+        pinned_profile_present,
+        request_turn_state_present,
+        turn_state_profile_present,
+        session_profile_present,
+        saw_inflight_saturation,
+        saw_upstream_failure,
+        previous_response_fresh_fallback_used,
+        reuse_terminal_idle_present,
+    ]:
+        if flag != 0 and flag != 1:
+            return 1
 
-    var strict_match = runtime_selection_bool(strict_candidate_match)
-    var pinned_match = runtime_selection_bool(pinned_candidate_match)
-    var turn_match = runtime_selection_bool(turn_state_candidate_match)
-    var session_match = runtime_selection_bool(session_candidate_match)
+    for index in range(6):
+        if not rich_view_valid(profile_views[unsafe_offset=index].copy(), RICH_MAX_IDENTIFIER_BYTES):
+            return 2
+
+    var candidate = profile_views[unsafe_offset=0].copy()
+    var strict_profile = profile_views[unsafe_offset=1].copy()
+    var pinned_profile = profile_views[unsafe_offset=2].copy()
+    var turn_state_profile = profile_views[unsafe_offset=3].copy()
+    var session_profile = profile_views[unsafe_offset=4].copy()
+    var compact_session_profile = profile_views[unsafe_offset=5].copy()
+    var strict_match = False
+    if candidate_name_present == 1 and strict_profile_present_for_match == 1:
+        strict_match = rich_views_equal(candidate, strict_profile)
+    var pinned_match = False
+    if candidate_name_present == 1 and pinned_profile_present_for_match == 1:
+        pinned_match = rich_views_equal(candidate, pinned_profile)
+    var turn_match = False
+    if candidate_name_present == 1 and turn_state_profile_present_for_match == 1:
+        turn_match = rich_views_equal(candidate, turn_state_profile)
+    var session_match = False
+    if candidate_name_present == 1 and session_profile_present_for_match == 1:
+        session_match = rich_views_equal(candidate, session_profile)
+    var compact_session_matches_session = False
+    if session_profile_present == 1 and compact_session_profile_present == 1:
+        compact_session_matches_session = rich_views_equal(
+            session_profile, compact_session_profile
+        )
     var trusted = runtime_selection_bool(trusted_previous_response_affinity)
     var no_rotate_affinity: Int64 = 0
     if strict_match:
@@ -961,11 +972,11 @@ def prodex_runtime_affinity_selection_plan_v1(
         wait_owner = 3
     if runtime_selection_bool(turn_state_profile_present):
         wait_owner = 2
-    if runtime_selection_bool(strict_candidate_match):
+    if strict_profile_present_for_match == 1:
         wait_owner = 1
     var noncompact_session_priority = (
         runtime_selection_bool(session_profile_present)
-        and not runtime_selection_bool(compact_session_matches_session)
+        and not compact_session_matches_session
     )
 
     output[unsafe_offset=0] = no_rotate_affinity

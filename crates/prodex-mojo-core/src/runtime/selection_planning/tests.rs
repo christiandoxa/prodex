@@ -248,3 +248,165 @@ mod noncompact_failure_plan_tests {
         assert!(transport_owned.record_transport_failure);
     }
 }
+
+#[cfg(test)]
+mod affinity_selection_tests {
+    use super::super::*;
+
+    #[test]
+    fn affinity_plan_matches_profile_names_and_keeps_hard_affinity_precedence() {
+        let base = AffinitySelectionInput {
+            route_kind: 1,
+            candidate_name: Some("owner"),
+            strict_affinity_profile: Some("owner"),
+            pinned_profile: Some("owner"),
+            turn_state_profile: Some("owner"),
+            session_profile: Some("owner"),
+            trusted_previous_response_affinity: true,
+            ..Default::default()
+        };
+        assert_eq!(affinity_selection_plan(base).unwrap().no_rotate_affinity, 1);
+        assert_eq!(
+            affinity_selection_plan(AffinitySelectionInput {
+                strict_affinity_profile: None,
+                ..base
+            })
+            .unwrap()
+            .no_rotate_affinity,
+            2
+        );
+        assert_eq!(
+            affinity_selection_plan(AffinitySelectionInput {
+                strict_affinity_profile: None,
+                turn_state_profile: None,
+                ..base
+            })
+            .unwrap()
+            .no_rotate_affinity,
+            3
+        );
+        assert_eq!(
+            affinity_selection_plan(AffinitySelectionInput {
+                strict_affinity_profile: None,
+                pinned_profile: None,
+                turn_state_profile: None,
+                trusted_previous_response_affinity: false,
+                ..base
+            })
+            .unwrap()
+            .no_rotate_affinity,
+            4
+        );
+        assert_eq!(
+            affinity_selection_plan(AffinitySelectionInput {
+                route_kind: 0,
+                strict_affinity_profile: None,
+                pinned_profile: None,
+                turn_state_profile: None,
+                trusted_previous_response_affinity: false,
+                ..base
+            })
+            .unwrap()
+            .no_rotate_affinity,
+            0
+        );
+        assert_eq!(
+            affinity_selection_plan(AffinitySelectionInput {
+                candidate_name: Some("other"),
+                ..base
+            })
+            .unwrap()
+            .no_rotate_affinity,
+            0
+        );
+    }
+
+    #[test]
+    fn affinity_plan_handles_empty_and_maximum_profile_names() {
+        assert_eq!(
+            affinity_selection_plan(AffinitySelectionInput {
+                route_kind: 0,
+                candidate_name: Some(""),
+                strict_affinity_profile: Some(""),
+                ..Default::default()
+            })
+            .unwrap()
+            .no_rotate_affinity,
+            1
+        );
+
+        let maximum = "x".repeat(AFFINITY_PROFILE_MAX_BYTES);
+        assert_eq!(
+            affinity_selection_plan(AffinitySelectionInput {
+                route_kind: 0,
+                candidate_name: Some(&maximum),
+                strict_affinity_profile: Some(&maximum),
+                ..Default::default()
+            })
+            .unwrap()
+            .no_rotate_affinity,
+            1
+        );
+        let oversized = "x".repeat(AFFINITY_PROFILE_MAX_BYTES + 1);
+        assert_eq!(
+            affinity_selection_plan(AffinitySelectionInput {
+                route_kind: 0,
+                candidate_name: Some(&oversized),
+                strict_affinity_profile: Some(&oversized),
+                ..Default::default()
+            }),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(
+            affinity_selection_plan(AffinitySelectionInput {
+                route_kind: 4,
+                ..Default::default()
+            }),
+            Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn affinity_plan_rejects_malformed_profile_utf8_at_the_abi() {
+        let malformed = [0xff_u8];
+        let views = [
+            super::super::super::RuntimeStringView {
+                ptr: malformed.as_ptr() as usize as u64,
+                len: malformed.len() as u64,
+            },
+            super::super::super::RuntimeStringView { ptr: 0, len: 0 },
+            super::super::super::RuntimeStringView { ptr: 0, len: 0 },
+            super::super::super::RuntimeStringView { ptr: 0, len: 0 },
+            super::super::super::RuntimeStringView { ptr: 0, len: 0 },
+            super::super::super::RuntimeStringView { ptr: 0, len: 0 },
+        ];
+        let mut output = [-1_i64; 8];
+        let status = unsafe {
+            super::super::prodex_runtime_affinity_selection_plan_v2(
+                views.as_ptr(),
+                0,
+                1,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                output.as_mut_ptr(),
+            )
+        };
+        assert_eq!(status, 2);
+    }
+}
