@@ -888,3 +888,130 @@ def prodex_session_report_timestamp_sort_key_v1(
         output[unsafe_offset=0] = 1
         output[unsafe_offset=1] = parsed[1]
     return SESSION_REPORT_OK
+
+
+comptime SESSION_CLI_ABI_VERSION: Int64 = 1
+comptime SESSION_CLI_MODE_TEXT: Int64 = 0
+comptime SESSION_CLI_MODE_JSON: Int64 = 1
+comptime SESSION_CLI_MODE_ID_ONLY: Int64 = 2
+comptime SESSION_CLI_MODE_RESUME: Int64 = 3
+comptime SESSION_CLI_CONFLICT: Int64 = 2
+comptime SESSION_RESUME_INSPECT: Int64 = 0
+comptime SESSION_RESUME_CONTINUE: Int64 = 1
+comptime SESSION_RESUME_REJECT: Int64 = 2
+
+
+@export("prodex_session_cli_output_mode_v1")
+def prodex_session_cli_output_mode_v1(
+    abi_version: Int64,
+    json: Int64,
+    id_only: Int64,
+    resume_command: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_CLI_ABI_VERSION
+        or (json != 0 and json != 1)
+        or (id_only != 0 and id_only != 1)
+        or (resume_command != 0 and resume_command != 1)
+        or output_address == 0
+    ):
+        return SESSION_REPORT_INVALID
+    if json + id_only + resume_command > 1:
+        return SESSION_CLI_CONFLICT
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = SESSION_CLI_MODE_TEXT
+    if json == 1:
+        output[unsafe_offset=0] = SESSION_CLI_MODE_JSON
+    elif id_only == 1:
+        output[unsafe_offset=0] = SESSION_CLI_MODE_ID_ONLY
+    elif resume_command == 1:
+        output[unsafe_offset=0] = SESSION_CLI_MODE_RESUME
+    return SESSION_REPORT_OK
+
+
+@export("prodex_session_resume_repair_action_v1")
+def prodex_session_resume_repair_action_v1(
+    abi_version: Int64,
+    repaired: Int64,
+    inspected_unrepairable: Int64,
+    unrepairable_found: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_CLI_ABI_VERSION
+        or (repaired != 0 and repaired != 1)
+        or (inspected_unrepairable != 0 and inspected_unrepairable != 1)
+        or (unrepairable_found != 0 and unrepairable_found != 1)
+        or output_address == 0
+    ):
+        return SESSION_REPORT_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if repaired == 1:
+        output[unsafe_offset=0] = SESSION_RESUME_CONTINUE
+    elif inspected_unrepairable == 0:
+        output[unsafe_offset=0] = SESSION_RESUME_INSPECT
+    elif unrepairable_found == 1:
+        output[unsafe_offset=0] = SESSION_RESUME_REJECT
+    else:
+        output[unsafe_offset=0] = SESSION_RESUME_CONTINUE
+    return SESSION_REPORT_OK
+
+
+@export("prodex_session_report_scroll_update_v1")
+def prodex_session_report_scroll_update_v1(
+    abi_version: Int64,
+    key_code: Int64,
+    control: Int64,
+    offset: Int64,
+    visible: Int64,
+    max_scroll: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if (
+        abi_version != SESSION_CLI_ABI_VERSION
+        or (control != 0 and control != 1)
+        or offset < 0
+        or visible <= 0
+        or max_scroll < offset
+        or output_address == 0
+    ):
+        return SESSION_REPORT_INVALID
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    output[unsafe_offset=0] = 0
+    output[unsafe_offset=1] = offset
+    if (
+        key_code == 113
+        or key_code == -7
+        or key_code == -8
+        or (control == 1 and (key_code == 99 or key_code == 122))
+    ):
+        output[unsafe_offset=0] = 1
+    elif key_code == 106 or key_code == -1:
+        if offset < max_scroll:
+            output[unsafe_offset=1] = offset + 1
+    elif key_code == 107 or key_code == -2:
+        if offset > 0:
+            output[unsafe_offset=1] = offset - 1
+    elif key_code == -3:
+        var remaining = max_scroll - offset
+        if visible >= remaining:
+            output[unsafe_offset=1] = max_scroll
+        else:
+            output[unsafe_offset=1] = offset + visible
+    elif key_code == -4:
+        if visible >= offset:
+            output[unsafe_offset=1] = 0
+        else:
+            output[unsafe_offset=1] = offset - visible
+    elif key_code == -5:
+        output[unsafe_offset=1] = 0
+    elif key_code == -6:
+        output[unsafe_offset=1] = max_scroll
+    return SESSION_REPORT_OK

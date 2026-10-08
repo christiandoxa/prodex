@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use crossterm::terminal;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Modifier, Style};
@@ -23,6 +23,34 @@ use crate::{
 use prodex_cli::CodexRuntimeFeatureArgs;
 use prodex_mojo_core::super_provider_config::runtime_ci_truth_token;
 pub(crate) use prodex_session_store::SessionReport;
+
+unsafe extern "C" {
+    fn prodex_session_cli_output_mode_v1(
+        abi_version: i64,
+        json: i64,
+        id_only: i64,
+        resume_command: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_session_resume_repair_action_v1(
+        abi_version: i64,
+        repaired: i64,
+        inspected_unrepairable: i64,
+        unrepairable_found: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_session_report_scroll_update_v1(
+        abi_version: i64,
+        key_code: i64,
+        control: i64,
+        offset: i64,
+        visible: i64,
+        max_scroll: i64,
+        output_address: u64,
+    ) -> i64;
+}
+
+const SESSION_CLI_ABI_VERSION: i64 = 1;
 
 pub(crate) fn handle_session(command: SessionCommands) -> Result<()> {
     match command {
@@ -98,24 +126,27 @@ fn session_output_mode(
     id_only: bool,
     resume_command: bool,
 ) -> Result<SessionOutputMode> {
-    let selected = [json, id_only, resume_command]
-        .into_iter()
-        .filter(|selected| *selected)
-        .count();
-    if selected > 1 {
-        return Err(anyhow::anyhow!(
-            "--json, --id-only, and --resume-command cannot be combined"
-        ));
+    let mut output = [-1_i64; 1];
+    let status = unsafe {
+        prodex_session_cli_output_mode_v1(
+            SESSION_CLI_ABI_VERSION,
+            i64::from(json),
+            i64::from(id_only),
+            i64::from(resume_command),
+            output.as_mut_ptr() as u64,
+        )
+    };
+    match status {
+        0 => {}
+        2 => anyhow::bail!("--json, --id-only, and --resume-command cannot be combined"),
+        _ => anyhow::bail!("Mojo session output planner rejected input"),
     }
-
-    if json {
-        Ok(SessionOutputMode::Json)
-    } else if id_only {
-        Ok(SessionOutputMode::IdOnly)
-    } else if resume_command {
-        Ok(SessionOutputMode::ResumeCommand)
-    } else {
-        Ok(SessionOutputMode::Text)
+    match output[0] {
+        0 => Ok(SessionOutputMode::Text),
+        1 => Ok(SessionOutputMode::Json),
+        2 => Ok(SessionOutputMode::IdOnly),
+        3 => Ok(SessionOutputMode::ResumeCommand),
+        _ => anyhow::bail!("Mojo session output planner returned invalid output"),
     }
 }
 
@@ -368,45 +399,60 @@ fn session_scroll_input(
     visible: usize,
     max_scroll: usize,
 ) -> Result<bool> {
-    let Event::Key(key) = crossterm::event::read().context("failed to read input")? else {
-        return Ok(false);
+    let event = crossterm::event::read().context("failed to read input")?;
+    let (next_offset, exit) = match event {
+        Event::Key(key) => session_scroll_update(Some(&key), *scroll_offset, visible, max_scroll)?,
+        _ => session_scroll_update(None, *scroll_offset, visible, max_scroll)?,
     };
-    if key.kind != KeyEventKind::Press {
-        return Ok(false);
+    *scroll_offset = next_offset;
+    Ok(exit)
+}
+
+fn session_scroll_update(
+    key: Option<&KeyEvent>,
+    offset: usize,
+    visible: usize,
+    max_scroll: usize,
+) -> Result<(usize, bool)> {
+    let (key_code, control) = match key.filter(|key| key.kind == KeyEventKind::Press) {
+        Some(key) => (
+            match key.code {
+                KeyCode::Char(value) => i64::from(value as u32),
+                KeyCode::Down => -1,
+                KeyCode::Up => -2,
+                KeyCode::PageDown => -3,
+                KeyCode::PageUp => -4,
+                KeyCode::Home => -5,
+                KeyCode::End => -6,
+                KeyCode::Esc => -7,
+                KeyCode::Enter => -8,
+                _ => 0,
+            },
+            i64::from(key.modifiers.contains(KeyModifiers::CONTROL)),
+        ),
+        None => (0, 0),
+    };
+    let mut output = [-1_i64; 2];
+    let status = unsafe {
+        prodex_session_report_scroll_update_v1(
+            SESSION_CLI_ABI_VERSION,
+            key_code,
+            control,
+            i64::try_from(offset).context("session scroll offset exceeds Mojo ABI")?,
+            i64::try_from(visible).context("session visible row count exceeds Mojo ABI")?,
+            i64::try_from(max_scroll).context("session scroll limit exceeds Mojo ABI")?,
+            output.as_mut_ptr() as u64,
+        )
+    };
+    if status != 0 {
+        anyhow::bail!("Mojo session scroll planner rejected input");
     }
-    match key.code {
-        KeyCode::Char('q') | KeyCode::Esc | KeyCode::Enter => Ok(true),
-        KeyCode::Char('c') | KeyCode::Char('z')
-            if key.modifiers.contains(KeyModifiers::CONTROL) =>
-        {
-            Ok(true)
-        }
-        KeyCode::Char('j') | KeyCode::Down => {
-            *scroll_offset = scroll_offset.saturating_add(1).min(max_scroll);
-            Ok(false)
-        }
-        KeyCode::Char('k') | KeyCode::Up => {
-            *scroll_offset = scroll_offset.saturating_sub(1);
-            Ok(false)
-        }
-        KeyCode::PageDown => {
-            *scroll_offset = scroll_offset.saturating_add(visible).min(max_scroll);
-            Ok(false)
-        }
-        KeyCode::PageUp => {
-            *scroll_offset = scroll_offset.saturating_sub(visible);
-            Ok(false)
-        }
-        KeyCode::Home => {
-            *scroll_offset = 0;
-            Ok(false)
-        }
-        KeyCode::End => {
-            *scroll_offset = max_scroll;
-            Ok(false)
-        }
-        _ => Ok(false),
+    if output[0] != 0 && output[0] != 1 {
+        anyhow::bail!("Mojo session scroll planner returned invalid exit state");
     }
+    let offset = usize::try_from(output[1])
+        .context("Mojo session scroll planner returned invalid offset")?;
+    Ok((offset, output[0] == 1))
 }
 
 fn session_scroll_lines(reports: &[SessionReport]) -> Vec<Line<'_>> {
@@ -509,18 +555,35 @@ fn handle_session_resume(args: SessionResumeArgs) -> Result<()> {
     let repaired = prodex_session_store::repair_resume_session_metadata_prefix(
         &paths.shared_codex_root,
         &args.id,
-    )?;
-    if repaired.is_none()
-        && let Some(path) = prodex_session_store::find_unrepairable_resume_session(
-            &paths.shared_codex_root,
-            &args.id,
-        )?
-    {
-        anyhow::bail!(
-            "session '{}' cannot be resumed because {} does not contain session metadata; the file is too incomplete to repair",
-            args.id,
-            path.display()
-        );
+    )?
+    .is_some();
+    match session_resume_repair_action(repaired, false, false)? {
+        SessionResumeRepairAction::InspectUnrepairable => {
+            let unrepairable_path = prodex_session_store::find_unrepairable_resume_session(
+                &paths.shared_codex_root,
+                &args.id,
+            )?;
+            match session_resume_repair_action(repaired, true, unrepairable_path.is_some())? {
+                SessionResumeRepairAction::Reject => {
+                    let Some(path) = unrepairable_path.as_deref() else {
+                        anyhow::bail!("Mojo session resume planner rejected without a path");
+                    };
+                    anyhow::bail!(
+                        "session '{}' cannot be resumed because {} does not contain session metadata; the file is too incomplete to repair",
+                        args.id,
+                        path.display()
+                    );
+                }
+                SessionResumeRepairAction::Continue => {}
+                SessionResumeRepairAction::InspectUnrepairable => {
+                    anyhow::bail!("Mojo session resume planner requested a repeated inspection");
+                }
+            }
+        }
+        SessionResumeRepairAction::Continue => {}
+        SessionResumeRepairAction::Reject => {
+            anyhow::bail!("Mojo session resume planner rejected before inspection");
+        }
     }
     let report = prodex_session_store::resolve_session_report_by_id_in_store(
         &paths.shared_codex_root,
@@ -544,37 +607,39 @@ fn handle_session_resume(args: SessionResumeArgs) -> Result<()> {
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SessionResumeRepairAction {
+    InspectUnrepairable,
+    Continue,
+    Reject,
+}
 
-    fn test_session_report(id: &str) -> SessionReport {
-        let mut report = SessionReport::from_path(Path::new(&format!("/tmp/{id}.jsonl")), 0);
-        prodex_session_store::apply_session_json_line(
-            &mut report,
-            r#"{"timestamp":"2026-06-26T10:00:00Z","type":"session_meta","payload":{"thread_name":"Build UI","cwd":"/tmp/prodex"}}"#,
-        );
-        report.set_profile(Some("main".to_string()));
-        report.set_model_provider(Some("openai".to_string()));
-        report
+fn session_resume_repair_action(
+    repaired: bool,
+    inspected_unrepairable: bool,
+    unrepairable_found: bool,
+) -> Result<SessionResumeRepairAction> {
+    let mut output = [-1_i64; 1];
+    let status = unsafe {
+        prodex_session_resume_repair_action_v1(
+            SESSION_CLI_ABI_VERSION,
+            i64::from(repaired),
+            i64::from(inspected_unrepairable),
+            i64::from(unrepairable_found),
+            output.as_mut_ptr() as u64,
+        )
+    };
+    if status != 0 {
+        anyhow::bail!("Mojo session resume planner rejected input");
     }
-
-    #[test]
-    fn session_report_tui_height_scales_with_reports() {
-        assert!(session_report_tui_height(&[] as &[SessionReport]) >= 1);
-        let reports = vec![test_session_report("a"), test_session_report("b")];
-        assert!(usize::from(session_report_tui_height(&reports)) >= 8);
-        assert_eq!(session_tui_item_count(&reports), 8);
-    }
-
-    #[test]
-    fn session_report_tui_item_contains_key_fields() {
-        let report = test_session_report("session-1");
-        let item = session_report_tui_item(&report);
-        let text = format!("{item:?}");
-        assert!(text.contains("session-1"));
-        assert!(text.contains("Build UI"));
-        assert!(text.contains("main"));
-        assert!(text.contains("openai"));
+    match output[0] {
+        0 => Ok(SessionResumeRepairAction::InspectUnrepairable),
+        1 => Ok(SessionResumeRepairAction::Continue),
+        2 => Ok(SessionResumeRepairAction::Reject),
+        _ => anyhow::bail!("Mojo session resume planner returned invalid output"),
     }
 }
+
+#[cfg(test)]
+#[path = "../../tests/src/app_commands/session.rs"]
+mod tests;
