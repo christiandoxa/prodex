@@ -4,7 +4,7 @@ use crate::reports::{
     info_token_usage_event_from_line, runtime_usage_snapshot_is_usable,
     usage_from_runtime_usage_snapshot,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::Local;
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use prodex_quota::{
@@ -25,8 +25,8 @@ use crate::{
     InfoRunwayEstimate, RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS, StatusArgs,
     collect_active_runtime_log_paths, collect_info_runtime_load_summary, collect_prodex_processes,
     collect_recent_runtime_log_paths, collect_run_profile_reports, estimate_info_runway,
-    format_info_load_summary, format_info_pool_remaining, format_info_runway,
-    format_info_token_usage_summary, load_runtime_usage_snapshots,
+    format_info_load_summary, format_info_pool_remaining, format_info_token_usage_summary,
+    load_runtime_usage_snapshots,
 };
 
 mod render;
@@ -45,7 +45,10 @@ use resource::{
 const STATUS_OVERVIEW_REFRESH: Duration = Duration::from_secs(5);
 const STATUS_INPUT_POLL: Duration = Duration::from_millis(100);
 const STATUS_HISTORY_POINTS: usize = 60;
-const STATUS_TOKEN_HISTORY_POINTS: usize = 64;
+
+type StatusQuotaSummary = prodex_mojo_core::quota_pool::StatusQuotaSummary;
+#[cfg(test)]
+type StatusQuotaWindow = prodex_mojo_core::quota_pool::StatusQuotaWindowAggregation;
 
 struct StatusOverview {
     updated_at: String,
@@ -61,21 +64,6 @@ struct StatusOverview {
     token_last_at: Option<String>,
     runtime_load: crate::InfoRuntimeLoadSummary,
     runtime_process_count: usize,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct StatusQuotaWindow {
-    profiles: usize,
-    total_remaining: i64,
-    earliest_reset_at: Option<i64>,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-struct StatusQuotaSummary {
-    compatible_profiles: usize,
-    unavailable_profiles: usize,
-    five_hour: StatusQuotaWindow,
-    weekly: StatusQuotaWindow,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -141,23 +129,23 @@ struct StatusResourceHistory {
 
 impl StatusResourceHistory {
     fn push(&mut self, snapshot: &StatusResourceSnapshot) {
-        push_history(
-            &mut self.cpu,
-            snapshot.cpu_percent.unwrap_or_default().round() as u64,
-        );
-        push_history(&mut self.memory, snapshot.resident_bytes);
-        push_history(
-            &mut self.disk,
-            snapshot
-                .disk_read_bytes_per_second
-                .saturating_add(snapshot.disk_write_bytes_per_second),
-        );
-        push_history(
-            &mut self.network,
-            snapshot
-                .network_rx_queue_bytes
-                .saturating_add(snapshot.network_tx_queue_bytes),
-        );
+        let values = prodex_mojo_core::info_render::status_resource_history_values(
+            snapshot.cpu_percent,
+            snapshot.resident_bytes,
+            (
+                snapshot.disk_read_bytes_per_second,
+                snapshot.disk_write_bytes_per_second,
+            ),
+            (
+                snapshot.network_rx_queue_bytes,
+                snapshot.network_tx_queue_bytes,
+            ),
+        )
+        .expect("Mojo status resource-history aggregation returned invalid output");
+        push_history(&mut self.cpu, values[0]);
+        push_history(&mut self.memory, values[1]);
+        push_history(&mut self.disk, values[2]);
+        push_history(&mut self.network, values[3]);
     }
 }
 
@@ -379,19 +367,24 @@ fn collect_status_overview(paths: &AppPaths) -> Result<StatusOverview> {
         quota.weekly.total_remaining,
         now,
     );
-    let token_data = collect_status_token_data(&collect_recent_runtime_log_paths(8));
+    let token_data = collect_status_token_data(&collect_recent_runtime_log_paths(8))?;
     let active_profile = state.active_profile.unwrap_or_else(|| "-".to_string());
-    let runtime_profile = if runtime_process_count == 0 {
-        active_profile.clone()
-    } else {
-        runtime_load
-            .observations
-            .iter()
-            .max_by_key(|observation| observation.timestamp)
-            .map(|observation| observation.profile.clone())
-            .or(token_data.latest_profile)
-            .unwrap_or_else(|| active_profile.clone())
-    };
+    let runtime_candidates = runtime_load
+        .observations
+        .iter()
+        .map(
+            |observation| prodex_mojo_core::info_render::InfoStatusRuntimeCandidate {
+                timestamp: observation.timestamp,
+                profile: &observation.profile,
+            },
+        )
+        .collect::<Vec<_>>();
+    let runtime_profile = status_runtime_profile(
+        runtime_process_count,
+        &active_profile,
+        token_data.latest_profile.as_deref(),
+        &runtime_candidates,
+    )?;
 
     Ok(StatusOverview {
         updated_at: Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
@@ -415,11 +408,15 @@ fn collect_status_quota(
     state: &AppState,
     now: i64,
 ) -> Result<StatusQuotaSummary> {
-    let profile_names = state
-        .profiles
+    let profiles = state.profiles.iter().collect::<Vec<_>>();
+    let eligible = profiles
         .iter()
-        .filter(|(_, profile)| profile.provider.supports_codex_runtime())
-        .map(|(name, _)| name.clone())
+        .map(|(_, profile)| profile.provider.supports_codex_runtime())
+        .collect::<Vec<_>>();
+    let profile_indices = status_profile_indices(&eligible)?;
+    let profile_names = profile_indices
+        .into_iter()
+        .map(|index| profiles[index].0.clone())
         .collect::<Vec<_>>();
     let snapshots = load_runtime_usage_snapshots(paths, &state.profiles).unwrap_or_default();
     let reports = collect_run_profile_reports(state, profile_names, None, false);
@@ -435,33 +432,24 @@ fn status_quota_from_reports(
     for report in reports {
         let report_succeeded = report.result.is_ok();
         let report_windows = report
-            .auth
-            .quota_compatible
-            .then(|| {
-                report
-                    .result
-                    .as_ref()
-                    .ok()
-                    .map(|usage| status_quota_windows(usage, now))
-            })
-            .flatten()
+            .result
+            .as_ref()
+            .ok()
+            .map(|usage| status_quota_windows(usage, now))
             .unwrap_or_default();
-        let cached_usage = if report.auth.quota_compatible && !report_succeeded {
-            snapshots.get(&report.name).filter(|snapshot| {
-                runtime_usage_snapshot_is_usable(
-                    snapshot,
-                    now,
-                    RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
-                )
-            })
-        } else {
-            None
-        };
+        let cached_usage = snapshots.get(&report.name).filter(|snapshot| {
+            runtime_usage_snapshot_is_usable(
+                snapshot,
+                now,
+                RUNTIME_PROFILE_USAGE_CACHE_STALE_GRACE_SECONDS,
+            )
+        });
         let cached_snapshot_usable = cached_usage.is_some();
         let cached_windows = cached_usage
-            .map(usage_from_runtime_usage_snapshot)
-            .as_ref()
-            .map(|usage| status_quota_windows(usage, now))
+            .map(|snapshot| {
+                let usage = usage_from_runtime_usage_snapshot(snapshot);
+                status_quota_windows(&usage, now)
+            })
             .unwrap_or_default();
         inputs.push(StatusQuotaProfileInput {
             quota_compatible: report.auth.quota_compatible,
@@ -474,22 +462,42 @@ fn status_quota_from_reports(
         });
     }
 
-    let summary = status_quota_summary_batch(&inputs)
-        .map_err(|error| anyhow::anyhow!("Mojo status quota summary failed: {error:?}"))?;
-    Ok(StatusQuotaSummary {
-        compatible_profiles: summary.compatible_profiles,
-        unavailable_profiles: summary.unavailable_profiles,
-        five_hour: StatusQuotaWindow {
-            profiles: summary.five_hour.profiles,
-            total_remaining: summary.five_hour.total_remaining,
-            earliest_reset_at: summary.five_hour.earliest_reset_at,
-        },
-        weekly: StatusQuotaWindow {
-            profiles: summary.weekly.profiles,
-            total_remaining: summary.weekly.total_remaining,
-            earliest_reset_at: summary.weekly.earliest_reset_at,
-        },
-    })
+    status_quota_summary_batch(&inputs)
+        .map_err(|error| anyhow::anyhow!("Mojo status quota summary failed: {error:?}"))
+}
+
+fn status_profile_indices(eligible: &[bool]) -> Result<Vec<usize>> {
+    prodex_mojo_core::info_render::status_profile_indices(eligible)
+        .map_err(|error| anyhow::anyhow!("Mojo status profile filter failed: {error:?}"))
+}
+
+fn status_runtime_profile(
+    runtime_process_count: usize,
+    active_profile: &str,
+    token_profile: Option<&str>,
+    runtime_candidates: &[prodex_mojo_core::info_render::InfoStatusRuntimeCandidate<'_>],
+) -> Result<String> {
+    let choice = prodex_mojo_core::info_render::status_profile_choice(
+        runtime_process_count,
+        active_profile,
+        token_profile,
+        runtime_candidates,
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo status profile selection failed: {error:?}"))?;
+    match choice {
+        prodex_mojo_core::info_render::InfoStatusProfileChoice::Active => {
+            Ok(active_profile.to_string())
+        }
+        prodex_mojo_core::info_render::InfoStatusProfileChoice::Token => token_profile
+            .map(str::to_string)
+            .context("Mojo status profile selection chose a missing token profile"),
+        prodex_mojo_core::info_render::InfoStatusProfileChoice::Runtime(index) => {
+            runtime_candidates
+                .get(index)
+                .map(|candidate| candidate.profile.to_string())
+                .context("Mojo status profile selection returned an invalid runtime index")
+        }
+    }
 }
 
 fn status_quota_windows(
@@ -513,7 +521,48 @@ struct StatusTokenData {
     latest_profile: Option<String>,
 }
 
-fn collect_status_token_data(log_paths: &[PathBuf]) -> StatusTokenData {
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct StatusTokenHistory {
+    history: Vec<u64>,
+    first_at: Option<String>,
+    last_at: Option<String>,
+    latest_profile: Option<String>,
+}
+
+fn status_token_history(events: &[InfoTokenUsageEvent]) -> Result<StatusTokenHistory> {
+    let mojo_events = events
+        .iter()
+        .map(
+            |event| prodex_mojo_core::info_render::InfoStatusTokenEvent {
+                timestamp: &event.timestamp,
+                request: event.request,
+                profile: &event.profile,
+                input_tokens: event.input_tokens,
+                output_tokens: event.output_tokens,
+            },
+        )
+        .collect::<Vec<_>>();
+    let plan = prodex_mojo_core::info_render::status_token_plan(&mojo_events)
+        .map_err(|error| anyhow::anyhow!("Mojo status token plan failed: {error:?}"))?;
+    let event_at = |index: usize| {
+        events
+            .get(index)
+            .ok_or_else(|| anyhow::anyhow!("Mojo status token plan returned an invalid index"))
+    };
+    let first_at = plan
+        .first_index
+        .map(|index| event_at(index).map(|event| event.timestamp.clone()))
+        .transpose()?;
+    let last_event = plan.latest_index.map(event_at).transpose()?;
+    Ok(StatusTokenHistory {
+        history: plan.history,
+        first_at,
+        last_at: last_event.map(|event| event.timestamp.clone()),
+        latest_profile: last_event.map(|event| event.profile.clone()),
+    })
+}
+
+fn collect_status_token_data(log_paths: &[PathBuf]) -> Result<StatusTokenData> {
     let tails = log_paths
         .iter()
         .filter_map(|path| {
@@ -523,39 +572,18 @@ fn collect_status_token_data(log_paths: &[PathBuf]) -> StatusTokenData {
         })
         .collect::<Vec<_>>();
     let summary = collect_info_token_usage_summary_from_texts(log_paths.len(), &tails);
-    let mut events = tails
+    let events = tails
         .iter()
         .flat_map(|tail| tail.lines().filter_map(info_token_usage_event_from_line))
         .collect::<Vec<_>>();
-    events.sort_by(|left, right| {
-        left.timestamp
-            .cmp(&right.timestamp)
-            .then_with(|| left.request.cmp(&right.request))
-            .then_with(|| left.profile.cmp(&right.profile))
-    });
-    let first_at = events.first().map(|event| event.timestamp.clone());
-    let last_at = events.last().map(|event| event.timestamp.clone());
-    let latest_profile = events.last().map(|event| event.profile.clone());
-    let history = token_history(&events, STATUS_TOKEN_HISTORY_POINTS);
-    StatusTokenData {
+    let history = status_token_history(&events)?;
+    Ok(StatusTokenData {
         summary,
-        history,
-        first_at,
-        last_at,
-        latest_profile,
-    }
-}
-
-fn token_history(events: &[InfoTokenUsageEvent], limit: usize) -> Vec<u64> {
-    events
-        .iter()
-        .rev()
-        .take(limit)
-        .map(|event| event.input_tokens.saturating_add(event.output_tokens))
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect()
+        history: history.history,
+        first_at: history.first_at,
+        last_at: history.last_at,
+        latest_profile: history.latest_profile,
+    })
 }
 
 #[cfg(test)]

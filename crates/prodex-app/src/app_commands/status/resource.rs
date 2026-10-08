@@ -84,43 +84,41 @@ pub(super) fn status_resource_snapshot(
     previous: Option<(StatusResourceCounters, Duration)>,
     current: StatusResourceCounters,
 ) -> StatusResourceSnapshot {
-    let (cpu_percent, disk_read_bytes_per_second, disk_write_bytes_per_second) = previous
-        .filter(|(previous, _)| previous.available && current.available)
-        .map(|(previous, elapsed)| {
-            let system_delta = current
-                .system_cpu_ticks
-                .saturating_sub(previous.system_cpu_ticks);
-            let process_delta = current
-                .process_cpu_ticks
-                .saturating_sub(previous.process_cpu_ticks);
-            let cpu = (system_delta > 0)
-                .then_some((process_delta as f64 / system_delta as f64 * 100.0).clamp(0.0, 100.0));
-            let seconds = elapsed.as_secs_f64().max(0.001);
-            (
-                cpu,
-                (current
-                    .disk_read_bytes
-                    .saturating_sub(previous.disk_read_bytes) as f64
-                    / seconds) as u64,
-                (current
-                    .disk_write_bytes
-                    .saturating_sub(previous.disk_write_bytes) as f64
-                    / seconds) as u64,
-            )
-        })
-        .unwrap_or((None, 0, 0));
+    let previous = previous.map(|(previous, elapsed)| {
+        (
+            prodex_mojo_core::info_render::InfoStatusResourceCounters {
+                available: previous.available,
+                process_cpu_ticks: previous.process_cpu_ticks,
+                system_cpu_ticks: previous.system_cpu_ticks,
+                disk_read_bytes: previous.disk_read_bytes,
+                disk_write_bytes: previous.disk_write_bytes,
+            },
+            elapsed.as_secs_f64(),
+        )
+    });
+    let metrics = prodex_mojo_core::info_render::status_resource_metrics(
+        previous,
+        prodex_mojo_core::info_render::InfoStatusResourceCounters {
+            available: current.available,
+            process_cpu_ticks: current.process_cpu_ticks,
+            system_cpu_ticks: current.system_cpu_ticks,
+            disk_read_bytes: current.disk_read_bytes,
+            disk_write_bytes: current.disk_write_bytes,
+        },
+    )
+    .expect("Mojo status resource snapshot returned invalid output");
 
     StatusResourceSnapshot {
         available: current.available,
         process_count: current.process_count,
         runtime_process_count: current.runtime_process_count,
-        cpu_percent,
+        cpu_percent: metrics.cpu_percent,
         resident_bytes: current.resident_bytes,
         memory_total_bytes: current.memory_total_bytes,
         disk_read_bytes: current.disk_read_bytes,
         disk_write_bytes: current.disk_write_bytes,
-        disk_read_bytes_per_second,
-        disk_write_bytes_per_second,
+        disk_read_bytes_per_second: metrics.disk_read_bytes_per_second,
+        disk_write_bytes_per_second: metrics.disk_write_bytes_per_second,
         socket_count: current.socket_count,
         network_rx_queue_bytes: current.network_rx_queue_bytes,
         network_tx_queue_bytes: current.network_tx_queue_bytes,

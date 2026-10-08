@@ -20,6 +20,8 @@ pub use copilot::{
     copilot_version_triplet, strip_copilot_json_line_comments,
 };
 
+pub use crate::profile_import_lifecycle::*;
+
 #[repr(i64)]
 #[derive(Clone, Copy)]
 enum ProfileExportPolicyMode {
@@ -93,13 +95,13 @@ unsafe extern "C" {
 
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
-struct ProfileImportStringView {
+pub(crate) struct ProfileImportStringView {
     ptr: u64,
     len: u64,
 }
 
 impl ProfileImportStringView {
-    fn from(value: Option<&str>) -> Result<Self, MojoError> {
+    pub(crate) fn from(value: Option<&str>) -> Result<Self, MojoError> {
         let Some(value) = value else {
             return Ok(Self::default());
         };
