@@ -1,10 +1,60 @@
-use crate::ProviderModelCost;
+use crate::{ProviderModelCost, mojo_json::Document};
+use serde_json::Value;
 
-mod estimate;
+pub fn estimate_request_input_tokens(body: &[u8]) -> u64 {
+    let parsed = serde_json::from_slice::<Value>(body).ok();
+    let document = parsed.as_ref().map(usage_json_document);
+    let nodes = document.as_ref().map(usage_json_nodes);
+    let text = String::from_utf8_lossy(body);
+    prodex_mojo_core::provider_usage::estimate_request_tokens(
+        nodes
+            .as_ref()
+            .zip(document.as_ref())
+            .map(|(nodes, document)| (nodes.as_slice(), document.raw.as_slice())),
+        &text,
+        body.is_empty(),
+    )
+    .expect("Mojo provider usage estimate returned invalid output")
+}
 
-pub use self::estimate::{
-    estimate_request_input_tokens, estimate_request_input_tokens_value, estimate_text_tokens,
-};
+pub fn estimate_request_input_tokens_value(value: &Value) -> Option<u64> {
+    let document = usage_json_document(value);
+    let nodes = usage_json_nodes(&document);
+    prodex_mojo_core::provider_usage::estimate_json_tokens(&nodes, &document.raw)
+        .expect("Mojo provider usage JSON estimate returned invalid output")
+}
+
+pub fn estimate_text_tokens(text: &str) -> u64 {
+    prodex_mojo_core::provider_usage::estimate_text_tokens(text)
+        .expect("Mojo provider text estimate returned invalid output")
+}
+
+fn usage_json_document(value: &Value) -> Document<'_> {
+    let mut document = Document::default();
+    document.push(value, None, "");
+    document
+}
+
+fn usage_json_nodes<'a>(
+    document: &Document<'a>,
+) -> Vec<prodex_mojo_core::provider_usage::ProviderUsageJsonNode<'a>> {
+    document
+        .nodes
+        .iter()
+        .map(
+            |node| prodex_mojo_core::provider_usage::ProviderUsageJsonNode {
+                kind: node.kind as i64,
+                first_child: node.first_child,
+                next_sibling: node.next_sibling,
+                parent: node.parent,
+                key: node.key,
+                text: node.text,
+                raw_start: node.raw_start,
+                raw_length: node.raw_length,
+            },
+        )
+        .collect()
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ProviderTokenUsage {
@@ -125,6 +175,50 @@ mod tests {
         let raw = estimate_text_tokens(&String::from_utf8_lossy(body));
         assert!(semantic < raw);
         assert!(semantic > 0);
+    }
+
+    #[test]
+    fn provider_adapter_estimates_selected_request_content_through_mojo() {
+        let body = br#"{"model":"gpt-test","messages":[{"role":"user","content":"abcd","parts":["efgh"],"metadata":{"note":"skipme"}}],"tools":[{"description":"ijkl"}],"stream":"ignored"}"#;
+        assert_eq!(
+            crate::provider_adapter(crate::ProviderId::OpenAi).estimate_input_tokens(body),
+            3
+        );
+        assert_eq!(
+            crate::provider_adapter(crate::ProviderId::OpenAi).estimate_input_tokens(b""),
+            0
+        );
+        assert_eq!(
+            crate::provider_adapter(crate::ProviderId::OpenAi).estimate_input_tokens(b"\xff"),
+            1
+        );
+        assert_eq!(
+            crate::provider_adapter(crate::ProviderId::OpenAi).estimate_input_tokens(b"{bad"),
+            1
+        );
+    }
+
+    #[test]
+    fn provider_usage_estimate_preserves_root_fields_and_control_filtering() {
+        assert_eq!(
+            estimate_request_input_tokens_value(&serde_json::json!({
+                "messages": ["abcd"],
+                "prompt": "efgh",
+                "metadata": "not selected",
+                "model": "not selected",
+            })),
+            Some(2)
+        );
+        assert_eq!(
+            estimate_request_input_tokens_value(&serde_json::json!([])),
+            None
+        );
+        assert_eq!(
+            estimate_request_input_tokens_value(&serde_json::json!({})),
+            None
+        );
+        assert_eq!(estimate_text_tokens("a\n\u{7f}\u{80}\u{9f}bé😀"), 1);
+        assert_eq!(estimate_text_tokens(""), 0);
     }
 
     #[test]
