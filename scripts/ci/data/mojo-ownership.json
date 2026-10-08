@@ -1055,7 +1055,8 @@
           "sub_agent_reasoning_effort_policy",
           "sub_agent_model_nonempty_policy",
           "sub_agent_provider_url_policy",
-          "sub_agent_child_spec_scalar_policy"
+          "sub_agent_child_spec_scalar_policy",
+          "sub_agent_config_validation_precedence"
         ]
       },
       {
@@ -1326,6 +1327,19 @@
           "gemini_compact_utf8_truncation",
           "gemini_local_compact_summary_formatting",
           "gemini_semantic_continuation_summary_formatting"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_compact_rewrite.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_compact_request_rewrite",
+          "gemini_compact_summary_extraction",
+          "gemini_compact_response_body_shaping",
+          "gemini_compact_error_classification"
         ]
       },
       {
@@ -6051,6 +6065,133 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "clock and log acquisition, host resource sampling, terminal layout/color mapping, and typed ABI input/output adaptation"
+    },
+    {
+      "name": "sub_agent_config_validation_precedence",
+      "domain": "app/sub-agent",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust selected the first sub-agent configuration error after provider catalog, reasoning, and URL facts were acquired",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_sub_agent_policy_v1",
+      "mojo_operation_ids": {
+        "config_validation": 13
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/sub_agent_policy.mojo",
+      "consumer": "crates/prodex-app/src/runtime_tools/sub_agents/config.rs",
+      "consumer_marker": "config_validation_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_tools/sub_agents/config.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_tools/sub_agents.rs",
+      "rust_owner_before": "Model non-empty, reasoning-catalog validity, URL syntax, local URL requirement, and non-local URL rejection precedence",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; Mojo-backed resolver tests cover every validation branch and precedence ordering",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "provider catalog lookup, URL parsing, caller-specific error text, and typed ABI result mapping"
+    },
+    {
+      "name": "gemini_compact_request_rewrite",
+      "domain": "provider/gemini",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust rewrote Gemini compact request JSON and selected the semantic compact instruction payload",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_compact_rewrite_v1",
+      "mojo_operation_ids": {
+        "request": 1
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_compact_rewrite.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
+      "consumer_marker": "gemini_provider_core_semantic_compact_request_body(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
+      "rust_owner_before": "Gemini compact request JSON transformation and instruction insertion",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI and Gemini compact provider-boundary tests cover request rewrite output",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "Serde JSON document/node preparation, typed ABI invocation, output byte ownership, and transport forwarding"
+    },
+    {
+      "name": "gemini_compact_summary_extraction",
+      "domain": "provider/gemini",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust extracted the compact summary text from Gemini response JSON",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_compact_rewrite_v1",
+      "mojo_operation_ids": {
+        "summary": 2
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_compact_rewrite.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
+      "consumer_marker": "gemini_provider_core_semantic_compact_summary(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/gemini_bridge/compact/semantic.rs",
+      "rust_owner_before": "Gemini compact response JSON traversal and summary extraction",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI and provider-boundary tests cover present, absent, and malformed summary output",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "response JSON acquisition, document/node preparation, typed ABI result mapping, and UTF-8 String materialization"
+    },
+    {
+      "name": "gemini_compact_response_body_shaping",
+      "domain": "provider/gemini",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust shaped Gemini compact summaries into the provider response body JSON envelope",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_compact_response_body_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_compact_rewrite.mojo",
+      "consumer": "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs",
+      "consumer_marker": "gemini_provider_core_compact_response_body(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/gemini_bridge/compact/local.rs",
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
+      "rust_owner_before": "Gemini compact response envelope serialization and escaping",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; provider-boundary and runtime compact response tests cover Unicode and JSON escaping",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "summary String ownership, bounded ABI output allocation, HTTP response assembly, and call-ID metadata"
+    },
+    {
+      "name": "gemini_compact_error_classification",
+      "domain": "provider/gemini",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust classified compact provider errors by message text into timeout, unavailable, unsupported, invalid-response, or provider classes",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_gemini_compact_error_reason_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/gemini_compact_rewrite.mojo",
+      "consumer": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
+      "consumer_marker": "gemini_compact_error_reason(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_launch/proxy_startup/local_rewrite_gemini_compact.rs",
+      "rust_owner_before": "Compact error-message keyword classification and stable local reason labels",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; runtime compact reason tests cover each classified error family and transport overrides",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "reqwest transport error detection, borrowed error text, typed enum mapping, and log/response label selection"
     }
   ],
   "rust_semantic_reductions": [
