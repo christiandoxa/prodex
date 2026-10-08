@@ -11,11 +11,6 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-pub(crate) const ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS: u64 = 10;
-pub(crate) const ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS: u64 = 5;
-pub(crate) const ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS: u64 = 45;
-pub(crate) const ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS: i64 = 2 * 60;
-pub(crate) const ALL_QUOTA_WATCH_NEAR_RESET_SECONDS: i64 = 15 * 60;
 const QUOTA_WATCH_RUNTIME_USAGE_CACHE_FILE: &str = "quota-watch-runtime-usage-cache.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,7 +27,10 @@ pub(crate) struct LiveQuotaWatchRuntimeUsageCache {
 
 impl LiveQuotaWatchRuntimeUsageCache {
     pub(crate) fn refresh_interval_at(&self, now: i64) -> Duration {
-        Duration::from_secs(u64::try_from(self.alive_until.saturating_sub(now).max(1)).unwrap_or(1))
+        Duration::from_secs(
+            prodex_mojo_core::quota_watch_policy::cache_remaining_seconds(self.alive_until, now)
+                .expect("Mojo quota-watch remaining interval policy failed"),
+        )
     }
 }
 
@@ -49,14 +47,13 @@ pub(crate) fn save_quota_watch_runtime_usage_cache(
         persist_openai_runtime_usage_snapshots(paths, &state.profiles, &snapshots);
     }
     let now = Local::now().timestamp();
-    let refresh_seconds = i64::try_from(refresh_interval.as_secs())
-        .unwrap_or(i64::MAX / 2)
-        .max(1);
     let cache = QuotaWatchRuntimeUsageCache {
         updated_at: now,
-        alive_until: now
-            .saturating_add(refresh_seconds)
-            .saturating_add(ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS as i64),
+        alive_until: prodex_mojo_core::quota_watch_policy::cache_alive_until(
+            now,
+            refresh_interval.as_secs(),
+        )
+        .expect("Mojo quota-watch cache lifetime policy failed"),
         snapshots,
     };
     let path = quota_watch_runtime_usage_cache_path(paths);
@@ -128,7 +125,9 @@ pub(crate) fn load_live_quota_watch_runtime_usage_cache(
     )
     .ok()?
     .value;
-    if cache.alive_until < now {
+    if !prodex_mojo_core::quota_watch_policy::cache_is_live(cache.alive_until, now)
+        .expect("Mojo quota-watch cache expiration policy failed")
+    {
         return None;
     }
     let snapshots = cache
@@ -148,27 +147,14 @@ pub(crate) fn quota_watch_detail_refresh_interval_for_cached_openai(
     profile_count: usize,
     now: i64,
 ) -> Duration {
-    let base = if watch {
-        ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS
-    } else if reset_windows
-        .iter()
-        .any(|reset| *reset <= now.saturating_add(ALL_QUOTA_WATCH_IMMINENT_RESET_SECONDS))
-    {
-        ALL_QUOTA_WATCH_IMMINENT_INTERVAL_SECONDS
-    } else if reset_windows
-        .iter()
-        .any(|reset| *reset <= now.saturating_add(ALL_QUOTA_WATCH_NEAR_RESET_SECONDS))
-    {
-        ALL_QUOTA_WATCH_FAST_INTERVAL_SECONDS
-    } else {
-        ALL_QUOTA_WATCH_DETAIL_STABLE_INTERVAL_SECONDS
-    };
     Duration::from_secs(
-        base.max(
-            u64::try_from(profile_count)
-                .unwrap_or(u64::MAX)
-                .saturating_mul(2),
-        ),
+        prodex_mojo_core::quota_watch_policy::refresh_seconds(
+            reset_windows,
+            watch,
+            profile_count,
+            now,
+        )
+        .expect("Mojo quota-watch refresh schedule policy failed"),
     )
 }
 
@@ -244,6 +230,44 @@ mod tests {
             weekly_remaining_percent: 80,
             weekly_reset_at: i64::MAX,
         }
+    }
+
+    #[test]
+    fn cached_openai_refresh_interval_preserves_window_and_profile_precedence() {
+        let interval = quota_watch_detail_refresh_interval_for_cached_openai;
+        assert_eq!(interval(&[], false, 1, 100), Duration::from_secs(45));
+        assert_eq!(interval(&[], true, 1, 100), Duration::from_secs(10));
+        assert_eq!(interval(&[220], false, 1, 100), Duration::from_secs(5));
+        assert_eq!(interval(&[221], false, 1, 100), Duration::from_secs(10));
+        assert_eq!(interval(&[1001], false, 1, 100), Duration::from_secs(45));
+        assert_eq!(interval(&[220], true, 101, 100), Duration::from_secs(202));
+        assert_eq!(
+            interval(&[i64::MAX], false, 1, i64::MAX),
+            Duration::from_secs(5)
+        );
+        assert_eq!(
+            interval(&[], false, usize::MAX, 100),
+            Duration::from_secs(u64::MAX)
+        );
+    }
+
+    #[test]
+    fn live_cache_remaining_interval_preserves_expiry_and_saturation() {
+        let cache = LiveQuotaWatchRuntimeUsageCache {
+            snapshots: BTreeMap::new(),
+            alive_until: 20,
+        };
+        assert_eq!(cache.refresh_interval_at(19), Duration::from_secs(1));
+        assert_eq!(cache.refresh_interval_at(5), Duration::from_secs(15));
+        assert_eq!(cache.refresh_interval_at(21), Duration::from_secs(1));
+        let huge = LiveQuotaWatchRuntimeUsageCache {
+            snapshots: BTreeMap::new(),
+            alive_until: i64::MAX,
+        };
+        assert_eq!(
+            huge.refresh_interval_at(i64::MIN),
+            Duration::from_secs(i64::MAX as u64)
+        );
     }
 
     #[test]
