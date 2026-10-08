@@ -8,9 +8,11 @@ use super::{
 use crate::app_commands::runtime_launch::goal_resume::add_runtime_goal_session_tracking;
 use anyhow::{Context, Result, bail};
 use prodex_mojo_core::runtime_overlay_policy::{
-    FreshProjectionAction, OverlayConfigAssignmentViolation,
-    config_assignments as mojo_overlay_config_assignments,
-    fresh_projection as mojo_fresh_projection, transport_flags as mojo_overlay_transport_flags,
+    FreshProjectionAction, OverlayConfigAssignmentViolation, OverlayToolAvailability,
+    OverlayToolPlanDecision, config_assignments as mojo_overlay_config_assignments,
+    fresh_projection as mojo_fresh_projection,
+    optional_tool_plan_decision as mojo_overlay_optional_tool_plan_decision,
+    transport_flags as mojo_overlay_transport_flags,
     workspace_trust_indices as mojo_workspace_trust_indices,
 };
 use std::path::{Path, PathBuf};
@@ -49,39 +51,67 @@ pub(crate) fn resolve_runtime_optional_tool_plan(
         .filter(|tool| *tool != prodex_optional_tools::OptionalToolId::Presidio)
         .collect();
     let plan = prodex_optional_tools::resolve_optional_tools_for_launch(&selected, &required);
-    if let Some(message) = required_optional_tool_error(&plan, &required) {
-        bail!("{message}");
+    if let OverlayToolPlanDecision::RequiredUnavailable(index) =
+        runtime_optional_tool_decision(&plan, &required)?
+    {
+        bail!("{}", required_optional_tool_error(&plan, index));
     }
     Ok(plan)
 }
 
-fn required_optional_tool_error(
+fn runtime_optional_tool_decision(
     plan: &prodex_optional_tools::ToolActivationPlan,
     required: &prodex_optional_tools::OptionalToolSet,
-) -> Option<String> {
-    plan.unavailable
+) -> Result<OverlayToolPlanDecision> {
+    let statuses = plan
+        .unavailable
         .iter()
-        .find(|health| required.contains(health.id))
-        .map(|unavailable| {
-            format!(
-                "required optional tool {} is unavailable: {}; run `prodex doctor --install`",
-                unavailable.id,
-                redaction_redact_secret_like_text(&unavailable.detail)
-            )
+        .map(|health| {
+            let status = match health.status {
+                prodex_optional_tools::ToolHealthStatus::Installed => {
+                    OverlayToolAvailability::Installed
+                }
+                prodex_optional_tools::ToolHealthStatus::Missing => {
+                    OverlayToolAvailability::Missing
+                }
+                prodex_optional_tools::ToolHealthStatus::Invalid => {
+                    OverlayToolAvailability::Invalid
+                }
+                prodex_optional_tools::ToolHealthStatus::Degraded => {
+                    OverlayToolAvailability::Degraded
+                }
+            };
+            (status, required.contains(health.id))
         })
+        .collect::<Vec<_>>();
+    mojo_overlay_optional_tool_plan_decision(&statuses).map_err(|error| {
+        anyhow::anyhow!("Mojo runtime-overlay optional-tool plan failed: {error:?}")
+    })
+}
+
+fn required_optional_tool_error(
+    plan: &prodex_optional_tools::ToolActivationPlan,
+    index: usize,
+) -> String {
+    let unavailable = &plan.unavailable[index];
+    format!(
+        "required optional tool {} is unavailable: {}; run `prodex doctor --install`",
+        unavailable.id,
+        redaction_redact_secret_like_text(&unavailable.detail)
+    )
 }
 
 fn optional_tool_skip_messages(
     plan: &prodex_optional_tools::ToolActivationPlan,
-    required: &prodex_optional_tools::OptionalToolSet,
+    decision: &OverlayToolPlanDecision,
 ) -> Vec<String> {
-    plan.unavailable
-        .iter()
-        .filter(|health| {
-            health.status == prodex_optional_tools::ToolHealthStatus::Invalid
-                && !required.contains(health.id)
-        })
-        .map(|health| {
+    let OverlayToolPlanDecision::SkipIncompatible(mask) = decision else {
+        return Vec::new();
+    };
+    (0..plan.unavailable.len())
+        .filter(|&index| *mask & (1_u8 << index) != 0)
+        .map(|index| {
+            let health = &plan.unavailable[index];
             format!(
                 "{}: skipped for this launch; {}. Update when convenient (minimum supported: {}, release-qualified reference: {}).",
                 health.id,
@@ -596,7 +626,8 @@ fn resolve_optional_tool_plan(
     let required_tools = strategy.args.required_tool_set();
     let tool_plan =
         resolve_runtime_optional_tool_plan(&strategy.args.selected_tool_set(), &required_tools)?;
-    let skipped_incompatible = optional_tool_skip_messages(&tool_plan, &required_tools);
+    let decision = runtime_optional_tool_decision(&tool_plan, &required_tools)?;
+    let skipped_incompatible = optional_tool_skip_messages(&tool_plan, &decision);
     if !skipped_incompatible.is_empty() {
         crate::print_stderr_panel("Optional Tools", &skipped_incompatible)?;
     }
@@ -653,7 +684,7 @@ mod overlay_tests {
             id: prodex_optional_tools::OptionalToolId::Rtk,
             status: prodex_optional_tools::ToolHealthStatus::Invalid,
             source: Some(prodex_optional_tools::ToolDiscoverySource::Path),
-            path: Some(PathBuf::from("/tmp/rtk")),
+            path: Some(PathBuf::from("/home/test-user/.local/bin/rtk")),
             version: Some("0.45.0".to_string()),
             digest: None,
             can_activate: false,
@@ -665,8 +696,9 @@ mod overlay_tests {
         };
 
         let optional_required = prodex_optional_tools::OptionalToolSet::default();
-        assert!(required_optional_tool_error(&plan, &optional_required).is_none());
-        let messages = optional_tool_skip_messages(&plan, &optional_required);
+        let decision = runtime_optional_tool_decision(&plan, &optional_required).unwrap();
+        assert_eq!(decision, OverlayToolPlanDecision::SkipIncompatible(1));
+        let messages = optional_tool_skip_messages(&plan, &decision);
         assert_eq!(messages.len(), 1);
         assert!(messages[0].contains("rtk: skipped for this launch"));
         assert!(messages[0].contains("Update when convenient"));
@@ -675,9 +707,46 @@ mod overlay_tests {
         let required = [prodex_optional_tools::OptionalToolId::Rtk]
             .into_iter()
             .collect::<prodex_optional_tools::OptionalToolSet>();
-        let error = required_optional_tool_error(&plan, &required)
-            .expect("required incompatible RTK must remain fatal");
+        let decision = runtime_optional_tool_decision(&plan, &required).unwrap();
+        assert_eq!(decision, OverlayToolPlanDecision::RequiredUnavailable(0));
+        let error = required_optional_tool_error(&plan, 0);
         assert!(error.contains("required optional tool rtk is unavailable"));
+
+        let mixed = prodex_optional_tools::ToolActivationPlan {
+            activations: Vec::new(),
+            unavailable: vec![
+                plan.unavailable[0].clone(),
+                prodex_optional_tools::ToolHealth {
+                    id: prodex_optional_tools::OptionalToolId::CodebaseMemoryMcp,
+                    status: prodex_optional_tools::ToolHealthStatus::Missing,
+                    source: None,
+                    path: None,
+                    version: None,
+                    digest: None,
+                    can_activate: false,
+                    detail: "codebase-memory-mcp was not found in managed roots or PATH".into(),
+                },
+            ],
+        };
+        let required_codebase = [prodex_optional_tools::OptionalToolId::CodebaseMemoryMcp]
+            .into_iter()
+            .collect::<prodex_optional_tools::OptionalToolSet>();
+        let decision = runtime_optional_tool_decision(&mixed, &required_codebase).unwrap();
+        assert_eq!(decision, OverlayToolPlanDecision::RequiredUnavailable(1));
+        assert!(optional_tool_skip_messages(&mixed, &decision).is_empty());
+    }
+
+    #[test]
+    fn optional_tool_plan_without_unavailable_items_is_ready() {
+        let plan = prodex_optional_tools::ToolActivationPlan::default();
+        assert_eq!(
+            runtime_optional_tool_decision(
+                &plan,
+                &prodex_optional_tools::OptionalToolSet::default()
+            )
+            .unwrap(),
+            OverlayToolPlanDecision::Ready
+        );
     }
 
     #[test]

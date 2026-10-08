@@ -1,6 +1,7 @@
 use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
+const MAX_OPTIONAL_TOOLS: usize = 6;
 
 #[repr(C)]
 #[derive(Clone, Copy)]
@@ -27,6 +28,22 @@ pub enum FreshProjectionAction {
     Keep(usize),
     ConfigArg(usize),
     Feature { index: usize, enabled: bool },
+}
+
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverlayToolAvailability {
+    Installed = 0,
+    Missing = 1,
+    Invalid = 2,
+    Degraded = 3,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OverlayToolPlanDecision {
+    Ready,
+    RequiredUnavailable(usize),
+    SkipIncompatible(u8),
 }
 
 unsafe extern "C" {
@@ -59,6 +76,13 @@ unsafe extern "C" {
         records_address: u64,
         record_capacity: i64,
         written_address: u64,
+    ) -> i64;
+    fn prodex_runtime_overlay_optional_tool_plan_v1(
+        abi_version: i64,
+        availability_mask: i64,
+        required_mask: i64,
+        count: i64,
+        result_address: u64,
     ) -> i64;
 }
 
@@ -252,6 +276,65 @@ pub fn fresh_projection(
         .collect()
 }
 
+/// Plans required-tool failure precedence and optional-incompatible notices for one launch.
+/// Status entries follow the unavailable-tool order and are bounded by the six known tools.
+pub fn optional_tool_plan_decision(
+    statuses: &[(OverlayToolAvailability, bool)],
+) -> Result<OverlayToolPlanDecision, MojoError> {
+    if statuses.len() > MAX_OPTIONAL_TOOLS {
+        return Err(MojoError::InvalidInput);
+    }
+    let (availability_mask, required_mask) = statuses.iter().enumerate().fold(
+        (0_i64, 0_i64),
+        |(availability_mask, required_mask), (index, (status, required))| {
+            (
+                availability_mask | ((*status as i64) << (index * 2)),
+                required_mask | (i64::from(*required) << index),
+            )
+        },
+    );
+    let mut result = [-1_i64; 3];
+    let status = unsafe {
+        prodex_runtime_overlay_optional_tool_plan_v1(
+            ABI_VERSION,
+            availability_mask,
+            required_mask,
+            i64::try_from(statuses.len()).map_err(|_| MojoError::InvalidInput)?,
+            (&mut result as *mut i64) as usize as u64,
+        )
+    };
+    validate_status(status)?;
+    match result[0] {
+        0 if result[1] == -1 && result[2] == 0 => Ok(OverlayToolPlanDecision::Ready),
+        1 if result[2] == 0 => {
+            let index = usize::try_from(result[1]).map_err(|_| MojoError::InvalidOutput)?;
+            if statuses.get(index).is_some_and(|(status, required)| {
+                *required && *status != OverlayToolAvailability::Installed
+            }) {
+                Ok(OverlayToolPlanDecision::RequiredUnavailable(index))
+            } else {
+                Err(MojoError::InvalidOutput)
+            }
+        }
+        2 if result[1] == -1 && result[2] > 0 => {
+            let mask = u8::try_from(result[2]).map_err(|_| MojoError::InvalidOutput)?;
+            if mask >> statuses.len() != 0
+                || statuses
+                    .iter()
+                    .enumerate()
+                    .any(|(index, (status, required))| {
+                        mask & (1_u8 << index) != 0
+                            && (*status != OverlayToolAvailability::Invalid || *required)
+                    })
+            {
+                return Err(MojoError::InvalidOutput);
+            }
+            Ok(OverlayToolPlanDecision::SkipIncompatible(mask))
+        }
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -327,6 +410,46 @@ mod tests {
                 FreshProjectionAction::ConfigArg(6),
                 FreshProjectionAction::Keep(7),
             ]
+        );
+    }
+
+    #[test]
+    fn optional_tool_plan_decision_keeps_required_failure_precedence() {
+        let outcomes = [
+            (OverlayToolAvailability::Invalid, false),
+            (OverlayToolAvailability::Missing, false),
+            (OverlayToolAvailability::Degraded, true),
+            (OverlayToolAvailability::Invalid, true),
+        ];
+        assert_eq!(
+            optional_tool_plan_decision(&outcomes).unwrap(),
+            OverlayToolPlanDecision::RequiredUnavailable(2)
+        );
+
+        let outcomes = [
+            (OverlayToolAvailability::Invalid, false),
+            (OverlayToolAvailability::Missing, false),
+            (OverlayToolAvailability::Invalid, false),
+        ];
+        assert_eq!(
+            optional_tool_plan_decision(&outcomes).unwrap(),
+            OverlayToolPlanDecision::SkipIncompatible(0b101)
+        );
+        assert_eq!(
+            optional_tool_plan_decision(&[]).unwrap(),
+            OverlayToolPlanDecision::Ready
+        );
+        assert_eq!(
+            optional_tool_plan_decision(&[(OverlayToolAvailability::Missing, false); 6]).unwrap(),
+            OverlayToolPlanDecision::Ready
+        );
+        assert_eq!(
+            optional_tool_plan_decision(&[(OverlayToolAvailability::Installed, false)]),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(
+            optional_tool_plan_decision(&[(OverlayToolAvailability::Missing, false); 7]),
+            Err(MojoError::InvalidInput)
         );
     }
 }
