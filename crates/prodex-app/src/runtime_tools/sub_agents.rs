@@ -5,8 +5,10 @@ use prodex_cli::{
     SuperLaunchTarget,
 };
 use prodex_mojo_core::sub_agent_policy::{
-    ChildArgvAction, ChildSpecScalarViolation, ProviderUrlViolation, child_argv_plan,
-    child_spec_scalar_violation, model_nonempty, provider_url_violation,
+    ChildArgvAction, ChildOutcomeAction, ChildSpecScalarViolation, ProviderUrlViolation,
+    RecursionDecision, SlotLockErrorAction, SlotPlanStep, child_argv_plan, child_outcome,
+    child_spec_scalar_violation, model_nonempty, provider_url_violation, recursion_decision,
+    slot_lock_error_action, slot_plan_step,
 };
 use prodex_provider_core::{
     ProviderId, ProviderModelReasoningError, provider_model_reasoning_resolution,
@@ -45,7 +47,6 @@ const SUB_AGENT_CONFIG_FILE: &str = "sub-agent-launch.json";
 const SUB_AGENT_TASK_DIR: &str = "sub-agent-tasks";
 const SUB_AGENT_SLOT_DIR: &str = "sub-agent-slots";
 const SUB_AGENT_TASK_MAX_BYTES: usize = 65_536;
-const SUB_AGENT_LIMIT_EXIT_CODE: i32 = 75;
 const SUB_AGENT_OUTPUT_DRAIN_TIMEOUT: Duration =
     Duration::from_millis(if cfg!(test) { 100 } else { 5_000 });
 const SUB_AGENT_CHILD_REAP_TIMEOUT: Duration =
@@ -94,11 +95,10 @@ pub(crate) enum SubAgentRecursionPolicy {
 }
 
 impl SubAgentRecursionPolicy {
-    pub(crate) fn from_marker(marker: Option<&OsStr>) -> Self {
-        if marker.is_some() {
-            Self::Disabled
-        } else {
-            Self::Allowed
+    fn from_decision(decision: RecursionDecision) -> Self {
+        match decision {
+            RecursionDecision::Allowed | RecursionDecision::InternalLauncher => Self::Allowed,
+            RecursionDecision::Disabled => Self::Disabled,
         }
     }
 }
@@ -220,7 +220,18 @@ pub(crate) fn resolve_super_sub_agent_config(
 }
 
 pub(crate) fn sub_agent_recursion_policy() -> SubAgentRecursionPolicy {
-    SubAgentRecursionPolicy::from_marker(env::var_os(SUB_AGENT_RECURSION_MARKER).as_deref())
+    SubAgentRecursionPolicy::from_decision(sub_agent_recursion_decision(
+        env::var_os(SUB_AGENT_RECURSION_MARKER).is_some(),
+        false,
+    ))
+}
+
+fn sub_agent_recursion_decision(
+    recursion_marker_present: bool,
+    launcher_marker_is_one: bool,
+) -> RecursionDecision {
+    recursion_decision(recursion_marker_present, launcher_marker_is_one)
+        .expect("Mojo sub-agent recursion policy returned invalid output")
 }
 
 pub(crate) fn write_sub_agent_overlay(
@@ -278,45 +289,68 @@ fn write_sub_agent_overlay_with_executable(
 }
 
 fn reconcile_sub_agent_slots(slot_dir: &Path, limit: u16) -> Result<()> {
-    let mut stale = Vec::with_capacity(usize::from(
-        prodex_cli::HARD_MAX_SUB_AGENT_CONCURRENCY - limit,
-    ));
-    for index in limit..prodex_cli::HARD_MAX_SUB_AGENT_CONCURRENCY {
-        let slot = slot_dir.join(format!("slot-{index:02}.lock"));
-        let file = match OpenOptions::new().read(true).write(true).open(&slot) {
-            Ok(file) => file,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => {
-                return Err(error)
-                    .with_context(|| format!("failed to open stale concurrency slot {index}"));
+    let mut stale = Vec::new();
+    let mut cursor = 0;
+    let mut stale_removed = false;
+    loop {
+        let step = slot_plan_step(limit, cursor, true)
+            .map_err(|error| anyhow::anyhow!("Mojo sub-agent slot planner failed: {error:?}"))?;
+        match step {
+            SlotPlanStep::Retire { index } => {
+                let slot = slot_dir.join(sub_agent_slot_name(index)?);
+                let file = match OpenOptions::new().read(true).write(true).open(&slot) {
+                    Ok(file) => file,
+                    Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                        cursor += 1;
+                        continue;
+                    }
+                    Err(error) => {
+                        return Err(error).with_context(|| {
+                            format!("failed to open stale concurrency slot {index}")
+                        });
+                    }
+                };
+                match file.try_lock_exclusive() {
+                    Ok(()) => stale.push((slot, file)),
+                    Err(error) => match sub_agent_slot_lock_error_action(&error, true)? {
+                        SlotLockErrorAction::BlockResize => bail!(
+                            "cannot reduce sub-agent concurrency while a child holds slot {index}; wait for active children to finish"
+                        ),
+                        SlotLockErrorAction::Propagate => {
+                            return Err(error)
+                                .context("failed to inspect stale sub-agent concurrency slot");
+                        }
+                        SlotLockErrorAction::TryNext => {
+                            bail!("Mojo returned an admission action while resizing slots");
+                        }
+                    },
+                }
             }
-        };
-        match file.try_lock_exclusive() {
-            Ok(()) => stale.push((slot, file)),
-            Err(error) if sub_agent_lock_contended(&error) => {
-                bail!(
-                    "cannot reduce sub-agent concurrency while a child holds slot {index}; wait for active children to finish"
-                );
+            SlotPlanStep::Ensure { index } => {
+                if !stale_removed {
+                    for (slot, _) in &stale {
+                        fs::remove_file(slot).with_context(|| {
+                            format!("failed to remove stale concurrency slot {}", slot.display())
+                        })?;
+                    }
+                    stale_removed = true;
+                }
+                let slot = slot_dir.join(sub_agent_slot_name(index)?);
+                match OpenOptions::new().write(true).create_new(true).open(&slot) {
+                    Ok(_) => {}
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                    Err(error) => {
+                        return Err(error)
+                            .with_context(|| format!("failed to create {}", slot.display()));
+                    }
+                }
             }
-            Err(error) => {
-                return Err(error).context("failed to inspect stale sub-agent concurrency slot");
+            SlotPlanStep::Complete => break,
+            SlotPlanStep::Candidate { .. } | SlotPlanStep::LimitReached { .. } => {
+                bail!("Mojo returned an admission step while reconciling slots");
             }
         }
-    }
-    for (slot, _) in &stale {
-        fs::remove_file(slot).with_context(|| {
-            format!("failed to remove stale concurrency slot {}", slot.display())
-        })?;
-    }
-    for index in 0..limit {
-        let slot = slot_dir.join(format!("slot-{index:02}.lock"));
-        match OpenOptions::new().write(true).create_new(true).open(&slot) {
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-            Err(error) => {
-                return Err(error).with_context(|| format!("failed to create {}", slot.display()));
-            }
-        }
+        cursor += 1;
     }
     Ok(())
 }
@@ -333,11 +367,11 @@ fn create_private_directory(path: &Path) -> Result<()> {
 }
 
 pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Result<()> {
-    if matches!(
-        sub_agent_recursion_policy(),
-        SubAgentRecursionPolicy::Disabled
-    ) && env::var_os(SUB_AGENT_LAUNCHER_MARKER).as_deref() != Some(OsStr::new("1"))
-    {
+    let recursion = sub_agent_recursion_decision(
+        env::var_os(SUB_AGENT_RECURSION_MARKER).is_some(),
+        env::var_os(SUB_AGENT_LAUNCHER_MARKER).as_deref() == Some(OsStr::new("1")),
+    );
+    if recursion == RecursionDecision::Disabled {
         bail!(
             "hidden sub-agent launcher cannot be invoked recursively while {SUB_AGENT_RECURSION_MARKER} is set"
         );
@@ -364,7 +398,7 @@ pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Resul
             .context("failed to secure sub-agent task file")?;
     }
     let task = read_bounded_utf8(&task_path, spec.task_max_bytes, "sub-agent task")?;
-    if task.trim().is_empty() {
+    if !model_nonempty(&task).expect("Mojo sub-agent task validator returned invalid output") {
         bail!("sub-agent task must be nonempty");
     }
     let _slot = acquire_sub_agent_slot(&spec)?;
@@ -373,34 +407,50 @@ pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Resul
         .build()
         .context("failed to initialize sub-agent launcher runtime")?;
     let outcome = runtime.block_on(run_child(&spec, &task, &task_path))?;
-    if outcome.cancelled {
-        return Err(crate::command_dispatch::command_exit_error(
-            130,
-            if outcome.output_incomplete {
+    finish_sub_agent_child(outcome)
+}
+
+fn finish_sub_agent_child(outcome: SubAgentChildOutcome) -> Result<()> {
+    let action = child_outcome(
+        outcome.cancelled,
+        outcome.status.success(),
+        outcome.output_incomplete,
+        outcome.output_bytes > 0,
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo sub-agent outcome classifier failed: {error:?}"))?;
+    match action {
+        ChildOutcomeAction::Success => Ok(()),
+        ChildOutcomeAction::Cancelled {
+            exit_code,
+            output_incomplete,
+        } => Err(crate::command_dispatch::command_exit_error(
+            exit_code,
+            if output_incomplete {
                 "sub-agent launcher cancelled; child output was incomplete"
             } else {
                 "sub-agent launcher cancelled"
             },
-        ));
+        )),
+        ChildOutcomeAction::ChildFailed { output_incomplete } => {
+            let code = crate::child_exit_code(&outcome.status);
+            Err(crate::command_dispatch::command_exit_error(
+                code,
+                if output_incomplete {
+                    format!(
+                        "sub-agent child exited with status {code}; child output was incomplete"
+                    )
+                } else {
+                    format!("sub-agent child exited with status {code}")
+                },
+            ))
+        }
+        ChildOutcomeAction::OutputIncomplete => {
+            bail!("sub-agent child output collection failed");
+        }
+        ChildOutcomeAction::NoOutput => {
+            bail!("sub-agent child completed without output");
+        }
     }
-    if !outcome.status.success() {
-        let code = crate::child_exit_code(&outcome.status);
-        return Err(crate::command_dispatch::command_exit_error(
-            code,
-            if outcome.output_incomplete {
-                format!("sub-agent child exited with status {code}; child output was incomplete")
-            } else {
-                format!("sub-agent child exited with status {code}")
-            },
-        ));
-    }
-    if outcome.output_incomplete {
-        bail!("sub-agent child output collection failed");
-    }
-    if outcome.output_bytes == 0 {
-        bail!("sub-agent child completed without output");
-    }
-    Ok(())
 }
 
 fn read_bounded_utf8(path: &Path, max_bytes: usize, label: &str) -> Result<String> {
@@ -461,34 +511,67 @@ impl Drop for SubAgentSlotLease {
     }
 }
 
-fn sub_agent_lock_contended(error: &io::Error) -> bool {
-    error.kind() == io::ErrorKind::WouldBlock
-        || matches!(
-            (error.raw_os_error(), fs2::lock_contended_error().raw_os_error()),
-            (Some(actual), Some(expected)) if actual == expected
-        )
+fn sub_agent_slot_name(index: u16) -> Result<String> {
+    prodex_mojo_core::sub_agent_policy::render_slot_lock_name(index)
+        .map_err(|error| anyhow::anyhow!("Mojo sub-agent slot name formatter failed: {error:?}"))
+}
+
+fn sub_agent_slot_lock_error_action(
+    error: &io::Error,
+    reconcile: bool,
+) -> Result<SlotLockErrorAction> {
+    let expected = fs2::lock_contended_error().raw_os_error();
+    let raw_code_matches = error
+        .raw_os_error()
+        .zip(expected)
+        .is_some_and(|(actual, expected)| actual == expected);
+    slot_lock_error_action(
+        reconcile,
+        error.kind() == io::ErrorKind::WouldBlock,
+        raw_code_matches,
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo sub-agent lock classifier failed: {error:?}"))
 }
 
 fn acquire_sub_agent_slot(spec: &ChildLaunchSpec) -> Result<SubAgentSlotLease> {
-    for index in 0..spec.max_concurrency.get() {
-        let path = spec.slot_dir.join(format!("slot-{index:02}.lock"));
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&path)
-            .with_context(|| format!("failed to open concurrency slot {index}"))?;
-        match file.try_lock_exclusive() {
-            Ok(()) => return Ok(SubAgentSlotLease(file)),
-            Err(error) if sub_agent_lock_contended(&error) => {}
-            Err(error) => {
-                return Err(error).context("failed to acquire sub-agent concurrency slot");
+    let mut cursor = 0;
+    loop {
+        let step = slot_plan_step(spec.max_concurrency.get(), cursor, false)
+            .map_err(|error| anyhow::anyhow!("Mojo sub-agent slot planner failed: {error:?}"))?;
+        match step {
+            SlotPlanStep::Candidate { index } => {
+                let path = spec.slot_dir.join(sub_agent_slot_name(index)?);
+                let file = OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .open(&path)
+                    .with_context(|| format!("failed to open concurrency slot {index}"))?;
+                match file.try_lock_exclusive() {
+                    Ok(()) => return Ok(SubAgentSlotLease(file)),
+                    Err(error) => match sub_agent_slot_lock_error_action(&error, false)? {
+                        SlotLockErrorAction::TryNext => {}
+                        SlotLockErrorAction::Propagate => {
+                            return Err(error)
+                                .context("failed to acquire sub-agent concurrency slot");
+                        }
+                        SlotLockErrorAction::BlockResize => {
+                            bail!("Mojo returned a resize action while acquiring a slot");
+                        }
+                    },
+                }
+                cursor += 1;
+            }
+            SlotPlanStep::LimitReached { exit_code } => {
+                return Err(crate::command_dispatch::command_exit_error(
+                    exit_code,
+                    "sub-agent concurrency limit reached; wait for an active child to finish before retrying",
+                ));
+            }
+            SlotPlanStep::Retire { .. } | SlotPlanStep::Ensure { .. } | SlotPlanStep::Complete => {
+                bail!("Mojo returned a reconciliation step while acquiring a slot");
             }
         }
     }
-    Err(crate::command_dispatch::command_exit_error(
-        SUB_AGENT_LIMIT_EXIT_CODE,
-        "sub-agent concurrency limit reached; wait for an active child to finish before retrying",
-    ))
 }
 
 fn child_argv(spec: &ChildLaunchSpec, task: &str) -> Vec<OsString> {
@@ -651,14 +734,23 @@ mod tests {
     }
 
     #[test]
-    fn lock_contention_errors_are_classified_portably() {
-        assert!(sub_agent_lock_contended(&fs2::lock_contended_error()));
-        assert!(sub_agent_lock_contended(&io::Error::from(
-            io::ErrorKind::WouldBlock
-        )));
-        assert!(!sub_agent_lock_contended(&io::Error::from(
-            io::ErrorKind::PermissionDenied
-        )));
+    fn lock_errors_use_mojo_slot_actions() {
+        assert_eq!(
+            sub_agent_slot_lock_error_action(&fs2::lock_contended_error(), false).unwrap(),
+            SlotLockErrorAction::TryNext
+        );
+        assert_eq!(
+            sub_agent_slot_lock_error_action(&fs2::lock_contended_error(), true).unwrap(),
+            SlotLockErrorAction::BlockResize
+        );
+        assert_eq!(
+            sub_agent_slot_lock_error_action(
+                &io::Error::from(io::ErrorKind::PermissionDenied),
+                false,
+            )
+            .unwrap(),
+            SlotLockErrorAction::Propagate
+        );
     }
 
     #[test]
@@ -930,17 +1022,21 @@ mod tests {
     }
 
     #[test]
-    fn recursion_marker_is_a_typed_fail_closed_policy() {
+    fn recursion_marker_and_internal_launcher_use_mojo_policy() {
         assert_eq!(
-            SubAgentRecursionPolicy::from_marker(None),
-            SubAgentRecursionPolicy::Allowed
+            sub_agent_recursion_decision(false, false),
+            RecursionDecision::Allowed
         );
         assert_eq!(
-            SubAgentRecursionPolicy::from_marker(Some(OsStr::new(""))),
-            SubAgentRecursionPolicy::Disabled
+            sub_agent_recursion_decision(true, false),
+            RecursionDecision::Disabled
         );
         assert_eq!(
-            SubAgentRecursionPolicy::from_marker(Some(OsStr::new("1"))),
+            sub_agent_recursion_decision(true, true),
+            RecursionDecision::InternalLauncher
+        );
+        assert_eq!(
+            SubAgentRecursionPolicy::from_decision(sub_agent_recursion_decision(true, false)),
             SubAgentRecursionPolicy::Disabled
         );
     }
@@ -1112,6 +1208,17 @@ mod tests {
         write_sub_agent_overlay_with_executable(&root, &resolved, executable.clone()).unwrap();
         let slot_dir = root.join(SUB_AGENT_SLOT_DIR);
         assert_eq!(fs::read_dir(&slot_dir).unwrap().count(), 8);
+        let mut names = fs::read_dir(&slot_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(
+            names,
+            (0..8)
+                .map(|index| format!("slot-{index:02}.lock"))
+                .collect::<Vec<_>>()
+        );
 
         let active = OpenOptions::new()
             .read(true)
@@ -1204,6 +1311,60 @@ mod tests {
         );
         drop(acquire_sub_agent_slot(&spec).unwrap());
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn empty_task_is_rejected_by_mojo_before_slot_admission() {
+        let root = temp_test_root("sub-agent-empty-task");
+        let spec = slot_spec(&root, 1);
+        let args = exec_args(&root, &spec, " \u{3000}\t");
+        let error = handle_sub_agent_exec(args).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("sub-agent task must be nonempty")
+        );
+        assert!(spec.task_dir.join("task.txt").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn mojo_child_outcome_plan_preserves_failure_precedence() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let cancelled = finish_sub_agent_child(SubAgentChildOutcome {
+            status: std::process::ExitStatus::from_raw(0),
+            cancelled: true,
+            output_incomplete: true,
+            output_bytes: 0,
+        })
+        .unwrap_err();
+        assert!(cancelled.to_string().contains("launcher cancelled"));
+        assert!(cancelled.to_string().contains("output was incomplete"));
+
+        let child_failed = finish_sub_agent_child(SubAgentChildOutcome {
+            status: std::process::ExitStatus::from_raw(7 << 8),
+            cancelled: false,
+            output_incomplete: true,
+            output_bytes: 0,
+        })
+        .unwrap_err();
+        assert!(
+            child_failed
+                .to_string()
+                .contains("child exited with status 7")
+        );
+        assert!(child_failed.to_string().contains("output was incomplete"));
+
+        let no_output = finish_sub_agent_child(SubAgentChildOutcome {
+            status: std::process::ExitStatus::from_raw(0),
+            cancelled: false,
+            output_incomplete: false,
+            output_bytes: 0,
+        })
+        .unwrap_err();
+        assert!(no_output.to_string().contains("completed without output"));
     }
 
     #[test]

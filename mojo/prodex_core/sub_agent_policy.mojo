@@ -15,6 +15,17 @@ comptime OP_MODEL_NONEMPTY: Int64 = 3
 comptime OP_PROVIDER_URL_POLICY: Int64 = 4
 comptime OP_CHILD_SPEC_SCALAR_POLICY: Int64 = 5
 comptime OP_PROMPT_STEPS: Int64 = 6
+comptime OP_CATALOG_STATUS: Int64 = 7
+comptime OP_EFFORT_SUGGESTION_MASK: Int64 = 8
+comptime OP_RECURSION_DECISION: Int64 = 9
+comptime OP_SLOT_PLAN_STEP: Int64 = 10
+comptime OP_SLOT_LOCK_ERROR_ACTION: Int64 = 11
+comptime OP_CHILD_OUTCOME: Int64 = 12
+
+comptime SUB_AGENT_CATALOG_ABI_VERSION: Int64 = 1
+
+comptime SUB_AGENT_HARD_CONCURRENCY: Int64 = 64
+comptime SUB_AGENT_LIMIT_EXIT_CODE: Int64 = 75
 
 comptime SUB_AGENT_POLICY_CAPACITY: Int64 = 2
 
@@ -45,6 +56,8 @@ comptime SUB_AGENT_RENDER_ABI: Int64 = 4
 comptime SUB_AGENT_RENDER_OVERLAY: Int64 = 0
 comptime SUB_AGENT_RENDER_ENABLED_DRY_RUN: Int64 = 1
 comptime SUB_AGENT_RENDER_DISABLED_DRY_RUN: Int64 = 2
+comptime SUB_AGENT_RENDER_SLOT_NAME: Int64 = 3
+comptime SUB_AGENT_RENDER_SESSION_ARGUMENT_REDACT: Int64 = 4
 comptime SUB_AGENT_RULE_COUNT: Int64 = 17
 
 @fieldwise_init
@@ -112,6 +125,23 @@ def sub_agent_render_put_view(
 ) -> Bool:
     var source = rich_view_ptr(value)
     for index in range(Int64(value.len)):
+        if not sub_agent_render_put_byte(
+            writer, source[unsafe_offset=index]
+        ):
+            return False
+    return True
+
+
+def sub_agent_render_put_view_range(
+    writer: Pointer[mut=True, SubAgentRenderWriter, _],
+    value: ProdexRichStringView,
+    start: Int64,
+    end: Int64,
+) -> Bool:
+    if start < 0 or end < start or end > Int64(value.len):
+        return False
+    var source = rich_view_ptr(value)
+    for index in range(start, end):
         if not sub_agent_render_put_byte(
             writer, source[unsafe_offset=index]
         ):
@@ -380,6 +410,72 @@ def sub_agent_render_disabled_dry_run(
     )
 
 
+def sub_agent_render_slot_name(
+    writer: Pointer[mut=True, SubAgentRenderWriter, _],
+    signed_address: UInt,
+) -> Bool:
+    var index = sub_agent_render_scalar(signed_address, 0)
+    return (
+        sub_agent_render_put_literal(writer, StringSlice("slot-"))
+        and (index >= 10 or sub_agent_render_put_byte(writer, UInt8(48)))
+        and sub_agent_render_put_u64(writer, UInt64(index))
+        and sub_agent_render_put_literal(writer, StringSlice(".lock"))
+    )
+
+
+def sub_agent_render_hex(value: UInt8) -> Bool:
+    return (
+        value >= 48 and value <= 57
+        or value >= 65 and value <= 70
+        or value >= 97 and value <= 102
+    )
+
+
+def sub_agent_render_uuid_end(
+    source: Pointer[mut=False, UInt8, _], length: Int64, start: Int64
+) -> Int64:
+    var end = start + 36
+    if start < 0 or end > length:
+        return -1
+    for index in range(36):
+        var value = source[unsafe_offset=start + Int64(index)]
+        if index == 8 or index == 13 or index == 18 or index == 23:
+            if value != 45:
+                return -1
+        elif not sub_agent_render_hex(value):
+            return -1
+    return end
+
+
+def sub_agent_render_redact_session_argument(
+    writer: Pointer[mut=True, SubAgentRenderWriter, _],
+    value: ProdexRichStringView,
+) -> Bool:
+    var source = rich_view_ptr(value)
+    var length = Int64(value.len)
+    var index: Int64 = 0
+    var last: Int64 = 0
+    var changed = False
+    while index < length:
+        var end = sub_agent_render_uuid_end(source, length, index)
+        if end >= 0:
+            if not (
+                sub_agent_render_put_view_range(writer, value, last, index)
+                and sub_agent_render_put_literal(
+                    writer, StringSlice("<SESSION_UUID>")
+                )
+            ):
+                return False
+            last = end
+            index = end
+            changed = True
+        else:
+            index += 1
+    if changed:
+        return sub_agent_render_put_view_range(writer, value, last, length)
+    return sub_agent_render_put_view_range(writer, value, 0, length)
+
+
 @export("prodex_sub_agent_render_v1")
 def prodex_sub_agent_render_v1(
     abi_version: Int64,
@@ -396,7 +492,7 @@ def prodex_sub_agent_render_v1(
         return SUB_AGENT_RENDER_ABI
     if (
         operation < SUB_AGENT_RENDER_OVERLAY
-        or operation > SUB_AGENT_RENDER_DISABLED_DRY_RUN
+        or operation > SUB_AGENT_RENDER_SESSION_ARGUMENT_REDACT
         or signed_count < 0
         or text_count < 0
         or (signed_count > 0 and signed_address == 0)
@@ -415,8 +511,12 @@ def prodex_sub_agent_render_v1(
     elif operation == SUB_AGENT_RENDER_ENABLED_DRY_RUN:
         expected_signed = 5
         expected_text = 8
-    else:
+    elif operation == SUB_AGENT_RENDER_DISABLED_DRY_RUN:
         expected_signed = 1
+    elif operation == SUB_AGENT_RENDER_SLOT_NAME:
+        expected_signed = 1
+    else:
+        expected_text = 1
     if signed_count != expected_signed or text_count != expected_text:
         return SUB_AGENT_RENDER_INVALID
     if not sub_agent_render_validate_texts(text_address, text_count):
@@ -445,9 +545,13 @@ def prodex_sub_agent_render_v1(
             or (recursion_disabled != 0 and recursion_disabled != 1)
         ):
             return SUB_AGENT_RENDER_INVALID
-    else:
+    elif operation == SUB_AGENT_RENDER_DISABLED_DRY_RUN:
         var presidio = sub_agent_render_scalar(signed_address, 0)
         if presidio != 0 and presidio != 1:
+            return SUB_AGENT_RENDER_INVALID
+    elif operation == SUB_AGENT_RENDER_SLOT_NAME:
+        var index = sub_agent_render_scalar(signed_address, 0)
+        if index < 0 or index >= SUB_AGENT_HARD_CONCURRENCY:
             return SUB_AGENT_RENDER_INVALID
 
     var writer = SubAgentRenderWriter(
@@ -466,9 +570,15 @@ def prodex_sub_agent_render_v1(
         ok = sub_agent_render_enabled_dry_run(
             Pointer(to=writer), signed_address, text_address
         )
-    else:
+    elif operation == SUB_AGENT_RENDER_DISABLED_DRY_RUN:
         ok = sub_agent_render_disabled_dry_run(
             Pointer(to=writer), signed_address
+        )
+    elif operation == SUB_AGENT_RENDER_SLOT_NAME:
+        ok = sub_agent_render_slot_name(Pointer(to=writer), signed_address)
+    else:
+        ok = sub_agent_render_redact_session_argument(
+            Pointer(to=writer), sub_agent_render_text(text_address, 0)
         )
 
     var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
@@ -617,7 +727,7 @@ def prodex_sub_agent_policy_v1(
         return SUB_AGENT_POLICY_ABI
     if (
         operation < OP_CONCURRENCY_PARSE
-        or operation > OP_PROMPT_STEPS
+        or operation > OP_CHILD_OUTCOME
         or length < 0
         or (length > 0 and address == 0)
         or result_address == 0
@@ -658,7 +768,7 @@ def prodex_sub_agent_policy_v1(
             result[unsafe_offset=0] = 1
         elif scalar < 1 or scalar > 65536:
             result[unsafe_offset=0] = 2
-    else:
+    elif operation == OP_PROMPT_STEPS:
         # scalar bits:
         # 0 provider_explicit, 1 provider_is_local, 2 url_present,
         # 3 model_explicit, 4 effort_explicit
@@ -680,6 +790,141 @@ def prodex_sub_agent_policy_v1(
         if not effort_explicit:
             mask |= PROMPT_STEP_REASONING_EFFORT
         result[unsafe_offset=1] = mask
+    elif operation == OP_CATALOG_STATUS:
+        if scalar < 0 or scalar > 3:
+            return SUB_AGENT_POLICY_INVALID
+        var has_models = (scalar & 1) == 1
+        var degraded = (scalar & 2) == 2
+        if degraded:
+            result[unsafe_offset=0] = 2
+        elif has_models:
+            result[unsafe_offset=0] = 1
+    elif operation == OP_EFFORT_SUGGESTION_MASK:
+        if scalar < 0 or scalar > 1:
+            return SUB_AGENT_POLICY_INVALID
+        if scalar == 0:
+            result[unsafe_offset=0] = 1
+    elif operation == OP_RECURSION_DECISION:
+        if scalar < 0 or scalar > 3:
+            return SUB_AGENT_POLICY_INVALID
+        var marker_present = (scalar & 1) == 1
+        var launcher_marker_is_one = (scalar & 2) == 2
+        if marker_present and launcher_marker_is_one:
+            result[unsafe_offset=0] = 2
+        elif marker_present:
+            result[unsafe_offset=0] = 1
+    elif operation == OP_SLOT_PLAN_STEP:
+        var reconcile = (scalar & 1) == 1
+        var limit = (scalar >> 2) & 127
+        var cursor = scalar >> 9
+        if (
+            scalar < 0
+            or (scalar & 2) != 0
+            or scalar >> 16 != 0
+            or limit < 1
+            or limit > SUB_AGENT_HARD_CONCURRENCY
+            or cursor < 0
+            or cursor > SUB_AGENT_HARD_CONCURRENCY
+        ):
+            return SUB_AGENT_POLICY_INVALID
+        if reconcile:
+            var retire_count = SUB_AGENT_HARD_CONCURRENCY - limit
+            if cursor < retire_count:
+                result[unsafe_offset=0] = 1
+                result[unsafe_offset=1] = limit + cursor
+            elif cursor < SUB_AGENT_HARD_CONCURRENCY:
+                result[unsafe_offset=0] = 2
+                result[unsafe_offset=1] = cursor - retire_count
+            else:
+                result[unsafe_offset=0] = 4
+        elif cursor < limit:
+            result[unsafe_offset=0] = 0
+            result[unsafe_offset=1] = cursor
+        else:
+            result[unsafe_offset=0] = 3
+            result[unsafe_offset=2] = SUB_AGENT_LIMIT_EXIT_CODE
+    elif operation == OP_SLOT_LOCK_ERROR_ACTION:
+        if scalar < 0 or scalar > 7:
+            return SUB_AGENT_POLICY_INVALID
+        var reconcile = (scalar & 1) == 1
+        var contended = (scalar & 2) == 2 or (scalar & 4) == 4
+        if contended:
+            result[unsafe_offset=0] = 1 if reconcile else 0
+        else:
+            result[unsafe_offset=0] = 2
+    elif operation == OP_CHILD_OUTCOME:
+        if scalar < 0 or scalar > 15:
+            return SUB_AGENT_POLICY_INVALID
+        var cancelled = (scalar & 1) == 1
+        var child_succeeded = (scalar & 2) == 2
+        var output_incomplete = (scalar & 4) == 4
+        var has_output = (scalar & 8) == 8
+        if cancelled:
+            result[unsafe_offset=0] = 1
+            result[unsafe_offset=1] = 130
+            result[unsafe_offset=2] = Int64(output_incomplete)
+        elif not child_succeeded:
+            result[unsafe_offset=0] = 2
+            result[unsafe_offset=2] = Int64(output_incomplete)
+        elif output_incomplete:
+            result[unsafe_offset=0] = 3
+        elif not has_output:
+            result[unsafe_offset=0] = 4
+    else:
+        return SUB_AGENT_POLICY_INVALID
+    return SUB_AGENT_POLICY_OK
+
+
+@export("prodex_sub_agent_catalog_entry_v1")
+def prodex_sub_agent_catalog_entry_v1(
+    abi_version: Int64,
+    fields_address: UInt,
+    field_count: Int64,
+    flags: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SUB_AGENT_CATALOG_ABI_VERSION:
+        return SUB_AGENT_POLICY_ABI
+    if (
+        fields_address == 0
+        or field_count != 6
+        or flags < 0
+        or flags > 7
+        or result_address == 0
+    ):
+        return SUB_AGENT_POLICY_INVALID
+    if not sub_agent_render_validate_texts(fields_address, field_count):
+        return SUB_AGENT_POLICY_INVALID
+
+    var result = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(result_address)
+    )
+    result[unsafe_offset=0] = -1
+    result[unsafe_offset=1] = 0
+    result[unsafe_offset=2] = 0
+    result[unsafe_offset=3] = 1
+    result[unsafe_offset=4] = 1
+
+    var id_bounds = rich_trim_bounds(sub_agent_render_text(fields_address, 0))
+    result[unsafe_offset=3] = Int64(id_bounds[1] == id_bounds[0])
+    for index in range(5):
+        var value = sub_agent_render_text(fields_address, Int64(index))
+        var bounds = rich_trim_bounds(value)
+        if bounds[1] > bounds[0]:
+            result[unsafe_offset=0] = Int64(index)
+            result[unsafe_offset=1] = bounds[0]
+            result[unsafe_offset=2] = bounds[1]
+            break
+
+    var selectable = True
+    if (flags & 1) == 1 or (flags & 2) == 2:
+        selectable = False
+    elif (flags & 4) == 4:
+        var visibility = sub_agent_render_text(fields_address, 5)
+        selectable = sub_agent_range_equals["list"](
+            visibility, 0, Int64(visibility.len), True
+        )
+    result[unsafe_offset=4] = Int64(selectable)
     return SUB_AGENT_POLICY_OK
 
 

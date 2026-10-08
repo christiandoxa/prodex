@@ -8,6 +8,8 @@ enum RenderOperation {
     Overlay = 0,
     EnabledDryRun = 1,
     DisabledDryRun = 2,
+    SlotLockName = 3,
+    SessionArgumentRedact = 4,
 }
 
 #[repr(C)]
@@ -195,6 +197,16 @@ pub fn render_disabled_dry_run_report(presidio_enabled: bool) -> Result<String, 
         &[i64::from(presidio_enabled)],
         &[],
     )
+}
+
+/// Returns the stable lock-file name for one planned concurrency slot.
+pub fn render_slot_lock_name(index: u16) -> Result<String, MojoError> {
+    render_template(RenderOperation::SlotLockName, &[i64::from(index)], &[])
+}
+
+/// Redacts UUID-shaped parent session ids from one dry-run argument.
+pub fn redact_session_argument(value: &str) -> Result<String, MojoError> {
+    render_template(RenderOperation::SessionArgumentRedact, &[], &[value])
 }
 
 #[cfg(test)]
@@ -391,5 +403,24 @@ Each delegated task must request a concise structured result:
             )
         };
         assert_eq!(malformed_status, 1);
+    }
+
+    #[test]
+    fn slot_names_and_session_redaction_use_the_mojo_renderer() {
+        assert_eq!(render_slot_lock_name(0).unwrap(), "slot-00.lock");
+        assert_eq!(render_slot_lock_name(9).unwrap(), "slot-09.lock");
+        assert_eq!(render_slot_lock_name(10).unwrap(), "slot-10.lock");
+        assert_eq!(render_slot_lock_name(63).unwrap(), "slot-63.lock");
+        assert_eq!(render_slot_lock_name(64), Err(MojoError::InvalidInput));
+
+        let session = "00000000-0000-7000-8000-000000000042";
+        assert_eq!(
+            redact_session_argument(&format!("before={session};after={session}")).unwrap(),
+            "before=<SESSION_UUID>;after=<SESSION_UUID>"
+        );
+        assert_eq!(
+            redact_session_argument("keep 00000000-0000-7000-8000-00000000004g").unwrap(),
+            "keep 00000000-0000-7000-8000-00000000004g"
+        );
     }
 }
