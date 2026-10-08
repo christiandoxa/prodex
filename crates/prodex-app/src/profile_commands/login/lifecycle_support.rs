@@ -24,6 +24,19 @@ struct ProfileLoginTarget {
     profile: ProfileEntry,
 }
 
+pub(super) fn auto_login_transition(
+    login_method: LoginMethod,
+    auth_label: Option<&str>,
+    existing_profile: bool,
+) -> prodex_mojo_core::profile_login_policy::AutoLoginTransition {
+    prodex_mojo_core::profile_login_policy::auto_login_transition(
+        login_method as i64,
+        auth_label,
+        existing_profile,
+    )
+    .expect("Mojo profile-login transition returned invalid output")
+}
+
 fn profile_login_provider_decision(
     provider: &ProfileProvider,
     method: LoginMethod,
@@ -283,6 +296,22 @@ mod tests {
     use std::fs;
     use std::sync::mpsc;
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn login_transition_keeps_status_precedence_at_the_app_boundary() {
+        assert_eq!(
+            auto_login_transition(LoginMethod::Status, Some("api-key"), true),
+            prodex_mojo_core::profile_login_policy::AutoLoginTransition::Status
+        );
+        assert_eq!(
+            auto_login_transition(LoginMethod::ChatGpt, Some("api-key"), false),
+            prodex_mojo_core::profile_login_policy::AutoLoginTransition::ApiKeyNew
+        );
+        assert_eq!(
+            auto_login_transition(LoginMethod::ChatGpt, Some("chatgpt"), true),
+            prodex_mojo_core::profile_login_policy::AutoLoginTransition::IdentityExisting
+        );
+    }
 
     #[test]
     fn named_login_status_uses_selected_profile_home() {

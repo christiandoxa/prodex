@@ -1,8 +1,9 @@
 #![cfg(feature = "mojo-runtime")]
 
 use prodex_mojo_core::profile_login_policy::{
-    AuthCommitPlan, AutoLoginRoute, LoginExecution, LoginTargetValidation, ProviderLoginValidation,
-    auth_commit_plan, auto_login_route, login_execution, validate_login_target,
+    AuthCommitPlan, AutoLoginRoute, AutoLoginTransition, LoginCandidateSelection, LoginExecution,
+    LoginTargetValidation, ProviderLoginValidation, auth_commit_plan, auto_login_route,
+    auto_login_transition, login_execution, select_login_candidate, validate_login_target,
     validate_provider_login,
 };
 
@@ -71,5 +72,71 @@ fn profile_login_policy_is_real_mojo_at_the_rust_boundary() {
     assert_eq!(
         auto_login_route(2, Some("api-key")).unwrap(),
         AutoLoginRoute::ApiKey
+    );
+}
+
+#[test]
+fn profile_login_transition_matrix_keeps_precedence_and_existing_state() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    for existing in [false, true] {
+        assert_eq!(
+            auto_login_transition(6, Some("api-key"), existing).unwrap(),
+            AutoLoginTransition::Status
+        );
+        assert_eq!(
+            auto_login_transition(4, Some("api-key"), existing).unwrap(),
+            AutoLoginTransition::Anthropic
+        );
+        assert_eq!(
+            auto_login_transition(0, None, existing).unwrap(),
+            AutoLoginTransition::AuthLabelRequired
+        );
+        assert_eq!(
+            auto_login_transition(0, Some("api-key"), existing).unwrap(),
+            if existing {
+                AutoLoginTransition::ApiKeyExisting
+            } else {
+                AutoLoginTransition::ApiKeyNew
+            }
+        );
+        assert_eq!(
+            auto_login_transition(0, Some("chatgpt"), existing).unwrap(),
+            if existing {
+                AutoLoginTransition::IdentityExisting
+            } else {
+                AutoLoginTransition::IdentityNew
+            }
+        );
+    }
+
+    assert!(auto_login_transition(-1, None, false).is_err());
+    assert!(auto_login_transition(7, None, false).is_err());
+}
+
+#[test]
+fn profile_login_candidate_order_and_duplicate_count_are_mojo_owned() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    assert_eq!(
+        select_login_candidate(&[false, true, true, false]).unwrap(),
+        LoginCandidateSelection {
+            first_match: Some(1),
+            match_count: 2,
+        }
+    );
+    assert_eq!(
+        select_login_candidate(&[true, false, true]).unwrap(),
+        LoginCandidateSelection {
+            first_match: Some(0),
+            match_count: 2,
+        }
+    );
+    assert_eq!(
+        select_login_candidate(&[]).unwrap(),
+        LoginCandidateSelection {
+            first_match: None,
+            match_count: 0,
+        }
     );
 }

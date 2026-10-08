@@ -13,6 +13,8 @@ enum ProfileLoginPolicyOperation {
     AuthCommit = 3,
     AutoRoute = 4,
     MethodRoute = 5,
+    AutoTransition = 6,
+    CandidateSelection = 7,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -55,6 +57,23 @@ pub enum AutoLoginRoute {
     ApiKey,
     Identity,
     AuthLabelRequired,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoLoginTransition {
+    Status,
+    Anthropic,
+    AuthLabelRequired,
+    ApiKeyExisting,
+    ApiKeyNew,
+    IdentityExisting,
+    IdentityNew,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LoginCandidateSelection {
+    pub first_match: Option<usize>,
+    pub match_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -217,6 +236,68 @@ pub fn auto_login_route(
     }
 }
 
+/// Classifies the post-login state transition after Rust has checked whether a profile exists.
+pub fn auto_login_transition(
+    login_method: i64,
+    auth_label: Option<&str>,
+    existing_profile: bool,
+) -> Result<AutoLoginTransition, MojoError> {
+    let output = call(
+        ProfileLoginPolicyOperation::AutoTransition,
+        auth_label,
+        login_method,
+        i64::from(auth_label.is_some()),
+        i64::from(existing_profile),
+    )?;
+    match output[0] {
+        0 => Ok(AutoLoginTransition::Status),
+        1 => Ok(AutoLoginTransition::Anthropic),
+        4 => Ok(AutoLoginTransition::AuthLabelRequired),
+        5 => Ok(AutoLoginTransition::ApiKeyExisting),
+        6 => Ok(AutoLoginTransition::ApiKeyNew),
+        7 => Ok(AutoLoginTransition::IdentityExisting),
+        8 => Ok(AutoLoginTransition::IdentityNew),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Selects the first matching profile in the caller's stable profile order.
+pub fn select_login_candidate(match_flags: &[bool]) -> Result<LoginCandidateSelection, MojoError> {
+    let mut encoded = String::with_capacity(match_flags.len());
+    for matched in match_flags {
+        encoded.push(if *matched { '1' } else { '0' });
+    }
+    let output = call(
+        ProfileLoginPolicyOperation::CandidateSelection,
+        (!encoded.is_empty()).then_some(encoded.as_str()),
+        0,
+        0,
+        0,
+    )?;
+    let match_count = usize::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
+    if match_count > match_flags.len() {
+        return Err(MojoError::InvalidOutput);
+    }
+    let first_match = match output[0] {
+        -1 => None,
+        index if index >= 0 => {
+            let index = usize::try_from(index).map_err(|_| MojoError::InvalidOutput)?;
+            if index >= match_flags.len() {
+                return Err(MojoError::InvalidOutput);
+            }
+            Some(index)
+        }
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    if first_match.is_none() != (match_count == 0) || output[2] != i64::from(match_count > 1) {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(LoginCandidateSelection {
+        first_match,
+        match_count,
+    })
+}
+
 /// Chooses the credential/process boundary without moving credential bytes into Mojo.
 pub fn login_method_plan(
     login_method: i64,
@@ -297,6 +378,43 @@ mod tests {
                 route: LoginMethodRoute::DirectApiKey,
                 allows_base_url: true,
             }
+        );
+        assert_eq!(
+            auto_login_transition(6, None, false).unwrap(),
+            AutoLoginTransition::Status
+        );
+        assert_eq!(
+            auto_login_transition(0, Some("api-key"), true).unwrap(),
+            AutoLoginTransition::ApiKeyExisting
+        );
+        assert_eq!(
+            auto_login_transition(0, Some("chatgpt"), false).unwrap(),
+            AutoLoginTransition::IdentityNew
+        );
+        assert_eq!(
+            select_login_candidate(&[false, true, true, false]).unwrap(),
+            LoginCandidateSelection {
+                first_match: Some(1),
+                match_count: 2,
+            }
+        );
+        assert_eq!(
+            select_login_candidate(&[]).unwrap(),
+            LoginCandidateSelection {
+                first_match: None,
+                match_count: 0,
+            }
+        );
+        assert!(call(ProfileLoginPolicyOperation::AutoTransition, None, 0, 2, 0).is_err());
+        assert!(
+            call(
+                ProfileLoginPolicyOperation::CandidateSelection,
+                Some("0102"),
+                0,
+                0,
+                0,
+            )
+            .is_err()
         );
     }
 }

@@ -6,8 +6,8 @@ use super::super::import_export::{
 };
 use super::super::manage::print_profile_panel;
 use super::super::write_secret_text_file;
-use super::lifecycle_support::validate_api_key_profile_provider;
-use super::{default_api_key_profile_name, unique_profile_name_for_slug};
+use super::lifecycle_support::{auto_login_transition, validate_api_key_profile_provider};
+use super::{LoginMethod, default_api_key_profile_name, unique_profile_name_for_slug};
 use crate::{
     AppPaths, AppState, AppStateIoExt, ProfileEntry, ProfileProvider, activate_profile,
     create_codex_home_if_missing, managed_profile_home_path, persist_login_home,
@@ -33,27 +33,35 @@ pub(super) fn finish_auto_login_for_api_key_profile(
         .map(ToOwned::to_owned)
         .unwrap_or_else(|| default_api_key_profile_name(openai_base_url));
 
-    if state.profiles.contains_key(&profile_name) {
-        finish_api_key_login_for_existing_profile(
-            paths,
-            state,
-            login_home,
-            &profile_name,
-            openai_base_url,
-            openai_base_url_specified,
-            auth_json,
-        )?;
-        return Ok(());
+    match auto_login_transition(
+        LoginMethod::ApiKey,
+        Some("api-key"),
+        state.profiles.contains_key(&profile_name),
+    ) {
+        prodex_mojo_core::profile_login_policy::AutoLoginTransition::ApiKeyExisting => {
+            finish_api_key_login_for_existing_profile(
+                paths,
+                state,
+                login_home,
+                &profile_name,
+                openai_base_url,
+                openai_base_url_specified,
+                auth_json,
+            )?;
+        }
+        prodex_mojo_core::profile_login_policy::AutoLoginTransition::ApiKeyNew => {
+            finish_api_key_login_for_new_profile(
+                paths,
+                state,
+                login_home,
+                &profile_name,
+                openai_base_url,
+                openai_base_url_specified,
+            )?;
+        }
+        route => unreachable!("Mojo API-key transition returned unexpected route {route:?}"),
     }
-
-    finish_api_key_login_for_new_profile(
-        paths,
-        state,
-        login_home,
-        &profile_name,
-        openai_base_url,
-        openai_base_url_specified,
-    )
+    Ok(())
 }
 
 fn finish_api_key_login_for_existing_profile(
