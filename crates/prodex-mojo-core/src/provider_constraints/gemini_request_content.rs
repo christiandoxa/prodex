@@ -21,6 +21,7 @@ pub enum GeminiRequestContentOperation {
     ToolConfig = 9,
     BuiltinTool = 10,
     SystemInstructionFromRequest = 11,
+    ContinuationMetadata = 12,
 }
 
 impl GeminiRequestContentOperation {
