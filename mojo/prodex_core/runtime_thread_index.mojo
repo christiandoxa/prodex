@@ -14,10 +14,14 @@ from parsed_json import (
 )
 from rich_text import rich_view_ptr, rich_view_valid
 from rich_types import ProdexRichStringView
+from session_selector import session_selector_is_full_id
 
 comptime THREAD_INDEX_ABI_VERSION: Int64 = 1
 comptime THREAD_INDEX_MAX_JSON_BYTES: Int64 = 64 * 1024 * 1024
 comptime THREAD_INDEX_MAX_JSON_NODES: Int64 = 1_048_576
+comptime THREAD_INDEX_MAX_SESSION_STEM_BYTES: Int64 = 4_096
+comptime THREAD_INDEX_SESSION_ID_BYTES: Int64 = 36
+comptime THREAD_INDEX_MAX_SESSION_ID_BYTES: Int64 = 45
 comptime THREAD_INDEX_MAX_SEEN_CURSORS: Int64 = 65_536
 comptime THREAD_INDEX_MAX_SEEN_CURSOR_BYTES: Int64 = 16 * 1024 * 1024
 
@@ -346,6 +350,109 @@ def thread_index_response_error(
     if not thread_index_output_error(output, capacity, written, result, message):
         return 3
     result[unsafe_offset=11] = written[]
+    return 0
+
+
+def thread_index_uuid_parse_str(value: ProdexRichStringView) -> Bool:
+    var length = Int64(value.len)
+    var source = rich_view_ptr(value)
+    if length == 32:
+        for index in range(32):
+            var byte = source[unsafe_offset=index]
+            if not (
+                byte >= 48 and byte <= 57
+                or byte >= 65 and byte <= 70
+                or byte >= 97 and byte <= 102
+            ):
+                return False
+        return True
+    if length == THREAD_INDEX_SESSION_ID_BYTES:
+        return session_selector_is_full_id(value)
+    if length == 38:
+        if source[unsafe_offset=0] != 123 or source[unsafe_offset=37] != 125:
+            return False
+        return session_selector_is_full_id(
+            ProdexRichStringView(value.ptr + 1, UInt(THREAD_INDEX_SESSION_ID_BYTES))
+        )
+    if length == THREAD_INDEX_MAX_SESSION_ID_BYTES:
+        var prefix = StringSlice("urn:uuid:").unsafe_ptr()
+        for index in range(9):
+            if source[unsafe_offset=index] != prefix[unsafe_offset=index]:
+                return False
+        return session_selector_is_full_id(
+            ProdexRichStringView(value.ptr + 9, UInt(THREAD_INDEX_SESSION_ID_BYTES))
+        )
+    return False
+
+
+def thread_index_uuid_candidate(
+    stem: ProdexRichStringView,
+    start: Int64,
+    length: Int64,
+) -> Bool:
+    var end = start + length
+    if start < 0 or end > Int64(stem.len):
+        return False
+    var source = rich_view_ptr(stem)
+    var start_boundary = start == 0
+    if start > 0:
+        start_boundary = source[unsafe_offset=start - 1] == 45
+    var end_boundary = end == Int64(stem.len)
+    if end < Int64(stem.len):
+        end_boundary = source[unsafe_offset=end] == 45
+    return (
+        start_boundary
+        and end_boundary
+        and thread_index_uuid_parse_str(
+            ProdexRichStringView(stem.ptr + UInt(start), UInt(length))
+        )
+    )
+
+
+@export("prodex_runtime_thread_index_session_id_v1")
+def prodex_runtime_thread_index_session_id_v1(
+    abi_version: Int64,
+    stem_address: UInt,
+    stem_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != THREAD_INDEX_ABI_VERSION:
+        return 4
+    if (
+        stem_length < 0
+        or stem_length > THREAD_INDEX_MAX_SESSION_STEM_BYTES
+        or output_capacity < THREAD_INDEX_MAX_SESSION_ID_BYTES
+        or output_capacity > THREAD_INDEX_MAX_SESSION_STEM_BYTES
+        or output_address == 0
+        or result_address == 0
+        or stem_length > 0 and stem_address == 0
+    ):
+        return 1
+    var stem = ProdexRichStringView(stem_address, UInt(stem_length))
+    if not rich_view_valid(stem, THREAD_INDEX_MAX_SESSION_STEM_BYTES):
+        return 2
+    var output = thread_index_output_ptr(output_address)
+    var result = thread_index_result_ptr(result_address)
+    result[unsafe_offset=0] = 0
+    result[unsafe_offset=1] = 0
+    var source = rich_view_ptr(stem)
+    if thread_index_uuid_parse_str(stem):
+        for index in range(stem_length):
+            output[unsafe_offset=index] = source[unsafe_offset=index]
+        result[unsafe_offset=0] = 1
+        result[unsafe_offset=1] = stem_length
+        return 0
+    var start: Int64 = 0
+    while start <= stem_length:
+        if thread_index_uuid_candidate(stem, start, THREAD_INDEX_SESSION_ID_BYTES):
+            for index in range(THREAD_INDEX_SESSION_ID_BYTES):
+                output[unsafe_offset=index] = source[unsafe_offset=start + index]
+            result[unsafe_offset=0] = 1
+            result[unsafe_offset=1] = THREAD_INDEX_SESSION_ID_BYTES
+            return 0
+        start += 1
     return 0
 
 

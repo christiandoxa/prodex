@@ -3,7 +3,7 @@
 
 use prodex_mojo_core::json::{JsonKind, JsonNode};
 use prodex_mojo_core::runtime::thread_index::{
-    ThreadIndexProtocol, ThreadIndexProtocolStep, ThreadIndexScope,
+    ThreadIndexProtocol, ThreadIndexProtocolStep, ThreadIndexScope, session_id_from_stem,
 };
 
 fn empty_result_nodes() -> [JsonNode<'static>; 3] {
@@ -88,4 +88,43 @@ fn runtime_only_json_preserves_protocol_error_mapping() {
         panic!("EOF must not be mistaken for successful reconciliation");
     };
     assert!(message.contains("stopped"));
+}
+
+#[test]
+fn runtime_only_thread_index_session_identity_is_bounded_and_exact() {
+    let session_id = "01900000-0000-7000-8000-000000000005";
+    assert_eq!(
+        session_id_from_stem(&format!("rollout-{session_id}-suffix")).unwrap(),
+        Some(session_id.to_string())
+    );
+    assert_eq!(
+        session_id_from_stem(&format!("rollout-{}", session_id.to_uppercase())).unwrap(),
+        Some(session_id.to_uppercase())
+    );
+    let simple_id = session_id.replace('-', "");
+    assert_eq!(
+        session_id_from_stem(&simple_id).unwrap(),
+        Some(simple_id.clone())
+    );
+    let braced_id = format!("{{{session_id}}}");
+    assert_eq!(session_id_from_stem(&braced_id).unwrap(), Some(braced_id));
+    let urn_id = format!("urn:uuid:{session_id}");
+    assert_eq!(session_id_from_stem(&urn_id).unwrap(), Some(urn_id));
+    assert_eq!(
+        session_id_from_stem(&format!("rollout-{session_id}tail")).unwrap(),
+        None
+    );
+    assert_eq!(
+        session_id_from_stem(&format!("rollout-{simple_id}-suffix")).unwrap(),
+        None
+    );
+    assert_eq!(
+        session_id_from_stem("rollout-01900000-0000-7000-8000-00000000000g").unwrap(),
+        None
+    );
+    assert_eq!(session_id_from_stem("").unwrap(), None);
+    assert_eq!(
+        session_id_from_stem(&"x".repeat(4_097)),
+        Err(prodex_mojo_core::MojoError::Capacity)
+    );
 }

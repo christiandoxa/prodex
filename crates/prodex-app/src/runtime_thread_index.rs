@@ -219,7 +219,7 @@ pub(crate) fn latest_thread_index_state(
     child: &ChildProcessPlan,
     session_file: &Path,
 ) -> Result<LatestThreadIndexState> {
-    let Some(session_id) = codex_session_id_from_path(session_file) else {
+    let Some(session_id) = codex_session_id_from_path(session_file)? else {
         return Ok(LatestThreadIndexState::Unavailable);
     };
     let sqlite_home = child
@@ -459,21 +459,18 @@ fn plain_rollout_path(path: &Path) -> PathBuf {
         .map_or_else(|| path.to_path_buf(), |name| path.with_file_name(name))
 }
 
-fn codex_session_id_from_path(path: &Path) -> Option<String> {
-    let file_name = path.file_name()?.to_str()?;
+fn codex_session_id_from_path(path: &Path) -> Result<Option<String>> {
+    let Some(file_name) = path.file_name().and_then(OsStr::to_str) else {
+        return Ok(None);
+    };
     let file_name = file_name
         .strip_suffix(".jsonl.zst")
         .or_else(|| file_name.strip_suffix(".jsonl"))
         .unwrap_or(file_name);
-    let stem = Path::new(file_name).file_stem()?.to_str()?;
-    if uuid::Uuid::parse_str(stem).is_ok() {
-        return Some(stem.to_string());
-    }
-    stem.split('-')
-        .collect::<Vec<_>>()
-        .windows(5)
-        .map(|parts| parts.join("-"))
-        .find(|candidate| uuid::Uuid::parse_str(candidate).is_ok())
+    let Some(stem) = Path::new(file_name).file_stem().and_then(OsStr::to_str) else {
+        return Ok(None);
+    };
+    mojo_result(thread_index_mojo::session_id_from_stem(stem))
 }
 
 pub(crate) fn repair_dirty_thread_index(paths: &AppPaths, child: &ChildProcessPlan) {
