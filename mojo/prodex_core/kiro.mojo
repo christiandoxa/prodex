@@ -83,6 +83,9 @@ comptime KIRO_RESPONSE_HAS_TOOL_CALLS: Int64 = 50
 comptime KIRO_RAW_RESPONSES_ITEMS_FROM_CHAT_MESSAGE: Int64 = 51
 comptime KIRO_RESPONSE_FINAL_EVENT: Int64 = 52
 comptime KIRO_PROMPT_FROM_CHAT_MESSAGES: Int64 = 53
+comptime KIRO_SEMANTIC_COMPACT_INSTRUCTIONS: Int64 = 54
+comptime KIRO_SEMANTIC_COMPACT_REQUEST: Int64 = 55
+comptime KIRO_SEMANTIC_COMPACT_SUMMARY: Int64 = 56
 
 comptime KIRO_REQUEST_VALIDATION_CHAT: Int64 = 1
 comptime KIRO_REQUEST_VALIDATION_RESPONSES: Int64 = 2
@@ -1163,11 +1166,231 @@ def kiro_write_request_validation_error(
         return kiro_put_literal(writer, StringSlice("unsupported_reasoning_effort\nKiro ACP does not support reasoning effort `")) and kiro_put_view(writer, input.reason) and kiro_put_byte(writer, 96)
     return kiro_put_literal(writer, StringSlice("invalid_request\nKiro request capability validation returned an unknown reason"))
 
+def kiro_raw_semantic_compact_request(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    var document_start = kiro_json_skip_ws(view, 0, Int64(view.len))
+    var document_end = kiro_json_value_end(view, document_start, Int64(view.len), 0)
+    if (
+        document_end < 0
+        or kiro_json_skip_ws(view, document_end, Int64(view.len)) != Int64(view.len)
+    ):
+        return kiro_put_literal(writer, StringSlice("Eparse"))
+    if deepseek_json_byte(view, document_start) != 123:
+        return kiro_put_literal(writer, StringSlice("Eobject"))
+    var root = kiro_raw_root(view)
+    if root[0] < 0:
+        return kiro_put_literal(writer, StringSlice("Eparse"))
+    var input = kiro_raw_member(view, root, StringSlice("input"))
+    if not kiro_raw_present(input) or deepseek_json_byte(view, input[0]) != 91:
+        return kiro_put_literal(writer, StringSlice("Einput"))
+
+    if not kiro_put_byte(writer, 123):
+        return False
+    var first: Int64 = 1
+    var first_ptr = Pointer(to=first)
+    var wrote_input = False
+    var wrote_stream = False
+    var wrote_store = False
+    var cursor = deepseek_json_skip_ws(view, root[0] + 1, root[1] - 1)
+    while cursor < root[1] - 1:
+        var key_start = cursor
+        var key_end = deepseek_json_string_end(view, key_start, root[1] - 1)
+        if key_end < 0:
+            return False
+        cursor = deepseek_json_skip_ws(view, key_end, root[1] - 1)
+        if cursor >= root[1] - 1 or deepseek_json_byte(view, cursor) != 58:
+            return False
+        var value_start = deepseek_json_skip_ws(view, cursor + 1, root[1] - 1)
+        var value_end = deepseek_json_value_end(view, value_start, root[1] - 1, 0)
+        if value_end < 0:
+            return False
+
+        var drop = (
+            kiro_raw_key_is(view, key_start, key_end, StringSlice("include"))
+            or kiro_raw_key_is(view, key_start, key_end, StringSlice("previous_response_id"))
+            or kiro_raw_key_is(view, key_start, key_end, StringSlice("prompt_cache_key"))
+            or kiro_raw_key_is(view, key_start, key_end, StringSlice("text"))
+            or kiro_raw_key_is(view, key_start, key_end, StringSlice("tool_choice"))
+            or kiro_raw_key_is(view, key_start, key_end, StringSlice("tools"))
+        )
+        if kiro_raw_key_is(view, key_start, key_end, StringSlice("input")):
+            if first == 0 and not kiro_put_byte(writer, 44):
+                return False
+            first = 0
+            wrote_input = True
+            if (
+                not kiro_put_view_range(writer, view, key_start, key_end)
+                or not kiro_put_byte(writer, 58)
+                or not kiro_put_byte(writer, 91)
+            ):
+                return False
+            var item_cursor = deepseek_json_skip_ws(view, input[0] + 1, input[1] - 1)
+            if item_cursor < input[1] - 1:
+                if (
+                    not kiro_put_view_range(writer, view, input[0] + 1, input[1] - 1)
+                    or not kiro_put_byte(writer, 44)
+                ):
+                    return False
+            if (
+                not kiro_put_literal(
+                    writer,
+                    StringSlice('{"type":"message","role":"user","content":[{"type":"input_text","text":'),
+                )
+                or not kiro_put_semantic_compact_instructions(writer)
+                or not kiro_put_literal(writer, StringSlice("}]}"))
+                or not kiro_put_byte(writer, 93)
+            ):
+                return False
+        elif drop:
+            pass
+        elif (
+            kiro_raw_key_is(view, key_start, key_end, StringSlice("stream"))
+            or kiro_raw_key_is(view, key_start, key_end, StringSlice("store"))
+        ):
+            if first == 0 and not kiro_put_byte(writer, 44):
+                return False
+            first = 0
+            if (
+                not kiro_put_view_range(writer, view, key_start, key_end)
+                or not kiro_put_literal(writer, StringSlice(":"))
+                or not kiro_put_literal(writer, StringSlice("false"))
+            ):
+                return False
+            if kiro_raw_key_is(view, key_start, key_end, StringSlice("stream")):
+                wrote_stream = True
+            else:
+                wrote_store = True
+        elif not kiro_raw_put_member(
+            writer,
+            view,
+            key_start,
+            key_end,
+            value_start,
+            value_end,
+            first_ptr,
+        ):
+            return False
+
+        cursor = deepseek_json_skip_ws(view, value_end, root[1] - 1)
+        if cursor < root[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, root[1] - 1)
+            continue
+        if cursor != root[1] - 1:
+            return False
+        break
+    if not wrote_input:
+        return kiro_put_literal(writer, StringSlice("Einput"))
+    if not wrote_stream:
+        if first == 0 and not kiro_put_byte(writer, 44):
+            return False
+        first = 0
+        if not kiro_put_literal(writer, StringSlice("\"stream\":false")):
+            return False
+    if not wrote_store:
+        if first == 0 and not kiro_put_byte(writer, 44):
+            return False
+        if not kiro_put_literal(writer, StringSlice("\"store\":false")):
+            return False
+    return kiro_put_byte(writer, 125)
+
+def kiro_raw_semantic_compact_summary(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+    view: ProdexRichStringView,
+) -> Bool:
+    var document_start = kiro_json_skip_ws(view, 0, Int64(view.len))
+    var document_end = kiro_json_value_end(view, document_start, Int64(view.len), 0)
+    if (
+        document_end < 0
+        or kiro_json_skip_ws(view, document_end, Int64(view.len)) != Int64(view.len)
+    ):
+        return kiro_put_literal(writer, StringSlice("Eoutput"))
+    var root = kiro_raw_root(view)
+    if root[0] < 0:
+        return kiro_put_literal(writer, StringSlice("Eoutput"))
+    var output = kiro_raw_member(view, root, StringSlice("output"))
+    if not kiro_raw_present(output) or deepseek_json_byte(view, output[0]) != 91:
+        return kiro_put_literal(writer, StringSlice("Eoutput"))
+    var cursor = deepseek_json_skip_ws(view, output[0] + 1, output[1] - 1)
+    while cursor < output[1] - 1:
+        var item_end = deepseek_json_value_end(view, cursor, output[1] - 1, 0)
+        if item_end < 0:
+            return kiro_put_literal(writer, StringSlice("Esummary"))
+        if deepseek_json_byte(view, cursor) == 123:
+            var item = Array[Int64, 2](fill=-1)
+            item[0] = cursor
+            item[1] = item_end
+            var kind = kiro_raw_member(view, item, StringSlice("type"))
+            if kiro_raw_present(kind) and deepseek_json_raw_equals(
+                view, kind[0], kind[1], StringSlice("message")
+            ):
+                var content = kiro_raw_member(view, item, StringSlice("content"))
+                if not kiro_raw_present(content) or deepseek_json_byte(view, content[0]) != 91:
+                    return kiro_put_literal(writer, StringSlice("Esummary"))
+                var content_cursor = deepseek_json_skip_ws(view, content[0] + 1, content[1] - 1)
+                while content_cursor < content[1] - 1:
+                    var content_end = deepseek_json_value_end(view, content_cursor, content[1] - 1, 0)
+                    if content_end < 0:
+                        return kiro_put_literal(writer, StringSlice("Esummary"))
+                    if deepseek_json_byte(view, content_cursor) == 123:
+                        var content_item = Array[Int64, 2](fill=-1)
+                        content_item[0] = content_cursor
+                        content_item[1] = content_end
+                        var text = kiro_raw_member(view, content_item, StringSlice("text"))
+                        if kiro_raw_present(text) and deepseek_json_byte(view, text[0]) == 34:
+                            var trimmed = kiro_raw_string_trimmed_bounds(view, text)
+                            if trimmed[0] >= 0 and trimmed[1] > trimmed[0]:
+                                return (
+                                    kiro_put_byte(writer, 34)
+                                    and kiro_put_view_range(writer, view, trimmed[0], trimmed[1])
+                                    and kiro_put_byte(writer, 34)
+                                )
+                            return kiro_put_literal(writer, StringSlice("Esummary"))
+                    content_cursor = deepseek_json_skip_ws(view, content_end, content[1] - 1)
+                    if content_cursor < content[1] - 1 and deepseek_json_byte(view, content_cursor) == 44:
+                        content_cursor = deepseek_json_skip_ws(view, content_cursor + 1, content[1] - 1)
+                        continue
+                    if content_cursor != content[1] - 1:
+                        return kiro_put_literal(writer, StringSlice("Esummary"))
+                    break
+                return kiro_put_literal(writer, StringSlice("Esummary"))
+        cursor = deepseek_json_skip_ws(view, item_end, output[1] - 1)
+        if cursor < output[1] - 1 and deepseek_json_byte(view, cursor) == 44:
+            cursor = deepseek_json_skip_ws(view, cursor + 1, output[1] - 1)
+            continue
+        if cursor != output[1] - 1:
+            return kiro_put_literal(writer, StringSlice("Esummary"))
+        break
+    return kiro_put_literal(writer, StringSlice("Esummary"))
+
+def kiro_put_semantic_compact_instructions(
+    writer: Pointer[mut=True, KiroResponseWriter, _],
+) -> Bool:
+    return (
+        kiro_put_byte(writer, 34)
+        and kiro_put_literal(
+            writer,
+            StringSlice("Compact the supplied coding-agent transcript into one durable continuation summary. Preserve the user's goals, repository instructions, decisions, files changed, exact identifiers, commands and test results, unresolved failures, current worktree state, and the next concrete steps. Remove redundant narration and obsolete intermediate reasoning. Do not call tools. Return only the continuation summary, with no preamble or completion claim."),
+        )
+        and kiro_put_byte(writer, 34)
+    )
+
 def kiro_write_operation(
     writer: Pointer[mut=True, KiroResponseWriter, _],
     input: ProdexKiroKernelInput,
 ) -> Bool:
     var operation = input.operation
+    if operation == KIRO_SEMANTIC_COMPACT_INSTRUCTIONS:
+        return kiro_put_semantic_compact_instructions(writer)
+    if operation == KIRO_SEMANTIC_COMPACT_REQUEST:
+        if input.input_present == 0:
+            return kiro_put_literal(writer, StringSlice("Eparse"))
+        return kiro_raw_semantic_compact_request(writer, input.input)
+    if operation == KIRO_SEMANTIC_COMPACT_SUMMARY:
+        if input.input_present == 0:
+            return kiro_put_literal(writer, StringSlice("Esummary"))
+        return kiro_raw_semantic_compact_summary(writer, input.input)
     if operation == KIRO_REQUEST_VALIDATION_ERROR:
         return kiro_write_request_validation_error(writer, input)
     if operation == KIRO_ANTHROPIC_REQUEST_REWRITE:

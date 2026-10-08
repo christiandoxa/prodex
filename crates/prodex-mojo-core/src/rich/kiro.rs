@@ -60,6 +60,9 @@ pub enum KiroKernelOperation {
     RawResponsesItemsFromChatMessage = 51,
     ResponseFinalEvent = 52,
     PromptFromChatMessages = 53,
+    SemanticCompactInstructions = 54,
+    SemanticCompactRequest = 55,
+    SemanticCompactSummary = 56,
 }
 
 /// Inputs for one bounded Kiro JSON or text transformation.
@@ -409,7 +412,31 @@ fn operation_code(operation: KiroKernelOperation) -> i64 {
         KiroKernelOperation::RawResponsesItemsFromChatMessage => 51,
         KiroKernelOperation::ResponseFinalEvent => 52,
         KiroKernelOperation::PromptFromChatMessages => 53,
+        KiroKernelOperation::SemanticCompactInstructions => 54,
+        KiroKernelOperation::SemanticCompactRequest => 55,
+        KiroKernelOperation::SemanticCompactSummary => 56,
     }
+}
+
+/// Returns the Mojo-owned Kiro semantic-compaction instruction JSON string.
+pub fn kiro_semantic_compact_instructions() -> Result<Vec<u8>, MojoError> {
+    kiro_kernel(KiroKernelInput::new(
+        KiroKernelOperation::SemanticCompactInstructions,
+    ))
+}
+
+/// Applies the Mojo-owned Kiro semantic-compaction request policy.
+pub fn kiro_semantic_compact_request_json(input: &str) -> Result<Vec<u8>, MojoError> {
+    let mut kernel_input = KiroKernelInput::new(KiroKernelOperation::SemanticCompactRequest);
+    kernel_input.input = Some(input);
+    kiro_kernel(kernel_input)
+}
+
+/// Extracts the Mojo-owned Kiro semantic-compaction summary JSON string.
+pub fn kiro_semantic_compact_summary_json(input: &str) -> Result<Vec<u8>, MojoError> {
+    let mut kernel_input = KiroKernelInput::new(KiroKernelOperation::SemanticCompactSummary);
+    kernel_input.input = Some(input);
+    kiro_kernel(kernel_input)
 }
 
 fn input_bytes(input: &KiroKernelInput<'_>) -> Result<usize, MojoError> {
