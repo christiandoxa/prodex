@@ -1628,6 +1628,7 @@ comptime GEMINI_REQUEST_CONTENT_TOOL_DECLARATION: Int64 = 8
 comptime GEMINI_REQUEST_CONTENT_TOOL_CONFIG: Int64 = 9
 comptime GEMINI_REQUEST_CONTENT_BUILTIN_TOOL: Int64 = 10
 comptime GEMINI_REQUEST_CONTENT_SYSTEM_INSTRUCTION_FROM_REQUEST: Int64 = 11
+comptime GEMINI_REQUEST_CONTENT_CONTINUATION_METADATA: Int64 = 12
 
 @fieldwise_init
 struct GeminiRequestContentStringView(Copyable):
@@ -2853,6 +2854,58 @@ def gemini_request_content_write_function_schema(
     return gemini_request_content_put_byte(writer, 125)
 
 
+# Canonical Gemini continuation extraction: Mojo selects metadata keys, JSON
+# types, and provenance, then Rust materializes selected original values.
+def gemini_request_content_write_continuation_metadata(
+    headers: GeminiRequestContentStringView,
+    request: GeminiRequestContentStringView,
+    writer: Pointer[mut=True, GeminiRequestContentWriter, _],
+) -> Bool:
+    if not gemini_request_content_fragment_valid(headers) or not gemini_request_content_fragment_valid(request):
+        return False
+    var headers_start = gemini_request_content_skip_ws(headers, 0, Int64(headers.len))
+    var headers_end = gemini_request_content_value_end(headers, headers_start, Int64(headers.len), 0)
+    var request_start = gemini_request_content_skip_ws(request, 0, Int64(request.len))
+    var request_end = gemini_request_content_value_end(request, request_start, Int64(request.len), 0)
+    if headers_end < 0 or request_end < 0 or gemini_request_content_byte(headers, headers_start) != 123 or gemini_request_content_byte(request, request_start) != 123:
+        return False
+
+    var previous = gemini_request_content_object_member(
+        request, request_start, request_end, StringSlice("previous_response_id")
+    )
+    var session = gemini_request_content_object_member(
+        headers, headers_start, headers_end, StringSlice("session_id")
+    )
+    var turn = gemini_request_content_object_member(
+        headers, headers_start, headers_end, StringSlice("x-codex-turn-state")
+    )
+    var has_previous = previous[0] >= 0 and gemini_request_content_byte(request, previous[0]) == 116
+    var has_session = session[0] >= 0 and gemini_request_content_byte(headers, session[0]) == 116
+    var has_turn = turn[0] >= 0 and gemini_request_content_byte(headers, turn[0]) == 116
+    if not has_previous and not has_session and not has_turn:
+        return gemini_request_content_put_literal(writer, StringSlice("null"))
+
+    if not gemini_request_content_put_byte(writer, 123):
+        return False
+    var first = True
+    if has_previous:
+        if not gemini_request_content_put_literal(writer, StringSlice("\"previous_response_id\":\"request\"")):
+            return False
+        first = False
+    if has_session:
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        if not gemini_request_content_put_literal(writer, StringSlice("\"session_id\":\"headers\"")):
+            return False
+        first = False
+    if has_turn:
+        if not first and not gemini_request_content_put_byte(writer, 44):
+            return False
+        if not gemini_request_content_put_literal(writer, StringSlice("\"x-codex-turn-state\":\"headers\"")):
+            return False
+    return gemini_request_content_put_byte(writer, 125)
+
+
 def gemini_request_content_write_operation(
     writer: Pointer[mut=True, GeminiRequestContentWriter, _],
     input: GeminiRequestContentInput,
@@ -2862,6 +2915,8 @@ def gemini_request_content_write_operation(
     var tertiary = input.tertiary.copy()
     if input.operation == GEMINI_REQUEST_CONTENT_SYSTEM_INSTRUCTION_FROM_REQUEST:
         return gemini_request_content_write_system_instruction_from_request(primary, writer)
+    if input.operation == GEMINI_REQUEST_CONTENT_CONTINUATION_METADATA:
+        return gemini_request_content_write_continuation_metadata(primary, secondary, writer)
     if input.operation == GEMINI_REQUEST_CONTENT_SANITIZE_SCHEMA:
         var end = Int64(primary.len)
         var value_end = gemini_request_content_value_end(primary, 0, end, 0)
@@ -2923,7 +2978,7 @@ def gemini_request_content_write_operation(
 
 
 def gemini_request_content_input_valid(input: GeminiRequestContentInput) -> Bool:
-    if input.operation < GEMINI_REQUEST_CONTENT_SANITIZE_SCHEMA or input.operation > GEMINI_REQUEST_CONTENT_SYSTEM_INSTRUCTION_FROM_REQUEST:
+    if input.operation < GEMINI_REQUEST_CONTENT_SANITIZE_SCHEMA or input.operation > GEMINI_REQUEST_CONTENT_CONTINUATION_METADATA:
         return False
     if input.primary_present < 0 or input.primary_present > 1 or input.secondary_present < 0 or input.secondary_present > 1 or input.tertiary_present < 0 or input.tertiary_present > 1 or input.quaternary_present < 0 or input.quaternary_present > 1:
         return False
@@ -2934,6 +2989,11 @@ def gemini_request_content_input_valid(input: GeminiRequestContentInput) -> Bool
     if input.operation == GEMINI_REQUEST_CONTENT_BUILTIN_TOOL and (input.kind < 1 or input.kind > 4):
         return False
     if input.operation != GEMINI_REQUEST_CONTENT_BUILTIN_TOOL and input.kind != 0:
+        return False
+    if input.operation == GEMINI_REQUEST_CONTENT_CONTINUATION_METADATA and (
+        input.primary_present != 1 or input.secondary_present != 1
+        or input.tertiary_present != 0 or input.quaternary_present != 0
+    ):
         return False
     if input.operation == GEMINI_REQUEST_CONTENT_SYSTEM_INSTRUCTION_FROM_REQUEST and (
         input.primary_present != 1 or input.secondary_present != 0
