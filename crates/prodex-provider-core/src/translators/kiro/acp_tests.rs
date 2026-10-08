@@ -168,6 +168,15 @@ fn kiro_provider_core_maps_acp_incomplete_details() {
         kiro_provider_core_acp_incomplete_details(Some("unknown")),
         None
     );
+    assert_eq!(kiro_provider_core_acp_incomplete_details(None), None);
+    assert_eq!(
+        kiro_provider_core_acp_incomplete_details(Some("refusal")),
+        Some(("refusal", "Kiro refused to continue the turn."))
+    );
+    assert_eq!(
+        kiro_provider_core_acp_incomplete_details(Some("cancelled")),
+        Some(("cancelled", "Kiro cancelled the turn before completion."))
+    );
 }
 
 #[test]
@@ -200,11 +209,20 @@ fn kiro_provider_core_marks_acp_incomplete_response() {
 #[test]
 fn kiro_provider_core_extracts_acp_stop_reason() {
     assert_eq!(
-        kiro_provider_core_acp_stop_reason(Some(&json!({"stopReason": "max_tokens"}))).as_deref(),
+        kiro_provider_core_acp_stop_reason(Some(&json!({
+            "stopReason": "max_tokens",
+            "stop_reason": "refusal",
+            "status": "cancelled",
+        })))
+        .as_deref(),
         Some("max_tokens")
     );
     assert_eq!(
-        kiro_provider_core_acp_stop_reason(Some(&json!({"stop_reason": "refusal"}))).as_deref(),
+        kiro_provider_core_acp_stop_reason(Some(&json!({
+            "stop_reason": "refusal",
+            "status": "cancelled",
+        })))
+        .as_deref(),
         Some("refusal")
     );
     assert_eq!(
@@ -215,7 +233,39 @@ fn kiro_provider_core_extracts_acp_stop_reason() {
         kiro_provider_core_acp_stop_reason(Some(&json!({"stopReason": 7}))),
         None
     );
+    assert_eq!(
+        kiro_provider_core_acp_stop_reason(Some(&json!({
+            "stopReason": 7,
+            "stop_reason": "must-not-fall-through",
+            "status": "also-ignored",
+        }))),
+        None
+    );
+    assert_eq!(
+        kiro_provider_core_acp_stop_reason(Some(&json!({"stopReason": ""}))).as_deref(),
+        Some("")
+    );
+    assert_eq!(kiro_provider_core_acp_stop_reason(Some(&json!({}))), None);
+    assert_eq!(kiro_provider_core_acp_stop_reason(Some(&json!([]))), None);
+    assert_eq!(kiro_provider_core_acp_stop_reason(Some(&json!(null))), None);
     assert_eq!(kiro_provider_core_acp_stop_reason(None), None);
+}
+
+#[test]
+fn kiro_provider_core_acp_stop_reason_kernel_rejects_malformed_and_oversized_input() {
+    use prodex_mojo_core::{
+        MojoError,
+        rich::{KiroKernelInput, KiroKernelOperation, kiro_kernel},
+    };
+
+    let mut input = KiroKernelInput::new(KiroKernelOperation::AcpStopReason);
+    input.input = Some("{");
+    assert_eq!(kiro_kernel(input), Err(MojoError::InvalidInput));
+
+    let oversized = " ".repeat(4 * 1024 * 1024 + 1);
+    let mut input = KiroKernelInput::new(KiroKernelOperation::AcpStopReason);
+    input.input = Some(&oversized);
+    assert_eq!(kiro_kernel(input), Err(MojoError::InvalidInput));
 }
 
 #[test]
