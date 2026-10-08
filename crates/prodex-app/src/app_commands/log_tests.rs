@@ -363,6 +363,36 @@ fn log_snapshot_json_preserves_complete_event_order() {
 }
 
 #[test]
+fn log_snapshot_json_preserves_mojo_order_for_sparse_events() {
+    let usage = InfoTokenUsageEvent {
+        timestamp: "2026-06-20 08:00:02".to_string(),
+        profile: "main".to_string(),
+        ..InfoTokenUsageEvent::default()
+    };
+    let upstream = crate::app_commands::log_upstream_payload::UpstreamPayloadEvent {
+        timestamp: "2026-06-20 08:00:01".to_string(),
+        request: None,
+        transport: "http".to_string(),
+        route: "responses".to_string(),
+        profile: "main".to_string(),
+        bytes: 0,
+        logged_bytes: 0,
+        truncated: false,
+        payload: "{}".to_string(),
+    };
+
+    let items = log_snapshot_items(None, Some(&upstream), Some(&usage));
+
+    assert!(matches!(
+        items.as_slices().0,
+        [
+            LogStreamItem::UpstreamPayload(_),
+            LogStreamItem::TokenUsage(_)
+        ]
+    ));
+}
+
+#[test]
 fn log_snapshot_tui_text_handles_empty_state() {
     let items = VecDeque::new();
     let text = log_stream_tui_text(&items, 10, 80);

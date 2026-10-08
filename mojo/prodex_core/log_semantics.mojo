@@ -3,6 +3,51 @@ from std.memory import Pointer
 from rich_text import rich_codepoint, rich_codepoint_width, rich_trim_bounds, rich_view_matches_literal, rich_view_valid
 from rich_types import ProdexRichStringView, rich_view_ptr
 
+comptime PRODEX_LOG_SNAPSHOT_ABI_VERSION: Int64 = 1
+comptime PRODEX_LOG_SNAPSHOT_STATUS_OK: Int64 = 0
+comptime PRODEX_LOG_SNAPSHOT_STATUS_INVALID: Int64 = 1
+comptime PRODEX_LOG_SNAPSHOT_STATUS_ABI: Int64 = 4
+
+
+def log_snapshot_flag_valid(value: Int64) -> Bool:
+    return value == 0 or value == 1
+
+
+@export("prodex_mojo_log_snapshot_order_v1")
+def prodex_mojo_log_snapshot_order_v1(
+    abi_version: Int64,
+    transcript_present: Int64,
+    upstream_present: Int64,
+    token_usage_present: Int64,
+    output_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_LOG_SNAPSHOT_ABI_VERSION:
+        return PRODEX_LOG_SNAPSHOT_STATUS_ABI
+    if (
+        output_address == 0
+        or not log_snapshot_flag_valid(transcript_present)
+        or not log_snapshot_flag_valid(upstream_present)
+        or not log_snapshot_flag_valid(token_usage_present)
+    ):
+        return PRODEX_LOG_SNAPSHOT_STATUS_INVALID
+
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var count: Int64 = 0
+    if transcript_present == 1:
+        output[unsafe_offset=count + 1] = 0
+        count += 1
+    if upstream_present == 1:
+        output[unsafe_offset=count + 1] = 1
+        count += 1
+    if token_usage_present == 1:
+        output[unsafe_offset=count + 1] = 2
+        count += 1
+    output[unsafe_offset=0] = count
+    return PRODEX_LOG_SNAPSHOT_STATUS_OK
+
+
 comptime PRODEX_LOG_LEVEL_ABI_VERSION: Int64 = 1
 comptime PRODEX_LOG_LEVEL_MAX_BYTES: Int64 = 4096
 

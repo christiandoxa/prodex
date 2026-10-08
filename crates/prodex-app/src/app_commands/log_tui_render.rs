@@ -18,24 +18,6 @@ use terminal_ui::{
     tui_metric_style, tui_muted_style, tui_primary_style, tui_title_style, tui_tool_style,
 };
 
-pub(crate) fn log_snapshot_items(
-    transcript: Option<&TranscriptEvent>,
-    upstream_payload: Option<&UpstreamPayloadEvent>,
-    token_usage: Option<&InfoTokenUsageEvent>,
-) -> VecDeque<LogStreamItem> {
-    let mut items = VecDeque::new();
-    if let Some(event) = transcript {
-        items.push_back(LogStreamItem::Transcript(event.clone()));
-    }
-    if let Some(event) = upstream_payload {
-        items.push_back(LogStreamItem::UpstreamPayload(event.clone()));
-    }
-    if let Some(event) = token_usage {
-        items.push_back(LogStreamItem::TokenUsage(event.clone()));
-    }
-    items
-}
-
 pub(super) fn log_snapshot_tui_height(
     transcript: Option<&TranscriptEvent>,
     upstream_payload: Option<&UpstreamPayloadEvent>,
