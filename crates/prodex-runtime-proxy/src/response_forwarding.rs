@@ -3,9 +3,9 @@ use std::collections::BTreeSet;
 use std::time::Instant;
 
 use crate::{
-    RuntimeTokenUsage, runtime_connection_header_tokens,
-    runtime_header_name_matches_connection_token, runtime_sse_consume_chunk,
-    runtime_sse_finish_pending,
+    RuntimeHttpErrorAction, RuntimeHttpErrorClass, RuntimeTokenUsage,
+    runtime_connection_header_tokens, runtime_header_name_matches_connection_token,
+    runtime_sse_consume_chunk, runtime_sse_finish_pending,
 };
 
 unsafe extern "C" {
@@ -26,6 +26,8 @@ unsafe extern "C" {
     ) -> i64;
 }
 
+const RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT: i64 = 9;
+
 fn response_forwarding_mojo_bool(operation: i64, value: Option<&str>, numeric: u64) -> bool {
     let present = value.is_some();
     let value = value.unwrap_or_default();
@@ -43,6 +45,71 @@ fn response_forwarding_mojo_bool(operation: i64, value: Option<&str>, numeric: u
         "Mojo response-forwarding classifier returned invalid output"
     );
     result == 1
+}
+
+fn response_forwarding_mojo_tag(operation: i64, numeric: u64) -> i64 {
+    let result =
+        unsafe { prodex_runtime_response_forwarding_classify_v1(operation, 0, 0, 0, numeric) };
+    assert!(
+        (0..=8).contains(&result),
+        "Mojo response-forwarding planner returned invalid output"
+    );
+    result
+}
+
+/// Mojo-owned pre-commit response outcome; Rust applies the returned effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeResponsesPrecommitAttemptPlan {
+    Success { note_auth_failure: bool },
+    AuthFailed,
+    QuotaBlocked,
+    RateLimited,
+    Overloaded,
+    PreviousResponseNotFound,
+}
+
+/// Plans one buffered Responses failure without touching affinity or runtime state.
+pub fn runtime_responses_precommit_attempt_plan(
+    status: u16,
+    error_class: RuntimeHttpErrorClass,
+    error_action: RuntimeHttpErrorAction,
+    retryable_previous: bool,
+    token_invalidated: bool,
+    committed: bool,
+) -> RuntimeResponsesPrecommitAttemptPlan {
+    let class_tag = match error_class {
+        RuntimeHttpErrorClass::Quota => 1,
+        RuntimeHttpErrorClass::RateLimited => 2,
+        RuntimeHttpErrorClass::ProfileUnavailable => 3,
+        RuntimeHttpErrorClass::Overload => 4,
+        RuntimeHttpErrorClass::TransientServer => 5,
+        RuntimeHttpErrorClass::Other => 0,
+    };
+    let action_tag = match error_action {
+        RuntimeHttpErrorAction::PassThrough => 0,
+        RuntimeHttpErrorAction::RotateProfile => 1,
+        RuntimeHttpErrorAction::RetryProfile => 2,
+    };
+    let numeric = u64::from(status)
+        | (class_tag << 16)
+        | (action_tag << 19)
+        | (u64::from(retryable_previous) << 21)
+        | (u64::from(token_invalidated) << 22)
+        | (u64::from(committed) << 23);
+    match response_forwarding_mojo_tag(RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT, numeric) {
+        0 => RuntimeResponsesPrecommitAttemptPlan::Success {
+            note_auth_failure: false,
+        },
+        1 => RuntimeResponsesPrecommitAttemptPlan::AuthFailed,
+        2 => RuntimeResponsesPrecommitAttemptPlan::QuotaBlocked,
+        3 => RuntimeResponsesPrecommitAttemptPlan::RateLimited,
+        4 => RuntimeResponsesPrecommitAttemptPlan::Overloaded,
+        5 => RuntimeResponsesPrecommitAttemptPlan::PreviousResponseNotFound,
+        8 => RuntimeResponsesPrecommitAttemptPlan::Success {
+            note_auth_failure: true,
+        },
+        _ => unreachable!("validated Mojo response attempt plan"),
+    }
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeResponseForwardingBodyKind {
