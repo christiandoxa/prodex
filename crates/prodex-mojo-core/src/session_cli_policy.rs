@@ -161,9 +161,7 @@ mod tests {
             1,
         );
         assert_eq!(
-            unsafe {
-                prodex_session_resume_repair_action_v1(ABI_VERSION, 0, 0, 2, output_address)
-            },
+            unsafe { prodex_session_resume_repair_action_v1(ABI_VERSION, 0, 0, 2, output_address) },
             1,
         );
         assert_eq!(

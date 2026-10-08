@@ -420,7 +420,7 @@ mod tests {
                 );
             } else {
                 assert_eq!(body["tool_choice"], request["tool_choice"]);
-                assert!(result.metadata.get("deepseek").is_none());
+                assert!(!result.metadata.contains_key("deepseek"));
             }
         }
     }
