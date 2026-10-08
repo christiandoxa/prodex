@@ -21,6 +21,7 @@ comptime OP_RECURSION_DECISION: Int64 = 9
 comptime OP_SLOT_PLAN_STEP: Int64 = 10
 comptime OP_SLOT_LOCK_ERROR_ACTION: Int64 = 11
 comptime OP_CHILD_OUTCOME: Int64 = 12
+comptime OP_CONFIG_VALIDATION: Int64 = 13
 
 comptime SUB_AGENT_CATALOG_ABI_VERSION: Int64 = 1
 
@@ -727,7 +728,7 @@ def prodex_sub_agent_policy_v1(
         return SUB_AGENT_POLICY_ABI
     if (
         operation < OP_CONCURRENCY_PARSE
-        or operation > OP_CHILD_OUTCOME
+        or operation > OP_CONFIG_VALIDATION
         or length < 0
         or (length > 0 and address == 0)
         or result_address == 0
@@ -870,6 +871,30 @@ def prodex_sub_agent_policy_v1(
             result[unsafe_offset=0] = 3
         elif not has_output:
             result[unsafe_offset=0] = 4
+    elif operation == OP_CONFIG_VALIDATION:
+        if scalar < 0 or scalar > 63:
+            return SUB_AGENT_POLICY_INVALID
+        var model_present = (scalar & 32) == 32
+        var reasoning = scalar & 3
+        var url = (scalar >> 2) & 3
+        var provider_is_local = (scalar & 16) == 16
+        if reasoning > 3 or url > 2:
+            return SUB_AGENT_POLICY_INVALID
+        if model_present:
+            var model_bounds = rich_trim_bounds(view)
+            if model_bounds[1] == model_bounds[0]:
+                result[unsafe_offset=0] = 1
+                return SUB_AGENT_POLICY_OK
+        if reasoning == 2:
+            result[unsafe_offset=0] = 2
+        elif reasoning == 3:
+            result[unsafe_offset=0] = 3
+        elif url == 1:
+            result[unsafe_offset=0] = 4
+        elif provider_is_local and url == 0:
+            result[unsafe_offset=0] = 5
+        elif not provider_is_local and url != 0:
+            result[unsafe_offset=0] = 6
     else:
         return SUB_AGENT_POLICY_INVALID
     return SUB_AGENT_POLICY_OK
