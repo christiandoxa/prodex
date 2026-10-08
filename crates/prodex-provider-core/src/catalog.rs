@@ -201,9 +201,19 @@ pub fn provider_catalog_entries() -> &'static [ProviderCatalogEntry] {
 }
 
 pub fn provider_catalog_entries_for(provider: ProviderId) -> Vec<&'static ProviderCatalogEntry> {
-    provider_catalog_entries_static()
+    let entries = provider_catalog_entries_static();
+    let provider_ids = entries
         .iter()
-        .filter(|entry| entry.provider == provider)
+        .map(|entry| entry.provider as i64)
+        .collect::<Vec<_>>();
+    prodex_mojo_core::rich::CatalogModel::provider_indices(&provider_ids, provider as i64)
+        .expect("Mojo provider catalog selection returned an invalid structured result")
+        .into_iter()
+        .map(|index| {
+            entries
+                .get(index)
+                .expect("Mojo provider catalog selection returned an invalid index")
+        })
         .collect()
 }
 

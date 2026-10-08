@@ -22,6 +22,54 @@ pub struct CatalogModel<'a> {
     pub aliases: &'a [&'a str],
 }
 
+impl CatalogModel<'_> {
+    /// Selects provider-scoped catalog rows while preserving their source order.
+    pub fn provider_indices(
+        provider_ids: &[i64],
+        provider_id: i64,
+    ) -> Result<Vec<usize>, MojoError> {
+        ensure_rich_abi()?;
+        if provider_ids.len() > CATALOG_MAX_MODELS {
+            return Err(MojoError::InvalidInput);
+        }
+        let mut indices = vec![-1_i64; provider_ids.len().max(1)];
+        let mut count = 0_i64;
+        status(unsafe {
+            prodex_mojo_rich_catalog_provider_indices_v1(
+                RICH_ABI_VERSION,
+                address(provider_ids),
+                i64::try_from(provider_ids.len()).map_err(|_| MojoError::InvalidInput)?,
+                provider_id,
+                mojo_mut_pointer_address(indices.as_mut_ptr()),
+                i64::try_from(provider_ids.len()).map_err(|_| MojoError::InvalidInput)?,
+                count_address(&mut count),
+            )
+        })?;
+        let count = usize::try_from(count).map_err(|_| MojoError::InvalidOutput)?;
+        if count > provider_ids.len() {
+            return Err(MojoError::InvalidOutput);
+        }
+        indices[..count]
+            .iter()
+            .try_fold(
+                (Vec::with_capacity(count), None),
+                |(mut selected, previous), raw| {
+                    let index = usize::try_from(*raw)
+                        .ok()
+                        .filter(|index| {
+                            *index < provider_ids.len()
+                                && provider_ids[*index] == provider_id
+                                && previous.is_none_or(|previous| *index > previous)
+                        })
+                        .ok_or(MojoError::InvalidOutput)?;
+                    selected.push(index);
+                    Ok((selected, Some(index)))
+                },
+            )
+            .map(|(selected, _)| selected)
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct CatalogReasoningModel<'a> {
     pub id: &'a str,
@@ -46,6 +94,10 @@ pub enum CatalogChoice {
     Current,
     Custom,
 }
+
+#[cfg(test)]
+#[path = "catalog_provider_tests.rs"]
+mod provider_tests;
 
 unsafe extern "C" {
     fn prodex_mojo_rich_ascii_casefold_equal_v1(
@@ -92,6 +144,15 @@ unsafe extern "C" {
         alias_count: i64,
         query: u64,
         output_index: u64,
+    ) -> i64;
+    fn prodex_mojo_rich_catalog_provider_indices_v1(
+        abi_version: i64,
+        provider_ids: u64,
+        provider_count: i64,
+        provider_id: i64,
+        output_indices: u64,
+        output_capacity: i64,
+        output_count: u64,
     ) -> i64;
     fn prodex_mojo_rich_catalog_choices_v1(
         abi_version: i64,

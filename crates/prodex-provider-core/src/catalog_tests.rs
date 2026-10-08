@@ -19,6 +19,31 @@ fn catalog_identity_trims_long_unicode_whitespace() {
 }
 
 #[test]
+fn provider_scoped_catalog_keeps_provider_membership_and_source_order() {
+    for provider in [
+        ProviderId::OpenAi,
+        ProviderId::Anthropic,
+        ProviderId::Copilot,
+        ProviderId::DeepSeek,
+        ProviderId::Gemini,
+        ProviderId::Kiro,
+        ProviderId::Local,
+    ] {
+        let expected = provider_catalog_entries()
+            .iter()
+            .filter(|entry| entry.provider == provider)
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>();
+        let actual = provider_catalog_entries_for(provider)
+            .into_iter()
+            .map(|entry| entry.id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(actual, expected, "{} catalog scope/order", provider.label());
+    }
+}
+
+#[test]
 fn model_choices_keep_order_and_deduplicate_aliases_and_unicode_custom_ids() {
     let long_alias = format!("{}luna", " ".repeat(4_100));
     let configured = vec![
