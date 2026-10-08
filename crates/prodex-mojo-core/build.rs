@@ -81,6 +81,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
             "../../mojo/prodex_core/json_view.mojo",
             "../../mojo/prodex_core/gemini_config.mojo",
             "../../mojo/prodex_core/gemini_response.mojo",
+            "../../mojo/prodex_core/gemini_chat_response.mojo",
             "../../mojo/prodex_core/gemini_sse_state.mojo",
             "../../mojo/prodex_core/anthropic_request.mojo",
             "../../mojo/prodex_core/context_command_output_common.mojo",
@@ -513,6 +514,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/smart_context_markers.mojo");
         sources.push("../../mojo/prodex_core/smart_context_symbols.mojo");
         sources.push("../../mojo/prodex_core/rich_abi.mojo");
+        sources.push("../../mojo/prodex_core/gemini_chat_response.mojo");
         sources.push("../../mojo/prodex_core/kiro_model_catalog.mojo");
         sources.push("../../mojo/prodex_core/runtime_cookie_policy.mojo");
         sources.push("../../mojo/prodex_core/chat_tools.mojo");

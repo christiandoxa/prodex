@@ -128,6 +128,8 @@ pub use self::util::{
 
 #[cfg(test)]
 mod tests {
+    #[path = "chat_assistant.rs"]
+    mod chat_assistant;
     #[path = "response.rs"]
     mod response;
 }

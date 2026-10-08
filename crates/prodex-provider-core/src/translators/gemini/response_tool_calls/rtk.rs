@@ -7,7 +7,7 @@ mod noisy;
 
 use self::noisy::{GEMINI_RTK_NOISY_SHELL_COMMANDS, GeminiRtkNoisyShellCommand};
 
-pub(super) fn gemini_rtk_wrapped_tool_arguments(name: &str, arguments: &str) -> String {
+pub(crate) fn gemini_rtk_wrapped_tool_arguments(name: &str, arguments: &str) -> String {
     if !matches!(name, "shell" | "exec_command") {
         return arguments.to_string();
     }
