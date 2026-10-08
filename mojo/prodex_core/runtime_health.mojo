@@ -153,6 +153,30 @@ def runtime_health_saturating_shift_multiplier(exponent: Int64) -> Int64:
 def runtime_health_active_until(until: Int64, now: Int64) -> Int64:
     return until if until > now else -1
 
+def runtime_health_profile_recovery_at(
+    retry_present: Int64,
+    retry_until: Int64,
+    transport_present: Int64,
+    transport_until: Int64,
+    circuit_present: Int64,
+    circuit_until: Int64,
+    now: Int64,
+) -> Int64:
+    var found = False
+    var latest: Int64 = INT64_MIN
+    if retry_present == 1 and retry_until > now:
+        found = True
+        latest = retry_until
+    if transport_present == 1 and transport_until > now:
+        if not found or transport_until > latest:
+            latest = transport_until
+        found = True
+    if circuit_present == 1 and circuit_until > now:
+        if not found or circuit_until > latest:
+            latest = circuit_until
+        found = True
+    return latest if found else INT64_MIN
+
 @export("prodex_runtime_health_scalar_v1")
 def prodex_runtime_health_scalar_v1(
     abi_version: Int64,
@@ -522,22 +546,17 @@ def prodex_runtime_health_scalar_v1(
         for index in [0, 2, 4]:
             if fields[unsafe_offset=index] < 0 or fields[unsafe_offset=index] > 1:
                 return 2
-        var now = fields[unsafe_offset=6]
-        var present = False
-        var recovery_at: Int64 = INT64_MIN
-        if fields[unsafe_offset=0] == 1 and fields[unsafe_offset=1] > now:
-            present = True
-            recovery_at = fields[unsafe_offset=1]
-        if fields[unsafe_offset=2] == 1 and fields[unsafe_offset=3] > now:
-            if not present or fields[unsafe_offset=3] > recovery_at:
-                recovery_at = fields[unsafe_offset=3]
-            present = True
-        if fields[unsafe_offset=4] == 1 and fields[unsafe_offset=5] > now:
-            if not present or fields[unsafe_offset=5] > recovery_at:
-                recovery_at = fields[unsafe_offset=5]
-            present = True
-        output[unsafe_offset=0] = Int64(present)
-        output[unsafe_offset=1] = recovery_at if present else 0
+        var recovery_at = runtime_health_profile_recovery_at(
+            fields[unsafe_offset=0],
+            fields[unsafe_offset=1],
+            fields[unsafe_offset=2],
+            fields[unsafe_offset=3],
+            fields[unsafe_offset=4],
+            fields[unsafe_offset=5],
+            fields[unsafe_offset=6],
+        )
+        output[unsafe_offset=0] = Int64(recovery_at != INT64_MIN)
+        output[unsafe_offset=1] = recovery_at if recovery_at != INT64_MIN else 0
         return 0
 
     if operation == RUNTIME_HEALTH_SCALAR_BACKOFF_SORT_KEY:
@@ -642,6 +661,70 @@ def prodex_runtime_health_scalar_v1(
         return 0
 
     return 1
+
+comptime RUNTIME_PROFILE_RECOVERY_PLAN_ABI_VERSION: Int64 = 1
+comptime RUNTIME_PROFILE_RECOVERY_PLAN_FIELD_COUNT: Int64 = 7
+comptime RUNTIME_PROFILE_RECOVERY_PLAN_MAX_COUNT: Int64 = 256
+
+@export("prodex_runtime_profile_recovery_plan_batch_v1")
+def prodex_runtime_profile_recovery_plan_batch_v1(
+    abi_version: Int64,
+    fields_address: UInt,
+    output_address: UInt,
+    count: Int64,
+    now: Int64,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_PROFILE_RECOVERY_PLAN_ABI_VERSION:
+        return 4
+    if count < 0 or count > RUNTIME_PROFILE_RECOVERY_PLAN_MAX_COUNT:
+        return 1
+    if count == 0:
+        return 0
+    if fields_address == 0 or output_address == 0:
+        return 1
+
+    var fields = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(fields_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var earliest_found = False
+    var earliest_recovery_at = INT64_MIN
+    for index in range(count):
+        var base = index * RUNTIME_PROFILE_RECOVERY_PLAN_FIELD_COUNT
+        if (
+            (fields[unsafe_offset=base] != 0 and fields[unsafe_offset=base] != 1)
+            or (fields[unsafe_offset=base + 1] != 0 and fields[unsafe_offset=base + 1] != 1)
+            or (fields[unsafe_offset=base + 3] != 0 and fields[unsafe_offset=base + 3] != 1)
+            or (fields[unsafe_offset=base + 5] != 0 and fields[unsafe_offset=base + 5] != 1)
+        ):
+            return 2
+
+        var eligible = fields[unsafe_offset=base] == 1
+        var recovery_at = runtime_health_profile_recovery_at(
+            fields[unsafe_offset=base + 1],
+            fields[unsafe_offset=base + 2],
+            fields[unsafe_offset=base + 3],
+            fields[unsafe_offset=base + 4],
+            fields[unsafe_offset=base + 5],
+            fields[unsafe_offset=base + 6],
+            now,
+        )
+        var recovery_found = recovery_at != INT64_MIN
+
+        var output_base = index * 2
+        output[unsafe_offset=output_base] = Int64(eligible and not recovery_found)
+        output[unsafe_offset=output_base + 1] = recovery_at if eligible and recovery_found else 0
+        if eligible and recovery_found:
+            if not earliest_found or recovery_at < earliest_recovery_at:
+                earliest_recovery_at = recovery_at
+            earliest_found = True
+
+    var summary_base = count * 2
+    output[unsafe_offset=summary_base] = Int64(earliest_found)
+    output[unsafe_offset=summary_base + 1] = earliest_recovery_at if earliest_found else 0
+    return 0
 
 comptime RUNTIME_HEALTH_SCALAR_BAD_PAIRING_NEXT: Int64 = 8
 comptime RUNTIME_HEALTH_SCALAR_BUMP_DECISION: Int64 = 9

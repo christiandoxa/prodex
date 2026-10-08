@@ -1,8 +1,9 @@
 #![cfg(feature = "mojo-runtime")]
 
 use prodex_mojo_core::runtime::{
-    ProfileBackoffMergeAction, ProfileHealthScoreInput, profile_backoff_merge_action,
-    profile_circuit_half_open_seconds, profile_health_sort_key_batch,
+    ProfileBackoffMergeAction, ProfileHealthScoreInput, ProfileRecoveryCandidate,
+    RUNTIME_PROFILE_SCHEDULE_MAX_COUNT, profile_backoff_merge_action,
+    profile_circuit_half_open_seconds, profile_health_sort_key_batch, profile_recovery_plan_batch,
 };
 
 #[test]
@@ -126,4 +127,51 @@ fn backoff_merge_action_handles_missing_ties_and_signed_extremes() {
             "existing={existing:?} incoming={incoming:?} value_present={value_present}"
         );
     }
+}
+
+#[test]
+fn recovery_batch_uses_latest_profile_blocker_and_earliest_profile_across_chunks() {
+    let healthy = ProfileRecoveryCandidate {
+        eligible: true,
+        retry_until: None,
+        transport_until: None,
+        circuit_until: None,
+    };
+    let mut inputs = vec![healthy; RUNTIME_PROFILE_SCHEDULE_MAX_COUNT];
+    inputs[0] = ProfileRecoveryCandidate {
+        eligible: true,
+        retry_until: Some(90),
+        transport_until: Some(120),
+        circuit_until: Some(80),
+    };
+    inputs[1] = ProfileRecoveryCandidate {
+        eligible: true,
+        retry_until: None,
+        transport_until: Some(110),
+        circuit_until: None,
+    };
+    inputs[2] = ProfileRecoveryCandidate {
+        eligible: false,
+        retry_until: Some(60),
+        transport_until: None,
+        circuit_until: None,
+    };
+    inputs[3] = ProfileRecoveryCandidate {
+        eligible: true,
+        retry_until: Some(49),
+        transport_until: None,
+        circuit_until: None,
+    };
+    inputs.push(ProfileRecoveryCandidate {
+        eligible: true,
+        retry_until: None,
+        transport_until: None,
+        circuit_until: Some(80),
+    });
+
+    let plan = profile_recovery_plan_batch(&inputs, 50).expect("valid recovery batch");
+    assert_eq!(plan.can_clear.len(), inputs.len());
+    assert_eq!(&plan.can_clear[..4], &[false, false, false, true]);
+    assert!(!plan.can_clear[RUNTIME_PROFILE_SCHEDULE_MAX_COUNT]);
+    assert_eq!(plan.earliest_recovery_at, Some(80));
 }
