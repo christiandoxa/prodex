@@ -21,6 +21,12 @@ unsafe extern "C" {
         value_length: i64,
         output_address: u64,
     ) -> i64;
+    fn prodex_session_report_record_shape_v1(
+        abi_version: i64,
+        raw_address: u64,
+        raw_length: i64,
+        output_address: u64,
+    ) -> i64;
 }
 
 #[repr(C)]
@@ -123,6 +129,24 @@ pub fn session_report_timestamp_sort_key(value: &str) -> Result<Option<i64>, Moj
     match output[0] {
         0 if output[1] == 0 => Ok(None),
         1 => Ok(Some(output[1])),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Validate the bounded transcript record shape used by session output reads.
+pub fn session_report_record_shape(raw: &str) -> Result<bool, MojoError> {
+    let mut output = [-1_i64; 1];
+    status(unsafe {
+        prodex_session_report_record_shape_v1(
+            1,
+            raw.as_ptr() as u64,
+            signed(raw.len())?,
+            output.as_mut_ptr() as u64,
+        )
+    })?;
+    match output[0] {
+        0 => Ok(false),
+        1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -282,5 +306,23 @@ mod tests {
 
         assert_eq!(adapted, expected);
         assert_eq!(raw, [4, 2, 3, 1, 0]);
+    }
+
+    #[test]
+    fn record_shape_policy_keeps_valid_boundaries_and_rejects_malformed_records() {
+        assert!(
+            session_report_record_shape(
+                r#"{"type":"event_msg","payload":{"type":"user_message","message":"x"}}"#
+            )
+            .unwrap()
+        );
+        assert!(session_report_record_shape(r#"{"type":"future_record","payload":null}"#).unwrap());
+        assert!(
+            !session_report_record_shape(
+                r#"{"type":"event_msg","payload":{"message":"missing type"}}"#
+            )
+            .unwrap()
+        );
+        assert!(!session_report_record_shape("not-json").unwrap());
     }
 }

@@ -37,7 +37,6 @@ const OUTPUT_CURSOR_VERSION: u8 = 1;
 const OUTPUT_READ_MAX_BYTES: usize = 512 * 1024;
 const OUTPUT_READ_MAX_LINE_BYTES: usize = 64 * 1024;
 const OUTPUT_VERIFY_MAX_LINE_BYTES: usize = 512 * 1024;
-const OUTPUT_READ_MAX_TEXT_BYTES: usize = 8 * 1024;
 const OUTPUT_READ_MAX_TOTAL_TEXT_BYTES: usize = 256 * 1024;
 const OUTPUT_SOURCE_PROBE_BYTES: usize = 64 * 1024;
 const OUTPUT_SKIP_MAX_BYTES: usize = 4 * 1024 * 1024;
@@ -265,10 +264,7 @@ where
         target = self.revalidate(&target, &workspace_root)?;
 
         let mut invocation = self.queue.queue_once(&target, &request.message);
-        let last_prompt_requeued = matches!(
-            invocation.outcome,
-            QueueRequestOutcome::Rejected | QueueRequestOutcome::Preflight
-        );
+        let last_prompt_requeued = Self::queue_policy(&invocation)?.retry;
         if last_prompt_requeued {
             target = self.revalidate(&target, &workspace_root)?;
             invocation = self.queue.queue_once(&target, &request.message);

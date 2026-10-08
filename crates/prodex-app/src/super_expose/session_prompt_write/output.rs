@@ -1,8 +1,8 @@
 use super::{
     OUTPUT_CURSOR_VERSION, OUTPUT_READ_MAX_BYTES, OUTPUT_READ_MAX_LINE_BYTES,
-    OUTPUT_READ_MAX_TEXT_BYTES, OUTPUT_READ_MAX_TOTAL_TEXT_BYTES, OUTPUT_SKIP_MAX_BYTES,
-    OUTPUT_SOURCE_PROBE_BYTES, OUTPUT_VERIFY_MAX_LINE_BYTES, OpenProcessFile, PromptOutputEvent,
-    ResolvedTarget, SessionPromptWriteError, legacy_thread_id,
+    OUTPUT_READ_MAX_TOTAL_TEXT_BYTES, OUTPUT_SKIP_MAX_BYTES, OUTPUT_SOURCE_PROBE_BYTES,
+    OUTPUT_VERIFY_MAX_LINE_BYTES, OpenProcessFile, PromptOutputEvent, ResolvedTarget,
+    SessionPromptWriteError, legacy_thread_id,
 };
 use base64::Engine;
 use sha2::{Digest, Sha256};
@@ -59,7 +59,12 @@ impl OutputCursor {
             && target.prodex.birth_identity.as_deref() == Some(self.prodex_birth.as_str())
             && self.codex_pid == target.writer.pid
             && target.writer.birth_identity.as_deref() == Some(self.codex_birth.as_str())
-            && self.thread_id == target.thread_id
+            && prodex_mojo_core::json::session_selector_matches(
+                &self.thread_id,
+                &target.thread_id,
+                true,
+            )
+            .is_ok_and(|matches| matches)
             && self.source_id == source_id
     }
 }
@@ -441,48 +446,50 @@ fn read_output_line(
         events.push(output_gap_event(line_start, "invalid_utf8"));
         return Ok(None);
     };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(line) else {
+    let Ok(_) = serde_json::from_str::<serde_json::Value>(line) else {
         events.push(output_gap_event(line_start, "malformed_record"));
         return Ok(None);
     };
-    if !transcript_record_shape_is_valid(&value) {
+    if !transcript_record_shape_is_valid(line)? {
         events.push(output_gap_event(line_start, "malformed_record"));
         return Ok(None);
     }
-    let parsed = crate::app_commands::transcript_events_from_session_line(line)
-        .into_iter()
-        .filter(mcp_visible_transcript_event)
-        .collect::<Vec<_>>();
-    if start_index > parsed.len() {
-        return Err(SessionPromptWriteError::OutputSourceChanged);
-    }
-    for (index, event) in parsed.iter().enumerate().skip(start_index) {
+    let mut visible_index = 0_usize;
+    for event in crate::app_commands::transcript_events_from_session_line(line) {
+        let sequence = line_start
+            .saturating_mul(65_536)
+            .saturating_add(visible_index as u64);
+        let Some(output_event) = output_event_from_transcript(sequence, event)? else {
+            continue;
+        };
+        if visible_index < start_index {
+            visible_index = visible_index.saturating_add(1);
+            continue;
+        }
         if events.len() >= limit {
             return Ok(Some(OutputReadBatch {
                 events: std::mem::take(events),
                 next_offset: line_start,
-                next_event_index: index,
+                next_event_index: visible_index,
                 has_more: true,
             }));
         }
-        let output_event = output_event_from_transcript(
-            line_start
-                .saturating_mul(65_536)
-                .saturating_add(index as u64),
-            event.clone(),
-        );
         if total_text_bytes.saturating_add(output_event.text.len())
             > OUTPUT_READ_MAX_TOTAL_TEXT_BYTES
         {
             return Ok(Some(OutputReadBatch {
                 events: std::mem::take(events),
                 next_offset: line_start,
-                next_event_index: index,
+                next_event_index: visible_index,
                 has_more: true,
             }));
         }
         *total_text_bytes = total_text_bytes.saturating_add(output_event.text.len());
         events.push(output_event);
+        visible_index = visible_index.saturating_add(1);
+    }
+    if start_index > visible_index {
+        return Err(SessionPromptWriteError::OutputSourceChanged);
     }
     Ok(None)
 }
@@ -513,33 +520,11 @@ fn raw_line_is_visible_user_message(raw_line: &[u8]) -> bool {
     }
 }
 
-fn mcp_visible_transcript_event(event: &crate::app_commands::TranscriptEvent) -> bool {
-    event.source == "assistant"
-        || event.source == "user"
-        || event.source == "tool-output"
-        || event.source == "mcp"
-        || event.source == "agent"
-        || event.source == "tool"
-        || event.source == "terminal"
-        || event.source == "error"
-        || event.source.starts_with("tool-call:")
-}
-
-fn transcript_record_shape_is_valid(value: &serde_json::Value) -> bool {
-    let Some(record_type) = value.get("type").and_then(serde_json::Value::as_str) else {
-        return false;
-    };
-    let Some(payload) = value.get("payload") else {
-        return false;
-    };
-    match record_type {
-        "event_msg" | "response_item" => payload
-            .get("type")
-            .and_then(serde_json::Value::as_str)
-            .is_some(),
-        "session_meta" | "turn_context" => payload.is_object(),
-        _ => true,
-    }
+fn transcript_record_shape_is_valid(
+    line: &str,
+) -> std::result::Result<bool, SessionPromptWriteError> {
+    prodex_mojo_core::json::session_report_record_shape(line)
+        .map_err(|_| SessionPromptWriteError::OutputReadFailed)
 }
 
 fn output_gap_event(sequence: u64, reason: &'static str) -> PromptOutputEvent {
@@ -556,43 +541,59 @@ fn output_gap_event(sequence: u64, reason: &'static str) -> PromptOutputEvent {
 fn output_event_from_transcript(
     sequence: u64,
     event: crate::app_commands::TranscriptEvent,
-) -> PromptOutputEvent {
-    let (kind, name, status) = if event.source == "assistant" {
-        ("assistant", None, None)
-    } else if event.source == "user" {
-        ("user", None, None)
-    } else if let Some(name) = event.source.strip_prefix("tool-call:") {
-        ("tool", Some(name.to_string()), Some("started".to_string()))
-    } else if event.source == "tool-output" {
-        ("tool", None, Some("completed".to_string()))
-    } else {
-        (event.source.as_str(), None, None)
+) -> std::result::Result<Option<PromptOutputEvent>, SessionPromptWriteError> {
+    let plan = prodex_mojo_core::session_cli_policy::transcript_output_plan(&event.source)
+        .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+    if !plan.visible {
+        return Ok(None);
+    }
+    let kind = match plan.kind {
+        prodex_mojo_core::session_cli_policy::TranscriptOutputKind::Assistant => "assistant",
+        prodex_mojo_core::session_cli_policy::TranscriptOutputKind::User => "user",
+        prodex_mojo_core::session_cli_policy::TranscriptOutputKind::Tool => "tool",
+        prodex_mojo_core::session_cli_policy::TranscriptOutputKind::Other => event.source.as_str(),
     };
-    let text = redaction::redaction_redact_secret_like_text(&event.text);
-    let text = bounded_output_text(&text);
-    PromptOutputEvent {
+    let status = match plan.status {
+        prodex_mojo_core::session_cli_policy::TranscriptOutputStatus::None => None,
+        prodex_mojo_core::session_cli_policy::TranscriptOutputStatus::Started => Some("started"),
+        prodex_mojo_core::session_cli_policy::TranscriptOutputStatus::Completed => {
+            Some("completed")
+        }
+    };
+    let name = plan
+        .name
+        .map(|(start, end)| {
+            let name = event
+                .source
+                .get(start..end)
+                .ok_or(SessionPromptWriteError::OutputReadFailed)?;
+            prodex_mojo_core::session_cli_policy::transcript_output_bounded(
+                name,
+                prodex_mojo_core::session_cli_policy::TranscriptOutputTextMode::Name,
+            )
+            .map(Some)
+            .map_err(|_| SessionPromptWriteError::OutputReadFailed)
+        })
+        .transpose()?
+        .flatten();
+    let timestamp = prodex_mojo_core::session_cli_policy::transcript_output_bounded(
+        &event.timestamp,
+        prodex_mojo_core::session_cli_policy::TranscriptOutputTextMode::Timestamp,
+    )
+    .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+    let text = prodex_mojo_core::session_cli_policy::transcript_output_bounded(
+        &event.text,
+        prodex_mojo_core::session_cli_policy::TranscriptOutputTextMode::Text,
+    )
+    .map_err(|_| SessionPromptWriteError::OutputReadFailed)?;
+    Ok(Some(PromptOutputEvent {
         sequence,
-        timestamp: event.timestamp.chars().take(128).collect(),
+        timestamp,
         kind: kind.to_string(),
-        name: name.map(|name| name.chars().take(256).collect()),
-        status,
+        name,
+        status: status.map(str::to_string),
         text,
-    }
-}
-
-fn bounded_output_text(text: &str) -> String {
-    const MARKER: &str = " …[text_truncated]";
-    if text.len() <= OUTPUT_READ_MAX_TEXT_BYTES {
-        return text.to_string();
-    }
-    let budget = OUTPUT_READ_MAX_TEXT_BYTES.saturating_sub(MARKER.len());
-    let end = text
-        .char_indices()
-        .take_while(|(index, character)| index.saturating_add(character.len_utf8()) <= budget)
-        .map(|(index, character)| index + character.len_utf8())
-        .last()
-        .unwrap_or(0);
-    format!("{}{}", &text[..end], MARKER)
+    }))
 }
 
 pub(crate) fn valid_rollout_path_in_roots(
