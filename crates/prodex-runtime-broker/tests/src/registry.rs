@@ -293,6 +293,12 @@ fn registry_reuse_decision_requires_launch_match_and_matching_health() {
         runtime_broker_registry_reuse_decision(&registry, Some(&health), launch_config),
         RuntimeBrokerRegistryReuseDecision::Reuse
     );
+    let mut mismatched_health = health.clone();
+    mismatched_health.instance_id = "Broker-token".to_string();
+    assert_eq!(
+        runtime_broker_registry_reuse_decision(&registry, Some(&mismatched_health), launch_config),
+        RuntimeBrokerRegistryReuseDecision::MissingMatchingHealth
+    );
     assert_eq!(
         runtime_broker_registry_reuse_decision(&registry, None, launch_config),
         RuntimeBrokerRegistryReuseDecision::MissingMatchingHealth

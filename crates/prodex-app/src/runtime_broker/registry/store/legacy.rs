@@ -24,6 +24,25 @@ pub(super) enum RegistryLegacyStatus {
     TooLarge,
 }
 
+pub(super) struct RegistryLegacyInfo {
+    pub status: RegistryLegacyStatus,
+    pub current: bool,
+}
+
+impl From<RegistryLegacyStatus>
+    for prodex_mojo_core::runtime_broker_continuity::BrokerRegistryArtifactStatus
+{
+    fn from(status: RegistryLegacyStatus) -> Self {
+        use prodex_mojo_core::runtime_broker_continuity::BrokerRegistryArtifactStatus as MojoStatus;
+        match status {
+            RegistryLegacyStatus::NotLegacy => MojoStatus::NotLegacy,
+            RegistryLegacyStatus::ValidLegacy => MojoStatus::ValidLegacy,
+            RegistryLegacyStatus::Malformed => MojoStatus::Malformed,
+            RegistryLegacyStatus::TooLarge => MojoStatus::TooLarge,
+        }
+    }
+}
+
 enum RegistryBytes {
     Unavailable,
     Present(Zeroizing<Vec<u8>>),
@@ -136,38 +155,53 @@ fn read_legacy_registry(path: &Path) -> Result<LegacyRuntimeBrokerRegistry> {
     serde_json::from_slice(&bytes).with_context(|| format!("failed to parse {}", path.display()))
 }
 
-pub(super) fn registry_legacy_status(path: &Path) -> Result<RegistryLegacyStatus> {
+pub(super) fn registry_legacy_status(path: &Path) -> Result<RegistryLegacyInfo> {
     let bytes = match read_registry_bytes(path)? {
-        RegistryBytes::Unavailable => return Ok(RegistryLegacyStatus::NotLegacy),
-        RegistryBytes::TooLarge => return Ok(RegistryLegacyStatus::TooLarge),
+        RegistryBytes::Unavailable => {
+            return Ok(RegistryLegacyInfo {
+                status: RegistryLegacyStatus::NotLegacy,
+                current: false,
+            });
+        }
+        RegistryBytes::TooLarge => {
+            return Ok(RegistryLegacyInfo {
+                status: RegistryLegacyStatus::TooLarge,
+                current: false,
+            });
+        }
         RegistryBytes::Present(bytes) => bytes,
     };
     let contains_legacy_keys =
         match prodex_runtime_broker::runtime_broker_registry_contains_legacy_secrets(&bytes) {
             Ok(contains) => contains,
-            Err(_) => return Ok(RegistryLegacyStatus::Malformed),
+            Err(_) => {
+                return Ok(RegistryLegacyInfo {
+                    status: RegistryLegacyStatus::Malformed,
+                    current: false,
+                });
+            }
         };
     if !contains_legacy_keys {
-        return Ok(RegistryLegacyStatus::NotLegacy);
+        return Ok(RegistryLegacyInfo {
+            status: RegistryLegacyStatus::NotLegacy,
+            current: serde_json::from_slice::<RuntimeBrokerRegistry>(&bytes).is_ok(),
+        });
     }
-    match serde_json::from_slice::<LegacyRuntimeBrokerRegistry>(&bytes) {
+    let status = match serde_json::from_slice::<LegacyRuntimeBrokerRegistry>(&bytes) {
         Ok(LegacyRuntimeBrokerRegistry {
             instance_token,
             admin_token,
         }) => {
             drop(instance_token);
             drop(admin_token);
-            Ok(RegistryLegacyStatus::ValidLegacy)
+            RegistryLegacyStatus::ValidLegacy
         }
-        Err(_) => Ok(RegistryLegacyStatus::Malformed),
-    }
-}
-
-pub(super) fn registry_file_is_current(path: &Path) -> bool {
-    matches!(
-        read_registry_bytes(path).ok(),
-        Some(RegistryBytes::Present(bytes)) if parse_current_registry_bytes(&bytes).is_ok()
-    )
+        Err(_) => RegistryLegacyStatus::Malformed,
+    };
+    Ok(RegistryLegacyInfo {
+        status,
+        current: false,
+    })
 }
 
 pub(super) fn parse_current_registry(content: &str) -> Result<RuntimeBrokerRegistry> {

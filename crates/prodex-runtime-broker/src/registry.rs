@@ -153,7 +153,11 @@ impl RuntimeBrokerHealth {
     }
 
     pub fn matches_registry_instance(&self, registry: &RuntimeBrokerRegistry) -> bool {
-        self.instance_id == registry.instance_id
+        prodex_mojo_core::runtime_broker_continuity::registry_instance_matches(
+            &self.instance_id,
+            &registry.instance_id,
+        )
+        .expect("Mojo runtime broker instance identity policy returned invalid output")
     }
 }
 

@@ -57,18 +57,24 @@ fn load_runtime_broker_registry_unlocked(
         return Ok(None);
     }
     let primary_exists = runtime_broker_file_exists(&path)?;
-    let primary_legacy_status = legacy::registry_legacy_status(&path)?;
-    let backup_legacy_status = legacy::registry_legacy_status(&backup_path)?;
-    if backup_legacy_status == legacy::RegistryLegacyStatus::ValidLegacy
-        && primary_legacy_status == legacy::RegistryLegacyStatus::NotLegacy
-        && legacy::registry_file_is_current(&path)
-    {
-        remove_runtime_broker_file_checked(&backup_path)?;
-    } else if primary_legacy_status == legacy::RegistryLegacyStatus::ValidLegacy
-        || (backup_legacy_status == legacy::RegistryLegacyStatus::ValidLegacy && !primary_exists)
-    {
-        legacy::remove_artifacts_unlocked(paths, broker_key, &path, &backup_path)?;
-        return Ok(None);
+    let primary_status = legacy::registry_legacy_status(&path)?;
+    let backup_status = legacy::registry_legacy_status(&backup_path)?;
+    let plan = prodex_mojo_core::runtime_broker_continuity::registry_store_plan(
+        primary_exists,
+        primary_status.status.into(),
+        backup_status.status.into(),
+        primary_status.current,
+    )
+    .expect("Mojo runtime broker registry recovery policy returned invalid output");
+    match plan.action {
+        prodex_mojo_core::runtime_broker_continuity::BrokerRegistryStoreAction::RemoveLegacyBackup => {
+            remove_runtime_broker_file_checked(&backup_path)?;
+        }
+        prodex_mojo_core::runtime_broker_continuity::BrokerRegistryStoreAction::RemoveLegacyArtifacts => {
+            legacy::remove_artifacts_unlocked(paths, broker_key, &path, &backup_path)?;
+            return Ok(None);
+        }
+        prodex_mojo_core::runtime_broker_continuity::BrokerRegistryStoreAction::ReadCurrent => {}
     }
     let current = read_json_file_with_backup_unlocked::<RuntimeBrokerRegistry>(
         &path,
@@ -77,18 +83,26 @@ fn load_runtime_broker_registry_unlocked(
     );
     match current {
         Ok(loaded) => Ok(Some(loaded.value)),
-        Err(err) if primary_legacy_status == legacy::RegistryLegacyStatus::TooLarge => Err(err
-            .context(format!(
+        Err(err)
+            if plan.error_source
+                == prodex_mojo_core::runtime_broker_continuity::BrokerRegistryErrorSource::Primary =>
+        {
+            Err(err.context(format!(
                 "runtime broker registry {} exceeds safe size limit ({} bytes)",
                 path.display(),
                 crate::runtime_store::RUNTIME_STORE_JSON_MAX_BYTES
-            ))),
-        Err(err) if backup_legacy_status == legacy::RegistryLegacyStatus::TooLarge => Err(err
-            .context(format!(
+            )))
+        }
+        Err(err)
+            if plan.error_source
+                == prodex_mojo_core::runtime_broker_continuity::BrokerRegistryErrorSource::Backup =>
+        {
+            Err(err.context(format!(
                 "runtime broker registry {} exceeds safe size limit ({} bytes)",
                 backup_path.display(),
                 crate::runtime_store::RUNTIME_STORE_JSON_MAX_BYTES
-            ))),
+            )))
+        }
         Err(err) => Err(err),
     }
 }
@@ -104,6 +118,12 @@ fn runtime_broker_file_exists(path: &Path) -> Result<bool> {
         Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
     }
 }
+
+fn runtime_broker_instance_matches(left: &str, right: &str) -> bool {
+    prodex_mojo_core::runtime_broker_continuity::registry_instance_matches(left, right)
+        .expect("Mojo runtime broker instance identity policy returned invalid output")
+}
+
 #[cfg(test)]
 pub(crate) fn save_runtime_broker_registry(
     paths: &AppPaths,
@@ -194,7 +214,7 @@ pub(crate) fn load_runtime_broker_capability(
     expected_instance_id: &str,
 ) -> Result<RuntimeBrokerSecret> {
     let capability = load_runtime_broker_capability_record(paths, broker_key)?;
-    if capability.instance_id != expected_instance_id {
+    if !runtime_broker_instance_matches(&capability.instance_id, expected_instance_id) {
         anyhow::bail!("runtime broker capability belongs to another instance");
     }
     Ok(capability.admin_token)
@@ -226,7 +246,7 @@ pub(crate) fn remove_runtime_broker_registry_if_instance_matches(
     let Ok(Some(existing)) = load_runtime_broker_registry_unlocked(paths, broker_key) else {
         return;
     };
-    if existing.instance_id != instance_id {
+    if !runtime_broker_instance_matches(&existing.instance_id, instance_id) {
         return;
     }
     remove_runtime_broker_registry_files(paths, broker_key);
@@ -255,7 +275,9 @@ fn remove_runtime_broker_capability_if_instance_matches_unlocked(
     expected_instance_id: &str,
 ) {
     match load_runtime_broker_capability_record(paths, broker_key) {
-        Ok(existing) if existing.instance_id == expected_instance_id => {
+        Ok(existing)
+            if runtime_broker_instance_matches(&existing.instance_id, expected_instance_id) =>
+        {
             remove_runtime_broker_capability_unlocked(paths, broker_key);
         }
         Ok(_) => {}
@@ -289,7 +311,7 @@ fn remove_runtime_broker_capability_if_matches_unlocked(
     let Ok(existing) = load_runtime_broker_capability_record(paths, broker_key) else {
         return;
     };
-    if existing.instance_id == expected_instance_id
+    if runtime_broker_instance_matches(&existing.instance_id, expected_instance_id)
         && existing.admin_token.matches(expected.expose())
     {
         remove_runtime_broker_capability_unlocked(paths, broker_key);

@@ -41,6 +41,35 @@ pub enum HealthKeyKind {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum BrokerRegistryArtifactStatus {
+    NotLegacy = 0,
+    ValidLegacy = 1,
+    Malformed = 2,
+    TooLarge = 3,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrokerRegistryStoreAction {
+    ReadCurrent,
+    RemoveLegacyArtifacts,
+    RemoveLegacyBackup,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrokerRegistryErrorSource {
+    None,
+    Primary,
+    Backup,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrokerRegistryStorePlan {
+    pub action: BrokerRegistryStoreAction,
+    pub error_source: BrokerRegistryErrorSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BrokerLogFingerprintRelation {
     Rebuild,
     Exact,
@@ -125,6 +154,23 @@ unsafe extern "C" {
         abi_version: i64,
         key_address: u64,
         key_length: i64,
+    ) -> i64;
+
+    fn prodex_runtime_broker_registry_store_plan_v1(
+        abi_version: i64,
+        primary_exists: i64,
+        primary_status: i64,
+        backup_status: i64,
+        primary_current: i64,
+        output_address: u64,
+    ) -> i64;
+
+    fn prodex_runtime_broker_registry_identity_match_v1(
+        abi_version: i64,
+        left_address: u64,
+        left_length: i64,
+        right_address: u64,
+        right_length: i64,
     ) -> i64;
 
     fn prodex_runtime_broker_identity_policy_v1(
@@ -322,6 +368,61 @@ pub fn route_kind(route: &str) -> Result<ContinuityRouteKind, MojoError> {
         2 => Ok(ContinuityRouteKind::Compact),
         3 => Ok(ContinuityRouteKind::Websocket),
         4 => Ok(ContinuityRouteKind::Standard),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn registry_store_plan(
+    primary_exists: bool,
+    primary_status: BrokerRegistryArtifactStatus,
+    backup_status: BrokerRegistryArtifactStatus,
+    primary_current: bool,
+) -> Result<BrokerRegistryStorePlan, MojoError> {
+    let mut output = [0_i64; 2];
+    let status = unsafe {
+        prodex_runtime_broker_registry_store_plan_v1(
+            ABI_VERSION,
+            i64::from(primary_exists),
+            primary_status as i64,
+            backup_status as i64,
+            i64::from(primary_current),
+            output.as_mut_ptr() as usize as u64,
+        )
+    };
+    if status != 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    let action = match output[0] {
+        0 => BrokerRegistryStoreAction::ReadCurrent,
+        1 => BrokerRegistryStoreAction::RemoveLegacyArtifacts,
+        2 => BrokerRegistryStoreAction::RemoveLegacyBackup,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    let error_source = match output[1] {
+        0 => BrokerRegistryErrorSource::None,
+        1 => BrokerRegistryErrorSource::Primary,
+        2 => BrokerRegistryErrorSource::Backup,
+        _ => return Err(MojoError::InvalidOutput),
+    };
+    Ok(BrokerRegistryStorePlan {
+        action,
+        error_source,
+    })
+}
+
+pub fn registry_instance_matches(left: &str, right: &str) -> Result<bool, MojoError> {
+    let output = unsafe {
+        prodex_runtime_broker_registry_identity_match_v1(
+            ABI_VERSION,
+            ptr(left),
+            length(left)?,
+            ptr(right),
+            length(right)?,
+        )
+    };
+    match output {
+        0 => Ok(false),
+        1 => Ok(true),
         _ => Err(MojoError::InvalidOutput),
     }
 }
