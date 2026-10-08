@@ -150,6 +150,8 @@ pub mod redaction;
 pub mod rich;
 #[cfg(feature = "mojo-routing")]
 pub mod routing;
+#[cfg(feature = "mojo-provider-constraints")]
+pub mod rtk_noisy;
 #[cfg(feature = "mojo-runtime")]
 pub mod runtime;
 #[cfg(feature = "mojo-runtime")]
