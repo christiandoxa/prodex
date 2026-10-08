@@ -390,6 +390,14 @@ fn full_context_replay_request() -> RuntimeProxyRequest {
 }
 
 fn run_retryable_hard_affinity_replay_case(fault: RuntimeProxyBackendFaultStep, marker: &str) {
+    run_retryable_hard_affinity_replay_case_after_delay(fault, marker, std::time::Duration::ZERO);
+}
+
+fn run_retryable_hard_affinity_replay_case_after_delay(
+    fault: RuntimeProxyBackendFaultStep,
+    marker: &str,
+    client_replay_delay: std::time::Duration,
+) {
     let backend =
         RuntimeProxyBackend::start_with_fault_script(RuntimeProxyBackendFaultScript::new([fault]));
     let ready = runtime_usage_snapshot(
@@ -421,6 +429,13 @@ fn run_retryable_hard_affinity_replay_case(fault: RuntimeProxyBackendFaultStep, 
     assert!(!body.contains("rate_limit_exceeded"), "{body}");
     let log = read_runtime_proxy_test_log(&harness.shared().log_path);
     assert!(log.contains(marker), "missing {marker}: {log}");
+
+    assert_eq!(
+        backend.responses_accounts(),
+        ["main-account"],
+        "the failed hard-affinity request must signal replay before trying another profile: {log}",
+    );
+    std::thread::sleep(client_replay_delay);
 
     let response =
         proxy_runtime_responses_request(102, &full_context_replay_request(), harness.shared())
@@ -460,12 +475,17 @@ fn responses_hard_affinity_auth_failure_requests_full_context_replay_then_rotate
 
 #[test]
 fn responses_hard_affinity_rate_limit_requests_full_context_replay_then_rotates() {
-    run_retryable_hard_affinity_replay_case(
-        RuntimeProxyBackendFaultStep::rate_limited_429(
+    // A one-second Retry-After can expire while a loaded Windows runner writes
+    // the replay signal. Keep the server-declared hold active across an explicit
+    // slow-client delay; otherwise retrying the original profile is valid.
+    run_retryable_hard_affinity_replay_case_after_delay(
+        RuntimeProxyBackendFaultStep::rate_limited_429_for_delay(
             RuntimeProxyBackendFaultRoute::Responses,
             "main-account",
+            30,
         ),
         "rate_limit_full_context_retry_signal",
+        std::time::Duration::from_millis(2_200),
     );
 }
 

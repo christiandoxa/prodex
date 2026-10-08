@@ -245,6 +245,14 @@ impl RuntimeProxyBackendFaultStep {
     }
 
     pub(crate) fn rate_limited_429(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
+        Self::rate_limited_429_for_delay(route, account_id, 1)
+    }
+
+    pub(crate) fn rate_limited_429_for_delay(
+        route: RuntimeProxyBackendFaultRoute,
+        account_id: &str,
+        retry_after_seconds: u64,
+    ) -> Self {
         Self {
             route,
             account_id: Some(account_id.to_string()),
@@ -253,7 +261,7 @@ impl RuntimeProxyBackendFaultStep {
             body: serde_json::json!({
                 "error": {
                     "code": "rate_limit_exceeded",
-                    "message": "Please try again in 1s."
+                    "message": format!("Please try again in {retry_after_seconds}s.")
                 }
             })
             .to_string(),
