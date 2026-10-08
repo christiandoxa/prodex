@@ -21,6 +21,50 @@ fn gemini_provider_core_web_search_call_from_grounding_opens_retrieved_context()
 }
 
 #[test]
+fn gemini_provider_core_response_media_projection_preserves_aliases_and_data_urls() {
+    let response = serde_json::json!({
+        "responseId": "resp_media_aliases",
+        "modelVersion": "gemini-test",
+        "candidates": [{
+            "content": {"parts": [
+                {"inline_data": {"mime_type": "image/webp", "data": "img"}},
+                {"text": "data:audio/wav;base64,UklGRg=="},
+                {"file_data": {"file_uri": "https://files.example/movie.MOV"}},
+                {"inlineData": {"mimeType": "image/png", "data": "generated"}}
+            ]},
+            "finishReason": "STOP"
+        }]
+    });
+
+    let value = gemini_provider_core_runtime_responses_value(
+        &response,
+        12,
+        1234,
+        "gemini-default",
+        |_, _| None,
+    );
+    let content = &value["output"][0]["content"];
+    assert!(content.as_array().unwrap().iter().any(|item| {
+        item["type"] == "input_image" && item["image_url"] == "data:image/webp;base64,img"
+    }));
+    assert!(content.as_array().unwrap().iter().any(|item| {
+        item["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("audio/wav"))
+    }));
+    assert!(content.as_array().unwrap().iter().any(|item| {
+        item["text"]
+            .as_str()
+            .is_some_and(|text| text.contains("video/quicktime"))
+    }));
+    assert!(
+        value["output"].as_array().unwrap().iter().any(|item| {
+            item["type"] == "image_generation_call" && item["result"] == "generated"
+        })
+    );
+}
+
+#[test]
 fn gemini_grounding_mojo_preserves_alias_dedupe_and_query_contracts() {
     let response = serde_json::json!({
         "candidates": [{

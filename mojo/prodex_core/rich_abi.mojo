@@ -31,6 +31,7 @@ from gemini_response import (
     gemini_grounding_v1,
     gemini_response_kernel_v1,
 )
+from gemini_response_media import gemini_response_media_kernel_v1
 from gemini_config import gemini_config_kernel_v1
 # DeepSeek shares the rich ABI while keeping its provider wire semantics isolated.
 from deepseek import (
@@ -473,6 +474,39 @@ def prodex_mojo_gemini_response_kernel_v1(
 ) abi("C") -> Int64:
     return gemini_response_kernel_v1(
         abi_version, input_address, output_address, output_capacity, written_address
+    )
+
+
+@export("prodex_mojo_gemini_response_media_v1")
+def prodex_mojo_gemini_response_media_v1(
+    abi_version: Int64,
+    operation: Int64,
+    flag: Int64,
+    nodes_address: UInt,
+    nodes_count: Int64,
+    raw_address: UInt,
+    raw_length: Int64,
+    scratch_address: UInt,
+    scratch_count: Int64,
+    measuring: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    metadata_address: UInt,
+) abi("C") -> Int64:
+    return gemini_response_media_kernel_v1(
+        abi_version,
+        operation,
+        flag,
+        nodes_address,
+        nodes_count,
+        raw_address,
+        raw_length,
+        scratch_address,
+        scratch_count,
+        measuring,
+        output_address,
+        output_capacity,
+        metadata_address,
     )
 
 

@@ -1,102 +1,36 @@
-use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+use crate::mojo_json::Document;
+use prodex_mojo_core::rich::GeminiResponseMediaOperation;
 use serde_json::{Value, json};
 
+fn media_kernel_value(
+    part: &Value,
+    operation: GeminiResponseMediaOperation,
+    response_id: Option<&str>,
+    index: Option<usize>,
+) -> Option<Value> {
+    let mut envelope = json!({"part": part});
+    if let Some(response_id) = response_id {
+        envelope["response_id"] = Value::String(response_id.to_string());
+    }
+    if let Some(index) = index {
+        envelope["index"] = Value::String(index.to_string());
+    }
+    let mut document = Document::default();
+    document.push(&envelope, None, "");
+    let raw = std::str::from_utf8(&document.raw).expect("Serde emits UTF-8 JSON");
+    let body = prodex_mojo_core::rich::gemini_response_media(&document.nodes, raw, operation)
+        .expect("Mojo Gemini response-media kernel returned invalid output")?;
+    serde_json::from_slice(&body).ok()
+}
+
 pub(crate) fn gemini_media_content_item_from_part(part: &Value) -> Option<Value> {
-    if let Some(inline_data) = part.get("inlineData").or_else(|| part.get("inline_data")) {
-        let mime_type = inline_data
-            .get("mimeType")
-            .or_else(|| inline_data.get("mime_type"))
-            .and_then(Value::as_str)
-            .unwrap_or("application/octet-stream");
-        let data = inline_data.get("data").and_then(Value::as_str)?;
-        if mime_type.starts_with("image/") {
-            return Some(json!({
-                "type": "input_image",
-                "image_url": format!("data:{mime_type};base64,{data}"),
-            }));
-        }
-        return Some(json!({
-            "type": "output_text",
-            "text": format!(
-                "Gemini returned inline {mime_type} media ({} base64 characters).",
-                data.len()
-            ),
-        }));
-    }
-    if let Some(file_data) = part.get("fileData").or_else(|| part.get("file_data")) {
-        let file_uri = file_data
-            .get("fileUri")
-            .or_else(|| file_data.get("file_uri"))
-            .and_then(Value::as_str)?;
-        let mime_type = file_data
-            .get("mimeType")
-            .or_else(|| file_data.get("mime_type"))
-            .and_then(Value::as_str)
-            .unwrap_or_else(|| gemini_mime_type_for_uri(file_uri));
-        if mime_type.starts_with("image/") {
-            return Some(json!({
-                "type": "input_image",
-                "image_url": file_uri,
-            }));
-        }
-        return Some(json!({
-            "type": "output_text",
-            "text": format!("Gemini returned {mime_type} media: {file_uri}"),
-        }));
-    }
-    let text = part.get("text").and_then(Value::as_str)?;
-    let (mime_type, data) = gemini_data_url_parts(text)?;
-    if mime_type.starts_with("image/") {
-        Some(json!({
-            "type": "input_image",
-            "image_url": format!("data:{mime_type};base64,{data}"),
-        }))
-    } else {
-        Some(json!({
-            "type": "output_text",
-            "text": format!(
-                "Gemini returned inline {mime_type} media ({} base64 characters).",
-                data.len()
-            ),
-        }))
-    }
+    media_kernel_value(part, GeminiResponseMediaOperation::Content, None, None)
 }
 
 pub(crate) fn gemini_text_from_special_part(part: &Value) -> Option<String> {
-    if let Some(executable_code) = part.get("executableCode") {
-        let language = executable_code
-            .get("language")
-            .and_then(Value::as_str)
-            .unwrap_or("text");
-        let code = executable_code
-            .get("code")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        if code.trim().is_empty() {
-            return None;
-        }
-        return Some(format!(
-            "Gemini executable code ({language}):\n```{language}\n{code}\n```"
-        ));
-    }
-    if let Some(result) = part.get("codeExecutionResult") {
-        let outcome = result
-            .get("outcome")
-            .and_then(Value::as_str)
-            .unwrap_or("OUTCOME_UNSPECIFIED");
-        let output = result
-            .get("output")
-            .and_then(Value::as_str)
-            .unwrap_or_default();
-        return Some(format!(
-            "Gemini code execution result ({outcome}):\n```text\n{output}\n```"
-        ));
-    }
-    if let Some(video_metadata) = part.get("videoMetadata") {
-        let metadata = serde_json::to_string(video_metadata).unwrap_or_else(|_| "{}".to_string());
-        return Some(format!("Gemini video metadata: {metadata}"));
-    }
-    None
+    media_kernel_value(part, GeminiResponseMediaOperation::SpecialText, None, None)?
+        .as_str()
+        .map(str::to_string)
 }
 
 pub(crate) fn gemini_image_generation_call_item_from_part(
@@ -104,58 +38,12 @@ pub(crate) fn gemini_image_generation_call_item_from_part(
     index: usize,
     part: &Value,
 ) -> Option<Value> {
-    let inline_data = part.get("inlineData").or_else(|| part.get("inline_data"))?;
-    let mime_type = inline_data
-        .get("mimeType")
-        .or_else(|| inline_data.get("mime_type"))
-        .and_then(Value::as_str)
-        .unwrap_or("application/octet-stream");
-    if !mime_type.starts_with("image/") {
-        return None;
-    }
-    let data = inline_data.get("data").and_then(Value::as_str)?;
-    Some(json!({
-        "type": "image_generation_call",
-        "id": format!("ig_{response_id}_{index}"),
-        "status": "completed",
-        "result": data,
-    }))
-}
-
-fn gemini_data_url_parts(text: &str) -> Option<(&str, &str)> {
-    let data = text.strip_prefix("data:")?;
-    let (meta, body) = data.split_once(',')?;
-    let meta = meta.strip_suffix(";base64")?;
-    Some((meta, body))
-}
-
-fn gemini_mime_type_for_uri(uri: &str) -> &str {
-    let extension = uri.rsplit('.').next().unwrap_or_default();
-    let is = |candidate| {
-        ascii_casefold_equal_exact(extension, candidate)
-            .expect("Mojo Gemini response-media extension comparison failed")
-    };
-    if is("png") {
-        "image/png"
-    } else if is("jpg") || is("jpeg") {
-        "image/jpeg"
-    } else if is("gif") {
-        "image/gif"
-    } else if is("webp") {
-        "image/webp"
-    } else if is("mp3") {
-        "audio/mpeg"
-    } else if is("wav") {
-        "audio/wav"
-    } else if is("mp4") {
-        "video/mp4"
-    } else if is("mov") {
-        "video/quicktime"
-    } else if is("pdf") {
-        "application/pdf"
-    } else {
-        "application/octet-stream"
-    }
+    media_kernel_value(
+        part,
+        GeminiResponseMediaOperation::ImageGeneration,
+        Some(response_id),
+        Some(index),
+    )
 }
 
 #[cfg(test)]
@@ -163,13 +51,21 @@ mod tests {
     use super::*;
 
     #[test]
-    fn gemini_response_media_mime_casefold_uses_mojo_identity() {
-        assert_eq!(gemini_mime_type_for_uri("IMAGE.PNG"), "image/png");
-        assert_eq!(gemini_mime_type_for_uri("photo.JpEg"), "image/jpeg");
-        assert_eq!(gemini_mime_type_for_uri("movie.MOV"), "video/quicktime");
+    fn response_media_projection_is_mojo_owned_at_provider_boundary() {
         assert_eq!(
-            gemini_mime_type_for_uri("archive.unknown"),
-            "application/octet-stream"
+            gemini_media_content_item_from_part(
+                &json!({"fileData": {"fileUri": "https://files.example/IMAGE.PNG"}})
+            ),
+            Some(json!({
+                "type": "input_image",
+                "image_url": "https://files.example/IMAGE.PNG"
+            }))
+        );
+        assert_eq!(
+            gemini_text_from_special_part(
+                &json!({"executableCode": {"language": "rust", "code": "println!(\"ok\");"}})
+            ),
+            Some("Gemini executable code (rust):\n```rust\nprintln!(\"ok\");\n```".to_string())
         );
     }
 }
