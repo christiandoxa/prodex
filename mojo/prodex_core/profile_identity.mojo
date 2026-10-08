@@ -30,6 +30,26 @@ comptime PROFILE_IDENTITY_FIRST_PRESENT_SOURCE: Int64 = 17
 comptime PROFILE_IDENTITY_REMOVED_ACTIVE_CHOICE: Int64 = 18
 comptime PROFILE_IDENTITY_NAME_CANDIDATE: Int64 = 19
 
+comptime PROFILE_MANAGEMENT_STATUS_ABI_VERSION: Int64 = 1
+comptime PROFILE_MANAGEMENT_STATUS_OK: Int64 = 0
+comptime PROFILE_MANAGEMENT_STATUS_INVALID: Int64 = 1
+comptime PROFILE_MANAGEMENT_STATUS_CAPACITY: Int64 = 2
+comptime PROFILE_MANAGEMENT_STATUS_ABI: Int64 = 4
+comptime PROFILE_MANAGEMENT_STATUS_MAX_PROFILES: Int64 = 256
+
+comptime PROFILE_MANAGEMENT_SCREEN_NO_ACTIVE: Int64 = 0
+comptime PROFILE_MANAGEMENT_SCREEN_ONLY_PROFILE: Int64 = 1
+comptime PROFILE_MANAGEMENT_SCREEN_ACTIVE: Int64 = 2
+
+comptime PROFILE_MANAGEMENT_ROW_ACTIVE_MANAGED_IDENTITY: Int64 = 0
+comptime PROFILE_MANAGEMENT_ROW_ACTIVE_MANAGED_MISSING: Int64 = 1
+comptime PROFILE_MANAGEMENT_ROW_INACTIVE_MANAGED_IDENTITY: Int64 = 2
+comptime PROFILE_MANAGEMENT_ROW_INACTIVE_MANAGED_MISSING: Int64 = 3
+comptime PROFILE_MANAGEMENT_ROW_ACTIVE_EXTERNAL_IDENTITY: Int64 = 4
+comptime PROFILE_MANAGEMENT_ROW_ACTIVE_EXTERNAL_MISSING: Int64 = 5
+comptime PROFILE_MANAGEMENT_ROW_INACTIVE_EXTERNAL_IDENTITY: Int64 = 6
+comptime PROFILE_MANAGEMENT_ROW_INACTIVE_EXTERNAL_MISSING: Int64 = 7
+
 comptime PROFILE_PRIMARY_PRESENT: Int64 = 1
 comptime PROFILE_SECONDARY_PRESENT: Int64 = 2
 comptime PROFILE_RECORD_EMAIL_PRESENT: Int64 = 1
@@ -60,6 +80,47 @@ def profile_record_email(record: ProfileIdentityRecord) -> ProdexRichStringView:
 
 def profile_record_account(record: ProfileIdentityRecord) -> ProdexRichStringView:
     return ProdexRichStringView(UInt(record.account_address), UInt(record.account_length))
+
+
+def profile_management_screen_status(
+    active_profile_present: Int64,
+    profile_count: Int64,
+) -> Int64:
+    if active_profile_present == 1:
+        return PROFILE_MANAGEMENT_SCREEN_ACTIVE
+    if profile_count == 1:
+        return PROFILE_MANAGEMENT_SCREEN_ONLY_PROFILE
+    return PROFILE_MANAGEMENT_SCREEN_NO_ACTIVE
+
+
+def profile_management_row_status(
+    active: Int64,
+    managed: Int64,
+    identity_present: Int64,
+) -> Int64:
+    if active == 1:
+        if managed == 1:
+            return (
+                PROFILE_MANAGEMENT_ROW_ACTIVE_MANAGED_IDENTITY
+                if identity_present == 1
+                else PROFILE_MANAGEMENT_ROW_ACTIVE_MANAGED_MISSING
+            )
+        return (
+            PROFILE_MANAGEMENT_ROW_ACTIVE_EXTERNAL_IDENTITY
+            if identity_present == 1
+            else PROFILE_MANAGEMENT_ROW_ACTIVE_EXTERNAL_MISSING
+        )
+    if managed == 1:
+        return (
+            PROFILE_MANAGEMENT_ROW_INACTIVE_MANAGED_IDENTITY
+            if identity_present == 1
+            else PROFILE_MANAGEMENT_ROW_INACTIVE_MANAGED_MISSING
+        )
+    return (
+        PROFILE_MANAGEMENT_ROW_INACTIVE_EXTERNAL_IDENTITY
+        if identity_present == 1
+        else PROFILE_MANAGEMENT_ROW_INACTIVE_EXTERNAL_MISSING
+    )
 
 
 def profile_lower_ascii(value: UInt8) -> UInt8:
@@ -875,3 +936,63 @@ def prodex_mojo_profile_identity_v1(
         return PROFILE_IDENTITY_OK
 
     return PROFILE_IDENTITY_INVALID
+
+
+@export("prodex_profile_management_status_v1")
+def prodex_profile_management_status_v1(
+    abi_version: Int64,
+    active_profile_present: Int64,
+    profile_count: Int64,
+    flags_address: UInt,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_MANAGEMENT_STATUS_ABI_VERSION:
+        return PROFILE_MANAGEMENT_STATUS_ABI
+    if (
+        (active_profile_present != 0 and active_profile_present != 1)
+        or profile_count < 0
+        or profile_count > PROFILE_MANAGEMENT_STATUS_MAX_PROFILES
+        or output_capacity < 0
+        or written_address == 0
+        or (profile_count > 0 and flags_address == 0)
+        or (output_capacity > 0 and output_address == 0)
+    ):
+        return PROFILE_MANAGEMENT_STATUS_INVALID
+
+    var required_capacity = 1 + profile_count
+    if output_capacity < required_capacity:
+        return PROFILE_MANAGEMENT_STATUS_CAPACITY
+
+    var flags = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(flags_address)
+    )
+    var output = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    output[unsafe_offset=0] = profile_management_screen_status(
+        active_profile_present,
+        profile_count,
+    )
+
+    for index in range(profile_count):
+        var active = flags[unsafe_offset=index * 3]
+        var managed = flags[unsafe_offset=index * 3 + 1]
+        var identity_present = flags[unsafe_offset=index * 3 + 2]
+        if (
+            (active != 0 and active != 1)
+            or (managed != 0 and managed != 1)
+            or (identity_present != 0 and identity_present != 1)
+        ):
+            return PROFILE_MANAGEMENT_STATUS_INVALID
+        output[unsafe_offset=1 + index] = profile_management_row_status(
+            active,
+            managed,
+            identity_present,
+        )
+    written[] = required_capacity
+    return PROFILE_MANAGEMENT_STATUS_OK

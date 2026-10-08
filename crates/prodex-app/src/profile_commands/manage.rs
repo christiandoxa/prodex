@@ -1,6 +1,9 @@
 use anyhow::{Context, Result, bail};
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
 use crossterm::terminal;
+use prodex_mojo_core::profile_identity::{
+    ProfileManagementScreenStatus, ProfileManagementStatusInput, profile_management_status,
+};
 use prodex_mojo_core::super_provider_config::runtime_ci_truth_token;
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
@@ -282,23 +285,27 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
         fields: summary_fields,
     }];
 
-    for summary in collect_profile_summaries(&state) {
-        let kind = if summary.managed {
-            "managed"
-        } else {
-            "external"
-        };
+    let summaries = collect_profile_summaries(&state);
+    let status_plan = profile_management_status(
+        state.active_profile.is_some(),
+        &summaries
+            .iter()
+            .map(|summary| ProfileManagementStatusInput {
+                active: summary.active,
+                managed: summary.managed,
+                identity_present: summary.email.is_some(),
+            })
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo profile-management status failed: {error:?}"))?;
 
+    for (summary, row_status) in summaries.into_iter().zip(status_plan.rows) {
         let fields = vec![
             (
                 "Current".to_string(),
-                if summary.active {
-                    "Yes".to_string()
-                } else {
-                    "No".to_string()
-                },
+                row_status.current_label().to_string(),
             ),
-            ("Kind".to_string(), kind.to_string()),
+            ("Kind".to_string(), row_status.kind_label().to_string()),
             (
                 "Provider".to_string(),
                 summary.provider.display_name().to_string(),
@@ -306,7 +313,11 @@ pub(crate) fn handle_list_profiles() -> Result<()> {
             ("Auth".to_string(), summary.auth.label),
             (
                 "Identity".to_string(),
-                summary.email.as_deref().unwrap_or("-").to_string(),
+                if row_status.identity_present() {
+                    summary.email.unwrap_or_default()
+                } else {
+                    "-".to_string()
+                },
             ),
             ("Path".to_string(), summary.codex_home.display().to_string()),
         ];
@@ -359,20 +370,60 @@ pub(crate) fn handle_current_profile() -> Result<()> {
     let (mut state, _) = load_profile_state_with_profile_recovery_locked(&paths, true)?;
     repair_missing_active_profile_and_save(&paths, &mut state)?;
 
-    let Some(active) = state.active_profile.as_deref() else {
-        let mut fields = vec![("Status".to_string(), "No active profile.".to_string())];
-        if state.profiles.len() == 1
-            && let Some((name, profile)) = state.profiles.iter().next()
-        {
-            fields.push(("Only profile".to_string(), name.clone()));
-            fields.push((
-                "CODEX_HOME".to_string(),
-                profile.codex_home.display().to_string(),
-            ));
+    let status_plan = profile_management_status(
+        state.active_profile.is_some(),
+        &state
+            .profiles
+            .iter()
+            .map(|(name, profile)| ProfileManagementStatusInput {
+                active: state.active_profile.as_deref() == Some(name.as_str()),
+                managed: profile.managed,
+                identity_present: profile.email.is_some(),
+            })
+            .collect::<Vec<_>>(),
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo profile-management status failed: {error:?}"))?;
+
+    match status_plan.screen {
+        ProfileManagementScreenStatus::NoActive => {
+            print_profile_panel(
+                "Active Profile",
+                &[("Status".to_string(), "No active profile.".to_string())],
+            )?;
+            return Ok(());
         }
-        print_profile_panel("Active Profile", &fields)?;
-        return Ok(());
-    };
+        ProfileManagementScreenStatus::OnlyProfile => {
+            let (name, profile) = state
+                .profiles
+                .iter()
+                .next()
+                .context("profile-management status selected a missing only profile")?;
+            let fields = vec![
+                ("Status".to_string(), "No active profile.".to_string()),
+                ("Only profile".to_string(), name.clone()),
+                (
+                    "CODEX_HOME".to_string(),
+                    profile.codex_home.display().to_string(),
+                ),
+            ];
+            print_profile_panel("Active Profile", &fields)?;
+            return Ok(());
+        }
+        ProfileManagementScreenStatus::Active => {}
+    }
+
+    let active_row_status = state
+        .profiles
+        .iter()
+        .zip(status_plan.rows.iter())
+        .find_map(|((name, _), status)| {
+            (state.active_profile.as_deref() == Some(name.as_str())).then_some(*status)
+        })
+        .context("profile-management status omitted the active profile row")?;
+    let active = state
+        .active_profile
+        .as_deref()
+        .context("profile-management status selected an absent active profile")?;
 
     let profile = state
         .profiles
@@ -387,11 +438,7 @@ pub(crate) fn handle_current_profile() -> Result<()> {
         ),
         (
             "Managed".to_string(),
-            if profile.managed {
-                "Yes".to_string()
-            } else {
-                "No".to_string()
-            },
+            active_row_status.managed_label().to_string(),
         ),
         (
             "Provider".to_string(),
