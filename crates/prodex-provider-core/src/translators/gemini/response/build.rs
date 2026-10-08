@@ -165,16 +165,6 @@ fn gemini_append_grounding_and_citations(
     gemini_citation_text(value)
 }
 
-pub(super) fn gemini_function_call_id(
-    function_call: &Value,
-    request_id: u64,
-    index: usize,
-) -> String {
-    gemini_function_call_id_with_fallback(function_call, || {
-        format!("call_gemini_{request_id}_{index}")
-    })
-}
-
 pub(super) fn gemini_function_call_id_with_fallback(
     function_call: &Value,
     fallback_call_id: impl FnOnce() -> String,

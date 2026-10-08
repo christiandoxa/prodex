@@ -170,6 +170,4 @@ pub(super) fn gemini_responses_value_from_generate_value(
 mod response_build;
 
 pub(super) use self::response_build::GeminiResponseBuildError;
-use self::response_build::{
-    gemini_build_response_value, gemini_function_call_id, gemini_function_call_id_with_fallback,
-};
+use self::response_build::{gemini_build_response_value, gemini_function_call_id_with_fallback};

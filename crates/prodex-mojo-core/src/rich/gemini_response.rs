@@ -2,6 +2,50 @@ use super::{
     MojoError, MojoIssue, RICH_ABI_VERSION, RichStringView, ensure_rich_abi,
     mojo_mut_pointer_address, mojo_pointer_address, view,
 };
+use crate::json::{JsonKernel, JsonNode, transform_json};
+
+/// Ordered operations for complete Gemini chat-assistant message assembly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i64)]
+pub enum GeminiChatAssistantResponseOperation {
+    BlockedToolCallPlan = 0,
+    Assemble = 1,
+}
+
+/// Maximum serialized input accepted by the complete chat-assistant kernel.
+pub const GEMINI_CHAT_ASSISTANT_MAX_INPUT_BYTES: usize = 64 * 1024 * 1024;
+
+unsafe extern "C" {
+    fn prodex_mojo_gemini_chat_assistant_response_v1(
+        abi: i64,
+        operation: i64,
+        flag: i64,
+        nodes: u64,
+        count: i64,
+        raw: u64,
+        raw_length: i64,
+        scratch: u64,
+        scratch_count: i64,
+        measuring: i64,
+        output: u64,
+        capacity: i64,
+        metadata: u64,
+    ) -> i64;
+}
+
+/// Plans ordered external blocked-tool callbacks or assembles their results.
+pub fn gemini_chat_assistant_response_kernel(
+    nodes: &[JsonNode<'_>],
+    raw: &str,
+    operation: GeminiChatAssistantResponseOperation,
+) -> Result<Option<Vec<u8>>, MojoError> {
+    if raw.len() > GEMINI_CHAT_ASSISTANT_MAX_INPUT_BYTES {
+        return Err(MojoError::InvalidInput);
+    }
+    ensure_rich_abi()?;
+    let kernel: JsonKernel = prodex_mojo_gemini_chat_assistant_response_v1;
+    transform_json(nodes, raw, operation as i64, false, kernel)
+}
 
 /// Deterministic JSON shapes emitted by the Gemini response kernel.
 #[repr(i64)]
