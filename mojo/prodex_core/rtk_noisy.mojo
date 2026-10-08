@@ -12,7 +12,7 @@ comptime RTK_NOISY_STATUS_CAPACITY: Int64 = 3
 comptime RTK_NOISY_STATUS_ABI: Int64 = 4
 comptime RTK_NOISY_MODE_WRAPPED: Int64 = 0
 comptime RTK_NOISY_MODE_PREFIXED: Int64 = 1
-comptime RTK_NOISY_MAX_INPUT_BYTES: Int64 = 4 * 1024 * 1024
+comptime RTK_NOISY_MAX_INPUT_BYTES: Int64 = 64 * 1024 * 1024
 # ponytail: 4096-byte decoded token buffer; stream matching if longer tokens matter.
 comptime RTK_NOISY_TOKEN_CAPACITY: Int64 = 4096
 
@@ -206,6 +206,36 @@ def rtk_noisy_is_env_assignment(
     return True
 
 
+def rtk_noisy_raw_env_assignment(
+    ptr: Pointer[mut=False, UInt8, _], start: Int64, end: Int64
+) -> Bool:
+    # Long environment values are valid. Match only their fixed-size ASCII
+    # NAME= prefix directly, without an artificial decoded-token limit.
+    if start >= end:
+        return False
+    var first = ptr[unsafe_offset=start]
+    if not (
+        first == 95
+        or first >= 65 and first <= 90
+        or first >= 97 and first <= 122
+    ):
+        return False
+    var index = start + 1
+    while index < end:
+        var value = ptr[unsafe_offset=index]
+        if value == 61:
+            return index + 1 < end
+        if not (
+            value == 95
+            or value >= 65 and value <= 90
+            or value >= 97 and value <= 122
+            or value >= 48 and value <= 57
+        ):
+            return False
+        index += 1
+    return False
+
+
 def rtk_noisy_subcommand(
     kind: Int64, buffer: Pointer[mut=False, UInt8, _], length: Int64
 ) -> Bool:
@@ -301,20 +331,34 @@ def rtk_noisy_segment_insert_index(
         return -1
     var token_end = rtk_noisy_token_end(ptr, cursor, end)
     var token = rtk_noisy_token_buffer(ptr, cursor, token_end, buffer_ptr, RTK_NOISY_TOKEN_CAPACITY)
-    if token[1] != 1:
+    if token[1] == 1 and rtk_noisy_buffer_matches(
+        buffer_ptr, 0, token[0], StringSlice("rtk")
+    ):
         return -1
-    if rtk_noisy_buffer_matches(buffer_ptr, 0, token[0], StringSlice("rtk")):
-        return -1
-    while rtk_noisy_is_env_assignment(buffer_ptr, token[0]):
+    var is_assignment = (
+        rtk_noisy_is_env_assignment(buffer_ptr, token[0])
+        if token[1] == 1
+        else rtk_noisy_raw_env_assignment(ptr, cursor, token_end)
+    )
+    while is_assignment:
         cursor = rtk_noisy_skip_whitespace(ptr, token_end, end)
         if cursor >= end:
             return -1
         token_end = rtk_noisy_token_end(ptr, cursor, end)
-        token = rtk_noisy_token_buffer(ptr, cursor, token_end, buffer_ptr, RTK_NOISY_TOKEN_CAPACITY)
-        if token[1] != 1:
+        token = rtk_noisy_token_buffer(
+            ptr, cursor, token_end, buffer_ptr, RTK_NOISY_TOKEN_CAPACITY
+        )
+        if token[1] == 1 and rtk_noisy_buffer_matches(
+            buffer_ptr, 0, token[0], StringSlice("rtk")
+        ):
             return -1
-        if rtk_noisy_buffer_matches(buffer_ptr, 0, token[0], StringSlice("rtk")):
-            return -1
+        is_assignment = (
+            rtk_noisy_is_env_assignment(buffer_ptr, token[0])
+            if token[1] == 1
+            else rtk_noisy_raw_env_assignment(ptr, cursor, token_end)
+        )
+    if token[1] != 1:
+        return -1
     var kind = rtk_noisy_command_kind(buffer_ptr, token[0])
     if kind < 0:
         return -1
