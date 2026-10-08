@@ -53,6 +53,31 @@ pub fn runtime_candidate_has_hard_affinity(affinity: RuntimeCandidateAffinity<'_
     runtime_candidate_no_rotate_affinity(affinity).is_some()
 }
 
+/// Reports conflicting hard binding owners before runtime candidate selection.
+#[derive(Clone, Copy, Debug)]
+pub struct RuntimeHardBindingConflictInput<'a> {
+    pub route_kind: RuntimeRouteKind,
+    pub strict_affinity_profile: Option<&'a str>,
+    pub pinned_profile: Option<&'a str>,
+    pub turn_state_profile: Option<&'a str>,
+    pub session_profile: Option<&'a str>,
+}
+
+pub fn runtime_hard_binding_conflict(
+    input: RuntimeHardBindingConflictInput<'_>,
+) -> Result<bool, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime::affinity_binding_conflict(
+        prodex_mojo_core::runtime::AffinityBindingConflictInput {
+            route_kind: input.route_kind as i64,
+            strict_affinity_profile: input.strict_affinity_profile,
+            pinned_profile: input.pinned_profile,
+            turn_state_profile: input.turn_state_profile,
+            session_profile: input.session_profile,
+            conflict_profile: prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE,
+        },
+    )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RuntimeNoRotateAffinity {
     Strict,
