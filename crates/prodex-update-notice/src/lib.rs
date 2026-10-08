@@ -185,15 +185,12 @@ pub fn format_info_codex_version(
     current_version: Option<&str>,
 ) -> Result<String> {
     let latest_version = latest_codex_version(paths, current_version.unwrap_or("0.0.0"))?;
-    Ok(match (current_version, latest_version) {
-        (Some(current), Some(latest)) if version_is_newer(&latest, current)? => {
-            format!("{current} (update available: {latest})")
-        }
-        (Some(current), Some(_)) => format!("{current} (up to date)"),
-        (Some(current), None) => format!("{current} (update check unavailable)"),
-        (None, Some(latest)) => format!("not detected (latest release: {latest})"),
-        (None, None) => "not detected (update check unavailable)".to_string(),
-    })
+    map_update_notice_mojo(
+        prodex_mojo_core::update_notice_policy::format_codex_version(
+            current_version,
+            latest_version.as_deref(),
+        ),
+    )
 }
 
 fn latest_prodex_version(paths: &AppPaths) -> Result<Option<String>> {
@@ -679,6 +676,10 @@ mod tests {
         assert_eq!(
             format_info_codex_version(&paths, Some("0.144.6")).unwrap(),
             "0.144.6 (up to date)"
+        );
+        assert_eq!(
+            format_info_codex_version(&paths, None).unwrap(),
+            "not detected (latest release: 0.144.6)"
         );
 
         let _ = fs::remove_dir_all(paths.root);
