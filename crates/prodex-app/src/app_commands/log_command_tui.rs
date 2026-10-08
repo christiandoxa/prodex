@@ -1,4 +1,38 @@
-pub(super) use self::render::log_snapshot_items;
+pub(super) fn log_snapshot_items(
+    transcript: Option<&TranscriptEvent>,
+    upstream_payload: Option<&UpstreamPayloadEvent>,
+    token_usage: Option<&InfoTokenUsageEvent>,
+) -> VecDeque<LogStreamItem> {
+    let order = prodex_mojo_core::log::snapshot_item_order(
+        transcript.is_some(),
+        upstream_payload.is_some(),
+        token_usage.is_some(),
+    )
+    .expect("Mojo log snapshot order returned invalid output");
+    order
+        .into_iter()
+        .map(|kind| match kind {
+            prodex_mojo_core::log::LogSnapshotItemKind::Transcript => LogStreamItem::Transcript(
+                transcript
+                    .expect("Mojo snapshot order selected absent transcript")
+                    .clone(),
+            ),
+            prodex_mojo_core::log::LogSnapshotItemKind::UpstreamPayload => {
+                LogStreamItem::UpstreamPayload(
+                    upstream_payload
+                        .expect("Mojo snapshot order selected absent upstream payload")
+                        .clone(),
+                )
+            }
+            prodex_mojo_core::log::LogSnapshotItemKind::TokenUsage => LogStreamItem::TokenUsage(
+                token_usage
+                    .expect("Mojo snapshot order selected absent token usage")
+                    .clone(),
+            ),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 pub(super) use self::render::log_stream_tui_text;
 use super::{

@@ -1,10 +1,34 @@
 #![cfg(feature = "mojo-rich")]
 
 use prodex_mojo_core::log::{
-    CHAIN_LOG_DEAD_UPSTREAM, CHAIN_LOG_RETRIED_OWNER, ChainLogRenderInput,
+    CHAIN_LOG_DEAD_UPSTREAM, CHAIN_LOG_RETRIED_OWNER, ChainLogRenderInput, LogSnapshotItemKind,
     ROUTE_AFFINITY_LOG_RECOMPUTE, RouteAffinityLogRenderInput, render_chain_log,
     render_log_event_name, render_route_affinity_log, render_route_affinity_owner_logs,
+    snapshot_item_order,
 };
+
+#[test]
+fn log_snapshot_order_preserves_report_precedence_and_sparse_items() {
+    assert_eq!(
+        snapshot_item_order(true, true, true).unwrap(),
+        [
+            LogSnapshotItemKind::Transcript,
+            LogSnapshotItemKind::UpstreamPayload,
+            LogSnapshotItemKind::TokenUsage,
+        ]
+    );
+    assert_eq!(
+        snapshot_item_order(false, true, true).unwrap(),
+        [
+            LogSnapshotItemKind::UpstreamPayload,
+            LogSnapshotItemKind::TokenUsage
+        ]
+    );
+    assert_eq!(
+        snapshot_item_order(false, false, false).unwrap(),
+        Vec::<LogSnapshotItemKind>::new()
+    );
+}
 
 #[test]
 fn log_event_name_renderer_preserves_exact_and_fallback_labels() {
