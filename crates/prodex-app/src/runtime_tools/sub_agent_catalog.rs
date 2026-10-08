@@ -144,13 +144,9 @@ fn append_catalog_entries(
             if !plan.selectable {
                 return None;
             }
-            let Some((field, start, end)) = plan.model_id else {
-                return None;
-            };
+            let (field, start, end) = plan.model_id?;
             let fields = catalog_id_fields(&entry);
-            let Some(id) = fields[field].and_then(|value| value.get(start..end)) else {
-                return None;
-            };
+            let id = fields[field].and_then(|value| value.get(start..end))?;
             let id = id.to_string();
             Some(Some((entry, id, plan.set_id)))
         })

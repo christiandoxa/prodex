@@ -32,7 +32,7 @@ use process::*;
 mod slot_lifecycle;
 use slot_lifecycle::{
     acquire_sub_agent_slot, create_private_directory, reconcile_sub_agent_slots,
-    sub_agent_slot_lock_error_action, validate_child_launch_spec,
+    validate_child_launch_spec,
 };
 #[path = "sub_agent_catalog.rs"]
 mod catalog;
@@ -491,7 +491,7 @@ fn sub_agent_target_label(target: &SuperLaunchTarget) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::{slot_lifecycle::sub_agent_slot_lock_error_action, *};
     use prodex_cli::SubAgentConcurrencySource;
 
     #[cfg(unix)]
