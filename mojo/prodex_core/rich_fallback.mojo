@@ -149,6 +149,69 @@ def combo_has_component(view: ProdexRichStringView, start: Int64, end: Int64) ->
     return False
 
 
+def fallback_range_contains_literal(
+    ptr: Pointer[mut=False, UInt8, _],
+    start: Int64,
+    end: Int64,
+    literal: StringSlice,
+) -> Bool:
+    var length = Int64(literal.byte_length())
+    if length == 0:
+        return True
+    if end - start < length:
+        return False
+    var target = literal.unsafe_ptr()
+    for offset in range(end - start - length + 1):
+        var matched = True
+        for index in range(length):
+            if ptr[unsafe_offset=start + offset + index] != target[unsafe_offset=index]:
+                matched = False
+                break
+        if matched:
+            return True
+    return False
+
+
+def fallback_gemini_code_assist_model_allowed(
+    model: ProdexRichStringView,
+) -> Bool:
+    var bounds = rich_trim_bounds(model)
+    var ptr = rich_view_ptr(model)
+    var trimmed_model = ProdexRichStringView(
+        model.ptr + UInt(bounds[0]), UInt(bounds[1] - bounds[0])
+    )
+    return not fallback_range_contains_literal(
+        ptr, bounds[0], bounds[1], StringSlice("customtools")
+    ) and not rich_view_matches_literal["gemini-3.5-flash"](
+        trimmed_model, False
+    ) and not rich_view_matches_literal["gemini-3-flash"](
+        trimmed_model, False
+    )
+
+
+@export("prodex_mojo_rich_gemini_code_assist_model_allowed_v1")
+def prodex_mojo_rich_gemini_code_assist_model_allowed_v1(
+    abi_version: Int64,
+    model_address: UInt,
+    allowed_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PRODEX_RICH_ABI_VERSION:
+        return RICH_STATUS_ABI
+    if model_address == 0 or allowed_address == 0:
+        return RICH_STATUS_INVALID
+    var model_ptr = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(model_address))
+    var model = model_ptr[].copy()
+    if not rich_view_valid(model, RICH_MAX_FALLBACK_MODEL_BYTES):
+        return RICH_STATUS_UTF8
+    var allowed = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(allowed_address)
+    )
+    allowed[] = Int64(fallback_gemini_code_assist_model_allowed(model))
+    return RICH_STATUS_OK
+
+
 def fallback_add_chain(
     provider: ProdexRichStringView,
     model: ProdexRichStringView,
@@ -389,6 +452,70 @@ def prodex_mojo_rich_model_fallback_v2(
         return RICH_STATUS_CAPACITY
     result_ptr[].records_written = records
     result_ptr[].required_records = records
+    result_ptr[].output_written = written
+    result_ptr[].required_output = written
+    return RICH_STATUS_OK
+
+
+@export("prodex_mojo_rich_model_fallback_head_v1")
+def prodex_mojo_rich_model_fallback_head_v1(
+    abi_version: Int64,
+    provider_address: UInt,
+    model_address: UInt,
+    output_records_address: UInt,
+    record_capacity: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    hash_slots_address: UInt,
+    hash_capacity: Int64,
+    result_address: UInt,
+) abi("C") -> Int64:
+    var status = prodex_mojo_rich_model_fallback_v2(
+        abi_version,
+        provider_address,
+        model_address,
+        output_records_address,
+        record_capacity,
+        output_address,
+        output_capacity,
+        hash_slots_address,
+        hash_capacity,
+        result_address,
+    )
+    if status != RICH_STATUS_OK:
+        return status
+    var result_ptr = Pointer[
+        mut=True, ProdexRichFallbackResult, MutUntrackedOrigin
+    ](unsafe_from_address=Int(result_address))
+    var model_ptr = Pointer[
+        mut=False, ProdexRichStringView, ImmUntrackedOrigin
+    ](unsafe_from_address=Int(model_address))
+    var model = model_ptr[].copy()
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    if result_ptr[].records_written > 0:
+        result_ptr[].output_written = (
+            Pointer[
+                mut=False, ProdexRichFallbackRecord, ImmUntrackedOrigin
+            ](unsafe_from_address=Int(output_records_address))[].model.len
+        )
+        result_ptr[].required_output = result_ptr[].output_written
+        result_ptr[].records_written = 1
+        return RICH_STATUS_OK
+    var written: Int64 = 0
+    var original = rich_copy_range(
+        rich_view_ptr(model),
+        0,
+        Int64(model.len),
+        output,
+        output_capacity,
+        Pointer(to=written),
+        False,
+    )
+    if original.len < 0:
+        result_ptr[].required_output = Int64(model.len)
+        return RICH_STATUS_CAPACITY
     result_ptr[].output_written = written
     result_ptr[].required_output = written
     return RICH_STATUS_OK

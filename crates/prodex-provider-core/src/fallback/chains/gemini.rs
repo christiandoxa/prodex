@@ -1,6 +1,6 @@
-//! Gemini Code Assist model filtering.
+//! Gemini Code Assist model filter adapter.
 
 pub(super) fn provider_gemini_code_assist_model_allowed(model: &str) -> bool {
-    let model = model.trim();
-    !model.contains("customtools") && !matches!(model, "gemini-3.5-flash" | "gemini-3-flash")
+    prodex_mojo_core::rich::gemini_code_assist_model_allowed(model)
+        .expect("Mojo Gemini Code Assist model filter returned an invalid result")
 }

@@ -3,7 +3,6 @@
 #[path = "chains/gemini.rs"]
 mod gemini;
 
-use self::gemini::provider_gemini_code_assist_model_allowed;
 use crate::ProviderId;
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
 
@@ -13,15 +12,12 @@ pub fn provider_model_fallback_chain(provider: ProviderId, model: &str) -> Vec<S
 }
 
 pub fn provider_gemini_retain_code_assist_models(model_chain: &mut Vec<String>) {
-    model_chain.retain(|model| provider_gemini_code_assist_model_allowed(model));
+    model_chain.retain(|model| self::gemini::provider_gemini_code_assist_model_allowed(model));
 }
 
 pub fn provider_canonical_model(provider: ProviderId, model: &str) -> String {
-    provider_model_fallback_chain(provider, model)
-        .into_iter()
-        .next()
-        .filter(|model| !model.trim().is_empty())
-        .unwrap_or_else(|| model.to_string())
+    prodex_mojo_core::rich::model_fallback_head(provider.label(), model)
+        .expect("Mojo model fallback choice returned an invalid structured result")
 }
 
 pub fn provider_model_allows_session_memory(model: &str) -> bool {
@@ -237,5 +233,44 @@ fn rich_model_fallback_batch_matches_expected_values() {
             "gpt-6-luna",
             "custom-model",
         ]
+    );
+}
+
+#[test]
+fn provider_fallback_head_and_code_assist_filter_are_mojo_owned_at_caller_boundary() {
+    assert_eq!(
+        provider_canonical_model(ProviderId::Gemini, "flash"),
+        "gemini-3.8-flash"
+    );
+    assert_eq!(provider_canonical_model(ProviderId::OpenAi, "  "), "  ");
+
+    let mut chain = [
+        "gemini-3-pro-preview",
+        "gemini-3.1-pro-preview-customtools",
+        "gemini-3.5-flash",
+        "gemini-3-flash",
+        "gemini-2.5-flash",
+        "gemini-3.1-CustomTools",
+        " GEMINI-3.5-FLASH ",
+        "",
+        "\u{3000}",
+    ]
+    .map(str::to_string)
+    .to_vec();
+
+    provider_gemini_retain_code_assist_models(&mut chain);
+
+    assert_eq!(
+        chain,
+        [
+            "gemini-3-pro-preview",
+            "gemini-2.5-flash",
+            "gemini-3.1-CustomTools",
+            " GEMINI-3.5-FLASH ",
+            "",
+            "\u{3000}",
+        ]
+        .map(str::to_string)
+        .to_vec()
     );
 }
