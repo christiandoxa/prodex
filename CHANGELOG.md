@@ -2,82 +2,81 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.436.1 - 2026-10-08
+
+### Runtime
+
+- Recover delayed SSE capacity failures without retaining permits (`bba3a25`)
+
+### Misc
+
+- Point scalar reachability to extracted ABI (`1d6c8d1`)
+- Preserve long shell arguments in Mojo parser (`5b81c6b`)
+- Accept large app-server pages through Mojo ABI (`51f66d7`)
+# Prodex 0.436.1
+
+## New Features
+
+- Keep HTTP SSE recovery consistent when a Codex client has fallen back from
+  WebSocket to HTTP for the lifetime of its session. No model, account
+  entitlement, or user-facing concurrency setting is changed.
+- Add structured precommit wait and boundary diagnostics without printing
+  provider failures into the interactive terminal during successful recovery.
+
+## Bug Fixes
+
+- Stop treating a short SSE lookahead timeout or metadata-only prefix as a
+  successful response. Delayed overload, rate-limit, and quota failures remain
+  inside precommit recovery until a commit-ready event is observed.
+- Bound that wait by the existing stream-idle deadline and prefetch byte budget.
+  EOF and transport failures after metadata no longer manufacture a committed
+  response. The canonical wait/abort decision is implemented in Mojo.
+- Release an unsuccessful SSE attempt's profile admission lease before retaining
+  its error payload for retry/final forwarding. A single eligible profile can
+  no longer be excluded by the lease held by its own failed attempt.
+- Preserve successful-stream leases, exact previous-response recovery ownership,
+  hard affinity, and the rule against replay after visible output or tool events.
+- Fix formatting and strict Clippy findings inherited from the preceding
+  migration checkpoints without changing their production semantics.
+
+## Compatibility scope
+
+- Keep the Codex 0.161.0 compatibility baseline and configured model/effort.
+- Retain the existing retry/backoff and profile-eligibility policy. A temporary
+  upstream overload is not reclassified as account quota exhaustion.
+- This fixes local premature-commit and permit-retention defects; it does not
+  guarantee upstream model availability or bypass an exhausted quota window.
+- Existing processes must load the new binary to receive the fixes.
+
+## Verification
+
+- A real loopback HTTP regression reproduced a 200 response followed by delayed
+  `server_is_overloaded` escaping to the caller before the patch.
+- Regression coverage includes delayed error fragments, metadata above the old
+  8 KiB lookahead boundary, deadline/byte-limit rejection, metadata-only EOF,
+  and no replay after output.
+- Runtime tests cover rotating to another healthy profile, retrying with only
+  one eligible profile, and a subsequent turn on the same session.
+- Lease tests distinguish retained unsuccessful payloads from successful streams;
+  hard-affinity replay, WebSocket overload recovery, and SSE forwarding remain
+  covered by existing runtime suites.
+- All verification uses synthetic local profiles and mock upstream responses.
+  Investigation on the affected machine was read-only; no live model probes,
+  credential changes, or production session restarts were performed there.
+
+## Changelog
+
+- Preserve HTTP SSE precommit ownership through delayed capacity failures.
+- Release failed-attempt admission leases before selecting a retry candidate.
+- Publish synchronized standalone release metadata for Prodex 0.436.1.
+
+Full Changelog: [0.436.0...0.436.1](https://github.com/christiandoxa/prodex/compare/0.436.0...0.436.1)
+
 ## 0.436.0 - 2026-10-08
 
 ### Misc
 
 - Preserve Codex 0.161 program arguments in Mojo (`eac2f58`)
-# Prodex 0.436.0
-
-## New Features
-
-- Qualify managed launch boundaries against the official Codex `rust-v0.161.0`
-  release, building on the transport audit included in Prodex 0.435.9.
-- Preserve the new global `codex exec --cyber-access-program` option and its
-  value through run/Super launch planning, proxy configuration, session resume,
-  and recovery retargeting. Official values are `standard`, `daybreak_blue`,
-  and `daybreak_red`; value validation remains owned by Codex.
-- Keep explicit GPT-6.1 Sol and Ultra reasoning choices intact without forcing
-  new model defaults or opting users into Daybreak.
-
-## Bug Fixes
-
-- Fix the canonical Mojo argument planner treating a Cyber program value as a
-  prompt or session ID. Governed proxy configuration can no longer split that
-  option/value pair, and recovery retains the selected value while replacing
-  only the resumed session and removing the old prompt.
-- Keep the existing Rust boundary as a thin native-argument/ABI adapter. There
-  is no duplicate Rust parser, new fallback, or access-program policy owner.
-- Retain the 0.435.9 fanout correction: local capacity waiting does not consume
-  the actual upstream retry budget, and permit-release wakeups are rechecked.
-  Genuine upstream failures remain distinct from local admission pressure.
-
-## Compatibility scope
-
-- Daybreak remains opt-in through the upstream `cli_daybreak` feature gate.
-  Passing `daybreak=true` alone does not enable that feature; saved preferences
-  and explicit override order remain unchanged.
-- Codex restricts Cyber/Daybreak routing to its built-in `openai` provider.
-  The governed `prodex-openai-governed-http` path is a custom provider, so this
-  release guarantees argument preservation, not Cyber/Daybreak availability
-  there. Prodex does not bypass provider/account eligibility or synthesize
-  entitlement metadata to make the feature appear active.
-- Preserve Codex-owned HTTPS account bootstrap, server-directed retry guidance,
-  HTTP/WebSocket continuation identity, and advertised Bedrock capabilities.
-- Keep the capability-based Codex minimum unchanged. This release does not
-  replace an already installed Codex executable.
-- The exact 0.161.0 tag still lacks the historical 0.160.1 explicit Windows
-  environment additions for cross-OS remote stdio MCP. That limitation is
-  documented in `migration/codex-rust-v0.161.0-audit.md`, not claimed as fixed.
-
-## Verification
-
-- The new runtime regression first reproduced four failures against the old
-  Mojo planner; after the fix, all 69 runtime-launch tests passed.
-- All 147 CLI unit tests and two CLI integration tests passed, including
-  explicit model/reasoning choices, feature opt-in, argument order, and literals.
-- The offline compatibility guard and five capture/replay fixtures passed.
-  Exact tagged-source replay matched 65 critical-file groups, 72 semantic groups,
-  and all 1,078 required marker occurrences.
-- Independently verified official Linux CLI/app-server archive digests and ran
-  isolated `initialize`, `config/read`, and `experimentalFeature/list` requests.
-  The live feature list reports `cli_daybreak` disabled by default.
-- Eight compiled-Prodex launch-plan cases reached the official Codex 0.161.0
-  validation boundary on native and governed Super paths. Valid programs reach
-  unsupported-review validation; an invalid hyphenated value is rejected by
-  Codex. These checks sent no model turn and do not claim Cyber eligibility.
-- The actual Prodex candidate with a loopback mock upstream served 128/128
-  requests at concurrency 32, with zero request errors or admission-pressure
-  responses. This is a local smoke result, not a live-provider availability SLA.
-
-## Changelog
-
-- Preserve Codex 0.161.0 program arguments in the canonical Mojo launch planner.
-- Guard explicit-program precedence, snake_case values, and upstream eligibility.
-- Record isolated official-binary and production launch-boundary evidence.
-- Publish synchronized standalone release metadata for Prodex 0.436.0.
-
-Full Changelog: [0.435.9...0.436.0](https://github.com/christiandoxa/prodex/compare/0.435.9...0.436.0)
 
 ## 0.435.9 - 2026-10-08
 
