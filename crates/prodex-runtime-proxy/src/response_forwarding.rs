@@ -27,6 +27,25 @@ unsafe extern "C" {
 }
 
 const RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT: i64 = 9;
+const RESPONSE_FORWARDING_TAP_PLAN: i64 = 10;
+
+fn runtime_sse_tap_plan(event_type: Option<&str>, output_tokens: u64) -> u8 {
+    let value = event_type.unwrap_or_default();
+    let result = unsafe {
+        prodex_runtime_response_forwarding_classify_v1(
+            RESPONSE_FORWARDING_TAP_PLAN,
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).unwrap_or(i64::MAX),
+            i64::from(event_type.is_some()),
+            output_tokens,
+        )
+    };
+    assert!(
+        (0..=15).contains(&result),
+        "Mojo response-forwarding tap planner returned invalid output"
+    );
+    result as u8
+}
 
 fn response_forwarding_mojo_bool(operation: i64, value: Option<&str>, numeric: u64) -> bool {
     let present = value.is_some();
@@ -446,15 +465,17 @@ impl RuntimeSseTapState {
             });
         }
         let event_type = event.event_type.as_deref();
-        if self.generation_started_at.is_none()
-            && runtime_response_event_is_generation_start(event_type)
-        {
+        let tap_plan = runtime_sse_tap_plan(
+            event_type,
+            event.token_usage.map_or(0, |usage| usage.output_tokens),
+        );
+        if self.generation_started_at.is_none() && tap_plan & 1 != 0 {
             self.generation_started_at = Some(Instant::now());
         }
-        let final_generation_ms = (event_type == Some("response.completed"))
+        let final_generation_ms = (tap_plan & 2 != 0)
             .then(|| runtime_generation_elapsed_ms(self.generation_started_at))
             .flatten();
-        if runtime_token_usage_event_is_live(event_type, event.token_usage)
+        if tap_plan & 4 != 0
             && let Some(token_usage) = event.token_usage
             && let Some(token_usage) = self
                 .output_token_usage_progress
@@ -466,7 +487,7 @@ impl RuntimeSseTapState {
                 generation_ms,
             });
         }
-        self.log_token_usage(event_type, event.token_usage, final_generation_ms, effects);
+        self.log_token_usage(tap_plan, event.token_usage, final_generation_ms, effects);
     }
 
     fn remember_response_ids(
@@ -533,7 +554,7 @@ impl RuntimeSseTapState {
 
     fn log_token_usage(
         &mut self,
-        event_type: Option<&str>,
+        tap_plan: u8,
         token_usage: Option<RuntimeTokenUsage>,
         generation_ms: Option<u64>,
         effects: &mut Vec<RuntimeSseTapEffect>,
@@ -541,8 +562,7 @@ impl RuntimeSseTapState {
         let Some(token_usage) = token_usage else {
             return;
         };
-        if runtime_token_usage_event_is_loggable(event_type)
-            && self.logged_token_usage.insert(token_usage)
+        if tap_plan & 8 != 0 && self.logged_token_usage.insert(token_usage)
         {
             if let Some(generation_ms) = generation_ms {
                 effects.push(RuntimeSseTapEffect::LogTokenUsageWithGeneration {
@@ -729,6 +749,15 @@ mod classifier_tests {
             Some(RuntimeTokenUsage::default())
         ));
     }
+
+    #[test]
+    fn tap_plan_is_single_mojo_decision_for_stream_boundaries() {
+        assert_eq!(runtime_sse_tap_plan(Some("response.output_text.delta"), 3), 0b0101);
+        assert_eq!(runtime_sse_tap_plan(Some("response.completed"), 3), 0b1010);
+        assert_eq!(runtime_sse_tap_plan(Some("response.failed"), 0), 0b1000);
+        assert_eq!(runtime_sse_tap_plan(None, 3), 0b1000);
+    }
+
 }
 
 #[cfg(test)]
