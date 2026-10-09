@@ -3,7 +3,8 @@
 use prodex_mojo_core::runtime::{
     ProfileBackoffMergeAction, ProfileHealthScoreInput, ProfileRecoveryCandidate,
     RUNTIME_PROFILE_SCHEDULE_MAX_COUNT, profile_backoff_merge_action,
-    profile_circuit_half_open_seconds, profile_health_sort_key_batch, profile_recovery_plan_batch,
+    profile_backoff_update_should_retain, profile_circuit_half_open_seconds,
+    profile_health_sort_key_batch, profile_recovery_plan_batch, profile_score_should_retain,
 };
 
 #[test]
@@ -23,6 +24,18 @@ fn half_open_circuit_timing_abi_caps_mojo_policy_boundaries() {
         );
     }
     assert!(profile_circuit_half_open_seconds(0, 4, 5, -1).is_err());
+}
+
+#[test]
+fn health_retention_and_half_open_timing_saturate_signed_extremes() {
+    const { assert!(prodex_mojo_core::MOJO_REQUIRED) };
+
+    assert!(profile_score_should_retain(true, i64::MIN, i64::MIN, i64::MAX).unwrap());
+    assert!(profile_backoff_update_should_retain(true, i64::MIN, i64::MIN, i64::MAX).unwrap());
+    assert_eq!(
+        profile_circuit_half_open_seconds(3, 0, i64::MAX, i64::MAX).unwrap(),
+        i64::MAX
+    );
 }
 
 #[test]

@@ -1182,12 +1182,7 @@ pub fn quota_window_label(seconds: Option<i64>) -> Result<String, crate::MojoErr
         )
     };
     quota_model_policy_status(status)?;
-    if kind == 4 {
-        return seconds
-            .map(|seconds| format!("{seconds}s"))
-            .ok_or(crate::MojoError::InvalidOutput);
-    }
-    if !(0..=3).contains(&kind) {
+    if !(0..=4).contains(&kind) {
         return Err(crate::MojoError::InvalidOutput);
     }
     let written = usize::try_from(written).map_err(|_| crate::MojoError::InvalidOutput)?;
