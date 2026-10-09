@@ -81,3 +81,40 @@ fn compact_followup_consumer_uses_mojo_plan_for_dead_and_live_binding_precedence
         "live, missing, and unavailable compact lineage must each reach Mojo"
     );
 }
+
+#[test]
+fn compact_followup_consumer_uses_mojo_source_precedence_for_turn_and_session_bindings() {
+    let now = Local::now().timestamp();
+    let temp_dir = TestDir::isolated();
+    let profile = "source-owner";
+    let turn_key = runtime_compact_turn_state_lineage_key("turn-source-precedence");
+    let session_key = runtime_compact_session_lineage_key("session-source-precedence");
+    let mut runtime = RuntimeProxyFixtureBuilder::new().build_runtime(&temp_dir);
+    runtime.state.profiles.insert(
+        profile.to_string(),
+        ProfileEntry {
+            codex_home: temp_dir.path.join("homes/source-owner"),
+            managed: false,
+            email: None,
+            provider: ProfileProvider::Openai,
+        },
+    );
+    let binding = || ResponseProfileBinding {
+        binding_identity: None,
+        profile_name: profile.to_string(),
+        bound_at: now,
+    };
+    runtime.turn_state_bindings.insert(turn_key, binding());
+    runtime.session_id_bindings.insert(session_key, binding());
+    let shared = runtime_rotation_proxy_shared(&temp_dir, runtime, 1);
+
+    assert_eq!(
+        runtime_compact_route_followup_bound_profile(
+            &shared,
+            Some("turn-source-precedence"),
+            Some("session-source-precedence"),
+        )
+        .expect("compact source precedence should succeed"),
+        Some((profile.to_string(), "turn_state")),
+    );
+}

@@ -9,19 +9,6 @@ struct RuntimePreviousResponseDiskFallbackEntry {
     order_index: usize,
 }
 
-enum RuntimePreviousResponseRejection {
-    NegativeCache,
-    AuthFailure,
-    Quota {
-        summary: RuntimeQuotaSummary,
-        reason: &'static str,
-    },
-}
-
-struct RuntimePreviousResponseEligibleCandidate {
-    quota_summary: RuntimeQuotaSummary,
-}
-
 struct RuntimePreviousResponseDiscovery {
     selected: Option<String>,
     disk_fallback_entries: Vec<RuntimePreviousResponseDiskFallbackEntry>,
@@ -64,7 +51,7 @@ pub(super) fn discover_runtime_previous_response_candidate(
             previous_response_id,
             route_kind,
             now,
-        ) {
+        )? {
             RuntimeBoundPreviousResponseOwner::Usable(owner) => {
                 record_runtime_previous_response_selection(trace, owner, 0, None, true);
                 return Ok(Some(owner.to_string()));
@@ -82,7 +69,7 @@ pub(super) fn discover_runtime_previous_response_candidate(
                 now,
             },
             trace,
-        );
+        )?;
         if let Some(selected) = discovered.selected {
             return Ok(Some(selected));
         }
@@ -97,67 +84,102 @@ fn bound_previous_response_owner<'a>(
     previous_response_id: Option<&str>,
     route_kind: RuntimeRouteKind,
     now: i64,
-) -> RuntimeBoundPreviousResponseOwner<'a> {
-    let Some(response_id) = previous_response_id else {
-        return RuntimeBoundPreviousResponseOwner::Unbound;
-    };
-    let Some(identity) = prodex_runtime_state::RuntimeHardBindingIdentity::response(response_id)
-    else {
-        return RuntimeBoundPreviousResponseOwner::Unusable;
-    };
-    let owner = prodex_runtime_store::runtime_hard_binding_owner(
-        &identity,
-        &runtime.state.response_profile_bindings,
-        &runtime.turn_state_bindings,
-        &runtime.session_id_bindings,
-        &runtime.state.session_profile_bindings,
-        &runtime.state.profiles,
-    );
-    let prodex_runtime_state::RuntimeHardBindingOwner::Owned(owner) = owner else {
-        return match owner {
-            prodex_runtime_state::RuntimeHardBindingOwner::Unbound => {
-                RuntimeBoundPreviousResponseOwner::Unbound
-            }
-            prodex_runtime_state::RuntimeHardBindingOwner::Conflict
-            | prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(_) => {
-                RuntimeBoundPreviousResponseOwner::Unusable
-            }
-            prodex_runtime_state::RuntimeHardBindingOwner::Owned(_) => unreachable!(),
-        };
-    };
-    if excluded_profiles.contains(&owner)
-        || runtime_profile_auth_failure_active_from_map(&runtime.profile_health, &owner, now)
-        || runtime_previous_response_negative_cache_active(
-            &runtime.profile_health,
-            response_id,
-            &owner,
-            route_kind,
-            now,
+) -> Result<RuntimeBoundPreviousResponseOwner<'a>> {
+    let id_present = previous_response_id.is_some();
+    let identity =
+        previous_response_id.and_then(prodex_runtime_state::RuntimeHardBindingIdentity::response);
+    let owner = if let Some(identity) = identity.as_ref() {
+        prodex_runtime_store::runtime_hard_binding_owner(
+            identity,
+            &runtime.state.response_profile_bindings,
+            &runtime.turn_state_bindings,
+            &runtime.session_id_bindings,
+            &runtime.state.session_profile_bindings,
+            &runtime.state.profiles,
         )
-    {
-        return RuntimeBoundPreviousResponseOwner::Unusable;
-    }
-    let Some(binding) = runtime
-        .state
-        .response_profile_bindings
-        .get(response_id)
-        .filter(|binding| binding.profile_name == owner)
-    else {
-        return RuntimeBoundPreviousResponseOwner::Unusable;
+    } else {
+        prodex_runtime_state::RuntimeHardBindingOwner::Unbound
     };
-    if let Some(binding_identity) = binding.binding_identity.as_ref()
-        && runtime_profile_binding_identity(runtime, &owner)
-            .is_none_or(|current_identity| current_identity != *binding_identity)
-    {
-        return RuntimeBoundPreviousResponseOwner::Unusable;
-    }
-    RuntimeBoundPreviousResponseOwner::Usable(binding.profile_name.as_str())
+    let response_id = previous_response_id.unwrap_or_default();
+    let owned_profile = match &owner {
+        prodex_runtime_state::RuntimeHardBindingOwner::Owned(owner) => Some(owner.as_str()),
+        _ => None,
+    };
+    let binding = owned_profile.and_then(|owner| {
+        runtime
+            .state
+            .response_profile_bindings
+            .get(response_id)
+            .filter(|binding| binding.profile_name == owner)
+    });
+    let identity_matches = binding.is_none_or(|binding| {
+        binding
+            .binding_identity
+            .as_ref()
+            .is_none_or(|binding_identity| {
+                runtime_profile_binding_identity(runtime, owned_profile.unwrap_or_default())
+                    .is_some_and(|current_identity| current_identity == *binding_identity)
+            })
+    });
+    let owner_kind = match &owner {
+        prodex_runtime_state::RuntimeHardBindingOwner::Unbound => {
+            prodex_mojo_core::runtime::RuntimeContinuationOwnerKind::Unbound
+        }
+        prodex_runtime_state::RuntimeHardBindingOwner::Owned(_) => {
+            prodex_mojo_core::runtime::RuntimeContinuationOwnerKind::Owned
+        }
+        prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(_) => {
+            prodex_mojo_core::runtime::RuntimeContinuationOwnerKind::Unavailable
+        }
+        prodex_runtime_state::RuntimeHardBindingOwner::Conflict => {
+            prodex_mojo_core::runtime::RuntimeContinuationOwnerKind::Conflict
+        }
+    };
+    let action = prodex_mojo_core::runtime::runtime_previous_response_owner_plan(
+        prodex_mojo_core::runtime::RuntimePreviousResponseOwnerInput {
+            id_present,
+            id_valid: identity.is_some(),
+            owner_kind,
+            excluded: owned_profile.is_some_and(|owner| excluded_profiles.contains(owner)),
+            auth_failure: owned_profile.is_some_and(|owner| {
+                runtime_profile_auth_failure_active_from_map(&runtime.profile_health, owner, now)
+            }),
+            negative_cache: owned_profile.is_some_and(|owner| {
+                runtime_previous_response_negative_cache_active(
+                    &runtime.profile_health,
+                    response_id,
+                    owner,
+                    route_kind,
+                    now,
+                )
+            }),
+            binding_present: binding.is_some(),
+            identity_matches,
+        },
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo previous-response owner planning failed: {error:?}"))?;
+    let owner = match action {
+        prodex_mojo_core::runtime::RuntimePreviousResponseOwnerAction::Unbound => {
+            RuntimeBoundPreviousResponseOwner::Unbound
+        }
+        prodex_mojo_core::runtime::RuntimePreviousResponseOwnerAction::Usable => {
+            let binding = binding.ok_or_else(|| {
+                anyhow::anyhow!("Mojo accepted previous-response owner without a binding")
+            })?;
+            RuntimeBoundPreviousResponseOwner::Usable(binding.profile_name.as_str())
+        }
+        prodex_mojo_core::runtime::RuntimePreviousResponseOwnerAction::Unusable
+        | prodex_mojo_core::runtime::RuntimePreviousResponseOwnerAction::Conflict => {
+            RuntimeBoundPreviousResponseOwner::Unusable
+        }
+    };
+    Ok(owner)
 }
 
 fn discover_cached_previous_response_candidate(
     context: RuntimePreviousResponseDiscoveryContext<'_>,
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
-) -> RuntimePreviousResponseDiscovery {
+) -> Result<RuntimePreviousResponseDiscovery> {
     let RuntimePreviousResponseDiscoveryContext {
         runtime,
         excluded_profiles,
@@ -174,133 +196,121 @@ fn discover_cached_previous_response_candidate(
         if excluded_profiles.contains(name) {
             continue;
         }
-        let eligible = match runtime_previous_response_candidate_eligibility(
-            runtime,
-            name,
-            previous_response_id,
-            route_kind,
-            now,
-        ) {
-            Ok(eligible) => eligible,
-            Err(rejection) => {
-                record_runtime_previous_response_rejection(trace, name, order_index, rejection);
-                continue;
-            }
-        };
-        match runtime_profile_cached_auth_summary_from_maps_for_selection(
+        let negative_cache = previous_response_id.is_some_and(|response_id| {
+            runtime_previous_response_negative_cache_active(
+                &runtime.profile_health,
+                response_id,
+                name,
+                route_kind,
+                now,
+            )
+        });
+        let auth_failure =
+            runtime_profile_auth_failure_active_from_map(&runtime.profile_health, name, now);
+        let (quota_summary, _) =
+            runtime_profile_quota_summary_for_route_from_state(runtime, name, route_kind, now);
+        let quota_reason =
+            runtime_quota_precommit_guard_reason(quota_summary, route_kind).or_else(|| {
+                (quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted)
+                    .then(|| runtime_quota_pressure_band_reason(quota_summary.route_band))
+            });
+        let cached_summary = runtime_profile_cached_auth_summary_from_maps_for_selection(
             name,
             &runtime.profile_usage_auth,
             &runtime.profile_probe_cache,
-        ) {
-            Some(summary) if summary.quota_compatible => {
+        );
+        let action = prodex_mojo_core::runtime::runtime_previous_response_candidate_plan(
+            prodex_mojo_core::runtime::RuntimePreviousResponseCandidateInput {
+                negative_cache,
+                auth_failure,
+                quota_exhausted: quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted,
+                quota_guard: quota_reason.is_some(),
+                cached_auth_present: cached_summary.is_some(),
+                cached_auth_compatible: cached_summary
+                    .as_ref()
+                    .is_some_and(|summary| summary.quota_compatible),
+                allow_disk_fallback: allow_disk_auth_fallback,
+            },
+        )
+        .map_err(|error| {
+            anyhow::anyhow!("Mojo previous-response candidate planning failed: {error:?}")
+        })?;
+        match action {
+            prodex_mojo_core::runtime::RuntimePreviousResponseCandidateAction::RejectNegativeCache => {
+                record_runtime_previous_response_simple_rejection(
+                    trace,
+                    name,
+                    order_index,
+                    "negative_cache",
+                    Some(runtime_proxy_crate::RuntimeRouteDecisionStage::Affinity),
+                );
+            }
+            prodex_mojo_core::runtime::RuntimePreviousResponseCandidateAction::RejectAuth => {
+                let reason =
+                    runtime_proxy_crate::RuntimeRouteDecisionReasonKind::AuthFailureBackoff.as_str();
+                record_runtime_previous_response_simple_rejection(
+                    trace,
+                    name,
+                    order_index,
+                    reason,
+                    None,
+                );
+            }
+            prodex_mojo_core::runtime::RuntimePreviousResponseCandidateAction::RejectQuota => {
+                record_runtime_previous_response_quota_rejection(
+                    trace,
+                    name,
+                    order_index,
+                    quota_summary,
+                    quota_reason.unwrap_or_else(|| {
+                        runtime_quota_pressure_band_reason(quota_summary.route_band)
+                    }),
+                );
+            }
+            prodex_mojo_core::runtime::RuntimePreviousResponseCandidateAction::SelectCached => {
+                if cached_summary.is_none() {
+                    return Err(anyhow::anyhow!(
+                        "Mojo selected cached previous-response auth without a cache"
+                    ));
+                }
                 record_runtime_previous_response_selection(
                     trace,
                     name,
                     order_index,
-                    Some(eligible.quota_summary),
+                    Some(quota_summary),
                     false,
                 );
-                return RuntimePreviousResponseDiscovery {
+                return Ok(RuntimePreviousResponseDiscovery {
                     selected: Some(name.to_string()),
                     disk_fallback_entries,
-                };
+                });
             }
-            Some(_) => record_runtime_previous_response_auth_incompatible(
-                trace,
-                name,
-                order_index,
-                eligible.quota_summary,
-            ),
-            None if allow_disk_auth_fallback => {
+            prodex_mojo_core::runtime::RuntimePreviousResponseCandidateAction::DiskFallback => {
                 disk_fallback_entries.push(RuntimePreviousResponseDiskFallbackEntry {
                     name: name.to_string(),
                     codex_home: profile.codex_home.clone(),
                     order_index,
                 });
             }
-            None => {}
+            prodex_mojo_core::runtime::RuntimePreviousResponseCandidateAction::Skip => {
+                if cached_summary
+                    .as_ref()
+                    .is_some_and(|summary| !summary.quota_compatible)
+                {
+                    record_runtime_previous_response_auth_incompatible(
+                        trace,
+                        name,
+                        order_index,
+                        quota_summary,
+                    );
+                }
+            }
         }
     }
-    RuntimePreviousResponseDiscovery {
+    Ok(RuntimePreviousResponseDiscovery {
         selected: None,
         disk_fallback_entries,
-    }
-}
-
-fn runtime_previous_response_candidate_eligibility(
-    runtime: &RuntimeRotationState,
-    name: &str,
-    previous_response_id: Option<&str>,
-    route_kind: RuntimeRouteKind,
-    now: i64,
-) -> std::result::Result<RuntimePreviousResponseEligibleCandidate, RuntimePreviousResponseRejection>
-{
-    if let Some(response_id) = previous_response_id
-        && runtime_previous_response_negative_cache_active(
-            &runtime.profile_health,
-            response_id,
-            name,
-            route_kind,
-            now,
-        )
-    {
-        return Err(RuntimePreviousResponseRejection::NegativeCache);
-    }
-    if runtime_profile_auth_failure_active_from_map(&runtime.profile_health, name, now) {
-        return Err(RuntimePreviousResponseRejection::AuthFailure);
-    }
-    let (quota_summary, _) =
-        runtime_profile_quota_summary_for_route_from_state(runtime, name, route_kind, now);
-    if quota_summary.route_band == RuntimeQuotaPressureBand::Exhausted
-        || runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some()
-    {
-        let reason = runtime_quota_precommit_guard_reason(quota_summary, route_kind)
-            .unwrap_or_else(|| runtime_quota_pressure_band_reason(quota_summary.route_band));
-        return Err(RuntimePreviousResponseRejection::Quota {
-            summary: quota_summary,
-            reason,
-        });
-    }
-    Ok(RuntimePreviousResponseEligibleCandidate { quota_summary })
-}
-
-fn record_runtime_previous_response_rejection(
-    trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
-    name: &str,
-    order_index: usize,
-    rejection: RuntimePreviousResponseRejection,
-) {
-    match rejection {
-        RuntimePreviousResponseRejection::NegativeCache => {
-            record_runtime_previous_response_simple_rejection(
-                trace,
-                name,
-                order_index,
-                "negative_cache",
-                Some(runtime_proxy_crate::RuntimeRouteDecisionStage::Affinity),
-            );
-        }
-        RuntimePreviousResponseRejection::AuthFailure => {
-            let reason =
-                runtime_proxy_crate::RuntimeRouteDecisionReasonKind::AuthFailureBackoff.as_str();
-            record_runtime_previous_response_simple_rejection(
-                trace,
-                name,
-                order_index,
-                reason,
-                None,
-            );
-        }
-        RuntimePreviousResponseRejection::Quota { summary, reason } => {
-            record_runtime_previous_response_quota_rejection(
-                trace,
-                name,
-                order_index,
-                summary,
-                reason,
-            )
-        }
-    }
+    })
 }
 
 fn record_runtime_previous_response_simple_rejection(
@@ -398,7 +408,23 @@ fn select_runtime_previous_response_disk_fallback(
     trace: &mut runtime_proxy_crate::RuntimeRouteDecisionTraceBuilder,
 ) -> Result<Option<String>> {
     for entry in entries {
-        if read_auth_summary(&entry.codex_home).quota_compatible {
+        let auth = read_auth_summary(&entry.codex_home);
+        let action = prodex_mojo_core::runtime::runtime_previous_response_candidate_plan(
+            prodex_mojo_core::runtime::RuntimePreviousResponseCandidateInput {
+                negative_cache: false,
+                auth_failure: false,
+                quota_exhausted: false,
+                quota_guard: false,
+                cached_auth_present: true,
+                cached_auth_compatible: auth.quota_compatible,
+                allow_disk_fallback: false,
+            },
+        )
+        .map_err(|error| {
+            anyhow::anyhow!("Mojo previous-response disk fallback planning failed: {error:?}")
+        })?;
+        if action == prodex_mojo_core::runtime::RuntimePreviousResponseCandidateAction::SelectCached
+        {
             record_runtime_previous_response_selection(
                 trace,
                 &entry.name,
