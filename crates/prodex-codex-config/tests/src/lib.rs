@@ -452,3 +452,5 @@ fn temp_dir(name: &str) -> PathBuf {
     }
     dir
 }
+
+mod custom_provider;

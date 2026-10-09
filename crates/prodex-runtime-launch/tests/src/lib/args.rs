@@ -479,3 +479,6 @@ fn prepare_codex_launch_args_rewrites_legacy_profile_v2_flag_for_codex_0134() {
 
 #[path = "args_resume.rs"]
 mod args_resume;
+
+#[path = "args/custom_provider.rs"]
+mod custom_provider;
