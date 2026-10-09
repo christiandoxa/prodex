@@ -526,6 +526,19 @@ mod tests {
     }
 
     #[test]
+    fn runtime_proxy_body_limit_mojo_is_used_for_declared_and_observed_lengths() {
+        for limit in [0, 1, 64, 65, (1_u64 << 63) - 1, 1_u64 << 63, u64::MAX] {
+            for observed in [0, 1, 64, 65, 1_u64 << 63, u64::MAX] {
+                assert_eq!(
+                    runtime_proxy_request_body_exceeds_limit(limit, observed).unwrap(),
+                    observed > limit,
+                    "limit={limit}, observed={observed}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn runtime_proxy_max_request_body_bytes_accepts_exact_env_value() {
         let _guard = crate::test_support::TestEnvVarGuard::set(
             "PRODEX_RUNTIME_PROXY_MAX_REQUEST_BODY_BYTES",
