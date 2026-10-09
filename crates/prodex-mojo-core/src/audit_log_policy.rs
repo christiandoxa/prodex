@@ -836,5 +836,21 @@ mod tests {
         assert_eq!(tail_start_index(4, 2).unwrap(), 2);
         assert_eq!(tail_start_index(4, 0).unwrap(), 4);
         assert_eq!(tail_start_index(2, usize::MAX).unwrap(), 0);
+        // Mojo returns a byte offset; multibyte prefixes must not be split.
+        let unicode = "\u{1f510}\u{3b1}\nlast\n";
+        assert_eq!(line_window_start(unicode, false, Some(1)).unwrap(), 7);
+        assert_eq!(line_window_start(unicode, true, None).unwrap(), 7);
+        assert_eq!(
+            line_window_start("one\r\ntwo\r\n", false, Some(1)).unwrap(),
+            5
+        );
+        assert_eq!(line_window_start("", false, Some(0)).unwrap(), 0);
+        assert_eq!(tail_start_index(0, 0).unwrap(), 0);
+        assert_eq!(tail_start_index(1, 1).unwrap(), 0);
+        let oversized = "x".repeat(1_048_577);
+        assert_eq!(
+            line_window_start(&oversized, false, None),
+            Err(MojoError::InvalidInput)
+        );
     }
 }
