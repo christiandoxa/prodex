@@ -1370,6 +1370,28 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/provider_binding_identity.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "provider_binding_identity_input_policy",
+          "provider_binding_identity_digest_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/provider_binding_identity.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "provider_binding_identity_input_policy",
+          "provider_binding_identity_digest_policy"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/profile_ui_policy.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -6355,6 +6377,52 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "reqwest transport error detection, borrowed error text, typed enum mapping, and log/response label selection"
+    },
+    {
+      "name": "provider_binding_identity_input_policy",
+      "domain": "provider/binding",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust trimmed and validated provider credential/profile identities and canonical endpoint suffixes before constructing continuation binding identities",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_provider_binding_identity_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/provider_binding_identity.mojo",
+      "consumer": "crates/prodex-provider-core/src/binding_identity.rs",
+      "consumer_marker": "prodex_mojo_core::rich::provider_binding_identity_inputs(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/binding_identity.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/binding_identity.rs",
+      "rust_owner_before": "Credential/profile trim, control rejection, byte limits, and endpoint trailing-slash normalization for provider continuation binding identities",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; Mojo boundary and provider-core identity tests cover Unicode trim, controls, empty profile, endpoint normalization, and exact limits",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "URL parsing, typed identity DTO construction, SHA-256 public identity hashing, and checked ABI result mapping"
+    },
+    {
+      "name": "provider_binding_identity_digest_policy",
+      "domain": "provider/binding",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust accepted or rejected serialized public binding digests by prefix, exact length, and lowercase hexadecimal shape",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_mojo_provider_binding_identity_digest_valid_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/provider_binding_identity.mojo",
+      "consumer": "crates/prodex-provider-core/src/binding_identity.rs",
+      "consumer_marker": "prodex_mojo_core::rich::provider_binding_identity_digest_is_public(",
+      "production_consumers": [
+        "crates/prodex-provider-core/src/binding_identity.rs"
+      ],
+      "production_reachability_test": "crates/prodex-provider-core/src/binding_identity.rs",
+      "rust_owner_before": "Serialized sha256 public-identity prefix, length, and lowercase-hex validation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; provider-core wire and digest tests cover uppercase, short, extended, and valid public identities",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "borrowed string projection and typed boolean/error mapping across the versioned ABI"
     },
     {
       "name": "provider_error_code_extraction",
