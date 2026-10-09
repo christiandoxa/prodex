@@ -19,12 +19,15 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 retry_after.map_or(0, |delay| delay.as_millis()),
             ),
         );
-        mark_runtime_profile_retry_backoff_for_delay(self.shared, &profile_name, retry_after)?;
-        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+        let (disposition, state_plan) = websocket_failure_plans(
+            runtime_proxy_crate::RuntimeWebsocketFailureKind::RateLimited,
             !self.candidate_has_hard_affinity(&profile_name),
             false,
         );
-        if !plan.continue_selection {
+        if disposition.mark_backoff {
+            mark_runtime_profile_retry_backoff_for_delay(self.shared, &profile_name, retry_after)?;
+        }
+        if !disposition.continue_selection {
             if self.full_context_retry_available(&profile_name)? {
                 let released_affinity = release_runtime_retryable_failure_affinity(
                     self.shared,
@@ -44,11 +47,16 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
-        self.saw_rate_limit_failure = true;
-        if plan.exclude_profile {
+        self.saw_rate_limit_failure = state_plan.record_rate_limit_failure;
+        if disposition.exclude_profile {
             self.excluded_profiles.insert(profile_name);
         }
-        self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
+        if state_plan.store_last_failure {
+            self.last_failure = Some((
+                RuntimeUpstreamFailureResponse::Websocket(payload),
+                state_plan.last_failure_retryable,
+            ));
+        }
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
 
@@ -65,11 +73,12 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.request_id, self.session_id, profile_name, via
             ),
         );
-        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+        let (disposition, state_plan) = websocket_failure_plans(
+            runtime_proxy_crate::RuntimeWebsocketFailureKind::AuthFailed,
             !self.candidate_has_hard_affinity(&profile_name),
             false,
         );
-        if !plan.continue_selection {
+        if !disposition.continue_selection {
             if self.full_context_retry_available(&profile_name)? {
                 let released_affinity = release_runtime_auth_failed_affinity(
                     self.shared,
@@ -88,18 +97,25 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             forward_runtime_proxy_websocket_error(&mut *self.local_socket, &payload)?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
-        let _ = release_runtime_auth_failed_affinity(
-            self.shared,
-            &profile_name,
-            self.previous_response_id.as_deref(),
-            self.request_turn_state.as_deref(),
-            self.request_session_id.as_deref(),
-        )?;
-        self.clear_profile_affinity(&profile_name, true);
-        if plan.exclude_profile {
+        if state_plan.clear_affinity {
+            let _ = release_runtime_auth_failed_affinity(
+                self.shared,
+                &profile_name,
+                self.previous_response_id.as_deref(),
+                self.request_turn_state.as_deref(),
+                self.request_session_id.as_deref(),
+            )?;
+            self.clear_profile_affinity(&profile_name, true);
+        }
+        if disposition.exclude_profile {
             self.excluded_profiles.insert(profile_name);
         }
-        self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), true));
+        if state_plan.store_last_failure {
+            self.last_failure = Some((
+                RuntimeUpstreamFailureResponse::Websocket(payload),
+                state_plan.last_failure_retryable,
+            ));
+        }
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
 
