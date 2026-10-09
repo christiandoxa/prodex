@@ -7,6 +7,7 @@ pub use bound_overload::bound_overload_retry_delay;
 mod candidate_plan;
 mod compatibility_surface;
 mod continuation_status;
+mod noncompact_loop;
 mod profile_health;
 mod profile_rotation;
 mod prompt_cache_affinity;
@@ -28,6 +29,10 @@ pub use continuation_status::{
     CONTINUATION_SHOULD_REPLACE, CONTINUATION_STALE_VERIFIED, CONTINUATION_SUSPECT_PLAN,
     CONTINUATION_TERMINAL_STATUS, CONTINUATION_TOUCH_PLAN, CONTINUATION_TOUCH_SHOULD_PERSIST,
     CONTINUATION_VERIFY_PLAN, continuation_status_transition,
+};
+pub use noncompact_loop::{
+    NoncompactLoopAction, NoncompactLoopInput, NoncompactLoopStage, NoncompactPrecommitAction,
+    NoncompactPrecommitInput, noncompact_loop_action, noncompact_precommit_action,
 };
 pub use profile_health::{
     ProfileBackoffMergeAction, ProfileBackoffPlan, ProfileBackoffSoftening, ProfileHealthBumpInput,

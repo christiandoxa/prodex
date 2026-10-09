@@ -2,9 +2,11 @@ use super::*;
 
 mod failure_handlers;
 mod failure_routing;
+mod loop_policy;
 
 use failure_handlers::*;
 use failure_routing::*;
+use loop_policy::{RuntimeNoncompactNextActionContext, runtime_noncompact_next_action};
 
 pub(super) fn proxy_runtime_noncompact_request(
     request_id: u64,
@@ -194,12 +196,49 @@ fn runtime_noncompact_budget_action(
     pressure_mode: bool,
     loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
 ) -> Result<RuntimeNoncompactBudgetAction> {
-    if !loop_state.budget_exhausted(
+    let normal_budget_exhausted = runtime_proxy_precommit_budget_exhausted_for_route(
         shared,
-        RuntimeRouteKind::Standard,
+        loop_state.selection_started_at,
+        loop_state.selection_attempts,
         session_present,
         pressure_mode,
-    )? {
+    )?;
+    let saw_transient_failure = loop_state.saw_overload_failure
+        || loop_state.saw_rate_limit_failure
+        || loop_state.saw_transport_failure;
+    let route_has_retryable_profile = saw_transient_failure
+        && runtime_route_has_retryable_profile(shared, RuntimeRouteKind::Standard)?;
+    let profile_count = shared
+        .runtime
+        .lock()
+        .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?
+        .state
+        .profiles
+        .len()
+        .max(1);
+    let attempt_limit = runtime_proxy_crate::runtime_proxy_precommit_budget_for_profile_count(
+        session_present,
+        pressure_mode,
+        profile_count,
+    )
+    .0;
+    let action = prodex_mojo_core::runtime::noncompact_precommit_action(
+        prodex_mojo_core::runtime::NoncompactPrecommitInput {
+            normal_budget_exhausted,
+            continuation: session_present,
+            saw_transient_failure,
+            route_has_retryable_profile,
+            recovery_sweeps: loop_state.recovery_sweeps,
+            attempts: loop_state.selection_attempts,
+            profile_count,
+            attempt_limit,
+        },
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo noncompact precommit policy failed: {error:?}"))?;
+    if matches!(
+        action,
+        prodex_mojo_core::runtime::NoncompactPrecommitAction::Proceed
+    ) {
         return Ok(RuntimeNoncompactBudgetAction::Proceed);
     }
     runtime_proxy_log(
@@ -210,13 +249,14 @@ fn runtime_noncompact_budget_action(
             loop_state.selection_started_at.elapsed().as_millis()
         ),
     );
-    if !session_present
-        && loop_state.maybe_wait_for_transient_recovery(
-            request_id,
-            shared,
-            RuntimeRouteKind::Standard,
-        )?
-    {
+    if matches!(
+        action,
+        prodex_mojo_core::runtime::NoncompactPrecommitAction::WaitTransient
+    ) && loop_state.maybe_wait_for_transient_recovery(
+        request_id,
+        shared,
+        RuntimeRouteKind::Standard,
+    )? {
         return Ok(RuntimeNoncompactBudgetAction::Continue);
     }
     Ok(RuntimeNoncompactBudgetAction::Return(
@@ -280,31 +320,21 @@ fn run_runtime_noncompact_standard_loop(
             RuntimeNoncompactBudgetAction::Proceed => {}
         }
 
-        let action = runtime_noncompact_next_action(
+        let action = runtime_noncompact_next_action(RuntimeNoncompactNextActionContext {
             request_id,
             shared,
             request_model_name,
             preferred_profile,
             preferred_is_session,
-            session_profile.is_some(),
-            &mut *loop_state,
-        )?;
+            session_present: session_profile.is_some(),
+            wait_affinity_owner: session_profile.as_deref(),
+            loop_state: &mut *loop_state,
+        })?;
         let candidate_name = match action {
             RuntimePrecommitLoopAction::Continue => continue,
             RuntimePrecommitLoopAction::Attempt(candidate_name) => candidate_name,
             RuntimePrecommitLoopAction::Return(response) => return Ok(response),
         };
-        if runtime_noncompact_candidate_saturated(
-            request_id,
-            shared,
-            &candidate_name,
-            &mut *loop_state,
-            session_profile.is_some(),
-            session_profile.as_deref(),
-        )? {
-            continue;
-        }
-
         loop_state.begin_attempt();
         let attempt = attempt_runtime_noncompact_standard_request(
             request_id,
@@ -343,209 +373,6 @@ fn run_runtime_noncompact_standard_loop(
         )? {
             return Ok(response);
         }
-    }
-}
-
-fn runtime_noncompact_next_action(
-    request_id: u64,
-    shared: &RuntimeRotationProxyShared,
-    request_model_name: Option<&str>,
-    preferred_profile: &str,
-    preferred_is_session: bool,
-    session_present: bool,
-    loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
-) -> Result<RuntimePrecommitLoopAction<String, tiny_http::ResponseBox>> {
-    let release_revision = runtime_profile_inflight_release_revision(shared);
-    if let Some(action) = runtime_noncompact_preferred_action(
-        request_id,
-        shared,
-        request_model_name,
-        preferred_profile,
-        preferred_is_session,
-        loop_state,
-    )? {
-        return Ok(action);
-    }
-    if let Some(candidate_name) = select_runtime_response_candidate_for_route_with_request(
-        shared,
-        RuntimeResponseCandidateSelection::fresh(
-            &loop_state.excluded_profiles,
-            RuntimeRouteKind::Standard,
-        ),
-        Some(request_id),
-        request_model_name,
-    )? {
-        return Ok(RuntimePrecommitLoopAction::Attempt(candidate_name));
-    }
-    match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
-        observed_release_revision: Some(release_revision),
-        request_id,
-        shared,
-        excluded_profiles: &loop_state.excluded_profiles,
-        route_kind: RuntimeRouteKind::Standard,
-        selection_started_at: &mut loop_state.selection_started_at,
-        continuation: session_present,
-        wait_affinity_owner: session_present.then_some(preferred_profile),
-        selected_profile: None,
-    })? {
-        RuntimeInflightReliefWaitResult::Relieved => {
-            return Ok(RuntimePrecommitLoopAction::Continue);
-        }
-        RuntimeInflightReliefWaitResult::NotWaitable => {}
-    }
-    let remaining_cold_start_profiles = runtime_remaining_sync_probe_cold_start_profiles_for_route(
-        shared,
-        &loop_state.excluded_profiles,
-        RuntimeRouteKind::Standard,
-    )?;
-    if remaining_cold_start_profiles > 0
-        && !session_present
-        && loop_state.claim_cold_start_probe_wait()
-    {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "request={request_id} transport=http candidate_exhausted_continue route=standard remaining_cold_start_profiles={remaining_cold_start_profiles}"
-            ),
-        );
-        runtime_proxy_probe_refresh_pause(shared, RuntimeRouteKind::Standard);
-        return Ok(RuntimePrecommitLoopAction::Continue);
-    }
-    if !session_present
-        && loop_state.maybe_wait_for_transient_recovery(
-            request_id,
-            shared,
-            RuntimeRouteKind::Standard,
-        )?
-    {
-        return Ok(RuntimePrecommitLoopAction::Continue);
-    }
-    Ok(RuntimePrecommitLoopAction::Return(
-        runtime_proxy_final_retryable_http_failure_response(
-            loop_state.last_failure.take(),
-            loop_state.saw_inflight_saturation,
-            false,
-        )
-        .unwrap_or_else(|| {
-            build_runtime_proxy_text_response(503, runtime_proxy_local_selection_failure_message())
-        }),
-    ))
-}
-
-fn runtime_noncompact_preferred_action(
-    request_id: u64,
-    shared: &RuntimeRotationProxyShared,
-    request_model_name: Option<&str>,
-    preferred_profile: &str,
-    preferred_is_session: bool,
-    loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
-) -> Result<Option<RuntimePrecommitLoopAction<String, tiny_http::ResponseBox>>> {
-    if !loop_state.excluded_profiles.is_empty() {
-        return Ok(None);
-    }
-    let preferred_hard_limited = !preferred_is_session
-        && runtime_profile_inflight_hard_limited_for_context(
-            shared,
-            preferred_profile,
-            runtime_route_kind_inflight_context(RuntimeRouteKind::Standard),
-        )?;
-    if !preferred_hard_limited {
-        runtime_selection_trace_log_direct(
-            shared,
-            request_id,
-            RuntimeSelectionTraceDirect {
-                requested_model: request_model_name,
-                route_kind: RuntimeRouteKind::Standard,
-                candidate_key: preferred_profile,
-                class: if preferred_is_session {
-                    runtime_proxy_crate::RuntimeRouteCandidateClass::Affinity
-                } else {
-                    runtime_proxy_crate::RuntimeRouteCandidateClass::Current
-                },
-                affinity_kind: preferred_is_session
-                    .then_some(runtime_proxy_crate::RuntimeRouteAffinityKind::Session),
-                hard_affinity: preferred_is_session,
-            },
-        );
-        return Ok(Some(RuntimePrecommitLoopAction::Attempt(
-            preferred_profile.to_string(),
-        )));
-    }
-
-    loop_state.record_inflight_saturation();
-    runtime_proxy_log(
-        shared,
-        runtime_proxy_structured_log_message(
-            "profile_inflight_saturated",
-            [
-                runtime_proxy_log_field("request", request_id.to_string()),
-                runtime_proxy_log_field("transport", "http"),
-                runtime_proxy_log_field("profile", preferred_profile),
-                runtime_proxy_log_field(
-                    "hard_limit",
-                    shared
-                        .runtime_config
-                        .tuning
-                        .profile_inflight_hard_limit
-                        .to_string(),
-                ),
-            ],
-        ),
-    );
-    Ok(None)
-}
-
-fn runtime_noncompact_candidate_saturated(
-    request_id: u64,
-    shared: &RuntimeRotationProxyShared,
-    candidate_name: &str,
-    loop_state: &mut RuntimePrecommitLoopState<tiny_http::ResponseBox>,
-    continuation: bool,
-    wait_affinity_owner: Option<&str>,
-) -> Result<bool> {
-    let hard_affinity = wait_affinity_owner == Some(candidate_name);
-    if hard_affinity
-        || !runtime_profile_inflight_hard_limited_for_context(
-            shared,
-            candidate_name,
-            "standard_http",
-        )?
-    {
-        return Ok(false);
-    }
-    runtime_proxy_log(
-        shared,
-        runtime_proxy_structured_log_message(
-            "profile_inflight_saturated",
-            [
-                runtime_proxy_log_field("request", request_id.to_string()),
-                runtime_proxy_log_field("transport", "http"),
-                runtime_proxy_log_field("profile", candidate_name),
-                runtime_proxy_log_field(
-                    "hard_limit",
-                    shared
-                        .runtime_config
-                        .tuning
-                        .profile_inflight_hard_limit
-                        .to_string(),
-                ),
-            ],
-        ),
-    );
-    loop_state.record_inflight_saturation();
-    match runtime_proxy_maybe_wait_for_interactive_inflight_relief(RuntimeInflightReliefWait {
-        observed_release_revision: None,
-        request_id,
-        shared,
-        excluded_profiles: &loop_state.excluded_profiles,
-        route_kind: RuntimeRouteKind::Standard,
-        selection_started_at: &mut loop_state.selection_started_at,
-        continuation,
-        wait_affinity_owner,
-        selected_profile: None,
-    })? {
-        RuntimeInflightReliefWaitResult::Relieved
-        | RuntimeInflightReliefWaitResult::NotWaitable => Ok(true),
     }
 }
 
