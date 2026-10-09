@@ -46,6 +46,7 @@ pub fn self_test() -> bool {
     let rehydrate_plan_ok = runtime_decisions::rehydrate_plan_self_test();
     let quota_aggregation_ok = quota::main_quota_aggregation_self_test();
     let provider_constraints_ok = provider_constraints::self_test();
+    let provider_upstream_ok = provider_upstream::self_test();
     let policy_validation_ok = policy::self_test();
     let context_ok = context::self_test();
     let tuning_defaults_ok = runtime_decisions::tuning_defaults_self_test();
@@ -63,6 +64,7 @@ pub fn self_test() -> bool {
         rehydrate_plan_ok,
         quota_aggregation_ok,
         provider_constraints_ok,
+        provider_upstream_ok,
         policy_validation_ok,
         context_ok,
         tuning_defaults_ok,
@@ -147,6 +149,8 @@ pub mod provider_constraints;
 pub mod provider_error_policy;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_registry;
+#[cfg(feature = "mojo-runtime")]
+pub mod provider_upstream;
 #[cfg(feature = "mojo-provider-constraints")]
 pub mod provider_usage;
 #[cfg(feature = "mojo-quota")]

@@ -11,7 +11,6 @@ use super::provider_bridge::{
 use crate::{RuntimeProxyRequest, runtime_proxy_log};
 use anyhow::{Context, Result};
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
-use prodex_provider_core::{ProviderWireFormat, provider_adapter};
 use runtime_proxy_crate::{
     path_without_query, runtime_proxy_log_field, runtime_proxy_structured_log_message,
 };
@@ -261,6 +260,12 @@ fn runtime_local_rewrite_apply_copilot_auth(
     body: &[u8],
     api_key: Option<&str>,
 ) -> Result<reqwest::RequestBuilder> {
+    let auth_shape = runtime_local_rewrite_mojo_auth_shape(
+        RuntimeProviderBridgeKind::Copilot,
+        false,
+        false,
+        false,
+    );
     let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request)
         .header("copilot-integration-id", "copilot-developer-cli")
         .header("openai-intent", "conversation-panel")
@@ -272,7 +277,12 @@ fn runtime_local_rewrite_apply_copilot_auth(
             "copilot/1.0.65 (client/github/cli)",
         );
     let api_key = api_key.context("Copilot API credential is unavailable")?;
-    upstream_request = upstream_request.bearer_auth(api_key);
+    upstream_request = match auth_shape {
+        prodex_mojo_core::provider_upstream::ProviderAuthShape::Bearer => {
+            upstream_request.bearer_auth(api_key)
+        }
+        _ => unreachable!("validated Mojo Copilot auth shape"),
+    };
     if runtime_copilot_request_has_vision_input(body) {
         upstream_request = upstream_request.header("copilot-vision-request", "true");
     }
@@ -285,7 +295,16 @@ fn runtime_local_rewrite_apply_openai_auth(
     shared: &RuntimeLocalRewriteProxyShared,
     api_key: Option<&str>,
 ) -> reqwest::RequestBuilder {
-    let replacing_openai_auth = api_key.is_some();
+    let auth_shape = runtime_local_rewrite_mojo_auth_shape(
+        RuntimeProviderBridgeKind::OpenAiResponses,
+        api_key.is_some(),
+        false,
+        false,
+    );
+    let replacing_openai_auth = !matches!(
+        auth_shape,
+        prodex_mojo_core::provider_upstream::ProviderAuthShape::Preserve
+    );
     let mut upstream_request = runtime_local_rewrite_copy_openai_headers(
         request,
         shared,
@@ -293,7 +312,12 @@ fn runtime_local_rewrite_apply_openai_auth(
         replacing_openai_auth,
     );
     if let Some(api_key) = api_key {
-        upstream_request = upstream_request.bearer_auth(api_key);
+        upstream_request = match auth_shape {
+            prodex_mojo_core::provider_upstream::ProviderAuthShape::Bearer => {
+                upstream_request.bearer_auth(api_key)
+            }
+            _ => unreachable!("validated Mojo OpenAI auth shape"),
+        };
     }
     upstream_request
 }
@@ -305,13 +329,28 @@ fn runtime_local_rewrite_apply_deepseek_auth(
     api_key: Option<&str>,
     native_messages: bool,
 ) -> Result<reqwest::RequestBuilder> {
+    let auth_shape = runtime_local_rewrite_mojo_auth_shape(
+        RuntimeProviderBridgeKind::DeepSeek,
+        false,
+        native_messages,
+        false,
+    );
     let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
     if native_messages {
         upstream_request = upstream_request.header("anthropic-version", ANTHROPIC_API_VERSION);
     }
     let api_key = api_key.context("DeepSeek API credential is unavailable")?;
-    upstream_request =
-        runtime_local_rewrite_apply_direct_api_key_auth(upstream_request, api_key, native_messages);
+    upstream_request = match auth_shape {
+        prodex_mojo_core::provider_upstream::ProviderAuthShape::XApiKey
+        | prodex_mojo_core::provider_upstream::ProviderAuthShape::Bearer => {
+            runtime_local_rewrite_apply_direct_api_key_auth(
+                upstream_request,
+                api_key,
+                native_messages,
+            )
+        }
+        _ => unreachable!("validated Mojo DeepSeek auth shape"),
+    };
     if let Some(user_agent) = runtime_local_rewrite_header_if_allowed(request, shared, "user-agent")
     {
         upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
@@ -328,10 +367,32 @@ fn runtime_local_rewrite_apply_gemini_auth(
     let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
     match auth {
         RuntimeGeminiAuth::ApiKey { api_key } => {
-            upstream_request = upstream_request.header("x-goog-api-key", api_key);
+            let auth_shape = runtime_local_rewrite_mojo_auth_shape(
+                RuntimeProviderBridgeKind::Gemini,
+                false,
+                false,
+                false,
+            );
+            upstream_request = match auth_shape {
+                prodex_mojo_core::provider_upstream::ProviderAuthShape::GoogleApiKey => {
+                    upstream_request.header("x-goog-api-key", api_key)
+                }
+                _ => unreachable!("validated Mojo Gemini API-key auth shape"),
+            };
         }
         RuntimeGeminiAuth::OAuth { access_token, .. } => {
-            upstream_request = upstream_request.bearer_auth(access_token);
+            let auth_shape = runtime_local_rewrite_mojo_auth_shape(
+                RuntimeProviderBridgeKind::Gemini,
+                true,
+                false,
+                false,
+            );
+            upstream_request = match auth_shape {
+                prodex_mojo_core::provider_upstream::ProviderAuthShape::Bearer => {
+                    upstream_request.bearer_auth(access_token)
+                }
+                _ => unreachable!("validated Mojo Gemini OAuth auth shape"),
+            };
         }
     }
     if let Some(user_agent) = runtime_local_rewrite_header_if_allowed(request, shared, "user-agent")
@@ -349,7 +410,14 @@ fn runtime_local_rewrite_apply_gemini_openai_auth(
 ) -> Result<reqwest::RequestBuilder> {
     let mut upstream_request = runtime_local_rewrite_provider_headers(upstream_request);
     let api_key = api_key.context("Gemini API credential is unavailable")?;
-    upstream_request = upstream_request.bearer_auth(api_key);
+    let auth_shape =
+        runtime_local_rewrite_mojo_auth_shape(RuntimeProviderBridgeKind::Gemini, true, false, true);
+    upstream_request = match auth_shape {
+        prodex_mojo_core::provider_upstream::ProviderAuthShape::Bearer => {
+            upstream_request.bearer_auth(api_key)
+        }
+        _ => unreachable!("validated Mojo Gemini OpenAI auth shape"),
+    };
     if let Some(user_agent) = runtime_local_rewrite_header_if_allowed(request, shared, "user-agent")
     {
         upstream_request = upstream_request.header(reqwest::header::USER_AGENT, user_agent);
@@ -366,9 +434,22 @@ fn runtime_local_rewrite_apply_direct_anthropic_auth(
         RuntimeAnthropicAuth::ApiKey { api_key } => {
             runtime_local_rewrite_apply_direct_api_key_auth(request, api_key, native_messages)
         }
-        RuntimeAnthropicAuth::OAuth { access_token } => request
-            .bearer_auth(access_token)
-            .header("anthropic-beta", "oauth-2025-04-20"),
+        RuntimeAnthropicAuth::OAuth { access_token } => {
+            let auth_shape = runtime_local_rewrite_mojo_auth_shape(
+                RuntimeProviderBridgeKind::Anthropic,
+                true,
+                native_messages,
+                false,
+            );
+            match auth_shape {
+                prodex_mojo_core::provider_upstream::ProviderAuthShape::AnthropicBetaBearer => {
+                    request
+                        .bearer_auth(access_token)
+                        .header("anthropic-beta", "oauth-2025-04-20")
+                }
+                _ => unreachable!("validated Mojo Anthropic OAuth auth shape"),
+            }
+        }
     }
 }
 
@@ -377,11 +458,35 @@ fn runtime_local_rewrite_apply_direct_api_key_auth(
     api_key: &str,
     native_messages: bool,
 ) -> reqwest::RequestBuilder {
-    if native_messages {
-        request.header("x-api-key", api_key)
-    } else {
-        request.bearer_auth(api_key)
+    match runtime_local_rewrite_mojo_auth_shape(
+        RuntimeProviderBridgeKind::Anthropic,
+        false,
+        native_messages,
+        false,
+    ) {
+        prodex_mojo_core::provider_upstream::ProviderAuthShape::XApiKey => {
+            request.header("x-api-key", api_key)
+        }
+        prodex_mojo_core::provider_upstream::ProviderAuthShape::Bearer => {
+            request.bearer_auth(api_key)
+        }
+        _ => unreachable!("validated Mojo direct API-key auth shape"),
     }
+}
+
+fn runtime_local_rewrite_mojo_auth_shape(
+    provider: RuntimeProviderBridgeKind,
+    credential_present: bool,
+    native_messages: bool,
+    openai_compatible: bool,
+) -> prodex_mojo_core::provider_upstream::ProviderAuthShape {
+    prodex_mojo_core::provider_upstream::provider_auth_shape(
+        provider.provider_id() as i64,
+        credential_present,
+        native_messages,
+        openai_compatible,
+    )
+    .expect("Mojo provider upstream auth shape returned invalid output")
 }
 
 #[cfg(test)]
@@ -497,12 +602,15 @@ fn runtime_local_rewrite_api_key_attempts_from_start(
 ) -> Vec<(String, &str)> {
     (0..api_keys.len())
         .map(|offset| {
-            let index = (start + offset) % api_keys.len();
-            let label = if api_keys.len() == 1 {
-                "api-key".to_string()
-            } else {
-                format!("api-key-{}", index + 1)
-            };
+            let index = prodex_mojo_core::provider_upstream::provider_attempt_index(
+                api_keys.len(),
+                start,
+                offset,
+            )
+            .expect("Mojo provider upstream attempt index returned invalid output");
+            let label =
+                prodex_mojo_core::provider_upstream::provider_attempt_label(api_keys.len(), index)
+                    .expect("Mojo provider upstream attempt label returned invalid output");
             (label, api_keys[index].as_str())
         })
         .collect()
@@ -537,7 +645,12 @@ pub(super) fn runtime_local_rewrite_anthropic_auth_attempts(
             };
             (0..profiles.len())
                 .map(|offset| {
-                    let index = (start + offset) % profiles.len();
+                    let index = prodex_mojo_core::provider_upstream::provider_attempt_index(
+                        profiles.len(),
+                        start,
+                        offset,
+                    )
+                    .expect("Mojo provider upstream profile index returned invalid output");
                     let profile = profiles[index].clone();
                     RuntimeLocalRewriteSelectedAnthropicAuth {
                         label: profile.profile_name.clone(),

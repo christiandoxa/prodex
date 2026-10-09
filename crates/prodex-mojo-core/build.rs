@@ -56,6 +56,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         "anthropic_chat_messages.mojo",
         "anthropic_chat_tools.mojo",
         "provider_binding_identity.mojo",
+        "provider_upstream.mojo",
     ] {
         println!(
             "cargo:rerun-if-changed={}",
@@ -523,6 +524,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/websocket_loop_control.mojo");
         sources.push("../../mojo/prodex_core/transport_failure_policy.mojo");
         sources.push("../../mojo/prodex_core/sse_line.mojo");
+        sources.push("../../mojo/prodex_core/provider_upstream.mojo");
     }
     if env::var_os("CARGO_FEATURE_MOJO_RICH").is_some()
         || env::var_os("CARGO_FEATURE_MOJO_CORE").is_some()

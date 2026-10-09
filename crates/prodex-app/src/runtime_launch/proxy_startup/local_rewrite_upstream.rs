@@ -367,7 +367,6 @@ pub(super) fn runtime_local_rewrite_precommit_native_first_event(
         }
     }
 }
-
 fn runtime_local_rewrite_inspect_native_chunk(
     prefetch: &mut RuntimeLocalRewriteSsePrefetch,
     prefix: &mut Vec<u8>,
@@ -416,7 +415,6 @@ fn runtime_local_rewrite_inspect_native_chunk(
     }
     None
 }
-
 fn runtime_local_rewrite_finish_native_prefetch(
     live: &mut RuntimeLocalRewriteLiveResponse,
     prefetch: RuntimeLocalRewriteSsePrefetch,
@@ -692,26 +690,58 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
         route_kind,
     )?
     .into_owned();
-    match (provider, shared.provider.as_ref()) {
-        (ProviderId::Anthropic, RuntimeLocalRewriteProviderOptions::Anthropic { auth }) => {
+    let dispatch_kind = prodex_mojo_core::provider_upstream::provider_dispatch_plan(
+        provider as i64,
+        shared.provider.bridge_kind().provider_id() as i64,
+        endpoint as i64,
+        matches!(
+            stream_mode,
+            prodex_provider_spi::ProviderStreamMode::Streaming
+        ),
+    )
+    .map_err(|error| anyhow::anyhow!("provider upstream dispatch policy failed: {error:?}"))?;
+    match dispatch_kind {
+        prodex_mojo_core::provider_upstream::ProviderDispatchKind::Anthropic => {
+            let RuntimeLocalRewriteProviderOptions::Anthropic { auth } = shared.provider.as_ref()
+            else {
+                anyhow::bail!("application provider dispatch does not match configured adapter")
+            };
             send_runtime_anthropic_upstream_request(
                 request_id, request, shared, body, auth, endpoint,
             )
         }
-        (ProviderId::Copilot, RuntimeLocalRewriteProviderOptions::Copilot { auth }) => {
+        prodex_mojo_core::provider_upstream::ProviderDispatchKind::Copilot => {
+            let RuntimeLocalRewriteProviderOptions::Copilot { auth } = shared.provider.as_ref()
+            else {
+                anyhow::bail!("application provider dispatch does not match configured adapter")
+            };
             send_runtime_copilot_upstream_request(request_id, request, shared, body, auth, endpoint)
         }
-        (ProviderId::OpenAi, RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys }) => {
+        prodex_mojo_core::provider_upstream::ProviderDispatchKind::OpenAi => {
+            let RuntimeLocalRewriteProviderOptions::OpenAiResponses { api_keys } =
+                shared.provider.as_ref()
+            else {
+                anyhow::bail!("application provider dispatch does not match configured adapter")
+            };
             send_runtime_openai_upstream_request(
                 request_id, request, shared, body, api_keys, endpoint,
             )
         }
-        (ProviderId::DeepSeek, RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys, .. }) => {
+        prodex_mojo_core::provider_upstream::ProviderDispatchKind::DeepSeek => {
+            let RuntimeLocalRewriteProviderOptions::DeepSeek { api_keys, .. } =
+                shared.provider.as_ref()
+            else {
+                anyhow::bail!("application provider dispatch does not match configured adapter")
+            };
             send_runtime_deepseek_upstream_request(
                 request_id, request, shared, body, api_keys, endpoint,
             )
         }
-        (ProviderId::Gemini, RuntimeLocalRewriteProviderOptions::Gemini { auth, .. }) => {
+        prodex_mojo_core::provider_upstream::ProviderDispatchKind::Gemini => {
+            let RuntimeLocalRewriteProviderOptions::Gemini { auth, .. } = shared.provider.as_ref()
+            else {
+                anyhow::bail!("application provider dispatch does not match configured adapter")
+            };
             send_runtime_gemini_upstream_request(
                 request_id,
                 request,
@@ -722,7 +752,10 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                 stream_mode,
             )
         }
-        (ProviderId::Kiro, RuntimeLocalRewriteProviderOptions::Kiro { auth }) => {
+        prodex_mojo_core::provider_upstream::ProviderDispatchKind::Kiro => {
+            let RuntimeLocalRewriteProviderOptions::Kiro { auth } = shared.provider.as_ref() else {
+                anyhow::bail!("application provider dispatch does not match configured adapter")
+            };
             send_runtime_kiro_upstream_request(
                 request_id,
                 request,
@@ -733,10 +766,8 @@ pub(super) fn send_runtime_local_rewrite_upstream_request(
                 stream_mode,
             )
         }
-        _ => anyhow::bail!("application provider dispatch does not match configured adapter"),
     }
 }
-
 fn send_runtime_openai_upstream_request(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -797,7 +828,6 @@ fn send_runtime_openai_upstream_request(
         &binding,
     )
 }
-
 fn runtime_local_rewrite_openai_attempts<'a>(
     shared: &RuntimeLocalRewriteProxyShared,
     api_keys: &'a [String],
@@ -842,7 +872,6 @@ fn runtime_local_rewrite_openai_attempts<'a>(
         false,
     ))
 }
-
 fn runtime_local_rewrite_send_openai_unkeyed(
     request_id: u64,
     request: &RuntimeProxyRequest,
@@ -860,7 +889,6 @@ fn runtime_local_rewrite_send_openai_unkeyed(
     )?;
     runtime_local_rewrite_openai_response(response, None, shared, None)
 }
-
 fn runtime_local_rewrite_send_openai_key_attempts(
     request_context: (u64, &RuntimeProxyRequest, &RuntimeLocalRewriteProxyShared),
     upstream_url: &str,
@@ -921,7 +949,6 @@ fn runtime_local_rewrite_send_openai_key_attempts(
     }
     Err(anyhow::anyhow!("OpenAI API-key attempts were exhausted"))
 }
-
 fn runtime_local_rewrite_openai_error_can_retry(
     parts: &RuntimeHeapTrimmedBufferedResponseParts,
     hard_binding: bool,
@@ -950,7 +977,6 @@ fn runtime_local_rewrite_openai_error_can_retry(
     )
     .expect("Mojo OpenAI credential retry policy returned invalid output")
 }
-
 fn runtime_local_rewrite_openai_response(
     response: RuntimeLocalRewriteAsyncResponse,
     identity: Option<RuntimeProviderBindingIdentity>,
@@ -1206,17 +1232,25 @@ pub(super) fn runtime_local_rewrite_json_parts(
 }
 
 pub(super) fn runtime_local_rewrite_route_kind(endpoint: ProviderEndpoint) -> RuntimeRouteKind {
-    match endpoint {
-        ProviderEndpoint::Responses | ProviderEndpoint::ChatCompletions => {
+    match prodex_mojo_core::provider_upstream::provider_route_kind(endpoint as i64)
+        .expect("Mojo provider upstream route policy returned invalid output")
+    {
+        prodex_mojo_core::provider_upstream::ProviderUpstreamRouteKind::Responses => {
             RuntimeRouteKind::Responses
         }
-        ProviderEndpoint::ResponsesCompact => RuntimeRouteKind::Compact,
-        _ => RuntimeRouteKind::Standard,
+        prodex_mojo_core::provider_upstream::ProviderUpstreamRouteKind::Compact => {
+            RuntimeRouteKind::Compact
+        }
+        prodex_mojo_core::provider_upstream::ProviderUpstreamRouteKind::Standard => {
+            RuntimeRouteKind::Standard
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+
+    use super::error_class::runtime_local_rewrite_native_first_event_error_class;
     use super::{
         RuntimeLocalRewriteAsyncResponse, RuntimeLocalRewriteBindingContext,
         RuntimeLocalRewriteContinuationReader, RuntimeLocalRewriteLiveResponse,
@@ -1745,6 +1779,18 @@ mod tests {
     }
 
     #[test]
+    fn native_first_event_malformed_and_oversized_inputs_fail_closed() {
+        assert_eq!(
+            runtime_local_rewrite_native_first_event_error_class(b"data: {not-json}\n\n"),
+            None
+        );
+        assert_eq!(
+            runtime_local_rewrite_native_first_event_error_class(&vec![b'x'; 65_537]),
+            None
+        );
+    }
+
+    #[test]
     fn native_first_event_transport_failure_is_precommit_transient() {
         let (response, runtime, server) = mock_truncated_async_sse_response();
         let mut live = RuntimeLocalRewriteLiveResponse::with_native_anthropic_messages(response);
@@ -1944,51 +1990,5 @@ data: {"type":"message_start","message":{"id":"msg_example"}}
         server.join().expect("mock upstream should finish");
     }
 
-    #[test]
-    fn async_prefetch_splits_large_upstream_chunks_before_queueing() {
-        let expected = vec![b'x'; super::RUNTIME_LOCAL_REWRITE_STREAM_CHUNK_BYTES * 3 + 7];
-        let (mut response, runtime, server, _) = mock_async_sse_response(Vec::new(), 100, false);
-        response.pending = expected.clone();
-        let mut prefetch = super::RuntimeLocalRewriteSsePrefetch::spawn(response, None);
-        let mut actual = Vec::new();
-        loop {
-            match prefetch
-                .recv_timeout(Duration::from_secs(1))
-                .expect("bounded upstream chunk should arrive")
-            {
-                super::RuntimeLocalRewritePrefetchChunk::Data(chunk) => {
-                    assert!(chunk.len() <= super::RUNTIME_LOCAL_REWRITE_STREAM_CHUNK_BYTES);
-                    actual.extend_from_slice(&chunk);
-                }
-                super::RuntimeLocalRewritePrefetchChunk::End => break,
-                super::RuntimeLocalRewritePrefetchChunk::Error(_, message) => {
-                    panic!("unexpected bounded stream error: {message}")
-                }
-            }
-        }
-        assert_eq!(actual, expected);
-        runtime.block_on(async { tokio::task::yield_now().await });
-        server.join().expect("mock upstream should finish");
-    }
-
-    #[test]
-    fn async_prefetch_drop_aborts_pump_and_releases_permit() {
-        let (response, runtime, server, closed) =
-            mock_async_sse_response(vec![(Duration::ZERO, b"first".to_vec())], 100, true);
-        let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
-        let permit = Arc::clone(&semaphore)
-            .try_acquire_owned()
-            .expect("prefetch slot should be available");
-        let prefetch = super::RuntimeLocalRewriteSsePrefetch::spawn(response, Some(permit));
-        let cancelled = Arc::clone(&prefetch.cancelled);
-        assert_eq!(semaphore.available_permits(), 0);
-        drop(prefetch);
-        assert!(cancelled.load(Ordering::Acquire));
-        assert_eq!(semaphore.available_permits(), 1);
-        runtime.block_on(async { tokio::time::sleep(Duration::from_millis(25)).await });
-        server
-            .join()
-            .expect("mock upstream should observe cancellation");
-        assert!(closed.load(Ordering::Acquire));
-    }
+    include!("local_rewrite_upstream/extracted_tests.rs");
 }
