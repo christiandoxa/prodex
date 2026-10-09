@@ -2869,6 +2869,7 @@ name = "prodex-runtime-proxy"
 version = "0.436.1"
 dependencies = [
  "base64 0.23.1",
+ "httpdate",
  "prodex-mojo-core",
  "prodex-provider-core",
  "prodex-redaction",

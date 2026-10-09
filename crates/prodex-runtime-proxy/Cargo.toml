@@ -20,6 +20,7 @@ mojo = [
 ]
 
 [dependencies]
+httpdate = { workspace = true }
 base64 = { workspace = true }
 prodex_mojo_core = { workspace = true, features = ["mojo-runtime", "mojo-rich", "mojo-quota", "mojo-observability", "mojo-routing"] }
 prodex_runtime_tuning = { workspace = true }
