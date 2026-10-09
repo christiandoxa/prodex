@@ -88,3 +88,60 @@ fn response_envelope_defaults_missing_and_non_string_identifiers() {
         r#"{"id":"resp_anthropic","object":"response","created_at":123,"model":"unknown","output":[]}"#
     );
 }
+
+#[test]
+fn response_envelope_raw_source_preserves_presence_and_overflow_policy() {
+    let source = r#"{"id":null,"model":1,"usage":{"input_tokens":18446744073709551615,"output_tokens":1,"server_tool_use":{"web_search_requests":0}},"stop_reason":null}"#;
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseEnvelope);
+    input.choice_kind = -1;
+    input.content = Some(source);
+    input.blocks = Some("[]");
+    input.created_at = 123;
+
+    assert_eq!(
+        run(input),
+        r#"{"id":"resp_anthropic","object":"response","created_at":123,"model":"unknown","output":[],"usage":{"input_tokens":18446744073709551615,"output_tokens":1,"total_tokens":18446744073709551615},"tool_usage":{"web_search":{"num_requests":0}},"metadata":{"anthropic":{"stop_reason":null}}}"#
+    );
+
+    let source = r#"{"usage":{"input_tokens":18446744073709551616,"output_tokens":true}}"#;
+    input.content = Some(source);
+    assert_eq!(
+        run(input),
+        r#"{"id":"resp_anthropic","object":"response","created_at":123,"model":"unknown","output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}"#
+    );
+}
+
+#[test]
+fn response_envelope_raw_source_fails_closed_for_malformed_and_oversized_input() {
+    let mut input =
+        AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseEnvelope);
+    input.choice_kind = -1;
+    input.content = Some(r#"{"usage":}"#);
+    input.blocks = Some("[]");
+    assert!(anthropic_request_kernel(input).is_err());
+
+    let oversized = format!(r#"{{"padding":"{}"}}"#, "x".repeat(4 * 1024 * 1024));
+    input.content = Some(&oversized);
+    assert!(anthropic_request_kernel(input).is_err());
+}
+
+#[test]
+fn stream_event_kernel_preserves_finish_and_error_shapes() {
+    let mut input = AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::StreamEvent);
+    input.content = Some(r#"{"type":"content_block_delta","delta":{"type":"text_delta"}}"#);
+    let output = anthropic_request_kernel(input).expect("stream event");
+    assert_eq!(output[0], 1);
+    assert_eq!(
+        String::from_utf8(output[1..].to_vec()).expect("stream event UTF-8"),
+        "event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"output_index\":0,\"delta\":\"\"}\n\n"
+    );
+
+    input.content = Some(r#"{"type":"error"}"#);
+    let output = anthropic_request_kernel(input).expect("stream error");
+    assert_eq!(output[0], 1);
+    assert_eq!(
+        String::from_utf8(output[1..].to_vec()).expect("stream error UTF-8"),
+        "event: error\ndata: {\"type\":\"error\",\"error\":null}\n\n"
+    );
+}

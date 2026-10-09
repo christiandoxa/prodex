@@ -49,22 +49,6 @@ pub(super) fn translate_responses_request_to_anthropic(
         );
     }
 
-    let source: Value = match serde_json::from_slice(&input.body) {
-        Ok(value) => value,
-        Err(error) => return rejected(format!("failed to parse Responses request JSON: {error}")),
-    };
-    let Some(source_object) = source.as_object() else {
-        return rejected("Responses request body must be a JSON object");
-    };
-    if let Some(field) = ["presence_penalty", "frequency_penalty", "seed", "user"]
-        .into_iter()
-        .find(|field| source_object.contains_key(*field))
-    {
-        return rejected(format!(
-            "Anthropic Messages does not translate Responses `{field}`"
-        ));
-    }
-
     let chat = translate_responses_request_to_chat(ProviderId::Anthropic, input, "auto");
     if !matches!(chat.loss, ProviderTransformLoss::Lossless) {
         return remap_result(chat);
@@ -98,7 +82,11 @@ pub(super) fn translate_chat_request_to_anthropic(
             return rejected_chat(format!("failed to parse translated request JSON: {error}"));
         }
     };
-    match mojo_request::transform(&chat) {
+    let transform = match mojo_request::transform(&chat) {
+        Ok(transform) => transform,
+        Err(reason) => return rejected_chat(reason),
+    };
+    match transform {
         prodex_mojo_core::json::AnthropicChatRequestTransform::Body(body) => {
             ProviderTransformResult::lossless(
                 ProviderId::Anthropic,
@@ -178,46 +166,14 @@ fn anthropic_response_envelope_mojo(
     output: Vec<Value>,
     created_at: u64,
 ) -> Result<Value, String> {
-    let id = value.get("id").map(json_fragment).transpose()?;
-    let model = value.get("model").map(json_fragment).transpose()?;
+    let source = json_fragment(value)?;
     let output = json_fragment(&Value::Array(output))?;
-    let usage = value.get("usage").and_then(Value::as_object);
-    let stop_reason = value.get("stop_reason").map(json_fragment).transpose()?;
-    let mut flags = i64::from(usage.is_some());
-    let web_search_requests = usage
-        .and_then(|usage| usage.get("server_tool_use"))
-        .and_then(|usage| usage.get("web_search_requests"))
-        .and_then(Value::as_u64);
-    if web_search_requests.is_some() {
-        flags |= 2;
-    }
-    if stop_reason.is_some() {
-        flags |= 4;
-    }
-    let output_tokens = json_fragment(&Value::from(
-        usage
-            .and_then(|usage| usage.get("output_tokens"))
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-    ))?;
-    let web_search_requests = web_search_requests
-        .map(Value::from)
-        .map(|value| json_fragment(&value))
-        .transpose()?;
     let mut input =
         AnthropicRequestKernelInput::new(AnthropicRequestKernelOperation::ResponseEnvelope);
-    input.id = id.as_deref();
-    input.model = model.as_deref();
+    input.content = Some(&source);
     input.blocks = Some(&output);
     input.created_at = created_at;
-    input.choice_kind = flags;
-    input.count = usage
-        .and_then(|usage| usage.get("input_tokens"))
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    input.max_tokens = Some(&output_tokens);
-    input.arguments = stop_reason.as_deref();
-    input.tool_use_id = web_search_requests.as_deref();
+    input.choice_kind = -1;
     anthropic_mojo_value(input)
 }
 
