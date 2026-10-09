@@ -28,24 +28,15 @@ pub(crate) fn gemini_response_tool_call_added_item_with_call_id(
         .get("name")
         .and_then(Value::as_str)
         .unwrap_or("tool_call");
-    if matches!(flat_name, "tool_search" | "apply_patch") {
-        return None;
-    }
-    let signature = part
-        .get("thoughtSignature")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            function_call
-                .get("thoughtSignature")
-                .and_then(Value::as_str)
-        });
+    let signature = gemini_response_tool_call_signature(part, function_call);
     let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
-        prodex_mojo_core::rich::GeminiResponseKernelOperation::AddedFunctionCallItem,
+        prodex_mojo_core::rich::GeminiResponseKernelOperation::StreamAddedToolCallItem,
     );
     input.call_id = Some(call_id);
     input.name = Some(flat_name);
-    input.signature = signature;
-    Some(super::super::stream::gemini_mojo_value(input))
+    input.signature = signature.as_deref();
+    let value = super::super::stream::gemini_mojo_value(input);
+    (!value.is_null()).then_some(value)
 }
 
 pub(crate) fn gemini_response_tool_call_raw_item_with_call_id(
@@ -57,7 +48,7 @@ pub(crate) fn gemini_response_tool_call_raw_item_with_call_id(
     let call_id = call_id_override.unwrap_or("call_1");
     let signature = part.get("thoughtSignature").and_then(Value::as_str);
     let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
-        prodex_mojo_core::rich::GeminiResponseKernelOperation::RawFunctionCallItem,
+        prodex_mojo_core::rich::GeminiResponseKernelOperation::StreamCompletedToolCallItem,
     );
     input.call_id = Some(call_id);
     input.name = Some(flat_name);
@@ -84,41 +75,53 @@ pub(crate) fn gemini_response_tool_call_item_with_call_id(
         .get("args")
         .cloned()
         .unwrap_or_else(|| json!({}));
-    if flat_name == "tool_search" {
-        let arguments = serde_json::to_string(&args_value).unwrap_or_else(|_| "{}".to_string());
-        let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
-            prodex_mojo_core::rich::GeminiResponseKernelOperation::ToolSearchCallItem,
-        );
-        input.call_id = Some(call_id);
-        input.arguments = Some(&arguments);
-        return super::super::stream::gemini_mojo_value(input);
-    }
-    if flat_name == "apply_patch" {
-        let input_value = gemini_custom_apply_patch_input(&args_value);
-        let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
-            prodex_mojo_core::rich::GeminiResponseKernelOperation::CustomToolCallItem,
-        );
-        input.call_id = Some(call_id);
-        input.name = Some(flat_name);
-        input.arguments = Some(&input_value);
-        return super::super::stream::gemini_mojo_value(input);
-    }
     let args = serde_json::to_string(&args_value).unwrap_or_else(|_| "{}".to_string());
     let args = gemini_rtk_wrapped_tool_arguments(flat_name, &args);
-    let signature = part
-        .get("thoughtSignature")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            function_call
-                .get("thoughtSignature")
-                .and_then(Value::as_str)
-        });
+    let custom_input =
+        (flat_name == "apply_patch").then(|| gemini_custom_apply_patch_input(&args_value));
+    let signature = gemini_response_tool_call_signature(part, function_call);
     let mut input = prodex_mojo_core::rich::GeminiResponseKernelInput::new(
-        prodex_mojo_core::rich::GeminiResponseKernelOperation::FunctionCallItem,
+        prodex_mojo_core::rich::GeminiResponseKernelOperation::StreamCompletedToolCallItem,
     );
     input.call_id = Some(call_id);
     input.name = Some(flat_name);
     input.arguments = Some(&args);
-    input.signature = signature;
+    input.signature = signature.as_deref();
+    input.response = custom_input.as_deref();
+    input.created_at_present = true;
     super::super::stream::gemini_mojo_value(input)
+}
+
+pub(super) fn gemini_response_tool_call_signature(
+    part: &Value,
+    function_call: &Value,
+) -> Option<String> {
+    let values = [
+        part.get("thoughtSignature"),
+        function_call.get("thoughtSignature"),
+    ];
+    let candidates = [
+        signature_candidate(values[0]),
+        signature_candidate(values[1]),
+        signature_candidate(None),
+        signature_candidate(None),
+        signature_candidate(None),
+        signature_candidate(None),
+        signature_candidate(None),
+    ];
+    let selected = prodex_mojo_core::provider_constraints::gemini_signature_choice(&candidates)
+        .expect("Mojo Gemini response thought-signature precedence failed")?;
+    values
+        .get(selected)
+        .and_then(|value| value.and_then(Value::as_str))
+        .map(str::to_string)
+}
+
+fn signature_candidate(
+    value: Option<&Value>,
+) -> prodex_mojo_core::provider_constraints::GeminiSignatureCandidate<'_> {
+    prodex_mojo_core::provider_constraints::GeminiSignatureCandidate {
+        present: value.is_some(),
+        text: value.and_then(Value::as_str),
+    }
 }

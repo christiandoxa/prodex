@@ -2,7 +2,8 @@
 
 use prodex_mojo_core::provider_constraints::{
     GeminiBridgeRequestKernelInput, GeminiBridgeRequestOperation, GeminiRequestContentKernelInput,
-    GeminiRequestContentOperation, gemini_bridge_request_kernel, gemini_request_content_kernel,
+    GeminiRequestContentOperation, GeminiSignatureCandidate, gemini_bridge_request_kernel,
+    gemini_request_content_kernel, gemini_signature_choice,
 };
 
 fn sanitize_function_schema(schema: &[u8]) -> Result<Vec<u8>, prodex_mojo_core::MojoError> {
@@ -14,6 +15,14 @@ fn sanitize_function_schema(schema: &[u8]) -> Result<Vec<u8>, prodex_mojo_core::
 
 fn tool_config(request: &[u8]) -> Result<Vec<u8>, prodex_mojo_core::MojoError> {
     let mut input = GeminiBridgeRequestKernelInput::new(GeminiBridgeRequestOperation::ToolConfig);
+    input.primary = Some(request);
+    gemini_bridge_request_kernel(input)
+}
+
+fn validate_translator(request: &[u8]) -> Result<Vec<u8>, prodex_mojo_core::MojoError> {
+    let mut input = GeminiBridgeRequestKernelInput::new(
+        GeminiBridgeRequestOperation::ValidateTranslatorRequest,
+    );
     input.primary = Some(request);
     gemini_bridge_request_kernel(input)
 }
@@ -91,6 +100,124 @@ fn tool_declaration_keeps_the_existing_json_shape() {
         gemini_request_content_kernel(input).unwrap(),
         br#"{"name":"lookup","description":"Look up a record","parameters":{"type":"object"}}"#
     );
+}
+
+#[test]
+fn translator_validation_keeps_malformed_and_null_tool_precedence_in_mojo() {
+    let cases = [
+        (
+            br#"{"tools":null}"#.as_slice(),
+            "invalid_tool_declaration: Gemini request field `tools` must be an array",
+        ),
+        (
+            br#"{"tools":[null]}"#.as_slice(),
+            "invalid_tool_declaration: Gemini request field `tools[0]` must be an object",
+        ),
+        (
+            br#"{"tools":[{"type":"function","function":{"name":"lookup"}}]}"#.as_slice(),
+            "invalid_tool_declaration: Gemini request field `tools[0].function.parameters` is required",
+        ),
+    ];
+    for (request, reason) in cases {
+        let output = String::from_utf8(validate_translator(request).unwrap()).unwrap();
+        assert!(output.contains(reason), "output={output}");
+    }
+}
+
+#[test]
+fn translator_validation_accepts_flat_function_and_preserves_unsupported_tool_tag() {
+    let flat = String::from_utf8(
+        validate_translator(br#"{"tools":[{"type":"function","name":"lookup","parameters":{}}]}"#)
+            .unwrap(),
+    )
+    .unwrap();
+    assert!(flat.contains(r#""tag":0"#), "output={flat}");
+
+    let unsupported = String::from_utf8(
+        validate_translator(br#"{"tools":[{"type":"custom","name":"lookup"}]}"#).unwrap(),
+    )
+    .unwrap();
+    assert!(unsupported.contains(r#""tag":16"#), "output={unsupported}");
+    assert!(
+        unsupported.contains(r#""reason":null"#),
+        "output={unsupported}"
+    );
+}
+
+#[test]
+fn translator_validation_rejects_oversized_json_before_mojo_execution() {
+    let oversized = vec![b' '; 4 * 1024 * 1024 + 1];
+    assert_eq!(
+        validate_translator(&oversized),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    );
+}
+
+#[test]
+fn signature_choice_keeps_invalid_presence_from_falling_through() {
+    let candidates = [
+        GeminiSignatureCandidate {
+            present: true,
+            text: None,
+        },
+        GeminiSignatureCandidate {
+            present: true,
+            text: Some("fallback"),
+        },
+        GeminiSignatureCandidate {
+            present: false,
+            text: None,
+        },
+        GeminiSignatureCandidate {
+            present: false,
+            text: None,
+        },
+        GeminiSignatureCandidate {
+            present: false,
+            text: None,
+        },
+        GeminiSignatureCandidate {
+            present: false,
+            text: None,
+        },
+        GeminiSignatureCandidate {
+            present: false,
+            text: None,
+        },
+    ];
+    assert_eq!(gemini_signature_choice(&candidates).unwrap(), None);
+
+    let candidates = [
+        GeminiSignatureCandidate {
+            present: false,
+            text: None,
+        },
+        GeminiSignatureCandidate {
+            present: true,
+            text: Some("\u{2003}雪\u{3000}"),
+        },
+        GeminiSignatureCandidate {
+            present: false,
+            text: None,
+        },
+        GeminiSignatureCandidate {
+            present: false,
+            text: None,
+        },
+        GeminiSignatureCandidate {
+            present: false,
+            text: None,
+        },
+        GeminiSignatureCandidate {
+            present: false,
+            text: None,
+        },
+        GeminiSignatureCandidate {
+            present: false,
+            text: None,
+        },
+    ];
+    assert_eq!(gemini_signature_choice(&candidates).unwrap(), Some(1));
 }
 
 #[test]
