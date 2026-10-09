@@ -60,7 +60,7 @@ pub(super) fn next_runtime_response_candidate_for_route_with_prompt_cache_key(
                 prompt_cache_owner.as_deref(),
                 |name| runtime_profile_selection_jitter(shared, name, route_kind),
             ),
-        );
+        )?;
         log_runtime_response_selection_plan(
             shared,
             excluded_profiles,
@@ -179,7 +179,7 @@ pub(crate) fn runtime_quota_last_chance_profile_for_route(
             prompt_cache_owner.as_deref(),
             |name| runtime_profile_selection_jitter(shared, name, route_kind),
         ),
-    );
+    )?;
     log_runtime_response_selection_plan(
         shared,
         excluded_profiles,

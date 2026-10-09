@@ -204,10 +204,10 @@ pub(crate) struct RuntimeOptimisticCurrentCandidateSelectionInput<'a> {
     pub(crate) prompt_cache_owner_profile: Option<&'a str>,
 }
 
-pub(crate) fn runtime_optimistic_current_candidate_decision(
+pub(crate) fn runtime_optimistic_current_candidate_decision_checked(
     input: RuntimeOptimisticCurrentCandidateSelectionInput<'_>,
-) -> RuntimeOptimisticCurrentCandidateDecision {
-    runtime_proxy_crate::runtime_optimistic_current_candidate_decision(
+) -> anyhow::Result<RuntimeOptimisticCurrentCandidateDecision> {
+    runtime_proxy_crate::runtime_optimistic_current_candidate_decision_checked(
         runtime_proxy_crate::RuntimeOptimisticCurrentCandidateInput {
             current_profile: input.current_profile,
             route_kind: input.route_kind,
@@ -231,6 +231,7 @@ pub(crate) fn runtime_optimistic_current_candidate_decision(
             prompt_cache_owner_profile: input.prompt_cache_owner_profile,
         },
     )
+    .map_err(|error| anyhow::anyhow!("Mojo optimistic candidate planning failed: {error:?}"))
 }
 
 pub(crate) fn build_runtime_response_candidate_execution_plan<F>(
@@ -241,7 +242,7 @@ pub(crate) fn build_runtime_response_candidate_execution_plan<F>(
     ready_profile_candidates: Vec<ReadyProfileCandidate>,
     requested_model: Option<&str>,
     options: RuntimeResponseCandidateExecutionOptions<'_, F>,
-) -> RuntimeResponseCandidateExecutionPlan
+) -> anyhow::Result<RuntimeResponseCandidateExecutionPlan>
 where
     F: Fn(&str) -> u64,
 {
@@ -320,9 +321,10 @@ where
             prompt_cache_owner_profile,
             runtime_proxy_responses_quota_critical_floor_percent(),
         ),
-    );
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo runtime candidate plan failed: {error:?}"))?;
 
-    RuntimeResponseCandidateExecutionPlan {
+    Ok(RuntimeResponseCandidateExecutionPlan {
         ready_candidates: proxy_plan
             .ready_candidates
             .into_iter()
@@ -337,7 +339,7 @@ where
                 runtime_response_planned_candidate_from_proxy(candidate, &candidate_quota_summaries)
             })
             .collect(),
-    }
+    })
 }
 
 fn runtime_response_planned_candidate_from_proxy(

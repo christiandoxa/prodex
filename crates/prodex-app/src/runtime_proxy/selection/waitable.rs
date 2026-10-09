@@ -37,7 +37,7 @@ pub(crate) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
             .is_some_and(|snapshot| {
                 runtime_snapshot_blocks_same_request_cold_start_probe(snapshot, route_kind, now)
             });
-        let eligible = prodex_mojo_core::runtime::waitable_candidate_eligible(
+        let eligible = runtime_waitable_candidate_eligible(
             prodex_mojo_core::runtime::WaitableCandidateMode::ColdStart,
             prodex_mojo_core::runtime::WaitableCandidateInput {
                 context_allowed: !excluded_profiles.contains(&name),
@@ -55,8 +55,7 @@ pub(crate) fn runtime_remaining_sync_probe_cold_start_profiles_for_route(
                 snapshot_blocks,
                 quota_blocked: false,
             },
-        )
-        .expect("Mojo cold-start candidate policy returned invalid output");
+        )?;
         if eligible {
             count += 1;
         }
@@ -117,7 +116,7 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
             .as_ref()
             .is_some_and(|auth| !auth.quota_compatible);
         let quota_blocked = runtime_inflight_wait_quota_blocked(entry, route_kind, now);
-        let eligible = prodex_mojo_core::runtime::waitable_candidate_eligible(
+        let eligible = runtime_waitable_candidate_eligible(
             prodex_mojo_core::runtime::WaitableCandidateMode::Waitable,
             prodex_mojo_core::runtime::WaitableCandidateInput {
                 context_allowed: !excluded_profiles.contains(&name)
@@ -133,8 +132,7 @@ pub(crate) fn runtime_waitable_inflight_candidates_for_route(
                 snapshot_blocks: false,
                 quota_blocked,
             },
-        )
-        .expect("Mojo waitable candidate policy returned invalid output");
+        )?;
         if eligible {
             waitable_profiles.insert(name);
         }
@@ -175,7 +173,7 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
             .as_ref()
             .is_some_and(|auth| !auth.quota_compatible);
         let quota_blocked = runtime_inflight_wait_quota_blocked(entry, route_kind, now);
-        let eligible = prodex_mojo_core::runtime::waitable_candidate_eligible(
+        let eligible = runtime_waitable_candidate_eligible(
             prodex_mojo_core::runtime::WaitableCandidateMode::Relieved,
             prodex_mojo_core::runtime::WaitableCandidateInput {
                 context_allowed: true,
@@ -190,8 +188,7 @@ pub(crate) fn runtime_any_waited_candidate_relieved(
                 snapshot_blocks: false,
                 quota_blocked,
             },
-        )
-        .expect("Mojo relief candidate policy returned invalid output");
+        )?;
         if eligible {
             return Ok(true);
         }

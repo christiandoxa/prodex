@@ -7,19 +7,20 @@ use crate::{
 };
 
 use super::{
-    RuntimeAffinitySelectionKind, RuntimeCandidateAffinity, RuntimeQuotaSource,
-    RuntimeQuotaSummary, RuntimeResponseCandidateSelection, RuntimeRotationProxyShared,
-    RuntimeRouteKind, prune_runtime_profile_selection_backoff,
-    reserve_runtime_profile_route_circuit_half_open_probe, runtime_affinity_selection_profile,
-    runtime_candidate_has_hard_affinity, runtime_has_route_eligible_quota_fallback_for_model,
-    runtime_profile_auth_failure_active_from_map, runtime_profile_name_in_selection_backoff,
-    runtime_profile_quota_summary_for_route_with_model, runtime_proxy_current_profile,
-    runtime_proxy_log, runtime_proxy_log_field,
-    runtime_proxy_responses_quota_critical_floor_percent, runtime_proxy_structured_log_message,
-    runtime_request_hard_binding_owner, runtime_route_kind_label,
-    runtime_selection_log_fields_with_quota, runtime_selection_quota_source_label,
-    runtime_selection_trace_affinity_kind, runtime_selection_trace_candidate,
-    runtime_selection_trace_reject,
+    RuntimeAffinitySelectionKind, RuntimeQuotaSource, RuntimeQuotaSummary,
+    RuntimeResponseCandidateSelection, RuntimeRotationProxyShared, RuntimeRouteKind,
+    prune_runtime_profile_selection_backoff, reserve_runtime_profile_route_circuit_half_open_probe,
+    runtime_affinity_outcome, runtime_affinity_selection_plan, runtime_affinity_selection_profile,
+    runtime_has_route_eligible_quota_fallback_for_model,
+    runtime_profile_auth_failure_active_from_map,
+    runtime_profile_quota_summary_for_route_with_model, runtime_profile_route_circuit_key,
+    runtime_profile_selection_backoff_active, runtime_proxy_current_profile, runtime_proxy_log,
+    runtime_proxy_log_field, runtime_proxy_responses_quota_critical_floor_percent,
+    runtime_proxy_structured_log_message, runtime_request_hard_binding_owner,
+    runtime_route_kind_label, runtime_selection_log_fields_with_quota,
+    runtime_selection_quota_source_label, runtime_selection_trace_affinity_kind,
+    runtime_selection_trace_candidate, runtime_selection_trace_reject,
+    runtime_soft_affinity_allowed, runtime_soft_affinity_rejection_reason,
 };
 
 pub(crate) fn runtime_previous_response_affinity_is_trusted(
@@ -134,17 +135,15 @@ pub(super) fn runtime_affinity_selection_decision(
     .map_err(|error| anyhow::anyhow!("Mojo hard-binding conflict policy failed: {error:?}"))?;
     if hard_binding_conflict {
         return Ok(
-            match runtime_proxy_crate::runtime_affinity_outcome(
-                runtime_proxy_crate::RuntimeAffinityOutcomeInput {
-                    hard_binding_conflict: true,
-                    exact_binding_mismatch: false,
-                    profile_usable: true,
-                    excluded: false,
-                    hard_affinity: true,
-                    soft_policy_allowed: true,
-                    local_rejection: runtime_proxy_crate::RuntimeAffinityLocalRejection::None,
-                },
-            ) {
+            match runtime_affinity_outcome(runtime_proxy_crate::RuntimeAffinityOutcomeInput {
+                hard_binding_conflict: true,
+                exact_binding_mismatch: false,
+                profile_usable: true,
+                excluded: false,
+                hard_affinity: true,
+                soft_policy_allowed: true,
+                local_rejection: runtime_proxy_crate::RuntimeAffinityLocalRejection::None,
+            })? {
                 runtime_proxy_crate::RuntimeAffinityOutcome::Unavailable { reason, hard } => {
                     record_runtime_unavailable_affinity(
                         trace,
@@ -168,17 +167,15 @@ pub(super) fn runtime_affinity_selection_decision(
     let profile_usable = runtime_profile_is_usable_for_hard_binding(shared, profile_name)?;
     let excluded = selection.excluded_profiles.contains(profile_name);
 
-    match runtime_proxy_crate::runtime_affinity_outcome(
-        runtime_proxy_crate::RuntimeAffinityOutcomeInput {
-            hard_binding_conflict: false,
-            exact_binding_mismatch,
-            profile_usable,
-            excluded,
-            hard_affinity,
-            soft_policy_allowed: true,
-            local_rejection: runtime_proxy_crate::RuntimeAffinityLocalRejection::None,
-        },
-    ) {
+    match runtime_affinity_outcome(runtime_proxy_crate::RuntimeAffinityOutcomeInput {
+        hard_binding_conflict: false,
+        exact_binding_mismatch,
+        profile_usable,
+        excluded,
+        hard_affinity,
+        soft_policy_allowed: true,
+        local_rejection: runtime_proxy_crate::RuntimeAffinityLocalRejection::None,
+    })? {
         runtime_proxy_crate::RuntimeAffinityOutcome::Unavailable { reason, hard } => Ok(
             record_runtime_unavailable_affinity(trace, affinity_kind, selection, hard, reason),
         ),
@@ -245,24 +242,22 @@ fn runtime_soft_affinity_selection_decision(
         has_route_eligible_quota_fallback,
         responses_critical_floor_percent: runtime_proxy_responses_quota_critical_floor_percent(),
     };
-    let soft_policy_allowed = runtime_proxy_crate::runtime_soft_affinity_allowed(soft_policy);
+    let soft_policy_allowed = runtime_soft_affinity_allowed(soft_policy)?;
     let local_rejection = if soft_policy_allowed {
         runtime_soft_affinity_local_rejection(shared, profile_name, selection.route_kind)?
     } else {
         runtime_proxy_crate::RuntimeAffinityLocalRejection::None
     };
 
-    match runtime_proxy_crate::runtime_affinity_outcome(
-        runtime_proxy_crate::RuntimeAffinityOutcomeInput {
-            hard_binding_conflict: false,
-            exact_binding_mismatch: false,
-            profile_usable: true,
-            excluded: false,
-            hard_affinity: false,
-            soft_policy_allowed,
-            local_rejection,
-        },
-    ) {
+    match runtime_affinity_outcome(runtime_proxy_crate::RuntimeAffinityOutcomeInput {
+        hard_binding_conflict: false,
+        exact_binding_mismatch: false,
+        profile_usable: true,
+        excluded: false,
+        hard_affinity: false,
+        soft_policy_allowed,
+        local_rejection,
+    })? {
         runtime_proxy_crate::RuntimeAffinityOutcome::Unavailable { reason, hard } => Ok(
             record_runtime_unavailable_affinity(trace, affinity_kind, selection, hard, reason),
         ),
@@ -282,7 +277,7 @@ fn runtime_soft_affinity_selection_decision(
                 affinity_kind,
                 selection.route_kind,
                 profile_name,
-                runtime_proxy_crate::runtime_soft_affinity_rejection_reason(soft_policy),
+                runtime_soft_affinity_rejection_reason(soft_policy)?,
                 RuntimeRejectedAffinityQuota {
                     source: quota_source,
                     summary: quota_summary,
@@ -320,16 +315,22 @@ fn runtime_affinity_is_hard(
     } else {
         false
     };
-    Ok(bound_previous_response_affinity
-        || runtime_candidate_has_hard_affinity(RuntimeCandidateAffinity {
-            route_kind: selection.route_kind,
-            candidate_name: profile_name,
+    let affinity_plan =
+        runtime_affinity_selection_plan(prodex_mojo_core::runtime::AffinitySelectionInput {
+            route_kind: selection.route_kind as i64,
+            candidate_name: Some(profile_name),
             strict_affinity_profile: selection.strict_affinity_profile,
             pinned_profile: selection.pinned_profile,
             turn_state_profile: selection.turn_state_profile,
             session_profile: selection.session_profile,
             trusted_previous_response_affinity,
-        }))
+            pinned_profile_present: selection.pinned_profile.is_some(),
+            request_turn_state_present: selection.turn_state_profile.is_some(),
+            turn_state_profile_present: selection.turn_state_profile.is_some(),
+            session_profile_present: selection.session_profile.is_some(),
+            ..Default::default()
+        })?;
+    Ok(bound_previous_response_affinity || affinity_plan.no_rotate_affinity != 0)
 }
 
 fn runtime_soft_affinity_local_rejection(
@@ -344,14 +345,23 @@ fn runtime_soft_affinity_local_rejection(
             .lock()
             .map_err(|_| anyhow::anyhow!("runtime auto-rotate state is poisoned"))?;
         prune_runtime_profile_selection_backoff(&mut runtime, now);
-        runtime_profile_name_in_selection_backoff(
-            profile_name,
-            &runtime.profile_retry_backoff_until,
-            &runtime.profile_transport_backoff_until,
-            &runtime.profile_route_circuit_open_until,
-            route_kind,
+        runtime_profile_selection_backoff_active(
+            runtime
+                .profile_retry_backoff_until
+                .get(profile_name)
+                .copied(),
+            prodex_runtime_store::runtime_profile_transport_backoff_until_from_map(
+                &runtime.profile_transport_backoff_until,
+                profile_name,
+                route_kind,
+                now,
+            ),
+            runtime
+                .profile_route_circuit_open_until
+                .get(&runtime_profile_route_circuit_key(profile_name, route_kind))
+                .copied(),
             now,
-        )
+        )?
     };
     if in_backoff {
         return Ok(runtime_proxy_crate::RuntimeAffinityLocalRejection::SelectionBackoff);

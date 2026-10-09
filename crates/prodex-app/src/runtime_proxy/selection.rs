@@ -6,6 +6,7 @@ mod affinity;
 mod catalog;
 mod current;
 mod dispatch;
+mod mojo;
 mod next;
 mod policy;
 mod previous_response;
@@ -41,6 +42,7 @@ pub(crate) use self::catalog::*;
 pub(crate) use self::current::runtime_proxy_optimistic_current_candidate_for_route;
 use self::current::runtime_proxy_optimistic_current_candidate_for_route_with_selection;
 pub(crate) use self::dispatch::*;
+pub(crate) use self::mojo::*;
 #[cfg(test)]
 pub(crate) use self::next::next_runtime_response_candidate_for_route;
 use self::next::next_runtime_response_candidate_for_route_with_prompt_cache_key;

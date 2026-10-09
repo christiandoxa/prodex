@@ -499,6 +499,13 @@ pub enum RuntimeAffinityOutcome {
 }
 
 pub fn runtime_affinity_outcome(input: RuntimeAffinityOutcomeInput) -> RuntimeAffinityOutcome {
+    runtime_affinity_outcome_checked(input)
+        .expect("Mojo affinity outcome planning returned an invalid result")
+}
+
+pub fn runtime_affinity_outcome_checked(
+    input: RuntimeAffinityOutcomeInput,
+) -> Result<RuntimeAffinityOutcome, prodex_mojo_core::MojoError> {
     let local_rejection = input.local_rejection as i64;
     let plan = prodex_mojo_core::runtime::affinity_outcome_plan(
         prodex_mojo_core::runtime::AffinityOutcomeInput {
@@ -510,20 +517,18 @@ pub fn runtime_affinity_outcome(input: RuntimeAffinityOutcomeInput) -> RuntimeAf
             soft_policy_allowed: input.soft_policy_allowed,
             local_rejection,
         },
-    )
-    .expect("Mojo affinity outcome planning returned an invalid result");
+    )?;
     match plan.action {
-        0 => RuntimeAffinityOutcome::Unavailable {
+        0 => Ok(RuntimeAffinityOutcome::Unavailable {
             reason: prodex_mojo_core::observability::runtime_affinity_unavailable_reason_label(
                 plan.reason,
-            )
-            .expect("Mojo affinity unavailable reason label returned invalid output"),
+            )?,
             hard: plan.unavailable_hard,
-        },
-        1 => RuntimeAffinityOutcome::SelectHard,
-        2 => RuntimeAffinityOutcome::SelectSoft,
-        3 => RuntimeAffinityOutcome::RejectSoftQuota,
-        _ => unreachable!("validated Mojo affinity outcome action"),
+        }),
+        1 => Ok(RuntimeAffinityOutcome::SelectHard),
+        2 => Ok(RuntimeAffinityOutcome::SelectSoft),
+        3 => Ok(RuntimeAffinityOutcome::RejectSoftQuota),
+        _ => Err(prodex_mojo_core::MojoError::InvalidOutput),
     }
 }
 
@@ -554,8 +559,15 @@ pub struct RuntimeSoftAffinityPolicyInput {
     pub responses_critical_floor_percent: i64,
 }
 
-fn runtime_soft_affinity_policy_mojo(input: RuntimeSoftAffinityPolicyInput) -> i64 {
-    prodex_mojo_core::runtime::soft_affinity_policy(
+pub fn runtime_soft_affinity_allowed(input: RuntimeSoftAffinityPolicyInput) -> bool {
+    runtime_soft_affinity_allowed_checked(input)
+        .expect("Mojo soft affinity policy returned an invalid result")
+}
+
+pub fn runtime_soft_affinity_allowed_checked(
+    input: RuntimeSoftAffinityPolicyInput,
+) -> Result<bool, prodex_mojo_core::MojoError> {
+    let result = prodex_mojo_core::runtime::soft_affinity_policy(
         prodex_mojo_core::runtime::SoftAffinityPolicyInput {
             affinity_kind: input.affinity_kind as i64,
             route_kind: input.route_kind as i64,
@@ -566,19 +578,43 @@ fn runtime_soft_affinity_policy_mojo(input: RuntimeSoftAffinityPolicyInput) -> i
             current_profile_matches_candidate: input.current_profile_matches_candidate,
             has_route_eligible_quota_fallback: input.has_route_eligible_quota_fallback,
         },
-    )
-    .expect("Mojo soft affinity policy returned an invalid result")
-}
-
-pub fn runtime_soft_affinity_allowed(input: RuntimeSoftAffinityPolicyInput) -> bool {
-    runtime_soft_affinity_policy_mojo(input)
-        == prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_ALLOWED
+    )?;
+    match result {
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_ALLOWED => Ok(true),
+        prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_WINDOWS_UNAVAILABLE
+        | prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED_BEFORE_SEND
+        | prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_EXHAUSTED
+        | prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_HEALTHY
+        | prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_THIN
+        | prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_CRITICAL
+        | prodex_mojo_core::runtime::SOFT_AFFINITY_POLICY_QUOTA_UNKNOWN => Ok(false),
+        _ => Err(prodex_mojo_core::MojoError::InvalidOutput),
+    }
 }
 
 pub fn runtime_soft_affinity_rejection_reason(
     input: RuntimeSoftAffinityPolicyInput,
 ) -> &'static str {
-    runtime_quota_policy_reason(runtime_soft_affinity_policy_mojo(input)).unwrap_or("quota_unknown")
+    runtime_soft_affinity_rejection_reason_checked(input)
+        .expect("Mojo soft affinity reason returned an invalid result")
+}
+
+pub fn runtime_soft_affinity_rejection_reason_checked(
+    input: RuntimeSoftAffinityPolicyInput,
+) -> Result<&'static str, prodex_mojo_core::MojoError> {
+    let result = prodex_mojo_core::runtime::soft_affinity_policy(
+        prodex_mojo_core::runtime::SoftAffinityPolicyInput {
+            affinity_kind: input.affinity_kind as i64,
+            route_kind: input.route_kind as i64,
+            five_hour_status: input.quota_summary.five_hour.status as i64,
+            weekly_status: input.quota_summary.weekly.status as i64,
+            quota_band: input.quota_summary.route_band as i64,
+            quota_source_present: input.quota_source.is_some(),
+            current_profile_matches_candidate: input.current_profile_matches_candidate,
+            has_route_eligible_quota_fallback: input.has_route_eligible_quota_fallback,
+        },
+    )?;
+    runtime_quota_policy_reason(result).ok_or(prodex_mojo_core::MojoError::InvalidOutput)
 }
 
 pub fn runtime_websocket_transport_failure_plan(

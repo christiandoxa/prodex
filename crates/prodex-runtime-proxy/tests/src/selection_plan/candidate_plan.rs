@@ -24,7 +24,8 @@ fn candidate_plan_separates_ready_and_fallback_attempts() {
         ],
         &BTreeSet::new(),
         runtime_response_candidate_plan_options(RuntimeRouteKind::Responses, 3, None, None, 2),
-    );
+    )
+    .expect("Mojo candidate plan should be valid");
 
     assert_eq!(
         plan.ready_candidates
@@ -100,7 +101,8 @@ fn candidate_plan_fallback_keeps_full_non_excluded_pool_despite_fresh_penalties(
         ],
         &excluded_profiles,
         runtime_response_candidate_plan_options(RuntimeRouteKind::Responses, 3, None, None, 2),
-    );
+    )
+    .expect("Mojo candidate plan should be valid");
 
     assert_eq!(
         plan.ready_candidates
@@ -169,7 +171,8 @@ fn candidate_plan_reports_auth_quota_backoff_and_unknown_availability() {
         ],
         &BTreeSet::new(),
         runtime_response_candidate_plan_options(RuntimeRouteKind::Responses, 3, None, None, 2),
-    );
+    )
+    .expect("Mojo candidate plan should be valid");
 
     assert_eq!(
         plan.fallback_candidates
@@ -219,7 +222,8 @@ fn candidate_plan_exhausts_five_hour_quota_for_every_route() {
             )],
             &BTreeSet::new(),
             runtime_response_candidate_plan_options(route_kind, 3, None, None, 2),
-        );
+        )
+        .expect("Mojo candidate plan should be valid");
 
         assert_eq!(
             plan.fallback_candidates[0].availability,
@@ -284,7 +288,8 @@ fn candidate_plan_orders_ready_candidates_by_execution_priority() {
         ],
         &BTreeSet::new(),
         runtime_response_candidate_plan_options(RuntimeRouteKind::Responses, 3, None, None, 2),
-    );
+    )
+    .expect("Mojo candidate plan should be valid");
 
     assert_eq!(
         plan.ready_candidates
@@ -334,7 +339,8 @@ fn candidate_plan_uses_route_specific_quota_source_order() {
             ],
             &BTreeSet::new(),
             runtime_response_candidate_plan_options(route_kind, 3, None, None, 2),
-        );
+        )
+        .expect("Mojo candidate plan should be valid");
 
         assert_eq!(
             plan.ready_candidates
@@ -372,7 +378,8 @@ fn candidate_plan_uses_prompt_cache_affinity_as_tie_breaker() {
             None,
             2,
         ),
-    );
+    )
+    .expect("Mojo candidate plan should be valid");
 
     let mut expected = vec!["main", "second", "third"];
     expected.sort_by_key(|profile_name| {
@@ -402,7 +409,8 @@ fn candidate_plan_prioritizes_prompt_cache_owner_profile() {
             Some("second"),
             2,
         ),
-    );
+    )
+    .expect("Mojo candidate plan should be valid");
 
     assert_eq!(
         plan.ready_candidates
@@ -442,7 +450,8 @@ fn candidate_plan_keeps_health_ahead_of_prompt_cache_affinity() {
             None,
             2,
         ),
-    );
+    )
+    .expect("Mojo candidate plan should be valid");
 
     assert_eq!(
         plan.ready_candidates
@@ -493,7 +502,8 @@ fn candidate_plan_orders_fallback_candidates_and_reports_skip_reasons() {
         ],
         &BTreeSet::new(),
         runtime_response_candidate_plan_options(RuntimeRouteKind::Responses, 3, None, None, 2),
-    );
+    )
+    .expect("Mojo candidate plan should be valid");
 
     assert_eq!(
         plan.ready_candidates
