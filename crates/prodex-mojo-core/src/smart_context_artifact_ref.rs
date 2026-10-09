@@ -2,6 +2,7 @@ use crate::MojoError;
 
 const ABI_VERSION: i64 = 1;
 const MAX_CANONICAL_ID_BYTES: usize = 68;
+const MAX_BODY_MARKER_SCAN_BYTES: usize = 4 * 1024 * 1024;
 
 #[repr(i64)]
 #[derive(Clone, Copy)]
@@ -11,6 +12,7 @@ enum Operation {
     AliasReference = 2,
     Reference = 3,
     IdValid = 4,
+    BodyMarkerPresent = 5,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,6 +168,41 @@ pub fn artifact_id_valid(id: &str) -> Result<bool, MojoError> {
     }
 }
 
+/// Detect known Smart Context artifact markers in a bounded request body.
+pub fn body_may_contain_artifact_ref(body: &[u8]) -> Result<bool, MojoError> {
+    let body = &body[..body.len().min(MAX_BODY_MARKER_SCAN_BYTES)];
+    let mut meta = [-1_i64; 4];
+    let mut written = 0_i64;
+    let mut range_count = 0_i64;
+    let output = [0_u8; 1];
+    let mut ranges = [0_i64; 2];
+    let status = unsafe {
+        prodex_smart_context_artifact_ref_v1(
+            ABI_VERSION,
+            Operation::BodyMarkerPresent as i64,
+            body.as_ptr() as usize as u64,
+            i64::try_from(body.len()).map_err(|_| MojoError::InvalidInput)?,
+            output.as_ptr() as usize as u64,
+            0,
+            (&mut written as *mut i64) as usize as u64,
+            ranges.as_mut_ptr() as usize as u64,
+            1,
+            (&mut range_count as *mut i64) as usize as u64,
+            meta.as_mut_ptr() as usize as u64,
+        )
+    };
+    match status {
+        0 => match meta[0] {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(MojoError::InvalidOutput),
+        },
+        1 => Err(MojoError::InvalidInput),
+        3 => Err(MojoError::Capacity),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
 pub fn parse_alias_declaration(
     token: &str,
 ) -> Result<Option<ArtifactAliasDeclarationPlan>, MojoError> {
@@ -220,6 +257,8 @@ mod tests {
         assert!(!artifact_alias_valid("@12.").unwrap());
         assert!(artifact_id_valid("sc:0123456789abcdef").unwrap());
         assert!(!artifact_id_valid("psc:0123456789abcdef").unwrap());
+        assert!(body_may_contain_artifact_ref(b"prefix psc:0123456789abcdef suffix").unwrap());
+        assert!(!body_may_contain_artifact_ref("Unicode café".as_bytes()).unwrap());
 
         let short = parse_reference("psc:0123456789abcdef#L2-L4")
             .unwrap()

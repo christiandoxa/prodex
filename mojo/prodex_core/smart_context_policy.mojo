@@ -393,3 +393,330 @@ def prodex_smart_context_rollout_plan_v1(
         else:
             reason[] = 5
     return 0
+
+# Request admission and rewrite telemetry stay in this policy kernel so the
+# Rust caller only acquires JSON/headers and applies the returned plan.
+comptime SMART_CONTEXT_REQUEST_PLAN_ABI_VERSION: Int64 = 1
+comptime SMART_CONTEXT_REQUEST_PLAN_OK: Int64 = 0
+comptime SMART_CONTEXT_REQUEST_PLAN_INVALID: Int64 = 1
+comptime SMART_CONTEXT_REQUEST_PLAN_ABI: Int64 = 4
+comptime SMART_CONTEXT_REQUEST_PLAN_HTTP: Int64 = 0
+comptime SMART_CONTEXT_REQUEST_PLAN_WEBSOCKET: Int64 = 1
+comptime SMART_CONTEXT_REQUEST_PLAN_MIN_BODY_BYTES: UInt64 = 512
+comptime SMART_CONTEXT_REQUEST_PLAN_HTTP_MAX_BYTES: UInt64 = 256 * 1024
+comptime SMART_CONTEXT_REQUEST_PLAN_WEBSOCKET_MAX_BYTES: UInt64 = 96 * 1024
+
+# Stable body-admission reason tags. Zero means the request may continue.
+comptime SMART_CONTEXT_BODY_REASON_ELIGIBLE: Int64 = 0
+comptime SMART_CONTEXT_BODY_REASON_UNSUPPORTED_ROUTE: Int64 = 1
+comptime SMART_CONTEXT_BODY_REASON_UNSUPPORTED_CONTENT_TYPE: Int64 = 2
+comptime SMART_CONTEXT_BODY_REASON_BELOW_MINIMUM: Int64 = 3
+comptime SMART_CONTEXT_BODY_REASON_WEBSOCKET_GENERATE_FALSE: Int64 = 4
+comptime SMART_CONTEXT_BODY_REASON_WEBSOCKET_LARGE: Int64 = 5
+comptime SMART_CONTEXT_BODY_REASON_HTTP_LARGE: Int64 = 6
+
+comptime SMART_CONTEXT_BODY_SHAPE_REASON_ELIGIBLE: Int64 = 0
+comptime SMART_CONTEXT_BODY_SHAPE_REASON_INVALID_JSON: Int64 = 1
+comptime SMART_CONTEXT_BODY_SHAPE_REASON_JSON_DEPTH: Int64 = 2
+comptime SMART_CONTEXT_BODY_SHAPE_REASON_JSON_NODE: Int64 = 3
+comptime SMART_CONTEXT_BODY_SHAPE_REASON_NO_CANDIDATE: Int64 = 4
+
+def smart_context_request_plan_bool(value: Int64) -> Bool:
+    return value == 0 or value == 1
+
+@export("prodex_smart_context_body_admission_plan_v1")
+def prodex_smart_context_body_admission_plan_v1(
+    abi_version: Int64,
+    body_bytes: UInt64,
+    transport: Int64,
+    route_supported: Int64,
+    content_type_supported: Int64,
+    marker_present: Int64,
+    static_context_required: Int64,
+    websocket_generate_false: Int64,
+    reason_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SMART_CONTEXT_REQUEST_PLAN_ABI_VERSION:
+        return SMART_CONTEXT_REQUEST_PLAN_ABI
+    if (
+        reason_address == 0
+        or (transport != SMART_CONTEXT_REQUEST_PLAN_HTTP and transport != SMART_CONTEXT_REQUEST_PLAN_WEBSOCKET)
+        or not smart_context_request_plan_bool(route_supported)
+        or not smart_context_request_plan_bool(content_type_supported)
+        or not smart_context_request_plan_bool(marker_present)
+        or not smart_context_request_plan_bool(static_context_required)
+        or not smart_context_request_plan_bool(websocket_generate_false)
+    ):
+        return SMART_CONTEXT_REQUEST_PLAN_INVALID
+    var reason = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(reason_address))
+    reason[] = SMART_CONTEXT_BODY_REASON_ELIGIBLE
+    if route_supported == 0:
+        reason[] = SMART_CONTEXT_BODY_REASON_UNSUPPORTED_ROUTE
+    elif content_type_supported == 0:
+        reason[] = SMART_CONTEXT_BODY_REASON_UNSUPPORTED_CONTENT_TYPE
+    elif body_bytes < SMART_CONTEXT_REQUEST_PLAN_MIN_BODY_BYTES and marker_present == 0 and static_context_required == 0:
+        reason[] = SMART_CONTEXT_BODY_REASON_BELOW_MINIMUM
+    elif transport == SMART_CONTEXT_REQUEST_PLAN_WEBSOCKET and websocket_generate_false == 1:
+        reason[] = SMART_CONTEXT_BODY_REASON_WEBSOCKET_GENERATE_FALSE
+    elif transport == SMART_CONTEXT_REQUEST_PLAN_WEBSOCKET and body_bytes > SMART_CONTEXT_REQUEST_PLAN_WEBSOCKET_MAX_BYTES and marker_present == 0:
+        reason[] = SMART_CONTEXT_BODY_REASON_WEBSOCKET_LARGE
+    elif transport == SMART_CONTEXT_REQUEST_PLAN_HTTP and body_bytes > SMART_CONTEXT_REQUEST_PLAN_HTTP_MAX_BYTES and marker_present == 0:
+        reason[] = SMART_CONTEXT_BODY_REASON_HTTP_LARGE
+    return SMART_CONTEXT_REQUEST_PLAN_OK
+
+@export("prodex_smart_context_body_shape_plan_v1")
+def prodex_smart_context_body_shape_plan_v1(
+    abi_version: Int64,
+    json_valid: Int64,
+    json_shape_valid: Int64,
+    json_shape_reason: Int64,
+    rewrite_candidate: Int64,
+    static_context_changed: Int64,
+    reason_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SMART_CONTEXT_REQUEST_PLAN_ABI_VERSION:
+        return SMART_CONTEXT_REQUEST_PLAN_ABI
+    if (
+        reason_address == 0
+        or not smart_context_request_plan_bool(json_valid)
+        or not smart_context_request_plan_bool(json_shape_valid)
+        or json_shape_reason < 0 or json_shape_reason > 2
+        or not smart_context_request_plan_bool(rewrite_candidate)
+        or not smart_context_request_plan_bool(static_context_changed)
+    ):
+        return SMART_CONTEXT_REQUEST_PLAN_INVALID
+    var reason = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(reason_address))
+    reason[] = SMART_CONTEXT_BODY_SHAPE_REASON_ELIGIBLE
+    if json_valid == 0:
+        reason[] = SMART_CONTEXT_BODY_SHAPE_REASON_INVALID_JSON
+    elif json_shape_valid == 0 and json_shape_reason == 1:
+        reason[] = SMART_CONTEXT_BODY_SHAPE_REASON_JSON_DEPTH
+    elif json_shape_valid == 0:
+        reason[] = SMART_CONTEXT_BODY_SHAPE_REASON_JSON_NODE
+    elif rewrite_candidate == 0 and static_context_changed == 0:
+        reason[] = SMART_CONTEXT_BODY_SHAPE_REASON_NO_CANDIDATE
+    return SMART_CONTEXT_REQUEST_PLAN_OK
+
+comptime SMART_CONTEXT_REWRITE_OUTCOME_OK_REHYDRATE_EXACT: Int64 = 0
+comptime SMART_CONTEXT_REWRITE_OUTCOME_OK_SAVED: Int64 = 1
+comptime SMART_CONTEXT_REWRITE_OUTCOME_ZERO_SAVINGS: Int64 = 2
+comptime SMART_CONTEXT_REWRITE_OUTCOME_GROWTH: Int64 = 3
+
+@export("prodex_smart_context_rewrite_outcome_plan_v1")
+def prodex_smart_context_rewrite_outcome_plan_v1(
+    abi_version: Int64,
+    body_bytes_before: UInt64,
+    body_bytes_after: UInt64,
+    rehydrated_refs: UInt64,
+    tool_outputs_condensed: UInt64,
+    duplicate_texts: UInt64,
+    static_context_deltas: UInt64,
+    outcome_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SMART_CONTEXT_REQUEST_PLAN_ABI_VERSION:
+        return SMART_CONTEXT_REQUEST_PLAN_ABI
+    if outcome_address == 0:
+        return SMART_CONTEXT_REQUEST_PLAN_INVALID
+    var outcome = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(outcome_address))
+    if (
+        rehydrated_refs > 0
+        and tool_outputs_condensed == 0
+        and duplicate_texts == 0
+        and static_context_deltas == 0
+    ):
+        outcome[] = SMART_CONTEXT_REWRITE_OUTCOME_OK_REHYDRATE_EXACT
+    elif body_bytes_after < body_bytes_before:
+        outcome[] = SMART_CONTEXT_REWRITE_OUTCOME_OK_SAVED
+    elif body_bytes_after == body_bytes_before:
+        outcome[] = SMART_CONTEXT_REWRITE_OUTCOME_ZERO_SAVINGS
+    else:
+        outcome[] = SMART_CONTEXT_REWRITE_OUTCOME_GROWTH
+    return SMART_CONTEXT_REQUEST_PLAN_OK
+
+comptime SMART_CONTEXT_TELEMETRY_LABEL_ABI_VERSION: Int64 = 1
+comptime SMART_CONTEXT_TELEMETRY_LABEL_MAX_BYTES: Int64 = 1024
+comptime SMART_CONTEXT_TELEMETRY_LABEL_PRESSURE: Int64 = 0
+comptime SMART_CONTEXT_TELEMETRY_LABEL_CONFIDENCE: Int64 = 1
+comptime SMART_CONTEXT_TELEMETRY_LABEL_ROLLOUT: Int64 = 2
+comptime SMART_CONTEXT_TELEMETRY_LABEL_BUDGET: Int64 = 3
+comptime SMART_CONTEXT_TELEMETRY_LABEL_CATEGORIES: Int64 = 4
+comptime SMART_CONTEXT_TELEMETRY_LABEL_EXACTNESS_REASONS: Int64 = 5
+comptime SMART_CONTEXT_TELEMETRY_LABEL_POLICY_REASONS: Int64 = 6
+comptime SMART_CONTEXT_TELEMETRY_LABEL_OUTCOME: Int64 = 7
+
+def smart_context_telemetry_put_byte(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    value: UInt8,
+) -> Bool:
+    if written[] < 0 or written[] >= capacity:
+        return False
+    output[unsafe_offset=written[]] = value
+    written[] += 1
+    return True
+
+def smart_context_telemetry_put_literal(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    literal: StringSlice,
+) -> Bool:
+    var source = literal.unsafe_ptr()
+    for index in range(Int64(literal.byte_length())):
+        if not smart_context_telemetry_put_byte(output, capacity, written, source[unsafe_offset=index]):
+            return False
+    return True
+
+def smart_context_telemetry_put_list_item(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    first: Pointer[mut=True, Bool, _],
+    literal: StringSlice,
+) -> Bool:
+    if not first[] and not smart_context_telemetry_put_byte(output, capacity, written, 44):
+        return False
+    first[] = False
+    return smart_context_telemetry_put_literal(output, capacity, written, literal)
+
+def smart_context_telemetry_write_label(
+    kind: Int64,
+    value: UInt64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if kind == SMART_CONTEXT_TELEMETRY_LABEL_PRESSURE:
+        if value == 0:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("unknown"))
+        elif value == 1:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("low"))
+        elif value == 2:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("moderate"))
+        elif value == 3:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("high"))
+        elif value == 4:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("critical"))
+        elif value == 5:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("exhausted"))
+        return False
+    if kind == SMART_CONTEXT_TELEMETRY_LABEL_CONFIDENCE:
+        if value == 0:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("high"))
+        elif value == 1:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("medium"))
+        elif value == 2:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("low"))
+        return False
+    if kind == SMART_CONTEXT_TELEMETRY_LABEL_ROLLOUT:
+        if value == 0:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("apply"))
+        elif value == 1:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("shadow"))
+        elif value == 2:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("disabled"))
+        return False
+    if kind == SMART_CONTEXT_TELEMETRY_LABEL_BUDGET:
+        if value == 0:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("exact_pass_through"))
+        elif value == 1:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("large_lossless"))
+        elif value == 2:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("artifact_condensed"))
+        elif value == 3:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("minimal_refs_only"))
+        return False
+    if kind == SMART_CONTEXT_TELEMETRY_LABEL_OUTCOME:
+        if value == 0:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("ok_rehydrate_exact"))
+        elif value == 1:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("ok_saved"))
+        elif value == 2:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("zero_savings"))
+        elif value == 3:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("growth"))
+        return False
+    var first = True
+    if kind == SMART_CONTEXT_TELEMETRY_LABEL_CATEGORIES:
+        if value & 1 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("tool_output")):
+            return False
+        if value & 2 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("tool_argument")):
+            return False
+        if value & 4 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("duplicate_context")):
+            return False
+        if value & 8 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("repeat_tool_output")):
+            return False
+        if value & 16 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("blob_output")):
+            return False
+        if value & 32 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("rehydration")):
+            return False
+        if value & 64 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("static_context")):
+            return False
+        if value & 128 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("repo_state")):
+            return False
+        if first:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("-"))
+        return True
+    if kind == SMART_CONTEXT_TELEMETRY_LABEL_EXACTNESS_REASONS:
+        if value & 1 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("exact_mode")):
+            return False
+        if value & 2 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("previous_response")):
+            return False
+        if value & 4 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("turn_state")):
+            return False
+        if value & 8 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("session")):
+            return False
+        if value & 16 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("tool_output_without_artifact")):
+            return False
+        if first:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("-"))
+        return True
+    if kind == SMART_CONTEXT_TELEMETRY_LABEL_POLICY_REASONS:
+        if value & 1 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("exactness_required")):
+            return False
+        if value & 2 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("static_context_changed")):
+            return False
+        if value & 4 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("missing_rehydrate_refs")):
+            return False
+        if value & 8 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("unknown_token_window")):
+            return False
+        if value & 16 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("unsafe_accounting")):
+            return False
+        if value & 32 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("recent_rewrite_savings_safe")):
+            return False
+        if value & 64 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("plenty_of_budget")):
+            return False
+        if value & 128 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("moderate_budget")):
+            return False
+        if value & 256 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("tight_budget")):
+            return False
+        if value & 512 != 0 and not smart_context_telemetry_put_list_item(output, capacity, written, Pointer(to=first), StringSlice("critical_budget")):
+            return False
+        if first:
+            return smart_context_telemetry_put_literal(output, capacity, written, StringSlice("-"))
+        return True
+    return False
+
+@export("prodex_smart_context_telemetry_label_v1")
+def prodex_smart_context_telemetry_label_v1(
+    abi_version: Int64,
+    kind: Int64,
+    value: UInt64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != SMART_CONTEXT_TELEMETRY_LABEL_ABI_VERSION:
+        return SMART_CONTEXT_REQUEST_PLAN_ABI
+    if output_capacity < 0 or output_capacity > SMART_CONTEXT_TELEMETRY_LABEL_MAX_BYTES or written_address == 0 or output_capacity > 0 and output_address == 0:
+        return SMART_CONTEXT_REQUEST_PLAN_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](unsafe_from_address=Int(output_address))
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](unsafe_from_address=Int(written_address))
+    written[] = 0
+    if not smart_context_telemetry_write_label(kind, value, output, output_capacity, written):
+        if written[] >= output_capacity:
+            written[] = 0
+            return 3
+        return SMART_CONTEXT_REQUEST_PLAN_INVALID
+    return SMART_CONTEXT_REQUEST_PLAN_OK

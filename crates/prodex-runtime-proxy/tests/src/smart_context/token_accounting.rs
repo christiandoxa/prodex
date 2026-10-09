@@ -598,3 +598,80 @@ fn pressure_snapshot_reports_confidence_and_safety_floor() {
     );
     assert_eq!(unknown_window.pressure.absolute_safety_floor_tokens, 2_000);
 }
+
+#[test]
+fn observed_token_accounting_marks_zero_and_unknown_windows_without_fallback() {
+    let zero = smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+        model_context_window_tokens: Some(0),
+        reserved_output_tokens: 0,
+        current_input_tokens: 0,
+        current_request_body_bytes: 0,
+        current_request_estimated_tokens: Some(0),
+        observed_usage: Vec::new(),
+    });
+    assert_eq!(zero.available_context_tokens, Some(0));
+    assert!(
+        zero.accounting_risks
+            .contains(&SmartContextTokenAccountingRisk::ZeroContextWindow)
+    );
+    assert_eq!(
+        zero.pressure.pressure_band,
+        SmartContextPressureBand::Unknown
+    );
+
+    let reserved =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(100),
+            reserved_output_tokens: 100,
+            ..Default::default()
+        });
+    assert!(
+        reserved
+            .accounting_risks
+            .contains(&SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow)
+    );
+
+    let unknown =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: None,
+            reserved_output_tokens: u64::MAX,
+            current_input_tokens: 1,
+            current_request_body_bytes: 0,
+            current_request_estimated_tokens: None,
+            observed_usage: Vec::new(),
+        });
+    assert_eq!(unknown.available_context_tokens, None);
+    assert!(
+        unknown
+            .accounting_risks
+            .contains(&SmartContextTokenAccountingRisk::UnknownTokenWindow)
+    );
+}
+
+#[test]
+fn observed_token_accounting_saturates_maximum_usage_values() {
+    let accounting =
+        smart_context_observed_token_accounting(SmartContextObservedTokenAccountingInput {
+            model_context_window_tokens: Some(u64::MAX),
+            reserved_output_tokens: u64::MAX,
+            current_input_tokens: u64::MAX,
+            current_request_body_bytes: usize::MAX,
+            current_request_estimated_tokens: Some(u64::MAX),
+            observed_usage: vec![RuntimeTokenUsage {
+                input_tokens: u64::MAX,
+                output_tokens: u64::MAX,
+                reasoning_tokens: u64::MAX,
+                ..RuntimeTokenUsage::default()
+            }],
+        });
+    assert_eq!(accounting.observed_total_tokens, u64::MAX);
+    assert_eq!(accounting.observed_context_tokens, u64::MAX);
+    assert_eq!(accounting.current_request_accounted_tokens, u64::MAX);
+    assert_eq!(accounting.effective_input_tokens, u64::MAX);
+    assert_eq!(accounting.available_context_tokens, Some(0));
+    assert!(
+        accounting
+            .accounting_risks
+            .contains(&SmartContextTokenAccountingRisk::ReservedOutputConsumesWindow)
+    );
+}

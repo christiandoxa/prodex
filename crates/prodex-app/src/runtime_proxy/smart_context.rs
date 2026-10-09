@@ -223,9 +223,13 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         return Ok(Cow::Borrowed(&request.body));
     }
     let now = runtime_smart_context_unix_secs_now();
-    if let Some(reason) =
-        runtime_smart_context_admission_fallback_reason(shared, route_kind, request, now)
-    {
+    if let Some(reason) = runtime_smart_context_admission_fallback_reason(
+        shared,
+        route_kind,
+        request,
+        profile_name,
+        now,
+    ) {
         runtime_smart_context_log_prepare_fallback(
             request_id,
             shared,
@@ -265,20 +269,6 @@ fn prepare_runtime_smart_context_body_safely<'a>(
         ) {
             std::panic::panic_any(RuntimeSmartContextInjectedPanic);
         }
-        if let Some(reason) =
-            runtime_smart_context_body_fallback_reason(request, transport, shared, profile_name)
-        {
-            runtime_smart_context_log_prepare_fallback(
-                request_id,
-                shared,
-                route_kind,
-                transport,
-                profile_name,
-                request.body.len(),
-                reason,
-            );
-            return Ok(Cow::Borrowed(request.body.as_slice()));
-        }
         prepare_runtime_smart_context_body(
             request_id,
             request,
@@ -306,6 +296,7 @@ fn runtime_smart_context_admission_fallback_reason(
     shared: &RuntimeRotationProxyShared,
     route_kind: RuntimeRouteKind,
     request: &RuntimeProxyRequest,
+    profile_name: Option<&str>,
     now: u64,
 ) -> Option<&'static str> {
     if runtime_smart_context_disabled_until_for(shared) > now {
@@ -317,18 +308,36 @@ fn runtime_smart_context_admission_fallback_reason(
     ) {
         return Some("fault_injection");
     }
-    if !matches!(
+    let websocket = route_kind == RuntimeRouteKind::Websocket;
+    let content_type_supported =
+        runtime_proxy_crate::runtime_proxy_request_header_value(&request.headers, "content-type")
+            .is_none_or(|value| {
+                ascii_casefold_starts_with(value, "application/json")
+                    .expect("Mojo Smart Context content-type prefix comparison failed")
+            });
+    let route_supported = matches!(
         route_kind,
         RuntimeRouteKind::Responses | RuntimeRouteKind::Websocket
-    ) {
-        return Some("unsupported_route");
-    }
-    runtime_proxy_crate::runtime_proxy_request_header_value(&request.headers, "content-type")
-        .is_some_and(|value| {
-            !ascii_casefold_starts_with(value, "application/json")
-                .expect("Mojo Smart Context content-type prefix comparison failed")
-        })
-        .then_some("unsupported_content_type")
+    );
+    let marker_present = runtime_smart_context_body_may_contain_artifact_ref(&request.body);
+    let static_context_required = route_supported
+        && content_type_supported
+        && !marker_present
+        && request.body.len() < 512
+        && runtime_smart_context_static_context_tracking_required(request, shared, profile_name);
+    prodex_mojo_core::runtime_decisions::smart_context_body_admission_reason(
+        prodex_mojo_core::runtime_decisions::SmartContextBodyAdmissionInput {
+            body_bytes: u64::try_from(request.body.len()).unwrap_or(u64::MAX),
+            websocket,
+            route_supported,
+            content_type_supported,
+            marker_present,
+            static_context_required,
+            websocket_generate_false: websocket
+                && runtime_smart_context_websocket_generate_false_request(&request.body),
+        },
+    )
+    .expect("Mojo Smart Context body admission planner returned invalid output")
 }
 
 fn runtime_smart_context_rollout_fallback_reason(
@@ -340,37 +349,6 @@ fn runtime_smart_context_rollout_fallback_reason(
     }
     (shadow && rollout.canary_bucket >= SMART_CONTEXT_SHADOW_SAMPLE_BASIS_POINTS)
         .then_some("rollout_shadow_sampled_out")
-}
-
-fn runtime_smart_context_body_fallback_reason(
-    request: &RuntimeProxyRequest,
-    transport: RuntimeSmartContextTransport,
-    shared: &RuntimeRotationProxyShared,
-    profile_name: Option<&str>,
-) -> Option<&'static str> {
-    if request.body.len() < SMART_CONTEXT_ADMISSION_MIN_BODY_BYTES
-        && !runtime_smart_context_body_may_contain_artifact_ref(&request.body)
-        && !runtime_smart_context_static_context_tracking_required(request, shared, profile_name)
-    {
-        return Some("below_minimum_body");
-    }
-    if transport == RuntimeSmartContextTransport::Websocket
-        && runtime_smart_context_websocket_generate_false_request(&request.body)
-    {
-        return Some("websocket_generate_false");
-    }
-    let rewrite_max_bytes = if transport == RuntimeSmartContextTransport::Websocket {
-        SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES
-    } else {
-        SMART_CONTEXT_HTTP_REWRITE_MAX_BYTES
-    };
-    (request.body.len() > rewrite_max_bytes
-        && !runtime_smart_context_body_may_contain_artifact_ref(&request.body))
-    .then_some(if transport == RuntimeSmartContextTransport::Websocket {
-        "websocket_large_payload"
-    } else {
-        "body_too_large"
-    })
 }
 
 fn runtime_smart_context_static_context_tracking_required(
@@ -490,9 +468,8 @@ fn runtime_smart_context_websocket_generate_false_request(body: &[u8]) -> bool {
 }
 
 fn runtime_smart_context_body_may_contain_artifact_ref(body: &[u8]) -> bool {
-    std::str::from_utf8(body).is_ok_and(|text| {
-        text.contains("psc:") || text.contains("psc2:") || text.contains("prodex-artifact:")
-    })
+    prodex_mojo_core::smart_context_artifact_ref::body_may_contain_artifact_ref(body)
+        .expect("Mojo Smart Context artifact-marker classifier returned invalid output")
 }
 
 fn runtime_smart_context_enabled(shared: &RuntimeRotationProxyShared) -> bool {
