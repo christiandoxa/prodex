@@ -1,6 +1,4 @@
 use super::*;
-
-use super::*;
 use crate::app_commands::LogLoadObservation;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 

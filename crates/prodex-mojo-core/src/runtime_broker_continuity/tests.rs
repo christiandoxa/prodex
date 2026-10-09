@@ -1,7 +1,5 @@
 use super::*;
 
-use super::*;
-
 #[test]
 fn broker_continuity_kernel_smoke() {
     let plan = continuity_line_plan(

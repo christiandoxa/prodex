@@ -1,8 +1,7 @@
 use anyhow::{Context, Result, bail};
 use fs2::FileExt;
 use prodex_cli::{
-    SubAgentConfig, SubAgentLaunchTarget, SubAgentMaxConcurrency, SubAgentReasoningEffort,
-    SuperLaunchTarget,
+    SubAgentLaunchTarget, SubAgentMaxConcurrency, SubAgentReasoningEffort, SuperLaunchTarget,
 };
 use prodex_mojo_core::sub_agent_policy::{
     ChildArgvAction, ChildOutcomeAction, ChildSpecScalarViolation, ProviderUrlViolation,
@@ -421,6 +420,7 @@ fn sub_agent_target_label(target: &SuperLaunchTarget) -> &'static str {
 mod tests {
     use super::{slot_lifecycle::sub_agent_slot_lock_error_action, *};
     use prodex_cli::SubAgentConcurrencySource;
+    use prodex_cli::SubAgentConfig;
 
     #[cfg(unix)]
     #[test]

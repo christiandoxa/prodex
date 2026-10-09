@@ -1,7 +1,5 @@
 use super::*;
 
-use super::*;
-
 fn rust_external_provider_number(
     value: Option<&str>,
     default: u64,

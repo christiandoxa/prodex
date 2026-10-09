@@ -1,7 +1,5 @@
 use super::*;
 
-use super::*;
-
 #[test]
 fn removed_google_oauth_flags_fail_with_migration_guidance() {
     for flag in ["--with-google", "--google"] {
