@@ -491,6 +491,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/runtime_route_reason.mojo");
         sources.push("../../mojo/prodex_core/session_selector.mojo");
         sources.push("../../mojo/prodex_core/session_report.mojo");
+        sources.push("../../mojo/prodex_core/session_repair.mojo");
         sources.push("../../mojo/prodex_core/runtime_broker_continuity.mojo");
         sources.push("../../mojo/prodex_core/runtime_proxy_request.mojo");
         sources.push("../../mojo/prodex_core/runtime_proxy_body_limit.mojo");

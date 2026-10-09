@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use prodex_mojo_core::json::{SessionRepairLine, session_repair_plan};
 use prodex_state::AppState;
 use std::env;
 use std::fs;
@@ -21,8 +22,8 @@ pub use report::{
 pub use resolve_error::*;
 
 use repair_candidates::{
-    collect_exact_repair_candidates, collect_prefix_repair_candidates, repair_session_candidate,
-    unrepairable_candidate_path,
+    collect_exact_repair_candidates, collect_prefix_repair_candidates,
+    oversized_session_already_repaired, repair_session_candidate, unrepairable_candidate_path,
 };
 use repair_transaction::SessionRepairTransaction;
 pub use session_file::{
@@ -665,120 +666,55 @@ fn repair_session_file_metadata_prefix(
         SessionRepairTransaction::begin(repository_root, path, SESSION_STORE_FILE_MAX_BYTES)?;
     let raw = transaction.contents();
     let lines = raw.lines().map(ToOwned::to_owned).collect::<Vec<_>>();
-    let Some(first_content_index) = lines.iter().position(|line| !line.trim().is_empty()) else {
+    if !lines.iter().any(|line| !line.trim().is_empty()) {
         return Ok(false);
-    };
-    let Some(metadata) = session_repair_metadata(
-        path,
-        selector,
-        synthesize_missing_metadata,
-        &lines,
-        first_content_index,
-    ) else {
+    }
+    let line_facts = lines
+        .iter()
+        .map(|line| {
+            let starts_resume_metadata = session_line_starts_resume_metadata(line);
+            let matches_selector = session_line_resume_id_matches(line, selector);
+            SessionRepairLine {
+                text: line,
+                blank: line.trim().is_empty(),
+                valid_json: session_line_is_valid_json(line),
+                starts_resume_metadata,
+                matches_selector,
+                starts_codex_metadata: starts_resume_metadata
+                    && session_meta::line_starts_codex_rollout_metadata(line),
+            }
+        })
+        .collect::<Vec<_>>();
+    let plan = session_repair_plan(selector, &line_facts, synthesize_missing_metadata)
+        .expect("Mojo session repair planner returned invalid output");
+    if !plan.should_repair {
         return Ok(false);
+    }
+    let metadata_line = if plan.synthesize_metadata {
+        let Some(line) = session_meta::synthetic_session_metadata_line(path, selector, &lines)
+        else {
+            return Ok(false);
+        };
+        line
+    } else {
+        let Some(selected_line) = plan.selected_line.and_then(|index| lines.get(index)) else {
+            return Ok(false);
+        };
+        selected_line.clone()
     };
-    let repaired = repaired_session_content(&lines, &metadata, selector);
+    let mut repaired = String::new();
+    repaired.push_str(&metadata_line);
+    repaired.push('\n');
+    for (line, keep) in lines.iter().zip(plan.keep_lines) {
+        if keep {
+            repaired.push_str(line);
+            repaired.push('\n');
+        }
+    }
 
     transaction.commit(repaired.as_bytes())?;
 
     Ok(true)
-}
-
-fn oversized_session_already_repaired(path: &Path, selector: &str) -> Result<bool> {
-    if fs::symlink_metadata(path)
-        .with_context(|| format!("failed to inspect session {}", path.display()))?
-        .len()
-        <= SESSION_STORE_FILE_MAX_BYTES
-    {
-        return Ok(false);
-    }
-    let mut first_line_is_matching_codex_metadata = false;
-    visit_session_lines(path, |line| {
-        if line.trim().is_empty() {
-            return true;
-        }
-        first_line_is_matching_codex_metadata = session_line_resume_id_matches(line, selector)
-            && session_line_starts_resume_metadata(line)
-            && session_meta::line_starts_codex_rollout_metadata(line);
-        false
-    })?;
-    Ok(first_line_is_matching_codex_metadata)
-}
-
-struct SessionRepairMetadata {
-    line: String,
-    first_content_index: usize,
-    first_line_is_matching_metadata: bool,
-    metadata_index: Option<usize>,
-}
-
-fn session_repair_metadata(
-    path: &Path,
-    selector: &str,
-    synthesize_missing_metadata: bool,
-    lines: &[String],
-    first_content_index: usize,
-) -> Option<SessionRepairMetadata> {
-    let first_line_is_matching_metadata =
-        session_line_resume_id_matches(&lines[first_content_index], selector)
-            && session_line_starts_resume_metadata(&lines[first_content_index]);
-    let first_line_is_matching_codex_metadata = first_line_is_matching_metadata
-        && session_meta::line_starts_codex_rollout_metadata(&lines[first_content_index]);
-    let has_unreadable_lines = lines
-        .iter()
-        .any(|line| !line.trim().is_empty() && !session_line_is_valid_json(line));
-    if first_line_is_matching_codex_metadata && !has_unreadable_lines {
-        return None;
-    }
-
-    let metadata_index = lines
-        .iter()
-        .enumerate()
-        .skip(first_content_index + 1)
-        .find_map(|(index, line)| {
-            (session_meta::line_starts_codex_rollout_metadata(line)
-                && session_line_resume_id_matches(line, selector))
-            .then_some(index)
-        });
-    let line = if first_line_is_matching_codex_metadata {
-        lines[first_content_index].clone()
-    } else if let Some(index) = metadata_index {
-        lines[index].clone()
-    } else if synthesize_missing_metadata {
-        session_meta::synthetic_session_metadata_line(path, selector, lines)?
-    } else {
-        return None;
-    };
-    Some(SessionRepairMetadata {
-        line,
-        first_content_index,
-        first_line_is_matching_metadata,
-        metadata_index,
-    })
-}
-
-fn repaired_session_content(
-    lines: &[String],
-    metadata: &SessionRepairMetadata,
-    selector: &str,
-) -> String {
-    let mut repaired = String::new();
-    repaired.push_str(&metadata.line);
-    repaired.push('\n');
-    for (index, line) in lines.iter().enumerate() {
-        if (metadata.first_line_is_matching_metadata && index == metadata.first_content_index)
-            || metadata.metadata_index == Some(index)
-            || line.trim().is_empty()
-            || !session_line_is_valid_json(line)
-            || (session_line_starts_resume_metadata(line)
-                && session_line_resume_id_matches(line, selector))
-        {
-            continue;
-        }
-        repaired.push_str(line);
-        repaired.push('\n');
-    }
-    repaired
 }
 
 fn session_file_repair_match(path: &Path, selector: &str, exact: bool) -> Result<Option<PathBuf>> {

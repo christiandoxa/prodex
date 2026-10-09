@@ -15,6 +15,8 @@ pub use self::session_report::{
     session_report_order, session_report_record_shape, session_report_timestamp_sort_key,
     session_report_update_json,
 };
+mod session_repair;
+pub use self::session_repair::{SessionRepairLine, SessionRepairPlan, session_repair_plan};
 mod session_selector;
 pub use self::session_selector::{session_selector_is_full, session_selector_matches};
 mod kiro_catalog;

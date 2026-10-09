@@ -544,6 +544,41 @@ fn repair_resume_session_metadata_prefix_recovers_readable_chat_after_corrupt_li
 }
 
 #[test]
+fn repair_consumer_preserves_unicode_chat_and_drops_unicode_blank_and_malformed_lines() {
+    let root = test_temp_dir("session-repair-unicode-boundaries");
+    let sessions = root.join("sessions/2026/06/14");
+    fs::create_dir_all(&sessions).expect("session directory should be created");
+    let session_id = "019ec6c3-28a4-79f0-91f9-74a2f34b0929";
+    let session_path = sessions.join(format!("rollout-2026-06-14T23-32-19-{session_id}.jsonl"));
+    let metadata = format!(
+        "{{\"timestamp\":\"2026-06-14T23:32:19Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{session_id}\",\"timestamp\":\"2026-06-14T23:32:19Z\",\"cwd\":\"/home/test-user/project\",\"originator\":\"codex-cli\",\"cli_version\":\"0.1.0\"}}}}"
+    );
+    fs::write(
+        &session_path,
+        format!(
+            "\u{3000}\n{{not-json\n{metadata}\n{{\"timestamp\":\"2026-06-14T23:32:20Z\",\"type\":\"event\",\"payload\":{{\"message\":\"héllo\"}}}}\n"
+        ),
+    )
+    .expect("session should be written");
+
+    assert_eq!(
+        repair_resume_session_metadata_prefix(&root, session_id)
+            .expect("session repair should succeed")
+            .as_deref(),
+        Some(session_path.as_path())
+    );
+    let repaired = fs::read_to_string(&session_path).expect("repaired session should read");
+    let lines = repaired.lines().collect::<Vec<_>>();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0], metadata);
+    assert!(lines[1].contains("héllo"));
+    assert!(!repaired.contains("{not-json"));
+    assert!(!repaired.contains('\u{3000}'));
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
 fn repair_resume_session_metadata_prefix_upgrades_minimal_repair_metadata() {
     let root = test_temp_dir("session-repair-upgrade-minimal-metadata");
     let sessions = root.join("sessions/2026/06/14");
