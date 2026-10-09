@@ -338,6 +338,68 @@ mod tests {
     }
 
     #[test]
+    fn codex_version_formatter_preserves_unicode_presence_and_error_boundaries() {
+        assert_eq!(
+            format_codex_version(Some("v0.161.0"), Some("v0.162.0")).unwrap(),
+            "v0.161.0 (update available: v0.162.0)"
+        );
+        assert_eq!(
+            format_codex_version(Some("1.0.0"), Some("1.0.0+build.1")).unwrap(),
+            "1.0.0 (update available: 1.0.0+build.1)"
+        );
+        assert_eq!(
+            format_codex_version(Some("1.0.0"), Some("not-a-version")).unwrap(),
+            "1.0.0 (up to date)"
+        );
+        assert_eq!(
+            format_codex_version(Some(""), None).unwrap(),
+            " (update check unavailable)"
+        );
+        assert_eq!(
+            format_codex_version(None, Some("versi-\u{2603}")).unwrap(),
+            "not detected (latest release: versi-\u{2603})"
+        );
+        assert_eq!(
+            format_codex_version(Some("0.1.0\u{1f680}"), None).unwrap(),
+            "0.1.0\u{1f680} (update check unavailable)"
+        );
+        let oversized = "x".repeat(1_048_577);
+        assert_eq!(
+            format_codex_version(Some(&oversized), Some("1.0.0")),
+            Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
+    fn codex_version_formatter_rejects_short_output_buffer_without_overflow() {
+        let current = "v0.161.0";
+        let latest = "v0.162.0";
+        let mut guard = [0xa5_u8; 8];
+        let mut written = -1_i64;
+        let status = unsafe {
+            prodex_update_notice_format_codex_version_v1(
+                CODEX_VERSION_FORMAT_ABI_VERSION,
+                current.as_ptr() as usize as u64,
+                current.len() as i64,
+                1,
+                latest.as_ptr() as usize as u64,
+                latest.len() as i64,
+                1,
+                guard.as_mut_ptr().wrapping_add(2) as usize as u64,
+                2,
+                (&mut written as *mut i64) as usize as u64,
+            )
+        };
+        assert_eq!(
+            status, 3,
+            "capacity failures must not become successful output"
+        );
+        assert_eq!(guard[0], 0xa5);
+        assert_eq!(guard[1], 0xa5);
+        assert_eq!(&guard[4..], &[0xa5; 4], "Mojo must not write past capacity");
+    }
+
+    #[test]
     fn release_version_abi_matches_strict_semver_validation_and_ordering() {
         let valid_cases = [
             ("1.2.3", true),
