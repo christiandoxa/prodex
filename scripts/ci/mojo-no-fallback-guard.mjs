@@ -26,6 +26,9 @@ const DOCTOR_RENDER_MOJO_FILE = "mojo/prodex_core/runtime_doctor_render.mojo";
 const DOCTOR_PRESENTATION_CONSUMER_FILE = "crates/prodex-app/src/app_commands/doctor/render.rs";
 const DOCTOR_PRESENTATION_ADAPTER_FILE = "crates/prodex-mojo-core/src/info_render/doctor.rs";
 const DOCTOR_PRESENTATION_MOJO_FILE = "mojo/prodex_core/info_render.mojo";
+const PROVIDER_BINDING_IDENTITY_CONSUMER_FILE = "crates/prodex-provider-core/src/binding_identity.rs";
+const PROVIDER_BINDING_IDENTITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/provider_binding_identity.rs";
+const PROVIDER_BINDING_IDENTITY_MOJO_FILE = "mojo/prodex_core/provider_binding_identity.mojo";
 const RUNTIME_DOCTOR_PLAN_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs";
 const RUNTIME_DOCTOR_PLAN_MOJO_FILE = "mojo/prodex_core/runtime_doctor_plan.mojo";
 const GOVERNANCE_INSPECTION_CONSUMER_FILE = "crates/prodex-domain/src/governance/inspection.rs";
@@ -331,6 +334,9 @@ const PROMOTED_FILES = [
   DOCTOR_PRESENTATION_CONSUMER_FILE,
   DOCTOR_PRESENTATION_ADAPTER_FILE,
   DOCTOR_PRESENTATION_MOJO_FILE,
+  PROVIDER_BINDING_IDENTITY_CONSUMER_FILE,
+  PROVIDER_BINDING_IDENTITY_ADAPTER_FILE,
+  PROVIDER_BINDING_IDENTITY_MOJO_FILE,
   "crates/prodex-app/src/runtime_external_provider_config.rs",
   "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
   "crates/prodex-app/src/super_expose/protocol.rs",
@@ -4273,6 +4279,60 @@ export function findViolations(files) {
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: doctor presentation adapter must retain ${marker}`);
     }
+    if (filePath === PROVIDER_BINDING_IDENTITY_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::rich::provider_binding_identity_inputs(",
+        "prodex_mojo_core::rich::provider_binding_identity_digest_is_public(",
+      ];
+      const restoredRust = [
+        "let credential_identity = credential_identity.trim()",
+        "profile.len() <= 256",
+        "credential_identity.len() <= 4_096",
+        "character.is_control()",
+      ];
+      const violations = required
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: provider binding identity policy must retain Mojo call ${marker}`);
+      if (restoredRust.some((marker) => production.includes(marker))) {
+        violations.push(`${filePath}: contains restored Rust provider binding identity semantics`);
+      }
+      const callerTests = [
+        "binding_identity_mojo_policy_preserves_unicode_and_boundary_inputs",
+        "binding_identity_mojo_boundary_returns_the_normalized_plan",
+        "binding_identity_rejects_raw_or_malformed_wire_values",
+      ];
+      violations.push(...callerTests
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: provider binding identity caller coverage must retain ${marker}`));
+      return violations;
+    }
+    if (filePath === PROVIDER_BINDING_IDENTITY_ADAPTER_FILE) {
+      const required = [
+        "const PROVIDER_BINDING_IDENTITY_ABI_VERSION: i64 = 1",
+        "prodex_mojo_provider_binding_identity_plan_v1(",
+        "prodex_mojo_provider_binding_identity_digest_valid_v1(",
+        "pub fn provider_binding_identity_inputs(",
+        "pub fn provider_binding_identity_digest_is_public(",
+        "input_plan_rejects_controls_and_digest_validation_is_exact",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: provider binding identity adapter must retain ${marker}`);
+    }
+    if (filePath === PROVIDER_BINDING_IDENTITY_MOJO_FILE) {
+      const required = [
+        '@export("prodex_mojo_provider_binding_identity_plan_v1")',
+        '@export("prodex_mojo_provider_binding_identity_digest_valid_v1")',
+        "provider_binding_trimmed_value(",
+        "provider_binding_endpoint_bounds(",
+        "provider_binding_has_control(",
+        "provider_binding_hex_digit(",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: provider binding identity semantics must remain Mojo-owned (${marker})`);
+    }
     if (filePath === "mojo/prodex_core/info_render.mojo") {
       const required = [
         "INFO_RENDER_HUMAN_BYTES",
@@ -6282,6 +6342,47 @@ function selfTest() {
     findViolations([[DOCTOR_PRESENTATION_MOJO_FILE,
       doctorPresentationMojoCanonical.replace("info_render_doctor_viewport(", "info_render_doctor_viewport_missing(")]]).join("\n"),
     /Mojo status formatter must retain info_render_doctor_viewport\(/u,
+  );
+  const providerBindingConsumerCanonical = [
+    "prodex_mojo_core::rich::provider_binding_identity_inputs(",
+    "prodex_mojo_core::rich::provider_binding_identity_digest_is_public(",
+    "binding_identity_mojo_policy_preserves_unicode_and_boundary_inputs",
+    "binding_identity_mojo_boundary_returns_the_normalized_plan",
+    "binding_identity_rejects_raw_or_malformed_wire_values",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PROVIDER_BINDING_IDENTITY_CONSUMER_FILE, providerBindingConsumerCanonical]]), []);
+  assert.match(
+    findViolations([[PROVIDER_BINDING_IDENTITY_CONSUMER_FILE,
+      `${providerBindingConsumerCanonical}\nlet credential_identity = credential_identity.trim()`]]).join("\n"),
+    /contains restored Rust provider binding identity semantics/u,
+  );
+  const providerBindingAdapterCanonical = [
+    "const PROVIDER_BINDING_IDENTITY_ABI_VERSION: i64 = 1",
+    "prodex_mojo_provider_binding_identity_plan_v1(",
+    "prodex_mojo_provider_binding_identity_digest_valid_v1(",
+    "pub fn provider_binding_identity_inputs(",
+    "pub fn provider_binding_identity_digest_is_public(",
+    "input_plan_rejects_controls_and_digest_validation_is_exact",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PROVIDER_BINDING_IDENTITY_ADAPTER_FILE, providerBindingAdapterCanonical]]), []);
+  assert.match(
+    findViolations([[PROVIDER_BINDING_IDENTITY_ADAPTER_FILE,
+      providerBindingAdapterCanonical.replace("pub fn provider_binding_identity_inputs(", "fn old(")]]).join("\n"),
+    /provider binding identity adapter must retain pub fn provider_binding_identity_inputs\(/u,
+  );
+  const providerBindingMojoCanonical = [
+    '@export("prodex_mojo_provider_binding_identity_plan_v1")',
+    '@export("prodex_mojo_provider_binding_identity_digest_valid_v1")',
+    "provider_binding_trimmed_value(",
+    "provider_binding_endpoint_bounds(",
+    "provider_binding_has_control(",
+    "provider_binding_hex_digit(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[PROVIDER_BINDING_IDENTITY_MOJO_FILE, providerBindingMojoCanonical]]), []);
+  assert.match(
+    findViolations([[PROVIDER_BINDING_IDENTITY_MOJO_FILE,
+      providerBindingMojoCanonical.replace("provider_binding_hex_digit(", "provider_binding_hex_digit_missing(")]]).join("\n"),
+    /provider binding identity semantics must remain Mojo-owned/u,
   );
   const affinitySource = "crates/prodex-app/src/runtime_proxy/selection/affinity.rs";
   const affinityCanonical = [
