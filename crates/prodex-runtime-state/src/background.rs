@@ -171,22 +171,41 @@ impl RuntimeStateSaveSections {
     }
 
     pub fn union(self, other: Self) -> Self {
-        let state =
-            match (self.state, other.state) {
-                (RuntimeStateSaveStateSection::Full, _)
-                | (_, RuntimeStateSaveStateSection::Full) => RuntimeStateSaveStateSection::Full,
-                (RuntimeStateSaveStateSection::Core, _)
-                | (_, RuntimeStateSaveStateSection::Core) => RuntimeStateSaveStateSection::Core,
-                _ => RuntimeStateSaveStateSection::None,
-            };
+        let policy = prodex_mojo_core::runtime_state::sections_union(
+            runtime_state_save_state_section_tag(self.state),
+            runtime_state_save_section_flags(self),
+            runtime_state_save_state_section_tag(other.state),
+            runtime_state_save_section_flags(other),
+        )
+        .expect("Mojo runtime-state section union returned invalid output");
         Self {
-            state,
-            continuations: self.continuations || other.continuations,
-            profile_scores: self.profile_scores || other.profile_scores,
-            usage_snapshots: self.usage_snapshots || other.usage_snapshots,
-            backoffs: self.backoffs || other.backoffs,
+            state: match policy.state_section {
+                0 => RuntimeStateSaveStateSection::None,
+                1 => RuntimeStateSaveStateSection::Core,
+                2 => RuntimeStateSaveStateSection::Full,
+                _ => unreachable!("validated Mojo runtime-state section tag"),
+            },
+            continuations: policy.flags & 1 != 0,
+            profile_scores: policy.flags & 2 != 0,
+            usage_snapshots: policy.flags & 4 != 0,
+            backoffs: policy.flags & 8 != 0,
         }
     }
+}
+
+fn runtime_state_save_state_section_tag(section: RuntimeStateSaveStateSection) -> u8 {
+    match section {
+        RuntimeStateSaveStateSection::None => 0,
+        RuntimeStateSaveStateSection::Core => 1,
+        RuntimeStateSaveStateSection::Full => 2,
+    }
+}
+
+fn runtime_state_save_section_flags(sections: RuntimeStateSaveSections) -> u8 {
+    u8::from(sections.continuations)
+        | (u8::from(sections.profile_scores) << 1)
+        | (u8::from(sections.usage_snapshots) << 2)
+        | (u8::from(sections.backoffs) << 3)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -19,6 +19,7 @@ comptime MODE_ADMISSION_PLAN: Int64 = 5
 comptime MODE_PROFILE_INFLIGHT_ACQUIRE: Int64 = 6
 comptime MODE_PROFILE_INFLIGHT_RELEASE: Int64 = 7
 comptime MODE_LANE_LIMIT: Int64 = 8
+comptime MODE_SECTIONS_UNION: Int64 = 9
 
 comptime ADMISSION_ALLOW: UInt64 = 0
 comptime ADMISSION_GLOBAL_LIMIT: UInt64 = 1
@@ -309,6 +310,22 @@ def runtime_state_mutation_plan(
     output[unsafe_offset=6] = runtime_state_flag(hot)
 
 
+def runtime_state_sections_union(
+    left_state: Int64,
+    left_flags: UInt64,
+    right_state: Int64,
+    right_flags: UInt64,
+    output: Pointer[mut=True, UInt64, _],
+):
+    var state = SECTION_NONE
+    if left_state == Int64(SECTION_FULL) or right_state == Int64(SECTION_FULL):
+        state = SECTION_FULL
+    elif left_state == Int64(SECTION_CORE) or right_state == Int64(SECTION_CORE):
+        state = SECTION_CORE
+    output[unsafe_offset=0] = state
+    output[unsafe_offset=1] = left_flags | right_flags
+
+
 def runtime_state_u64_saturating_add(left: UInt64, right: UInt64) -> UInt64:
     if left > UINT64_MAX - right:
         return UINT64_MAX
@@ -347,8 +364,17 @@ def prodex_runtime_state_background_policy_v1(
         return RUNTIME_STATE_BACKGROUND_ABI
     if (
         mode < MODE_MUTATION_PLAN
-        or mode > MODE_LANE_LIMIT
+        or mode > MODE_SECTIONS_UNION
         or output_address == 0
+    ):
+        return RUNTIME_STATE_BACKGROUND_INVALID
+    if mode == MODE_SECTIONS_UNION and (
+        mutation_kind < 0
+        or mutation_kind > 2
+        or queue_kind < 0
+        or queue_kind > 2
+        or state_save_backlog > 15
+        or continuation_journal_backlog > 15
     ):
         return RUNTIME_STATE_BACKGROUND_INVALID
     if mode == MODE_MUTATION_PLAN and (mutation_kind < 0 or mutation_kind > 31):
@@ -436,6 +462,16 @@ def prodex_runtime_state_background_policy_v1(
         else:
             output[unsafe_offset=0] = 0
             output[unsafe_offset=2] = 1
+        return RUNTIME_STATE_BACKGROUND_OK
+
+    if mode == MODE_SECTIONS_UNION:
+        runtime_state_sections_union(
+            mutation_kind,
+            state_save_backlog,
+            queue_kind,
+            continuation_journal_backlog,
+            output,
+        )
         return RUNTIME_STATE_BACKGROUND_OK
 
     if mode == MODE_LANE_LIMIT:

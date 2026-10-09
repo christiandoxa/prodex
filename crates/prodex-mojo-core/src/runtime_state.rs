@@ -10,6 +10,7 @@ const MODE_ADMISSION_PLAN: i64 = 5;
 const MODE_PROFILE_INFLIGHT_ACQUIRE: i64 = 6;
 const MODE_PROFILE_INFLIGHT_RELEASE: i64 = 7;
 const MODE_LANE_LIMIT: i64 = 8;
+const MODE_SECTIONS_UNION: i64 = 9;
 
 const RUNTIME_PROXY_ADMISSION_ABI_VERSION: i64 = 1;
 
@@ -45,6 +46,12 @@ pub enum RuntimeAdmissionPlan {
         active: usize,
         limit: usize,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeStateSaveSectionsUnion {
+    pub state_section: u8,
+    pub flags: u8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -282,6 +289,41 @@ pub fn admission_plan(
     }
 }
 
+/// The canonical union of state-save sections is owned by the Mojo kernel.
+/// Rust only serializes tags and validates the ABI result.
+pub fn sections_union(
+    left_state: u8,
+    left_flags: u8,
+    right_state: u8,
+    right_flags: u8,
+) -> Result<RuntimeStateSaveSectionsUnion, MojoError> {
+    const FLAG_MASK: u8 = 0b1111;
+    if left_state > 2
+        || right_state > 2
+        || left_flags & !FLAG_MASK != 0
+        || right_flags & !FLAG_MASK != 0
+    {
+        return Err(MojoError::InvalidInput);
+    }
+    let output = call(
+        MODE_SECTIONS_UNION,
+        i64::from(left_state),
+        i64::from(right_state),
+        [usize::from(left_flags), usize::from(right_flags), 0],
+        [0; 3],
+        0,
+    )?;
+    let state_section = u8::try_from(output[0]).map_err(|_| MojoError::InvalidOutput)?;
+    let flags = u8::try_from(output[1]).map_err(|_| MojoError::InvalidOutput)?;
+    if state_section > 2 || flags & !FLAG_MASK != 0 {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(RuntimeStateSaveSectionsUnion {
+        state_section,
+        flags,
+    })
+}
+
 pub fn profile_inflight_acquire_plan(
     current: usize,
     weight: usize,
@@ -368,6 +410,41 @@ pub fn runtime_proxy_admission_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sections_union_mojo_preserves_all_state_and_flag_combinations() {
+        for left_state in 0_u8..=2 {
+            for right_state in 0_u8..=2 {
+                for left_flags in 0_u8..=15 {
+                    for right_flags in 0_u8..=15 {
+                        let union =
+                            sections_union(left_state, left_flags, right_state, right_flags)
+                                .expect("all typed state sections must be accepted by Mojo");
+                        assert_eq!(union.state_section, left_state.max(right_state));
+                        assert_eq!(union.flags, left_flags | right_flags);
+                        assert_eq!(
+                            union,
+                            sections_union(right_state, right_flags, left_state, left_flags)
+                                .unwrap(),
+                            "union must be commutative"
+                        );
+                    }
+                }
+            }
+        }
+        for args in [
+            (3, 0, 0, 0),
+            (0, 0, 3, 0),
+            (0, 16, 0, 0),
+            (0, 0, 0, 16),
+            (u8::MAX, 0, 0, 0),
+        ] {
+            assert_eq!(
+                sections_union(args.0, args.1, args.2, args.3),
+                Err(MojoError::InvalidInput)
+            );
+        }
+    }
 
     #[test]
     fn runtime_state_background_kernel_smoke() {
