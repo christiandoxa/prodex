@@ -2,6 +2,7 @@ use super::*;
 
 #[test]
 fn broker_continuity_kernel_smoke() {
+    const { assert!(crate::MOJO_REQUIRED) };
     let plan = continuity_line_plan(
         "request=3 chain_retried_owner profile=second reason=\"quoted reason\"",
         None,

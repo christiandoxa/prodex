@@ -124,9 +124,12 @@ mod model_capacity;
 mod quota_pool;
 #[test]
 fn labels_standard_windows() {
+    assert_eq!(window_label(Some(17_700)), "5h");
     assert_eq!(window_label(Some(18_000)), "5h");
     assert_eq!(window_label(Some(604_800)), "weekly");
     assert_eq!(window_label(Some(2_592_000)), "monthly");
+    assert_eq!(window_label(Some(i64::MIN)), "-9223372036854775808s");
+    assert_eq!(window_label(Some(i64::MAX)), "9223372036854775807s");
 }
 
 #[cfg(feature = "mojo")]

@@ -35,6 +35,22 @@ def runtime_profile_health_saturating_add(left: Int64, right: Int64) -> Int64:
     return left + right
 
 
+def runtime_health_saturating_sub(left: Int64, right: Int64) -> Int64:
+    if right > 0 and left < INT64_MIN + right:
+        return INT64_MIN
+    if right < 0 and left > INT64_MAX + right:
+        return INT64_MAX
+    return left - right
+
+
+def runtime_health_saturating_mul_nonnegative(left: Int64, right: Int64) -> Int64:
+    if left <= 0 or right <= 0:
+        return 0
+    if left > INT64_MAX / right:
+        return INT64_MAX
+    return left * right
+
+
 @export("prodex_runtime_profile_health_sort_key_batch_v1")
 def prodex_runtime_profile_health_sort_key_batch_v1(
     abi_version: Int64,
@@ -268,9 +284,7 @@ def prodex_runtime_health_scalar_v1(
         if retention < 0:
             retention = 0
         var now = fields[unsafe_offset=2]
-        var oldest_allowed = now - retention
-        if retention > 0 and now < INT64_MIN + retention:
-            oldest_allowed = INT64_MIN
+        var oldest_allowed = runtime_health_saturating_sub(now, retention)
         output[unsafe_offset=0] = Int64(
             fields[unsafe_offset=0] == 1
             and fields[unsafe_offset=1] >= oldest_allowed
@@ -393,9 +407,7 @@ def prodex_runtime_health_scalar_v1(
         if retention < 0:
             retention = 0
         var now = fields[unsafe_offset=2]
-        var oldest_seconds = now - retention
-        if retention > 0 and now < INT64_MIN + retention:
-            oldest_seconds = INT64_MIN
+        var oldest_seconds = runtime_health_saturating_sub(now, retention)
         var oldest_update: Int64
         if oldest_seconds > 0 and oldest_seconds > INT64_MAX / 1000:
             oldest_update = INT64_MAX
@@ -613,7 +625,9 @@ def prodex_runtime_health_scalar_v1(
         if exponent > 3:
             exponent = 3
         var multiplier = runtime_health_saturating_shift_multiplier(exponent)
-        output[unsafe_offset=0] = min(runtime_profile_health_saturating_elapsed(base * multiplier, 0), maximum)
+        output[unsafe_offset=0] = min(
+            runtime_health_saturating_mul_nonnegative(base, multiplier), maximum
+        )
         return 0
 
     if operation == RUNTIME_HEALTH_SCALAR_OPEN_SECONDS:

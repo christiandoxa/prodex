@@ -1449,7 +1449,16 @@ def prodex_quota_window_label_plan_v1(
         )
 
     kind[] = QUOTA_WINDOW_LABEL_SECONDS
-    written[] = 0
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var writer = QuotaDisplayWriter(output, output_capacity, 0)
+    if (
+        not quota_display_put_i64(Pointer(to=writer), seconds)
+        or not quota_display_put_byte(Pointer(to=writer), UInt8(115))
+    ):
+        return QUOTA_MODEL_POLICY_CAPACITY
+    written[] = writer.written
     return QUOTA_MODEL_POLICY_OK
 
 

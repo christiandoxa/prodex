@@ -3,6 +3,7 @@ use super::*;
 #[cfg(all(test, feature = "mojo-quota"))]
 #[test]
 fn quota_model_policy_kernel_preserves_expected_contracts() {
+    const { assert!(crate::MOJO_REQUIRED) };
     assert_eq!(plan_capacity_pressure_scale_bps(" Pro-20x "), Ok(2_000));
     assert_eq!(scale_quota_pressure_for_plan(-10, 5_000), Ok(-5));
     assert_eq!(quota_report_sort_next(5), Ok(0));
@@ -59,6 +60,14 @@ fn quota_model_policy_kernel_preserves_expected_contracts() {
         Ok("monthly".to_string())
     );
     assert_eq!(quota_window_label(Some(42)), Ok("42s".to_string()));
+    assert_eq!(
+        quota_window_label(Some(i64::MIN)),
+        Ok("-9223372036854775808s".to_string())
+    );
+    assert_eq!(
+        quota_window_label(Some(i64::MAX)),
+        Ok("9223372036854775807s".to_string())
+    );
     assert_eq!(
         quota_workspace_label(Some("  Personal  "), Some("ignored")).unwrap(),
         Some("Personal".to_string())
