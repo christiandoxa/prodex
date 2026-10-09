@@ -26,14 +26,7 @@ pub(crate) enum RuntimeProcessTerminationOutcome {
     StillRunning,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
-pub(crate) enum RuntimeProcessIdentityOutcome {
-    Absent,
-    Proven,
-    OwnershipChanged,
-    OwnershipUnproven,
-}
+pub(crate) use prodex_runtime_broker::BrokerProcessIdentityPlan as RuntimeProcessIdentityOutcome;
 
 #[derive(Debug, Clone)]
 struct RuntimeProcessVersionResolution {
@@ -50,53 +43,82 @@ use self::platform::RuntimeProcessMacos;
 use self::platform::runtime_process_row;
 use self::platform::{RuntimeProcessPlatform, RuntimeProcessPlatformImpl};
 
-#[cfg(any(target_os = "macos", test))]
 fn runtime_process_executable_paths_match(actual: &Path, expected: &Path) -> bool {
     actual == expected
+        || prodex_core::same_path(actual, expected)
         || fs::canonicalize(actual)
             .ok()
             .zip(fs::canonicalize(expected).ok())
             .is_some_and(|(actual, expected)| actual == expected)
 }
 
-#[cfg(any(target_os = "macos", test))]
 fn runtime_process_identity_outcome_for<P: RuntimeProcessPlatform>(
     pid: u32,
     expected_birth_identity: Option<&str>,
     expected_executable_path: Option<&Path>,
+    check_executable_path: bool,
 ) -> RuntimeProcessIdentityOutcome {
-    if P::process_absence_proven(pid) {
-        return RuntimeProcessIdentityOutcome::Absent;
-    }
-    let (Some(expected_birth_identity), Some(expected_executable_path)) =
-        (expected_birth_identity, expected_executable_path)
-    else {
-        return RuntimeProcessIdentityOutcome::OwnershipUnproven;
-    };
-    match P::process_birth_identity(pid) {
-        Some(actual) if actual == expected_birth_identity => {}
-        Some(_) => return RuntimeProcessIdentityOutcome::OwnershipChanged,
-        None if P::process_absence_proven(pid) => return RuntimeProcessIdentityOutcome::Absent,
-        None => return RuntimeProcessIdentityOutcome::OwnershipUnproven,
-    }
-    match P::executable_path(pid) {
-        Some(actual)
-            if runtime_process_executable_paths_match(&actual, expected_executable_path) =>
-        {
-            // Re-read the start identity after the path lookup so a same-path PID reuse
-            // cannot pass both checks.
-            match P::process_birth_identity(pid) {
-                Some(actual) if actual == expected_birth_identity => {
-                    RuntimeProcessIdentityOutcome::Proven
-                }
-                Some(_) => RuntimeProcessIdentityOutcome::OwnershipChanged,
-                None if P::process_absence_proven(pid) => RuntimeProcessIdentityOutcome::Absent,
-                None => RuntimeProcessIdentityOutcome::OwnershipUnproven,
-            }
+    let initially_absent = P::process_absence_proven(pid);
+    let expected_birth_present = expected_birth_identity.is_some();
+    let first_birth =
+        (!initially_absent && expected_birth_present).then(|| P::process_birth_identity(pid));
+    let birth_present = first_birth.as_ref().is_some_and(|birth| birth.is_some());
+    let birth_matches = first_birth
+        .as_ref()
+        .and_then(Option::as_deref)
+        .zip(expected_birth_identity)
+        .is_some_and(|(actual, expected)| actual == expected);
+    let path_check_enabled = check_executable_path && birth_matches;
+    let path_probe_enabled = path_check_enabled && expected_executable_path.is_some();
+    let executable_path = path_probe_enabled
+        .then(|| P::executable_path(pid))
+        .flatten();
+    let path_present = executable_path.is_some();
+    let path_matches = executable_path
+        .as_deref()
+        .zip(expected_executable_path)
+        .is_some_and(|(actual, expected)| runtime_process_executable_paths_match(actual, expected));
+    let recheck_enabled = path_matches;
+    let recheck_birth = recheck_enabled.then(|| P::process_birth_identity(pid));
+    let recheck_present = recheck_birth.as_ref().is_some_and(|birth| birth.is_some());
+    let recheck_matches = recheck_birth
+        .as_ref()
+        .and_then(Option::as_deref)
+        .zip(expected_birth_identity)
+        .is_some_and(|(actual, expected)| actual == expected);
+    let process_absence_proven = initially_absent
+        || (first_birth.as_ref().is_some_and(|birth| birth.is_none())
+            && P::process_absence_proven(pid))
+        || (path_probe_enabled && executable_path.is_none() && P::process_absence_proven(pid))
+        || (recheck_enabled
+            && recheck_birth.as_ref().is_some_and(|birth| birth.is_none())
+            && P::process_absence_proven(pid));
+    match prodex_runtime_broker::runtime_process_identity_plan(
+        process_absence_proven,
+        expected_birth_present,
+        birth_present,
+        birth_matches,
+        path_check_enabled,
+        path_present,
+        path_matches,
+        recheck_enabled,
+        recheck_present,
+        recheck_matches,
+    )
+    .expect("Mojo runtime broker process identity policy returned invalid output")
+    {
+        prodex_runtime_broker::BrokerProcessIdentityPlan::Absent => {
+            RuntimeProcessIdentityOutcome::Absent
         }
-        Some(_) => RuntimeProcessIdentityOutcome::OwnershipChanged,
-        None if P::process_absence_proven(pid) => RuntimeProcessIdentityOutcome::Absent,
-        None => RuntimeProcessIdentityOutcome::OwnershipUnproven,
+        prodex_runtime_broker::BrokerProcessIdentityPlan::Proven => {
+            RuntimeProcessIdentityOutcome::Proven
+        }
+        prodex_runtime_broker::BrokerProcessIdentityPlan::OwnershipChanged => {
+            RuntimeProcessIdentityOutcome::OwnershipChanged
+        }
+        prodex_runtime_broker::BrokerProcessIdentityPlan::OwnershipUnproven => {
+            RuntimeProcessIdentityOutcome::OwnershipUnproven
+        }
     }
 }
 
@@ -110,6 +132,7 @@ pub(crate) fn runtime_process_identity_outcome(
         pid,
         expected_birth_identity,
         expected_executable_path,
+        true,
     )
 }
 
@@ -117,22 +140,14 @@ pub(crate) fn runtime_process_identity_outcome(
 pub(crate) fn runtime_process_identity_outcome(
     pid: u32,
     expected_birth_identity: Option<&str>,
-    _expected_executable_path: Option<&Path>,
+    expected_executable_path: Option<&Path>,
 ) -> RuntimeProcessIdentityOutcome {
-    if RuntimeProcessPlatformImpl::process_absence_proven(pid) {
-        return RuntimeProcessIdentityOutcome::Absent;
-    }
-    let Some(expected_birth_identity) = expected_birth_identity else {
-        return RuntimeProcessIdentityOutcome::OwnershipUnproven;
-    };
-    match RuntimeProcessPlatformImpl::process_birth_identity(pid) {
-        Some(actual) if actual == expected_birth_identity => RuntimeProcessIdentityOutcome::Proven,
-        Some(_) => RuntimeProcessIdentityOutcome::OwnershipChanged,
-        None if RuntimeProcessPlatformImpl::process_absence_proven(pid) => {
-            RuntimeProcessIdentityOutcome::Absent
-        }
-        None => RuntimeProcessIdentityOutcome::OwnershipUnproven,
-    }
+    runtime_process_identity_outcome_for::<RuntimeProcessPlatformImpl>(
+        pid,
+        expected_birth_identity,
+        expected_executable_path,
+        false,
+    )
 }
 
 #[cfg(any(target_os = "macos", test))]
@@ -141,19 +156,26 @@ fn terminate_runtime_process_with_platform<P: RuntimeProcessPlatform>(
     expected_birth_identity: Option<&str>,
     expected_executable_path: Option<&Path>,
 ) -> RuntimeProcessTerminationOutcome {
-    match runtime_process_identity_outcome_for::<P>(
+    let identity = runtime_process_identity_outcome_for::<P>(
         pid,
         expected_birth_identity,
         expected_executable_path,
-    ) {
-        RuntimeProcessIdentityOutcome::Absent => RuntimeProcessTerminationOutcome::NotRunning,
-        RuntimeProcessIdentityOutcome::OwnershipChanged => {
-            RuntimeProcessTerminationOutcome::OwnershipChanged
+        true,
+    );
+    match prodex_runtime_broker::runtime_broker_termination_signal_plan(identity)
+        .expect("Mojo runtime broker termination signal policy returned invalid output")
+    {
+        prodex_runtime_broker::BrokerTerminationSignalAction::Skip => {
+            RuntimeProcessTerminationOutcome::NotRunning
         }
-        RuntimeProcessIdentityOutcome::OwnershipUnproven => {
-            RuntimeProcessTerminationOutcome::OwnershipUnproven
+        prodex_runtime_broker::BrokerTerminationSignalAction::Refuse => {
+            if identity == RuntimeProcessIdentityOutcome::OwnershipChanged {
+                RuntimeProcessTerminationOutcome::OwnershipChanged
+            } else {
+                RuntimeProcessTerminationOutcome::OwnershipUnproven
+            }
         }
-        RuntimeProcessIdentityOutcome::Proven => {
+        prodex_runtime_broker::BrokerTerminationSignalAction::Signal => {
             P::terminate(pid, expected_birth_identity, expected_executable_path)
         }
     }
@@ -245,37 +267,20 @@ pub(crate) fn runtime_process_executable_path(pid: u32) -> Option<PathBuf> {
 fn runtime_broker_registry_identity_is_valid_for<P: RuntimeProcessPlatform>(
     registry: &RuntimeBrokerRegistry,
 ) -> bool {
-    let Some(expected_birth_identity) = registry
+    let expected_birth_identity = registry
         .process_birth_identity
         .as_deref()
-        .filter(|identity| !identity.is_empty())
-    else {
-        return false;
-    };
-    let Some(expected_executable_path) = registry
+        .filter(|identity| !identity.is_empty());
+    let expected_executable_path = registry
         .executable_path
         .as_deref()
-        .filter(|path| !path.is_empty())
-    else {
-        return false;
-    };
-    if registry.pid == 0 || !P::pid_alive(registry.pid) || P::process_absence_proven(registry.pid) {
-        return false;
-    }
-    let Some(actual_birth_identity) = P::process_birth_identity(registry.pid) else {
-        return false;
-    };
-    if actual_birth_identity != expected_birth_identity {
-        return false;
-    }
-    let Some(actual_executable_path) = P::executable_path(registry.pid) else {
-        return false;
-    };
-    let Some(actual_birth_identity_after_path) = P::process_birth_identity(registry.pid) else {
-        return false;
-    };
-    actual_birth_identity_after_path == expected_birth_identity
-        && prodex_core::same_path(Path::new(expected_executable_path), &actual_executable_path)
+        .filter(|path| !path.is_empty());
+    runtime_process_identity_outcome_for::<P>(
+        registry.pid,
+        expected_birth_identity,
+        expected_executable_path.map(Path::new),
+        true,
+    ) == RuntimeProcessIdentityOutcome::Proven
 }
 
 pub(crate) fn runtime_broker_registry_identity_is_valid(registry: &RuntimeBrokerRegistry) -> bool {

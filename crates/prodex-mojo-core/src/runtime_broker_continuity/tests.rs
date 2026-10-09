@@ -66,6 +66,23 @@ fn broker_continuity_kernel_smoke() {
         }
     );
     assert_eq!(
+        version_guard_plan(
+            true,
+            current,
+            BrokerBinaryIdentityView {
+                version: Some("0.7.0"),
+                sha256: None,
+                path_present: false,
+            },
+            different,
+            1,
+            0,
+        )
+        .unwrap()
+        .outcome,
+        BrokerVersionGuardOutcome::DeferredActiveRequests
+    );
+    assert_eq!(
         parse_prodex_version(
             "  prodex 0.7.0
 "
@@ -262,5 +279,203 @@ fn broker_startup_grace_plan_preserves_timeout_rounding_and_idle_floor() {
     assert_eq!(
         startup_grace_seconds(u64::MAX, 0).unwrap(),
         18_446_744_073_709_553
+    );
+}
+
+#[test]
+fn broker_process_identity_and_termination_plans_are_fail_closed() {
+    let proven = |path_check_enabled, recheck_enabled| {
+        process_identity_plan(
+            false,
+            true,
+            true,
+            true,
+            path_check_enabled,
+            true,
+            true,
+            recheck_enabled,
+            true,
+            true,
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        process_identity_plan(false, true, true, true, true, true, true, true, true, true),
+        Ok(BrokerProcessIdentityPlan::Proven)
+    );
+    assert_eq!(
+        process_identity_plan(
+            true, true, false, false, false, false, false, false, false, false
+        ),
+        Ok(BrokerProcessIdentityPlan::Absent)
+    );
+    assert_eq!(
+        process_identity_plan(
+            false, false, false, false, false, false, false, false, false, false
+        ),
+        Ok(BrokerProcessIdentityPlan::OwnershipUnproven)
+    );
+    assert_eq!(
+        process_identity_plan(
+            false, true, true, false, false, false, false, false, false, false
+        ),
+        Ok(BrokerProcessIdentityPlan::OwnershipChanged)
+    );
+    assert_eq!(
+        process_identity_plan(
+            false, true, true, true, true, true, false, false, false, false
+        ),
+        Ok(BrokerProcessIdentityPlan::OwnershipChanged)
+    );
+    assert_eq!(
+        process_identity_plan(false, true, true, true, true, true, true, true, true, false),
+        Ok(BrokerProcessIdentityPlan::OwnershipChanged)
+    );
+    assert_eq!(proven(false, false), BrokerProcessIdentityPlan::Proven);
+    assert_eq!(
+        termination_signal_plan(BrokerProcessIdentityPlan::Absent),
+        Ok(BrokerTerminationSignalAction::Skip)
+    );
+    assert_eq!(
+        termination_signal_plan(BrokerProcessIdentityPlan::Proven),
+        Ok(BrokerTerminationSignalAction::Signal)
+    );
+    assert_eq!(
+        termination_signal_plan(BrokerProcessIdentityPlan::OwnershipUnproven),
+        Ok(BrokerTerminationSignalAction::Refuse)
+    );
+}
+
+#[test]
+fn broker_lease_lifecycle_covers_cleanup_expiry_and_reuse_actions() {
+    assert_eq!(
+        lease_lifecycle_plan(
+            BrokerLeaseLifecycleOperation::Cleanup,
+            false,
+            false,
+            false,
+            0,
+            false,
+        ),
+        Ok(BrokerLeaseLifecycleAction::Ignore)
+    );
+    assert_eq!(
+        lease_lifecycle_plan(
+            BrokerLeaseLifecycleOperation::Cleanup,
+            true,
+            true,
+            false,
+            0,
+            false,
+        ),
+        Ok(BrokerLeaseLifecycleAction::Remove)
+    );
+    assert_eq!(
+        lease_lifecycle_plan(
+            BrokerLeaseLifecycleOperation::Cleanup,
+            true,
+            false,
+            true,
+            0,
+            false,
+        ),
+        Ok(BrokerLeaseLifecycleAction::Keep)
+    );
+    assert_eq!(
+        lease_lifecycle_plan(
+            BrokerLeaseLifecycleOperation::Cleanup,
+            true,
+            false,
+            false,
+            0,
+            true,
+        ),
+        Ok(BrokerLeaseLifecycleAction::Remove)
+    );
+    assert_eq!(
+        lease_lifecycle_plan(
+            BrokerLeaseLifecycleOperation::Cleanup,
+            true,
+            true,
+            false,
+            1,
+            true,
+        ),
+        Ok(BrokerLeaseLifecycleAction::Keep)
+    );
+    assert_eq!(
+        lease_lifecycle_plan(
+            BrokerLeaseLifecycleOperation::Acquire,
+            true,
+            false,
+            true,
+            0,
+            false,
+        ),
+        Ok(BrokerLeaseLifecycleAction::Acquire)
+    );
+    assert_eq!(
+        lease_lifecycle_plan(
+            BrokerLeaseLifecycleOperation::Renew,
+            true,
+            false,
+            true,
+            0,
+            false,
+        ),
+        Ok(BrokerLeaseLifecycleAction::Renew)
+    );
+}
+
+#[test]
+fn broker_readiness_idle_and_cleanup_precedence_respect_boundaries() {
+    assert_eq!(
+        readiness_plan(false, false, false, false, 0, 10),
+        Ok(BrokerReadinessDecision::Wait)
+    );
+    assert_eq!(
+        readiness_plan(true, true, true, true, 9, 10),
+        Ok(BrokerReadinessDecision::Ready)
+    );
+    assert_eq!(
+        readiness_plan(true, true, true, true, 10, 10),
+        Ok(BrokerReadinessDecision::Timeout)
+    );
+    assert!(readiness_plan(false, true, false, false, 0, 10).is_err());
+
+    assert_eq!(
+        idle_plan(false, 0, 0, 100, 5),
+        Ok(BrokerIdleDecision::Reset)
+    );
+    assert_eq!(idle_plan(true, 1, 0, 100, 5), Ok(BrokerIdleDecision::Reset));
+    assert_eq!(idle_plan(true, 0, 0, 4, 5), Ok(BrokerIdleDecision::Wait));
+    assert_eq!(
+        idle_plan(true, 0, 0, 5, 5),
+        Ok(BrokerIdleDecision::Shutdown)
+    );
+
+    assert_eq!(
+        registry_process_plan(BrokerProcessIdentityPlan::Absent, 3, 4),
+        Ok(BrokerRegistryProcessAction::Remove)
+    );
+    assert_eq!(
+        registry_process_plan(BrokerProcessIdentityPlan::OwnershipChanged, 0, 0),
+        Ok(BrokerRegistryProcessAction::DiscardStale)
+    );
+    assert_eq!(
+        registry_process_plan(BrokerProcessIdentityPlan::OwnershipUnproven, 3, 4),
+        Ok(BrokerRegistryProcessAction::Keep)
+    );
+    assert_eq!(
+        termination_outcome_plan(0),
+        Ok(BrokerTerminationOutcomePlan::Cleanup)
+    );
+    assert_eq!(
+        termination_outcome_plan(2),
+        Ok(BrokerTerminationOutcomePlan::DiscardStale)
+    );
+    assert_eq!(
+        termination_outcome_plan(4),
+        Ok(BrokerTerminationOutcomePlan::Failure)
     );
 }

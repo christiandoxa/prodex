@@ -11,6 +11,29 @@ use crate::{
     AppPaths, RuntimeBrokerLease, runtime_broker_lease_dir, runtime_process_absence_proven,
 };
 
+pub(crate) fn runtime_broker_lease_cleanup_action(
+    file_name: &str,
+) -> prodex_runtime_broker::BrokerLeaseLifecycleAction {
+    let Some(pid) = prodex_core::runtime_broker_lease_pid(file_name) else {
+        return prodex_runtime_broker::BrokerLeaseLifecycleAction::Ignore;
+    };
+    let process_absence_proven = runtime_process_absence_proven(pid);
+    let operation = if process_absence_proven {
+        prodex_runtime_broker::BrokerLeaseLifecycleOperation::Cleanup
+    } else {
+        prodex_runtime_broker::BrokerLeaseLifecycleOperation::Renew
+    };
+    prodex_runtime_broker::runtime_broker_lease_lifecycle_plan(
+        operation,
+        true,
+        process_absence_proven,
+        !process_absence_proven,
+        0,
+        false,
+    )
+    .expect("Mojo runtime broker lease lifecycle policy returned invalid output")
+}
+
 pub(crate) fn runtime_random_token(prefix: &str) -> Result<String> {
     let mut bytes = [0_u8; 32];
     getrandom::fill(&mut bytes).context("failed to generate runtime token")?;
@@ -32,6 +55,21 @@ pub(crate) fn create_runtime_broker_lease_in_dir_for_pid(
     lease_dir: &Path,
     pid: u32,
 ) -> Result<RuntimeBrokerLease> {
+    anyhow::ensure!(
+        matches!(
+            prodex_runtime_broker::runtime_broker_lease_lifecycle_plan(
+                prodex_runtime_broker::BrokerLeaseLifecycleOperation::Acquire,
+                pid != 0,
+                false,
+                true,
+                0,
+                false,
+            )
+            .expect("Mojo runtime broker lease lifecycle policy returned invalid output"),
+            prodex_runtime_broker::BrokerLeaseLifecycleAction::Acquire
+        ),
+        "runtime broker lease pid is invalid"
+    );
     fs::create_dir_all(lease_dir)
         .with_context(|| format!("failed to create {}", lease_dir.display()))?;
     anyhow::ensure!(
@@ -69,14 +107,14 @@ pub(crate) fn cleanup_runtime_broker_stale_leases(paths: &AppPaths, broker_key: 
         if !runtime_broker_lease_path_is_regular_file(&path) {
             continue;
         }
-        let pid = file_name
-            .split('-')
-            .next()
-            .and_then(|value| value.parse::<u32>().ok());
-        if pid.is_some_and(|pid| !runtime_process_absence_proven(pid)) {
-            live += 1;
-        } else {
-            let _ = fs::remove_file(path);
+        match runtime_broker_lease_cleanup_action(file_name) {
+            prodex_runtime_broker::BrokerLeaseLifecycleAction::Keep
+            | prodex_runtime_broker::BrokerLeaseLifecycleAction::Renew => live += 1,
+            prodex_runtime_broker::BrokerLeaseLifecycleAction::Remove => {
+                let _ = fs::remove_file(path);
+            }
+            prodex_runtime_broker::BrokerLeaseLifecycleAction::Ignore
+            | prodex_runtime_broker::BrokerLeaseLifecycleAction::Acquire => {}
         }
     }
     live

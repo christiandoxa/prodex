@@ -237,11 +237,11 @@ fn runtime_doctor_count_stale_runtime_broker_leases(paths: &AppPaths, broker_key
             if !runtime_broker_lease_path_is_regular_file(&path) {
                 return false;
             }
-            let pid = file_name
-                .split('-')
-                .next()
-                .and_then(|value| value.parse::<u32>().ok());
-            pid.is_none_or(runtime_process_absence_proven)
+            !matches!(
+                runtime_broker_lease_cleanup_action(file_name),
+                prodex_runtime_broker::BrokerLeaseLifecycleAction::Keep
+                    | prodex_runtime_broker::BrokerLeaseLifecycleAction::Renew
+            )
         })
         .count()
 }
