@@ -2157,6 +2157,7 @@ export function findViolations(files) {
         "prodex_mojo_core::runtime_state::enqueue_backlog(",
         "prodex_mojo_core::runtime_state::queue_threshold(",
         "prodex_mojo_core::runtime_state::queue_enqueue_plan(",
+        "prodex_mojo_core::runtime_state::sections_union(",
         "fn runtime_state_mutation_input(",
       ];
       const violations = required
@@ -2185,12 +2186,14 @@ export function findViolations(files) {
       return contents.includes("prodex_runtime_state_mutation_reason_v1(") &&
           contents.includes("prodex_runtime_proxy_admission_policy_v1(") &&
           contents.includes("pub fn runtime_proxy_admission_policy(") &&
+          contents.includes("pub fn sections_union(") &&
           contents.includes("pub fn mutation_reason(")
         ? [] : [`${filePath}: runtime-state policy adapters must retain their versioned Mojo ABIs`];
     }
     if (filePath === RUNTIME_STATE_BACKGROUND_MOJO_FILE) {
       return contents.includes('@export("prodex_runtime_state_mutation_reason_v1")') &&
           contents.includes('@export("prodex_runtime_proxy_admission_policy_v1")') &&
+          contents.includes("def runtime_state_sections_union(") &&
           contents.includes("def runtime_state_put_mutation_label(") &&
           contents.includes('StringSlice("profile_auth_backoff_cleared")')
         ? [] : [`${filePath}: runtime-state mutation labels must remain Mojo-owned`];
