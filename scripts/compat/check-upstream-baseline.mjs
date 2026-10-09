@@ -18,7 +18,9 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/codex-mcp/src/tools.rs",
   "codex-rs/codex-mcp/src/connection_manager_tests.rs",
   "codex-rs/model-provider-info/src/lib.rs",
+  "codex-rs/model-provider-info/src/capabilities.rs",
   "codex-rs/model-provider/src/amazon_bedrock/catalog.rs",
+  "codex-rs/model-provider/src/capabilities.rs",
   "codex-rs/model-provider/src/provider.rs",
   "codex-rs/core/src/realtime_conversation.rs",
   "codex-rs/codex-api/src/endpoint/realtime_call.rs",
@@ -27,6 +29,13 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/codex-api/src/sse/responses_error.rs",
   "codex-rs/codex-api/src/endpoint/responses.rs",
   "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+  "codex-rs/core/src/context/base_instructions.rs",
+  "codex-rs/core/src/context/world_state/base_instructions.rs",
+  "codex-rs/core/src/context/world_state/top_level_tools.rs",
+  "codex-rs/core/src/tools/spec_plan.rs",
+  "codex-rs/protocol/src/turn_input.rs",
+  "codex-rs/protocol/src/environment.rs",
+  "codex-rs/rollout-trace/src/reducer/conversation/normalize.rs",
   "codex-rs/core/src/config/mod.rs",
   "codex-rs/config/src/project_trust.rs",
   "codex-rs/features/src/lib.rs",
@@ -49,10 +58,13 @@ const REQUIRED_CRITICAL_FILES = [
   "codex-rs/app-server-protocol/src/protocol/common.rs",
   "codex-rs/app-server-protocol/src/protocol/v2/mcp.rs",
   "codex-rs/app-server-protocol/src/protocol/v2/thread.rs",
+  "codex-rs/app-server-protocol/src/protocol/v2/turn.rs",
+  "codex-rs/app-server-protocol/src/protocol/v2/environment.rs",
   "codex-rs/app-server/src/message_processor.rs",
   "codex-rs/app-server/src/request_processors/initialize_processor.rs",
   "codex-rs/app-server/src/request_processors/thread_processor.rs",
   "codex-rs/app-server/src/request_processors/turn_processor.rs",
+  "codex-rs/app-server/src/request_processors/environment_processor.rs",
   "codex-rs/app-server/src/request_processors/mcp_event_stream.rs",
   "codex-rs/app-server/src/request_processors/account_processor/workspace_routing.rs",
   "codex-rs/app-server/src/request_serialization.rs",
@@ -121,6 +133,11 @@ const REQUIRED_FILE_CONTAINS = {
     ".include_internal_metadata(&client_setup.api_provider)",
     "if !include_internal",
     "responses_metadata.client_metadata(include_internal)",
+    "let mut prefix = Vec::new();",
+    "create_tools_json_for_responses_lite(&prompt.tools)?",
+    "create_tools_raw_json_for_responses_api(&prompt.tools)?.into()",
+    "BaseInstructionsFragment(",
+    "input.splice(0..0, prefix);",
   ],
   "codex-rs/core/src/compact_remote_v2.rs": [
     "run_remote_compact_task",
@@ -265,6 +282,15 @@ const REQUIRED_FILE_CONTAINS = {
     "AMAZON_BEDROCK_GPT_6_LUNA_MODEL_ID",
     "openai.gpt-6-luna",
   ],
+  "codex-rs/model-provider-info/src/capabilities.rs": [
+    "ModelProviderCapabilities",
+    "external_web_access: Option<bool>",
+    "remote_compaction: Option<RemoteCompactionSupport>",
+    "RemoteCompactionSupport",
+    "Unsupported,",
+    "V2,",
+    "#[serde(rename_all = \"snake_case\")]",
+  ],
   "codex-rs/model-provider/src/amazon_bedrock/catalog.rs": [
     "static_model_catalog",
     "normalize_bedrock_catalog",
@@ -289,7 +315,6 @@ const REQUIRED_FILE_CONTAINS = {
     "RemoteCompactionSupport",
     "ProviderCapabilities",
     "remote_compaction",
-    "is_azure_responses_provider",
     "RemoteCompactionSupport::V2",
     "amazon_bedrock_provider_creates_static_models_manager",
     "openai.gpt-5.5",
@@ -303,6 +328,21 @@ const REQUIRED_FILE_CONTAINS = {
     "url.scheme() == \"https\"",
     "host == \"api.openai.com\"",
     "codex_http_client::is_allowed_chatgpt_host(host)",
+  ],
+  "codex-rs/model-provider/src/capabilities.rs": [
+    "ProviderCapabilities",
+    "RemoteCompactionSupport",
+    "remote_compaction",
+    "pub struct ProviderCapabilities",
+    "pub external_web_access: bool",
+    "pub remote_compaction: RemoteCompactionSupport",
+    "is_azure_responses_provider",
+    "RemoteCompactionSupport::V2",
+    "RemoteCompactionSupport::Unsupported",
+    "overrides\n                .external_web_access",
+    "overrides\n                .remote_compaction",
+    "unwrap_or(defaults.external_web_access)",
+    "unwrap_or(defaults.remote_compaction)",
   ],
   "codex-rs/core/src/realtime_conversation.rs": [
     "ConversationStartTransport::Websocket",
@@ -353,6 +393,10 @@ const REQUIRED_FILE_CONTAINS = {
     "ResponseEvent::SafetyBuffering",
     "invalid_prompt",
     "ApiError::InvalidPrompt",
+    "response.output_item.added",
+    "phase",
+    "MessagePhase::PartialAnswer",
+    "partial_answer",
   ],
   "codex-rs/codex-api/src/sse/responses_error.rs": [
     "parse_failed_response",
@@ -365,6 +409,12 @@ const REQUIRED_FILE_CONTAINS = {
     "server_is_overloaded",
     "invalid_prompt",
     "ApiError::InvalidPrompt",
+    "json_headers_to_http_headers",
+    "let retry_after_header = error",
+    ".and_then(|error| error.get(\"headers\"))",
+    "RetryAfter::from_headers(&json_headers_to_http_headers(headers))",
+    "retry_after_header\n                .or_else",
+    "Duration::try_from_secs_f64(value).ok()",
   ],
   "codex-rs/codex-api/src/endpoint/responses.rs": [
     "ResponsesClient",
@@ -403,6 +453,58 @@ const REQUIRED_FILE_CONTAINS = {
     "let retry_after = RetryAfter::from_headers(&headers)",
     "headers: Some(headers)",
     "retry_after,",
+    "WrappedWebsocketError",
+    "headers: Option<Value>,",
+    "error.headers.as_ref()",
+    "headers.as_ref(),",
+    "find_map(|headers| RetryAfter::from_headers(&json_headers_to_http_headers(headers)))",
+  ],
+  "codex-rs/core/src/context/base_instructions.rs": [
+    "pub(crate) const KIND: &str = \"model.base_instructions\";",
+    "pub(crate) fn matches_item(item: &ResponseItem) -> bool",
+    "internal_chat_message_metadata_passthrough: Some(metadata)",
+    "kind.as_str() == Self::KIND",
+  ],
+  "codex-rs/core/src/context/world_state/base_instructions.rs": [
+    "pub(crate) struct BaseInstructionsState(pub(crate) String);",
+    "const ID: &'static str = \"base_instructions\";",
+    "WorldStateUpdate::optional_prefix_boxed_fragment",
+    "PreviousSectionState::Absent",
+  ],
+  "codex-rs/core/src/context/world_state/top_level_tools.rs": [
+    "pub(crate) struct TopLevelToolsState",
+    "const NAMESPACE_UPDATE_HINT: &str",
+    "WorldStateUpdate::prefix_item",
+    "REMOVED_NAMESPACES_HEADER",
+    "REMOVED_TOOLS_HEADER",
+    "Some(self.hashes.clone())",
+  ],
+  "codex-rs/core/src/tools/spec_plan.rs": [
+    "merge_into_namespaces(specs)",
+    "model_info.supports_search_tool",
+    "tool_exposure_with_namespace_override",
+    "code_mode_only_strict_3p_tools",
+    "turn_context.config.multi_agent_v2.tool_namespace.as_deref()",
+    "turn_context.provider.capabilities().image_generation",
+  ],
+  "codex-rs/protocol/src/turn_input.rs": [
+    "pub struct TurnAttribution",
+    "pub initiating_agent_path: Option<AgentPath>",
+    "pub root_turn_id: Option<String>",
+    "pub fn start_options(&self) -> TurnStartOptions",
+    "Started {",
+    "Steered {",
+  ],
+  "codex-rs/protocol/src/environment.rs": [
+    "pub struct TurnEnvironmentRequest",
+    "pub struct TurnEnvironmentRequests",
+    "pub fn new(",
+    "legacy_fallback_cwd",
+  ],
+  "codex-rs/rollout-trace/src/reducer/conversation/normalize.rs": [
+    "fn channel_from_phase(phase: &str)",
+    "\"partial_answer\" | \"final_answer\"",
+    "ConversationChannel::Final",
   ],
   "codex-rs/config/src/project_trust.rs": [
     "ProjectTrustPath",
@@ -644,6 +746,18 @@ const REQUIRED_FILE_CONTAINS = {
     "ThreadItemsListAnchor",
     "item_id: String",
   ],
+  "codex-rs/app-server-protocol/src/protocol/v2/turn.rs": [
+    "pub parent_turn_id: Option<String>",
+    "pub root_turn_id: Option<String>",
+    "pub environments: Option<Vec<TurnEnvironmentParams>>",
+  ],
+  "codex-rs/app-server-protocol/src/protocol/v2/environment.rs": [
+    "EnvironmentAddParams",
+    "pub skills: Option<EnvironmentSkillsParams>",
+    "pub struct EnvironmentSkillsParams",
+    "pub required: Option<Vec<String>>",
+    "checked before model inference",
+  ],
   "codex-rs/app-server/src/message_processor.rs": [
     "reject_obsolete_request_fields",
     "reject_removed_permission_profile",
@@ -673,6 +787,17 @@ const REQUIRED_FILE_CONTAINS = {
     "turn/start",
     "TurnStatus::InProgress",
     "ThreadSettingsBuildParams",
+    "TurnEnvironmentRequests",
+    "resolve_turn_environment_requests",
+    "parent_turn_id: params.parent_turn_id",
+    "root_turn_id: params.root_turn_id",
+    "root_turn_id: Some(root_turn_id)",
+  ],
+  "codex-rs/app-server/src/request_processors/environment_processor.rs": [
+    "EnvironmentAddParams",
+    "ScopedSkillsConfig",
+    ".skills",
+    "upsert_environment_with_options(params.environment_id, options, skills)",
   ],
   "codex-rs/app-server/src/request_serialization.rs": [
     "ClientRequestSerializationScope",
@@ -768,6 +893,9 @@ const REQUIRED_FILE_CONTAINS = {
     "include_only,",
     "env.get(\"REMOTE_TOKEN\")",
     "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))",
+    ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
+    "env.get(\"SystemRoot\")",
+    "env.get(name)",
   ],
 
   "codex-rs/core/src/responses_retry.rs": [
@@ -1155,7 +1283,7 @@ const REQUIRED_SEMANTIC_CHECKS = [
   {
     id: "model-provider.remote-compaction-capability",
     kind: "capability_gate",
-    file: "codex-rs/model-provider/src/provider.rs",
+    file: "codex-rs/model-provider/src/capabilities.rs",
     file_contains_all: [
       "RemoteCompactionSupport",
       "ProviderCapabilities",
@@ -1793,6 +1921,173 @@ const REQUIRED_SEMANTIC_CHECKS = [
     ],
   },
   {
+    id: "responses.failed-retry-after",
+    kind: "retry_metadata",
+    file: "codex-rs/codex-api/src/sse/responses_error.rs",
+    file_contains_all: [
+      "parse_failed_response",
+      "let retry_after_header = error",
+      ".and_then(|error| error.get(\"headers\"))",
+      "RetryAfter::from_headers(&json_headers_to_http_headers(headers))",
+      "retry_after_header\n                .or_else",
+      "Duration::try_from_secs_f64(value).ok()",
+    ],
+  },
+  {
+    id: "websocket.error-retry-after",
+    kind: "retry_metadata",
+    file: "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+    file_contains_all: [
+      "WrappedWebsocketError",
+      "headers: Option<Value>,",
+      "error.headers.as_ref()",
+      "headers.as_ref(),",
+      "find_map(|headers| RetryAfter::from_headers(&json_headers_to_http_headers(headers)))",
+    ],
+  },
+  {
+    id: "model-provider.custom-capabilities",
+    kind: "provider_capabilities",
+    file: "codex-rs/model-provider/src/capabilities.rs",
+    file_contains_all: [
+      "pub struct ProviderCapabilities",
+      "pub external_web_access: bool",
+      "pub remote_compaction: RemoteCompactionSupport",
+      "is_azure_responses_provider",
+      "RemoteCompactionSupport::V2",
+      "RemoteCompactionSupport::Unsupported",
+      "overrides\n                .external_web_access",
+      "overrides\n                .remote_compaction",
+    ],
+  },
+  {
+    id: "tools.namespace-gate-removal",
+    kind: "tool_capability",
+    file: "codex-rs/core/src/tools/spec_plan.rs",
+    file_contains_all: [
+      "merge_into_namespaces(specs)",
+      "model_info.supports_search_tool",
+      "tool_exposure_with_namespace_override",
+      "code_mode_only_strict_3p_tools",
+      "turn_context.config.multi_agent_v2.tool_namespace.as_deref()",
+      "turn_context.provider.capabilities().image_generation",
+    ],
+  },
+  {
+    id: "context.base-instructions-identity",
+    kind: "context_boundary",
+    file: "codex-rs/core/src/context/base_instructions.rs",
+    file_contains_all: [
+      "pub(crate) const KIND: &str = \"model.base_instructions\";",
+      "pub(crate) fn matches_item(item: &ResponseItem) -> bool",
+      "internal_chat_message_metadata_passthrough: Some(metadata)",
+      "kind.as_str() == Self::KIND",
+    ],
+  },
+  {
+    id: "context.incremental-tool-prefix",
+    kind: "request_context",
+    file: "codex-rs/core/src/client.rs",
+    file_contains_all: [
+      "let mut prefix = Vec::new();",
+      "create_tools_json_for_responses_lite(&prompt.tools)?",
+      "create_tools_raw_json_for_responses_api(&prompt.tools)?.into()",
+      "BaseInstructionsFragment(",
+      "input.splice(0..0, prefix);",
+    ],
+  },
+  {
+    id: "responses.partial-answer-phase",
+    kind: "stream_phase",
+    file: "codex-rs/codex-api/src/sse/responses.rs",
+    file_contains_all: [
+      "response.output_item.added",
+      "phase",
+      "MessagePhase::PartialAnswer",
+      "partial_answer",
+    ],
+    expected_stream_events_all: ["response.output_item.added", "response.completed"],
+  },
+  {
+    id: "rollout.partial-answer-channel",
+    kind: "stream_phase",
+    file: "codex-rs/rollout-trace/src/reducer/conversation/normalize.rs",
+    file_contains_all: [
+      "fn channel_from_phase(phase: &str)",
+      "\"partial_answer\" | \"final_answer\"",
+      "ConversationChannel::Final",
+    ],
+  },
+  {
+    id: "rmcp.remote-windows-env",
+    kind: "remote_mcp_environment",
+    file: "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
+    file_contains_all: [
+      "crate::utils::DEFAULT_ENV_VARS",
+      ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
+      "include_only,",
+      "env.get(\"SystemRoot\")",
+      "env.get(name)",
+      "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))",
+    ],
+  },
+  {
+    id: "app-server.turn-lineage",
+    kind: "app_server_lineage",
+    file: "codex-rs/app-server/src/request_processors/turn_processor.rs",
+    file_contains_all: [
+      "TurnEnvironmentRequests",
+      "resolve_turn_environment_requests",
+      "parent_turn_id: params.parent_turn_id",
+      "root_turn_id: params.root_turn_id",
+      "root_turn_id: Some(root_turn_id)",
+    ],
+  },
+  {
+    id: "app-server.turn-lineage-wire",
+    kind: "app_server_lineage",
+    file: "codex-rs/app-server-protocol/src/protocol/v2/turn.rs",
+    file_contains_all: [
+      "pub parent_turn_id: Option<String>",
+      "pub root_turn_id: Option<String>",
+      "pub environments: Option<Vec<TurnEnvironmentParams>>",
+    ],
+  },
+  {
+    id: "app-server.environment-skills",
+    kind: "app_server_environment",
+    file: "codex-rs/app-server/src/request_processors/environment_processor.rs",
+    file_contains_all: [
+      "ScopedSkillsConfig",
+      ".skills",
+      "upsert_environment_with_options(params.environment_id, options, skills)",
+    ],
+  },
+  {
+    id: "app-server.environment-skills-wire",
+    kind: "app_server_environment",
+    file: "codex-rs/app-server-protocol/src/protocol/v2/environment.rs",
+    file_contains_all: [
+      "pub skills: Option<EnvironmentSkillsParams>",
+      "pub struct EnvironmentSkillsParams",
+      "pub required: Option<Vec<String>>",
+      "checked before model inference",
+    ],
+  },
+  {
+    id: "turn.input-attribution",
+    kind: "turn_lineage",
+    file: "codex-rs/protocol/src/turn_input.rs",
+    file_contains_all: [
+      "pub struct TurnAttribution",
+      "pub initiating_agent_path: Option<AgentPath>",
+      "pub root_turn_id: Option<String>",
+      "pub fn start_options(&self) -> TurnStartOptions",
+      "Started {",
+      "Steered {",
+    ],
+  },
+  {
     "id": "exec.cyber-access-program",
     "kind": "cli_contract",
     "file": "codex-rs/exec/src/cli.rs",
@@ -1856,6 +2151,7 @@ function parseArgs(argv) {
   const args = {
     baseline: DEFAULT_BASELINE_PATH,
     report: null,
+    source: null,
     json: false,
   };
 
@@ -1875,6 +2171,14 @@ function parseArgs(argv) {
         throw new Error("--report requires a value");
       }
       args.report = argv[index];
+      continue;
+    }
+    if (value === "--source") {
+      index += 1;
+      if (!argv[index]) {
+        throw new Error("--source requires a directory");
+      }
+      args.source = argv[index];
       continue;
     }
     if (value === "--json") {
@@ -2259,6 +2563,54 @@ function validateBaseline(baseline) {
   return { errors, warnings };
 }
 
+async function validateSourceMarkers({ compat, sourceRoot }) {
+  const errors = [];
+  const contents = new Map();
+  const files = Array.isArray(compat?.critical_files) ? compat.critical_files : [];
+
+  for (const file of files) {
+    if (!file || typeof file.path !== "string") {
+      continue;
+    }
+    const sourcePath = path.resolve(sourceRoot, file.path);
+    try {
+      contents.set(file.path, await fs.readFile(sourcePath, "utf8"));
+    } catch (error) {
+      errors.push(
+        `upstream source missing critical file ${file.path}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  for (const file of files) {
+    const text = contents.get(file?.path);
+    if (text === undefined) {
+      continue;
+    }
+    for (const marker of stringArray(file.required_contains)) {
+      if (!text.includes(marker)) {
+        errors.push(`upstream source ${file.path} missing critical marker ${JSON.stringify(marker)}`);
+      }
+    }
+  }
+
+  for (const check of Array.isArray(compat?.semantic_checks) ? compat.semantic_checks : []) {
+    const text = contents.get(check?.file);
+    if (text === undefined) {
+      continue;
+    }
+    for (const marker of stringArray(check.file_contains_all)) {
+      if (!text.includes(marker)) {
+        errors.push(
+          `upstream source ${check.file} missing semantic marker ${check.id}.${JSON.stringify(marker)}`,
+        );
+      }
+    }
+  }
+
+  return errors;
+}
+
 function renderReport(report) {
   const lines = [];
   lines.push("Upstream Codex baseline guard");
@@ -2442,6 +2794,102 @@ function runSelfTest() {
   });
 
   assertSelfTestError({
+    name: "missing failed Responses retry header handling",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "responses.failed-retry-after");
+      check.file_contains_all = check.file_contains_all.filter(
+        (value) => !value.includes("json_headers_to_http_headers(headers)"),
+      );
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.responses.failed-retry-after.file_contains_all missing "RetryAfter::from_headers(&json_headers_to_http_headers(headers))"',
+  });
+
+  assertSelfTestError({
+    name: "missing WebSocket nested retry header handling",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "websocket.error-retry-after");
+      check.file_contains_all = check.file_contains_all.filter(
+        (value) => value !== "error.headers.as_ref()",
+      );
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.websocket.error-retry-after.file_contains_all missing "error.headers.as_ref()"',
+  });
+
+  assertSelfTestError({
+    name: "missing custom provider remote compaction default",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "model-provider.custom-capabilities");
+      check.file_contains_all = check.file_contains_all.filter(
+        (value) => value !== "RemoteCompactionSupport::Unsupported",
+      );
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.model-provider.custom-capabilities.file_contains_all missing "RemoteCompactionSupport::Unsupported"',
+  });
+
+  assertSelfTestError({
+    name: "missing namespace exposure gate removal",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "tools.namespace-gate-removal");
+      check.file_contains_all = check.file_contains_all.filter(
+        (value) => value !== "merge_into_namespaces(specs)",
+      );
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.tools.namespace-gate-removal.file_contains_all missing "merge_into_namespaces(specs)"',
+  });
+
+  assertSelfTestError({
+    name: "missing partial answer phase",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "responses.partial-answer-phase");
+      check.file_contains_all = check.file_contains_all.filter(
+        (value) => value !== "MessagePhase::PartialAnswer",
+      );
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.responses.partial-answer-phase.file_contains_all missing "MessagePhase::PartialAnswer"',
+  });
+
+  assertSelfTestError({
+    name: "missing remote MCP Windows bootstrap variables",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "rmcp.remote-windows-env");
+      check.file_contains_all = check.file_contains_all.filter(
+        (value) => value !== '.chain(["SYSTEMROOT", "TEMP", "TMP"].iter())',
+      );
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.rmcp.remote-windows-env.file_contains_all missing ".chain([\\"SYSTEMROOT\\", \\"TEMP\\", \\"TMP\\"].iter())"',
+  });
+
+  assertSelfTestError({
+    name: "missing app-server root lineage",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "app-server.turn-lineage");
+      check.file_contains_all = check.file_contains_all.filter(
+        (value) => value !== "root_turn_id: Some(root_turn_id)",
+      );
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.app-server.turn-lineage.file_contains_all missing "root_turn_id: Some(root_turn_id)"',
+  });
+
+  assertSelfTestError({
+    name: "missing app-server environment skills wire field",
+    mutate: (compat) => {
+      const check = semanticCheck(compat, "app-server.environment-skills-wire");
+      check.file_contains_all = check.file_contains_all.filter(
+        (value) => value !== "pub required: Option<Vec<String>>",
+      );
+    },
+    expectedMessage:
+      'codex.compatibility.semantic_checks.app-server.environment-skills-wire.file_contains_all missing "pub required: Option<Vec<String>>"',
+  });
+
+  assertSelfTestError({
     name: "missing skipped transport header",
     mutate: (compat) => {
       compat.proxy_skipped_headers = compat.proxy_skipped_headers.filter((header) => header !== "sec-websocket-*");
@@ -2465,7 +2913,7 @@ async function main() {
   if (args.help) {
     process.stdout.write(
       [
-        "Usage: node scripts/compat/check-upstream-baseline.mjs [--baseline <path>] [--report <path>] [--json] [--self-test]",
+        "Usage: node scripts/compat/check-upstream-baseline.mjs [--baseline <path>] [--source <dir>] [--report <path>] [--json] [--self-test]",
         "",
         "Offline guard for critical upstream Codex runtime assumptions recorded in scripts/compat/upstream-baseline.json.",
       ].join("\n") + "\n",
@@ -2481,9 +2929,20 @@ async function main() {
 
   const baselineText = await fs.readFile(args.baseline, "utf8");
   const baseline = JSON.parse(baselineText);
-  const { errors, warnings } = validateBaseline(baseline);
+  const validation = validateBaseline(baseline);
+  const errors = [...validation.errors];
+  const warnings = [...validation.warnings];
+  if (args.source) {
+    errors.push(
+      ...(await validateSourceMarkers({
+        compat: baseline?.codex?.compatibility,
+        sourceRoot: args.source,
+      })),
+    );
+  }
   const report = {
     baselinePath: args.baseline,
+    sourcePath: args.source,
     generated_at: new Date().toISOString(),
     ok: errors.length === 0,
     errors,

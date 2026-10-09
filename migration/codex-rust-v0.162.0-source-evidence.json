@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/openai/codex",
+  "release": {
+    "tag": "rust-v0.162.0",
+    "release_date": "2026-10-08T18:55:59Z",
+    "tag_object": "1f3f93473394b620b35580859b7e6864f7a9f948",
+    "peeled_commit": "c1382380de69521303b416720a52f42d51af6248",
+    "previous_tag": "rust-v0.161.0",
+    "previous_commit": "979011409de0a60b52f179721948e65531d26144"
+  },
+  "source_archives": [
+    {
+      "name": "source-01610.tar.gz",
+      "sha256": "4b20acb969588c0694f97851aaf63228eb206fa052b168681503f63c2e4efac2",
+      "commit": "979011409de0a60b52f179721948e65531d26144"
+    },
+    {
+      "name": "source-01620.tar.gz",
+      "sha256": "89c5f8139486a9ce723681e977109e1512b039b7e010e2ee9a3a1a6a24952369",
+      "commit": "c1382380de69521303b416720a52f42d51af6248"
+    }
+  ],
+  "tree_comparison": {
+    "previous_file_count": 8899,
+    "current_file_count": 9017,
+    "changed_common_files": 1400,
+    "added_files": 188,
+    "removed_files": 70,
+    "changed_file_count": 1658,
+    "github_compare_api_file_cap": 300
+  },
+  "marker_replay": {
+    "critical_files": 77,
+    "semantic_checks": 86,
+    "markers": 1238,
+    "missing_files": 0,
+    "missing_markers": 0,
+    "source_tree": "rust-v0.162.0 exact tagged source archive",
+    "command": "node scripts/compat/check-upstream-baseline.mjs --source <exact rust-v0.162.0 extracted source directory>"
+  },
+  "moved_owners": [
+    {
+      "marker": "is_azure_responses_provider",
+      "from": "codex-rs/model-provider/src/provider.rs",
+      "to": "codex-rs/model-provider/src/capabilities.rs"
+    }
+  ],
+  "reviewed_contracts": [
+    "Responses response.failed Retry-After headers and WebSocket nested/top-level error headers",
+    "Custom provider external_web_access and remote_compaction V2/unsupported defaults",
+    "Removed provider namespace_tools gate and retained explicit tool policy",
+    "Incremental base-instruction/tool identity and Responses Lite prefix input",
+    "partial_answer stream phase and final-channel transcript normalization",
+    "Remote MCP SYSTEMROOT/TEMP/TMP restoration with unrequested-secret rejection",
+    "App-server parent/root turn lineage and required environment skills"
+  ],
+  "fixture_and_guard_scope": {
+    "offline_only": true,
+    "live_provider_traffic": false,
+    "runtime_launch_or_binary_smoke": "coordinator-owned; not claimed here"
+  }
+}

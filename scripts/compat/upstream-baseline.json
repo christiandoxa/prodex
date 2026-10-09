@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.161.0 release",
+      "baseline_source": "openai/codex rust-v0.162.0 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -59,7 +59,12 @@
             "include_internal",
             ".include_internal_metadata(&client_setup.api_provider)",
             "if !include_internal",
-            "responses_metadata.client_metadata(include_internal)"
+            "responses_metadata.client_metadata(include_internal)",
+            "let mut prefix = Vec::new();",
+            "create_tools_json_for_responses_lite(&prompt.tools)?",
+            "create_tools_raw_json_for_responses_api(&prompt.tools)?.into()",
+            "BaseInstructionsFragment(",
+            "input.splice(0..0, prefix);"
           ]
         },
         {
@@ -280,7 +285,6 @@
             "RemoteCompactionSupport",
             "ProviderCapabilities",
             "remote_compaction",
-            "is_azure_responses_provider",
             "RemoteCompactionSupport::V2",
             "amazon_bedrock_provider_creates_static_models_manager",
             "openai.gpt-5.5",
@@ -362,7 +366,11 @@
             "with_treatment",
             "invalid_prompt",
             "ApiError::InvalidPrompt",
-            "parse_failed_response"
+            "parse_failed_response",
+            "response.output_item.added",
+            "phase",
+            "MessagePhase::PartialAnswer",
+            "partial_answer"
           ]
         },
         {
@@ -381,7 +389,13 @@
             "ApiError::QuotaExceeded",
             "ApiError::RateLimitExceeded",
             "ApiError::ServerOverloaded",
-            "ApiError::InvalidPrompt"
+            "ApiError::InvalidPrompt",
+            "json_headers_to_http_headers",
+            "let retry_after_header = error",
+            ".and_then(|error| error.get(\"headers\"))",
+            "RetryAfter::from_headers(&json_headers_to_http_headers(headers))",
+            "Duration::try_from_secs_f64(value).ok()",
+            "retry_after_header\n                .or_else"
           ]
         },
         {
@@ -427,7 +441,12 @@
             "let headers = response.headers().clone()",
             "let retry_after = RetryAfter::from_headers(&headers)",
             "headers: Some(headers)",
-            "retry_after,"
+            "retry_after,",
+            "WrappedWebsocketError",
+            "headers: Option<Value>,",
+            "error.headers.as_ref()",
+            "headers.as_ref(),",
+            "find_map(|headers| RetryAfter::from_headers(&json_headers_to_http_headers(headers)))"
           ]
         },
         {
@@ -785,7 +804,12 @@
             "TurnStartResponse",
             "turn/start",
             "TurnStatus::InProgress",
-            "ThreadSettingsBuildParams"
+            "ThreadSettingsBuildParams",
+            "TurnEnvironmentRequests",
+            "resolve_turn_environment_requests",
+            "parent_turn_id: params.parent_turn_id",
+            "root_turn_id: params.root_turn_id",
+            "root_turn_id: Some(root_turn_id)"
           ]
         },
         {
@@ -965,7 +989,10 @@
             "remote_env_vars.iter().cloned()",
             "include_only,",
             "env.get(\"REMOTE_TOKEN\")",
-            "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))"
+            "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))",
+            ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
+            "env.get(\"SystemRoot\")",
+            "env.get(name)"
           ]
         },
         {
@@ -1007,6 +1034,143 @@
             "Feature::ApiKeyCyberAccessPrograms",
             "if auth.is_chatgpt_auth()",
             "if !auth.is_api_key_auth()"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider-info/src/capabilities.rs",
+          "reason": "Owns serializable custom-provider capability overrides for live web access and remote compaction.",
+          "required_contains": [
+            "ModelProviderCapabilities",
+            "external_web_access: Option<bool>",
+            "remote_compaction: Option<RemoteCompactionSupport>",
+            "RemoteCompactionSupport",
+            "Unsupported,",
+            "V2,",
+            "#[serde(rename_all = \"snake_case\")]"
+          ]
+        },
+        {
+          "path": "codex-rs/model-provider/src/capabilities.rs",
+          "reason": "Owns provider capability defaults and custom-provider override resolution, including the moved Azure Responses test.",
+          "required_contains": [
+            "ProviderCapabilities",
+            "RemoteCompactionSupport",
+            "remote_compaction",
+            "pub struct ProviderCapabilities",
+            "pub external_web_access: bool",
+            "pub remote_compaction: RemoteCompactionSupport",
+            "is_azure_responses_provider",
+            "RemoteCompactionSupport::V2",
+            "RemoteCompactionSupport::Unsupported",
+            "unwrap_or(defaults.external_web_access)",
+            "unwrap_or(defaults.remote_compaction)",
+            "overrides\n                .external_web_access",
+            "overrides\n                .remote_compaction"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/context/base_instructions.rs",
+          "reason": "Owns stable identity matching for base-instruction items in incremental Responses Lite context.",
+          "required_contains": [
+            "pub(crate) const KIND: &str = \"model.base_instructions\";",
+            "pub(crate) fn matches_item(item: &ResponseItem) -> bool",
+            "internal_chat_message_metadata_passthrough: Some(metadata)",
+            "kind.as_str() == Self::KIND"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/context/world_state/base_instructions.rs",
+          "reason": "Owns prefix placement and snapshot hashing for base instructions in incremental world state.",
+          "required_contains": [
+            "pub(crate) struct BaseInstructionsState(pub(crate) String);",
+            "const ID: &'static str = \"base_instructions\";",
+            "WorldStateUpdate::optional_prefix_boxed_fragment",
+            "PreviousSectionState::Absent"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/context/world_state/top_level_tools.rs",
+          "reason": "Owns incremental Responses Lite namespace/tool catalog diffs and removal notices.",
+          "required_contains": [
+            "pub(crate) struct TopLevelToolsState",
+            "const NAMESPACE_UPDATE_HINT: &str",
+            "WorldStateUpdate::prefix_item",
+            "REMOVED_NAMESPACES_HEADER",
+            "REMOVED_TOOLS_HEADER",
+            "Some(self.hashes.clone())"
+          ]
+        },
+        {
+          "path": "codex-rs/core/src/tools/spec_plan.rs",
+          "reason": "Owns tool exposure planning after removal of the provider namespace_tools gate.",
+          "required_contains": [
+            "merge_into_namespaces(specs)",
+            "model_info.supports_search_tool",
+            "tool_exposure_with_namespace_override",
+            "code_mode_only_strict_3p_tools",
+            "turn_context.config.multi_agent_v2.tool_namespace.as_deref()",
+            "turn_context.provider.capabilities().image_generation"
+          ]
+        },
+        {
+          "path": "codex-rs/protocol/src/turn_input.rs",
+          "reason": "Owns turn attribution and root-lineage fields carried through input admission and recovery.",
+          "required_contains": [
+            "pub struct TurnAttribution",
+            "pub initiating_agent_path: Option<AgentPath>",
+            "pub root_turn_id: Option<String>",
+            "pub fn start_options(&self) -> TurnStartOptions",
+            "Started {",
+            "Steered {"
+          ]
+        },
+        {
+          "path": "codex-rs/protocol/src/environment.rs",
+          "reason": "Owns typed turn environment requests and selected capability roots.",
+          "required_contains": [
+            "pub struct TurnEnvironmentRequest",
+            "pub struct TurnEnvironmentRequests",
+            "pub fn new(",
+            "legacy_fallback_cwd"
+          ]
+        },
+        {
+          "path": "codex-rs/rollout-trace/src/reducer/conversation/normalize.rs",
+          "reason": "Owns transcript channel normalization for partial and final assistant answers.",
+          "required_contains": [
+            "fn channel_from_phase(phase: &str)",
+            "\"partial_answer\" | \"final_answer\"",
+            "ConversationChannel::Final"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/turn.rs",
+          "reason": "Owns app-server turn parent/root lineage and environment request wire fields.",
+          "required_contains": [
+            "pub parent_turn_id: Option<String>",
+            "pub root_turn_id: Option<String>",
+            "pub environments: Option<Vec<TurnEnvironmentParams>>"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server-protocol/src/protocol/v2/environment.rs",
+          "reason": "Owns app-server environment registration skill requirements.",
+          "required_contains": [
+            "EnvironmentAddParams",
+            "pub skills: Option<EnvironmentSkillsParams>",
+            "pub struct EnvironmentSkillsParams",
+            "pub required: Option<Vec<String>>",
+            "checked before model inference"
+          ]
+        },
+        {
+          "path": "codex-rs/app-server/src/request_processors/environment_processor.rs",
+          "reason": "Owns app-server conversion of environment skill requirements into scoped executor configuration.",
+          "required_contains": [
+            "EnvironmentAddParams",
+            "ScopedSkillsConfig",
+            ".skills",
+            "upsert_environment_with_options(params.environment_id, options, skills)"
           ]
         }
       ],
@@ -1365,7 +1529,7 @@
         {
           "id": "model-provider.remote-compaction-capability",
           "kind": "capability_gate",
-          "file": "codex-rs/model-provider/src/provider.rs",
+          "file": "codex-rs/model-provider/src/capabilities.rs",
           "reason": "Gemini semantic compact depends on Codex continuing to expose remote compaction through the provider-owned capability gate.",
           "file_contains_all": [
             "RemoteCompactionSupport",
@@ -2225,9 +2389,193 @@
             "if auth.is_chatgpt_auth()",
             "if !auth.is_api_key_auth()"
           ]
+        },
+        {
+          "id": "responses.failed-retry-after",
+          "kind": "retry_metadata",
+          "file": "codex-rs/codex-api/src/sse/responses_error.rs",
+          "reason": "Failed Responses events must retain validated upstream Retry-After guidance for quota, rate-limit, overload, and generic retryable errors.",
+          "file_contains_all": [
+            "parse_failed_response",
+            "let retry_after_header = error",
+            ".and_then(|error| error.get(\"headers\"))",
+            "RetryAfter::from_headers(&json_headers_to_http_headers(headers))",
+            "retry_after_header\n                .or_else",
+            "Duration::try_from_secs_f64(value).ok()"
+          ]
+        },
+        {
+          "id": "websocket.error-retry-after",
+          "kind": "retry_metadata",
+          "file": "codex-rs/codex-api/src/endpoint/responses_websocket.rs",
+          "reason": "Wrapped WebSocket errors must preserve validated retry headers from both nested error metadata and top-level event metadata.",
+          "file_contains_all": [
+            "WrappedWebsocketError",
+            "headers: Option<Value>,",
+            "error.headers.as_ref()",
+            "headers.as_ref(),",
+            "find_map(|headers| RetryAfter::from_headers(&json_headers_to_http_headers(headers)))"
+          ]
+        },
+        {
+          "id": "model-provider.custom-capabilities",
+          "kind": "provider_capabilities",
+          "file": "codex-rs/model-provider/src/capabilities.rs",
+          "reason": "Custom Responses-compatible providers may override live web access and remote compaction without changing OpenAI/Azure defaults.",
+          "file_contains_all": [
+            "pub struct ProviderCapabilities",
+            "pub external_web_access: bool",
+            "pub remote_compaction: RemoteCompactionSupport",
+            "is_azure_responses_provider",
+            "RemoteCompactionSupport::V2",
+            "RemoteCompactionSupport::Unsupported",
+            "overrides\n                .external_web_access",
+            "overrides\n                .remote_compaction"
+          ]
+        },
+        {
+          "id": "tools.namespace-gate-removal",
+          "kind": "tool_capability",
+          "file": "codex-rs/core/src/tools/spec_plan.rs",
+          "reason": "Namespace exposure is now governed by tool policy and model search support; the removed provider namespace_tools capability must not return as a hidden gate.",
+          "file_contains_all": [
+            "merge_into_namespaces(specs)",
+            "model_info.supports_search_tool",
+            "tool_exposure_with_namespace_override",
+            "code_mode_only_strict_3p_tools",
+            "turn_context.config.multi_agent_v2.tool_namespace.as_deref()",
+            "turn_context.provider.capabilities().image_generation"
+          ]
+        },
+        {
+          "id": "context.base-instructions-identity",
+          "kind": "context_boundary",
+          "file": "codex-rs/core/src/context/base_instructions.rs",
+          "reason": "Incremental context must recognize stable base-instruction message identity through internal content metadata.",
+          "file_contains_all": [
+            "pub(crate) const KIND: &str = \"model.base_instructions\";",
+            "pub(crate) fn matches_item(item: &ResponseItem) -> bool",
+            "internal_chat_message_metadata_passthrough: Some(metadata)",
+            "kind.as_str() == Self::KIND"
+          ]
+        },
+        {
+          "id": "context.incremental-tool-prefix",
+          "kind": "request_context",
+          "file": "codex-rs/core/src/client.rs",
+          "reason": "Responses Lite and Responses API tool payloads share one stable prefix path with base instructions prepended to request input.",
+          "file_contains_all": [
+            "let mut prefix = Vec::new();",
+            "create_tools_json_for_responses_lite(&prompt.tools)?",
+            "create_tools_raw_json_for_responses_api(&prompt.tools)?.into()",
+            "BaseInstructionsFragment(",
+            "input.splice(0..0, prefix);"
+          ]
+        },
+        {
+          "id": "responses.partial-answer-phase",
+          "kind": "stream_phase",
+          "file": "codex-rs/codex-api/src/sse/responses.rs",
+          "reason": "Responses stream parsing must preserve partial_answer on output item start and completion events.",
+          "file_contains_all": [
+            "response.output_item.added",
+            "phase",
+            "MessagePhase::PartialAnswer",
+            "partial_answer"
+          ],
+          "expected_stream_events_all": [
+            "response.output_item.added",
+            "response.completed"
+          ]
+        },
+        {
+          "id": "rollout.partial-answer-channel",
+          "kind": "stream_phase",
+          "file": "codex-rs/rollout-trace/src/reducer/conversation/normalize.rs",
+          "reason": "Transcript normalization must place partial_answer text in the final answer channel while keeping it non-terminal upstream state.",
+          "file_contains_all": [
+            "fn channel_from_phase(phase: &str)",
+            "\"partial_answer\" | \"final_answer\"",
+            "ConversationChannel::Final"
+          ]
+        },
+        {
+          "id": "rmcp.remote-windows-env",
+          "kind": "remote_mcp_environment",
+          "file": "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
+          "reason": "Explicit remote MCP environment variables must preserve Windows executor bootstrap/temp variables while filtering unrelated secrets.",
+          "file_contains_all": [
+            "crate::utils::DEFAULT_ENV_VARS",
+            ".chain([\"SYSTEMROOT\", \"TEMP\", \"TMP\"].iter())",
+            "include_only,",
+            "env.get(\"SystemRoot\")",
+            "env.get(name)",
+            "assert!(!env.contains_key(\"UNREQUESTED_SECRET\"))"
+          ]
+        },
+        {
+          "id": "app-server.turn-lineage",
+          "kind": "app_server_lineage",
+          "file": "codex-rs/app-server/src/request_processors/turn_processor.rs",
+          "reason": "App-server turn processing must carry parent/root lineage and typed environment requests into Core turn admission.",
+          "file_contains_all": [
+            "TurnEnvironmentRequests",
+            "resolve_turn_environment_requests",
+            "parent_turn_id: params.parent_turn_id",
+            "root_turn_id: params.root_turn_id",
+            "root_turn_id: Some(root_turn_id)"
+          ]
+        },
+        {
+          "id": "app-server.turn-lineage-wire",
+          "kind": "app_server_lineage",
+          "file": "codex-rs/app-server-protocol/src/protocol/v2/turn.rs",
+          "reason": "The app-server v2 turn wire contract exposes parent/root lineage and environment requests.",
+          "file_contains_all": [
+            "pub parent_turn_id: Option<String>",
+            "pub root_turn_id: Option<String>",
+            "pub environments: Option<Vec<TurnEnvironmentParams>>"
+          ]
+        },
+        {
+          "id": "app-server.environment-skills",
+          "kind": "app_server_environment",
+          "file": "codex-rs/app-server/src/request_processors/environment_processor.rs",
+          "reason": "Environment registration must convert requested skills into scoped executor configuration before model inference.",
+          "file_contains_all": [
+            "ScopedSkillsConfig",
+            ".skills",
+            "upsert_environment_with_options(params.environment_id, options, skills)"
+          ]
+        },
+        {
+          "id": "app-server.environment-skills-wire",
+          "kind": "app_server_environment",
+          "file": "codex-rs/app-server-protocol/src/protocol/v2/environment.rs",
+          "reason": "The app-server v2 environment wire contract carries exact required skill catalog names.",
+          "file_contains_all": [
+            "pub skills: Option<EnvironmentSkillsParams>",
+            "pub struct EnvironmentSkillsParams",
+            "pub required: Option<Vec<String>>",
+            "checked before model inference"
+          ]
+        },
+        {
+          "id": "turn.input-attribution",
+          "kind": "turn_lineage",
+          "file": "codex-rs/protocol/src/turn_input.rs",
+          "reason": "Turn input recovery retains initiating agent and causal root attribution across retries, sleep, and compaction.",
+          "file_contains_all": [
+            "pub struct TurnAttribution",
+            "pub initiating_agent_path: Option<AgentPath>",
+            "pub root_turn_id: Option<String>",
+            "pub fn start_options(&self) -> TurnStartOptions",
+            "Started {",
+            "Steered {"
+          ]
         }
       ],
-      "tested_codex_release": "rust-v0.161.0",
+      "tested_codex_release": "rust-v0.162.0",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -2578,6 +2926,24 @@
           ],
           "prodex_action": "Qualify the current OpenAI runtime transport and app-server surfaces, add retry/serialization baseline checks, and document the cross-OS remote-MCP limitation. Do not replace user Codex binaries, change the capability-based minimum, or duplicate Codex retry/compaction semantics.",
           "compatibility_evidence": "migration/codex-rust-v0.161.0-audit.md records exact tag/source provenance, marker replay, official binary digest verification, isolated credential-free app-server initialize, and Prodex boundary tests."
+        },
+        {
+          "from": "rust-v0.161.0",
+          "to": "rust-v0.162.0",
+          "upstream_commit": "c1382380de69521303b416720a52f42d51af6248",
+          "upstream_tag_object": "1f3f93473394b620b35580859b7e6864f7a9f948",
+          "upstream_release_date": "2026-10-08T18:55:59Z",
+          "tree_comparison": "Exact source archives: 1,658 changed files (1,400 changed, 188 added, 70 removed); the GitHub compare API file list is capped at 300 and was not treated as a full-tree comparison.",
+          "runtime_changes": [
+            "Responses failed events and WebSocket error events now preserve validated Retry-After headers, including server overload and rate-limit failures.",
+            "Custom Responses-compatible providers expose explicit external_web_access and remote_compaction overrides; OpenAI and Azure Responses retain remote compaction V2 defaults while unrelated providers remain unsupported by default.",
+            "Namespace tool exposure is no longer gated by the removed provider namespace_tools capability; strict third-party Code Mode policy and direct-only namespace overrides remain explicit tool policy.",
+            "Responses Lite incremental world state carries stable top-level tool and base-instruction identity, and partial_answer assistant items remain final-channel stream content.",
+            "Remote stdio MCP launches preserve SYSTEMROOT, TEMP, and TMP when explicit remote variables activate the allowlist while continuing to reject unrequested secrets.",
+            "App-server turns retain parent/root lineage and environment requests; environment registration can carry required skill names checked before model inference."
+          ],
+          "prodex_action": "Advance the tested Codex baseline to 0.162.0, move the Azure capability marker to model-provider/src/capabilities.rs, and guard the new retry, provider-capability, namespace, context, partial-answer, remote-MCP, and app-server contracts. Keep Prodex transport, hard affinity, no-midstream-rotate, and existing 0.436.1 capacity fixes unchanged.",
+          "compatibility_evidence": "migration/codex-rust-v0.162.0-audit.md and migration/codex-rust-v0.162.0-source-evidence.json record exact tag/source provenance, full archive comparison, critical/semantic marker replay, negative baseline self-tests, and offline capture replay. Runtime-launch and binary smoke evidence remain coordinator-owned."
         }
       ],
       "app_server_protocol": {
@@ -2600,23 +2966,26 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.161.0",
-      "name": "0.161.0",
-      "published_at": "2026-10-07T15:58:45Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.161.0",
+      "tag_name": "rust-v0.162.0",
+      "name": "0.162.0",
+      "published_at": "2026-10-08T18:55:59Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.162.0",
       "body_head": [
         "## New Features",
-        "- GPT-6.1 Sol is now the default model in the bundled and Amazon Bedrock catalogs. (#49318, #49339)",
-        "- Amazon Bedrock supports multi-agent V2 and Ultra reasoning on compatible models; Bedrock Mantle also accepts AWS GovCloud regions. (#49345, #49813)",
-        "- Sign in to MCP servers from an active terminal session with `/mcp login <name>`. (#49290)",
-        "- Choose your microphone, speaker, and microphone input channels for voice conversations, with preferences saved locally. (#49437, #49836)",
-        "- Daybreak is opt-in through `--enable cli_daybreak` or `features.cli_daybreak=true`; `daybreak=true` alone is insufficient. By default, controls and indicators are hidden, `/daybreak` is unavailable, and automatic Cyber routing is omitted—even for saved Daybreak threads. Saved preferences remain intact. Opt-in routing requires eligible ChatGPT sign-in, the OpenAI provider, and advertised model/program support. (#49856, #49858, #49859, #49861, #51207)",
-        "- Select a Cyber access program per turn with `codex exec --cyber-access-program` or the TypeScript SDK’s `cyberAccessProgram` option. The explicit exec override remains available with `cli_daybreak` disabled and leaves the saved choice unchanged. (#49939, #51207)",
+        "- Add tools for creating and listing managed Git worktrees from trusted local projects when the worktrees feature is enabled. (#50148)",
+        "- Pin tasks in the agent Command Center with `p` and keep them in a shared Pinned group when supported by the server. (#51500)",
+        "- Navigate and copy transcript blocks with `/copy`, use `Ctrl+Insert` to copy selections, and tune mouse-wheel scrolling with `tui.mouse_scroll_speed`. (#50434, #50215, #50209)",
+        "- Make URLs clickable in approval headers, questions, MCP prompts, warnings, banners, and verification prompts, including when links wrap across lines. (#51439, #51449, #51450, #51451, #51452, #51458)",
+        "- Configure live web access and remote compaction capabilities for custom Responses-compatible model providers. (#50459)",
+        "- Add JavaScript helpers for streaming promise results as they settle, plus opt-in ranked tool search in Code Mode. (#51126, #51209)",
+        "",
         "## Bug Fixes",
-        "- Approved filesystem escalation can now grant broader write access while preserving denied reads and network restrictions. Background tasks retain their originating turn’s permissions. (#49353, #49880)",
-        "- Explicit launch permissions survive terminal reconnects and new sessions, while implicit client settings no longer overwrite server or saved-thread web-search settings. (#49809, #49799)",
-        "- Elevated Windows terminal sessions can start using an embedded server, and sandboxed PowerShell preserves relative paths beneath protected user profiles. (#49855, #49690)",
-        "- Enter correctly submits buffered input after paste detection expires, including in Vim insert mode. (#49810)"
+        "- Respect server model and reasoning-summary defaults for new TUI threads while retaining explicit launch overrides. (#50013, #50811, #50913)",
+        "- Preserve existing CRLF line endings in `apply_patch` updates without requiring an opt-in. (#51203)",
+        "- Fix Linux sandbox startup with multiple denied files, reject writable sandbox-construction executables, and keep ripgrep configuration from weakening deny-glob masks. (#50059, #51211, #51407, #51527)",
+        "- Restore ordinary drive-letter file access on Windows 10 and match Windows sandbox temp permissions to the child process environment. (#51511, #51512)",
+        "- Honor server `Retry-After` advice for retryable Responses and WebSocket failures. (#50418, #51440)",
+        "- Fix archive checksum verification when installing through Windows PowerShell with PowerShell 7 module paths present. (#51257)"
       ]
     }
   },
