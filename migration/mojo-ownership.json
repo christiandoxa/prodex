@@ -863,7 +863,18 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "runtime_state_background_policy"
+          "runtime_state_background_policy",
+          "runtime_state_route_key_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_state/route.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_state_route_key_policy"
         ]
       },
       {
@@ -2878,6 +2889,38 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "typed mutation/queue-kind tag mapping, usize/u64 ABI conversion, Duration/Instant construction and typed section/enqueue-plan reconstruction"
+    },
+    {
+      "name": "runtime_state_route_key_policy",
+      "domain": "runtime/state",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust owned runtime route labels, label parsing, route coupling, route-key construction/parsing, profile-suffix extraction, and circuit-health key rewriting",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_state_route_policy_v1",
+      "mojo_operation_ids": {
+        "route_label": 11,
+        "route_from_label": 12,
+        "route_coupled_kind": 13,
+        "route_build_key": 14,
+        "route_key_parts": 15,
+        "route_profile_suffix": 16,
+        "route_circuit_health_key": 17
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_state_background.mojo",
+      "consumer": "crates/prodex-runtime-state/src/route.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_state::route_kind_label",
+      "production_consumers": [
+        "crates/prodex-runtime-state/src/route.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/src/runtime_state/route.rs",
+      "rust_owner_before": "Runtime route label and parser tables, route coupling, profile route-key prefixes and composition, key component parsing, profile suffix extraction, and circuit-to-health key rewriting",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; Mojo ABI and runtime-state caller tests cover labels, coupling, every key prefix, malformed keys, colon-bearing profile names, suffix behavior, and circuit-health rewriting",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "RuntimeRouteKind mapping, borrowed UTF-8 slice projection, and validated ABI result mapping"
     },
     {
       "name": "quota_selection_policy",
