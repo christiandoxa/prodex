@@ -3,9 +3,8 @@ use std::collections::BTreeSet;
 use std::time::Instant;
 
 use crate::{
-    RuntimeHttpErrorAction, RuntimeHttpErrorClass, RuntimeTokenUsage,
-    runtime_connection_header_tokens, runtime_header_name_matches_connection_token,
-    runtime_sse_consume_chunk, runtime_sse_finish_pending,
+    RuntimeHttpErrorAction, RuntimeHttpErrorClass, RuntimeTokenUsage, runtime_sse_consume_chunk,
+    runtime_sse_finish_pending,
 };
 
 unsafe extern "C" {
@@ -15,6 +14,27 @@ unsafe extern "C" {
         length: i64,
         present: i64,
         numeric: u64,
+    ) -> i64;
+    fn prodex_runtime_response_forwarding_header_v1(
+        name_address: u64,
+        name_length: i64,
+        value_address: u64,
+        value_length: i64,
+        value_present: i64,
+    ) -> i64;
+    fn prodex_runtime_response_forwarding_content_type_v1(
+        name_address: u64,
+        name_length: i64,
+        value_address: u64,
+        value_length: i64,
+    ) -> i64;
+    fn prodex_runtime_response_forwarding_attempt_v1(
+        status: i64,
+        class_tag: i64,
+        action_tag: i64,
+        retryable_previous: i64,
+        token_invalidated: i64,
+        committed: i64,
     ) -> i64;
     fn prodex_runtime_token_usage_progress_plan_v1(
         abi_version: i64,
@@ -28,6 +48,20 @@ unsafe extern "C" {
 
 const RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT: i64 = 9;
 const RESPONSE_FORWARDING_TAP_PLAN: i64 = 10;
+
+const RESPONSE_FORWARDING_HEADER_FORWARD: i64 = 0;
+const RESPONSE_FORWARDING_HEADER_SKIP: i64 = 1;
+const RESPONSE_FORWARDING_HEADER_CONNECTION_TOKEN: i64 = 2;
+const RESPONSE_FORWARDING_HEADER_CONNECTION: i64 = 3;
+
+const RESPONSE_FORWARDING_ATTEMPT_SUCCESS: i64 = 0;
+const RESPONSE_FORWARDING_ATTEMPT_AUTH_FAILED: i64 = 1;
+const RESPONSE_FORWARDING_ATTEMPT_PROFILE_UNAVAILABLE: i64 = 2;
+const RESPONSE_FORWARDING_ATTEMPT_QUOTA_RETRY: i64 = 3;
+const RESPONSE_FORWARDING_ATTEMPT_RATE_LIMITED: i64 = 4;
+const RESPONSE_FORWARDING_ATTEMPT_OVERLOADED: i64 = 5;
+const RESPONSE_FORWARDING_ATTEMPT_PREVIOUS_RESPONSE_NOT_FOUND: i64 = 6;
+const RESPONSE_FORWARDING_ATTEMPT_AUTH_FAILURE_NOTICE: i64 = 7;
 
 fn runtime_sse_tap_plan(event_type: Option<&str>, output_tokens: u64) -> u8 {
     let value = event_type.unwrap_or_default();
@@ -74,6 +108,61 @@ fn response_forwarding_mojo_tag(operation: i64, numeric: u64) -> i64 {
         "Mojo response-forwarding planner returned invalid output"
     );
     result
+}
+
+fn runtime_response_forwarding_header_action(name: &str, value: Option<&[u8]>) -> i64 {
+    let present = value.is_some();
+    let value = value.unwrap_or_default();
+    let result = unsafe {
+        prodex_runtime_response_forwarding_header_v1(
+            name.as_ptr() as usize as u64,
+            i64::try_from(name.len()).unwrap_or(i64::MAX),
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).unwrap_or(i64::MAX),
+            i64::from(present),
+        )
+    };
+    assert!(
+        matches!(
+            result,
+            RESPONSE_FORWARDING_HEADER_FORWARD
+                | RESPONSE_FORWARDING_HEADER_SKIP
+                | RESPONSE_FORWARDING_HEADER_CONNECTION_TOKEN
+                | RESPONSE_FORWARDING_HEADER_CONNECTION
+        ),
+        "Mojo response-forwarding header planner returned invalid output"
+    );
+    result
+}
+
+fn runtime_response_forwarding_header_is_connection(name: &str) -> bool {
+    runtime_response_forwarding_header_action(name, None) == RESPONSE_FORWARDING_HEADER_CONNECTION
+}
+
+fn runtime_response_forwarding_header_is_connection_token(
+    name: &str,
+    connection_values: &[&[u8]],
+) -> bool {
+    connection_values.iter().any(|value| {
+        runtime_response_forwarding_header_action(name, Some(value))
+            == RESPONSE_FORWARDING_HEADER_CONNECTION_TOKEN
+    })
+}
+
+fn runtime_response_content_type_header_is_usable(name: &str, value: &[u8]) -> bool {
+    let result = unsafe {
+        prodex_runtime_response_forwarding_content_type_v1(
+            name.as_ptr() as usize as u64,
+            i64::try_from(name.len()).unwrap_or(i64::MAX),
+            value.as_ptr() as usize as u64,
+            i64::try_from(value.len()).unwrap_or(i64::MAX),
+        )
+    };
+    assert!(
+        matches!(result, 0 | 1),
+        "Mojo response-forwarding content-type planner returned invalid output"
+    );
+    result == 1
 }
 
 /// Mojo-owned pre-commit response outcome; Rust applies the returned effect.
@@ -130,6 +219,77 @@ pub fn runtime_responses_precommit_attempt_plan(
         _ => unreachable!("validated Mojo response attempt plan"),
     }
 }
+
+/// Plans the terminal outcome for a standard or compact buffered response.
+/// Rust keeps ownership of the response body and applies this decision to the
+/// route-specific attempt state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeResponseForwardingAttemptPlan {
+    Success { note_auth_failure: bool },
+    AuthFailed,
+    ProfileUnavailable,
+    QuotaRetry,
+    RateLimited,
+    Overloaded,
+    PreviousResponseNotFound,
+}
+
+pub fn runtime_response_forwarding_attempt_plan(
+    status: u16,
+    error_class: RuntimeHttpErrorClass,
+    error_action: RuntimeHttpErrorAction,
+    retryable_previous: bool,
+    token_invalidated: bool,
+    committed: bool,
+) -> RuntimeResponseForwardingAttemptPlan {
+    let class_tag = match error_class {
+        RuntimeHttpErrorClass::Quota => 1,
+        RuntimeHttpErrorClass::RateLimited => 2,
+        RuntimeHttpErrorClass::ProfileUnavailable => 3,
+        RuntimeHttpErrorClass::Overload => 4,
+        RuntimeHttpErrorClass::TransientServer => 5,
+        RuntimeHttpErrorClass::Other => 0,
+    };
+    let action_tag = match error_action {
+        RuntimeHttpErrorAction::PassThrough => 0,
+        RuntimeHttpErrorAction::RotateProfile => 1,
+        RuntimeHttpErrorAction::RetryProfile => 2,
+    };
+    let result = unsafe {
+        prodex_runtime_response_forwarding_attempt_v1(
+            i64::from(status),
+            class_tag,
+            action_tag,
+            i64::from(retryable_previous),
+            i64::from(token_invalidated),
+            i64::from(committed),
+        )
+    };
+    match result {
+        RESPONSE_FORWARDING_ATTEMPT_SUCCESS => RuntimeResponseForwardingAttemptPlan::Success {
+            note_auth_failure: false,
+        },
+        RESPONSE_FORWARDING_ATTEMPT_AUTH_FAILED => RuntimeResponseForwardingAttemptPlan::AuthFailed,
+        RESPONSE_FORWARDING_ATTEMPT_PROFILE_UNAVAILABLE => {
+            RuntimeResponseForwardingAttemptPlan::ProfileUnavailable
+        }
+        RESPONSE_FORWARDING_ATTEMPT_QUOTA_RETRY => RuntimeResponseForwardingAttemptPlan::QuotaRetry,
+        RESPONSE_FORWARDING_ATTEMPT_RATE_LIMITED => {
+            RuntimeResponseForwardingAttemptPlan::RateLimited
+        }
+        RESPONSE_FORWARDING_ATTEMPT_OVERLOADED => RuntimeResponseForwardingAttemptPlan::Overloaded,
+        RESPONSE_FORWARDING_ATTEMPT_PREVIOUS_RESPONSE_NOT_FOUND => {
+            RuntimeResponseForwardingAttemptPlan::PreviousResponseNotFound
+        }
+        RESPONSE_FORWARDING_ATTEMPT_AUTH_FAILURE_NOTICE => {
+            RuntimeResponseForwardingAttemptPlan::Success {
+                note_auth_failure: true,
+            }
+        }
+        _ => panic!("Mojo response-forwarding attempt planner returned invalid output: {result}"),
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeResponseForwardingBodyKind {
     Unary,
@@ -150,7 +310,7 @@ pub struct RuntimeSseForwardingCommitDetail {
 }
 
 pub fn should_skip_runtime_response_header(name: &str) -> bool {
-    response_forwarding_mojo_bool(0, Some(name), 0)
+    runtime_response_forwarding_header_action(name, None) != RESPONSE_FORWARDING_HEADER_FORWARD
 }
 
 pub fn runtime_forward_text_response_header(name: &str, value: &str) -> Option<(String, String)> {
@@ -168,11 +328,15 @@ pub fn runtime_forward_text_response_headers<'a>(
     headers: impl IntoIterator<Item = (&'a str, &'a str)>,
 ) -> Vec<(String, String)> {
     let headers = headers.into_iter().collect::<Vec<_>>();
-    let connection_headers = runtime_connection_header_tokens(headers.iter().copied());
+    let connection_values = headers
+        .iter()
+        .filter(|(name, _)| runtime_response_forwarding_header_is_connection(name))
+        .map(|(_, value)| value.as_bytes())
+        .collect::<Vec<_>>();
     headers
         .into_iter()
         .filter(|(name, _)| {
-            !runtime_header_name_matches_connection_token(name, &connection_headers)
+            !runtime_response_forwarding_header_is_connection_token(name, &connection_values)
         })
         .filter_map(|(name, value)| runtime_forward_text_response_header(name, value))
         .collect()
@@ -182,14 +346,15 @@ pub fn runtime_forward_binary_response_headers<'a>(
     headers: impl IntoIterator<Item = (&'a str, &'a [u8])>,
 ) -> Vec<(String, Vec<u8>)> {
     let headers = headers.into_iter().collect::<Vec<_>>();
-    let connection_headers =
-        runtime_connection_header_tokens(headers.iter().filter_map(|(name, value)| {
-            std::str::from_utf8(value).ok().map(|value| (*name, value))
-        }));
+    let connection_values = headers
+        .iter()
+        .filter(|(name, _)| runtime_response_forwarding_header_is_connection(name))
+        .map(|(_, value)| *value)
+        .collect::<Vec<_>>();
     headers
         .into_iter()
         .filter(|(name, _)| {
-            !runtime_header_name_matches_connection_token(name, &connection_headers)
+            !runtime_response_forwarding_header_is_connection_token(name, &connection_values)
         })
         .filter_map(|(name, value)| runtime_forward_binary_response_header(name, value))
         .collect()
@@ -199,8 +364,7 @@ pub fn runtime_response_content_type_from_binary_headers<'a>(
     headers: impl IntoIterator<Item = (&'a str, &'a [u8])>,
 ) -> Option<&'a str> {
     headers.into_iter().find_map(|(name, value)| {
-        ascii_casefold_equal_exact(name, "content-type")
-            .expect("Mojo response Content-Type comparison failed")
+        runtime_response_content_type_header_is_usable(name, value)
             .then(|| std::str::from_utf8(value).ok())
             .flatten()
             .map(str::trim)

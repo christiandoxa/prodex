@@ -48,6 +48,70 @@ fn response_header_classifier_rejects_invalid_utf8_at_abi_boundary() {
 }
 
 #[test]
+fn required_mojo_header_and_content_type_abis_fail_closed_on_malformed_input() {
+    let malformed = [0xc3_u8, 0x28];
+    assert_eq!(
+        unsafe {
+            prodex_runtime_response_forwarding_header_v1(
+                malformed.as_ptr() as usize as u64,
+                malformed.len() as i64,
+                0,
+                0,
+                0,
+            )
+        },
+        -1
+    );
+    assert_eq!(
+        unsafe {
+            prodex_runtime_response_forwarding_content_type_v1(
+                b"Content-Type".as_ptr() as usize as u64,
+                12,
+                malformed.as_ptr() as usize as u64,
+                malformed.len() as i64,
+            )
+        },
+        0
+    );
+    assert_eq!(
+        unsafe {
+            prodex_runtime_response_forwarding_header_v1(
+                b"x-local-hop".as_ptr() as usize as u64,
+                b"x-local-hop".len() as i64,
+                b"keep-alive, X-LOCAL-HOP".as_ptr() as usize as u64,
+                b"keep-alive, X-LOCAL-HOP".len() as i64,
+                1,
+            )
+        },
+        2
+    );
+    assert_eq!(
+        unsafe {
+            prodex_runtime_response_forwarding_header_v1(
+                b" Content-Length ".as_ptr() as usize as u64,
+                b" Content-Length ".len() as i64,
+                0,
+                0,
+                0,
+            )
+        },
+        1
+    );
+}
+
+#[test]
+fn required_mojo_attempt_abi_rejects_invalid_tags() {
+    assert_eq!(
+        unsafe { prodex_runtime_response_forwarding_attempt_v1(200, 6, 0, 0, 0, 0) },
+        -1
+    );
+    assert_eq!(
+        unsafe { prodex_runtime_response_forwarding_attempt_v1(200, 0, 0, 0, 0, 2) },
+        -1
+    );
+}
+
+#[test]
 fn sse_content_type_expected_values_and_body_boundary() {
     for (content_type, expected) in [
         (None, false),

@@ -94,6 +94,53 @@ fn models_response_without_removed_model_is_forwarded_unchanged() {
     );
 }
 
+#[test]
+fn buffered_runtime_proxy_response_keeps_transparency_after_header_filtering() {
+    let filtered = runtime_forward_text_response_headers([
+        ("Connection", "X-Local-Hop"),
+        ("X-Local-Hop", "strip-me"),
+        ("X-Keep", "keep-me"),
+    ]);
+    assert_eq!(
+        filtered,
+        vec![("X-Keep".to_string(), "keep-me".to_string())]
+    );
+
+    let server = TinyServer::http("127.0.0.1:0").expect("header test server should bind");
+    let address = server
+        .server_addr()
+        .to_ip()
+        .expect("header test server should expose an address");
+    let server_thread = thread::spawn(move || {
+        let request = server.recv().expect("header request should arrive");
+        let response = TinyResponse::from_string("ok")
+            .with_header(TinyHeader::from_bytes("X-Keep", "keep-me").unwrap());
+        request
+            .respond(response)
+            .expect("header response should send");
+    });
+
+    let runtime = TokioRuntimeBuilder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("header test runtime should build");
+    let response = runtime
+        .block_on(reqwest::get(format!("http://{address}/headers")))
+        .expect("header response should be received");
+    let response = runtime
+        .block_on(forward_runtime_proxy_response(response, Vec::new()))
+        .expect("header response should forward");
+    server_thread.join().expect("header server should finish");
+
+    let mut bytes = Vec::new();
+    response
+        .raw_print(&mut bytes, (1, 0).into(), &[], false, None)
+        .expect("header response should serialize");
+    let rendered = String::from_utf8(bytes).expect("header response should be UTF-8");
+    assert!(rendered.to_ascii_lowercase().contains("x-keep: keep-me"));
+    assert!(rendered.ends_with("ok"));
+}
+
 fn test_runtime_streaming_shared(log_path: PathBuf) -> RuntimeRotationProxyShared {
     let root = env::temp_dir().join(format!(
         "prodex-response-forwarding-test-{}",
