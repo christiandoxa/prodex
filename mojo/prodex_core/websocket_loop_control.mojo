@@ -67,10 +67,8 @@ def prodex_runtime_websocket_precommit_exhausted_v1(
             output[] = 0
         return 0
 
-    if fields[unsafe_offset=9] == 0:
-        return 1
-    if fields[unsafe_offset=1] >= fields[unsafe_offset=9]:
-        output[] = 1
-    else:
-        output[] = 0
+    # After at least one recovery sweep, the canonical attempt limit governs.
+    # A zero limit is exhausted immediately. Compare attempts, not the
+    # boolean time-budget flag; the latter is an independent early-phase fact.
+    output[] = 1 if fields[unsafe_offset=2] >= fields[unsafe_offset=9] else 0
     return 0
