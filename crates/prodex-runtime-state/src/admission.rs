@@ -106,11 +106,13 @@ pub struct RuntimeProxyAdmissionAcquired {
 fn release_counter(counter: &AtomicUsize) -> bool {
     loop {
         let current = counter.load(Ordering::SeqCst);
-        if current == 0 {
+        let plan = prodex_mojo_core::runtime_state::admission_release_plan(current)
+            .expect("Mojo admission release planner returned invalid output");
+        if plan.underflow {
             return true;
         }
         if counter
-            .compare_exchange(current, current - 1, Ordering::SeqCst, Ordering::SeqCst)
+            .compare_exchange(current, plan.next, Ordering::SeqCst, Ordering::SeqCst)
             .is_ok()
         {
             return false;

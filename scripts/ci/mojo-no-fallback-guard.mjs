@@ -89,6 +89,7 @@ const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_po
 const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-runtime-state/src/admission.rs",
   "crates/prodex-app/src/runtime_proxy/response_forwarding.rs",
   "crates/prodex-app/src/runtime_proxy/responses/attempt/bound_overload.rs",
   "crates/prodex-mojo-core/src/runtime/bound_overload.rs",
@@ -2173,6 +2174,18 @@ export function findViolations(files) {
     return violations;
   });
   const runtimeStateBackgroundViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-state/src/admission.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::runtime_state::admission_release_plan(current)",
+        ".compare_exchange(current, plan.next,",
+      ];
+      const missing = required.filter((value) => !production.includes(value));
+      if (production.includes(".compare_exchange(current, current - 1,")) {
+        missing.push("duplicate Rust decrement on admission permit release");
+      }
+      return missing.map((value) => `${filePath}: admission release must remain Mojo-owned (${value})`);
+    }
     if (filePath === "crates/prodex-runtime-proxy/src/admission.rs") {
       const required = [
         "prodex_mojo_core::runtime_state::runtime_proxy_admission_policy(",
@@ -2228,7 +2241,8 @@ export function findViolations(files) {
       return violations;
     }
     if (filePath === RUNTIME_STATE_BACKGROUND_ADAPTER_FILE) {
-      return contents.includes("prodex_runtime_state_mutation_reason_v1(") &&
+      return contents.includes("pub fn admission_release_plan(") &&
+          contents.includes("prodex_runtime_state_mutation_reason_v1(") &&
           contents.includes("prodex_runtime_proxy_admission_policy_v1(") &&
           contents.includes("pub fn runtime_proxy_admission_policy(") &&
           contents.includes("pub fn sections_union(") &&
@@ -2236,7 +2250,8 @@ export function findViolations(files) {
         ? [] : [`${filePath}: runtime-state policy adapters must retain their versioned Mojo ABIs`];
     }
     if (filePath === RUNTIME_STATE_BACKGROUND_MOJO_FILE) {
-      return contents.includes('@export("prodex_runtime_state_mutation_reason_v1")') &&
+      return contents.includes("if mode == MODE_ADMISSION_RELEASE:") &&
+          contents.includes('@export("prodex_runtime_state_mutation_reason_v1")') &&
           contents.includes('@export("prodex_runtime_proxy_admission_policy_v1")') &&
           contents.includes("def runtime_state_sections_union(") &&
           contents.includes("def runtime_state_put_mutation_label(") &&

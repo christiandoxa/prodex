@@ -890,6 +890,37 @@ fn runtime_proxy_admission_permit_releases_global_and_lane_capacity() {
 }
 
 #[test]
+fn runtime_proxy_admission_release_records_underflow_without_wrapping() {
+    let admission = RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
+        responses: 1,
+        compact: 1,
+        websocket: 1,
+        standard: 1,
+    });
+    let active = Arc::new(AtomicUsize::new(0));
+    let acquired = admission
+        .try_acquire(Arc::clone(&active), 2, RuntimeRouteKind::Responses, false)
+        .expect("admission permit must be granted");
+    assert_eq!(active.load(Ordering::SeqCst), 1);
+    active.store(0, Ordering::SeqCst); // simulate counter reset before release
+    drop(acquired.permit);
+    assert_eq!(active.load(Ordering::SeqCst), 0);
+    assert_eq!(admission.active_request_release_underflows_total(), 1);
+    assert_eq!(
+        admission
+            .active_counter(RuntimeRouteKind::Responses)
+            .load(Ordering::SeqCst),
+        0
+    );
+    assert_eq!(
+        admission
+            .release_underflows_total_counter(RuntimeRouteKind::Responses)
+            .load(Ordering::Relaxed),
+        0
+    );
+}
+
+#[test]
 fn runtime_proxy_admission_bypasses_only_lane_limit() {
     let admission = RuntimeProxyLaneAdmission::new(RuntimeProxyLaneLimits {
         responses: 1,
