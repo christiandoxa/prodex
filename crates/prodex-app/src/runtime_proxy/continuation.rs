@@ -2,6 +2,14 @@ use super::*;
 
 pub(crate) use prodex_runtime_store::RuntimeContinuationBindingKind;
 
+#[cfg(test)]
+static RUNTIME_COMPACT_FOLLOWUP_MOJO_CALLS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
+pub(crate) fn runtime_compact_followup_mojo_confirmed_calls() -> usize {
+    RUNTIME_COMPACT_FOLLOWUP_MOJO_CALLS.load(Ordering::Relaxed)
+}
+
 pub(crate) fn runtime_binding_touch_should_persist(bound_at: i64, now: i64) -> bool {
     prodex_runtime_store::runtime_binding_touch_should_persist(
         bound_at,
@@ -138,32 +146,39 @@ pub(crate) fn runtime_turn_state_is_dead_recovery_token(
     .is_some_and(runtime_continuation_status_is_terminal))
 }
 
-pub(crate) fn runtime_continuation_status_recently_suspect(
-    statuses: &RuntimeContinuationStatuses,
-    kind: RuntimeContinuationBindingKind,
-    key: &str,
-    now: i64,
-) -> bool {
-    prodex_runtime_store::runtime_continuation_status_recently_suspect(
-        runtime_continuation_status_map(statuses, kind).get(key),
-        now,
-        runtime_continuation_policy(),
-    )
-}
-
-pub(crate) fn runtime_dead_continuation_status_shadowed_by_live_binding(
+fn runtime_compact_followup_policy(
     status: Option<&RuntimeContinuationBindingStatus>,
-    binding: Option<&ResponseProfileBinding>,
-) -> bool {
-    matches!(
-        (binding, status),
-        (Some(binding), Some(status))
-            if runtime_continuation_status_is_terminal(status)
-                && prodex_runtime_store::runtime_continuation_dead_status_shadowed_by_binding(
-                    binding,
-                    status,
-                )
-    )
+    binding_present: bool,
+    binding_conflict: bool,
+    binding_bound_at: i64,
+    now: i64,
+) -> prodex_mojo_core::runtime::RuntimeContinuationFollowupPlan {
+    let default = RuntimeContinuationBindingStatus::default();
+    let status_present = status.is_some();
+    let status = status.unwrap_or(&default);
+    let plan = prodex_mojo_core::runtime::runtime_continuation_compact_followup_plan(
+        prodex_mojo_core::runtime::RuntimeContinuationFollowupInput {
+            status_present,
+            state: status.state as i64,
+            confidence: status.confidence,
+            last_touched_at: status.last_touched_at,
+            last_verified_at: status.last_verified_at,
+            last_not_found_at: status.last_not_found_at,
+            not_found_streak: status.not_found_streak,
+            failure_count: status.failure_count,
+            binding_present,
+            binding_conflict,
+            binding_bound_at,
+            now,
+            verified_stale_seconds: RUNTIME_CONTINUATION_VERIFIED_STALE_SECONDS,
+            suspect_grace_seconds: RUNTIME_CONTINUATION_SUSPECT_GRACE_SECONDS,
+            suspect_not_found_streak_limit: RUNTIME_CONTINUATION_SUSPECT_NOT_FOUND_STREAK_LIMIT,
+            touch_persist_interval_seconds: RUNTIME_BINDING_TOUCH_PERSIST_INTERVAL_SECONDS,
+        },
+    );
+    #[cfg(test)]
+    RUNTIME_COMPACT_FOLLOWUP_MOJO_CALLS.fetch_add(1, Ordering::Relaxed);
+    plan.expect("Mojo compact continuation policy rejected valid runtime state")
 }
 
 pub(crate) fn runtime_touch_compact_lineage_binding(
@@ -184,75 +199,13 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
     } else {
         runtime.turn_state_bindings.contains_key(key)
     };
-    if runtime_compact_lineage_status_is_unusable(
-        shared,
-        runtime,
-        key,
-        status_kind,
-        session_binding,
-        now,
-    ) && !binding_present
-    {
-        return None;
-    }
-    let (profile_name, dead_shadowed_by_binding) =
-        match runtime_compact_binding_lookup(runtime, key, status_kind, session_binding, now) {
-            RuntimeCompactBindingLookup::Conflict => {
-                return Some(
-                    prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string(),
-                );
-            }
-            RuntimeCompactBindingLookup::Resolved {
-                profile_name,
-                dead_shadowed_by_binding,
-            } => (profile_name, dead_shadowed_by_binding),
-        };
-    if runtime_compact_lineage_status_is_dead(
-        shared,
-        &runtime.continuation_statuses,
-        key,
-        status_kind,
-        session_binding,
-        dead_shadowed_by_binding,
-    ) {
-        return None;
-    }
-    let persist_touch = runtime_touch_compact_profile_binding(
-        runtime,
-        key,
-        status_kind,
-        session_binding,
-        profile_name.as_deref(),
-        now,
-    );
-    if persist_touch {
-        schedule_runtime_binding_touch_save(shared, runtime, mutation);
-    }
-    profile_name
-}
-
-enum RuntimeCompactBindingLookup {
-    Conflict,
-    Resolved {
-        profile_name: Option<String>,
-        dead_shadowed_by_binding: bool,
-    },
-}
-
-fn runtime_compact_binding_lookup(
-    runtime: &RuntimeRotationState,
-    key: &str,
-    status_kind: RuntimeContinuationBindingKind,
-    session_binding: bool,
-    now: i64,
-) -> RuntimeCompactBindingLookup {
     let bindings = if session_binding {
         &runtime.session_id_bindings
     } else {
         &runtime.turn_state_bindings
     };
     let binding = bindings.get(key);
-    if binding.is_some_and(|binding| {
+    let binding_conflict = binding.is_some_and(|binding| {
         binding.profile_name == prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
             || !runtime.state.profiles.contains_key(&binding.profile_name)
             || runtime_profile_auth_failure_active_from_map(
@@ -260,17 +213,79 @@ fn runtime_compact_binding_lookup(
                 &binding.profile_name,
                 now,
             )
-    }) {
-        return RuntimeCompactBindingLookup::Conflict;
+    });
+    let status =
+        runtime_continuation_status_map(&runtime.continuation_statuses, status_kind).get(key);
+    let plan = runtime_compact_followup_policy(
+        status,
+        binding_present,
+        binding_conflict,
+        binding.map(|binding| binding.bound_at).unwrap_or(now),
+        now,
+    );
+    let affinity = if session_binding {
+        "compact_session"
+    } else {
+        "compact_turn_state"
+    };
+    if plan.status_stale {
+        let _ = runtime_age_stale_verified_continuation_status(
+            &mut runtime.continuation_statuses,
+            status_kind,
+            key,
+            now,
+        );
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=compact affinity={affinity} profile=- reason=continuation_stale key={key}"
+            ),
+        );
+        schedule_runtime_binding_touch_save(
+            shared,
+            runtime,
+            RuntimeStateMutation::ContinuationStale(key.to_string()),
+        );
     }
-    let binding =
-        binding.filter(|binding| runtime.state.profiles.contains_key(&binding.profile_name));
-    RuntimeCompactBindingLookup::Resolved {
-        profile_name: binding.map(|binding| binding.profile_name.clone()),
-        dead_shadowed_by_binding: runtime_dead_continuation_status_shadowed_by_live_binding(
-            runtime_continuation_status_map(&runtime.continuation_statuses, status_kind).get(key),
-            binding,
-        ),
+    if plan.recently_suspect {
+        runtime_proxy_log(
+            shared,
+            format!(
+                "selection_skip_affinity route=compact affinity={affinity} profile=- reason=continuation_recent_suspect key={key}"
+            ),
+        );
+    }
+    match plan.action {
+        prodex_mojo_core::runtime::RuntimeContinuationFollowupAction::Conflict => {
+            Some(prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string())
+        }
+        prodex_mojo_core::runtime::RuntimeContinuationFollowupAction::None => {
+            if plan.dead {
+                runtime_proxy_log(
+                    shared,
+                    format!(
+                        "selection_skip_affinity route=compact affinity={affinity} profile=- reason=continuation_dead key={key}"
+                    ),
+                );
+            }
+            None
+        }
+        prodex_mojo_core::runtime::RuntimeContinuationFollowupAction::Owner => {
+            let profile_name = binding.map(|binding| binding.profile_name.clone());
+            let persist_touch = runtime_touch_compact_profile_binding(
+                runtime,
+                key,
+                status_kind,
+                session_binding,
+                profile_name.as_deref(),
+                now,
+                plan.persist_touch,
+            );
+            if persist_touch {
+                schedule_runtime_binding_touch_save(shared, runtime, mutation);
+            }
+            profile_name
+        }
     }
 }
 
@@ -281,6 +296,7 @@ fn runtime_touch_compact_profile_binding(
     session_binding: bool,
     profile_name: Option<&str>,
     now: i64,
+    persist_touch: bool,
 ) -> bool {
     let bindings = if session_binding {
         &mut runtime.session_id_bindings
@@ -296,16 +312,9 @@ fn runtime_touch_compact_profile_binding(
     if binding.profile_name != profile_name {
         return false;
     }
-    let mut persist_touch = runtime_binding_touch_should_persist(binding.bound_at, now);
     if binding.bound_at < now {
         binding.bound_at = now;
     }
-    persist_touch = runtime_continuation_status_should_persist_touch(
-        &runtime.continuation_statuses,
-        status_kind,
-        key,
-        now,
-    ) || persist_touch;
     let _ = runtime_mark_continuation_status_touched(
         &mut runtime.continuation_statuses,
         status_kind,
@@ -313,84 +322,6 @@ fn runtime_touch_compact_profile_binding(
         now,
     );
     persist_touch
-}
-
-fn runtime_compact_lineage_status_is_unusable(
-    shared: &RuntimeRotationProxyShared,
-    runtime: &mut RuntimeRotationState,
-    key: &str,
-    status_kind: RuntimeContinuationBindingKind,
-    session_binding: bool,
-    now: i64,
-) -> bool {
-    let affinity = if session_binding {
-        "compact_session"
-    } else {
-        "compact_turn_state"
-    };
-    if runtime_age_stale_verified_continuation_status(
-        &mut runtime.continuation_statuses,
-        status_kind,
-        key,
-        now,
-    ) {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route=compact affinity={affinity} profile=- reason=continuation_stale key={key}"
-            ),
-        );
-        schedule_runtime_binding_touch_save(
-            shared,
-            runtime,
-            RuntimeStateMutation::ContinuationStale(key.to_string()),
-        );
-        return true;
-    }
-    if runtime_continuation_status_recently_suspect(
-        &runtime.continuation_statuses,
-        status_kind,
-        key,
-        now,
-    ) {
-        runtime_proxy_log(
-            shared,
-            format!(
-                "selection_skip_affinity route=compact affinity={affinity} profile=- reason=continuation_recent_suspect key={key}"
-            ),
-        );
-        return true;
-    }
-    false
-}
-
-fn runtime_compact_lineage_status_is_dead(
-    shared: &RuntimeRotationProxyShared,
-    statuses: &RuntimeContinuationStatuses,
-    key: &str,
-    status_kind: RuntimeContinuationBindingKind,
-    session_binding: bool,
-    dead_shadowed_by_binding: bool,
-) -> bool {
-    if !runtime_continuation_status_map(statuses, status_kind)
-        .get(key)
-        .is_some_and(runtime_continuation_status_is_terminal)
-        || dead_shadowed_by_binding
-    {
-        return false;
-    }
-    let affinity = if session_binding {
-        "compact_session"
-    } else {
-        "compact_turn_state"
-    };
-    runtime_proxy_log(
-        shared,
-        format!(
-            "selection_skip_affinity route=compact affinity={affinity} profile=- reason=continuation_dead key={key}"
-        ),
-    );
-    true
 }
 
 fn runtime_compact_followup_bound_profile_raw(

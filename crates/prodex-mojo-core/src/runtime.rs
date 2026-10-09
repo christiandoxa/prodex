@@ -6,6 +6,7 @@ mod bound_overload;
 pub use bound_overload::bound_overload_retry_delay;
 mod candidate_plan;
 mod compatibility_surface;
+mod continuation_followup;
 mod continuation_status;
 mod noncompact_loop;
 mod profile_health;
@@ -21,6 +22,10 @@ pub use auto_redeem::{
     auto_redeem_plan_self_test,
 };
 pub use compatibility_surface::compatibility_surface_plan;
+pub use continuation_followup::{
+    RuntimeContinuationFollowupAction, RuntimeContinuationFollowupInput,
+    RuntimeContinuationFollowupPlan, runtime_continuation_compact_followup_plan,
+};
 pub use continuation_status::{
     CONTINUATION_BINDING_RETENTION_KEY, CONTINUATION_BINDING_SHOULD_RETAIN, CONTINUATION_DEAD_PLAN,
     CONTINUATION_DEAD_SHADOWED, CONTINUATION_RECENTLY_SUSPECT, CONTINUATION_RETAIN_WITH_BINDING,
