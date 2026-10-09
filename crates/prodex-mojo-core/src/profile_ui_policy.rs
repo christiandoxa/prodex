@@ -107,7 +107,7 @@ pub fn value_color(label: &str, value: &str) -> Result<ProfileValueColor, MojoEr
 pub fn tui_height(rows: usize, terminal_height: u16) -> Result<u16, MojoError> {
     let value = nonnegative(call(
         OP_TUI_HEIGHT,
-        rows,
+        rows.min(i64::MAX as usize), // transport-bound only; Mojo owns height policy
         usize::from(terminal_height),
         "",
         "",

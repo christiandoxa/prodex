@@ -5,6 +5,7 @@ from rich_types import ProdexRichStringView
 
 comptime PROFILE_UI_ABI_VERSION: Int64 = 1
 comptime PROFILE_UI_INVALID: Int64 = 1
+comptime PROFILE_UI_MAX_INT64: Int64 = 9_223_372_036_854_775_807
 
 # Output color classes consumed by the host renderer.
 comptime PROFILE_UI_COLOR_RESET: Int64 = 0
@@ -139,7 +140,9 @@ def prodex_profile_ui_numeric_v1(
             return PROFILE_UI_INVALID
         output[unsafe_offset=0] = profile_value_color(label, value)
     elif operation == 4:  # bounded inline TUI height
-        var rows = max(input0 + 4, 4)
+        # An unbounded row count must not overflow before terminal clipping.
+        var rows = PROFILE_UI_MAX_INT64 if input0 > PROFILE_UI_MAX_INT64 - 4 else input0 + 4
+        rows = max(rows, 4)
         var terminal_height = input1 if input1 != 0 else 24
         output[unsafe_offset=0] = max(min(rows, terminal_height), 1)
     else:
