@@ -1355,7 +1355,18 @@
         "production_reachable": true,
         "role": "semantic",
         "operations": [
-          "status_command_presentation_policy"
+          "status_command_presentation_policy",
+          "doctor_presentation_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/info_render/doctor.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "doctor_presentation_policy"
         ]
       },
       {
@@ -6163,6 +6174,16 @@
       "baseline_state": "Rust selected the status profile and token history, derived resource chart values and quota runway, and formatted the fixed status field list",
       "final_state": "authoritative",
       "mojo_entry": "prodex_terminal_info_render_v1",
+      "mojo_operation_ids": {
+        "profile_filter": 20,
+        "token_plan": 21,
+        "runtime_profile": 22,
+        "runway": 23,
+        "fields": 24,
+        "resource_metrics": 25,
+        "resource_history": 26,
+        "quota_gauge": 27
+      },
       "mojo_abi_version": 1,
       "mojo_source": "mojo/prodex_core/info_render.mojo",
       "consumer": "crates/prodex-app/src/app_commands/status.rs",
@@ -6180,6 +6201,33 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "clock and log acquisition, host resource sampling, terminal layout/color mapping, and typed ABI input/output adaptation"
+    },
+    {
+      "name": "doctor_presentation_policy",
+      "domain": "cli/doctor",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust classified doctor field severity and selected visible rows while preserving hidden critical diagnostics",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_terminal_info_render_v1",
+      "mojo_operation_ids": {
+        "value_color": 28,
+        "viewport": 29
+      },
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/info_render.mojo",
+      "consumer": "crates/prodex-app/src/app_commands/doctor/render.rs",
+      "consumer_marker": "doctor_viewport_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/app_commands/doctor/render.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/app_commands/doctor/render.rs",
+      "rust_owner_before": "Doctor severity classification and terminal viewport visibility policy, including hidden critical-row preservation",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo policy tests and doctor caller tests cover severity precedence, zero-height output, row budgets, and hidden critical diagnostics",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "terminal width measurement, Ratatui style and line construction, and typed Mojo result mapping"
     },
     {
       "name": "sub_agent_config_validation_precedence",
@@ -7375,11 +7423,9 @@
     },
     {
       "file": "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
-      "symbol": "gemini_media_content_item_from_part; gemini_text_from_special_part; gemini_image_generation_call_item_from_part",
+      "symbol": "gemini_media_content_item_from_part",
       "operation": "gemini_response_media_projection",
       "previous_responsibility": "Gemini response media MIME inference, data-URL parsing, special-part text formatting, and image-generation item shaping",
-      "baseline_semantic_loc": 138,
-      "migrated_semantic_loc": 138,
       "final_state": "adapter-only",
       "rust_before": "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
       "rust_after": "Rust builds the borrowed Serde JSON tree and materializes the validated Mojo JSON result",
