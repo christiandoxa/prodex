@@ -3340,7 +3340,6 @@ def deepseek_put_response_usage(
                 writer, StringSlice(',"metadata":{')
             )
             or input.role_present != 1
-            or input.role.len == 0
             or not deepseek_put_json_string(writer, input.role)
             or not deepseek_put_literal(
                 writer, StringSlice(':{"prompt_cache_hit_tokens":')
