@@ -39,6 +39,8 @@ comptime INFO_RENDER_STATUS_FIELDS: Int64 = 24
 comptime INFO_RENDER_STATUS_RESOURCE_METRICS: Int64 = 25
 comptime INFO_RENDER_STATUS_RESOURCE_HISTORY: Int64 = 26
 comptime INFO_RENDER_STATUS_QUOTA_GAUGE: Int64 = 27
+comptime INFO_RENDER_DOCTOR_VALUE_COLOR: Int64 = 28
+comptime INFO_RENDER_DOCTOR_VIEWPORT: Int64 = 29
 comptime INFO_STATUS_HISTORY_LIMIT: Int64 = 64
 comptime INFO_STATUS_FIELD_COUNT: Int64 = 14
 
@@ -1456,6 +1458,99 @@ def info_render_runtime_quota_hint(
     )
 
 
+def info_doctor_ascii_lower(value: UInt8) -> UInt8:
+    if value >= 65 and value <= 90:
+        return value + 32
+    return value
+
+
+def info_doctor_contains(
+    view: ProdexRichStringView, needle: StringSlice, lowercase: Bool
+) -> Bool:
+    var needle_length = Int64(needle.byte_length())
+    if needle_length == 0:
+        return True
+    if view.len < UInt(needle_length):
+        return False
+    var source = rich_view_ptr(view)
+    var wanted = needle.unsafe_ptr()
+    var last_start = Int64(view.len) - needle_length
+    for start in range(last_start + 1):
+        var matches = True
+        for offset in range(needle_length):
+            var left = source[unsafe_offset=start + offset]
+            var right = wanted[unsafe_offset=offset]
+            if lowercase:
+                left = info_doctor_ascii_lower(left)
+                right = info_doctor_ascii_lower(right)
+            if left != right:
+                matches = False
+                break
+        if matches:
+            return True
+    return False
+
+
+def info_render_doctor_value_color(
+    writer: Pointer[mut=True, InfoRenderWriter, _], text_address: UInt
+) -> Bool:
+    var label = info_text(text_address, 2, 0)
+    var value = info_text(text_address, 2, 1)
+    if (
+        info_doctor_contains(value, StringSlice("error"), True)
+        or info_doctor_contains(value, StringSlice("missing"), True)
+        or info_doctor_contains(value, StringSlice("blocked"), True)
+        or info_doctor_contains(value, StringSlice("warning"), True)
+        or info_doctor_contains(value, StringSlice("orphan"), True)
+        or info_doctor_contains(value, StringSlice("critical"), True)
+        or info_doctor_contains(value, StringSlice("thin"), True)
+        or info_doctor_contains(value, StringSlice("degraded"), True)
+    ):
+        return info_put_u64(writer, UInt64(1))
+    if (
+        info_doctor_contains(value, StringSlice("ready"), True)
+        or info_doctor_contains(value, StringSlice("yes"), True)
+        or info_doctor_contains(value, StringSlice("exists"), True)
+    ):
+        return info_put_u64(writer, UInt64(2))
+    if (
+        info_doctor_contains(label, StringSlice("Runtime"), False)
+        or info_doctor_contains(label, StringSlice("Quota"), False)
+        or info_doctor_contains(label, StringSlice("Main"), False)
+    ):
+        return info_put_u64(writer, UInt64(3))
+    return info_put_u64(writer, UInt64(0))
+
+
+def info_render_doctor_viewport(
+    writer: Pointer[mut=True, InfoRenderWriter, _],
+    unsigned_address: UInt,
+) -> Bool:
+    var max_rows = info_unsigned(unsigned_address, 0, 0)
+    var line_count = info_unsigned(unsigned_address, 0, 1)
+    var visible = Int64(line_count)
+    var hidden: UInt64 = 0
+    var critical: Int64 = -1
+    if line_count > max_rows:
+        if max_rows == 0:
+            visible = 0
+            hidden = line_count
+        else:
+            visible = Int64(max_rows - 1)
+            hidden = line_count - UInt64(visible)
+            for index in range(visible, Int64(line_count)):
+                if info_unsigned(unsigned_address, 0, 2 + index) == 1:
+                    critical = index
+                    break
+    return (
+        info_put_i64(writer, visible)
+        and info_put_byte(writer, UInt8(44))
+        and info_put_u64(writer, hidden)
+        and info_put_byte(writer, UInt8(44))
+        and info_put_i64(writer, critical)
+    )
+
+
 @export("prodex_terminal_info_render_v1")
 def prodex_terminal_info_render_v1(
     abi_version: Int64,
@@ -1474,7 +1569,7 @@ def prodex_terminal_info_render_v1(
     if (
         abi_version != INFO_RENDER_ABI_VERSION
         or operation < INFO_RENDER_RELATIVE_DURATION
-        or operation > INFO_RENDER_STATUS_QUOTA_GAUGE
+        or operation > INFO_RENDER_DOCTOR_VIEWPORT
         or signed_count < 0
         or unsigned_count < 0
         or text_count < 0
@@ -1490,7 +1585,26 @@ def prodex_terminal_info_render_v1(
     var required_signed: Int64 = 0
     var required_unsigned: Int64 = 0
     var required_text: Int64 = 0
-    if operation == INFO_RENDER_STATUS_PROFILE_FILTER:
+    if operation == INFO_RENDER_DOCTOR_VALUE_COLOR:
+        if signed_count != 0 or unsigned_count != 0 or text_count != 2 or presence != 0:
+            return INFO_RENDER_INVALID
+        required_text = 2
+    elif operation == INFO_RENDER_DOCTOR_VIEWPORT:
+        if signed_count != 0 or text_count != 0 or presence != 0 or unsigned_count < 2:
+            return INFO_RENDER_INVALID
+        var line_count = info_unsigned(unsigned_address, unsigned_count, 1)
+        if (
+            line_count > UInt64(INT64_MAX)
+            or UInt64(unsigned_count - 2) != line_count
+        ):
+            return INFO_RENDER_INVALID
+        var index: Int64 = 2
+        while index < unsigned_count:
+            if info_unsigned(unsigned_address, unsigned_count, index) > 1:
+                return INFO_RENDER_INVALID
+            index += 1
+        required_unsigned = 2
+    elif operation == INFO_RENDER_STATUS_PROFILE_FILTER:
         if signed_count != 0 or text_count != 0:
             return INFO_RENDER_INVALID
         for index in range(unsigned_count):
@@ -1759,6 +1873,10 @@ def prodex_terminal_info_render_v1(
         ok = info_render_status_quota_gauge(
             Pointer(to=writer), signed_address, unsigned_address, text_address, presence
         )
+    elif operation == INFO_RENDER_DOCTOR_VALUE_COLOR:
+        ok = info_render_doctor_value_color(Pointer(to=writer), text_address)
+    elif operation == INFO_RENDER_DOCTOR_VIEWPORT:
+        ok = info_render_doctor_viewport(Pointer(to=writer), unsigned_address)
     else:
         ok = info_render_token_usage(
             Pointer(to=writer), unsigned_address, text_address, text_count
