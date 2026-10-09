@@ -144,6 +144,26 @@ fn runtime_proxy_http_invalid_previous_response_id_recovers_on_same_profile_once
     assert!(!trace.contains("resp-second"), "{trace}");
     assert!(!trace.contains("session-second"), "{trace}");
     assert!(!trace.contains("thread-second"), "{trace}");
+
+    let malformed = fixture.post_json(
+        "backend-api/codex/responses",
+        serde_json::json!({
+            "model": "gpt-5.6",
+            "previous_response_id": "resp-second",
+            "input": [{"type": "message", "role": "user", "content": "turn three"}],
+            "client_metadata": {"session_id": "session-second"},
+        }),
+    );
+    assert_eq!(malformed.status().as_u16(), 400);
+    assert!(malformed
+        .text()
+        .expect("malformed recovery response should decode")
+        .contains("Invalid `previous_response_id`."));
+    assert_eq!(
+        fixture.backend.responses_bodies().len(),
+        4,
+        "non-reconstructable history must not trigger a second full-history retry"
+    );
 }
 
 #[test]
