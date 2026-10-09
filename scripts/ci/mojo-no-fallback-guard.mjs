@@ -89,6 +89,7 @@ const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_po
 const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_proxy/lineage/release.rs",
   "crates/prodex-runtime-state/src/admission.rs",
   "crates/prodex-app/src/runtime_proxy/lineage/lookup.rs",
   "mojo/prodex_core/runtime_lineage.mojo",
@@ -5108,6 +5109,17 @@ export function findViolations(files) {
     return [];
   });
   const runtimeLineageViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_proxy/lineage/release.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::runtime_lineage::dead_turn_state_release_plan(",
+      ];
+      const missing = required.filter((marker) => !production.includes(marker));
+      if (production.includes("&& !surviving_turn_states.contains(turn_state.as_str())")) {
+        missing.push("restored Rust dead turn-state release policy");
+      }
+      return missing.map((marker) => `${filePath}: dead turn-state release must remain Mojo-owned (${marker})`);
+    }
     if (filePath === "crates/prodex-app/src/runtime_proxy/lineage/lookup.rs") {
       const production = contents.split("#[cfg(test)]", 1)[0];
       const required = [
@@ -5120,8 +5132,11 @@ export function findViolations(files) {
       return missing.map((marker) => `${filePath}: hard-binding identity fallback must use Mojo (${marker})`);
     }
     if (filePath === "mojo/prodex_core/runtime_lineage.mojo") {
-      return contents.includes('@export("prodex_runtime_lineage_identity_fallback_v1")')
-        ? [] : [`${filePath}: hard-binding identity fallback policy must remain Mojo-owned`];
+      return [
+        '@export("prodex_runtime_lineage_identity_fallback_v1")',
+        '@export("prodex_runtime_lineage_dead_turn_state_plan_v1")',
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: lineage identity and dead-turn-state policy must remain Mojo-owned (${marker})`);
     }
     if (filePath === LOCAL_REWRITE_UPSTREAM_FILE) {
       const body = contents.match(/pub\(super\) fn\s+candidate_allowed\([^]*?^\}/mu)?.[0];
@@ -5180,6 +5195,8 @@ export function findViolations(files) {
       const required = [
         "prodex_runtime_lineage_identity_fallback_v1(",
         "pub fn identity_fallback_plan(",
+        "prodex_runtime_lineage_dead_turn_state_plan_v1(",
+        "pub fn dead_turn_state_release_plan(",
         "prodex_runtime_lineage_classify_v1(",
         "prodex_runtime_lineage_build_v1(",
         "prodex_runtime_lineage_parts_v1(",
