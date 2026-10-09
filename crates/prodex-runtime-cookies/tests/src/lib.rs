@@ -327,3 +327,42 @@ fn cookie_jar_prunes_oldest_host_cookie_through_mojo_policy() {
     assert!(!merged.contains("cookie00=value"), "{merged}");
     assert!(merged.contains("cookie32=value"), "{merged}");
 }
+
+#[test]
+fn cookie_jar_prunes_globally_oldest_host_and_keeps_first_tie_break() {
+    for tied in [false, true] {
+        let mut jar = RuntimeProxyCookieJar::default();
+        let entries = jar.entries.get_mut().expect("isolated jar lock");
+        for index in 0..=RUNTIME_PROXY_COOKIE_MAX_HOSTS {
+            let host = format!("host{index:03}.chatgpt.com");
+            let cookie = RuntimeProxyCookieEntry {
+                name: "probe".to_string(),
+                value: "synthetic".to_string(),
+                path: "/".to_string(),
+                secure: true,
+                expires_at: None,
+                updated_at: UNIX_EPOCH + Duration::from_secs(if tied { 1 } else { index as u64 }),
+            };
+            entries.insert(
+                RuntimeProxyCookieKey {
+                    namespace: "".to_string(),
+                    profile_name: "alpha".to_string(),
+                    host,
+                },
+                BTreeMap::from([(
+                    RuntimeProxyCookieIdentity {
+                        name: "probe".to_string(),
+                        path: "/".to_string(),
+                    },
+                    cookie,
+                )]),
+            );
+        }
+        runtime_proxy_cookie_prune_global_locked(entries);
+        assert_eq!(entries.len(), RUNTIME_PROXY_COOKIE_MAX_HOSTS);
+        assert!(!entries.keys().any(|key| key.host == "host000.chatgpt.com"));
+        assert!(entries.keys().any(
+            |key| key.host == format!("host{:03}.chatgpt.com", RUNTIME_PROXY_COOKIE_MAX_HOSTS)
+        ));
+    }
+}
