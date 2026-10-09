@@ -591,6 +591,7 @@ fn handle_runtime_responses_attempt(
         RuntimeResponsesAttempt::Overloaded {
             profile_name,
             response,
+            ..
         } => {
             loop_state.record_overload_failure();
             handle_runtime_responses_overloaded_attempt(

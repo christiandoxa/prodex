@@ -24,6 +24,34 @@ pub(crate) struct RuntimeProxyBackendFaultStep {
 }
 
 impl RuntimeProxyBackendFaultStep {
+    pub(crate) fn with_sse_retry_after(mut self, seconds: u64) -> Self {
+        self.body = format!("data: {}\r\n\r\n", serde_json::json!({
+            "type": "response.failed",
+            "response": {"error": {"code": "server_is_overloaded", "message": "Server is overloaded",
+                "headers": {"retry-after": seconds.to_string()}}}
+        }));
+        self
+    }
+
+    pub(crate) fn after_visible_output(mut self) -> Self {
+        self.body = format!(
+            "data: {{\"type\":\"response.output_text.delta\",\"delta\":\"visible-before-error\"}}\r\n\r\n{}",
+            self.body,
+        );
+        self
+    }
+
+    pub(crate) fn with_response_turn_state(mut self, turn_state: &str) -> Self {
+        self.response_turn_state = Some(turn_state.to_string());
+        self
+    }
+
+    /// Reproduce upstream Responses streams with no MIME header at all.
+    pub(crate) fn without_content_type(mut self) -> Self {
+        self.content_type = "";
+        self
+    }
+
     pub(crate) fn success(route: RuntimeProxyBackendFaultRoute, account_id: &str) -> Self {
         Self {
             route,

@@ -220,6 +220,7 @@ fn http_responses_success_without_turn_state_keeps_compact_lineage_alive() {
                 RuntimeResponsesSuccessContext {
                     request_id: 1,
                     request_model_name: None,
+                    request_streaming: false,
                     request_previous_response_id: Some("resp-second"),
                     request_prompt_cache_key: None,
                     request_session_id: Some("sess-compact"),
@@ -477,6 +478,7 @@ fn http_responses_success_with_turn_state_releases_compact_lineage() {
                 RuntimeResponsesSuccessContext {
                     request_id: 1,
                     request_model_name: None,
+                    request_streaming: false,
                     request_previous_response_id: None,
                     request_prompt_cache_key: None,
                     request_session_id: Some("sess-compact"),

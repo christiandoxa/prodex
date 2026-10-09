@@ -2,6 +2,8 @@
 pub use crate::runtime_decisions::*;
 
 mod auto_redeem;
+mod bound_overload;
+pub use bound_overload::bound_overload_retry_delay;
 mod candidate_plan;
 mod compatibility_surface;
 mod continuation_status;

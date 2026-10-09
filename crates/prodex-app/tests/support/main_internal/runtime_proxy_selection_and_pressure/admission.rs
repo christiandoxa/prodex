@@ -26,6 +26,8 @@ mod quota_fallback;
 mod response_affinity;
 #[path = "admission/responses_overload_recovery.rs"]
 mod responses_overload_recovery;
+#[path = "admission/responses_missing_content_type.rs"]
+mod responses_missing_content_type;
 #[path = "admission/retired_spark.rs"]
 mod retired_spark;
 #[path = "admission/rotation_matrix.rs"]

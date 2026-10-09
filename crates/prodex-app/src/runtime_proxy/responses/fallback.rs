@@ -156,6 +156,7 @@ fn handle_runtime_responses_direct_attempt(
         RuntimeResponsesAttempt::Overloaded {
             profile_name,
             response,
+            ..
         } => handle_runtime_responses_direct_overloaded(
             fallback,
             affinity_state,

@@ -89,6 +89,10 @@ const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_po
 const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_proxy/response_forwarding.rs",
+  "crates/prodex-app/src/runtime_proxy/responses/attempt/bound_overload.rs",
+  "crates/prodex-mojo-core/src/runtime/bound_overload.rs",
+  "mojo/prodex_core/response_forwarding.mojo",
   PROFILE_LOGIN_FILE,
   PROFILE_LOGIN_LIFECYCLE_FILE,
   PROFILE_LOGIN_API_KEY_FILE,
@@ -1099,6 +1103,28 @@ const FORBIDDEN_MARKERS = [
 ];
 
 export function findViolations(files) {
+  const responsesCapacityRecoveryViolations = files.flatMap(([filePath, contents]) => {
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    if (filePath === "crates/prodex-app/src/runtime_proxy/response_forwarding.rs") {
+      return production.includes("runtime_responses_should_inspect_sse(response_content_type, request_streaming)")
+        ? [] : [`${filePath}: missing-header Responses framing must use the request-aware Mojo owner`];
+    }
+    if (filePath === "crates/prodex-app/src/runtime_proxy/responses/attempt/bound_overload.rs") {
+      const required = ["prodex_mojo_core::runtime::bound_overload_retry_delay(", "drop(inflight_guard.take())"];
+      return required.filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: bounded same-owner capacity recovery must retain ${marker}`);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime/bound_overload.rs") {
+      return production.includes("prodex_runtime_bound_overload_retry_v1(")
+        ? [] : [`${filePath}: bounded overload policy must retain the Mojo ABI`];
+    }
+    if (filePath === "mojo/prodex_core/response_forwarding.mojo") {
+      const required = ["if operation == RESPONSE_FORWARDING_RESPONSES_STREAM:", '@export("prodex_runtime_bound_overload_retry_v1")'];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: capacity recovery must remain Mojo-owned (${marker})`);
+    }
+    return [];
+  });
   const quotaWatchViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === QUOTA_WATCH_CALLER_FILE) {
       const production = contents.split("#[cfg(test)]", 1)[0];
@@ -5815,7 +5841,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -5888,6 +5914,11 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  assert.match(findViolations([["crates/prodex-app/src/runtime_proxy/response_forwarding.rs",
+    "let is_sse = runtime_response_content_type_is_sse(response_content_type);"]]).join("\n"),
+    /missing-header Responses framing/u);
+  assert.match(findViolations([["crates/prodex-app/src/runtime_proxy/responses/attempt/bound_overload.rs",
+    "fn retry_in_rust() {}"]]).join("\n"), /same-owner capacity recovery/u);
   assert.deepEqual(findViolations([["x.rs", "fn main() {}"]]), []);
   assert.equal(findViolations([["x.rs", "prodex_mojo_fallback();"]]).length, 1);
   const profileLoginConsumer = [
