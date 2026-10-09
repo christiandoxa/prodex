@@ -125,8 +125,7 @@ pub(super) fn is_kiro_import_source(path: &Path) -> bool {
     path.components().count() == 1
         && path.to_str().is_some_and(|value| {
             profile_import_source_class(value)
-                .expect("profile import source classifier should accept Rust strings")
-                == Some(ProfileImportSourceClass::Kiro)
+                .is_ok_and(|source| source == Some(ProfileImportSourceClass::Kiro))
         })
         && !path.exists()
 }
@@ -429,6 +428,39 @@ mod tests {
         let error = parse_kiro_model_catalog_text(&text).unwrap_err();
 
         assert!(error.to_string().contains("hard limit of 1024 entries"));
+    }
+
+    #[test]
+    fn kiro_model_catalog_production_adapter_rejects_malformed_and_empty_data() {
+        assert!(parse_kiro_model_catalog_text("{").is_err());
+        for value in [
+            serde_json::json!({}),
+            serde_json::json!({"models": []}),
+            serde_json::json!({"models": [{"id": "  \u{2003}"}]}),
+        ] {
+            assert!(parse_kiro_model_catalog_text(&value.to_string()).is_err());
+        }
+    }
+
+    #[test]
+    fn kiro_model_catalog_production_adapter_preserves_unicode_and_first_duplicate() {
+        let models = parse_kiro_model_catalog_text(
+            &serde_json::json!({
+                "models": [
+                    {"id": "  雪-model  ", "name": "  日本語  "},
+                    {"modelId": "雪-MODEL", "name": "duplicate"},
+                    {"slug": "third"}
+                ]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let ids = models
+            .iter()
+            .filter_map(|model| model.get("id").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["雪-model", "third"]);
+        assert_eq!(models[0]["name"], "日本語");
     }
 
     #[test]

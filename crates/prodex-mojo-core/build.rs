@@ -478,6 +478,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/policy_validation.mojo");
         sources.push("../../mojo/prodex_core/governance_inspection.mojo");
         sources.push("../../mojo/prodex_core/profile_identity.mojo");
+        sources.push("../../mojo/prodex_core/kiro_import_policy.mojo");
         sources.push("../../mojo/prodex_core/profile_ui_policy.mojo");
         sources.push("../../mojo/prodex_core/secret_policy.mojo");
         sources.push("../../mojo/prodex_core/sub_agent_policy.mojo");

@@ -4,6 +4,8 @@ use super::{
 };
 use anyhow::{Context, Result, bail};
 use chrono::{DateTime, FixedOffset};
+use prodex_mojo_core::kiro_import_policy::{KiroAuthStoreAction, kiro_auth_store_action};
+use prodex_mojo_core::profile_identity::is_trimmed_nonempty;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -52,11 +54,31 @@ pub(crate) fn prepare_kiro_cli_data_dir(codex_home: &Path) -> Result<(PathBuf, K
     if let Some(stored_auth) = stored_auth {
         let _: Value = serde_json::from_str(&stored_auth)
             .context("failed to parse persisted Kiro auth JSON")?;
-        if kiro_auth_expiry(&secret.auth_json) > kiro_auth_expiry(&stored_auth) {
-            write_kiro_cli_data_dir(&data_dir, &secret)?;
-        } else if secret.auth_json != stored_auth {
-            secret.auth_json = stored_auth;
-            write_kiro_auth_secret(codex_home, &secret)?;
+        let incoming_expiry = kiro_auth_expiry(&secret.auth_json);
+        let stored_expiry = kiro_auth_expiry(&stored_auth);
+        let incoming_is_newer = match (incoming_expiry.as_ref(), stored_expiry.as_ref()) {
+            (Some(incoming), Some(stored)) => incoming > stored,
+            (Some(_), None) => true,
+            _ => false,
+        };
+        match kiro_auth_store_action(
+            incoming_expiry.is_some(),
+            true,
+            stored_expiry.is_some(),
+            incoming_is_newer,
+        )
+        .map_err(|error| anyhow::anyhow!("Mojo Kiro auth-store decision failed: {error:?}"))?
+        {
+            KiroAuthStoreAction::UseIncoming => {
+                if secret.auth_json != stored_auth {
+                    write_kiro_cli_data_dir(&data_dir, &secret)?;
+                }
+            }
+            KiroAuthStoreAction::UseStored if secret.auth_json != stored_auth => {
+                secret.auth_json = stored_auth;
+                write_kiro_auth_secret(codex_home, &secret)?;
+            }
+            KiroAuthStoreAction::UseStored => {}
         }
     } else {
         write_kiro_cli_data_dir(&data_dir, &secret)?;
@@ -205,22 +227,22 @@ fn ensure_private_kiro_data_dir(data_dir: &Path) -> Result<()> {
 }
 
 fn kiro_profile_state_json(secret: &KiroAuthSecret) -> Result<Option<String>> {
-    let Some(arn) = secret
-        .profile_arn
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
+    let Some(arn) = secret.profile_arn.as_deref() else {
         return Ok(None);
     };
-    let Some(profile_name) = secret
-        .profile_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    else {
+    let Some(profile_name) = secret.profile_name.as_deref() else {
         return Ok(None);
     };
+    if !is_trimmed_nonempty(arn)
+        .map_err(|error| anyhow::anyhow!("Mojo Kiro ARN presence check failed: {error:?}"))?
+        || !is_trimmed_nonempty(profile_name).map_err(|error| {
+            anyhow::anyhow!("Mojo Kiro profile-name presence check failed: {error:?}")
+        })?
+    {
+        return Ok(None);
+    }
+    let arn = arn.trim();
+    let profile_name = profile_name.trim();
     serde_json::to_string(&serde_json::json!({
         "arn": arn,
         "profile_name": profile_name,
@@ -231,7 +253,16 @@ fn kiro_profile_state_json(secret: &KiroAuthSecret) -> Result<Option<String>> {
 }
 
 fn write_kiro_state_entry(connection: &Connection, key: &str, value: Option<&str>) -> Result<()> {
-    if let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) {
+    let present = value
+        .map(is_trimmed_nonempty)
+        .transpose()
+        .map_err(|error| anyhow::anyhow!("Mojo Kiro state presence check failed: {error:?}"))?
+        .unwrap_or(false);
+    if present {
+        let Some(value) = value else {
+            bail!("Mojo Kiro state presence disagreed with its value");
+        };
+        let value = value.trim();
         connection.execute(
             "INSERT OR REPLACE INTO state(key, value) VALUES(?1, ?2)",
             params![key, value],
