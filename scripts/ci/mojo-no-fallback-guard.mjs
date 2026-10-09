@@ -31,6 +31,7 @@ const GOVERNANCE_INSPECTION_MOJO_FILE = "mojo/prodex_core/governance_inspection.
 const GOVERNANCE_INSPECTION_TEST_FILE = "crates/prodex-domain/tests/governance_inspection.rs";
 const CLI_DEFAULT_RUN_CONSUMER_FILE = "crates/prodex-cli/src/lib.rs";
 const CLI_DEFAULT_RUN_ABI_FILE = "crates/prodex-mojo-core/src/launch.rs";
+const CLI_DEFAULT_RUN_ADAPTER_FILE = "crates/prodex-mojo-core/src/launch/menu_policy.rs";
 const CLI_DEFAULT_RUN_MOJO_FILE = "mojo/prodex_core/launch_args.mojo";
 const CLI_DEFAULT_RUN_ABI_TEST_FILE = "crates/prodex-mojo-core/tests/launch_args.rs";
 const CLI_DEFAULT_RUN_CALLER_TEST_FILE = "crates/prodex-cli/tests/src/shortcuts.rs";
@@ -200,6 +201,7 @@ const PROMOTED_FILES = [
   DOCTOR_RENDER_MOJO_FILE,
   CLI_DEFAULT_RUN_CONSUMER_FILE,
   CLI_DEFAULT_RUN_ABI_FILE,
+  CLI_DEFAULT_RUN_ADAPTER_FILE,
   CLI_DEFAULT_RUN_MOJO_FILE,
   CLI_DEFAULT_RUN_ABI_TEST_FILE,
   CLI_DEFAULT_RUN_CALLER_TEST_FILE,
@@ -4255,7 +4257,15 @@ export function findViolations(files) {
     }
     if (filePath === CLI_DEFAULT_RUN_ABI_FILE &&
         (!contents.includes("const CLI_DEFAULT_RUN: i64 = 13;") ||
-          !contents.includes("pub fn default_cli_invocation_to_run(") ||
+          !contents.includes("mod menu_policy;") ||
+          !contents.includes("pub use menu_policy::{") ||
+          !contents.includes("default_cli_invocation_to_run") ||
+          !contents.includes("prodex_mojo_launch_args_v1("))) {
+      return [`${filePath}: CLI default-run adapter must retain launch Mojo operation 13`];
+    }
+    if (filePath === CLI_DEFAULT_RUN_ADAPTER_FILE &&
+        (!contents.includes("pub fn default_cli_invocation_to_run(") ||
+          !contents.includes("CLI_DEFAULT_RUN,") ||
           !contents.includes("prodex_mojo_launch_args_v1("))) {
       return [`${filePath}: CLI default-run adapter must retain launch Mojo operation 13`];
     }
@@ -6798,6 +6808,8 @@ function selfTest() {
     "fn parse_cli_command_from() {}\n"]]).join("\n"),
   /CLI default-run decision must use the Mojo launch-arguments policy/u);
   assert.match(findViolations([[CLI_DEFAULT_RUN_ABI_FILE, "fn default_cli_invocation_to_run() {}"]]).join("\n"),
+  /CLI default-run adapter must retain launch Mojo operation 13/u);
+  assert.match(findViolations([[CLI_DEFAULT_RUN_ADAPTER_FILE, "pub fn default_cli_invocation_to_run() { true }"]]).join("\n"),
   /CLI default-run adapter must retain launch Mojo operation 13/u);
   assert.match(findViolations([[CLI_DEFAULT_RUN_MOJO_FILE, "def launch_cli_default_run_policy(): pass"]]).join("\n"),
   /CLI default-run classification must remain in the launch-arguments Mojo kernel/u);
