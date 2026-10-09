@@ -511,6 +511,42 @@ mod tests {
     }
 
     #[test]
+    fn usage_snapshot_retention_matches_saturating_boundary_contract() {
+        let boundary = [
+            i64::MIN,
+            i64::MIN + 1,
+            -1000,
+            -1,
+            0,
+            1,
+            120,
+            i64::MAX - 1,
+            i64::MAX,
+        ];
+        for profile_present in [false, true] {
+            for &now in &boundary {
+                for &checked_at in &boundary {
+                    for &retention_seconds in &boundary {
+                        let expected =
+                            profile_present && checked_at >= now.saturating_sub(retention_seconds);
+                        let actual = usage_snapshot_should_retain(
+                            profile_present,
+                            checked_at,
+                            now,
+                            retention_seconds,
+                        )
+                        .expect("Mojo retention policy must produce a boolean");
+                        assert_eq!(
+                            actual, expected,
+                            "profile_present={profile_present}, now={now}, checked_at={checked_at}, retention_seconds={retention_seconds}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
     fn runtime_state_quota_kernel_smoke() {
         assert!(timestamp_touch_should_persist(0, 11, 10).unwrap());
         assert!(usage_snapshot_should_retain(true, 130, 250, 120).unwrap());
