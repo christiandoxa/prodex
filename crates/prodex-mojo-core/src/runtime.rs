@@ -85,7 +85,8 @@ pub use selection_planning::{
     websocket_quota_fallback_plan, websocket_response_plan, websocket_transport_failure_plan,
 };
 pub use websocket_loop_control::{
-    WebsocketPrecommitBudgetInput, websocket_precommit_budget_exhausted,
+    WebsocketErrorKind, WebsocketPrecommitBudgetInput, WebsocketReadAction, WebsocketReadFrame,
+    websocket_local_disconnect, websocket_precommit_budget_exhausted, websocket_read_action,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

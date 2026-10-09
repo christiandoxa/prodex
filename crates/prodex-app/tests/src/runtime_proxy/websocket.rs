@@ -64,6 +64,44 @@ pub(super) fn websocket_test_local_pair() -> (RuntimeLocalWebSocket, RuntimeUpst
     (local_socket, client_socket)
 }
 
+#[test]
+fn websocket_session_read_loop_reaches_mojo_frame_policy() {
+    let _guard = acquire_test_runtime_lock();
+    let (mut local_socket, mut client_socket) = websocket_test_local_pair();
+    let shared = websocket_test_shared("read-loop-mojo");
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let worker = thread::spawn(move || {
+        run_runtime_proxy_websocket_session(
+            1,
+            &mut local_socket,
+            &handshake_request,
+            &shared,
+            false,
+        )
+    });
+
+    client_socket
+        .send(WsMessage::Ping("mojo-ping".into()))
+        .expect("client ping should send");
+    assert!(matches!(
+        client_socket.read().expect("client pong should arrive"),
+        WsMessage::Pong(payload) if payload.as_ref() == b"mojo-ping"
+    ));
+    client_socket
+        .send(WsMessage::Close(None))
+        .expect("client close should send");
+
+    worker
+        .join()
+        .expect("websocket read-loop worker should join")
+        .expect("websocket read-loop should classify ping and close successfully");
+}
+
 pub(super) fn websocket_test_shared(name: &str) -> RuntimeRotationProxyShared {
     let root = std::env::temp_dir().join(format!("prodex-websocket-{name}-{}", std::process::id()));
     let paths = AppPaths {

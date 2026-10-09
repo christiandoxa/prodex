@@ -1,5 +1,9 @@
 use super::*;
 use prodex_mojo_core::rich::ascii_casefold_equal_exact;
+use prodex_mojo_core::runtime::{
+    WebsocketErrorKind, WebsocketReadAction, WebsocketReadFrame, websocket_local_disconnect,
+    websocket_read_action,
+};
 use redaction::redaction_redact_secret_like_text;
 mod connect;
 mod response_tracking;
@@ -38,19 +42,32 @@ pub(super) fn runtime_websocket_error_log_value(error: &str) -> String {
 }
 
 fn runtime_websocket_local_disconnect_error(error: &WsError) -> bool {
-    match error {
-        WsError::ConnectionClosed | WsError::AlreadyClosed => true,
-        WsError::Io(error) => matches!(
-            error.kind(),
-            io::ErrorKind::BrokenPipe
-                | io::ErrorKind::ConnectionAborted
-                | io::ErrorKind::ConnectionReset
-                | io::ErrorKind::NotConnected
-                | io::ErrorKind::UnexpectedEof
-        ),
-        WsError::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake) => true,
-        _ => false,
-    }
+    let kind = match error {
+        WsError::ConnectionClosed => WebsocketErrorKind::ConnectionClosed,
+        WsError::AlreadyClosed => WebsocketErrorKind::AlreadyClosed,
+        WsError::Io(error) => match error.kind() {
+            io::ErrorKind::BrokenPipe => WebsocketErrorKind::BrokenPipe,
+            io::ErrorKind::ConnectionAborted => WebsocketErrorKind::ConnectionAborted,
+            io::ErrorKind::ConnectionReset => WebsocketErrorKind::ConnectionReset,
+            io::ErrorKind::NotConnected => WebsocketErrorKind::NotConnected,
+            io::ErrorKind::UnexpectedEof => WebsocketErrorKind::UnexpectedEof,
+            _ => WebsocketErrorKind::Other,
+        },
+        WsError::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake) => {
+            WebsocketErrorKind::ResetWithoutClosingHandshake
+        }
+        _ => WebsocketErrorKind::Other,
+    };
+    websocket_local_disconnect(kind).expect("Mojo websocket disconnect classification failed")
+}
+
+fn runtime_websocket_read_action(
+    frame: WebsocketReadFrame,
+    realtime_duplex: bool,
+    has_socket: bool,
+) -> Result<WebsocketReadAction> {
+    websocket_read_action(frame, realtime_duplex, has_socket)
+        .map_err(|error| anyhow::anyhow!("Mojo websocket read action failed: {error:?}"))
 }
 
 enum RuntimeWebsocketSessionReadAction {
@@ -111,25 +128,54 @@ fn handle_runtime_proxy_websocket_read(
                 "invalid_request_error",
                 "Binary websocket messages are not supported by the runtime auto-rotate proxy.",
             )?;
-            Ok(RuntimeWebsocketSessionReadAction::Continue)
+            match runtime_websocket_read_action(WebsocketReadFrame::Binary, false, false)? {
+                WebsocketReadAction::Continue => Ok(RuntimeWebsocketSessionReadAction::Continue),
+                action => Err(anyhow::anyhow!(
+                    "unexpected Mojo websocket binary-frame action: {action:?}"
+                )),
+            }
         }
         Ok(WsMessage::Ping(payload)) => {
             local_socket
                 .send(WsMessage::Pong(payload))
                 .context("failed to respond to runtime websocket ping")?;
-            Ok(RuntimeWebsocketSessionReadAction::Continue)
+            match runtime_websocket_read_action(WebsocketReadFrame::Ping, false, false)? {
+                WebsocketReadAction::Continue => Ok(RuntimeWebsocketSessionReadAction::Continue),
+                action => Err(anyhow::anyhow!(
+                    "unexpected Mojo websocket ping-frame action: {action:?}"
+                )),
+            }
         }
-        Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => {
-            Ok(RuntimeWebsocketSessionReadAction::Continue)
+        Ok(WsMessage::Pong(_)) => {
+            match runtime_websocket_read_action(WebsocketReadFrame::Pong, false, false)? {
+                WebsocketReadAction::Continue => Ok(RuntimeWebsocketSessionReadAction::Continue),
+                action => Err(anyhow::anyhow!(
+                    "unexpected Mojo websocket pong-frame action: {action:?}"
+                )),
+            }
+        }
+        Ok(WsMessage::Frame(_)) => {
+            match runtime_websocket_read_action(WebsocketReadFrame::Raw, false, false)? {
+                WebsocketReadAction::Continue => Ok(RuntimeWebsocketSessionReadAction::Continue),
+                action => Err(anyhow::anyhow!(
+                    "unexpected Mojo websocket raw-frame action: {action:?}"
+                )),
+            }
         }
         Ok(WsMessage::Close(frame)) => {
+            let action = runtime_websocket_read_action(WebsocketReadFrame::Close, false, false)?;
             runtime_proxy_log(
                 shared,
                 format!("websocket_session={session_id} local_close"),
             );
             websocket_session.close();
             let _ = local_socket.close(frame);
-            Ok(RuntimeWebsocketSessionReadAction::Break)
+            match action {
+                WebsocketReadAction::Break => Ok(RuntimeWebsocketSessionReadAction::Break),
+                action => Err(anyhow::anyhow!(
+                    "unexpected Mojo websocket close-frame action: {action:?}"
+                )),
+            }
         }
         Err(err) => {
             handle_runtime_proxy_websocket_read_error(session_id, shared, websocket_session, &err)
@@ -172,18 +218,27 @@ fn handle_runtime_proxy_websocket_text_message(
         shared,
         websocket_session,
     })?;
-    if websocket_session.is_realtime_duplex() && websocket_session.has_socket() {
-        let result = run_runtime_realtime_websocket_duplex_session(
-            session_id,
-            local_socket,
-            handshake_request,
-            shared,
-            websocket_session,
-        );
-        websocket_session.reset();
-        return Ok(RuntimeWebsocketSessionReadAction::Return(result));
+    match runtime_websocket_read_action(
+        WebsocketReadFrame::Text,
+        websocket_session.is_realtime_duplex(),
+        websocket_session.has_socket(),
+    )? {
+        WebsocketReadAction::Continue => Ok(RuntimeWebsocketSessionReadAction::Continue),
+        WebsocketReadAction::Return => {
+            let result = run_runtime_realtime_websocket_duplex_session(
+                session_id,
+                local_socket,
+                handshake_request,
+                shared,
+                websocket_session,
+            );
+            websocket_session.reset();
+            Ok(RuntimeWebsocketSessionReadAction::Return(result))
+        }
+        WebsocketReadAction::Break | WebsocketReadAction::Error => Err(anyhow::anyhow!(
+            "unexpected Mojo websocket text-frame action"
+        )),
     }
-    Ok(RuntimeWebsocketSessionReadAction::Continue)
 }
 
 fn handle_runtime_proxy_websocket_read_error(
@@ -192,13 +247,25 @@ fn handle_runtime_proxy_websocket_read_error(
     websocket_session: &mut RuntimeWebsocketSessionState,
     error: &WsError,
 ) -> Result<RuntimeWebsocketSessionReadAction> {
-    if runtime_websocket_local_disconnect_error(error) {
+    let action = runtime_websocket_read_action(
+        WebsocketReadFrame::ReadError {
+            local_disconnect: runtime_websocket_local_disconnect_error(error),
+        },
+        false,
+        false,
+    )?;
+    if action == WebsocketReadAction::Break {
         runtime_proxy_log(
             shared,
             format!("websocket_session={session_id} local_connection_closed"),
         );
         websocket_session.close();
         return Ok(RuntimeWebsocketSessionReadAction::Break);
+    }
+    if action != WebsocketReadAction::Error {
+        return Err(anyhow::anyhow!(
+            "unexpected Mojo websocket read-error action: {action:?}"
+        ));
     }
     runtime_proxy_log(
         shared,
@@ -697,12 +764,59 @@ mod tests {
         assert!(runtime_websocket_local_disconnect_error(
             &WsError::Protocol(tungstenite::error::ProtocolError::ResetWithoutClosingHandshake)
         ));
+        assert!(runtime_websocket_local_disconnect_error(
+            &WsError::ConnectionClosed
+        ));
+        assert!(runtime_websocket_local_disconnect_error(&WsError::Io(
+            io::Error::from(io::ErrorKind::BrokenPipe),
+        )));
         assert!(runtime_websocket_local_disconnect_error(&WsError::Io(
             io::Error::from(io::ErrorKind::ConnectionReset),
         )));
         assert!(!runtime_websocket_local_disconnect_error(
             &WsError::Protocol(tungstenite::error::ProtocolError::WrongHttpMethod,)
         ));
+    }
+
+    #[test]
+    fn websocket_read_action_policy_covers_frame_and_error_boundaries() {
+        assert_eq!(
+            runtime_websocket_read_action(WebsocketReadFrame::Text, false, false)
+                .expect("text frame policy should classify"),
+            WebsocketReadAction::Continue
+        );
+        assert_eq!(
+            runtime_websocket_read_action(WebsocketReadFrame::Text, true, true)
+                .expect("realtime text frame policy should classify"),
+            WebsocketReadAction::Return
+        );
+        assert_eq!(
+            runtime_websocket_read_action(WebsocketReadFrame::Close, false, false)
+                .expect("close frame policy should classify"),
+            WebsocketReadAction::Break
+        );
+        assert_eq!(
+            runtime_websocket_read_action(
+                WebsocketReadFrame::ReadError {
+                    local_disconnect: true,
+                },
+                false,
+                false,
+            )
+            .expect("disconnect policy should classify"),
+            WebsocketReadAction::Break
+        );
+        assert_eq!(
+            runtime_websocket_read_action(
+                WebsocketReadFrame::ReadError {
+                    local_disconnect: false,
+                },
+                false,
+                false,
+            )
+            .expect("transient read error policy should classify"),
+            WebsocketReadAction::Error
+        );
     }
 
     #[test]
