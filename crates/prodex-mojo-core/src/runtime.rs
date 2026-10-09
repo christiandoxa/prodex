@@ -5,6 +5,7 @@ mod auto_redeem;
 mod bound_overload;
 pub use bound_overload::bound_overload_retry_delay;
 mod candidate_plan;
+pub use candidate_plan::runtime_candidate_plan_batch;
 mod compatibility_surface;
 mod continuation_followup;
 mod continuation_status;
@@ -808,52 +809,5 @@ pub fn smart_context_pressure_snapshot(
         pressure_band,
         absolute_safety_floor_tokens,
         estimator_confidence,
-    })
-}
-
-pub fn runtime_candidate_plan_batch(
-    fields: &[i64],
-    excluded: &[i64],
-    route_kind: i64,
-    inflight_soft_limit: usize,
-    responses_critical_floor_percent: i64,
-) -> Result<RuntimeCandidatePlan, crate::MojoError> {
-    let count = candidate_plan::input_count(fields, excluded, route_kind)?;
-    let inflight_soft_limit =
-        i64::try_from(inflight_soft_limit).map_err(|_| crate::MojoError::InvalidInput)?;
-    let mut decision_tags = vec![0_i64; count * RUNTIME_CANDIDATE_DECISION_FIELD_COUNT];
-    let mut ready_indices = vec![0_i64; count];
-    let mut fallback_indices = vec![0_i64; count];
-    let mut ready_count = 0_i64;
-    let mut fallback_count = 0_i64;
-    let status = unsafe {
-        prodex_runtime_candidate_plan_batch_v2(
-            fields.as_ptr(),
-            excluded.as_ptr(),
-            decision_tags.as_mut_ptr(),
-            ready_indices.as_mut_ptr(),
-            &mut ready_count,
-            fallback_indices.as_mut_ptr(),
-            &mut fallback_count,
-            i64::try_from(count).map_err(|_| crate::MojoError::InvalidInput)?,
-            route_kind,
-            inflight_soft_limit,
-            responses_critical_floor_percent,
-        )
-    };
-    let (ready_indices, fallback_indices, decisions) = candidate_plan::output(
-        status,
-        ready_count,
-        fallback_count,
-        &ready_indices,
-        &fallback_indices,
-        &decision_tags,
-        count,
-    )?;
-    candidate_plan::validate(fields, &ready_indices, &fallback_indices, &decisions)?;
-    Ok(RuntimeCandidatePlan {
-        ready_indices,
-        fallback_indices,
-        decisions,
     })
 }
