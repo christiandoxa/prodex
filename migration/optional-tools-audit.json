@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "audited_at": "2026-10-08T07:21:30.431219Z",
-  "release": "0.436.1",
+  "audited_at": "2026-10-09T01:27:44Z",
+  "release": "0.437.0",
   "tools": [
     {
       "id": "caveman",
@@ -99,11 +99,11 @@
     {
       "id": "ponytail",
       "repository": "https://github.com/DietrichGebert/ponytail",
-      "latest_stable": "5.0.0",
-      "release": "v5.0.0",
-      "commit": "b088b2df6e08d4306c6a3c3d575fe38c2d2d2989",
-      "git_tree": "cd94f9b4abb6ff6e65055b0076e82a5b13c693aa",
-      "prodex_tree_sha256": "4d8896cca8c8214ac8226bb77b8c3572822ba76dcfd8bfd73c70b9dee59f72f7",
+      "latest_stable": "5.1.0",
+      "release": "v5.1.0",
+      "commit": "9cc65d03aa2da1db7121b912d03596409ee340b8",
+      "git_tree": "42320b8382d3bd9eb59521e6b7f2735edcd9b649",
+      "prodex_tree_sha256": "40281142115c85272f3a3cf6fb4fbd357aea38d6a5be434fee5fe40fad22240c",
       "license": "MIT",
       "runtime": "Node.js plugin; externally managed immutable checkout",
       "platforms": [
@@ -112,8 +112,8 @@
         "windows"
       ],
       "decision": "ADOPT_PACKAGE",
-      "notes": "Latest stable v5.0.0 was checked at the 0.436.1 release gate using the exact official tag, commit and Git tree. The full Prodex digest covers 199 regular files / 10528434 bytes; no symlinks or tree-limit exceptions are needed. Required plugin names, versions and hook/skill paths remain compatible. No upstream hooks or installers were executed; existing minimum-version and legacy-manifest rules remain unchanged.",
-      "source_archive_sha256": "a5675290f7dd9979fc694988774d548064a906aa1d913335c276a7566a77b718"
+      "notes": "Latest stable v5.1.0 was checked at the 0.437.0 release prerequisite using the exact official tag, commit and Git tree. The full Prodex digest covers 199 regular files / 10530987 bytes; no symlinks or tree-limit exceptions are needed. Required plugin names, versions and hook/skill paths remain compatible. No upstream hooks or installers were executed; existing minimum-version and legacy-manifest rules remain unchanged.",
+      "source_archive_sha256": "b460dbaff20a7e366ff597477d6ddfd4ea8f3454c5780e6b6003d5a3b625db6a"
     },
     {
       "id": "presidio",
