@@ -92,6 +92,9 @@ const PROMOTED_FILES = [
   "crates/prodex-app/src/runtime_proxy/response_forwarding.rs",
   "crates/prodex-app/src/runtime_proxy/responses/attempt/bound_overload.rs",
   "crates/prodex-mojo-core/src/runtime/bound_overload.rs",
+  "crates/prodex-app/src/runtime_proxy/responses/quota_blocked.rs",
+  "crates/prodex-mojo-core/src/runtime_responses_quota.rs",
+  "mojo/prodex_core/runtime_responses_quota.mojo",
   "mojo/prodex_core/response_forwarding.mojo",
   PROFILE_LOGIN_FILE,
   PROFILE_LOGIN_LIFECYCLE_FILE,
@@ -1122,6 +1125,22 @@ export function findViolations(files) {
       const required = ["if operation == RESPONSE_FORWARDING_RESPONSES_STREAM:", '@export("prodex_runtime_bound_overload_retry_v1")'];
       return required.filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: capacity recovery must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === "crates/prodex-app/src/runtime_proxy/responses/quota_blocked.rs") {
+      const required = [
+        "affinity_state.turn_state_profile() == Some(profile_name.as_str())",
+        "prodex_mojo_core::runtime_responses_quota::turn_state_full_context_replay_candidate(",
+      ];
+      return required.filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: exact turn-state ownership and replay eligibility must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_responses_quota.rs") {
+      return production.includes("prodex_runtime_responses_quota_turn_state_replay_v1(")
+        ? [] : [`${filePath}: replay eligibility must retain the Mojo ABI`];
+    }
+    if (filePath === "mojo/prodex_core/runtime_responses_quota.mojo") {
+      return contents.includes('@export("prodex_runtime_responses_quota_turn_state_replay_v1")')
+        ? [] : [`${filePath}: replay eligibility must retain Mojo ownership`];
     }
     return [];
   });
@@ -5914,6 +5933,14 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const replaySource = "crates/prodex-app/src/runtime_proxy/responses/quota_blocked.rs";
+  const replayRequired = [
+    "affinity_state.turn_state_profile() == Some(profile_name.as_str())",
+    "prodex_mojo_core::runtime_responses_quota::turn_state_full_context_replay_candidate(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[replaySource, replayRequired]]), []);
+  assert.match(findViolations([[replaySource, "fn old_rust_replay() {}"]]).join("\n"),
+    /turn-state ownership and replay eligibility must remain Mojo-owned/u);
   assert.match(findViolations([["crates/prodex-app/src/runtime_proxy/response_forwarding.rs",
     "let is_sse = runtime_response_content_type_is_sse(response_content_type);"]]).join("\n"),
     /missing-header Responses framing/u);
