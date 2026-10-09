@@ -13,6 +13,27 @@ use crate::{
     read_auth_json_text,
 };
 
+pub(super) fn validate_import_provider_transition(
+    profile_name: &str,
+    existing_provider: &str,
+    incoming_provider: &str,
+) -> Result<()> {
+    match prodex_mojo_core::profile_export::profile_import_provider_transition(
+        incoming_provider,
+        existing_provider,
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo profile-import provider decision failed: {error:?}"))?
+    {
+        prodex_mojo_core::profile_export::ProfileImportProviderTransition::Compatible => Ok(()),
+        prodex_mojo_core::profile_export::ProfileImportProviderTransition::Mismatch => bail!(
+            "profile '{}' already exists with provider '{}' and cannot be imported as '{}'",
+            profile_name,
+            existing_provider,
+            incoming_provider,
+        ),
+    }
+}
+
 pub(super) fn build_import_lifecycle_plan(
     state: &AppState,
     payload: &ProfileExportPayload,
@@ -260,31 +281,59 @@ pub(crate) fn recover_imported_auth_update_journals_locked(
         imported_auth_update_from_journal(paths, state, &journal_path, &journal)?;
         journals.push((journal_path, journal));
     }
-    journals.sort_by(|left, right| {
-        right
-            .1
-            .created_at
-            .cmp(&left.1.created_at)
-            .then_with(|| right.0.cmp(&left.0))
-    });
+    let created_at = journals
+        .iter()
+        .map(|(_, journal)| journal.created_at.as_str())
+        .collect::<Vec<_>>();
+    let journal_paths = journals
+        .iter()
+        .map(|(path, _)| path.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let path_views = journal_paths.iter().map(String::as_str).collect::<Vec<_>>();
+    let order =
+        prodex_mojo_core::profile_export::profile_import_journal_order(&created_at, &path_views)
+            .map_err(|error| {
+                anyhow::anyhow!("Mojo profile-import journal order failed: {error:?}")
+            })?;
+    journals = order
+        .into_iter()
+        .map(|index| {
+            journals
+                .get(index)
+                .cloned()
+                .with_context(|| "Mojo profile-import journal index is invalid")
+        })
+        .collect::<Result<Vec<_>>>()?;
 
     let mut recovered = 0;
     for (journal_path, journal) in journals {
-        if imported_auth_update_journal_is_committed(state, &journal)? {
-            if let Some(temporary_home) = journal.temporary_home.as_deref() {
-                let _ = fs::remove_dir_all(temporary_home);
+        let committed = imported_auth_update_journal_is_committed(state, &journal)?;
+        let action = prodex_mojo_core::profile_export::profile_import_recovery_action(
+            false, true, true, committed,
+        )
+        .map_err(|error| {
+            anyhow::anyhow!("Mojo profile-import recovery decision failed: {error:?}")
+        })?;
+        match action {
+            prodex_mojo_core::profile_export::ProfileImportRecoveryAction::Skip => {}
+            prodex_mojo_core::profile_export::ProfileImportRecoveryAction::Commit => {
+                if let Some(temporary_home) = journal.temporary_home.as_deref() {
+                    let _ = fs::remove_dir_all(temporary_home);
+                }
+                let _ = fs::remove_file(&journal_path);
+                recovered += 1;
             }
-            let _ = fs::remove_file(&journal_path);
-            recovered += 1;
-            continue;
+            prodex_mojo_core::profile_export::ProfileImportRecoveryAction::Rollback => {
+                let update =
+                    imported_auth_update_from_journal(paths, state, &journal_path, &journal)?;
+                super::rollback_imported_auth_updates(state, &[update])?;
+                if let Some(temporary_home) = journal.temporary_home.as_deref() {
+                    let _ = fs::remove_dir_all(temporary_home);
+                }
+                prodex_profile_export::cleanup_profile_import_auth_update_journal(&journal_path);
+                recovered += 1;
+            }
         }
-        let update = imported_auth_update_from_journal(paths, state, &journal_path, &journal)?;
-        super::rollback_imported_auth_updates(state, &[update])?;
-        if let Some(temporary_home) = journal.temporary_home.as_deref() {
-            let _ = fs::remove_dir_all(temporary_home);
-        }
-        prodex_profile_export::cleanup_profile_import_auth_update_journal(&journal_path);
-        recovered += 1;
     }
 
     let _ = fs::remove_dir(&journal_root);

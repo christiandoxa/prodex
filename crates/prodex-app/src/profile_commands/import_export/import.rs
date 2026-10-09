@@ -17,7 +17,7 @@ use super::secrets::{
 use super::*;
 
 pub(super) mod lifecycle_support;
-use self::lifecycle_support::build_import_lifecycle_plan;
+use self::lifecycle_support::{build_import_lifecycle_plan, validate_import_provider_transition};
 
 struct StagedImportCleanup<'a> {
     staged_profiles: &'a [StagedImportedProfile],
@@ -667,14 +667,11 @@ fn stage_existing_profile_update(
         .profiles
         .get(target_profile_name)
         .with_context(|| format!("profile '{}' is missing", target_profile_name))?;
-    if existing.provider.label() != exported.provider.label() {
-        bail!(
-            "profile '{}' already exists with provider '{}' and cannot be imported as '{}'",
-            target_profile_name,
-            existing.provider.label(),
-            exported.provider.label(),
-        );
-    }
+    validate_import_provider_transition(
+        target_profile_name,
+        existing.provider.label(),
+        exported.provider.label(),
+    )?;
     if plan_inputs[source_index].supports_codex_runtime {
         prodex_profile_export::queue_profile_import_auth_update(
             auth_updates,
