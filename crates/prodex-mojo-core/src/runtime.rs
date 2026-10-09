@@ -15,6 +15,7 @@ mod profile_rotation;
 mod prompt_cache_affinity;
 mod quota_decisions;
 mod quota_route_score;
+mod responses_loop_control;
 mod selection_planning;
 pub mod thread_index;
 mod websocket_failure;
@@ -67,6 +68,9 @@ pub use quota_decisions::{
     precommit_budget_plan, quota_gate_plan, quota_snapshot_plan,
 };
 pub use quota_route_score::quota_route_score_batch;
+pub use responses_loop_control::{
+    ResponsesLoopAction, ResponsesLoopInput, ResponsesLoopPhase, responses_loop_action,
+};
 pub use selection_planning::{
     ADAPTIVE_PLAN_REASON_ADAPTIVE_ENABLED, ADAPTIVE_PLAN_REASON_ADAPTIVE_EXPLORATION,
     ADAPTIVE_PLAN_REASON_INSUFFICIENT_SAMPLES, ADAPTIVE_PLAN_REASON_SHADOW_EXPLORATION,
