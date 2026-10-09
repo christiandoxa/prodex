@@ -89,6 +89,7 @@ const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_po
 const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
 const PROMOTED_FILES = [
+  "mojo/prodex_core/runtime_cookie_policy.mojo",
   "crates/prodex-app/src/runtime_proxy/websocket_message/loop_control.rs",
   "crates/prodex-mojo-core/src/runtime/websocket_loop_control.rs",
   "mojo/prodex_core/websocket_loop_control.mojo",
@@ -1177,6 +1178,31 @@ export function findViolations(files) {
         "fields[unsafe_offset=2] >= fields[unsafe_offset=9]",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: precommit decision must compare attempts in Mojo (${marker})`);
+    }
+    return [];
+  });
+  const cookieEvictionMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-runtime-cookies/src/lib.rs") {
+      const missing = ["runtime_cookie_policy::oldest_timestamp_index"].filter(
+        (marker) => !contents.includes(marker),
+      );
+      if (contents.includes(".min_by_key(")) {
+        missing.push("duplicate Rust cookie eviction comparator");
+      }
+      return missing.map((marker) => `${filePath}: cookie eviction must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_cookie_policy.rs") {
+      const required = [
+        "prodex_runtime_cookie_oldest_timestamp_index_v1(",
+        "fn oldest_timestamp_index_chunk(",
+        "pub fn oldest_timestamp_index(",
+      ];
+      return required.filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: chunked Mojo cookie ordering must stay authoritative (${marker})`);
+    }
+    if (filePath === "mojo/prodex_core/runtime_cookie_policy.mojo") {
+      return contents.includes('@export("prodex_runtime_cookie_oldest_timestamp_index_v1")')
+        ? [] : [`${filePath}: cookie eviction ordering must remain Mojo-owned`];
     }
     return [];
   });
@@ -5971,7 +5997,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,

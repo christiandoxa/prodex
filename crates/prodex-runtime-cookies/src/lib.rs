@@ -446,7 +446,10 @@ fn runtime_proxy_cookie_prune_host_locked(
             .map(|(identity, entry)| (identity.clone(), entry.updated_at))
             .collect::<Vec<_>>();
         let Some(oldest_index) = prodex_mojo_core::runtime_cookie_policy::oldest_timestamp_index(
-            &candidates.iter().map(|(_, updated_at)| *updated_at).collect::<Vec<_>>(),
+            &candidates
+                .iter()
+                .map(|(_, updated_at)| *updated_at)
+                .collect::<Vec<_>>(),
         )
         .expect("Mojo cookie eviction policy returned invalid output") else {
             break;
@@ -465,11 +468,16 @@ fn runtime_proxy_cookie_prune_global_locked(
         let candidates = jar
             .iter()
             .flat_map(|(key, cookies)| {
-                cookies.values().map(move |entry| (key.clone(), entry.updated_at))
+                cookies
+                    .values()
+                    .map(move |entry| (key.clone(), entry.updated_at))
             })
             .collect::<Vec<_>>();
         let Some(oldest_index) = prodex_mojo_core::runtime_cookie_policy::oldest_timestamp_index(
-            &candidates.iter().map(|(_, updated_at)| *updated_at).collect::<Vec<_>>(),
+            &candidates
+                .iter()
+                .map(|(_, updated_at)| *updated_at)
+                .collect::<Vec<_>>(),
         )
         .expect("Mojo cookie eviction policy returned invalid output") else {
             break;

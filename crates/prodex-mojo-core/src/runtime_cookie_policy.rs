@@ -269,12 +269,9 @@ pub fn normalize_host(host: &str) -> Result<Option<String>, MojoError> {
     ))
 }
 
-pub fn oldest_timestamp_index(
-    timestamps: &[SystemTime],
-) -> Result<Option<usize>, MojoError> {
-    if timestamps.len() > MAX_EVICTION_TIMESTAMPS {
-        return Err(MojoError::InvalidInput);
-    }
+fn oldest_timestamp_index_chunk(timestamps: &[SystemTime]) -> Result<Option<usize>, MojoError> {
+    // All ordering, timestamp comparison and tie-breaking stay in Mojo.
+    debug_assert!(timestamps.len() <= MAX_EVICTION_TIMESTAMPS);
 
     let mut input = Vec::with_capacity(timestamps.len() * 3);
     for timestamp in timestamps {
@@ -312,9 +309,115 @@ pub fn oldest_timestamp_index(
     }
 }
 
+/// Select the oldest timestamp without a Rust ordering fallback.
+/// The Mojo ABI is bounded to keep each call deterministic; arbitrarily large
+/// candidate lists are folded by comparing Mojo-selected chunk winners.
+pub fn oldest_timestamp_index(timestamps: &[SystemTime]) -> Result<Option<usize>, MojoError> {
+    let mut winner = None;
+    for (chunk_number, chunk) in timestamps.chunks(MAX_EVICTION_TIMESTAMPS).enumerate() {
+        let local_index = oldest_timestamp_index_chunk(chunk)?.ok_or(MojoError::InvalidOutput)?;
+        let candidate = chunk_number
+            .checked_mul(MAX_EVICTION_TIMESTAMPS)
+            .and_then(|base| base.checked_add(local_index))
+            .ok_or(MojoError::InvalidInput)?;
+        winner = match winner {
+            None => Some(candidate),
+            Some(previous) => {
+                // The first candidate wins ties, matching ordered Rust map
+                // traversal without reimplementing any timestamp comparison.
+                let pair = [timestamps[previous], timestamps[candidate]];
+                match oldest_timestamp_index_chunk(&pair)? {
+                    Some(0) => Some(previous),
+                    Some(1) => Some(candidate),
+                    _ => return Err(MojoError::InvalidOutput),
+                }
+            }
+        };
+    }
+    Ok(winner)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cookie_eviction_mojo_preserves_timestamp_order_and_first_tie() {
+        use std::time::Duration;
+        let epoch = UNIX_EPOCH;
+        assert_eq!(oldest_timestamp_index(&[]), Ok(None));
+        assert_eq!(oldest_timestamp_index(&[epoch]), Ok(Some(0)));
+        let cases = [
+            vec![
+                epoch + Duration::from_secs(1),
+                epoch,
+                epoch + Duration::from_secs(2),
+            ],
+            vec![epoch, epoch, epoch],
+            vec![
+                epoch - Duration::new(2, 100),
+                epoch - Duration::new(2, 200),
+                epoch,
+            ],
+            vec![
+                epoch + Duration::new(2, 100),
+                epoch + Duration::new(2, 200),
+                epoch,
+            ],
+            vec![
+                epoch - Duration::from_secs(1),
+                epoch + Duration::from_secs(1),
+            ],
+        ];
+        for cases in cases {
+            let expected = cases
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, time)| *time)
+                .map(|(index, _)| index);
+            assert_eq!(oldest_timestamp_index(&cases), Ok(expected));
+        }
+    }
+
+    #[test]
+    fn cookie_eviction_mojo_handles_more_than_one_abi_chunk_without_fallback() {
+        use std::time::Duration;
+        for count in [
+            1,
+            32,
+            33,
+            129,
+            MAX_EVICTION_TIMESTAMPS - 1,
+            MAX_EVICTION_TIMESTAMPS,
+            MAX_EVICTION_TIMESTAMPS + 1,
+            2 * MAX_EVICTION_TIMESTAMPS + 9,
+        ] {
+            let mut timestamps = (0..count)
+                .map(|index| UNIX_EPOCH + Duration::from_nanos((index % 61) as u64))
+                .collect::<Vec<_>>();
+            // The oldest element deliberately sits in a later chunk.
+            timestamps[count - 1] = UNIX_EPOCH - Duration::new(20, 8);
+            let expected = timestamps
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, time)| *time)
+                .map(|(index, _)| index);
+            assert_eq!(
+                oldest_timestamp_index(&timestamps),
+                Ok(expected),
+                "count={count}"
+            );
+            if count > 2 {
+                timestamps[0] = timestamps[count - 1];
+                // The first matching timestamp must win on ties.
+                assert_eq!(
+                    oldest_timestamp_index(&timestamps),
+                    Ok(Some(0)),
+                    "tie count={count}"
+                );
+            }
+        }
+    }
 
     #[test]
     fn runtime_cookie_text_policy_preserves_parser_contracts() {
