@@ -117,3 +117,21 @@ fn kiro_catalog_plan_returns_typed_missing_empty_and_limit_issues() {
         KiroModelCatalogPlan::TooManyModels { input_count: 2 }
     );
 }
+
+#[test]
+fn kiro_catalog_plan_rejects_malformed_tree_and_zero_bound() {
+    let mut malformed = vec![
+        node(JsonKind::Object, "", "", None, Some(1), None),
+        node(JsonKind::String, "models", "", Some(0), None, None),
+    ];
+    malformed[1].raw_start = 1;
+    malformed[1].raw_length = 2;
+    assert_eq!(
+        kiro_model_catalog_plan(&malformed, "{}", 1_024),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    );
+    assert_eq!(
+        kiro_model_catalog_plan(&catalog_tree(), "{}", 0),
+        Err(prodex_mojo_core::MojoError::InvalidInput)
+    );
+}
