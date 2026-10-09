@@ -71,8 +71,8 @@
   },
   {
     "file": "crates/prodex-runtime-state/tests/src/lib.rs",
-    "maxLines": 948,
-    "reason": "Runtime-state fixed parity coverage now includes exhaustive Mojo mutation/quota/background policy matrices and usize boundary regressions; exact test cap ratchets the audited 0.433.0 suite until policy fixtures split into sibling modules."
+    "maxLines": 923,
+    "reason": "Runtime-state parity coverage is split between the main policy fixtures and profile-inflight sibling; this exact cap ratchets the remaining reviewed suite."
   },
   {
     "file": "crates/prodex-mojo-core/src/log.rs",

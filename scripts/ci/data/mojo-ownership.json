@@ -731,7 +731,8 @@
           "deepseek_response_format_shape_policy",
           "deepseek_request_metadata_shape_policy",
           "deepseek_json_guidance_policy",
-          "deepseek_response_usage_mapping"
+          "deepseek_response_usage_mapping",
+          "gemini_response_media_projection"
         ]
       },
       {
@@ -1460,6 +1461,206 @@
         "role": "adapter",
         "operations": [
           "runtime_responses_turn_state_quota_replay_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_proxy_body_limit.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_proxy_body_limit_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_proxy_body_limit.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_proxy_body_limit_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_responses_attempt.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_responses_attempt_recovery_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_responses_attempt.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_responses_attempt_recovery_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_responses_loop.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_responses_loop_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime/responses_loop_control.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_responses_loop_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/continuation_status.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_continuation_compact_followup_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime/continuation_followup.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_continuation_compact_followup_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_noncompact_loop.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_noncompact_loop_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime/noncompact_loop.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_noncompact_loop_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/websocket_loop_control.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_websocket_read_loop_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime/websocket_loop_control.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_websocket_read_loop_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/websocket_response_tracking.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_websocket_response_tracking_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/websocket_response_tracking.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_websocket_response_tracking_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/websocket_failure.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_websocket_failure_state_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime/websocket_failure.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_websocket_failure_state_policy"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/runtime_proxy_dispatch.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "runtime_proxy_dispatch_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/runtime_proxy_dispatch.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "runtime_proxy_dispatch_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/rich/gemini_response_media.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "gemini_response_media_projection"
+        ]
+      },
+      {
+        "path": "mojo/prodex_core/gemini_response_media.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "gemini_response_media_projection"
         ]
       }
     ],
@@ -6615,7 +6816,7 @@
         "special_text": 1,
         "image_generation": 2
       },
-      "mojo_source": "mojo/prodex_core/gemini_response_media.mojo",
+      "mojo_source": "mojo/prodex_core/rich_abi.mojo",
       "consumer": "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
       "consumer_marker": "prodex_mojo_core::rich::gemini_response_media",
       "production_consumers": [
@@ -6630,7 +6831,8 @@
       "production_fallback": false,
       "duplicate_production_owner": false,
       "platform_fallback": false,
-      "rust_adapter_scope": "Serde Value acquisition, caller-owned JSON-tree construction, bounded ABI invocation, and returned JSON decoding; response ordering and envelope assembly remain Rust adapters"
+      "rust_adapter_scope": "Serde Value acquisition, caller-owned JSON-tree construction, bounded ABI invocation, and returned JSON decoding; response ordering and envelope assembly remain Rust adapters",
+      "mojo_semantic_source": "mojo/prodex_core/gemini_response_media.mojo"
     },
     {
       "name": "deepseek_response_usage_mapping",
@@ -6659,6 +6861,191 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "Serde response acquisition and serialization, bounded Mojo invocation, JSON decoding, and provider-label mapping"
+    },
+    {
+      "name": "runtime_responses_attempt_recovery_policy",
+      "domain": "runtime-proxy/responses-recovery",
+      "introduced_in": "0.437.1",
+      "baseline_state": "Rust decided whether an invalid previous Responses identifier could retry once from reconstructable full history before stream commitment",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_responses_attempt_recovery_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_responses_attempt.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/responses/attempt.rs",
+      "consumer_marker": "runtime_responses_attempt_recovery_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/responses/attempt.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_responses_attempt.rs",
+      "rust_owner_before": "Invalid previous-response recovery gate and full-history replay eligibility",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI cases and Responses invalid-previous-response caller coverage exercise owner, history, and precommit boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "request and affinity fact acquisition, typed ABI mapping, and replay side effects"
+    },
+    {
+      "name": "runtime_responses_loop_policy",
+      "domain": "runtime-proxy/responses-loop",
+      "introduced_in": "0.437.1",
+      "baseline_state": "Rust ordered Responses parent-loop recovery, admission waits, compact failure, direct fallback, and final failure actions",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_responses_loop_action_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_responses_loop.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/responses/loop_control.rs",
+      "consumer_marker": "responses_loop_action(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/responses/loop_control.rs"
+      ],
+      "production_reachability_test": "crates/prodex-mojo-core/tests/runtime_responses_loop.rs",
+      "rust_owner_before": "Responses precommit parent-loop action precedence across retry, wait, fallback, and terminal failure phases",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo loop matrix and Responses caller coverage exercise affinity, transient recovery, cold start, and commit boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "live runtime fact collection, host waits and retries, typed action mapping, and response construction"
+    },
+    {
+      "name": "runtime_continuation_compact_followup_policy",
+      "domain": "runtime-proxy/continuation",
+      "introduced_in": "0.437.1",
+      "baseline_state": "Rust classified compact continuation binding status, staleness, suspect grace, conflicts, and persistence touch eligibility",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_continuation_status_transition_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/continuation_status.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/continuation.rs",
+      "consumer_marker": "runtime_continuation_compact_followup_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/continuation.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_proxy/continuation.rs",
+      "rust_owner_before": "Compact continuation follow-up status transition and binding-retention policy",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo ABI boundaries and compact continuation caller regressions cover owner, conflict, stale, suspect, and touch cases",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "continuation state acquisition, timestamp marshalling, typed action mapping, and persistence effects"
+    },
+    {
+      "name": "runtime_noncompact_loop_policy",
+      "domain": "runtime-proxy/noncompact-loop",
+      "introduced_in": "0.437.1",
+      "baseline_state": "Rust ordered standard noncompact candidate selection, admission waits, transient recovery, and bounded precommit retries",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_noncompact_next_action_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_noncompact_loop.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/standard/noncompact/loop_policy.rs",
+      "consumer_marker": "noncompact_loop_action(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/standard/noncompact/loop_policy.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_proxy/standard/noncompact/loop_policy.rs",
+      "rust_owner_before": "Standard noncompact loop action precedence and precommit recovery planning",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo loop cases and standard noncompact caller coverage exercise preferred, fresh, saturated, and recovery paths",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "candidate and runtime fact acquisition, bounded waits, typed action mapping, and attempt effects"
+    },
+    {
+      "name": "runtime_websocket_read_loop_policy",
+      "domain": "runtime-proxy/websocket-loop",
+      "introduced_in": "0.437.1",
+      "baseline_state": "Rust classified WebSocket frames, keepalive handling, realtime return, and local socket-error actions",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_websocket_read_action_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/websocket_loop_control.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/websocket.rs",
+      "consumer_marker": "websocket_read_action(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/websocket.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_proxy/websocket.rs",
+      "rust_owner_before": "WebSocket read-loop frame classification and bounded local-disconnect policy",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo frame matrix and WebSocket caller coverage exercise text, keepalive, close, and error boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "socket reads and writes, frame decoding, host error mapping, and typed action application"
+    },
+    {
+      "name": "runtime_websocket_response_tracking_policy",
+      "domain": "runtime-proxy/websocket-response",
+      "introduced_in": "0.437.1",
+      "baseline_state": "Rust tracked WebSocket response-frame commitment, terminality, retryability, and socket reset effects",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_websocket_response_frame_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/websocket_response_tracking.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking.rs",
+      "consumer_marker": "websocket_response_frame_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/websocket/response_tracking.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_proxy/websocket/response_tracking.rs",
+      "rust_owner_before": "WebSocket response frame state and terminal/retry transition decisions",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo frame plans and response-tracking caller coverage exercise precommit, committed, terminal, and retry frames",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "upstream frame acquisition, stream state mutation, response forwarding, and typed plan mapping"
+    },
+    {
+      "name": "runtime_websocket_failure_state_policy",
+      "domain": "runtime-proxy/websocket-failure",
+      "introduced_in": "0.437.1",
+      "baseline_state": "Rust selected WebSocket failure affinity release, retryability, quota/backoff recording, and last-failure state",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_websocket_failure_state_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/websocket_failure.mojo",
+      "consumer": "crates/prodex-runtime-proxy/src/selection_policy.rs",
+      "consumer_marker": "runtime_websocket_failure_state_plan(",
+      "production_consumers": [
+        "crates/prodex-runtime-proxy/src/selection_policy.rs",
+        "crates/prodex-app/src/runtime_proxy/websocket_message/failure_handling.rs"
+      ],
+      "production_reachability_test": "crates/prodex-runtime-proxy/src/selection_policy.rs",
+      "rust_owner_before": "WebSocket precommit failure state transitions across rate-limit, auth, overload, and local-selection classes",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo failure matrix and WebSocket failure-handler caller coverage exercise affinity and backoff boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "failure classification, affinity/state mutation, response handling, and typed plan mapping"
+    },
+    {
+      "name": "runtime_proxy_dispatch_policy",
+      "domain": "runtime-proxy/dispatch",
+      "introduced_in": "0.437.1",
+      "baseline_state": "Rust classified runtime proxy admission and dispatch errors into bounded retry, rejection, overload, and local response actions",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_runtime_proxy_dispatch_policy_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/runtime_proxy_dispatch.mojo",
+      "consumer": "crates/prodex-app/src/runtime_proxy/dispatch.rs",
+      "consumer_marker": "prodex_mojo_core::runtime_proxy_dispatch::admission_plan(",
+      "production_consumers": [
+        "crates/prodex-app/src/runtime_proxy/dispatch.rs"
+      ],
+      "production_reachability_test": "crates/prodex-app/src/runtime_proxy/dispatch.rs",
+      "rust_owner_before": "Runtime proxy admission rejection and dispatch-error response policy",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo admission/error ABI cases and dispatch caller regressions cover lane, websocket, capture, and local-error boundaries",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "request classification, bounded body capture, host admission, HTTP response construction, and typed action mapping"
     }
   ],
   "rust_semantic_reductions": [
