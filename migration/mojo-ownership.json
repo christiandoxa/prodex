@@ -1392,6 +1392,26 @@
         ]
       },
       {
+        "path": "mojo/prodex_core/session_repair.mojo",
+        "language": "mojo",
+        "classification": "DETERMINISTIC_DOMAIN",
+        "production_reachable": true,
+        "role": "semantic",
+        "operations": [
+          "session_repair_rewrite_policy"
+        ]
+      },
+      {
+        "path": "crates/prodex-mojo-core/src/json/session_repair.rs",
+        "language": "rust",
+        "classification": "MIXED",
+        "production_reachable": true,
+        "role": "adapter",
+        "operations": [
+          "session_repair_rewrite_policy"
+        ]
+      },
+      {
         "path": "mojo/prodex_core/profile_ui_policy.mojo",
         "language": "mojo",
         "classification": "DETERMINISTIC_DOMAIN",
@@ -6423,6 +6443,29 @@
       "duplicate_production_owner": false,
       "platform_fallback": false,
       "rust_adapter_scope": "borrowed string projection and typed boolean/error mapping across the versioned ABI"
+    },
+    {
+      "name": "session_repair_rewrite_policy",
+      "domain": "session-store/repair",
+      "introduced_in": "0.436.1",
+      "baseline_state": "Rust selected session metadata promotion, no-op detection, malformed-line removal, duplicate metadata removal, and optional synthetic repair",
+      "final_state": "authoritative",
+      "mojo_entry": "prodex_session_repair_plan_v1",
+      "mojo_abi_version": 1,
+      "mojo_source": "mojo/prodex_core/session_repair.mojo",
+      "consumer": "crates/prodex-session-store/src/lib.rs",
+      "consumer_marker": "session_repair_plan(",
+      "production_consumers": [
+        "crates/prodex-session-store/src/lib.rs"
+      ],
+      "production_reachability_test": "crates/prodex-session-store/src/lib.rs",
+      "rust_owner_before": "Session JSONL prefix classification, metadata selection, malformed-line filtering, duplicate suppression, and synthetic-repair planning",
+      "rust_state_after": "adapter-only",
+      "rust_test_oracle": "deleted; direct Mojo planner, session-store, Unicode, malformed-input, and caller-boundary tests cover rewrite and no-op behavior",
+      "production_fallback": false,
+      "duplicate_production_owner": false,
+      "platform_fallback": false,
+      "rust_adapter_scope": "filesystem acquisition and transaction commit, JSONL fact projection, synthetic metadata construction, timestamps, and typed ABI result mapping"
     },
     {
       "name": "provider_error_code_extraction",
