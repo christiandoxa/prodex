@@ -7,6 +7,7 @@ pub(super) struct BoundOverloadRetry<'a> {
     profile_name: &'a str,
     request_id: u64,
     hard_affinity: bool,
+    previous_response_present: bool,
     started_at: Instant,
     retries: usize,
 }
@@ -17,18 +18,35 @@ impl<'a> BoundOverloadRetry<'a> {
         profile_name: &'a str,
         request_id: u64,
         hard_affinity: bool,
+        previous_response_present: bool,
     ) -> Self {
         Self {
             shared,
             profile_name,
             request_id,
             hard_affinity,
+            previous_response_present,
             started_at: Instant::now(),
             retries: 0,
         }
     }
 
-    pub(super) fn maybe_retry(
+    pub(super) fn retain_or_retry(
+        &mut self,
+        attempt: Option<RuntimeResponsesAttempt>,
+        inflight_guard: &mut Option<RuntimeProfileInFlightGuard>,
+    ) -> Result<Option<RuntimeResponsesAttempt>> {
+        let Some(attempt) = attempt else {
+            return Ok(None);
+        };
+        if self.maybe_retry(&attempt, inflight_guard)? {
+            Ok(None)
+        } else {
+            Ok(Some(attempt))
+        }
+    }
+
+    fn maybe_retry(
         &mut self,
         attempt: &RuntimeResponsesAttempt,
         inflight_guard: &mut Option<RuntimeProfileInFlightGuard>,
@@ -38,6 +56,7 @@ impl<'a> BoundOverloadRetry<'a> {
         };
         let delay = prodex_mojo_core::runtime::bound_overload_retry_delay(
             self.hard_affinity,
+            self.previous_response_present,
             false,
             self.retries,
             self.started_at.elapsed(),

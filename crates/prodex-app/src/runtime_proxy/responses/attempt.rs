@@ -374,8 +374,13 @@ pub(crate) fn attempt_runtime_responses_request(
     };
 
     let mut inflight_guard = Some(inflight_guard);
-    let mut overload_retry =
-        BoundOverloadRetry::new(shared, profile_name, request_id, hard_affinity);
+    let mut overload_retry = BoundOverloadRetry::new(
+        shared,
+        profile_name,
+        request_id,
+        hard_affinity,
+        request_previous_response_id.is_some(),
+    );
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     let mut retry_number = 0usize;
     loop {
@@ -500,7 +505,7 @@ pub(crate) fn attempt_runtime_responses_request(
                 retry_number = retry_number.saturating_add(1);
                 continue;
             }
-            let Some(attempt) = handle_runtime_responses_non_success(
+            let attempt = handle_runtime_responses_non_success(
                 request_id,
                 shared,
                 profile_name,
@@ -508,15 +513,12 @@ pub(crate) fn attempt_runtime_responses_request(
                 parts,
                 response_turn_state,
                 &mut recovery_steps,
-            )?
+            )?;
+            let Some(attempt) = overload_retry.retain_or_retry(attempt, &mut inflight_guard)?
             else {
                 retry_number = retry_number.saturating_add(1);
                 continue;
             };
-            if overload_retry.maybe_retry(&attempt, &mut inflight_guard)? {
-                retry_number = retry_number.saturating_add(1);
-                continue;
-            }
             return Ok(attempt);
         }
         let mut prepared = prepare_runtime_responses_success_attempt(
@@ -594,22 +596,33 @@ pub(crate) fn attempt_runtime_responses_request(
             retry_number = retry_number.saturating_add(1);
             continue;
         }
-        if let Ok(attempt) = &prepared
-            && overload_retry.maybe_retry(attempt, &mut inflight_guard)?
-        {
-            drop(prepared);
+        let Some(prepared) =
+            overload_retry.retain_or_retry(Some(prepared?), &mut inflight_guard)?
+        else {
             retry_number = retry_number.saturating_add(1);
             continue;
-        }
-        if let Ok(RuntimeResponsesAttempt::Success { profile_name, .. }) = &prepared {
-            remember_runtime_prompt_cache_profile(
-                shared,
-                profile_name,
-                request_prompt_cache_key.as_deref(),
-                RuntimeRouteKind::Responses,
-            );
-        }
-        return prepared;
+        };
+        remember_responses_success_prompt_cache(
+            &prepared,
+            shared,
+            request_prompt_cache_key.as_deref(),
+        );
+        return Ok(prepared);
+    }
+}
+
+fn remember_responses_success_prompt_cache(
+    attempt: &RuntimeResponsesAttempt,
+    shared: &RuntimeRotationProxyShared,
+    prompt_cache_key: Option<&str>,
+) {
+    if let RuntimeResponsesAttempt::Success { profile_name, .. } = attempt {
+        remember_runtime_prompt_cache_profile(
+            shared,
+            profile_name,
+            prompt_cache_key,
+            RuntimeRouteKind::Responses,
+        );
     }
 }
 
