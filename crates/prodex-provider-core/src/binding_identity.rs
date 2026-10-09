@@ -40,9 +40,7 @@ impl RuntimeProviderBindingIdentity {
         endpoint: &str,
         profile: Option<&str>,
     ) -> Option<Self> {
-        let raw_key = raw_key.trim();
-        (!raw_key.is_empty() && raw_key.chars().all(|character| !character.is_control()))
-            .then(|| Self::from_public_credential_identity(provider, raw_key, endpoint, profile))?
+        Self::from_public_credential_identity(provider, raw_key, endpoint, profile)
     }
 
     pub fn from_public_credential_identity(
@@ -51,28 +49,21 @@ impl RuntimeProviderBindingIdentity {
         endpoint: &str,
         profile: Option<&str>,
     ) -> Option<Self> {
-        let credential_identity = credential_identity.trim();
         let endpoint = canonical_endpoint(endpoint)?;
-        let profile_identity = match profile.map(str::trim).filter(|value| !value.is_empty()) {
-            Some(profile)
-                if profile.len() <= 256
-                    && profile.chars().all(|character| !character.is_control()) =>
-            {
-                Some(public_identity("profile", profile))
-            }
-            Some(_) => return None,
-            None => None,
-        };
-        (!credential_identity.is_empty()
-            && credential_identity.len() <= 4_096
-            && credential_identity
-                .chars()
-                .all(|character| !character.is_control()))
-        .then(|| Self {
+        let inputs = prodex_mojo_core::rich::provider_binding_identity_inputs(
+            credential_identity,
+            &endpoint,
+            profile,
+        )
+        .expect("Mojo provider binding identity policy failed")?;
+        Some(Self {
             provider,
-            credential_identity: public_identity("credential", credential_identity),
-            endpoint_identity: public_identity("endpoint", &endpoint),
-            profile_identity,
+            credential_identity: public_identity("credential", &inputs.credential),
+            endpoint_identity: public_identity("endpoint", &inputs.endpoint),
+            profile_identity: inputs
+                .profile
+                .as_deref()
+                .map(|profile| public_identity("profile", profile)),
         })
     }
 
@@ -116,12 +107,18 @@ impl<'de> Deserialize<'de> for RuntimeProviderBindingIdentity {
         D: Deserializer<'de>,
     {
         let wire = RuntimeProviderBindingIdentityWire::deserialize(deserializer)?;
-        if !is_public_identity(&wire.credential_identity)
-            || !is_public_identity(&wire.endpoint_identity)
+        let valid_identity = |value: &str| {
+            prodex_mojo_core::rich::provider_binding_identity_digest_is_public(value)
+                .map_err(|_| D::Error::custom("provider binding identity policy failed"))
+        };
+        if !valid_identity(&wire.credential_identity)?
+            || !valid_identity(&wire.endpoint_identity)?
             || wire
                 .profile_identity
                 .as_deref()
-                .is_some_and(|value| !is_public_identity(value))
+                .map(valid_identity)
+                .transpose()?
+                .is_some_and(|valid| !valid)
         {
             return Err(D::Error::custom(
                 "invalid runtime provider binding identity",
@@ -151,16 +148,6 @@ fn public_identity(kind: &str, value: &str) -> String {
     encoded
 }
 
-fn is_public_identity(value: &str) -> bool {
-    let Some(value) = value.strip_prefix("sha256:") else {
-        return false;
-    };
-    value.len() == 64
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'))
-}
-
 fn canonical_endpoint(value: &str) -> Option<String> {
     let value = value.trim();
     let url = Url::parse(value).ok()?;
@@ -174,7 +161,7 @@ fn canonical_endpoint(value: &str) -> Option<String> {
     {
         return None;
     }
-    Some(url.to_string().trim_end_matches('/').to_string())
+    Some(url.to_string())
 }
 
 #[cfg(test)]
@@ -239,5 +226,72 @@ mod tests {
         ] {
             assert!(serde_json::from_value::<RuntimeProviderBindingIdentity>(value).is_err());
         }
+    }
+
+    #[test]
+    fn binding_identity_mojo_policy_preserves_unicode_and_boundary_inputs() {
+        let identity = RuntimeProviderBindingIdentity::from_raw_key(
+            ProviderId::OpenAi,
+            "\u{2003}synthetic-key-🦀\u{3000}",
+            "https://example.com/v1///",
+            Some("\u{2003}synthetic-profile-雪\u{3000}"),
+        )
+        .unwrap();
+        let expected = RuntimeProviderBindingIdentity::from_raw_key(
+            ProviderId::OpenAi,
+            "synthetic-key-🦀",
+            "https://example.com/v1",
+            Some("synthetic-profile-雪"),
+        )
+        .unwrap();
+        assert_eq!(identity, expected);
+        assert!(
+            RuntimeProviderBindingIdentity::from_raw_key(
+                ProviderId::OpenAi,
+                &"x".repeat(4_097),
+                "https://example.com",
+                None,
+            )
+            .is_none()
+        );
+        assert!(
+            RuntimeProviderBindingIdentity::from_raw_key(
+                ProviderId::OpenAi,
+                "credential",
+                "https://example.com",
+                Some(&"x".repeat(256)),
+            )
+            .is_some()
+        );
+        assert!(
+            RuntimeProviderBindingIdentity::from_raw_key(
+                ProviderId::OpenAi,
+                "credential",
+                "https://example.com",
+                Some(&"x".repeat(257)),
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn binding_identity_mojo_boundary_returns_the_normalized_plan() {
+        let plan = prodex_mojo_core::rich::provider_binding_identity_inputs(
+            "\u{2003}credential\u{3000}",
+            "https://example.com/v1///",
+            Some("\u{2003}profile\u{3000}"),
+        )
+        .expect("Mojo binding identity boundary should be available")
+        .expect("valid input should be accepted");
+        assert_eq!(plan.credential, "credential");
+        assert_eq!(plan.endpoint, "https://example.com/v1");
+        assert_eq!(plan.profile.as_deref(), Some("profile"));
+        assert!(
+            prodex_mojo_core::rich::provider_binding_identity_digest_is_public(&format!(
+                "sha256:{}",
+                "a".repeat(64)
+            ))
+            .expect("Mojo digest boundary should be available")
+        );
     }
 }

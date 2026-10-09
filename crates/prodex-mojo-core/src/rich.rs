@@ -31,6 +31,11 @@ pub use anthropic_messages::{
     AnthropicResponseBlockClassificationInput, AnthropicResponseBlockKind, AnthropicResponsePlan,
     AnthropicResponsePlanItem, AnthropicResponsePlanKind, plan_anthropic_response_blocks,
 };
+mod provider_binding_identity;
+pub use provider_binding_identity::{
+    ProviderBindingIdentityInputPlan, provider_binding_identity_digest_is_public,
+    provider_binding_identity_inputs,
+};
 #[path = "rich/anthropic_request.rs"]
 mod anthropic_request;
 pub use anthropic_request::{
