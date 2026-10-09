@@ -55,6 +55,18 @@ fn filters_connection_named_text_response_headers() {
 }
 
 #[test]
+fn filters_connection_tokens_case_insensitively_and_keeps_unrelated_headers() {
+    let headers = runtime_forward_text_response_headers([
+        ("Connection", " keep-alive, X-LOCAL-HOP , x-second "),
+        ("X-Local-Hop", "strip-me"),
+        ("x-second", "strip-too"),
+        ("x-keep", "keep-me"),
+    ]);
+
+    assert_eq!(headers, vec![("x-keep".to_string(), "keep-me".to_string())]);
+}
+
+#[test]
 fn preserves_codex_0145_backend_response_headers() {
     let headers = runtime_forward_text_response_headers([
         ("x-request-id", "req-0142"),
@@ -150,6 +162,23 @@ fn filters_connection_named_binary_response_headers() {
 }
 
 #[test]
+fn binary_connection_values_ignore_invalid_utf8_and_preserve_binary_headers() {
+    let headers = runtime_forward_binary_response_headers([
+        ("Connection", b"X-Local-Hop, \xff".as_slice()),
+        ("X-Local-Hop", b"strip-me".as_slice()),
+        ("x-binary", b"\xff\x00".as_slice()),
+    ]);
+
+    assert_eq!(
+        headers,
+        vec![
+            ("X-Local-Hop".to_string(), b"strip-me".to_vec()),
+            ("x-binary".to_string(), b"\xff\x00".to_vec()),
+        ]
+    );
+}
+
+#[test]
 fn extracts_buffered_response_metadata_from_binary_headers() {
     let headers = [
         ("x-extra", b"ignored".as_slice()),
@@ -165,6 +194,19 @@ fn extracts_buffered_response_metadata_from_binary_headers() {
             content_type: Some("application/json"),
             body_bytes: 42,
         }
+    );
+}
+
+#[test]
+fn content_type_selection_is_mojo_owned_and_rejects_invalid_utf8_values() {
+    let headers = [
+        ("Content-Type", b"\xfftext/event-stream".as_slice()),
+        ("content-type", b" application/json ".as_slice()),
+    ];
+
+    assert_eq!(
+        runtime_response_content_type_from_binary_headers(headers),
+        Some("application/json")
     );
 }
 
@@ -435,6 +477,95 @@ fn responses_precommit_attempt_plan_rejects_invalid_abi_tags() {
         )
     };
     assert_eq!(result, -1);
+}
+
+#[test]
+fn standard_and_compact_attempt_plans_preserve_precedence_and_commit_boundary() {
+    let plan = |status, class, action, previous, token, committed| {
+        runtime_response_forwarding_attempt_plan(status, class, action, previous, token, committed)
+    };
+
+    assert_eq!(
+        plan(
+            401,
+            RuntimeHttpErrorClass::Other,
+            RuntimeHttpErrorAction::PassThrough,
+            false,
+            false,
+            false,
+        ),
+        RuntimeResponseForwardingAttemptPlan::AuthFailed
+    );
+    assert_eq!(
+        plan(
+            429,
+            RuntimeHttpErrorClass::Quota,
+            RuntimeHttpErrorAction::RotateProfile,
+            false,
+            false,
+            false,
+        ),
+        RuntimeResponseForwardingAttemptPlan::QuotaRetry
+    );
+    assert_eq!(
+        plan(
+            429,
+            RuntimeHttpErrorClass::RateLimited,
+            RuntimeHttpErrorAction::RetryProfile,
+            false,
+            false,
+            false,
+        ),
+        RuntimeResponseForwardingAttemptPlan::RateLimited
+    );
+    assert_eq!(
+        plan(
+            503,
+            RuntimeHttpErrorClass::TransientServer,
+            RuntimeHttpErrorAction::RetryProfile,
+            false,
+            false,
+            false,
+        ),
+        RuntimeResponseForwardingAttemptPlan::Overloaded
+    );
+    assert_eq!(
+        plan(
+            400,
+            RuntimeHttpErrorClass::Other,
+            RuntimeHttpErrorAction::PassThrough,
+            true,
+            true,
+            false,
+        ),
+        RuntimeResponseForwardingAttemptPlan::PreviousResponseNotFound
+    );
+    assert_eq!(
+        plan(
+            429,
+            RuntimeHttpErrorClass::Quota,
+            RuntimeHttpErrorAction::RotateProfile,
+            true,
+            true,
+            true,
+        ),
+        RuntimeResponseForwardingAttemptPlan::Success {
+            note_auth_failure: false,
+        }
+    );
+    assert_eq!(
+        plan(
+            403,
+            RuntimeHttpErrorClass::Other,
+            RuntimeHttpErrorAction::PassThrough,
+            false,
+            true,
+            false,
+        ),
+        RuntimeResponseForwardingAttemptPlan::Success {
+            note_auth_failure: true,
+        }
+    );
 }
 
 #[test]

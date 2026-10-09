@@ -17,6 +17,20 @@ comptime RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT: Int64 = 9
 comptime RESPONSE_FORWARDING_TAP_PLAN: Int64 = 10
 comptime RESPONSE_FORWARDING_RESPONSES_STREAM: Int64 = 11
 
+comptime RESPONSE_FORWARDING_HEADER_FORWARD: Int64 = 0
+comptime RESPONSE_FORWARDING_HEADER_SKIP: Int64 = 1
+comptime RESPONSE_FORWARDING_HEADER_CONNECTION_TOKEN: Int64 = 2
+comptime RESPONSE_FORWARDING_HEADER_CONNECTION: Int64 = 3
+
+comptime RESPONSE_FORWARDING_ATTEMPT_SUCCESS: Int64 = 0
+comptime RESPONSE_FORWARDING_ATTEMPT_AUTH_FAILED: Int64 = 1
+comptime RESPONSE_FORWARDING_ATTEMPT_PROFILE_UNAVAILABLE: Int64 = 2
+comptime RESPONSE_FORWARDING_ATTEMPT_QUOTA_RETRY: Int64 = 3
+comptime RESPONSE_FORWARDING_ATTEMPT_RATE_LIMITED: Int64 = 4
+comptime RESPONSE_FORWARDING_ATTEMPT_OVERLOADED: Int64 = 5
+comptime RESPONSE_FORWARDING_ATTEMPT_PREVIOUS_RESPONSE_NOT_FOUND: Int64 = 6
+comptime RESPONSE_FORWARDING_ATTEMPT_AUTH_FAILURE_NOTICE: Int64 = 7
+
 comptime RESPONSE_ATTEMPT_SUCCESS: Int64 = 0
 comptime RESPONSE_ATTEMPT_AUTH_FAILED: Int64 = 1
 comptime RESPONSE_ATTEMPT_QUOTA_BLOCKED: Int64 = 2
@@ -145,6 +159,260 @@ def response_generation_start(address: UInt, length: Int64) -> Bool:
     )
 
 
+def response_is_hop_header(address: UInt, length: Int64) -> Bool:
+    if length > 0 and not rich_utf8_valid(response_text_ptr(address), length):
+        return False
+    var bounds = rich_trim_bounds(ProdexRichStringView(address, UInt(length)))
+    var start = bounds[0]
+    var end = bounds[1]
+    return (
+        response_equals_ci_range(address, start, end, StringSlice("connection"))
+        or response_equals_ci_range(address, start, end, StringSlice("content-length"))
+        or response_equals_ci_range(address, start, end, StringSlice("keep-alive"))
+        or response_equals_ci_range(
+            address, start, end, StringSlice("proxy-authenticate")
+        )
+        or response_equals_ci_range(
+            address, start, end, StringSlice("proxy-authorization")
+        )
+        or response_equals_ci_range(address, start, end, StringSlice("te"))
+        or response_equals_ci_range(address, start, end, StringSlice("trailer"))
+        or response_equals_ci_range(
+            address, start, end, StringSlice("transfer-encoding")
+        )
+        or response_equals_ci_range(address, start, end, StringSlice("upgrade"))
+    )
+
+
+def response_is_connection_header(address: UInt, length: Int64) -> Bool:
+    if length > 0 and not rich_utf8_valid(response_text_ptr(address), length):
+        return False
+    var bounds = rich_trim_bounds(ProdexRichStringView(address, UInt(length)))
+    return response_equals_ci_range(
+        address,
+        bounds[0],
+        bounds[1],
+        StringSlice("connection"),
+    )
+
+
+def response_is_tchar(value: UInt8) -> Bool:
+    return (
+        (value >= 48 and value <= 57)
+        or (value >= 65 and value <= 90)
+        or (value >= 97 and value <= 122)
+        or value == 33
+        or value == 35
+        or value == 36
+        or value == 37
+        or value == 38
+        or value == 39
+        or value == 42
+        or value == 43
+        or value == 45
+        or value == 46
+        or value == 94
+        or value == 95
+        or value == 96
+        or value == 124
+        or value == 126
+    )
+
+
+def response_ranges_equal_ci(
+    left_address: UInt,
+    left_start: Int64,
+    left_end: Int64,
+    right_address: UInt,
+    right_start: Int64,
+    right_end: Int64,
+) -> Bool:
+    if left_end - left_start != right_end - right_start:
+        return False
+    var left = response_text_ptr(left_address)
+    var right = response_text_ptr(right_address)
+    for offset in range(left_end - left_start):
+        if response_ascii_lower(left[unsafe_offset=left_start + offset]) != response_ascii_lower(
+            right[unsafe_offset=right_start + offset]
+        ):
+            return False
+    return True
+
+
+def response_connection_value_matches_name(
+    name_address: UInt,
+    name_length: Int64,
+    value_address: UInt,
+    value_length: Int64,
+) -> Bool:
+    if value_length == 0 or not rich_utf8_valid(response_text_ptr(value_address), value_length):
+        return False
+    var value = response_text_ptr(value_address)
+    var name_bounds = rich_trim_bounds(ProdexRichStringView(name_address, UInt(name_length)))
+    var token_start: Int64 = 0
+    while token_start <= value_length:
+        var token_end = token_start
+        while token_end < value_length and value[unsafe_offset=token_end] != 44:
+            token_end += 1
+        var bounds = rich_trim_bounds(
+            ProdexRichStringView(
+                value_address + UInt(token_start),
+                UInt(token_end - token_start),
+            )
+        )
+        var start = token_start + bounds[0]
+        var end = token_start + bounds[1]
+        var valid = start < end
+        for offset in range(start, end):
+            if not response_is_tchar(value[unsafe_offset=offset]):
+                valid = False
+                break
+        if valid and response_ranges_equal_ci(
+            name_address,
+            name_bounds[0],
+            name_bounds[1],
+            value_address,
+            start,
+            end,
+        ):
+            return True
+        if token_end == value_length:
+            break
+        token_start = token_end + 1
+    return False
+
+
+@export("prodex_runtime_response_forwarding_header_v1")
+def prodex_runtime_response_forwarding_header_v1(
+    name_address: UInt,
+    name_length: Int64,
+    value_address: UInt,
+    value_length: Int64,
+    value_present: Int64,
+) abi("C") -> Int64:
+    if (
+        name_length < 0
+        or value_length < 0
+        or value_present < 0
+        or value_present > 1
+        or (name_length > 0 and name_address == 0)
+        or (value_present == 1 and value_length > 0 and value_address == 0)
+    ):
+        return -1
+    if name_length > 0 and not rich_utf8_valid(response_text_ptr(name_address), name_length):
+        return -1
+    if response_is_connection_header(name_address, name_length):
+        return RESPONSE_FORWARDING_HEADER_CONNECTION
+    if response_is_hop_header(name_address, name_length):
+        return RESPONSE_FORWARDING_HEADER_SKIP
+    if value_present == 1 and value_length > 0:
+        if not rich_utf8_valid(response_text_ptr(value_address), value_length):
+            return RESPONSE_FORWARDING_HEADER_FORWARD
+        if response_connection_value_matches_name(
+            name_address,
+            name_length,
+            value_address,
+            value_length,
+        ):
+            return RESPONSE_FORWARDING_HEADER_CONNECTION_TOKEN
+    return RESPONSE_FORWARDING_HEADER_FORWARD
+
+
+@export("prodex_runtime_response_forwarding_content_type_v1")
+def prodex_runtime_response_forwarding_content_type_v1(
+    name_address: UInt,
+    name_length: Int64,
+    value_address: UInt,
+    value_length: Int64,
+) abi("C") -> Int64:
+    if (
+        name_length < 0
+        or value_length < 0
+        or (name_length > 0 and name_address == 0)
+        or (value_length > 0 and value_address == 0)
+    ):
+        return -1
+    if name_length > 0 and not rich_utf8_valid(response_text_ptr(name_address), name_length):
+        return -1
+    if value_length == 0 or not rich_utf8_valid(response_text_ptr(value_address), value_length):
+        return 0
+    var name_bounds = rich_trim_bounds(ProdexRichStringView(name_address, UInt(name_length)))
+    var value_bounds = rich_trim_bounds(ProdexRichStringView(value_address, UInt(value_length)))
+    return Int64(
+        response_equals_ci_range(
+            name_address,
+            name_bounds[0],
+            name_bounds[1],
+            StringSlice("content-type"),
+        )
+        and value_bounds[0] < value_bounds[1]
+    )
+
+
+@export("prodex_runtime_response_forwarding_attempt_v1")
+def prodex_runtime_response_forwarding_attempt_v1(
+    status: Int64,
+    class_tag: Int64,
+    action_tag: Int64,
+    retryable_previous: Int64,
+    token_invalidated: Int64,
+    committed: Int64,
+) abi("C") -> Int64:
+    return response_forwarding_attempt_plan(
+        status,
+        class_tag,
+        action_tag,
+        retryable_previous,
+        token_invalidated,
+        committed,
+    )
+
+
+def response_forwarding_attempt_plan(
+    status: Int64,
+    class_tag: Int64,
+    action_tag: Int64,
+    retryable_previous: Int64,
+    token_invalidated: Int64,
+    committed: Int64,
+) -> Int64:
+    if (
+        status < 0
+        or status > 65535
+        or class_tag < 0
+        or class_tag > 5
+        or action_tag < 0
+        or action_tag > 2
+        or retryable_previous < 0
+        or retryable_previous > 1
+        or token_invalidated < 0
+        or token_invalidated > 1
+        or committed < 0
+        or committed > 1
+    ):
+        return -1
+    # Once output is committed the upstream response is transparent and no
+    # recovery action may rotate or retry it.
+    if committed == 1:
+        return RESPONSE_FORWARDING_ATTEMPT_SUCCESS
+    # A stale continuation is terminal for standard and compact forwarding.
+    if retryable_previous == 1:
+        return RESPONSE_FORWARDING_ATTEMPT_PREVIOUS_RESPONSE_NOT_FOUND
+    if status == 401:
+        return RESPONSE_FORWARDING_ATTEMPT_AUTH_FAILED
+    if class_tag == 3 and action_tag == 1:
+        return RESPONSE_FORWARDING_ATTEMPT_PROFILE_UNAVAILABLE
+    if class_tag == 1 and action_tag == 1:
+        return RESPONSE_FORWARDING_ATTEMPT_QUOTA_RETRY
+    if class_tag == 2 and action_tag == 2:
+        return RESPONSE_FORWARDING_ATTEMPT_RATE_LIMITED
+    if (class_tag == 4 or class_tag == 5) and action_tag == 2:
+        return RESPONSE_FORWARDING_ATTEMPT_OVERLOADED
+    if token_invalidated == 1:
+        return RESPONSE_FORWARDING_ATTEMPT_AUTH_FAILURE_NOTICE
+    return RESPONSE_FORWARDING_ATTEMPT_SUCCESS
+
+
 def response_precommit_attempt_plan(numeric: UInt64) -> Int64:
     # Rust packs status, the existing Mojo error class/action tags, and the
     # caller-owned response observations into this scalar. Mojo owns only the
@@ -197,28 +465,7 @@ def prodex_runtime_response_forwarding_classify_v1(
             return 0
         if length > 0 and not rich_utf8_valid(response_text_ptr(address), length):
             return -1
-        var bounds = rich_trim_bounds(ProdexRichStringView(address, UInt(length)))
-        var start = bounds[0]
-        var end = bounds[1]
-        if (
-            response_equals_ci_range(address, start, end, StringSlice("connection"))
-            or response_equals_ci_range(address, start, end, StringSlice("content-length"))
-            or response_equals_ci_range(address, start, end, StringSlice("keep-alive"))
-            or response_equals_ci_range(
-                address, start, end, StringSlice("proxy-authenticate")
-            )
-            or response_equals_ci_range(
-                address, start, end, StringSlice("proxy-authorization")
-            )
-            or response_equals_ci_range(address, start, end, StringSlice("te"))
-            or response_equals_ci_range(address, start, end, StringSlice("trailer"))
-            or response_equals_ci_range(
-                address, start, end, StringSlice("transfer-encoding")
-            )
-            or response_equals_ci_range(address, start, end, StringSlice("upgrade"))
-        ):
-            return 1
-        return 0
+        return Int64(response_is_hop_header(address, length))
 
     if operation == RESPONSE_FORWARDING_RESPONSES_STREAM:
         if _numeric > 1:
