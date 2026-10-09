@@ -89,6 +89,9 @@ const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_po
 const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_proxy/websocket_message/loop_control.rs",
+  "crates/prodex-mojo-core/src/runtime/websocket_loop_control.rs",
+  "mojo/prodex_core/websocket_loop_control.mojo",
   "crates/prodex-app/src/runtime_proxy/lineage/release.rs",
   "crates/prodex-runtime-state/src/admission.rs",
   "crates/prodex-app/src/runtime_proxy/lineage/lookup.rs",
@@ -1148,6 +1151,32 @@ export function findViolations(files) {
     if (filePath === "mojo/prodex_core/runtime_responses_quota.mojo") {
       return contents.includes('@export("prodex_runtime_responses_quota_turn_state_replay_v1")')
         ? [] : [`${filePath}: replay eligibility must retain Mojo ownership`];
+    }
+    return [];
+  });
+  const websocketBudgetMojoViolations = files.flatMap(([filePath, contents]) => {
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    if (filePath === "crates/prodex-app/src/runtime_proxy/websocket_message/loop_control.rs") {
+      const required = [
+        "prodex_mojo_core::runtime::websocket_precommit_budget_exhausted(",
+        "WebsocketPrecommitBudgetInput {",
+      ];
+      const missing = required.filter((marker) => !contents.includes(marker));
+      if (contents.includes("Ok(selection_attempts >= attempt_limit)")) {
+        missing.push("restored Rust websocket exhaustion decision");
+      }
+      return missing.map((marker) => `${filePath}: websocket precommit budget must remain Mojo-owned (${marker})`);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime/websocket_loop_control.rs") {
+      return production.includes("prodex_runtime_websocket_precommit_exhausted_v1(")
+        ? [] : [`${filePath}: websocket budget adapter must retain versioned Mojo ABI`];
+    }
+    if (filePath === "mojo/prodex_core/websocket_loop_control.mojo") {
+      return [
+        '@export("prodex_runtime_websocket_precommit_exhausted_v1")',
+        "fields[unsafe_offset=2] >= fields[unsafe_offset=9]",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: precommit decision must compare attempts in Mojo (${marker})`);
     }
     return [];
   });
@@ -5942,7 +5971,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
