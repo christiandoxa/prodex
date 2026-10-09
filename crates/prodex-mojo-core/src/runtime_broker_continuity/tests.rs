@@ -156,6 +156,105 @@ fn broker_registry_reuse_plan_is_mojo_authoritative() {
 }
 
 #[test]
+fn broker_reuse_policy_uses_all_flags_and_health_only_after_config_match() {
+    const A: &str = "https://upstream.example";
+    const B: &str = "https://UPSTREAM.example";
+    for registry_bits in 0_u8..8 {
+        for launch_bits in 0_u8..8 {
+            for health_present in [false, true] {
+                for health_matches in [false, true] {
+                    if health_matches && !health_present {
+                        assert_eq!(
+                            registry_reuse_plan(BrokerRegistryReuseInput {
+                                registry_upstream_base_url: A,
+                                registry_include_code_review: registry_bits & 1 != 0,
+                                registry_upstream_no_proxy: registry_bits & 2 != 0,
+                                registry_smart_context_enabled: registry_bits & 4 != 0,
+                                launch_upstream_base_url: A,
+                                launch_include_code_review: launch_bits & 1 != 0,
+                                launch_upstream_no_proxy: launch_bits & 2 != 0,
+                                launch_smart_context_enabled: launch_bits & 4 != 0,
+                                health_present,
+                                health_matches,
+                            }),
+                            Err(MojoError::InvalidOutput),
+                        );
+                        continue;
+                    }
+                    let expected = if registry_bits != launch_bits {
+                        BrokerRegistryReuseDecision::LaunchConfigMismatch
+                    } else if health_present && health_matches {
+                        BrokerRegistryReuseDecision::Reuse
+                    } else {
+                        BrokerRegistryReuseDecision::MissingMatchingHealth
+                    };
+                    assert_eq!(
+                        registry_reuse_plan(BrokerRegistryReuseInput {
+                            registry_upstream_base_url: A,
+                            registry_include_code_review: registry_bits & 1 != 0,
+                            registry_upstream_no_proxy: registry_bits & 2 != 0,
+                            registry_smart_context_enabled: registry_bits & 4 != 0,
+                            launch_upstream_base_url: A,
+                            launch_include_code_review: launch_bits & 1 != 0,
+                            launch_upstream_no_proxy: launch_bits & 2 != 0,
+                            launch_smart_context_enabled: launch_bits & 4 != 0,
+                            health_present,
+                            health_matches,
+                        }),
+                        Ok(expected),
+                        "registry_bits={registry_bits:03b}, launch_bits={launch_bits:03b}",
+                    );
+                }
+            }
+        }
+    }
+    let input = BrokerRegistryReuseInput {
+        registry_upstream_base_url: A,
+        registry_include_code_review: true,
+        registry_upstream_no_proxy: false,
+        registry_smart_context_enabled: true,
+        launch_upstream_base_url: B,
+        launch_include_code_review: true,
+        launch_upstream_no_proxy: false,
+        launch_smart_context_enabled: true,
+        health_present: true,
+        health_matches: true,
+    };
+    assert_eq!(
+        registry_reuse_plan(input),
+        Ok(BrokerRegistryReuseDecision::LaunchConfigMismatch)
+    );
+}
+
+#[test]
+fn broker_startup_grace_matches_ceil_plus_one_for_integer_boundaries() {
+    let times = [
+        0,
+        1,
+        999,
+        1_000,
+        1_001,
+        9_999,
+        10_000,
+        u32::MAX as u64,
+        u64::MAX,
+    ];
+    let grace = [-100, -1, 0, 1, 5, 17, i64::MAX];
+    for milliseconds in times {
+        for idle in grace {
+            let expected = (milliseconds.div_ceil(1_000) as i64)
+                .saturating_add(1)
+                .max(idle);
+            assert_eq!(
+                startup_grace_seconds(milliseconds, idle),
+                Ok(expected),
+                "milliseconds={milliseconds}, idle={idle}"
+            );
+        }
+    }
+}
+
+#[test]
 fn broker_startup_grace_plan_preserves_timeout_rounding_and_idle_floor() {
     assert_eq!(startup_grace_seconds(1_250, 5).unwrap(), 5);
     assert_eq!(startup_grace_seconds(5_250, 1).unwrap(), 7);

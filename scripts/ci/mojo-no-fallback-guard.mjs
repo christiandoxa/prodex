@@ -89,6 +89,9 @@ const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_po
 const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-runtime-broker/src/registry.rs",
+  "crates/prodex-runtime-broker/src/process.rs",
+  "mojo/prodex_core/runtime_broker_continuity.mojo",
   "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
   "crates/prodex-mojo-core/src/rich/gemini_response_media.rs",
   "mojo/prodex_core/gemini_response_media.mojo",
@@ -1234,6 +1237,43 @@ export function findViolations(files) {
         "def media_put_image_generation(", "def media_put_special_text("].filter(
         (marker) => !contents.includes(marker),
       ).map((marker) => `${filePath}: Gemini media projection must remain Mojo-owned (${marker})`);
+    }
+    return [];
+  });
+  const runtimeBrokerReuseMojoViolations = files.flatMap(([filePath, contents]) => {
+    const production = contents.split("#[cfg(test)]", 1)[0];
+    if (filePath === "crates/prodex-runtime-broker/src/registry.rs") {
+      const required = [
+        "prodex_mojo_core::runtime_broker_continuity::registry_reuse_plan(",
+        "BrokerRegistryReuseInput {",
+      ];
+      const missing = required.filter((marker) => !production.includes(marker));
+      if (production.includes("self.upstream_base_url == upstream_base_url")) {
+        missing.push("duplicate Rust broker registry config comparison");
+      }
+      return missing.map((marker) => `${filePath}: broker registry reuse must stay Mojo-owned (${marker})`);
+    }
+    if (filePath === "crates/prodex-runtime-broker/src/process.rs") {
+      const required = ["prodex_mojo_core::runtime_broker_continuity::startup_grace_seconds("];
+      const missing = required.filter((marker) => !production.includes(marker));
+      if (production.includes("ready_timeout_ms.div_ceil(1_000) as i64")) {
+        missing.push("duplicate Rust broker startup-grace rounding");
+      }
+      return missing.map((marker) => `${filePath}: startup grace policy must stay Mojo-owned (${marker})`);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime_broker_continuity.rs") {
+      return [
+        "prodex_runtime_broker_registry_reuse_plan_v1(",
+        "prodex_runtime_broker_startup_grace_seconds_v1(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: broker reuse ABI must be retained (${marker})`);
+    }
+    if (filePath === "mojo/prodex_core/runtime_broker_continuity.mojo") {
+      return [
+        '@export("prodex_runtime_broker_registry_reuse_plan_v1")',
+        '@export("prodex_runtime_broker_startup_grace_seconds_v1")',
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: broker policy must remain Mojo-owned (${marker})`);
     }
     return [];
   });
@@ -6045,7 +6085,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
