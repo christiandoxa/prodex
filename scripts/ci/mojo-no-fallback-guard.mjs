@@ -89,6 +89,9 @@ const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_po
 const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-provider-core/src/translators/gemini/response_media.rs",
+  "crates/prodex-mojo-core/src/rich/gemini_response_media.rs",
+  "mojo/prodex_core/gemini_response_media.mojo",
   "mojo/prodex_core/runtime_cookie_policy.mojo",
   "crates/prodex-app/src/runtime_proxy/websocket_message/loop_control.rs",
   "crates/prodex-mojo-core/src/runtime/websocket_loop_control.rs",
@@ -1203,6 +1206,34 @@ export function findViolations(files) {
     if (filePath === "mojo/prodex_core/runtime_cookie_policy.mojo") {
       return contents.includes('@export("prodex_runtime_cookie_oldest_timestamp_index_v1")')
         ? [] : [`${filePath}: cookie eviction ordering must remain Mojo-owned`];
+    }
+    return [];
+  });
+  const geminiResponseMediaMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-provider-core/src/translators/gemini/response_media.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "GeminiResponseMediaOperation::Content",
+        "GeminiResponseMediaOperation::SpecialText",
+        "GeminiResponseMediaOperation::ImageGeneration",
+        "prodex_mojo_core::rich::gemini_response_media(",
+      ];
+      const missing = required.filter((marker) => !production.includes(marker));
+      for (const legacy of ["fn gemini_mime_type_for_uri(", "fn gemini_data_url_parts("]) {
+        if (production.includes(legacy)) missing.push(`restored Rust media policy ${legacy}`);
+      }
+      return missing.map((marker) => `${filePath}: Gemini response-media semantics must be Mojo-owned (${marker})`);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/rich/gemini_response_media.rs") {
+      return ["prodex_mojo_gemini_response_media_v1(", "transform_json("].filter(
+        (marker) => !contents.includes(marker),
+      ).map((marker) => `${filePath}: Gemini media adapter must retain Mojo ABI (${marker})`);
+    }
+    if (filePath === "mojo/prodex_core/gemini_response_media.mojo") {
+      return ["def gemini_response_media_kernel_v1(", "def media_put_content(",
+        "def media_put_image_generation(", "def media_put_special_text("].filter(
+        (marker) => !contents.includes(marker),
+      ).map((marker) => `${filePath}: Gemini media projection must remain Mojo-owned (${marker})`);
     }
     return [];
   });
@@ -5997,7 +6028,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -6070,6 +6101,18 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const mediaFile = "crates/prodex-provider-core/src/translators/gemini/response_media.rs";
+  const mediaCanonical = [
+    "GeminiResponseMediaOperation::Content",
+    "GeminiResponseMediaOperation::SpecialText",
+    "GeminiResponseMediaOperation::ImageGeneration",
+    "prodex_mojo_core::rich::gemini_response_media(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[mediaFile, mediaCanonical]]), []);
+  assert.match(
+    findViolations([[mediaFile, "fn gemini_data_url_parts() {}"]]).join("\n"),
+    /Gemini response-media semantics must be Mojo-owned/u,
+  );
   const affinitySource = "crates/prodex-app/src/runtime_proxy/selection/affinity.rs";
   const affinityCanonical = [
     "runtime_proxy_crate::runtime_hard_binding_conflict(",
