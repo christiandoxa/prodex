@@ -62,7 +62,20 @@ def anthropic_chat_validate_fields(
     var field = pj_child(tree, chat)
     while field >= 0:
         var key = tree.nodes[unsafe_offset=field].key.copy()
-        if pj_equal(key, pj_literal(StringSlice("parallel_tool_calls"))):
+        if (
+            pj_equal(key, pj_literal(StringSlice("presence_penalty")))
+            or pj_equal(key, pj_literal(StringSlice("frequency_penalty")))
+            or pj_equal(key, pj_literal(StringSlice("seed")))
+            or pj_equal(key, pj_literal(StringSlice("user")))
+        ):
+            anthropic_chat_error_field(
+                sink,
+                StringSlice("Anthropic Messages does not translate chat field `"),
+                key,
+                StringSlice("`"),
+            )
+            return False
+        elif pj_equal(key, pj_literal(StringSlice("parallel_tool_calls"))):
             if pj_kind(tree, field) != JSON_TRUE:
                 anthropic_chat_error(
                     sink,

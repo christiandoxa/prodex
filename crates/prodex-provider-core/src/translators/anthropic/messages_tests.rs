@@ -145,6 +145,20 @@ fn request_rejects_unmappable_sampling_fields() {
 }
 
 #[test]
+fn request_rejects_oversized_chat_input_without_panicking() {
+    let result = request(json!({
+        "model": "claude-sonnet-4-6",
+        "input": "x".repeat(4 * 1024 * 1024),
+    }));
+    assert!(matches!(
+        result.loss,
+        ProviderTransformLoss::Rejected { ref reason }
+            if reason.contains("Anthropic Messages request exceeds")
+    ));
+    assert!(result.body.is_none());
+}
+
+#[test]
 fn chat_request_rejects_every_unmapped_top_level_field() {
     for (field, value) in [
         ("response_format", json!({"type": "json_object"})),

@@ -1687,8 +1687,159 @@ def anthropic_request_json_u64(view: ProdexRichStringView) -> UInt64:
         var digit = anthropic_request_byte(view, index)
         if digit < 48 or digit > 57:
             return 0
-        value = value * 10 + UInt64(digit - 48)
+        var next = UInt64(digit - 48)
+        if value > (ANTHROPIC_UINT64_MAX - next) / 10:
+            return 0
+        value = value * 10 + next
     return value
+
+
+def anthropic_request_range_is_u64(
+    view: ProdexRichStringView, value: Array[Int64, 2]
+) -> Bool:
+    if value[0] < 0 or value[1] <= value[0]:
+        return False
+    var value_view = ProdexRichStringView(
+        view.ptr + UInt(value[0]), UInt(value[1] - value[0])
+    )
+    var parsed = anthropic_request_json_u64(value_view)
+    if value_view.len == 0:
+        return False
+    for index in range(Int64(value_view.len)):
+        var digit = anthropic_request_byte(value_view, index)
+        if digit < 48 or digit > 57:
+            return False
+    if parsed == 0:
+        return anthropic_request_range_matches_literal(
+            value_view, 0, Int64(value_view.len), StringSlice("0")
+        )
+    return True
+
+
+def anthropic_request_range_is_object(
+    view: ProdexRichStringView, value: Array[Int64, 2]
+) -> Bool:
+    return (
+        value[0] >= 0
+        and value[1] >= value[0] + 2
+        and anthropic_request_byte(view, value[0]) == 123
+        and anthropic_request_byte(view, value[1] - 1) == 125
+    )
+
+
+def anthropic_request_write_response_envelope_raw(
+    writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
+    input: ProdexAnthropicRequestKernelInput,
+) -> Bool:
+    if (
+        input.content.len < 2
+        or anthropic_request_byte(input.content, 0) != 123
+        or anthropic_request_byte(input.content, Int64(input.content.len) - 1) != 125
+        or input.blocks.len == 0
+    ):
+        return False
+    var source = input.content.copy()
+    var source_end = Int64(source.len)
+    var id = anthropic_request_object_field(source, 0, source_end, StringSlice('"id"'))
+    var model = anthropic_request_object_field(source, 0, source_end, StringSlice('"model"'))
+    if id[0] < 0 or anthropic_request_string_end(source, id[0], id[1]) != id[1]:
+        id = Array[Int64, 2](fill=-1)
+    if model[0] < 0 or anthropic_request_string_end(source, model[0], model[1]) != model[1]:
+        model = Array[Int64, 2](fill=-1)
+    var usage = anthropic_request_object_field(source, 0, source_end, StringSlice('"usage"'))
+    var has_usage = anthropic_request_range_is_object(source, usage)
+    var input_tokens = Array[Int64, 2](fill=-1)
+    var output_tokens = Array[Int64, 2](fill=-1)
+    var web_search_requests = Array[Int64, 2](fill=-1)
+    if has_usage:
+        input_tokens = anthropic_request_object_field(
+            source, usage[0], usage[1], StringSlice('"input_tokens"')
+        )
+        output_tokens = anthropic_request_object_field(
+            source, usage[0], usage[1], StringSlice('"output_tokens"')
+        )
+        var server_tool_use = anthropic_request_object_field(
+            source, usage[0], usage[1], StringSlice('"server_tool_use"')
+        )
+        if anthropic_request_range_is_object(source, server_tool_use):
+            web_search_requests = anthropic_request_object_field(
+                source, server_tool_use[0], server_tool_use[1], StringSlice('"web_search_requests"')
+            )
+    var stop_reason = anthropic_request_object_field(
+        source, 0, source_end, StringSlice('"stop_reason"')
+    )
+    var has_web_search_requests = anthropic_request_range_is_u64(source, web_search_requests)
+    var flags: Int64 = 0
+    if has_usage:
+        flags |= 1
+    if has_web_search_requests:
+        flags |= 2
+    if stop_reason[0] >= 0:
+        flags |= 4
+    if not (
+        anthropic_request_put_literal(writer, StringSlice('{"id":'))
+        and anthropic_request_put_range_or_literal(writer, source, id, StringSlice('"resp_anthropic"'))
+        and anthropic_request_put_literal(writer, StringSlice(',"object":"response","created_at":'))
+        and anthropic_request_put_u64(writer, input.created_at)
+        and anthropic_request_put_literal(writer, StringSlice(',"model":'))
+        and anthropic_request_put_range_or_literal(writer, source, model, StringSlice('"unknown"'))
+        and anthropic_request_put_literal(writer, StringSlice(',"output":'))
+        and anthropic_request_put_view(writer, input.blocks)
+    ):
+        return False
+    if flags & 1:
+        var input_value: UInt64 = 0
+        var output_value: UInt64 = 0
+        if anthropic_request_range_is_u64(source, input_tokens):
+            input_value = anthropic_request_json_u64(
+                ProdexRichStringView(
+                    source.ptr + UInt(input_tokens[0]), UInt(input_tokens[1] - input_tokens[0])
+                )
+            )
+        if anthropic_request_range_is_u64(source, output_tokens):
+            output_value = anthropic_request_json_u64(
+                ProdexRichStringView(
+                    source.ptr + UInt(output_tokens[0]), UInt(output_tokens[1] - output_tokens[0])
+                )
+            )
+        var total = ANTHROPIC_UINT64_MAX
+        if output_value <= ANTHROPIC_UINT64_MAX - input_value:
+            total = input_value + output_value
+        if not (
+            anthropic_request_put_literal(writer, StringSlice(',"usage":{"input_tokens":'))
+            and anthropic_request_put_u64(writer, input_value)
+            and anthropic_request_put_literal(writer, StringSlice(',"output_tokens":'))
+            and anthropic_request_put_u64(writer, output_value)
+            and anthropic_request_put_literal(writer, StringSlice(',"total_tokens":'))
+            and anthropic_request_put_u64(writer, total)
+            and anthropic_request_put_byte(writer, 125)
+        ):
+            return False
+    if flags & 2:
+        var web_value = anthropic_request_json_u64(
+            ProdexRichStringView(
+                source.ptr + UInt(web_search_requests[0]),
+                UInt(web_search_requests[1] - web_search_requests[0]),
+            )
+        )
+        if not (
+            anthropic_request_put_literal(
+                writer, StringSlice(',"tool_usage":{"web_search":{"num_requests":')
+            )
+            and anthropic_request_put_u64(writer, web_value)
+            and anthropic_request_put_literal(writer, StringSlice("}}"))
+        ):
+            return False
+    if flags & 4:
+        if not (
+            anthropic_request_put_literal(
+                writer, StringSlice(',"metadata":{"anthropic":{"stop_reason":')
+            )
+            and anthropic_request_put_view_range(writer, source, stop_reason[0], stop_reason[1])
+            and anthropic_request_put_literal(writer, StringSlice("}}"))
+        ):
+            return False
+    return anthropic_request_put_byte(writer, 125)
 
 
 def anthropic_request_put_json_string_or_default(
@@ -1707,6 +1858,8 @@ def anthropic_request_write_response_envelope(
     writer: Pointer[mut=True, AnthropicRequestKernelWriter, _],
     input: ProdexAnthropicRequestKernelInput,
 ) -> Bool:
+    if input.choice_kind == -1:
+        return anthropic_request_write_response_envelope_raw(writer, input)
     if input.blocks.len == 0:
         return False
     if not (
