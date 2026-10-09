@@ -10,8 +10,10 @@ comptime OP_ALIAS_DECLARATION: Int64 = 1
 comptime OP_ALIAS_REFERENCE: Int64 = 2
 comptime OP_REFERENCE: Int64 = 3
 comptime OP_ID_VALID: Int64 = 4
+comptime OP_BODY_MARKER_PRESENT: Int64 = 5
 
 comptime MAX_TOKEN_BYTES: Int64 = 1024 * 1024
+comptime MAX_BODY_SCAN_BYTES: Int64 = 4 * 1024 * 1024
 
 def byte_at(address: UInt, index: Int64) -> UInt8:
     return Pointer[mut=False, UInt8, ImmUntrackedOrigin](unsafe_from_address=Int(address))[unsafe_offset=index]
@@ -37,6 +39,14 @@ def literal_at[literal: StaticString](address: UInt, start: Int64, end: Int64) -
         if byte_at(address, start + i) != wanted[unsafe_offset=i]:
             return False
     return True
+
+def body_marker_present(address: UInt, length: Int64) -> Bool:
+    if length <= 0:
+        return False
+    for start in range(length):
+        if literal_at["psc:"](address, start, length) or literal_at["psc2:"](address, start, length) or literal_at["prodex-artifact:"](address, start, length):
+            return True
+    return False
 
 def ascii_hex(value: UInt8) -> Bool:
     return value >= 48 and value <= 57 or value >= 65 and value <= 70 or value >= 97 and value <= 102
@@ -219,8 +229,9 @@ def prodex_smart_context_artifact_ref_v1(
 ) abi("C") -> Int64:
     if (
         abi_version != ARTIFACT_REF_ABI_VERSION
-        or operation < OP_ALIAS_VALID or operation > OP_ID_VALID
-        or length < 0 or length > MAX_TOKEN_BYTES
+        or operation < OP_ALIAS_VALID or operation > OP_BODY_MARKER_PRESENT
+        or length < 0
+        or length > (MAX_BODY_SCAN_BYTES if operation == OP_BODY_MARKER_PRESENT else MAX_TOKEN_BYTES)
         or (length > 0 and address == 0)
         or meta_address == 0
     ):
@@ -231,6 +242,10 @@ def prodex_smart_context_artifact_ref_v1(
     )
     for i in range(4):
         meta[unsafe_offset=i] = -1
+
+    if operation == OP_BODY_MARKER_PRESENT:
+        meta[unsafe_offset=0] = Int64(body_marker_present(address, length))
+        return ARTIFACT_REF_OK
 
     var bounds = trim_bounds(address, length)
     var start = bounds[0]

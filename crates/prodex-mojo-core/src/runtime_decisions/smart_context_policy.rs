@@ -1,3 +1,7 @@
+#[path = "smart_context_request.rs"]
+mod smart_context_request;
+pub use smart_context_request::*;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmartContextRegressionPlanInput {
     pub exactness_required: bool,

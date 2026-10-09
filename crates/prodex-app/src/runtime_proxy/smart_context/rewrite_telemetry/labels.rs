@@ -4,144 +4,78 @@ use super::*;
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_pressure_band_label(
     value: runtime_proxy_crate::SmartContextPressureBand,
-) -> &'static str {
-    match value {
-        runtime_proxy_crate::SmartContextPressureBand::Unknown => "unknown",
-        runtime_proxy_crate::SmartContextPressureBand::Low => "low",
-        runtime_proxy_crate::SmartContextPressureBand::Moderate => "moderate",
-        runtime_proxy_crate::SmartContextPressureBand::High => "high",
-        runtime_proxy_crate::SmartContextPressureBand::Critical => "critical",
-        runtime_proxy_crate::SmartContextPressureBand::Exhausted => "exhausted",
-    }
+) -> String {
+    runtime_smart_context_telemetry_label(0, value as u64)
 }
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_estimator_confidence_label(
     value: runtime_proxy_crate::SmartContextEstimatorConfidence,
-) -> &'static str {
-    match value {
-        runtime_proxy_crate::SmartContextEstimatorConfidence::High => "high",
-        runtime_proxy_crate::SmartContextEstimatorConfidence::Medium => "medium",
-        runtime_proxy_crate::SmartContextEstimatorConfidence::Low => "low",
-    }
+) -> String {
+    runtime_smart_context_telemetry_label(1, value as u64)
 }
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_rollout_mode_label(
     mode: runtime_proxy_crate::SmartContextRolloutMode,
-) -> &'static str {
-    match mode {
-        runtime_proxy_crate::SmartContextRolloutMode::Apply => "apply",
-        runtime_proxy_crate::SmartContextRolloutMode::Shadow => "shadow",
-        runtime_proxy_crate::SmartContextRolloutMode::Disabled => "disabled",
-    }
+) -> String {
+    runtime_smart_context_telemetry_label(2, mode as u64)
 }
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_budget_mode_label(
     mode: runtime_proxy_crate::SmartContextBudgetMode,
-) -> &'static str {
-    match mode {
-        runtime_proxy_crate::SmartContextBudgetMode::ExactPassThrough => "exact_pass_through",
-        runtime_proxy_crate::SmartContextBudgetMode::LargeLossless => "large_lossless",
-        runtime_proxy_crate::SmartContextBudgetMode::ArtifactCondensed => "artifact_condensed",
-        runtime_proxy_crate::SmartContextBudgetMode::MinimalRefsOnly => "minimal_refs_only",
-    }
+) -> String {
+    runtime_smart_context_telemetry_label(3, mode as u64)
 }
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_budget_policy_reason_labels(
     reasons: &[runtime_proxy_crate::SmartContextBudgetPolicyReason],
 ) -> String {
-    if reasons.is_empty() {
-        return "-".to_string();
-    }
-    reasons
-        .iter()
-        .map(|reason| match reason {
-            runtime_proxy_crate::SmartContextBudgetPolicyReason::ExactnessRequired => {
-                "exactness_required"
-            }
-            runtime_proxy_crate::SmartContextBudgetPolicyReason::StaticContextChanged => {
-                "static_context_changed"
-            }
-            runtime_proxy_crate::SmartContextBudgetPolicyReason::MissingRehydrateRefs => {
-                "missing_rehydrate_refs"
-            }
-            runtime_proxy_crate::SmartContextBudgetPolicyReason::UnknownTokenWindow => {
-                "unknown_token_window"
-            }
-            runtime_proxy_crate::SmartContextBudgetPolicyReason::UnsafeAccounting => {
-                "unsafe_accounting"
-            }
-            runtime_proxy_crate::SmartContextBudgetPolicyReason::RecentRewriteSavingsSafe => {
-                "recent_rewrite_savings_safe"
-            }
-            runtime_proxy_crate::SmartContextBudgetPolicyReason::PlentyOfBudget => {
-                "plenty_of_budget"
-            }
-            runtime_proxy_crate::SmartContextBudgetPolicyReason::ModerateBudget => {
-                "moderate_budget"
-            }
-            runtime_proxy_crate::SmartContextBudgetPolicyReason::TightBudget => "tight_budget",
-            runtime_proxy_crate::SmartContextBudgetPolicyReason::CriticalBudget => {
-                "critical_budget"
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(",")
+    let bits = reasons.iter().fold(0_u64, |bits, reason| {
+        bits | match reason {
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::ExactnessRequired => 1,
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::StaticContextChanged => 2,
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::MissingRehydrateRefs => 4,
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::UnknownTokenWindow => 8,
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::UnsafeAccounting => 16,
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::RecentRewriteSavingsSafe => 32,
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::PlentyOfBudget => 64,
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::ModerateBudget => 128,
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::TightBudget => 256,
+            runtime_proxy_crate::SmartContextBudgetPolicyReason::CriticalBudget => 512,
+        }
+    });
+    runtime_smart_context_telemetry_label(6, bits)
 }
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_transformed_segment_categories(
     stats: &RuntimeSmartContextTransformStats,
 ) -> String {
-    let mut categories = Vec::new();
-    if stats.tool_outputs_condensed > 0 {
-        categories.push("tool_output");
-    }
-    if stats.tool_call_args_condensed > 0 {
-        categories.push("tool_argument");
-    }
-    if stats.duplicate_texts > 0 || stats.cross_turn_duplicate_texts > 0 {
-        categories.push("duplicate_context");
-    }
-    if stats.repeat_tool_output_refs > 0 {
-        categories.push("repeat_tool_output");
-    }
-    if stats.blob_outputs_condensed > 0 {
-        categories.push("blob_output");
-    }
-    if stats.rehydrated_refs > 0 {
-        categories.push("rehydration");
-    }
-    if stats.static_context_deltas > 0 {
-        categories.push("static_context");
-    }
-    if stats.repo_state_facts > 0 {
-        categories.push("repo_state");
-    }
-    if categories.is_empty() {
-        "-".to_string()
-    } else {
-        categories.join(",")
-    }
+    let bits = u64::from(stats.tool_outputs_condensed > 0)
+        | (u64::from(stats.tool_call_args_condensed > 0) << 1)
+        | (u64::from(stats.duplicate_texts > 0 || stats.cross_turn_duplicate_texts > 0) << 2)
+        | (u64::from(stats.repeat_tool_output_refs > 0) << 3)
+        | (u64::from(stats.blob_outputs_condensed > 0) << 4)
+        | (u64::from(stats.rehydrated_refs > 0) << 5)
+        | (u64::from(stats.static_context_deltas > 0) << 6)
+        | (u64::from(stats.repo_state_facts > 0) << 7);
+    runtime_smart_context_telemetry_label(4, bits)
 }
 
 pub(in crate::runtime_proxy::smart_context) fn runtime_smart_context_reason_labels(
     reasons: &[runtime_proxy_crate::SmartContextExactnessReason],
 ) -> String {
-    if reasons.is_empty() {
-        return "-".to_string();
-    }
-    reasons
-        .iter()
-        .map(|reason| match reason {
-            runtime_proxy_crate::SmartContextExactnessReason::ExplicitExactMode => "exact_mode",
-            runtime_proxy_crate::SmartContextExactnessReason::PreviousResponseAffinity => {
-                "previous_response"
-            }
-            runtime_proxy_crate::SmartContextExactnessReason::TurnStateAffinity => "turn_state",
-            runtime_proxy_crate::SmartContextExactnessReason::SessionAffinity => "session",
-            runtime_proxy_crate::SmartContextExactnessReason::ToolOutputWithoutArtifact => {
-                "tool_output_without_artifact"
-            }
-        })
-        .collect::<Vec<_>>()
-        .join(",")
+    let bits = reasons.iter().fold(0_u64, |bits, reason| {
+        bits | match reason {
+            runtime_proxy_crate::SmartContextExactnessReason::ExplicitExactMode => 1,
+            runtime_proxy_crate::SmartContextExactnessReason::PreviousResponseAffinity => 2,
+            runtime_proxy_crate::SmartContextExactnessReason::TurnStateAffinity => 4,
+            runtime_proxy_crate::SmartContextExactnessReason::SessionAffinity => 8,
+            runtime_proxy_crate::SmartContextExactnessReason::ToolOutputWithoutArtifact => 16,
+        }
+    });
+    runtime_smart_context_telemetry_label(5, bits)
+}
+
+fn runtime_smart_context_telemetry_label(kind: i64, value: u64) -> String {
+    prodex_mojo_core::runtime_decisions::smart_context_telemetry_label(kind, value)
+        .expect("Mojo Smart Context telemetry label returned invalid output")
 }

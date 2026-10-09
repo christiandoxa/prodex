@@ -1,5 +1,4 @@
 pub(super) const SMART_CONTEXT_DUPLICATE_TEXT_MIN_BYTES: usize = 1024;
-pub(super) const SMART_CONTEXT_ADMISSION_MIN_BODY_BYTES: usize = 512;
 pub(super) const SMART_CONTEXT_SHADOW_SAMPLE_BASIS_POINTS: u16 = 100;
 pub(super) const SMART_CONTEXT_FALLBACK_CONTEXT_WINDOW_TOKENS: u64 = 32_000;
 pub(super) const SMART_CONTEXT_RESERVED_OUTPUT_TOKENS: u64 = 4_096;
@@ -10,7 +9,9 @@ pub(super) const SMART_CONTEXT_TOKEN_CALIBRATION_SAVE_DELAY_MS: u64 = 250;
 pub(super) const SMART_CONTEXT_REWRITE_TELEMETRY_HISTORY_LIMIT: usize = 16;
 pub(super) const SMART_CONTEXT_REWRITE_SAFETY_HISTORY_LIMIT: usize = 4;
 pub(super) const SMART_CONTEXT_REWRITE_SAFETY_TTL_SECS: u64 = 6 * 60 * 60;
+#[cfg(test)]
 pub(super) const SMART_CONTEXT_HTTP_REWRITE_MAX_BYTES: usize = 256 * 1024;
+#[cfg(test)]
 pub(super) const SMART_CONTEXT_WEBSOCKET_REWRITE_MAX_BYTES: usize = 96 * 1024;
 #[cfg(not(debug_assertions))]
 pub(super) const SMART_CONTEXT_REWRITE_DEADLINE_MS: u64 = 100;

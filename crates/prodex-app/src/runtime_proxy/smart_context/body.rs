@@ -154,19 +154,48 @@ fn prepare_runtime_smart_context_body_input(
     if !cfg!(feature = "mojo-quota") {
         return Ok(None);
     }
-    let Ok(value) = serde_json::from_slice::<serde_json::Value>(&request.body) else {
-        runtime_smart_context_log_prepare_fallback(
-            request_id,
-            shared,
-            route_kind,
-            transport,
-            profile_name,
-            request.body.len(),
-            "invalid_json",
-        );
-        return Ok(None);
+    let value = match serde_json::from_slice::<serde_json::Value>(&request.body) {
+        Ok(value) => value,
+        Err(_) => {
+            let reason = prodex_mojo_core::runtime_decisions::smart_context_body_shape_reason(
+                prodex_mojo_core::runtime_decisions::SmartContextBodyShapeInput {
+                    json_valid: false,
+                    json_shape_valid: true,
+                    json_shape_reason: 0,
+                    rewrite_candidate: false,
+                    static_context_changed: false,
+                },
+            )
+            .expect("Mojo Smart Context body shape planner returned invalid output")
+            .expect("invalid JSON must have a fallback reason");
+            runtime_smart_context_log_prepare_fallback(
+                request_id,
+                shared,
+                route_kind,
+                transport,
+                profile_name,
+                request.body.len(),
+                reason,
+            );
+            return Ok(None);
+        }
     };
-    if let Some(reason) = runtime_smart_context_unsupported_json_shape_reason(&value) {
+    if let Some(shape_reason) = runtime_smart_context_unsupported_json_shape_reason(&value) {
+        let reason = prodex_mojo_core::runtime_decisions::smart_context_body_shape_reason(
+            prodex_mojo_core::runtime_decisions::SmartContextBodyShapeInput {
+                json_valid: true,
+                json_shape_valid: false,
+                json_shape_reason: if shape_reason == "json_depth_limit" {
+                    1
+                } else {
+                    2
+                },
+                rewrite_candidate: false,
+                static_context_changed: false,
+            },
+        )
+        .expect("Mojo Smart Context body shape planner returned invalid output")
+        .expect("oversized JSON must have a fallback reason");
         runtime_smart_context_log_prepare_fallback(
             request_id,
             shared,
@@ -192,6 +221,17 @@ fn prepare_runtime_smart_context_body_input(
     let static_context =
         runtime_smart_context_static_context_observation(&value, &planned_state.artifacts);
     if !has_rewrite_candidate && !static_context.state_changed {
+        let reason = prodex_mojo_core::runtime_decisions::smart_context_body_shape_reason(
+            prodex_mojo_core::runtime_decisions::SmartContextBodyShapeInput {
+                json_valid: true,
+                json_shape_valid: true,
+                json_shape_reason: 0,
+                rewrite_candidate: false,
+                static_context_changed: false,
+            },
+        )
+        .expect("Mojo Smart Context body shape planner returned invalid output")
+        .expect("missing rewrite candidate must have a fallback reason");
         runtime_smart_context_log_prepare_fallback(
             request_id,
             shared,
@@ -199,7 +239,7 @@ fn prepare_runtime_smart_context_body_input(
             transport,
             profile_name,
             request.body.len(),
-            "no_duplicate_candidate",
+            reason,
         );
         return Ok(None);
     }

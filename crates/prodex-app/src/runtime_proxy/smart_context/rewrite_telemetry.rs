@@ -449,11 +449,10 @@ fn runtime_smart_context_telemetry_fallback_reason<'a>(
     decision: &str,
     self_check: &'a str,
 ) -> Option<&'a str> {
-    if decision == "self_check_passthrough" {
-        Some(self_check)
-    } else {
-        None
-    }
+    (prodex_mojo_core::rich::runtime_doctor_smart_context_fallback_reason_source(decision, true, 0)
+        .ok()
+        == Some(prodex_mojo_core::rich::RUNTIME_DOCTOR_FALLBACK_REASON_SOURCE_SELF_CHECK))
+    .then_some(self_check)
 }
 
 pub(super) fn runtime_smart_context_rewrite_self_check(
@@ -461,19 +460,15 @@ pub(super) fn runtime_smart_context_rewrite_self_check(
     body_bytes_after: usize,
     stats: &RuntimeSmartContextTransformStats,
 ) -> &'static str {
-    if stats.rehydrated_refs > 0
-        && stats.tool_outputs_condensed == 0
-        && stats.duplicate_texts == 0
-        && stats.static_context_deltas == 0
-    {
-        "ok_rehydrate_exact"
-    } else if body_bytes_after < body_bytes_before {
-        "ok_saved"
-    } else if body_bytes_after == body_bytes_before {
-        "zero_savings"
-    } else {
-        "growth"
-    }
+    prodex_mojo_core::runtime_decisions::smart_context_rewrite_outcome(
+        body_bytes_before,
+        body_bytes_after,
+        stats.rehydrated_refs,
+        stats.tool_outputs_condensed,
+        stats.duplicate_texts,
+        stats.static_context_deltas,
+    )
+    .expect("Mojo Smart Context rewrite outcome returned invalid output")
 }
 
 fn runtime_smart_context_rewrite_ratio_percent(
