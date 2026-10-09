@@ -63,7 +63,15 @@ fn sub_agent_policy_kernel_matches_public_cli_contract() {
         Some(ChildSpecScalarViolation::InvalidRecursionMarker)
     );
     assert_eq!(
+        child_spec_scalar_violation("", 65_536).unwrap(),
+        Some(ChildSpecScalarViolation::InvalidRecursionMarker)
+    );
+    assert_eq!(
         child_spec_scalar_violation("PRODEX_SUB_AGENT", 0).unwrap(),
+        Some(ChildSpecScalarViolation::InvalidTaskSize)
+    );
+    assert_eq!(
+        child_spec_scalar_violation("PRODEX_SUB_AGENT", 65_537).unwrap(),
         Some(ChildSpecScalarViolation::InvalidTaskSize)
     );
     assert_eq!(
@@ -186,6 +194,19 @@ fn app_policy_plans_cover_slots_catalogs_recursion_and_child_results() {
         recursion_decision(true, true).unwrap(),
         RecursionDecision::InternalLauncher
     );
+    assert_eq!(
+        recursion_decision(false, true).unwrap(),
+        RecursionDecision::Allowed
+    );
+
+    for (resume, exec, expected) in [
+        (false, false, LaunchTargetPlan::Fresh),
+        (false, true, LaunchTargetPlan::Exec),
+        (true, false, LaunchTargetPlan::Resume),
+        (true, true, LaunchTargetPlan::Resume),
+    ] {
+        assert_eq!(launch_target_plan(resume, exec).unwrap(), expected);
+    }
 
     assert_eq!(
         slot_plan_step(2, 0, false).unwrap(),
@@ -220,6 +241,14 @@ fn app_policy_plans_cover_slots_catalogs_recursion_and_child_results() {
         slot_plan_step(0, 0, false),
         Err(MojoError::InvalidInput)
     ));
+    assert_eq!(
+        slot_plan_step(64, 63, false).unwrap(),
+        SlotPlanStep::Candidate { index: 63 }
+    );
+    assert_eq!(
+        slot_plan_step(64, 64, false).unwrap(),
+        SlotPlanStep::LimitReached { exit_code: 75 }
+    );
     assert_eq!(
         slot_lock_error_action(false, true, false).unwrap(),
         SlotLockErrorAction::TryNext
@@ -309,4 +338,57 @@ fn app_policy_plans_cover_slots_catalogs_recursion_and_child_results() {
         .unwrap(),
         ConfigValidationAction::Valid
     );
+    assert_eq!(
+        config_validation_plan(
+            Some(" "),
+            ConfigReasoningState::InvalidCatalog,
+            ConfigUrlState::Invalid,
+            false,
+        )
+        .unwrap(),
+        ConfigValidationAction::ModelNonempty
+    );
+    assert_eq!(
+        config_validation_plan(
+            Some("model"),
+            ConfigReasoningState::InvalidCatalog,
+            ConfigUrlState::Invalid,
+            false,
+        )
+        .unwrap(),
+        ConfigValidationAction::InvalidReasoningCatalog
+    );
+}
+
+#[test]
+fn child_argv_policy_covers_every_provider_and_optional_shape() {
+    for provider in [(true, false), (false, true), (false, false)] {
+        for presidio in [false, true] {
+            for tool_count in [0, 1, 6] {
+                for model in [false, true] {
+                    for effort in [false, true] {
+                        let plan = child_argv_plan(
+                            provider.0, provider.1, presidio, tool_count, model, effort,
+                        )
+                        .unwrap();
+                        let expected_presidio = if presidio {
+                            ChildArgvAction::Presidio
+                        } else {
+                            ChildArgvAction::NoPresidio
+                        };
+                        assert_eq!(plan.first(), Some(&ChildArgvAction::Super));
+                        assert_eq!(plan.get(1), Some(&ChildArgvAction::NoSubAgent));
+                        assert_eq!(plan.get(2), Some(&expected_presidio));
+                        assert_eq!(
+                            plan.iter()
+                                .filter(|action| **action == ChildArgvAction::RequireTool)
+                                .count(),
+                            tool_count
+                        );
+                        assert_eq!(plan.last(), Some(&ChildArgvAction::Task));
+                    }
+                }
+            }
+        }
+    }
 }
