@@ -23,6 +23,9 @@ const DOCTOR_TIMELINE_DETAIL_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/p
 const DOCTOR_LAST_MARKER_LINE_CONSUMER_FILE = "crates/prodex-runtime-doctor/src/parsing/log_line.rs";
 const DOCTOR_RENDER_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_render.rs";
 const DOCTOR_RENDER_MOJO_FILE = "mojo/prodex_core/runtime_doctor_render.mojo";
+const DOCTOR_PRESENTATION_CONSUMER_FILE = "crates/prodex-app/src/app_commands/doctor/render.rs";
+const DOCTOR_PRESENTATION_ADAPTER_FILE = "crates/prodex-mojo-core/src/info_render/doctor.rs";
+const DOCTOR_PRESENTATION_MOJO_FILE = "mojo/prodex_core/info_render.mojo";
 const RUNTIME_DOCTOR_PLAN_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs";
 const RUNTIME_DOCTOR_PLAN_MOJO_FILE = "mojo/prodex_core/runtime_doctor_plan.mojo";
 const GOVERNANCE_INSPECTION_CONSUMER_FILE = "crates/prodex-domain/src/governance/inspection.rs";
@@ -325,6 +328,9 @@ const PROMOTED_FILES = [
   "crates/prodex-terminal-ui/src/runtime_launch.rs",
   "crates/prodex-mojo-core/src/info_render.rs",
   "crates/prodex-mojo-core/src/info_render/status.rs",
+  DOCTOR_PRESENTATION_CONSUMER_FILE,
+  DOCTOR_PRESENTATION_ADAPTER_FILE,
+  DOCTOR_PRESENTATION_MOJO_FILE,
   "crates/prodex-app/src/runtime_external_provider_config.rs",
   "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
   "crates/prodex-app/src/super_expose/protocol.rs",
@@ -4226,6 +4232,47 @@ export function findViolations(files) {
         .filter((marker) => !contents.includes(marker))
         .map((marker) => filePath + ": status policy adapter must retain Mojo call " + marker);
     }
+    if (filePath === DOCTOR_PRESENTATION_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "mojo_doctor_value_color(",
+        "doctor_viewport_plan(",
+      ];
+      const restoredRust = [
+        "let lower = value.to_ascii_lowercase()",
+        "let visible_rows = max_rows.saturating_sub(1)",
+        "lines.iter().skip(visible_rows).find",
+      ];
+      const violations = required
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: doctor presentation must retain Mojo call ${marker}`);
+      if (restoredRust.some((marker) => production.includes(marker))) {
+        violations.push(`${filePath}: contains restored Rust doctor presentation semantics`);
+      }
+      const callerTests = [
+        "doctor_value_color_highlights_status",
+        "doctor_mojo_viewport_keeps_unicode_and_hidden_critical_output",
+      ];
+      violations.push(...callerTests
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: doctor caller coverage must retain ${marker}`));
+      return violations;
+    }
+    if (filePath === DOCTOR_PRESENTATION_ADAPTER_FILE) {
+      const required = [
+        "const DOCTOR_VALUE_COLOR: i64 = 28",
+        "const DOCTOR_VIEWPORT: i64 = 29",
+        "pub fn doctor_value_color(",
+        "pub fn doctor_viewport_plan(",
+        "render(DOCTOR_VALUE_COLOR",
+        "render(DOCTOR_VIEWPORT",
+        "doctor_color_policy_keeps_precedence_and_ascii_matching",
+        "doctor_viewport_policy_preserves_hidden_critical_rows",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: doctor presentation adapter must retain ${marker}`);
+    }
     if (filePath === "mojo/prodex_core/info_render.mojo") {
       const required = [
         "INFO_RENDER_HUMAN_BYTES",
@@ -4246,6 +4293,12 @@ export function findViolations(files) {
         "info_render_status_resource_metrics(",
         "info_render_status_resource_history(",
         "info_render_status_quota_gauge(",
+        "INFO_RENDER_DOCTOR_VALUE_COLOR",
+        "INFO_RENDER_DOCTOR_VIEWPORT",
+        "info_render_doctor_value_color(",
+        "info_render_doctor_viewport(",
+        "if operation == INFO_RENDER_DOCTOR_VALUE_COLOR:",
+        "elif operation == INFO_RENDER_DOCTOR_VIEWPORT:",
       ];
       return required
         .filter((marker) => !contents.includes(marker))
@@ -6169,6 +6222,66 @@ function selfTest() {
   assert.match(
     findViolations([[mediaFile, "fn gemini_data_url_parts() {}"]]).join("\n"),
     /Gemini response-media semantics must be Mojo-owned/u,
+  );
+  const doctorPresentationCanonical = [
+    "mojo_doctor_value_color(",
+    "doctor_viewport_plan(",
+    "doctor_value_color_highlights_status",
+    "doctor_mojo_viewport_keeps_unicode_and_hidden_critical_output",
+  ].join("\n");
+  assert.deepEqual(findViolations([[DOCTOR_PRESENTATION_CONSUMER_FILE, doctorPresentationCanonical]]), []);
+  assert.match(
+    findViolations([[DOCTOR_PRESENTATION_CONSUMER_FILE,
+      `${doctorPresentationCanonical}\nlet lower = value.to_ascii_lowercase()`]]).join("\n"),
+    /contains restored Rust doctor presentation semantics/u,
+  );
+  const doctorPresentationAdapterCanonical = [
+    "const DOCTOR_VALUE_COLOR: i64 = 28",
+    "const DOCTOR_VIEWPORT: i64 = 29",
+    "pub fn doctor_value_color(",
+    "pub fn doctor_viewport_plan(",
+    "render(DOCTOR_VALUE_COLOR",
+    "render(DOCTOR_VIEWPORT",
+    "doctor_color_policy_keeps_precedence_and_ascii_matching",
+    "doctor_viewport_policy_preserves_hidden_critical_rows",
+  ].join("\n");
+  assert.deepEqual(findViolations([[DOCTOR_PRESENTATION_ADAPTER_FILE, doctorPresentationAdapterCanonical]]), []);
+  assert.match(
+    findViolations([[DOCTOR_PRESENTATION_ADAPTER_FILE,
+      doctorPresentationAdapterCanonical.replace("render(DOCTOR_VIEWPORT", "fn viewport_rust(")]]).join("\n"),
+    /doctor presentation adapter must retain render\(DOCTOR_VIEWPORT/u,
+  );
+  const doctorPresentationMojoCanonical = [
+    "INFO_RENDER_HUMAN_BYTES",
+    "INFO_RENDER_HUMAN_COUNT",
+    "INFO_RENDER_TOKEN_EFFICIENCY",
+    "INFO_RENDER_MEMORY_PERCENT",
+    "INFO_RENDER_TEXT_SPARKLINE",
+    "info_render_human_bytes(",
+    "info_render_human_count(",
+    "info_render_token_efficiency(",
+    "info_render_memory_percent(",
+    "info_render_text_sparkline(",
+    "info_render_status_profile_filter(",
+    "info_render_status_token_plan(",
+    "info_render_status_runtime_profile(",
+    "info_render_status_runway(",
+    "info_render_status_fields(",
+    "info_render_status_resource_metrics(",
+    "info_render_status_resource_history(",
+    "info_render_status_quota_gauge(",
+    "INFO_RENDER_DOCTOR_VALUE_COLOR",
+    "INFO_RENDER_DOCTOR_VIEWPORT",
+    "info_render_doctor_value_color(",
+    "info_render_doctor_viewport(",
+    "if operation == INFO_RENDER_DOCTOR_VALUE_COLOR:",
+    "elif operation == INFO_RENDER_DOCTOR_VIEWPORT:",
+  ].join("\n");
+  assert.deepEqual(findViolations([[DOCTOR_PRESENTATION_MOJO_FILE, doctorPresentationMojoCanonical]]), []);
+  assert.match(
+    findViolations([[DOCTOR_PRESENTATION_MOJO_FILE,
+      doctorPresentationMojoCanonical.replace("info_render_doctor_viewport(", "info_render_doctor_viewport_missing(")]]).join("\n"),
+    /Mojo status formatter must retain info_render_doctor_viewport\(/u,
   );
   const affinitySource = "crates/prodex-app/src/runtime_proxy/selection/affinity.rs";
   const affinityCanonical = [
