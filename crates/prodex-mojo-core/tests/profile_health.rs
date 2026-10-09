@@ -247,11 +247,10 @@ fn recovery_batch_preserves_eligibility_and_saturated_time_boundaries() {
                 input.eligible && next.is_none(),
                 "index={index}, now={now}, input={input:?}"
             );
-            if input.eligible {
-                if let Some(next) = next {
-                    expected_earliest =
-                        Some(expected_earliest.map_or(next, |before| before.min(next)));
-                }
+            if input.eligible
+                && let Some(next) = next
+            {
+                expected_earliest = Some(expected_earliest.map_or(next, |before| before.min(next)));
             }
         }
         assert_eq!(plan.earliest_recovery_at, expected_earliest, "now={now}");

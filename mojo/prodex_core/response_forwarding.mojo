@@ -15,6 +15,7 @@ comptime RESPONSE_FORWARDING_GENERATION_START_ONCE: Int64 = 7
 comptime RESPONSE_FORWARDING_USAGE_EVENT_LIVE: Int64 = 8
 comptime RESPONSE_FORWARDING_PRECOMMIT_ATTEMPT: Int64 = 9
 comptime RESPONSE_FORWARDING_TAP_PLAN: Int64 = 10
+comptime RESPONSE_FORWARDING_RESPONSES_STREAM: Int64 = 11
 
 comptime RESPONSE_ATTEMPT_SUCCESS: Int64 = 0
 comptime RESPONSE_ATTEMPT_AUTH_FAILED: Int64 = 1
@@ -183,7 +184,7 @@ def prodex_runtime_response_forwarding_classify_v1(
 ) abi("C") -> Int64:
     if (
         operation < RESPONSE_FORWARDING_SKIP_HEADER
-        or operation > RESPONSE_FORWARDING_TAP_PLAN
+        or operation > RESPONSE_FORWARDING_RESPONSES_STREAM
         or present < 0
         or present > 1
         or length < 0
@@ -218,6 +219,22 @@ def prodex_runtime_response_forwarding_classify_v1(
         ):
             return 1
         return 0
+
+    if operation == RESPONSE_FORWARDING_RESPONSES_STREAM:
+        if _numeric > 1:
+            return -1
+        # The HTTP fallback client still requests SSE. An omitted or blank MIME
+        # header must not bypass precommit inspection and commit a failure as 200.
+        if present == 0 or length == 0:
+            return Int64(_numeric)
+        if not rich_utf8_valid(response_text_ptr(address), length):
+            return -1
+        var bounds = rich_trim_bounds(ProdexRichStringView(address, UInt(length)))
+        if bounds[0] == bounds[1]:
+            return Int64(_numeric)
+        return Int64(
+            response_contains_ci(address, length, StringSlice("text/event-stream"))
+        )
 
     if operation == RESPONSE_FORWARDING_CONTENT_TYPE_SSE:
         if present == 0:
@@ -316,3 +333,35 @@ def prodex_runtime_token_usage_progress_plan_v1(
     ):
         return RESPONSE_USAGE_PROGRESS_SUPPRESS
     return RESPONSE_USAGE_PROGRESS_LOG
+
+
+@export("prodex_runtime_bound_overload_retry_v1")
+def prodex_runtime_bound_overload_retry_v1(
+    abi_version: Int64,
+    hard_affinity: Int64,
+    committed: Int64,
+    retries: UInt64,
+    elapsed_ms: UInt64,
+    retry_after_present: Int64,
+    retry_after_ms: UInt64,
+    jitter_key: UInt64,
+) abi("C") -> Int64:
+    if abi_version != 1:
+        return -4
+    if (
+        (hard_affinity != 0 and hard_affinity != 1)
+        or (committed != 0 and committed != 1)
+        or (retry_after_present != 0 and retry_after_present != 1)
+    ):
+        return -2
+    # Preserve the owner of a live continuation. Never re-send committed output,
+    # and never retry indefinitely when the provider remains at capacity.
+    if hard_affinity == 0 or committed == 1 or retries >= 5 or elapsed_ms >= 60_000:
+        return -1
+    var delay_ms = UInt64(250) * (UInt64(1) << retries) + jitter_key % UInt64(251)
+    if retry_after_present == 1 and retry_after_ms > delay_ms:
+        delay_ms = retry_after_ms
+    # Do not truncate Retry-After to manufacture an early retry at the deadline.
+    if delay_ms >= UInt64(60_000) - elapsed_ms:
+        return -1
+    return Int64(delay_ms)

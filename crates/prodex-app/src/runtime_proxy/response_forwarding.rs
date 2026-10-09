@@ -2,7 +2,7 @@ use super::*;
 
 use runtime_proxy_crate::{
     runtime_buffered_response_metadata, runtime_forward_text_response_headers,
-    runtime_response_content_type_is_sse, runtime_response_header_value,
+    runtime_response_header_value, runtime_responses_should_inspect_sse,
     runtime_sse_forwarding_commit_detail,
 };
 pub(crate) use runtime_proxy_crate::{
@@ -60,6 +60,7 @@ pub(super) async fn forward_runtime_proxy_response_with_limit(
 pub(crate) struct RuntimeResponsesSuccessContext<'a> {
     pub(crate) request_id: u64,
     pub(crate) request_model_name: Option<&'a str>,
+    pub(crate) request_streaming: bool,
     pub(crate) request_previous_response_id: Option<&'a str>,
     pub(crate) request_prompt_cache_key: Option<&'a str>,
     pub(crate) request_session_id: Option<&'a str>,
@@ -82,6 +83,7 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
     let RuntimeResponsesSuccessContext {
         request_id,
         request_model_name,
+        request_streaming,
         request_previous_response_id,
         request_prompt_cache_key,
         request_session_id,
@@ -103,12 +105,13 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
         .headers()
         .get(reqwest::header::CONTENT_TYPE)
         .and_then(|value| value.to_str().ok());
-    let is_sse = runtime_response_content_type_is_sse(response_content_type);
+    let is_sse = runtime_responses_should_inspect_sse(response_content_type, request_streaming);
     runtime_proxy_log(
         shared,
         format!(
-            "request={request_id} transport=http prepare_success profile={profile_name} sse={is_sse} turn_state={:?}",
-            response_header_turn_state
+            "request={request_id} transport=http prepare_success profile={profile_name} sse={is_sse} request_streaming={request_streaming} content_type_present={} turn_state_present={}",
+            response_content_type.is_some(),
+            response_header_turn_state.is_some()
         ),
     );
     if !is_sse {
@@ -314,6 +317,31 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
             });
         }
         RuntimeSseInspection::Overloaded(prelude) => {
+            let retry_after = runtime_proxy_crate::runtime_retry_after_from_headers(
+                headers
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value.as_bytes())),
+            )
+            .or_else(|| {
+                let mut line = Vec::new();
+                let mut data = Vec::new();
+                let mut advice = None;
+                let mut found_overload = false;
+                let mut observe = |event: runtime_proxy_crate::RuntimeParsedSseEvent| {
+                    if event.overloaded && !found_overload {
+                        advice = event.retry_after;
+                        found_overload = true;
+                    }
+                };
+                runtime_proxy_crate::runtime_sse_consume_chunk(
+                    &mut line,
+                    &mut data,
+                    &prelude,
+                    &mut observe,
+                );
+                runtime_proxy_crate::runtime_sse_finish_pending(&mut line, &mut data, observe);
+                advice
+            });
             runtime_proxy_log(
                 shared,
                 format!(
@@ -326,6 +354,7 @@ pub(crate) async fn prepare_runtime_proxy_responses_success(
             drop(inflight_guard);
             return Ok(RuntimeResponsesAttempt::Overloaded {
                 profile_name: profile_name.to_string(),
+                retry_after,
                 response: RuntimeResponsesReply::Streaming(RuntimeStreamingResponse {
                     status,
                     headers: headers.clone(),

@@ -50,11 +50,16 @@ pub(super) fn write_runtime_proxy_backend_http_response(
             RuntimeProxyBackendMode::HttpOnlyPreviousResponseNotFoundAfterCommit
         )
         && matches!(account_id, "second-account");
+    let content_type_header = if content_type.is_empty() {
+        String::new()
+    } else {
+        format!("Content-Type: {content_type}\r\n")
+    };
     let mut headers = if close_delimited_sse {
-        format!("{status_line}\r\nContent-Type: {content_type}\r\nConnection: close\r\n")
+        format!("{status_line}\r\n{content_type_header}Connection: close\r\n")
     } else {
         format!(
-            "{status_line}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n",
+            "{status_line}\r\n{content_type_header}Content-Length: {}\r\nConnection: close\r\n",
             body.len(),
         )
     };

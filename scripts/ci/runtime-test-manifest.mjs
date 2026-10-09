@@ -547,6 +547,38 @@ export const RUNTIME_STRESS_WEIGHT_HINTS = Object.freeze([
 
 export const RUNTIME_CI_TEST_CASES = [
   {
+    name: "missing_content_type_capacity_must_not_commit_as_unary_success",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "missing_content_type_capacity_rotates_before_stream_commit",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "missing_content_type_streaming_success_keeps_upstream_header_absence",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "missing_content_type_unary_and_explicit_json_contracts_remain_buffered",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "missing_content_type_capacity_in_same_turn_retries_the_bound_profile",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "missing_content_type_capacity_after_output_is_never_replayed",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "missing_content_type_persistent_capacity_has_bounded_same_owner_retries",
+    tags: SERIALIZED_TAGS,
+  },
+  {
+    name: "missing_content_type_capacity_preserves_retry_after_beyond_local_budget",
+    tags: SERIALIZED_TAGS,
+  },
+  {
     name: "delayed_capacity_after_http_headers_rotates_without_restart_or_failed_binding",
     tags: SERIALIZED_TAGS,
   },

@@ -1,5 +1,8 @@
 use super::*;
 
+mod bound_overload;
+use bound_overload::BoundOverloadRetry;
+
 pub(crate) struct RuntimeResponsesContinuationTrace<'a> {
     pub(crate) request_id: u64,
     pub(crate) profile_name: &'a str,
@@ -318,6 +321,11 @@ pub(crate) fn attempt_runtime_responses_request(
     let request_thread_id = runtime_proxy_crate::runtime_request_thread_id(request);
     let request_compaction_generation =
         runtime_proxy_crate::runtime_request_compaction_generation(request);
+    // Host-side wire fact extraction; Mojo owns the response framing decision.
+    let request_streaming = serde_json::from_slice::<serde_json::Value>(&request.body)
+        .ok()
+        .and_then(|body| body.get("stream").and_then(serde_json::Value::as_bool))
+        == Some(true);
     let mut request_for_attempt = request.clone();
     let mut previous_response_id_for_attempt = request_previous_response_id.clone();
     let mut full_history_fallback_used = false;
@@ -366,6 +374,8 @@ pub(crate) fn attempt_runtime_responses_request(
     };
 
     let mut inflight_guard = Some(inflight_guard);
+    let mut overload_retry =
+        BoundOverloadRetry::new(shared, profile_name, request_id, hard_affinity);
     let mut recovery_steps = RuntimeProfileUnauthorizedRecoveryStep::ordered();
     let mut retry_number = 0usize;
     loop {
@@ -503,6 +513,10 @@ pub(crate) fn attempt_runtime_responses_request(
                 retry_number = retry_number.saturating_add(1);
                 continue;
             };
+            if overload_retry.maybe_retry(&attempt, &mut inflight_guard)? {
+                retry_number = retry_number.saturating_add(1);
+                continue;
+            }
             return Ok(attempt);
         }
         let mut prepared = prepare_runtime_responses_success_attempt(
@@ -518,6 +532,7 @@ pub(crate) fn attempt_runtime_responses_request(
                 request_turn_id: request_turn_id.clone(),
                 request_turn_state: request_turn_state.clone(),
                 request_model_name: runtime_smart_context_model_name_from_body(&request.body),
+                request_streaming,
                 selection_attempt,
                 retry_number,
                 request_compaction_generation,
@@ -576,6 +591,13 @@ pub(crate) fn attempt_runtime_responses_request(
             request_for_attempt = fallback_request;
             previous_response_id_for_attempt = None;
             full_history_fallback_used = true;
+            retry_number = retry_number.saturating_add(1);
+            continue;
+        }
+        if let Ok(attempt) = &prepared
+            && overload_retry.maybe_retry(attempt, &mut inflight_guard)?
+        {
+            drop(prepared);
             retry_number = retry_number.saturating_add(1);
             continue;
         }
@@ -671,6 +693,7 @@ fn handle_runtime_responses_non_success(
             Ok(Some(RuntimeResponsesAttempt::Overloaded {
                 profile_name: profile_name.to_string(),
                 response,
+                retry_after,
             }))
         }
         runtime_proxy_crate::RuntimeResponsesPrecommitAttemptPlan::PreviousResponseNotFound => {
@@ -712,6 +735,7 @@ struct RuntimeResponsesSuccessAttemptContext {
     request_turn_id: Option<String>,
     request_turn_state: Option<String>,
     request_model_name: Option<String>,
+    request_streaming: bool,
     selection_attempt: usize,
     retry_number: usize,
     request_compaction_generation: Option<u64>,
@@ -734,6 +758,7 @@ fn prepare_runtime_responses_success_attempt(
         request_turn_id,
         request_turn_state,
         request_model_name,
+        request_streaming,
         selection_attempt,
         retry_number,
         request_compaction_generation,
@@ -762,6 +787,7 @@ fn prepare_runtime_responses_success_attempt(
             RuntimeResponsesSuccessContext {
                 request_id,
                 request_model_name: request_model_name.as_deref(),
+                request_streaming,
                 request_previous_response_id: request_previous_response_id.as_deref(),
                 request_prompt_cache_key: request_prompt_cache_key.as_deref(),
                 request_session_id: request_session_id.as_deref(),

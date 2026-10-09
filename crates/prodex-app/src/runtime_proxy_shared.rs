@@ -17,6 +17,7 @@ pub(super) enum RuntimeResponsesAttempt {
     Overloaded {
         profile_name: String,
         response: RuntimeResponsesReply,
+        retry_after: Option<Duration>,
     },
     AuthFailed {
         profile_name: String,
