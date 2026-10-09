@@ -55,6 +55,7 @@ fn emit_source_rerun_directives(sources: &[&str], manifest_dir: &Path) {
         "anthropic_chat_common.mojo",
         "anthropic_chat_messages.mojo",
         "anthropic_chat_tools.mojo",
+        "provider_binding_identity.mojo",
     ] {
         println!(
             "cargo:rerun-if-changed={}",
@@ -534,6 +535,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/openai_chat_request.mojo");
         sources.push("../../mojo/prodex_core/openai_chat_response.mojo");
         sources.push("../../mojo/prodex_core/anthropic_chat_request.mojo");
+        sources.push("../../mojo/prodex_core/provider_binding_identity.mojo");
         sources.push("../../mojo/prodex_core/deepseek_messages.mojo");
         sources.push("../../mojo/prodex_core/rich_context_v2.mojo");
         sources.push("../../mojo/prodex_core/rich_route.mojo");

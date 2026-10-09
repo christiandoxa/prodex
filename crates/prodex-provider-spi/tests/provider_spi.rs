@@ -1,7 +1,7 @@
 use prodex_provider_core::ProviderErrorClass;
 use prodex_provider_spi::{
     ProviderRetryCause, ProviderRetryDecision, ProviderRetryPolicy, ProviderRetryStage,
-    plan_provider_retry,
+    RuntimeProviderBindingIdentity, plan_provider_retry,
 };
 
 #[test]
@@ -66,4 +66,35 @@ fn cause_and_error_class_must_be_compatible() {
         0,
     );
     assert_eq!(model.decision, ProviderRetryDecision::Allowed);
+}
+
+#[test]
+fn provider_spi_binding_identity_uses_the_provider_core_policy_path() {
+    let identity = RuntimeProviderBindingIdentity::from_profile(
+        prodex_provider_core::ProviderId::Anthropic,
+        "synthetic-profile",
+        "https://api.example.com/v1/",
+    )
+    .expect("valid provider binding identity");
+    assert_eq!(
+        identity.provider(),
+        prodex_provider_core::ProviderId::Anthropic
+    );
+    assert_eq!(
+        identity,
+        RuntimeProviderBindingIdentity::from_profile(
+            prodex_provider_core::ProviderId::Anthropic,
+            "synthetic-profile",
+            "https://api.example.com/v1",
+        )
+        .unwrap()
+    );
+    assert!(
+        RuntimeProviderBindingIdentity::from_profile(
+            prodex_provider_core::ProviderId::Anthropic,
+            "bad\u{0000}profile",
+            "https://api.example.com/v1",
+        )
+        .is_none()
+    );
 }
