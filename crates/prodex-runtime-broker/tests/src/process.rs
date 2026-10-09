@@ -265,3 +265,45 @@ fn broker_key_is_scoped_to_smart_context_window_when_enabled() {
 
     assert_ne!(default_window, custom_window);
 }
+
+#[test]
+fn broker_lifecycle_consumers_use_mojo_plans_at_process_boundary() {
+    assert_eq!(
+        runtime_process_identity_plan(false, true, true, true, true, true, true, true, true, true)
+            .unwrap(),
+        BrokerProcessIdentityPlan::Proven
+    );
+    assert_eq!(
+        runtime_broker_termination_signal_plan(BrokerProcessIdentityPlan::OwnershipChanged)
+            .unwrap(),
+        BrokerTerminationSignalAction::Refuse
+    );
+    assert_eq!(
+        runtime_broker_lease_lifecycle_plan(
+            BrokerLeaseLifecycleOperation::Cleanup,
+            true,
+            true,
+            false,
+            0,
+            false,
+        )
+        .unwrap(),
+        BrokerLeaseLifecycleAction::Remove
+    );
+    assert_eq!(
+        runtime_broker_readiness_plan(true, true, true, true, 4, 5).unwrap(),
+        BrokerReadinessDecision::Ready
+    );
+    assert_eq!(
+        runtime_broker_readiness_plan(false, false, false, false, 5, 5).unwrap(),
+        BrokerReadinessDecision::Timeout
+    );
+    assert_eq!(
+        runtime_broker_idle_plan(true, 0, 0, 5, 5).unwrap(),
+        BrokerIdleDecision::Shutdown
+    );
+    assert_eq!(
+        runtime_broker_termination_outcome_plan(4).unwrap(),
+        BrokerTerminationOutcomePlan::Failure
+    );
+}

@@ -50,9 +50,12 @@ fn discard_stale_runtime_broker_registry(
         registry.process_birth_identity.as_deref(),
         registry.executable_path.as_deref().map(Path::new),
     );
+    let action = prodex_runtime_broker::runtime_broker_registry_process_plan(identity, 0, 0)
+        .expect("Mojo runtime broker registry process policy returned invalid output");
     if matches!(
-        identity,
-        RuntimeProcessIdentityOutcome::Absent | RuntimeProcessIdentityOutcome::OwnershipChanged
+        action,
+        prodex_runtime_broker::BrokerRegistryProcessAction::Remove
+            | prodex_runtime_broker::BrokerRegistryProcessAction::DiscardStale
     ) {
         remove_runtime_broker_registry_if_instance_matches(
             paths,
@@ -230,17 +233,54 @@ pub(crate) fn wait_for_runtime_broker_ready(
 ) -> Result<RuntimeBrokerRegistry> {
     let started_at = Instant::now();
     let poll_interval = Duration::from_millis(RUNTIME_BROKER_POLL_INTERVAL_MS);
-    while started_at.elapsed() < ready_timeout {
-        if let Some(registry) = load_runtime_broker_registry(paths, broker_key)?
-            && registry.instance_id == expected_instance_id
-            && let Some(health) = probe_runtime_broker_health(client, paths, broker_key, &registry)?
-            && health.matches_registry_instance(&registry)
+    let timeout_ms = ready_timeout.as_millis().min(u64::MAX as u128) as u64;
+    loop {
+        let elapsed_ms = started_at.elapsed().as_millis().min(u64::MAX as u128) as u64;
+        let Some(registry) = load_runtime_broker_registry(paths, broker_key)? else {
+            match prodex_runtime_broker::runtime_broker_readiness_plan(
+                false, false, false, false, elapsed_ms, timeout_ms,
+            )
+            .expect("Mojo runtime broker readiness policy returned invalid output")
+            {
+                prodex_runtime_broker::BrokerReadinessDecision::Timeout => {
+                    bail!("timed out waiting for runtime broker readiness")
+                }
+                prodex_runtime_broker::BrokerReadinessDecision::Wait => {
+                    thread::sleep(poll_interval);
+                    continue;
+                }
+                prodex_runtime_broker::BrokerReadinessDecision::Ready => {
+                    bail!("runtime broker readiness returned ready without a registry")
+                }
+            }
+        };
+        let instance_matches = registry.instance_id == expected_instance_id;
+        let health = instance_matches
+            .then(|| probe_runtime_broker_health(client, paths, broker_key, &registry))
+            .transpose()?
+            .flatten();
+        let health_present = health.is_some();
+        let health_matches = health
+            .as_ref()
+            .is_some_and(|health| health.matches_registry_instance(&registry));
+        match prodex_runtime_broker::runtime_broker_readiness_plan(
+            true,
+            instance_matches,
+            health_present,
+            health_matches,
+            elapsed_ms,
+            timeout_ms,
+        )
+        .expect("Mojo runtime broker readiness policy returned invalid output")
         {
-            return Ok(registry);
+            prodex_runtime_broker::BrokerReadinessDecision::Ready => return Ok(registry),
+            prodex_runtime_broker::BrokerReadinessDecision::Timeout => {
+                bail!("timed out waiting for runtime broker readiness")
+            }
+            prodex_runtime_broker::BrokerReadinessDecision::Wait => {}
         }
         thread::sleep(poll_interval);
     }
-    bail!("timed out waiting for runtime broker readiness");
 }
 
 pub(crate) type RuntimeBrokerSpawnConfig<'a> = prodex_runtime_broker::RuntimeBrokerSpawnConfig<'a>;

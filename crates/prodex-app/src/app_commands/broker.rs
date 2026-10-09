@@ -125,27 +125,38 @@ fn runtime_broker_idle_tick(
     cached_live_leases: usize,
     idle_started_at: &mut Option<i64>,
 ) -> bool {
-    if cached_live_leases > 0 || active_requests > 0 {
-        *idle_started_at = None;
-        return false;
-    }
     let now = Local::now().timestamp();
-    if now < startup_grace_until {
-        *idle_started_at = None;
-        return false;
+    let startup_grace_elapsed = now >= startup_grace_until;
+    let idle_elapsed_seconds =
+        if startup_grace_elapsed && active_requests == 0 && cached_live_leases == 0 {
+            now.saturating_sub(*idle_started_at.get_or_insert(now))
+        } else {
+            0
+        };
+    match prodex_runtime_broker::runtime_broker_idle_plan(
+        startup_grace_elapsed,
+        active_requests,
+        cached_live_leases,
+        idle_elapsed_seconds,
+        RUNTIME_BROKER_IDLE_GRACE_SECONDS,
+    )
+    .expect("Mojo runtime broker idle policy returned invalid output")
+    {
+        prodex_runtime_broker::BrokerIdleDecision::Reset => {
+            *idle_started_at = None;
+            false
+        }
+        prodex_runtime_broker::BrokerIdleDecision::Wait => false,
+        prodex_runtime_broker::BrokerIdleDecision::Shutdown => {
+            runtime_proxy_log_to_path(
+                &proxy.log_path,
+                &format!(
+                    "runtime_broker_idle_shutdown broker_key={broker_key} idle_seconds={idle_elapsed_seconds}"
+                ),
+            );
+            true
+        }
     }
-    let idle_since = idle_started_at.get_or_insert(now);
-    if now.saturating_sub(*idle_since) < RUNTIME_BROKER_IDLE_GRACE_SECONDS {
-        return false;
-    }
-    runtime_proxy_log_to_path(
-        &proxy.log_path,
-        &format!(
-            "runtime_broker_idle_shutdown broker_key={broker_key} idle_seconds={}",
-            now.saturating_sub(*idle_since)
-        ),
-    );
-    true
 }
 
 pub(crate) fn runtime_broker_publish_start(

@@ -972,3 +972,221 @@ def prodex_runtime_broker_lru_evict_index_v1(
     # Preserve the Rust fallback that may evict the kept entry when it is the
     # only entry left above a pathological limit.
     return 0
+
+
+comptime BROKER_PROCESS_IDENTITY_ABSENT: Int64 = 0
+comptime BROKER_PROCESS_IDENTITY_PROVEN: Int64 = 1
+comptime BROKER_PROCESS_IDENTITY_CHANGED: Int64 = 2
+comptime BROKER_PROCESS_IDENTITY_UNPROVEN: Int64 = 3
+
+
+def broker_bool(value: Int64) -> Bool:
+    return value == 0 or value == 1
+
+
+@export("prodex_runtime_broker_process_identity_plan_v1")
+def prodex_runtime_broker_process_identity_plan_v1(
+    abi_version: Int64,
+    process_absence_proven: Int64,
+    expected_birth_present: Int64,
+    birth_present: Int64,
+    birth_matches: Int64,
+    path_check_enabled: Int64,
+    path_present: Int64,
+    path_matches: Int64,
+    recheck_enabled: Int64,
+    recheck_present: Int64,
+    recheck_matches: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or not broker_bool(process_absence_proven)
+        or not broker_bool(expected_birth_present)
+        or not broker_bool(birth_present)
+        or not broker_bool(birth_matches)
+        or not broker_bool(path_check_enabled)
+        or not broker_bool(path_present)
+        or not broker_bool(path_matches)
+        or not broker_bool(recheck_enabled)
+        or not broker_bool(recheck_present)
+        or not broker_bool(recheck_matches)
+    ):
+        return BROKER_CONTINUITY_INVALID
+    if process_absence_proven == 1:
+        return BROKER_PROCESS_IDENTITY_ABSENT
+    if expected_birth_present == 0 or birth_present == 0:
+        return BROKER_PROCESS_IDENTITY_UNPROVEN
+    if birth_matches == 0:
+        return BROKER_PROCESS_IDENTITY_CHANGED
+    if path_check_enabled == 1:
+        if path_present == 0:
+            return BROKER_PROCESS_IDENTITY_UNPROVEN
+        if path_matches == 0:
+            return BROKER_PROCESS_IDENTITY_CHANGED
+    if recheck_enabled == 1:
+        if recheck_present == 0:
+            return BROKER_PROCESS_IDENTITY_UNPROVEN
+        if recheck_matches == 0:
+            return BROKER_PROCESS_IDENTITY_CHANGED
+    return BROKER_PROCESS_IDENTITY_PROVEN
+
+
+@export("prodex_runtime_broker_termination_signal_plan_v1")
+def prodex_runtime_broker_termination_signal_plan_v1(
+    abi_version: Int64,
+    identity_outcome: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or identity_outcome < BROKER_PROCESS_IDENTITY_ABSENT
+        or identity_outcome > BROKER_PROCESS_IDENTITY_UNPROVEN
+    ):
+        return BROKER_CONTINUITY_INVALID
+    if identity_outcome == BROKER_PROCESS_IDENTITY_ABSENT:
+        return 0
+    if identity_outcome == BROKER_PROCESS_IDENTITY_PROVEN:
+        return 1
+    return 2
+
+
+comptime BROKER_LEASE_OPERATION_CLEANUP: Int64 = 0
+comptime BROKER_LEASE_OPERATION_ACQUIRE: Int64 = 1
+comptime BROKER_LEASE_OPERATION_RENEW: Int64 = 2
+comptime BROKER_LEASE_ACTION_IGNORE: Int64 = 0
+comptime BROKER_LEASE_ACTION_KEEP: Int64 = 1
+comptime BROKER_LEASE_ACTION_REMOVE: Int64 = 2
+comptime BROKER_LEASE_ACTION_ACQUIRE: Int64 = 3
+comptime BROKER_LEASE_ACTION_RENEW: Int64 = 4
+
+
+@export("prodex_runtime_broker_lease_lifecycle_plan_v1")
+def prodex_runtime_broker_lease_lifecycle_plan_v1(
+    abi_version: Int64,
+    operation: Int64,
+    pid_valid: Int64,
+    process_absence_proven: Int64,
+    process_alive: Int64,
+    active_requests: UInt64,
+    expired: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or operation < BROKER_LEASE_OPERATION_CLEANUP
+        or operation > BROKER_LEASE_OPERATION_RENEW
+        or not broker_bool(pid_valid)
+        or not broker_bool(process_absence_proven)
+        or not broker_bool(process_alive)
+        or not broker_bool(expired)
+    ):
+        return BROKER_CONTINUITY_INVALID
+    if operation == BROKER_LEASE_OPERATION_CLEANUP:
+        if pid_valid == 0:
+            return BROKER_LEASE_ACTION_IGNORE
+        if active_requests > 0:
+            return BROKER_LEASE_ACTION_KEEP
+        if process_absence_proven == 1 or (expired == 1 and process_alive == 0):
+            return BROKER_LEASE_ACTION_REMOVE
+        return BROKER_LEASE_ACTION_KEEP
+    if pid_valid == 0 or process_absence_proven == 1:
+        return BROKER_LEASE_ACTION_IGNORE
+    if operation == BROKER_LEASE_OPERATION_ACQUIRE:
+        return BROKER_LEASE_ACTION_ACQUIRE
+    if process_alive == 1 and expired == 0:
+        return BROKER_LEASE_ACTION_RENEW
+    return BROKER_LEASE_ACTION_IGNORE
+
+
+@export("prodex_runtime_broker_registry_process_plan_v1")
+def prodex_runtime_broker_registry_process_plan_v1(
+    abi_version: Int64,
+    identity_outcome: Int64,
+    active_requests: UInt64,
+    live_leases: UInt64,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or identity_outcome < BROKER_PROCESS_IDENTITY_ABSENT
+        or identity_outcome > BROKER_PROCESS_IDENTITY_UNPROVEN
+    ):
+        return BROKER_CONTINUITY_INVALID
+    if identity_outcome == BROKER_PROCESS_IDENTITY_ABSENT:
+        return 1
+    if identity_outcome == BROKER_PROCESS_IDENTITY_CHANGED:
+        return 2
+    if active_requests > 0 or live_leases > 0:
+        return 0
+    return 0
+
+
+comptime BROKER_READINESS_WAIT: Int64 = 0
+comptime BROKER_READINESS_READY: Int64 = 1
+comptime BROKER_READINESS_TIMEOUT: Int64 = 2
+
+
+@export("prodex_runtime_broker_readiness_plan_v1")
+def prodex_runtime_broker_readiness_plan_v1(
+    abi_version: Int64,
+    registry_present: Int64,
+    instance_matches: Int64,
+    health_present: Int64,
+    health_matches: Int64,
+    elapsed_ms: UInt64,
+    timeout_ms: UInt64,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or not broker_bool(registry_present)
+        or not broker_bool(instance_matches)
+        or not broker_bool(health_present)
+        or not broker_bool(health_matches)
+        or (instance_matches == 1 and registry_present == 0)
+        or (health_matches == 1 and health_present == 0)
+    ):
+        return BROKER_CONTINUITY_INVALID
+    if elapsed_ms >= timeout_ms:
+        return BROKER_READINESS_TIMEOUT
+    if registry_present == 1 and instance_matches == 1 and health_present == 1 and health_matches == 1:
+        return BROKER_READINESS_READY
+    return BROKER_READINESS_WAIT
+
+
+@export("prodex_runtime_broker_idle_plan_v1")
+def prodex_runtime_broker_idle_plan_v1(
+    abi_version: Int64,
+    startup_grace_elapsed: Int64,
+    active_requests: UInt64,
+    live_leases: UInt64,
+    idle_elapsed_seconds: Int64,
+    idle_grace_seconds: Int64,
+) abi("C") -> Int64:
+    if (
+        abi_version != BROKER_CONTINUITY_ABI_VERSION
+        or not broker_bool(startup_grace_elapsed)
+        or idle_elapsed_seconds < 0
+        or idle_grace_seconds < 0
+    ):
+        return BROKER_CONTINUITY_INVALID
+    if active_requests > 0 or live_leases > 0 or startup_grace_elapsed == 0:
+        return 1
+    if idle_elapsed_seconds < idle_grace_seconds:
+        return 0
+    return 2
+
+
+comptime BROKER_TERMINATION_CLEANUP: Int64 = 1
+comptime BROKER_TERMINATION_FAILURE: Int64 = 2
+comptime BROKER_TERMINATION_DISCARD_STALE: Int64 = 3
+
+
+@export("prodex_runtime_broker_termination_outcome_plan_v1")
+def prodex_runtime_broker_termination_outcome_plan_v1(
+    abi_version: Int64,
+    termination_outcome: Int64,
+) abi("C") -> Int64:
+    if abi_version != BROKER_CONTINUITY_ABI_VERSION or termination_outcome < 0 or termination_outcome > 4:
+        return BROKER_CONTINUITY_INVALID
+    if termination_outcome == 0 or termination_outcome == 3:
+        return BROKER_TERMINATION_CLEANUP
+    if termination_outcome == 2:
+        return BROKER_TERMINATION_DISCARD_STALE
+    return BROKER_TERMINATION_FAILURE

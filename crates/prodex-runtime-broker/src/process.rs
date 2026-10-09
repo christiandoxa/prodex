@@ -503,3 +503,112 @@ pub fn runtime_broker_startup_grace_seconds(ready_timeout_ms: u64, idle_grace_se
     )
     .expect("Mojo runtime broker startup-grace policy returned invalid output")
 }
+
+pub use prodex_mojo_core::runtime_broker_continuity::{
+    BrokerIdleDecision, BrokerLeaseLifecycleAction, BrokerLeaseLifecycleOperation,
+    BrokerProcessIdentityPlan, BrokerReadinessDecision, BrokerRegistryProcessAction,
+    BrokerTerminationOutcomePlan, BrokerTerminationSignalAction,
+};
+
+#[allow(clippy::too_many_arguments)]
+pub fn runtime_process_identity_plan(
+    process_absence_proven: bool,
+    expected_birth_present: bool,
+    birth_present: bool,
+    birth_matches: bool,
+    path_check_enabled: bool,
+    path_present: bool,
+    path_matches: bool,
+    recheck_enabled: bool,
+    recheck_present: bool,
+    recheck_matches: bool,
+) -> Result<BrokerProcessIdentityPlan, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime_broker_continuity::process_identity_plan(
+        process_absence_proven,
+        expected_birth_present,
+        birth_present,
+        birth_matches,
+        path_check_enabled,
+        path_present,
+        path_matches,
+        recheck_enabled,
+        recheck_present,
+        recheck_matches,
+    )
+}
+
+pub fn runtime_broker_termination_signal_plan(
+    identity: BrokerProcessIdentityPlan,
+) -> Result<BrokerTerminationSignalAction, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime_broker_continuity::termination_signal_plan(identity)
+}
+
+pub fn runtime_broker_lease_lifecycle_plan(
+    operation: BrokerLeaseLifecycleOperation,
+    pid_valid: bool,
+    process_absence_proven: bool,
+    process_alive: bool,
+    active_requests: usize,
+    expired: bool,
+) -> Result<BrokerLeaseLifecycleAction, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime_broker_continuity::lease_lifecycle_plan(
+        operation,
+        pid_valid,
+        process_absence_proven,
+        process_alive,
+        active_requests,
+        expired,
+    )
+}
+
+pub fn runtime_broker_registry_process_plan(
+    identity: BrokerProcessIdentityPlan,
+    active_requests: usize,
+    live_leases: usize,
+) -> Result<BrokerRegistryProcessAction, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime_broker_continuity::registry_process_plan(
+        identity,
+        active_requests,
+        live_leases,
+    )
+}
+
+pub fn runtime_broker_readiness_plan(
+    registry_present: bool,
+    instance_matches: bool,
+    health_present: bool,
+    health_matches: bool,
+    elapsed_ms: u64,
+    timeout_ms: u64,
+) -> Result<BrokerReadinessDecision, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime_broker_continuity::readiness_plan(
+        registry_present,
+        instance_matches,
+        health_present,
+        health_matches,
+        elapsed_ms,
+        timeout_ms,
+    )
+}
+
+pub fn runtime_broker_idle_plan(
+    startup_grace_elapsed: bool,
+    active_requests: usize,
+    live_leases: usize,
+    idle_elapsed_seconds: i64,
+    idle_grace_seconds: i64,
+) -> Result<BrokerIdleDecision, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime_broker_continuity::idle_plan(
+        startup_grace_elapsed,
+        active_requests,
+        live_leases,
+        idle_elapsed_seconds,
+        idle_grace_seconds,
+    )
+}
+
+pub fn runtime_broker_termination_outcome_plan(
+    termination_outcome: i64,
+) -> Result<BrokerTerminationOutcomePlan, prodex_mojo_core::MojoError> {
+    prodex_mojo_core::runtime_broker_continuity::termination_outcome_plan(termination_outcome)
+}

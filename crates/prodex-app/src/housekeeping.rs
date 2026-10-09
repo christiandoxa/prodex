@@ -1,7 +1,7 @@
 use super::*;
 
 use fs2::FileExt;
-use prodex_core::{runtime_broker_artifact_key, runtime_broker_lease_pid};
+use prodex_core::runtime_broker_artifact_key;
 
 pub(crate) use prodex_housekeeping::{ProdexCleanupCounts, ProdexCleanupSummary};
 
@@ -384,10 +384,10 @@ fn cleanup_runtime_broker_stale_lease_path(path: &Path, counts: &mut ProdexClean
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return;
     }
-    let Some(pid) = runtime_broker_lease_pid(file_name) else {
-        return;
-    };
-    if !runtime_process_absence_proven(pid) {
+    if !matches!(
+        runtime_broker_lease_cleanup_action(file_name),
+        prodex_runtime_broker::BrokerLeaseLifecycleAction::Remove
+    ) {
         return;
     }
     match fs::remove_file(path) {

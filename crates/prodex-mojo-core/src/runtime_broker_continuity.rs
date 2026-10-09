@@ -812,6 +812,16 @@ pub fn health_key_kind(key: &str) -> Result<HealthKeyKind, MojoError> {
     }
 }
 
+#[path = "runtime_broker_lifecycle.rs"]
+mod lifecycle;
+pub use lifecycle::{
+    BrokerIdleDecision, BrokerLeaseLifecycleAction, BrokerLeaseLifecycleOperation,
+    BrokerProcessIdentityPlan, BrokerReadinessDecision, BrokerRegistryProcessAction,
+    BrokerTerminationOutcomePlan, BrokerTerminationSignalAction, idle_plan, lease_lifecycle_plan,
+    process_identity_plan, readiness_plan, registry_process_plan, termination_outcome_plan,
+    termination_signal_plan,
+};
+
 #[cfg(test)]
 #[path = "runtime_broker_continuity/tests.rs"]
 mod tests;
