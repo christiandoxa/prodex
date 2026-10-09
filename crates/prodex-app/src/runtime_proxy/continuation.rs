@@ -329,29 +329,66 @@ fn runtime_compact_followup_bound_profile_raw(
     turn_state: Option<&str>,
     session_id: Option<&str>,
 ) -> Result<Option<(String, &'static str)>> {
-    match runtime_request_hard_binding_owner(shared, None, turn_state, session_id)? {
-        prodex_runtime_state::RuntimeHardBindingOwner::Conflict
-        | prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(_) => {
+    let owner = runtime_request_hard_binding_owner(shared, None, turn_state, session_id)?;
+    let owner_kind = match &owner {
+        prodex_runtime_state::RuntimeHardBindingOwner::Unbound => {
+            prodex_mojo_core::runtime::RuntimeContinuationOwnerKind::Unbound
+        }
+        prodex_runtime_state::RuntimeHardBindingOwner::Owned(_) => {
+            prodex_mojo_core::runtime::RuntimeContinuationOwnerKind::Owned
+        }
+        prodex_runtime_state::RuntimeHardBindingOwner::Unavailable(_) => {
+            prodex_mojo_core::runtime::RuntimeContinuationOwnerKind::Unavailable
+        }
+        prodex_runtime_state::RuntimeHardBindingOwner::Conflict => {
+            prodex_mojo_core::runtime::RuntimeContinuationOwnerKind::Conflict
+        }
+    };
+    let source = prodex_mojo_core::runtime::runtime_continuation_binding_source_plan(
+        prodex_mojo_core::runtime::RuntimeContinuationBindingSourceInput {
+            turn_state_present: turn_state
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty()),
+            session_id_present: session_id
+                .map(str::trim)
+                .is_some_and(|value| !value.is_empty()),
+            owner_kind,
+        },
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo compact binding source planning failed: {error:?}"))?;
+    match (source, owner) {
+        (
+            prodex_mojo_core::runtime::RuntimeContinuationBindingSource::ConflictTurnState
+            | prodex_mojo_core::runtime::RuntimeContinuationBindingSource::ConflictSessionId,
+            _,
+        ) => {
+            let source = match source {
+                prodex_mojo_core::runtime::RuntimeContinuationBindingSource::ConflictTurnState => {
+                    "turn_state"
+                }
+                prodex_mojo_core::runtime::RuntimeContinuationBindingSource::ConflictSessionId => {
+                    "session_id"
+                }
+                _ => return Ok(None),
+            };
             return Ok(Some((
                 prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE.to_string(),
-                if turn_state.is_some() {
-                    "turn_state"
-                } else {
-                    "session_id"
-                },
+                source,
             )));
         }
-        prodex_runtime_state::RuntimeHardBindingOwner::Owned(profile_name) => {
-            return Ok(Some((
-                profile_name,
-                if turn_state.is_some() {
-                    "turn_state"
-                } else {
-                    "session_id"
-                },
-            )));
-        }
-        prodex_runtime_state::RuntimeHardBindingOwner::Unbound => {}
+        (
+            prodex_mojo_core::runtime::RuntimeContinuationBindingSource::TurnState,
+            prodex_runtime_state::RuntimeHardBindingOwner::Owned(profile_name),
+        ) => return Ok(Some((profile_name, "turn_state"))),
+        (
+            prodex_mojo_core::runtime::RuntimeContinuationBindingSource::SessionId,
+            prodex_runtime_state::RuntimeHardBindingOwner::Owned(profile_name),
+        ) => return Ok(Some((profile_name, "session_id"))),
+        (
+            prodex_mojo_core::runtime::RuntimeContinuationBindingSource::None,
+            prodex_runtime_state::RuntimeHardBindingOwner::Unbound,
+        ) => {}
+        _ => return Ok(None),
     }
     let mut runtime = shared
         .runtime

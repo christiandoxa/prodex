@@ -27,10 +27,29 @@ comptime OP_RETENTION_KEY: Int64 = 21
 comptime OP_BINDING_SHOULD_RETAIN: Int64 = 22
 comptime OP_BINDING_RETENTION_KEY: Int64 = 23
 comptime OP_COMPACT_FOLLOWUP_PLAN: Int64 = 24
+comptime OP_PREVIOUS_RESPONSE_OWNER_PLAN: Int64 = 25
+comptime OP_PREVIOUS_RESPONSE_CANDIDATE_PLAN: Int64 = 26
+comptime OP_BINDING_SOURCE_PLAN: Int64 = 27
 
 comptime COMPACT_FOLLOWUP_NONE: Int64 = 0
 comptime COMPACT_FOLLOWUP_OWNER: Int64 = 1
 comptime COMPACT_FOLLOWUP_CONFLICT: Int64 = 2
+
+comptime PREVIOUS_RESPONSE_OWNER_UNBOUND: Int64 = 0
+comptime PREVIOUS_RESPONSE_OWNER_USABLE: Int64 = 1
+comptime PREVIOUS_RESPONSE_OWNER_UNUSABLE: Int64 = 2
+comptime PREVIOUS_RESPONSE_OWNER_CONFLICT: Int64 = 3
+
+comptime PREVIOUS_RESPONSE_CANDIDATE_REJECT_NEGATIVE_CACHE: Int64 = 0
+comptime PREVIOUS_RESPONSE_CANDIDATE_REJECT_AUTH: Int64 = 1
+comptime PREVIOUS_RESPONSE_CANDIDATE_REJECT_QUOTA: Int64 = 2
+comptime PREVIOUS_RESPONSE_CANDIDATE_SELECT_CACHED: Int64 = 3
+comptime PREVIOUS_RESPONSE_CANDIDATE_DISK_FALLBACK: Int64 = 4
+comptime PREVIOUS_RESPONSE_CANDIDATE_SKIP: Int64 = 5
+
+comptime BINDING_SOURCE_NONE: Int64 = 0
+comptime BINDING_SOURCE_TURN_STATE: Int64 = 1
+comptime BINDING_SOURCE_SESSION_ID: Int64 = 2
 
 
 def sat_sub_i64(left: Int64, right: Int64) -> Int64:
@@ -328,6 +347,116 @@ def prodex_runtime_continuation_status_transition_v1(
         output[unsafe_offset=3] = Int64(shadowed)
         output[unsafe_offset=4] = Int64(terminal_status and not shadowed and binding_conflict == 0)
         output[unsafe_offset=5] = Int64(persist_touch)
+        return 0
+
+    if operation == OP_PREVIOUS_RESPONSE_OWNER_PLAN:
+        if field_count != 8 or output_count != 1:
+            return 1
+        var id_present = fields[unsafe_offset=0]
+        var id_valid = fields[unsafe_offset=1]
+        var owner_kind = fields[unsafe_offset=2]
+        var excluded = fields[unsafe_offset=3]
+        var auth_failure = fields[unsafe_offset=4]
+        var negative_cache = fields[unsafe_offset=5]
+        var binding_present = fields[unsafe_offset=6]
+        var identity_matches = fields[unsafe_offset=7]
+        if (
+            not bool_field(id_present)
+            or not bool_field(id_valid)
+            or owner_kind < 0
+            or owner_kind > 3
+            or not bool_field(excluded)
+            or not bool_field(auth_failure)
+            or not bool_field(negative_cache)
+            or not bool_field(binding_present)
+            or not bool_field(identity_matches)
+        ):
+            return 2
+        var action = PREVIOUS_RESPONSE_OWNER_UNBOUND
+        if id_present == 1:
+            if id_valid == 0:
+                action = PREVIOUS_RESPONSE_OWNER_UNUSABLE
+            elif owner_kind == 3:
+                action = PREVIOUS_RESPONSE_OWNER_CONFLICT
+            elif owner_kind == 2:
+                action = PREVIOUS_RESPONSE_OWNER_UNUSABLE
+            elif owner_kind == 1:
+                action = PREVIOUS_RESPONSE_OWNER_USABLE
+                if (
+                    excluded == 1
+                    or auth_failure == 1
+                    or negative_cache == 1
+                    or binding_present == 0
+                    or identity_matches == 0
+                ):
+                    action = PREVIOUS_RESPONSE_OWNER_UNUSABLE
+        output[unsafe_offset=0] = action
+        return 0
+
+    if operation == OP_PREVIOUS_RESPONSE_CANDIDATE_PLAN:
+        if field_count != 7 or output_count != 1:
+            return 1
+        var negative_cache = fields[unsafe_offset=0]
+        var auth_failure = fields[unsafe_offset=1]
+        var quota_exhausted = fields[unsafe_offset=2]
+        var quota_guard = fields[unsafe_offset=3]
+        var cached_auth_present = fields[unsafe_offset=4]
+        var cached_auth_compatible = fields[unsafe_offset=5]
+        var allow_disk_fallback = fields[unsafe_offset=6]
+        if (
+            not bool_field(negative_cache)
+            or not bool_field(auth_failure)
+            or not bool_field(quota_exhausted)
+            or not bool_field(quota_guard)
+            or not bool_field(cached_auth_present)
+            or not bool_field(cached_auth_compatible)
+            or not bool_field(allow_disk_fallback)
+        ):
+            return 2
+        var action = PREVIOUS_RESPONSE_CANDIDATE_SKIP
+        if negative_cache == 1:
+            action = PREVIOUS_RESPONSE_CANDIDATE_REJECT_NEGATIVE_CACHE
+        elif auth_failure == 1:
+            action = PREVIOUS_RESPONSE_CANDIDATE_REJECT_AUTH
+        elif quota_exhausted == 1 or quota_guard == 1:
+            action = PREVIOUS_RESPONSE_CANDIDATE_REJECT_QUOTA
+        elif cached_auth_present == 1:
+            if cached_auth_compatible == 1:
+                action = PREVIOUS_RESPONSE_CANDIDATE_SELECT_CACHED
+        elif allow_disk_fallback == 1:
+            action = PREVIOUS_RESPONSE_CANDIDATE_DISK_FALLBACK
+        output[unsafe_offset=0] = action
+        return 0
+
+    if operation == OP_BINDING_SOURCE_PLAN:
+        if field_count != 3 or output_count != 2:
+            return 1
+        var turn_present = fields[unsafe_offset=0]
+        var session_present = fields[unsafe_offset=1]
+        var owner_kind = fields[unsafe_offset=2]
+        if (
+            not bool_field(turn_present)
+            or not bool_field(session_present)
+            or owner_kind < 0
+            or owner_kind > 3
+        ):
+            return 2
+        var action = COMPACT_FOLLOWUP_NONE
+        var source = BINDING_SOURCE_NONE
+        if owner_kind == 3 or owner_kind == 2:
+            action = COMPACT_FOLLOWUP_CONFLICT
+            if turn_present == 1:
+                source = BINDING_SOURCE_TURN_STATE
+            elif session_present == 1:
+                source = BINDING_SOURCE_SESSION_ID
+        elif owner_kind == 1:
+            action = COMPACT_FOLLOWUP_OWNER
+            if turn_present == 1:
+                source = BINDING_SOURCE_TURN_STATE
+            elif session_present == 1:
+                source = BINDING_SOURCE_SESSION_ID
+        output[unsafe_offset=0] = action
+        output[unsafe_offset=1] = source
         return 0
 
     if operation == OP_SHOULD_REPLACE:

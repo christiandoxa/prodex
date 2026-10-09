@@ -8,6 +8,7 @@ mod candidate_plan;
 pub use candidate_plan::runtime_candidate_plan_batch;
 mod compatibility_surface;
 mod continuation_followup;
+mod continuation_replay;
 mod continuation_status;
 mod noncompact_loop;
 mod profile_health;
@@ -29,6 +30,13 @@ pub use compatibility_surface::compatibility_surface_plan;
 pub use continuation_followup::{
     RuntimeContinuationFollowupAction, RuntimeContinuationFollowupInput,
     RuntimeContinuationFollowupPlan, runtime_continuation_compact_followup_plan,
+};
+pub use continuation_replay::{
+    RuntimeContinuationBindingSource, RuntimeContinuationBindingSourceInput,
+    RuntimeContinuationOwnerKind, RuntimePreviousResponseCandidateAction,
+    RuntimePreviousResponseCandidateInput, RuntimePreviousResponseOwnerAction,
+    RuntimePreviousResponseOwnerInput, runtime_continuation_binding_source_plan,
+    runtime_previous_response_candidate_plan, runtime_previous_response_owner_plan,
 };
 pub use continuation_status::{
     CONTINUATION_BINDING_RETENTION_KEY, CONTINUATION_BINDING_SHOULD_RETAIN, CONTINUATION_DEAD_PLAN,
