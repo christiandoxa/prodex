@@ -388,6 +388,52 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hard_binding_identity_fallback_covers_unicode_empty_and_invalid_components() {
+        let whitespace = [
+            '\u{0009}', '\u{000A}', '\u{000B}', '\u{000C}', '\u{000D}', '\u{0020}', '\u{0085}',
+            '\u{00A0}', '\u{1680}', '\u{2000}', '\u{2001}', '\u{2002}', '\u{2003}', '\u{2004}',
+            '\u{2005}', '\u{2006}', '\u{2007}', '\u{2008}', '\u{2009}', '\u{200A}', '\u{2028}',
+            '\u{2029}', '\u{202F}', '\u{205F}', '\u{3000}',
+        ];
+        for space in whitespace {
+            let blank = format!("{space}{space}");
+            for slot in 0..3 {
+                let mut inputs = [None, None, None];
+                inputs[slot] = Some(blank.as_str());
+                assert_eq!(
+                    runtime_hard_binding_identity(inputs[0], inputs[1], inputs[2]).unwrap(),
+                    prodex_runtime_state::RuntimeHardBindingIdentity::default(),
+                    "slot={slot}, space=U+{:04X}",
+                    space as u32
+                );
+            }
+        }
+        for invalid in ["\0", "\u{007f}", "\u{009f}"] {
+            assert_eq!(
+                runtime_hard_binding_identity(Some(invalid), None, None)
+                    .unwrap_err()
+                    .to_string(),
+                "runtime hard-binding identity is invalid"
+            );
+        }
+        let overlong = "x".repeat(1025);
+        assert_eq!(
+            runtime_hard_binding_identity(None, None, Some(&overlong))
+                .unwrap_err()
+                .to_string(),
+            "runtime hard-binding identity is invalid"
+        );
+        // U+200B is not whitespace: an identity consisting of it is present.
+        assert_eq!(
+            runtime_hard_binding_identity(Some("\u{200b}"), None, None)
+                .unwrap()
+                .response_id
+                .as_deref(),
+            Some("\u{200b}")
+        );
+    }
+
+    #[test]
     fn hard_binding_identity_fallback_preserves_unicode_trim_and_validation() {
         assert_eq!(
             runtime_hard_binding_identity(Some("\u{2003}\u{00a0}"), None, None).unwrap(),
