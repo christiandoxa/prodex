@@ -21,6 +21,13 @@ comptime MODE_PROFILE_INFLIGHT_RELEASE: Int64 = 7
 comptime MODE_LANE_LIMIT: Int64 = 8
 comptime MODE_SECTIONS_UNION: Int64 = 9
 comptime MODE_ADMISSION_RELEASE: Int64 = 10
+comptime MODE_ROUTE_LABEL: Int64 = 11
+comptime MODE_ROUTE_FROM_LABEL: Int64 = 12
+comptime MODE_ROUTE_COUPLED: Int64 = 13
+comptime MODE_ROUTE_BUILD_KEY: Int64 = 14
+comptime MODE_ROUTE_KEY_PARTS: Int64 = 15
+comptime MODE_ROUTE_PROFILE_SUFFIX: Int64 = 16
+comptime MODE_ROUTE_CIRCUIT_HEALTH_KEY: Int64 = 17
 
 comptime ADMISSION_ALLOW: UInt64 = 0
 comptime ADMISSION_GLOBAL_LIMIT: UInt64 = 1
@@ -36,9 +43,415 @@ comptime RUNTIME_PROXY_ROUTE_COMPACT: Int64 = 1
 comptime RUNTIME_PROXY_ROUTE_WEBSOCKET: Int64 = 2
 comptime RUNTIME_PROXY_ROUTE_STANDARD: Int64 = 3
 
+comptime ROUTE_KEY_HEALTH: Int64 = 0
+comptime ROUTE_KEY_BAD_PAIRING: Int64 = 1
+comptime ROUTE_KEY_SUCCESS_STREAK: Int64 = 2
+comptime ROUTE_KEY_PERFORMANCE: Int64 = 3
+comptime ROUTE_KEY_CIRCUIT: Int64 = 4
+comptime ROUTE_KEY_CIRCUIT_REOPEN: Int64 = 5
+comptime ROUTE_KEY_TRANSPORT_BACKOFF: Int64 = 6
+
 
 def runtime_state_flag(value: Bool) -> UInt64:
     return UInt64(1) if value else UInt64(0)
+
+
+def runtime_state_route_input_valid(address: UInt, length: Int64) -> Bool:
+    return length >= 0 and (length == 0 or address != 0)
+
+
+def runtime_state_route_matches_literal(
+    address: UInt, length: Int64, literal: StringSlice
+) -> Bool:
+    var literal_length = Int64(literal.byte_length())
+    if length != literal_length:
+        return False
+    if literal_length == 0:
+        return True
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    var expected = literal.unsafe_ptr()
+    for index in range(literal_length):
+        if source[unsafe_offset=index] != expected[unsafe_offset=index]:
+            return False
+    return True
+
+
+def runtime_state_route_put_input(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    address: UInt,
+    length: Int64,
+) -> Bool:
+    if length == 0:
+        return True
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    return runtime_state_reason_put(output, capacity, written, source, length)
+
+
+def runtime_state_route_put_literal(
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+    literal: StringSlice,
+) -> Bool:
+    return runtime_state_reason_put_literal(output, capacity, written, literal)
+
+
+def runtime_state_route_label(
+    route_kind: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if route_kind == RUNTIME_PROXY_ROUTE_RESPONSES:
+        return runtime_state_route_put_literal(
+            output, capacity, written, StringSlice("responses")
+        )
+    if route_kind == RUNTIME_PROXY_ROUTE_COMPACT:
+        return runtime_state_route_put_literal(
+            output, capacity, written, StringSlice("compact")
+        )
+    if route_kind == RUNTIME_PROXY_ROUTE_WEBSOCKET:
+        return runtime_state_route_put_literal(
+            output, capacity, written, StringSlice("websocket")
+        )
+    if route_kind == RUNTIME_PROXY_ROUTE_STANDARD:
+        return runtime_state_route_put_literal(
+            output, capacity, written, StringSlice("standard")
+        )
+    return False
+
+
+def runtime_state_route_key_prefix(
+    key_kind: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if key_kind == ROUTE_KEY_HEALTH:
+        return runtime_state_route_put_literal(
+            output, capacity, written, StringSlice("__route_health__:")
+        )
+    if key_kind == ROUTE_KEY_BAD_PAIRING:
+        return runtime_state_route_put_literal(
+            output, capacity, written, StringSlice("__route_bad_pairing__:")
+        )
+    if key_kind == ROUTE_KEY_SUCCESS_STREAK:
+        return runtime_state_route_put_literal(
+            output, capacity, written, StringSlice("__route_success__:")
+        )
+    if key_kind == ROUTE_KEY_PERFORMANCE:
+        return runtime_state_route_put_literal(
+            output, capacity, written, StringSlice("__route_performance__:")
+        )
+    if key_kind == ROUTE_KEY_CIRCUIT:
+        return runtime_state_route_put_literal(
+            output, capacity, written, StringSlice("__route_circuit__:")
+        )
+    if key_kind == ROUTE_KEY_CIRCUIT_REOPEN:
+        return runtime_state_route_put_literal(
+            output, capacity, written, StringSlice("__route_circuit_reopen__:")
+        )
+    if key_kind == ROUTE_KEY_TRANSPORT_BACKOFF:
+        return runtime_state_route_put_literal(
+            output, capacity, written, StringSlice("__route_transport_backoff__:")
+        )
+    return False
+
+
+def runtime_state_route_key(
+    key_kind: Int64,
+    route_kind: Int64,
+    profile_address: UInt,
+    profile_length: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if not runtime_state_route_key_prefix(key_kind, output, capacity, written):
+        return False
+    if not runtime_state_route_label(route_kind, output, capacity, written):
+        return False
+    if not runtime_state_route_put_literal(
+        output, capacity, written, StringSlice(":")
+    ):
+        return False
+    return runtime_state_route_put_input(
+        output, capacity, written, profile_address, profile_length
+    )
+
+
+def runtime_state_route_find_first_colon(
+    address: UInt,
+    length: Int64,
+    output: Pointer[mut=True, Int64, _],
+) -> Bool:
+    if length == 0:
+        return False
+    var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+        unsafe_from_address=Int(address)
+    )
+    for index in range(length):
+        if source[unsafe_offset=index] == UInt8(58):
+            output[unsafe_offset=0] = 0
+            output[unsafe_offset=1] = index
+            output[unsafe_offset=2] = index + 1
+            output[unsafe_offset=3] = length
+            return True
+    return False
+
+
+def runtime_state_route_find_last_colon(
+    address: UInt,
+    length: Int64,
+    output: Pointer[mut=True, Int64, _],
+):
+    var start: Int64 = 0
+    if length > 0:
+        var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(address)
+        )
+        for index in range(length):
+            if source[unsafe_offset=index] == UInt8(58):
+                start = Int64(index) + 1
+    output[unsafe_offset=0] = start
+    output[unsafe_offset=1] = length
+
+
+def runtime_state_route_replace_circuit_health(
+    address: UInt,
+    length: Int64,
+    output: Pointer[mut=True, UInt8, _],
+    capacity: Int64,
+    written: Pointer[mut=True, Int64, _],
+) -> Bool:
+    var circuit = StringSlice("__route_circuit__")
+    if runtime_state_route_input_valid(address, length) and length >= Int64(circuit.byte_length()):
+        var source = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(address)
+        )
+        var expected = circuit.unsafe_ptr()
+        var found: Int64 = -1
+        for start in range(length - Int64(circuit.byte_length()) + 1):
+            var matches = True
+            for index in range(Int64(circuit.byte_length())):
+                if source[unsafe_offset=start + index] != expected[unsafe_offset=index]:
+                    matches = False
+                    break
+            if matches:
+                found = start
+                break
+        if found >= 0:
+            if not runtime_state_route_put_input(
+                output, capacity, written, address, found
+            ):
+                return False
+            if not runtime_state_route_put_literal(
+                output, capacity, written, StringSlice("__route_health__")
+            ):
+                return False
+            return runtime_state_route_put_input(
+                output,
+                capacity,
+                written,
+                address + UInt(found + Int64(circuit.byte_length())),
+                length - found - Int64(circuit.byte_length()),
+            )
+    return runtime_state_route_put_input(output, capacity, written, address, length)
+
+
+@export("prodex_runtime_state_route_policy_v1")
+def prodex_runtime_state_route_policy_v1(
+    abi_version: Int64,
+    mode: Int64,
+    route_kind: Int64,
+    key_kind: Int64,
+    key_address: UInt,
+    key_length: Int64,
+    prefix_address: UInt,
+    prefix_length: Int64,
+    profile_address: UInt,
+    profile_length: Int64,
+    output_address: UInt,
+    output_capacity: Int64,
+    written_address: UInt,
+    spans_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != RUNTIME_STATE_BACKGROUND_ABI_VERSION:
+        return RUNTIME_STATE_BACKGROUND_ABI
+    if mode < MODE_ROUTE_LABEL or mode > MODE_ROUTE_CIRCUIT_HEALTH_KEY:
+        return RUNTIME_STATE_BACKGROUND_INVALID
+
+    if mode == MODE_ROUTE_LABEL:
+        if (
+            route_kind < RUNTIME_PROXY_ROUTE_RESPONSES
+            or route_kind > RUNTIME_PROXY_ROUTE_STANDARD
+            or output_address == 0
+            or output_capacity <= 0
+            or written_address == 0
+        ):
+            return RUNTIME_STATE_BACKGROUND_INVALID
+        var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        )
+        var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(written_address)
+        )
+        written[] = 0
+        if not runtime_state_route_label(route_kind, output, output_capacity, written):
+            return RUNTIME_STATE_BACKGROUND_INVALID
+        return RUNTIME_STATE_BACKGROUND_OK
+
+    if mode == MODE_ROUTE_FROM_LABEL:
+        if (
+            not runtime_state_route_input_valid(key_address, key_length)
+            or spans_address == 0
+        ):
+            return RUNTIME_STATE_BACKGROUND_INVALID
+        var spans = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(spans_address)
+        )
+        spans[unsafe_offset=0] = -1
+        if runtime_state_route_matches_literal(
+            key_address, key_length, StringSlice("responses")
+        ):
+            spans[unsafe_offset=0] = RUNTIME_PROXY_ROUTE_RESPONSES
+        elif runtime_state_route_matches_literal(
+            key_address, key_length, StringSlice("compact")
+        ):
+            spans[unsafe_offset=0] = RUNTIME_PROXY_ROUTE_COMPACT
+        elif runtime_state_route_matches_literal(
+            key_address, key_length, StringSlice("websocket")
+        ):
+            spans[unsafe_offset=0] = RUNTIME_PROXY_ROUTE_WEBSOCKET
+        elif runtime_state_route_matches_literal(
+            key_address, key_length, StringSlice("standard")
+        ):
+            spans[unsafe_offset=0] = RUNTIME_PROXY_ROUTE_STANDARD
+        return RUNTIME_STATE_BACKGROUND_OK
+
+    if mode == MODE_ROUTE_COUPLED:
+        if (
+            route_kind < RUNTIME_PROXY_ROUTE_RESPONSES
+            or route_kind > RUNTIME_PROXY_ROUTE_STANDARD
+            or spans_address == 0
+        ):
+            return RUNTIME_STATE_BACKGROUND_INVALID
+        var spans = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(spans_address)
+        )
+        if route_kind == RUNTIME_PROXY_ROUTE_RESPONSES:
+            spans[unsafe_offset=0] = RUNTIME_PROXY_ROUTE_WEBSOCKET
+        elif route_kind == RUNTIME_PROXY_ROUTE_COMPACT:
+            spans[unsafe_offset=0] = RUNTIME_PROXY_ROUTE_STANDARD
+        elif route_kind == RUNTIME_PROXY_ROUTE_WEBSOCKET:
+            spans[unsafe_offset=0] = RUNTIME_PROXY_ROUTE_RESPONSES
+        else:
+            spans[unsafe_offset=0] = RUNTIME_PROXY_ROUTE_COMPACT
+        return RUNTIME_STATE_BACKGROUND_OK
+
+    if mode == MODE_ROUTE_BUILD_KEY:
+        if (
+            route_kind < RUNTIME_PROXY_ROUTE_RESPONSES
+            or route_kind > RUNTIME_PROXY_ROUTE_STANDARD
+            or key_kind < ROUTE_KEY_HEALTH
+            or key_kind > ROUTE_KEY_TRANSPORT_BACKOFF
+            or not runtime_state_route_input_valid(profile_address, profile_length)
+            or output_address == 0
+            or output_capacity <= 0
+            or written_address == 0
+        ):
+            return RUNTIME_STATE_BACKGROUND_INVALID
+        var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+            unsafe_from_address=Int(output_address)
+        )
+        var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(written_address)
+        )
+        written[] = 0
+        if not runtime_state_route_key(
+            key_kind,
+            route_kind,
+            profile_address,
+            profile_length,
+            output,
+            output_capacity,
+            written,
+        ):
+            return 3
+        return RUNTIME_STATE_BACKGROUND_OK
+
+    if mode == MODE_ROUTE_KEY_PARTS:
+        if (
+            not runtime_state_route_input_valid(key_address, key_length)
+            or not runtime_state_route_input_valid(prefix_address, prefix_length)
+            or spans_address == 0
+        ):
+            return RUNTIME_STATE_BACKGROUND_INVALID
+        var spans = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(spans_address)
+        )
+        for index in range(4):
+            spans[unsafe_offset=index] = -1
+        var key = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(key_address)
+        )
+        var prefix = Pointer[mut=False, UInt8, ImmUntrackedOrigin](
+            unsafe_from_address=Int(prefix_address)
+        )
+        if key_length < prefix_length:
+            return RUNTIME_STATE_BACKGROUND_OK
+        for index in range(prefix_length):
+            if key[unsafe_offset=index] != prefix[unsafe_offset=index]:
+                return RUNTIME_STATE_BACKGROUND_OK
+        var rest_address = key_address + UInt(prefix_length)
+        var rest_length = key_length - prefix_length
+        var parts = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(spans_address)
+        )
+        if runtime_state_route_find_first_colon(rest_address, rest_length, parts):
+            parts[unsafe_offset=0] += prefix_length
+            parts[unsafe_offset=1] += prefix_length
+            parts[unsafe_offset=2] += prefix_length
+            parts[unsafe_offset=3] += prefix_length
+        return RUNTIME_STATE_BACKGROUND_OK
+
+    if mode == MODE_ROUTE_PROFILE_SUFFIX:
+        if (
+            not runtime_state_route_input_valid(key_address, key_length)
+            or spans_address == 0
+        ):
+            return RUNTIME_STATE_BACKGROUND_INVALID
+        var spans = Pointer[mut=True, Int64, MutUntrackedOrigin](
+            unsafe_from_address=Int(spans_address)
+        )
+        runtime_state_route_find_last_colon(key_address, key_length, spans)
+        return RUNTIME_STATE_BACKGROUND_OK
+
+    if (
+        not runtime_state_route_input_valid(key_address, key_length)
+        or output_address == 0
+        or output_capacity <= 0
+        or written_address == 0
+    ):
+        return RUNTIME_STATE_BACKGROUND_INVALID
+    var output = Pointer[mut=True, UInt8, MutUntrackedOrigin](
+        unsafe_from_address=Int(output_address)
+    )
+    var written = Pointer[mut=True, Int64, MutUntrackedOrigin](
+        unsafe_from_address=Int(written_address)
+    )
+    written[] = 0
+    if not runtime_state_route_replace_circuit_health(
+        key_address, key_length, output, output_capacity, written
+    ):
+        return 3
+    return RUNTIME_STATE_BACKGROUND_OK
 
 
 @export("prodex_runtime_proxy_admission_policy_v1")
