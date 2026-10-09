@@ -22,6 +22,11 @@ comptime OP_SLOT_PLAN_STEP: Int64 = 10
 comptime OP_SLOT_LOCK_ERROR_ACTION: Int64 = 11
 comptime OP_CHILD_OUTCOME: Int64 = 12
 comptime OP_CONFIG_VALIDATION: Int64 = 13
+comptime OP_LAUNCH_TARGET: Int64 = 14
+
+comptime LAUNCH_TARGET_FRESH: Int64 = 0
+comptime LAUNCH_TARGET_EXEC: Int64 = 1
+comptime LAUNCH_TARGET_RESUME: Int64 = 2
 
 comptime SUB_AGENT_CATALOG_ABI_VERSION: Int64 = 1
 
@@ -728,7 +733,7 @@ def prodex_sub_agent_policy_v1(
         return SUB_AGENT_POLICY_ABI
     if (
         operation < OP_CONCURRENCY_PARSE
-        or operation > OP_CONFIG_VALIDATION
+        or operation > OP_LAUNCH_TARGET
         or length < 0
         or (length > 0 and address == 0)
         or result_address == 0
@@ -895,6 +900,16 @@ def prodex_sub_agent_policy_v1(
             result[unsafe_offset=0] = 5
         elif not provider_is_local and url != 0:
             result[unsafe_offset=0] = 6
+    elif operation == OP_LAUNCH_TARGET:
+        if scalar < 0 or scalar > 3:
+            return SUB_AGENT_POLICY_INVALID
+        # A normalized resume target owns the launch even when exec is also present.
+        if (scalar & 1) == 1:
+            result[unsafe_offset=0] = LAUNCH_TARGET_RESUME
+        elif (scalar & 2) == 2:
+            result[unsafe_offset=0] = LAUNCH_TARGET_EXEC
+        else:
+            result[unsafe_offset=0] = LAUNCH_TARGET_FRESH
     else:
         return SUB_AGENT_POLICY_INVALID
     return SUB_AGENT_POLICY_OK

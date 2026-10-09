@@ -10,18 +10,17 @@ use prodex_provider_core::{
 
 use super::ResolvedSuperSubAgent;
 
-pub(crate) fn resolve_super_sub_agent_config(
-    config: SubAgentConfig,
-    target: SuperLaunchTarget,
-) -> Result<ResolvedSuperSubAgent> {
-    let provider = config.provider;
-    let model_input = config.model.as_deref();
+pub(super) fn provider_model_effort_facts(
+    provider: ProviderId,
+    model_input: Option<&str>,
+    effort: Option<prodex_cli::SubAgentReasoningEffort>,
+) -> (Option<String>, ConfigReasoningState) {
     let model = model_input.map(|model| {
         provider_model_spec(provider, model)
             .map(|spec| spec.id.to_string())
             .unwrap_or_else(|| model.to_string())
     });
-    let reasoning = match config.model_reasoning_effort {
+    let reasoning = match effort {
         None => ConfigReasoningState::Absent,
         Some(effort) => match provider_model_reasoning_resolution(
             provider,
@@ -37,6 +36,17 @@ pub(crate) fn resolve_super_sub_agent_config(
             }
         },
     };
+    (model, reasoning)
+}
+
+pub(crate) fn resolve_super_sub_agent_config(
+    config: SubAgentConfig,
+    target: SuperLaunchTarget,
+) -> Result<ResolvedSuperSubAgent> {
+    let provider = config.provider;
+    let model_input = config.model.as_deref();
+    let (model, reasoning) =
+        provider_model_effort_facts(provider, model_input, config.model_reasoning_effort);
     let parsed_url = config.url.as_deref().map(prodex_cli::parse_sub_agent_url);
     let url = match parsed_url.as_ref() {
         None => ConfigUrlState::Absent,

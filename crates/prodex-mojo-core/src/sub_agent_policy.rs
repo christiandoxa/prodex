@@ -33,6 +33,7 @@ enum Operation {
     SlotLockErrorAction = 11,
     ChildOutcome = 12,
     ConfigValidation = 13,
+    LaunchTarget = 14,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -132,6 +133,13 @@ pub enum ChildOutcomeAction {
     },
     OutputIncomplete,
     NoOutput,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchTargetPlan {
+    Fresh,
+    Exec,
+    Resume,
 }
 
 unsafe extern "C" {
@@ -456,6 +464,22 @@ pub fn child_outcome(
         }),
         3 if result[2] == 0 => Ok(ChildOutcomeAction::OutputIncomplete),
         4 if result[2] == 0 => Ok(ChildOutcomeAction::NoOutput),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+/// Chooses the child launch target after the launch-args kernel has extracted
+/// the normalized resume and exec facts.
+pub fn launch_target_plan(
+    resume_session_present: bool,
+    exec_invocation: bool,
+) -> Result<LaunchTargetPlan, MojoError> {
+    let scalar = i64::from(resume_session_present) | (i64::from(exec_invocation) << 1);
+    let result = call(Operation::LaunchTarget, "", scalar)?;
+    match result[0] {
+        0 => Ok(LaunchTargetPlan::Fresh),
+        1 => Ok(LaunchTargetPlan::Exec),
+        2 => Ok(LaunchTargetPlan::Resume),
         _ => Err(MojoError::InvalidOutput),
     }
 }

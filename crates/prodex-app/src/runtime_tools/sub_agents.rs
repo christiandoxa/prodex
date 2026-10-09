@@ -4,10 +4,10 @@ use prodex_cli::{
     SubAgentLaunchTarget, SubAgentMaxConcurrency, SubAgentReasoningEffort, SuperLaunchTarget,
 };
 use prodex_mojo_core::sub_agent_policy::{
-    ChildArgvAction, ChildOutcomeAction, ChildSpecScalarViolation, ProviderUrlViolation,
-    RecursionDecision, SlotLockErrorAction, SlotPlanStep, child_argv_plan, child_outcome,
-    child_spec_scalar_violation, model_nonempty, provider_url_violation, recursion_decision,
-    slot_lock_error_action, slot_plan_step,
+    ChildArgvAction, ChildOutcomeAction, ChildSpecScalarViolation, LaunchTargetPlan,
+    ProviderUrlViolation, RecursionDecision, SlotLockErrorAction, SlotPlanStep, child_argv_plan,
+    child_outcome, child_spec_scalar_violation, launch_target_plan, model_nonempty,
+    provider_url_violation, recursion_decision, slot_lock_error_action, slot_plan_step,
 };
 use prodex_provider_core::ProviderId;
 use prodex_runtime_launch::ChildProcessPlan;
@@ -123,15 +123,20 @@ pub(crate) struct ResolvedSuperSubAgent {
 
 pub(crate) fn resolve_super_launch_target(codex_args: &[OsString]) -> SuperLaunchTarget {
     let normalized = prodex_runtime_launch::normalize_run_codex_args(codex_args);
-    if let Some(session_id) = prodex_runtime_launch::codex_resume_session_id(&normalized) {
-        return SuperLaunchTarget::Resume {
-            session_id: session_id.to_owned(),
-        };
-    }
-    if prodex_runtime_launch::is_codex_exec_invocation(&normalized) {
-        SuperLaunchTarget::Exec
-    } else {
-        SuperLaunchTarget::Fresh
+    let session_id = prodex_runtime_launch::codex_resume_session_id(&normalized);
+    let target = launch_target_plan(
+        session_id.is_some(),
+        prodex_runtime_launch::is_codex_exec_invocation(&normalized),
+    )
+    .expect("Mojo sub-agent launch target policy returned invalid output");
+    match target {
+        LaunchTargetPlan::Fresh => SuperLaunchTarget::Fresh,
+        LaunchTargetPlan::Exec => SuperLaunchTarget::Exec,
+        LaunchTargetPlan::Resume => SuperLaunchTarget::Resume {
+            session_id: session_id
+                .expect("Mojo resume launch target requires a normalized session")
+                .to_owned(),
+        },
     }
 }
 
@@ -231,7 +236,11 @@ pub(crate) fn handle_sub_agent_exec(args: prodex_cli::SubAgentExecArgs) -> Resul
             "hidden sub-agent launcher cannot be invoked recursively while {SUB_AGENT_RECURSION_MARKER} is set"
         );
     }
-    let config = read_bounded_utf8(&args.config, 65_536, "sub-agent launcher config")?;
+    let config = read_bounded_utf8(
+        &args.config,
+        SUB_AGENT_TASK_MAX_BYTES,
+        "sub-agent launcher config",
+    )?;
     let spec: ChildLaunchSpec =
         serde_json::from_str(&config).context("invalid sub-agent launcher config")?;
     validate_child_launch_spec(&spec)?;
@@ -834,6 +843,100 @@ mod tests {
     }
 
     #[test]
+    fn child_config_rejects_invalid_model_effort_url_and_scalar_values() {
+        let mut empty_model = test_spec(ProviderId::OpenAi);
+        empty_model.model = Some(" \t".to_string());
+        let error = validate_child_launch_spec(&empty_model).unwrap_err();
+        assert!(error.to_string().contains("model must be nonempty"));
+
+        let mut model_and_url_error = test_spec(ProviderId::Local);
+        model_and_url_error.model = Some(" \t".to_string());
+        model_and_url_error.local_url = Some("not-a-url".to_string());
+        let error = validate_child_launch_spec(&model_and_url_error).unwrap_err();
+        assert!(error.to_string().contains("model must be nonempty"));
+
+        let mut unsupported_effort = test_spec(ProviderId::OpenAi);
+        unsupported_effort.model = Some("gpt-5.6-luna".to_string());
+        unsupported_effort.effort = Some(SubAgentReasoningEffort::Ultra);
+        let error = validate_child_launch_spec(&unsupported_effort).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("reasoning effort ultra is unsupported")
+        );
+
+        let mut invalid_url = test_spec(ProviderId::Local);
+        invalid_url.local_url = Some("https://example.com/v1?query=value".to_string());
+        let error = validate_child_launch_spec(&invalid_url).unwrap_err();
+        assert!(error.to_string().contains("invalid --sub-agent-url"));
+
+        let mut empty_tool = test_spec(ProviderId::OpenAi);
+        empty_tool.required_tools = vec![String::new()];
+        let error = validate_child_launch_spec(&empty_tool).unwrap_err();
+        assert!(error.to_string().contains("invalid required optional tool"));
+
+        let mut oversized_task = test_spec(ProviderId::OpenAi);
+        oversized_task.task_max_bytes = SUB_AGENT_TASK_MAX_BYTES + 1;
+        let error = validate_child_launch_spec(&oversized_task).unwrap_err();
+        assert!(error.to_string().contains("task size policy is invalid"));
+    }
+
+    #[test]
+    fn hidden_launcher_revalidates_provider_model_before_slot_admission() {
+        let root = temp_test_root("sub-agent-child-model-validation");
+        let mut spec = slot_spec(&root, 1);
+        spec.model = Some("gpt-5.6-luna".to_string());
+        spec.effort = Some(SubAgentReasoningEffort::Ultra);
+        let error = handle_sub_agent_exec(exec_args(&root, &spec, "narrow task")).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("reasoning effort ultra is unsupported")
+        );
+        assert!(spec.task_dir.join("task.txt").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn hidden_launcher_uses_mojo_marker_precedence_before_reading_config() {
+        let _marker = crate::test_support::TestEnvVarGuard::set(SUB_AGENT_RECURSION_MARKER, "1");
+        let _launcher = crate::test_support::TestEnvVarGuard::set(SUB_AGENT_LAUNCHER_MARKER, "1");
+        let root = temp_test_root("sub-agent-launcher-marker-precedence");
+        let error = handle_sub_agent_exec(prodex_cli::SubAgentExecArgs {
+            config: root.join(SUB_AGENT_CONFIG_FILE),
+            task_file: root.join("task.txt"),
+        })
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("failed to open sub-agent launcher config")
+        );
+        assert!(!error.to_string().contains("cannot be invoked recursively"));
+    }
+
+    #[test]
+    fn hidden_launcher_rejects_oversized_config_before_parsing_or_task_access() {
+        let _marker = crate::test_support::TestEnvVarGuard::unset(SUB_AGENT_RECURSION_MARKER);
+        let _launcher = crate::test_support::TestEnvVarGuard::unset(SUB_AGENT_LAUNCHER_MARKER);
+        let root = temp_test_root("sub-agent-oversized-config");
+        fs::create_dir_all(&root).unwrap();
+        let config = root.join(SUB_AGENT_CONFIG_FILE);
+        fs::write(&config, vec![b'x'; SUB_AGENT_TASK_MAX_BYTES + 1]).unwrap();
+        let error = handle_sub_agent_exec(prodex_cli::SubAgentExecArgs {
+            config,
+            task_file: root.join("task.txt"),
+        })
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("sub-agent launcher config exceeds")
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn recursion_marker_and_internal_launcher_use_mojo_policy() {
         assert_eq!(
             sub_agent_recursion_decision(false, false),
@@ -849,6 +952,16 @@ mod tests {
         );
         assert_eq!(
             SubAgentRecursionPolicy::from_decision(sub_agent_recursion_decision(true, false)),
+            SubAgentRecursionPolicy::Disabled
+        );
+    }
+
+    #[test]
+    fn public_recursion_policy_does_not_trust_launcher_marker_precedence() {
+        let _marker = crate::test_support::TestEnvVarGuard::set(SUB_AGENT_RECURSION_MARKER, "1");
+        let _launcher = crate::test_support::TestEnvVarGuard::set(SUB_AGENT_LAUNCHER_MARKER, "1");
+        assert_eq!(
+            sub_agent_recursion_policy(),
             SubAgentRecursionPolicy::Disabled
         );
     }

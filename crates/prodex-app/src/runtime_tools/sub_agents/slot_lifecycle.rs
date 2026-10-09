@@ -2,6 +2,9 @@
 //! Production state decisions are delegated exclusively to Mojo.
 
 use super::*;
+use prodex_mojo_core::sub_agent_policy::{
+    ConfigUrlState, ConfigValidationAction, config_validation_plan,
+};
 
 pub(super) fn reconcile_sub_agent_slots(slot_dir: &Path, limit: u16) -> Result<()> {
     let mut stale = Vec::new();
@@ -114,8 +117,66 @@ pub(super) fn validate_child_launch_spec(spec: &ChildLaunchSpec) -> Result<()> {
         }
         None => {}
     }
-    if let Some(url) = spec.local_url.as_deref() {
-        prodex_cli::parse_sub_agent_url(url).map_err(anyhow::Error::msg)?;
+    let parsed_url = spec
+        .local_url
+        .as_deref()
+        .map(prodex_cli::parse_sub_agent_url);
+    let url_state = match parsed_url.as_ref() {
+        None => ConfigUrlState::Absent,
+        Some(Ok(_)) => ConfigUrlState::Valid,
+        Some(Err(_)) => ConfigUrlState::Invalid,
+    };
+    let (model, reasoning) = super::config::provider_model_effort_facts(
+        spec.provider,
+        spec.model.as_deref(),
+        spec.effort,
+    );
+    let validation = config_validation_plan(
+        spec.model.as_deref(),
+        reasoning,
+        url_state,
+        spec.provider == ProviderId::Local,
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo child launch configuration policy failed: {error:?}"))?;
+    match validation {
+        ConfigValidationAction::Valid => {}
+        ConfigValidationAction::ModelNonempty => {
+            bail!("sub-agent model must be nonempty")
+        }
+        ConfigValidationAction::InvalidReasoningCatalog => {
+            bail!("provider model reasoning catalog is invalid")
+        }
+        ConfigValidationAction::UnsupportedReasoning => {
+            let effort = spec
+                .effort
+                .expect("unsupported child reasoning requires an explicit effort");
+            let effort_model = model
+                .as_deref()
+                .or_else(|| {
+                    prodex_provider_core::provider_runtime_metadata(spec.provider)
+                        .map(|metadata| metadata.default_model)
+                })
+                .unwrap_or("unknown");
+            bail!(
+                "reasoning effort {} is unsupported for {} model {}; choose a catalogued effort or omit the explicit effort",
+                effort.as_str(),
+                spec.provider.label(),
+                effort_model
+            );
+        }
+        ConfigValidationAction::InvalidUrl => {
+            let error = parsed_url
+                .as_ref()
+                .and_then(|result| result.as_ref().err())
+                .expect("invalid child URL policy requires a parser error");
+            bail!("{error}")
+        }
+        ConfigValidationAction::LocalRequiresUrl => {
+            bail!("local child provider requires a URL")
+        }
+        ConfigValidationAction::NonLocalRejectsUrl => {
+            bail!("child local URL is valid only for the local provider")
+        }
     }
     for tool in &spec.required_tools {
         tool.parse::<prodex_optional_tools::OptionalToolId>()
