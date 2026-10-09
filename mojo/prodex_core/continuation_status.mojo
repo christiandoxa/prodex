@@ -26,6 +26,11 @@ comptime OP_SHOULD_REPLACE: Int64 = 18
 comptime OP_RETENTION_KEY: Int64 = 21
 comptime OP_BINDING_SHOULD_RETAIN: Int64 = 22
 comptime OP_BINDING_RETENTION_KEY: Int64 = 23
+comptime OP_COMPACT_FOLLOWUP_PLAN: Int64 = 24
+
+comptime COMPACT_FOLLOWUP_NONE: Int64 = 0
+comptime COMPACT_FOLLOWUP_OWNER: Int64 = 1
+comptime COMPACT_FOLLOWUP_CONFLICT: Int64 = 2
 
 
 def sat_sub_i64(left: Int64, right: Int64) -> Int64:
@@ -255,6 +260,74 @@ def prodex_runtime_continuation_status_transition_v1(
             sat_sub_i64(fields[unsafe_offset=1], fields[unsafe_offset=0])
             > fields[unsafe_offset=2]
         )
+        return 0
+
+    if operation == OP_COMPACT_FOLLOWUP_PLAN:
+        if field_count != 21 or output_count != 6:
+            return 1
+        var status_present = fields[unsafe_offset=12]
+        var binding_present = fields[unsafe_offset=13]
+        var binding_conflict = fields[unsafe_offset=14]
+        var stale_seconds = fields[unsafe_offset=17]
+        var suspect_grace = fields[unsafe_offset=18]
+        var suspect_limit = fields[unsafe_offset=19]
+        var touch_interval = fields[unsafe_offset=20]
+        if (
+            not bool_field(status_present)
+            or not bool_field(binding_present)
+            or not bool_field(binding_conflict)
+            or not status_valid(fields)
+            or stale_seconds < 0
+            or suspect_grace < 0
+            or suspect_limit < 0
+            or suspect_limit > UINT32_MAX
+            or touch_interval < 0
+        ):
+            return 2
+
+        var stale = status_present == 1 and fields[unsafe_offset=0] == STATE_VERIFIED
+        if stale:
+            var last = last_event(fields)
+            stale = last[0] == 1 and sat_sub_i64(fields[unsafe_offset=16], last[1]) >= stale_seconds
+        var recent_suspect = (
+            status_present == 1
+            and fields[unsafe_offset=0] == STATE_SUSPECT
+            and not terminal(fields, suspect_limit)
+            and fields[unsafe_offset=7] == 1
+            and sat_sub_i64(fields[unsafe_offset=16], fields[unsafe_offset=8]) < suspect_grace
+        )
+        var terminal_status = status_present == 1 and terminal(fields, suspect_limit)
+        var shadowed = False
+        if status_present == 1 and fields[unsafe_offset=0] == STATE_DEAD and binding_present == 1:
+            if fields[unsafe_offset=7] == 1:
+                shadowed = fields[unsafe_offset=15] > fields[unsafe_offset=8]
+            elif fields[unsafe_offset=2] == 1:
+                shadowed = fields[unsafe_offset=15] > fields[unsafe_offset=3]
+
+        var action = COMPACT_FOLLOWUP_NONE
+        if binding_conflict == 1:
+            action = COMPACT_FOLLOWUP_CONFLICT
+        elif binding_present == 1 and (not terminal_status or shadowed):
+            action = COMPACT_FOLLOWUP_OWNER
+
+        var persist_touch = False
+        if action == COMPACT_FOLLOWUP_OWNER:
+            var binding_touch = sat_sub_i64(fields[unsafe_offset=16], fields[unsafe_offset=15]) > touch_interval
+            var status_touch = status_present == 0
+            if not status_touch and fields[unsafe_offset=0] == STATE_SUSPECT and fields[unsafe_offset=7] == 1:
+                status_touch = sat_sub_i64(fields[unsafe_offset=16], fields[unsafe_offset=8]) >= suspect_grace
+            if not status_touch:
+                status_touch = fields[unsafe_offset=2] == 0 or sat_sub_i64(
+                    fields[unsafe_offset=16], fields[unsafe_offset=3]
+                ) > touch_interval
+            persist_touch = binding_touch or status_touch
+
+        output[unsafe_offset=0] = action
+        output[unsafe_offset=1] = Int64(stale)
+        output[unsafe_offset=2] = Int64(recent_suspect)
+        output[unsafe_offset=3] = Int64(shadowed)
+        output[unsafe_offset=4] = Int64(terminal_status and not shadowed and binding_conflict == 0)
+        output[unsafe_offset=5] = Int64(persist_touch)
         return 0
 
     if operation == OP_SHOULD_REPLACE:
