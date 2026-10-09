@@ -30,6 +30,21 @@ pub fn runtime_prompt_cache_affinity_sort_key_with_owner(
     .expect("Mojo prompt-cache affinity returned no row")
 }
 
+pub fn runtime_prompt_cache_affinity_sort_key_with_owner_checked(
+    prompt_cache_key: Option<&str>,
+    prompt_cache_owner_profile: Option<&str>,
+    profile_name: &str,
+) -> Result<(u8, u64), prodex_mojo_core::MojoError> {
+    runtime_prompt_cache_affinity_batch(
+        prompt_cache_key,
+        prompt_cache_owner_profile,
+        &[profile_name],
+    )?
+    .into_iter()
+    .next()
+    .ok_or(prodex_mojo_core::MojoError::InvalidOutput)
+}
+
 pub fn runtime_prompt_cache_affinity_sort_key(
     prompt_cache_key: Option<&str>,
     profile_name: &str,

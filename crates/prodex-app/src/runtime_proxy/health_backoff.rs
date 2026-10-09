@@ -7,7 +7,7 @@ use super::{
     runtime_profile_quota_summary_for_route_from_state, runtime_profile_route_circuit_health_key,
     runtime_profile_route_circuit_key, runtime_proxy_log, runtime_quota_precommit_guard_reason,
     runtime_route_kind_label, runtime_soften_persisted_route_circuits_for_startup,
-    schedule_runtime_state_save_from_runtime,
+    runtime_waitable_candidate_eligible, schedule_runtime_state_save_from_runtime,
 };
 use anyhow::Result;
 use chrono::Local;
@@ -28,8 +28,8 @@ fn runtime_retryable_pool_candidate_eligible(
     supports_runtime: bool,
     auth_failure_active: bool,
     quota_blocked: bool,
-) -> bool {
-    prodex_mojo_core::runtime::waitable_candidate_eligible(
+) -> Result<bool> {
+    runtime_waitable_candidate_eligible(
         prodex_mojo_core::runtime::WaitableCandidateMode::RetryablePool,
         prodex_mojo_core::runtime::WaitableCandidateInput {
             context_allowed,
@@ -40,7 +40,6 @@ fn runtime_retryable_pool_candidate_eligible(
             ..Default::default()
         },
     )
-    .expect("Mojo recovery-candidate policy returned invalid output")
 }
 
 pub(crate) fn runtime_route_has_retryable_profile(
@@ -78,7 +77,7 @@ pub(crate) fn runtime_route_has_retryable_profile(
             profile.provider.supports_codex_runtime(),
             auth_failure_active,
             quota_blocked,
-        ) {
+        )? {
             return Ok(true);
         }
     }
@@ -119,7 +118,7 @@ pub(crate) fn runtime_profile_recovery_wait_for_route(
                 now,
             ),
             runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some(),
-        );
+        )?;
         let retry_until = include_retry_backoff
             .then(|| {
                 runtime
@@ -147,7 +146,7 @@ pub(crate) fn runtime_profile_recovery_wait_for_route(
     }
     Ok(
         prodex_mojo_core::runtime::profile_recovery_plan_batch(&candidates, now)
-            .expect("Mojo profile recovery planner returned invalid output")
+            .map_err(|error| anyhow::anyhow!("Mojo profile recovery planning failed: {error:?}"))?
             .earliest_recovery_at,
     )
 }
@@ -187,7 +186,7 @@ pub(crate) fn clear_runtime_recovered_profiles(
                 now,
             ),
             runtime_quota_precommit_guard_reason(quota_summary, route_kind).is_some(),
-        );
+        )?;
         let retry_until = include_retry_backoff
             .then(|| {
                 runtime
@@ -214,7 +213,7 @@ pub(crate) fn clear_runtime_recovered_profiles(
         });
     }
     let plan = prodex_mojo_core::runtime::profile_recovery_plan_batch(&candidates, now)
-        .expect("Mojo profile recovery planner returned invalid output");
+        .map_err(|error| anyhow::anyhow!("Mojo profile recovery planning failed: {error:?}"))?;
     let recovered = profile_names
         .into_iter()
         .zip(plan.can_clear)

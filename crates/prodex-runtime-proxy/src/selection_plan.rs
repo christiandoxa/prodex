@@ -12,6 +12,7 @@ mod prompt_cache;
 pub use prompt_cache::{
     runtime_prompt_cache_affinity_batch, runtime_prompt_cache_affinity_sort_key,
     runtime_prompt_cache_affinity_sort_key_with_owner,
+    runtime_prompt_cache_affinity_sort_key_with_owner_checked,
 };
 
 pub type RuntimeResponseBackoffSortKey = (usize, i64, i64, i64);
@@ -166,8 +167,14 @@ impl RuntimeOptimisticCurrentCandidateSkip {
 pub fn runtime_optimistic_current_candidate_decision(
     input: RuntimeOptimisticCurrentCandidateInput<'_>,
 ) -> RuntimeOptimisticCurrentCandidateDecision {
-    optimistic_current_candidate_decision_mojo(input)
+    runtime_optimistic_current_candidate_decision_checked(input)
         .expect("Mojo optimistic candidate decision returned an invalid tag")
+}
+
+pub fn runtime_optimistic_current_candidate_decision_checked(
+    input: RuntimeOptimisticCurrentCandidateInput<'_>,
+) -> Result<RuntimeOptimisticCurrentCandidateDecision, prodex_mojo_core::MojoError> {
+    optimistic_current_candidate_decision_mojo(input)
 }
 
 fn optimistic_current_candidate_decision_mojo(
@@ -229,60 +236,64 @@ fn prompt_cache_key_present(prompt_cache_key: Option<&str>) -> bool {
         .is_some_and(|prompt_cache_key| !prompt_cache_key.is_empty())
 }
 
-fn mojo_candidate_availability(tag: i64) -> RuntimeProfileAvailabilityState {
+fn mojo_candidate_availability(
+    tag: i64,
+) -> Result<RuntimeProfileAvailabilityState, prodex_mojo_core::MojoError> {
     match tag {
         prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_READY => {
-            RuntimeProfileAvailabilityState::Ready
+            Ok(RuntimeProfileAvailabilityState::Ready)
         }
         prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_QUOTA_EXHAUSTED => {
-            RuntimeProfileAvailabilityState::QuotaExhausted
+            Ok(RuntimeProfileAvailabilityState::QuotaExhausted)
         }
         prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_TRANSIENT_BACKOFF => {
-            RuntimeProfileAvailabilityState::TransientBackoff
+            Ok(RuntimeProfileAvailabilityState::TransientBackoff)
         }
         prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_AUTH_INVALID => {
-            RuntimeProfileAvailabilityState::AuthInvalid
+            Ok(RuntimeProfileAvailabilityState::AuthInvalid)
         }
         prodex_mojo_core::runtime::RUNTIME_CANDIDATE_AVAILABILITY_UNKNOWN => {
-            RuntimeProfileAvailabilityState::Unknown
+            Ok(RuntimeProfileAvailabilityState::Unknown)
         }
-        _ => panic!("validated Mojo candidate availability tag is out of range"),
+        _ => Err(prodex_mojo_core::MojoError::InvalidOutput),
     }
 }
 
-fn mojo_candidate_skip_reason(tag: i64) -> Option<&'static str> {
-    let kind = prodex_mojo_core::runtime::candidate_skip_reason_kind(tag)
-        .expect("Mojo candidate skip-reason mapping returned an invalid result")?;
-    Some(
+fn mojo_candidate_skip_reason(
+    tag: i64,
+) -> Result<Option<&'static str>, prodex_mojo_core::MojoError> {
+    let Some(kind) = prodex_mojo_core::runtime::candidate_skip_reason_kind(tag)? else {
+        return Ok(None);
+    };
+    Ok(Some(
         prodex_mojo_core::runtime_route_reason::label(kind)
-            .expect("Mojo candidate route-reason label returned invalid output"),
-    )
+            .map_err(|_| prodex_mojo_core::MojoError::InvalidOutput)?,
+    ))
 }
 
 pub fn build_runtime_response_candidate_execution_plan(
     candidates: Vec<RuntimeResponseCandidatePlanInput>,
     excluded_profiles: &BTreeSet<String>,
     options: RuntimeResponseCandidatePlanOptions<'_>,
-) -> RuntimeResponseCandidateExecutionPlan {
+) -> Result<RuntimeResponseCandidateExecutionPlan, prodex_mojo_core::MojoError> {
     let available_inputs = candidates
         .into_iter()
         .filter(|candidate| !excluded_profiles.contains(&candidate.name))
         .collect::<Vec<_>>();
     let mojo_plan =
-        crate::quota::mojo::runtime_response_candidate_plan_batch(&available_inputs, options)
-            .expect("Mojo runtime candidate plan returned invalid indices");
+        crate::quota::mojo::runtime_response_candidate_plan_batch(&available_inputs, options)?;
     let mut mojo_decisions = mojo_plan.decisions.iter();
     let available_candidates = available_inputs
         .iter()
         .map(|candidate| {
             let decision = mojo_decisions
                 .next()
-                .expect("Mojo candidate decision count matches inputs");
-            let quota_guard_reason = mojo_candidate_skip_reason(decision.quota_guard_reason);
-            let ready_skip_reason = mojo_candidate_skip_reason(decision.ready_skip_reason);
-            let fallback_skip_reason = mojo_candidate_skip_reason(decision.fallback_skip_reason);
-            let availability = mojo_candidate_availability(decision.availability);
-            RuntimeResponsePlannedCandidate {
+                .ok_or(prodex_mojo_core::MojoError::InvalidOutput)?;
+            let quota_guard_reason = mojo_candidate_skip_reason(decision.quota_guard_reason)?;
+            let ready_skip_reason = mojo_candidate_skip_reason(decision.ready_skip_reason)?;
+            let fallback_skip_reason = mojo_candidate_skip_reason(decision.fallback_skip_reason)?;
+            let availability = mojo_candidate_availability(decision.availability)?;
+            Ok(RuntimeResponsePlannedCandidate {
                 name: candidate.name.clone(),
                 order_index: candidate.order_index,
                 inflight_count: candidate.inflight_count,
@@ -300,17 +311,18 @@ pub fn build_runtime_response_candidate_execution_plan(
                 quota_sort_key: candidate.quota_sort_key,
                 in_selection_backoff: candidate.in_selection_backoff,
                 availability,
-                prompt_cache_affinity_sort_key: runtime_prompt_cache_affinity_sort_key_with_owner(
-                    options.prompt_cache_key,
-                    options.prompt_cache_owner_profile,
-                    &candidate.name,
-                ),
+                prompt_cache_affinity_sort_key:
+                    runtime_prompt_cache_affinity_sort_key_with_owner_checked(
+                        options.prompt_cache_key,
+                        options.prompt_cache_owner_profile,
+                        &candidate.name,
+                    )?,
                 jitter: candidate.jitter,
-            }
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, prodex_mojo_core::MojoError>>()?;
 
-    RuntimeResponseCandidateExecutionPlan {
+    Ok(RuntimeResponseCandidateExecutionPlan {
         ready_candidates: mojo_plan
             .ready_indices
             .into_iter()
@@ -321,7 +333,7 @@ pub fn build_runtime_response_candidate_execution_plan(
             .into_iter()
             .map(|index| available_candidates[index].clone())
             .collect(),
-    }
+    })
 }
 
 #[cfg(test)]

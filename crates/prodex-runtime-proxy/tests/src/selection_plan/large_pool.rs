@@ -55,7 +55,8 @@ fn candidate_plan_handles_pools_larger_than_mojo_batch_limit() {
                 Some(owner),
                 2,
             ),
-        );
+        )
+        .expect("Mojo candidate plan should be valid");
 
         let mut expected_fallback = (0..count).collect::<Vec<_>>();
         expected_fallback.sort_by_key(|index| (inflight_counts[*index], affinity[*index], *index));

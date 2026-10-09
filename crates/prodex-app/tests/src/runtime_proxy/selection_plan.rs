@@ -124,7 +124,8 @@ fn candidate_plan_reuses_supplied_ready_candidates_without_rebuilding() {
         ready_candidates,
         None,
         runtime_response_candidate_execution_options(None, None, |_| 0),
-    );
+    )
+    .expect("Mojo candidate plan should be valid");
 
     assert_eq!(
         plan.ready_candidates
@@ -192,7 +193,8 @@ fn candidate_plan_excludes_failed_profiles_from_ready_and_fallback_candidates() 
         ready_candidates,
         None,
         runtime_response_candidate_execution_options(None, None, |_| 0),
-    );
+    )
+    .expect("Mojo candidate plan should be valid");
 
     assert_eq!(
         plan.ready_candidates

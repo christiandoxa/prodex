@@ -168,7 +168,7 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
         return Ok(None);
     }
     if let RuntimeOptimisticCurrentCandidateDecision::Skip(skip) =
-        runtime_optimistic_current_candidate_decision(
+        runtime_optimistic_current_candidate_decision_checked(
             RuntimeOptimisticCurrentCandidateSelectionInput {
                 current_profile: current_profile.as_str(),
                 route_kind,
@@ -186,7 +186,7 @@ pub(super) fn runtime_proxy_optimistic_current_candidate_for_route_with_selectio
                 prompt_cache_key,
                 prompt_cache_owner_profile: prompt_cache_owner_profile.as_deref(),
             },
-        )
+        )?
     {
         let reason = skip.reason_label();
         let mut candidate = trace_candidate();
