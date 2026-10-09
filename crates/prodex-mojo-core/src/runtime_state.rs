@@ -11,6 +11,7 @@ const MODE_PROFILE_INFLIGHT_ACQUIRE: i64 = 6;
 const MODE_PROFILE_INFLIGHT_RELEASE: i64 = 7;
 const MODE_LANE_LIMIT: i64 = 8;
 const MODE_SECTIONS_UNION: i64 = 9;
+const MODE_ADMISSION_RELEASE: i64 = 10;
 
 const RUNTIME_PROXY_ADMISSION_ABI_VERSION: i64 = 1;
 
@@ -46,6 +47,12 @@ pub enum RuntimeAdmissionPlan {
         active: usize,
         limit: usize,
     },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuntimeAdmissionReleasePlan {
+    pub next: usize,
+    pub underflow: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -289,6 +296,20 @@ pub fn admission_plan(
     }
 }
 
+/// The canonical decrement and underflow classification for admission permits.
+/// Rust retains only the atomic compare/exchange effect and retry on contention.
+pub fn admission_release_plan(current: usize) -> Result<RuntimeAdmissionReleasePlan, MojoError> {
+    let output = call(MODE_ADMISSION_RELEASE, 0, 0, [current, 0, 0], [0; 3], 0)?;
+    let next = usize_output(output[0])?;
+    let underflow = bool_output(output[1])?;
+    if (underflow && (current != 0 || next != 0))
+        || (!underflow && (current == 0 || next != current - 1))
+    {
+        return Err(MojoError::InvalidOutput);
+    }
+    Ok(RuntimeAdmissionReleasePlan { next, underflow })
+}
+
 /// The canonical union of state-save sections is owned by the Mojo kernel.
 /// Rust only serializes tags and validates the ABI result.
 pub fn sections_union(
@@ -410,6 +431,36 @@ pub fn runtime_proxy_admission_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn admission_release_plan_preserves_underflow_and_exact_decrement() {
+        let cases = [
+            0,
+            1,
+            2,
+            3,
+            7,
+            100,
+            usize::MAX / 2,
+            usize::MAX - 1,
+            usize::MAX,
+        ];
+        for current in cases {
+            assert_eq!(
+                admission_release_plan(current),
+                Ok(RuntimeAdmissionReleasePlan {
+                    next: current.saturating_sub(1),
+                    underflow: current == 0,
+                }),
+                "admission release at {current}"
+            );
+        }
+        for current in 0..=2048 {
+            let plan = admission_release_plan(current).unwrap();
+            assert_eq!(plan.next, current.saturating_sub(1));
+            assert_eq!(plan.underflow, current == 0);
+        }
+    }
 
     #[test]
     fn sections_union_mojo_preserves_all_state_and_flag_combinations() {

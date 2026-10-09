@@ -20,6 +20,7 @@ comptime MODE_PROFILE_INFLIGHT_ACQUIRE: Int64 = 6
 comptime MODE_PROFILE_INFLIGHT_RELEASE: Int64 = 7
 comptime MODE_LANE_LIMIT: Int64 = 8
 comptime MODE_SECTIONS_UNION: Int64 = 9
+comptime MODE_ADMISSION_RELEASE: Int64 = 10
 
 comptime ADMISSION_ALLOW: UInt64 = 0
 comptime ADMISSION_GLOBAL_LIMIT: UInt64 = 1
@@ -364,7 +365,7 @@ def prodex_runtime_state_background_policy_v1(
         return RUNTIME_STATE_BACKGROUND_ABI
     if (
         mode < MODE_MUTATION_PLAN
-        or mode > MODE_SECTIONS_UNION
+        or mode > MODE_ADMISSION_RELEASE
         or output_address == 0
     ):
         return RUNTIME_STATE_BACKGROUND_INVALID
@@ -426,6 +427,12 @@ def prodex_runtime_state_background_policy_v1(
         output[unsafe_offset=3] = runtime_state_flag(
             lane_active >= lane_limit and bypass_lane_limit
         )
+        return RUNTIME_STATE_BACKGROUND_OK
+
+    if mode == MODE_ADMISSION_RELEASE:
+        var current = state_save_backlog
+        output[unsafe_offset=0] = current - 1 if current > 0 else UInt64(0)
+        output[unsafe_offset=1] = UInt64(1) if current == 0 else UInt64(0)
         return RUNTIME_STATE_BACKGROUND_OK
 
     if mode == MODE_PROFILE_INFLIGHT_ACQUIRE:
