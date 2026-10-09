@@ -12,7 +12,7 @@ use crate::{
 use prodex_core::path_is_strictly_under_root;
 
 mod home_action_validation;
-use home_action_validation::{lifecycle_path_exists, validate_home_actions};
+use home_action_validation::{finish_home_actions, validate_home_actions};
 
 pub(crate) struct ProfileLifecycleLock {
     _lock: crate::JsonFileLock,
@@ -249,7 +249,20 @@ pub(crate) fn recover_profile_lifecycle_journals_locked(
     let mut recovery = ProfileLifecycleRecovery::default();
     for path in prodex_profile_export::profile_lifecycle_journal_paths(&paths.root)? {
         let journal = prodex_profile_export::read_profile_lifecycle_journal(&path)?;
-        if journal.operation == "remove" && !recover_removals {
+        let is_removal = journal.operation == "remove";
+        let initial_action = prodex_mojo_core::profile_export::profile_import_recovery_action(
+            is_removal,
+            recover_removals,
+            false,
+            false,
+        )
+        .map_err(|error| {
+            anyhow::anyhow!("Mojo profile-import recovery decision failed: {error:?}")
+        })?;
+        if matches!(
+            initial_action,
+            prodex_mojo_core::profile_export::ProfileImportRecoveryAction::Skip
+        ) {
             continue;
         }
         let plan: ProfileLifecyclePlan =
@@ -278,18 +291,31 @@ pub(crate) fn recover_profile_lifecycle_journals_locked(
             None => false,
         };
 
-        if committed {
-            finish_committed_lifecycle(
-                paths,
-                path,
-                &journal.operation,
-                &plan,
-                persisted_state.as_ref(),
-                &auth_journals,
-                &mut recovery,
-            )?;
-        } else {
-            rollback_lifecycle(paths, state, &path, &plan, &auth_journals)?;
+        let action = prodex_mojo_core::profile_export::profile_import_recovery_action(
+            is_removal,
+            recover_removals,
+            persisted_state.is_some(),
+            committed,
+        )
+        .map_err(|error| {
+            anyhow::anyhow!("Mojo profile-import recovery decision failed: {error:?}")
+        })?;
+        match action {
+            prodex_mojo_core::profile_export::ProfileImportRecoveryAction::Skip => continue,
+            prodex_mojo_core::profile_export::ProfileImportRecoveryAction::Commit => {
+                finish_committed_lifecycle(
+                    paths,
+                    path,
+                    &journal.operation,
+                    &plan,
+                    persisted_state.as_ref(),
+                    &auth_journals,
+                    &mut recovery,
+                )?;
+            }
+            prodex_mojo_core::profile_export::ProfileImportRecoveryAction::Rollback => {
+                rollback_lifecycle(paths, state, &path, &plan, &auth_journals)?;
+            }
         }
         recovery.recovered += 1;
     }
@@ -382,7 +408,7 @@ pub(super) fn lifecycle_referenced_auth_journals(paths: &AppPaths) -> Result<BTr
 
 fn validate_auth_journal_paths(paths: &AppPaths, plan: &ProfileLifecyclePlan) -> Result<()> {
     let root = prodex_profile_export::profile_import_auth_update_journal_root(&paths.root);
-    let mut seen = BTreeSet::new();
+    let mut paths_for_policy = Vec::with_capacity(plan.auth_journal_paths.len());
     for path in &plan.auth_journal_paths {
         let path = Path::new(path);
         if !path_is_strictly_under_root(&root, path)
@@ -396,12 +422,18 @@ fn validate_auth_journal_paths(paths: &AppPaths, plan: &ProfileLifecyclePlan) ->
             );
         }
         prodex_profile_export::validate_profile_import_auth_update_journal_path(path)?;
-        if !seen.insert(path.to_path_buf()) {
-            bail!(
-                "profile lifecycle auth journal path {} is duplicated",
-                path.display()
-            );
-        }
+        paths_for_policy.push(path.to_string_lossy().into_owned());
+    }
+    let path_views = paths_for_policy
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    let order = prodex_mojo_core::profile_export::profile_import_lifecycle_order(&path_views)
+        .map_err(|error| {
+            anyhow::anyhow!("Mojo profile lifecycle journal decision failed: {error:?}")
+        })?;
+    if order.profile_indices.len() != path_views.len() {
+        bail!("profile lifecycle auth journal path is duplicated");
     }
     Ok(())
 }
@@ -528,15 +560,19 @@ fn lifecycle_state_matches(
 
 fn validate_plan(paths: &AppPaths, operation: &str, plan: &ProfileLifecyclePlan) -> Result<()> {
     prodex_profile_export::validate_profile_lifecycle_operation(operation)?;
-    let mut names = BTreeSet::new();
+    let names = plan
+        .profile_states
+        .iter()
+        .map(|profile| profile.name.as_str())
+        .collect::<Vec<_>>();
+    let order = prodex_mojo_core::profile_export::profile_import_lifecycle_order(&names).map_err(
+        |error| anyhow::anyhow!("Mojo profile lifecycle name decision failed: {error:?}"),
+    )?;
+    if order.profile_indices.len() != names.len() {
+        bail!("profile lifecycle journal repeats a profile");
+    }
     for profile in &plan.profile_states {
         prodex_profile_identity::validate_profile_name(&profile.name)?;
-        if !names.insert(profile.name.clone()) {
-            bail!(
-                "profile lifecycle journal repeats profile '{}'",
-                profile.name
-            );
-        }
         for value in [&profile.before, &profile.after].into_iter().flatten() {
             let entry: ProfileEntry = serde_json::from_value(value.clone()).with_context(|| {
                 format!(
@@ -639,102 +675,6 @@ fn remove_lifecycle_journal(path: &Path) -> Result<()> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
     }
-}
-
-fn finish_home_actions(actions: &[ProfileLifecycleHomeAction], committed: bool) -> Result<()> {
-    for action in actions {
-        match action {
-            ProfileLifecycleHomeAction::Promote {
-                source,
-                destination,
-                rollback,
-            } => {
-                if committed {
-                    promote_home(Path::new(source), Path::new(destination))?;
-                } else {
-                    rollback_promoted_home(Path::new(source), Path::new(destination), rollback)?;
-                }
-            }
-            ProfileLifecycleHomeAction::Create { path } => {
-                if !committed {
-                    remove_home(Path::new(path))?;
-                }
-            }
-            ProfileLifecycleHomeAction::Cleanup { path } => {
-                remove_home(Path::new(path))?;
-            }
-            ProfileLifecycleHomeAction::Quarantine { source, quarantine } => {
-                finish_quarantine_home(source, quarantine, committed)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-fn finish_quarantine_home(source: &str, quarantine: &str, committed: bool) -> Result<()> {
-    let source = Path::new(source);
-    let quarantine = Path::new(quarantine);
-    if committed {
-        remove_home(quarantine)?;
-        remove_home(source)?;
-    } else {
-        let source_exists = lifecycle_path_exists(source)?;
-        let quarantine_exists = lifecycle_path_exists(quarantine)?;
-        if !source_exists && quarantine_exists {
-            fs::rename(quarantine, source).with_context(|| {
-                format!("failed to restore quarantined home {}", source.display())
-            })?;
-        } else if source_exists && quarantine_exists {
-            remove_home(quarantine)?;
-        }
-    }
-    Ok(())
-}
-
-fn promote_home(source: &Path, destination: &Path) -> Result<()> {
-    if !destination.exists() && source.exists() {
-        if let Some(parent) = destination.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
-        match fs::rename(source, destination) {
-            Ok(()) => {}
-            Err(_) => {
-                crate::copy_codex_home(source, destination)?;
-                remove_home(source)?;
-            }
-        }
-    }
-    if source.exists() && destination.exists() {
-        remove_home(source)?;
-    }
-    Ok(())
-}
-
-fn rollback_promoted_home(
-    source: &Path,
-    destination: &Path,
-    rollback: &ProfileLifecyclePromoteRollback,
-) -> Result<()> {
-    match rollback {
-        ProfileLifecyclePromoteRollback::Remove => {
-            remove_home(source)?;
-            remove_home(destination)?;
-        }
-        ProfileLifecyclePromoteRollback::RestoreSource => {
-            if !source.exists() && destination.exists() {
-                fs::rename(destination, source).with_context(|| {
-                    format!(
-                        "failed to restore temporary profile home {}",
-                        source.display()
-                    )
-                })?;
-            } else if source.exists() && destination.exists() {
-                remove_home(destination)?;
-            }
-        }
-    }
-    Ok(())
 }
 
 pub(crate) fn remove_home(path: &Path) -> Result<()> {

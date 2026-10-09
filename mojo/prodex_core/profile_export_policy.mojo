@@ -879,6 +879,131 @@ def prodex_profile_import_auth_journal_commit_v1(
     return 0
 
 
+comptime PROFILE_IMPORT_RECOVERY_SKIP: Int64 = 0
+comptime PROFILE_IMPORT_RECOVERY_COMMIT: Int64 = 1
+comptime PROFILE_IMPORT_RECOVERY_ROLLBACK: Int64 = 2
+
+
+@export("prodex_profile_import_recovery_plan_v1")
+def prodex_profile_import_recovery_plan_v1(
+    abi_version: Int64,
+    is_removal: Int64,
+    recover_removals: Int64,
+    persisted_state_known: Int64,
+    committed: Int64,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_IMPORT_LIFECYCLE_ABI_VERSION:
+        return PROFILE_EXPORT_POLICY_ABI
+    if (
+        (is_removal != 0 and is_removal != 1)
+        or (recover_removals != 0 and recover_removals != 1)
+        or (persisted_state_known != 0 and persisted_state_known != 1)
+        or (committed != 0 and committed != 1)
+    ):
+        return PROFILE_EXPORT_POLICY_INVALID
+    if is_removal == 1 and recover_removals == 0:
+        return PROFILE_IMPORT_RECOVERY_SKIP
+    if persisted_state_known == 1 and committed == 1:
+        return PROFILE_IMPORT_RECOVERY_COMMIT
+    return PROFILE_IMPORT_RECOVERY_ROLLBACK
+
+
+comptime PROFILE_IMPORT_HOME_PROMOTE: Int64 = 0
+comptime PROFILE_IMPORT_HOME_CREATE: Int64 = 1
+comptime PROFILE_IMPORT_HOME_CLEANUP: Int64 = 2
+comptime PROFILE_IMPORT_HOME_QUARANTINE: Int64 = 3
+
+comptime PROFILE_IMPORT_HOME_NOOP: Int64 = 0
+comptime PROFILE_IMPORT_HOME_PROMOTE_ACTION: Int64 = 1
+comptime PROFILE_IMPORT_HOME_RESTORE_SOURCE: Int64 = 2
+comptime PROFILE_IMPORT_HOME_CLEANUP_SOURCE: Int64 = 3
+comptime PROFILE_IMPORT_HOME_CLEANUP_DESTINATION: Int64 = 4
+comptime PROFILE_IMPORT_HOME_CLEANUP_BOTH: Int64 = 5
+
+
+@export("prodex_profile_import_home_action_v1")
+def prodex_profile_import_home_action_v1(
+    abi_version: Int64,
+    action_kind: Int64,
+    committed: Int64,
+    source_exists: Int64,
+    destination_exists: Int64,
+    rollback_remove: Int64,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_IMPORT_LIFECYCLE_ABI_VERSION:
+        return PROFILE_EXPORT_POLICY_ABI
+    if (
+        action_kind < PROFILE_IMPORT_HOME_PROMOTE
+        or action_kind > PROFILE_IMPORT_HOME_QUARANTINE
+        or (committed != 0 and committed != 1)
+        or (source_exists != 0 and source_exists != 1)
+        or (destination_exists != 0 and destination_exists != 1)
+        or (rollback_remove != 0 and rollback_remove != 1)
+    ):
+        return PROFILE_EXPORT_POLICY_INVALID
+
+    if action_kind == PROFILE_IMPORT_HOME_CREATE:
+        return (
+            PROFILE_IMPORT_HOME_NOOP
+            if committed == 1
+            else PROFILE_IMPORT_HOME_CLEANUP_DESTINATION
+        )
+    if action_kind == PROFILE_IMPORT_HOME_CLEANUP:
+        return PROFILE_IMPORT_HOME_CLEANUP_DESTINATION
+    if committed == 1:
+        if action_kind == PROFILE_IMPORT_HOME_PROMOTE:
+            if source_exists == 1 and destination_exists == 0:
+                return PROFILE_IMPORT_HOME_PROMOTE_ACTION
+            if source_exists == 1 and destination_exists == 1:
+                return PROFILE_IMPORT_HOME_CLEANUP_SOURCE
+            return PROFILE_IMPORT_HOME_NOOP
+        return PROFILE_IMPORT_HOME_CLEANUP_BOTH
+    if action_kind == PROFILE_IMPORT_HOME_PROMOTE and rollback_remove == 1:
+        return PROFILE_IMPORT_HOME_CLEANUP_BOTH
+    if source_exists == 0 and destination_exists == 1:
+        return PROFILE_IMPORT_HOME_RESTORE_SOURCE
+    if source_exists == 1 and destination_exists == 1:
+        return PROFILE_IMPORT_HOME_CLEANUP_DESTINATION
+    return PROFILE_IMPORT_HOME_NOOP
+
+
+def profile_import_known_provider(view: ProdexRichStringView) -> Bool:
+    return (
+        rich_view_matches_literal["openai"](view, False)
+        or rich_view_matches_literal["gemini"](view, False)
+        or rich_view_matches_literal["anthropic"](view, False)
+        or rich_view_matches_literal["copilot"](view, False)
+        or rich_view_matches_literal["kiro"](view, False)
+        or rich_view_matches_literal["agy"](view, False)
+    )
+
+
+@export("prodex_profile_import_provider_transition_v1")
+def prodex_profile_import_provider_transition_v1(
+    abi_version: Int64,
+    source_address: UInt,
+    target_address: UInt,
+) abi("C") -> Int64:
+    if abi_version != PROFILE_IMPORT_LIFECYCLE_ABI_VERSION:
+        return PROFILE_EXPORT_POLICY_ABI
+    if source_address == 0 or target_address == 0:
+        return PROFILE_EXPORT_POLICY_INVALID
+    var source = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(source_address)
+    )[].copy()
+    var target = Pointer[mut=False, ProdexRichStringView, ImmUntrackedOrigin](
+        unsafe_from_address=Int(target_address)
+    )[].copy()
+    if (
+        not profile_import_view_valid(source, False)
+        or not profile_import_view_valid(target, False)
+        or not profile_import_known_provider(source)
+        or not profile_import_known_provider(target)
+    ):
+        return PROFILE_EXPORT_POLICY_INVALID
+    return 0 if profile_import_views_equal(source, target) else 1
+
+
 @export("prodex_profile_export_copilot_strip_json_line_comments_v1")
 def prodex_profile_export_copilot_strip_json_line_comments_v1(
     abi_version: Int64,

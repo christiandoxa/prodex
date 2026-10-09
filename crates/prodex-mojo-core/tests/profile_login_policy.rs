@@ -2,9 +2,9 @@
 
 use prodex_mojo_core::profile_login_policy::{
     AuthCommitPlan, AutoLoginRoute, AutoLoginTransition, LoginCandidateSelection, LoginExecution,
-    LoginTargetValidation, ProviderLoginValidation, auth_commit_plan, auto_login_route,
-    auto_login_transition, login_execution, select_login_candidate, validate_login_target,
-    validate_provider_login,
+    LoginMethodPlan, LoginMethodRoute, LoginTargetValidation, ProviderLoginValidation,
+    auth_commit_plan, auto_login_route, auto_login_transition, login_execution, login_method_plan,
+    select_login_candidate, validate_login_target, validate_provider_login,
 };
 
 #[test]
@@ -138,5 +138,66 @@ fn profile_login_candidate_order_and_duplicate_count_are_mojo_owned() {
             first_match: None,
             match_count: 0,
         }
+    );
+}
+
+#[test]
+fn profile_login_method_and_auth_outcomes_keep_precedence_in_mojo() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    assert_eq!(
+        login_method_plan(2, true).unwrap(),
+        LoginMethodPlan {
+            route: LoginMethodRoute::DirectApiKey,
+            allows_base_url: true,
+        }
+    );
+    assert_eq!(
+        login_method_plan(2, false).unwrap(),
+        LoginMethodPlan {
+            route: LoginMethodRoute::CodexChild,
+            allows_base_url: true,
+        }
+    );
+    assert_eq!(
+        login_method_plan(4, true).unwrap(),
+        LoginMethodPlan {
+            route: LoginMethodRoute::ExternalClaude,
+            allows_base_url: false,
+        }
+    );
+    assert_eq!(
+        auth_commit_plan("api-key", false).unwrap(),
+        AuthCommitPlan {
+            is_api_key: true,
+            clear_email: true,
+            write_base_url: false,
+        }
+    );
+    assert_eq!(
+        auth_commit_plan("chatgpt", true).unwrap(),
+        AuthCommitPlan {
+            is_api_key: false,
+            clear_email: false,
+            write_base_url: false,
+        }
+    );
+}
+
+#[test]
+fn profile_login_provider_validation_rejects_missing_and_invalid_combinations() {
+    const { assert!(prodex_mojo_core::MOJO_ACTIVE) }
+
+    assert!(validate_provider_login("", 0).is_err());
+    assert!(validate_provider_login("unknown", 0).is_err());
+    assert!(validate_provider_login("openai", -1).is_err());
+    assert!(
+        validate_provider_login("anthropic", 0).is_ok_and(|decision| {
+            decision == ProviderLoginValidation::CodexProviderUnsupported
+        })
+    );
+    assert!(
+        validate_provider_login("anthropic", 4)
+            .is_ok_and(|decision| { decision == ProviderLoginValidation::Allowed })
     );
 }
