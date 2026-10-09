@@ -150,3 +150,42 @@ fn websocket_transport_failure_precedence_is_mojo_authoritative() {
         RuntimeWebsocketTransportFailurePlan::Error
     );
 }
+
+#[test]
+fn websocket_failure_state_plan_adapter_exercises_every_class_and_tie() {
+    let cases = [
+        (RuntimeWebsocketFailureKind::RateLimited, true, false),
+        (RuntimeWebsocketFailureKind::AuthFailed, true, false),
+        (RuntimeWebsocketFailureKind::Overloaded, true, false),
+        (
+            RuntimeWebsocketFailureKind::LocalSelectionBlocked,
+            true,
+            true,
+        ),
+        (
+            RuntimeWebsocketFailureKind::LocalSelectionBlocked,
+            false,
+            true,
+        ),
+    ];
+    let mut confirmed = 0;
+    for (kind, affinity_releasable, inflight_saturated) in cases {
+        let plan = runtime_websocket_failure_state_plan(kind, affinity_releasable);
+        if matches!(kind, RuntimeWebsocketFailureKind::LocalSelectionBlocked) {
+            let disposition =
+                runtime_websocket_failure_disposition(affinity_releasable, inflight_saturated);
+            assert_eq!(disposition.mark_backoff, !inflight_saturated);
+            assert_eq!(disposition.continue_selection, affinity_releasable);
+        }
+        assert_eq!(
+            plan.clear_affinity,
+            matches!(
+                kind,
+                RuntimeWebsocketFailureKind::AuthFailed
+                    | RuntimeWebsocketFailureKind::LocalSelectionBlocked
+            ) && affinity_releasable
+        );
+        confirmed += 1;
+    }
+    assert!(confirmed > 0);
+}

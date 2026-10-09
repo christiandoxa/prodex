@@ -223,6 +223,53 @@ fn websocket_text_frame_inspection_classifies_retry_and_terminal_events() {
 }
 
 #[test]
+fn websocket_retry_classification_preserves_failure_precedence_ties() {
+    let cases = [
+        (
+            serde_json::json!({
+                "type": "error",
+                "status": 429,
+                "error": {
+                    "code": "websocket_connection_limit_reached",
+                    "message": "insufficient_quota"
+                }
+            }),
+            RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached,
+        ),
+        (
+            serde_json::json!({
+                "type": "response.failed",
+                "status": 429,
+                "error": {
+                    "code": "previous_response_not_found",
+                    "message": "rate_limit_exceeded"
+                }
+            }),
+            RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound,
+        ),
+        (
+            serde_json::json!({
+                "type": "response.failed",
+                "status": 429,
+                "error": {
+                    "code": "rate_limit_exceeded",
+                    "type": "insufficient_quota",
+                    "message": "server_is_overloaded"
+                }
+            }),
+            RuntimeWebsocketRetryInspectionKind::QuotaBlocked,
+        ),
+    ];
+    let mut confirmed = 0;
+    for (payload, expected) in cases {
+        let inspected = inspect_runtime_websocket_text_frame(&payload.to_string());
+        assert_eq!(inspected.retry_kind, Some(expected));
+        confirmed += 1;
+    }
+    assert_eq!(confirmed, 3);
+}
+
+#[test]
 fn websocket_profile_unavailable_is_retryable_without_quota_classification() {
     let payload = serde_json::json!({
         "type": "response.failed",

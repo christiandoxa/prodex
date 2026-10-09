@@ -518,6 +518,7 @@ fn selected_sources() -> Vec<&'static str> {
         sources.push("../../mojo/prodex_core/response_forwarding.mojo");
         sources.push("../../mojo/prodex_core/websocket_proxy_policy.mojo");
         sources.push("../../mojo/prodex_core/websocket_response_tracking.mojo");
+        sources.push("../../mojo/prodex_core/websocket_failure.mojo");
         sources.push("../../mojo/prodex_core/websocket_loop_control.mojo");
         sources.push("../../mojo/prodex_core/transport_failure_policy.mojo");
         sources.push("../../mojo/prodex_core/sse_line.mojo");

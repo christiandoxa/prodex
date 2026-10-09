@@ -5,6 +5,23 @@ use std::time::Duration;
 mod retry_recovery;
 mod retryable_failures;
 
+fn websocket_failure_plans(
+    kind: runtime_proxy_crate::RuntimeWebsocketFailureKind,
+    affinity_releasable: bool,
+    inflight_saturated: bool,
+) -> (
+    runtime_proxy_crate::RuntimeWebsocketFailureDispositionPlan,
+    runtime_proxy_crate::RuntimeWebsocketFailureStatePlan,
+) {
+    (
+        runtime_proxy_crate::runtime_websocket_failure_disposition(
+            affinity_releasable,
+            inflight_saturated,
+        ),
+        runtime_proxy_crate::runtime_websocket_failure_state_plan(kind, affinity_releasable),
+    )
+}
+
 impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
     pub(super) fn handle_direct_current_fallback_attempt(
         &mut self,
@@ -411,14 +428,17 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 overload_message.as_deref().unwrap_or("-"),
             ),
         );
-        self.mark_overload_backoff(&profile_name)?;
-        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+        let (plan, state_plan) = websocket_failure_plans(
+            runtime_proxy_crate::RuntimeWebsocketFailureKind::Overloaded,
             self.quota_blocked_affinity_is_releasable(
                 &profile_name,
                 self.request_requires_locked_previous_response_affinity(),
             ),
             false,
         );
+        if plan.mark_backoff {
+            self.mark_overload_backoff(&profile_name)?;
+        }
         if !plan.continue_selection {
             if self.full_context_retry_available(&profile_name)? {
                 let released_affinity = release_runtime_retryable_failure_affinity(
@@ -449,7 +469,12 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         if plan.exclude_profile {
             self.excluded_profiles.insert(profile_name);
         }
-        self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
+        if state_plan.store_last_failure {
+            self.last_failure = Some((
+                RuntimeUpstreamFailureResponse::Websocket(payload),
+                state_plan.last_failure_retryable,
+            ));
+        }
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
 
@@ -459,7 +484,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         reason: &'static str,
         reset_previous_response_retry_index: bool,
     ) -> Result<RuntimeWebsocketMessageLoopAction> {
-        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+        let (plan, state_plan) = websocket_failure_plans(
+            runtime_proxy_crate::RuntimeWebsocketFailureKind::LocalSelectionBlocked,
             self.quota_blocked_affinity_is_releasable(
                 &profile_name,
                 self.request_requires_locked_previous_response_affinity(),
@@ -483,8 +509,13 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             )?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
-        let released_affinity = self.release_quota_blocked_affinity(&profile_name)?;
-        self.clear_profile_affinity(&profile_name, reset_previous_response_retry_index);
+        let released_affinity = if state_plan.clear_affinity {
+            let released_affinity = self.release_quota_blocked_affinity(&profile_name)?;
+            self.clear_profile_affinity(&profile_name, reset_previous_response_retry_index);
+            released_affinity
+        } else {
+            false
+        };
         if released_affinity {
             runtime_proxy_log(
                 self.shared,
@@ -576,15 +607,18 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 overload_message.as_deref().unwrap_or("-"),
             ),
         );
-        self.mark_overload_backoff(&profile_name)?;
-        self.saw_overload_failure = true;
-        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+        let (plan, state_plan) = websocket_failure_plans(
+            runtime_proxy_crate::RuntimeWebsocketFailureKind::Overloaded,
             self.quota_blocked_affinity_is_releasable(
                 &profile_name,
                 self.request_requires_locked_previous_response_affinity(),
             ),
             false,
         );
+        if plan.mark_backoff {
+            self.mark_overload_backoff(&profile_name)?;
+        }
+        self.saw_overload_failure = state_plan.record_overload_failure;
         if !plan.continue_selection {
             if self.full_context_retry_available(&profile_name)? {
                 let released_affinity = release_runtime_retryable_failure_affinity(
@@ -615,7 +649,12 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         if plan.exclude_profile {
             self.excluded_profiles.insert(profile_name);
         }
-        self.last_failure = Some((RuntimeUpstreamFailureResponse::Websocket(payload), false));
+        if state_plan.store_last_failure {
+            self.last_failure = Some((
+                RuntimeUpstreamFailureResponse::Websocket(payload),
+                state_plan.last_failure_retryable,
+            ));
+        }
         Ok(RuntimeWebsocketMessageLoopAction::Continue)
     }
 
@@ -631,7 +670,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
                 self.request_id, self.session_id, profile_name, reason
             ),
         );
-        let plan = runtime_proxy_crate::runtime_websocket_failure_disposition(
+        let (plan, state_plan) = websocket_failure_plans(
+            runtime_proxy_crate::RuntimeWebsocketFailureKind::LocalSelectionBlocked,
             self.quota_blocked_affinity_is_releasable(
                 &profile_name,
                 self.request_requires_locked_previous_response_affinity(),
@@ -655,8 +695,13 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             )?;
             return Ok(RuntimeWebsocketMessageLoopAction::Finished);
         }
-        let released_affinity = self.release_quota_blocked_affinity(&profile_name)?;
-        self.clear_profile_affinity(&profile_name, true);
+        let released_affinity = if state_plan.clear_affinity {
+            let released_affinity = self.release_quota_blocked_affinity(&profile_name)?;
+            self.clear_profile_affinity(&profile_name, true);
+            released_affinity
+        } else {
+            false
+        };
         if released_affinity {
             runtime_proxy_log(
                 self.shared,
@@ -676,3 +721,7 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
 #[cfg(test)]
 #[path = "../../../tests/src/runtime_proxy/websocket_message/failure_handling.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "../../../tests/src/runtime_proxy/websocket_message/failure_state.rs"]
+mod failure_state_tests;

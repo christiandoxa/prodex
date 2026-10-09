@@ -10,6 +10,8 @@ mod mojo;
 pub use prodex_mojo_core::runtime::{
     WebsocketChainReuseReason as RuntimeWebsocketChainReuseReason,
     WebsocketFailureDispositionPlan as RuntimeWebsocketFailureDispositionPlan,
+    WebsocketFailureKind as RuntimeWebsocketFailureKind,
+    WebsocketFailureStatePlan as RuntimeWebsocketFailureStatePlan,
     WebsocketInvalidPreviousResponseAction as RuntimeWebsocketInvalidPreviousResponseAction,
     WebsocketInvalidPreviousResponsePlan as RuntimeWebsocketInvalidPreviousResponsePlan,
     WebsocketQuotaFallbackPlan as RuntimeWebsocketQuotaFallbackPlan,
@@ -601,6 +603,14 @@ pub fn runtime_websocket_failure_disposition(
         inflight_saturated,
     )
     .expect("Mojo websocket failure disposition returned an invalid result")
+}
+
+pub fn runtime_websocket_failure_state_plan(
+    failure_kind: RuntimeWebsocketFailureKind,
+    affinity_releasable: bool,
+) -> RuntimeWebsocketFailureStatePlan {
+    prodex_mojo_core::runtime::websocket_failure_state_plan(failure_kind, affinity_releasable)
+        .expect("Mojo websocket failure state plan returned an invalid result")
 }
 
 pub fn runtime_websocket_invalid_previous_response_plan(
