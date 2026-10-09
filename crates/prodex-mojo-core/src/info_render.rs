@@ -1,6 +1,8 @@
 use crate::MojoError;
 
+mod doctor;
 mod status;
+pub use doctor::{InfoDoctorViewportPlan, doctor_value_color, doctor_viewport_plan};
 pub use status::{
     InfoStatusFields, InfoStatusProfileChoice, InfoStatusQuotaGauge, InfoStatusReset,
     InfoStatusResourceCounters, InfoStatusResourceMetrics, InfoStatusResources,

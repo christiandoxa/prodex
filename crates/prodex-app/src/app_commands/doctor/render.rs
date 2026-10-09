@@ -1,6 +1,9 @@
 use super::{DoctorPanel, first_line_of_error};
 use anyhow::Result;
 use crossterm::terminal;
+use prodex_mojo_core::info_render::{
+    doctor_value_color as mojo_doctor_value_color, doctor_viewport_plan,
+};
 use ratatui::layout::{Constraint, Direction, Layout};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
@@ -131,17 +134,20 @@ fn doctor_tui_text_for_viewport(
             ));
         }
     }
+    let critical_lines = lines
+        .iter()
+        .map(|(_, critical)| *critical)
+        .collect::<Vec<_>>();
+    let plan = doctor_viewport_plan(max_rows, &critical_lines)
+        .expect("Mojo doctor viewport planner returned invalid output");
     if lines.len() > max_rows {
         if max_rows == 0 {
             return Text::default();
         }
-        let visible_rows = max_rows.saturating_sub(1);
-        let hidden = lines.len().saturating_sub(visible_rows);
-        let hidden_critical = lines
-            .iter()
-            .skip(visible_rows)
-            .find(|(_, critical)| *critical)
-            .map(|(line, _)| line.clone());
+        let visible_rows = plan.visible_rows;
+        let hidden_critical = plan
+            .critical_index
+            .and_then(|index| lines.get(index).map(|(line, _)| line.clone()));
         lines.truncate(visible_rows);
         if let Some(critical) = hidden_critical
             && let Some(last) = lines.last_mut()
@@ -150,7 +156,7 @@ fn doctor_tui_text_for_viewport(
         }
         lines.push((
             Line::styled(
-                fit_cell(&format!("… {hidden} row(s) hidden"), width),
+                fit_cell(&format!("… {} row(s) hidden", plan.hidden_rows), width),
                 tui_secondary_style(),
             ),
             false,
@@ -160,23 +166,13 @@ fn doctor_tui_text_for_viewport(
 }
 
 fn doctor_value_color(label: &str, value: &str) -> Color {
-    let lower = value.to_ascii_lowercase();
-    if lower.contains("error")
-        || lower.contains("missing")
-        || lower.contains("blocked")
-        || lower.contains("warning")
-        || lower.contains("orphan")
-        || lower.contains("critical")
-        || lower.contains("thin")
-        || lower.contains("degraded")
+    match mojo_doctor_value_color(label, value)
+        .expect("Mojo doctor value classifier returned invalid output")
     {
-        Color::Red
-    } else if lower.contains("ready") || lower.contains("yes") || lower.contains("exists") {
-        Color::Green
-    } else if label.contains("Runtime") || label.contains("Quota") || label.contains("Main") {
-        Color::Cyan
-    } else {
-        Color::Reset
+        1 => Color::Red,
+        2 => Color::Green,
+        3 => Color::Cyan,
+        _ => Color::Reset,
     }
 }
 
@@ -273,5 +269,25 @@ mod tests {
             assert!(rendered.contains("critical error"));
             assert!(rendered.contains("hidden"));
         }
+    }
+
+    #[test]
+    fn doctor_mojo_viewport_keeps_unicode_and_hidden_critical_output() {
+        let panels = vec![DoctorPanel {
+            title: "诊断".to_string(),
+            fields: vec![
+                ("Quota 日本".to_string(), "ready 日本語".to_string()),
+                ("Runtime".to_string(), "warming".to_string()),
+                ("Main".to_string(), "critical error".to_string()),
+            ],
+        }];
+
+        let text = doctor_tui_text_for_viewport(&panels, &[], 24, 3);
+        assert_eq!(text.lines.len(), 3);
+        assert!(text.lines.iter().all(|line| line.width() <= 24));
+        let rendered = format!("{text:?}");
+        assert!(rendered.contains("诊断"));
+        assert!(rendered.contains("critical"));
+        assert!(rendered.contains("row(s) hidden"));
     }
 }
