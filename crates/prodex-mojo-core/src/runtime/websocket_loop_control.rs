@@ -2,6 +2,53 @@ use crate::MojoError;
 
 const WEBSOCKET_LOOP_CONTROL_ABI_VERSION: i64 = 1;
 const WEBSOCKET_LOOP_CONTROL_FIELD_COUNT: usize = 10;
+const WEBSOCKET_SESSION_CONTROL_ABI_VERSION: i64 = 1;
+
+const WEBSOCKET_FRAME_TEXT: i64 = 0;
+const WEBSOCKET_FRAME_BINARY: i64 = 1;
+const WEBSOCKET_FRAME_PING: i64 = 2;
+const WEBSOCKET_FRAME_PONG: i64 = 3;
+const WEBSOCKET_FRAME_RAW: i64 = 4;
+const WEBSOCKET_FRAME_CLOSE: i64 = 5;
+const WEBSOCKET_FRAME_READ_ERROR: i64 = 6;
+
+const WEBSOCKET_READ_CONTINUE: i64 = 0;
+const WEBSOCKET_READ_BREAK: i64 = 1;
+const WEBSOCKET_READ_RETURN: i64 = 2;
+const WEBSOCKET_READ_ERROR: i64 = 3;
+
+#[repr(i64)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebsocketErrorKind {
+    ConnectionClosed = 0,
+    AlreadyClosed = 1,
+    BrokenPipe = 2,
+    ConnectionAborted = 3,
+    ConnectionReset = 4,
+    NotConnected = 5,
+    UnexpectedEof = 6,
+    ResetWithoutClosingHandshake = 7,
+    Other = 8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebsocketReadFrame {
+    Text,
+    Binary,
+    Ping,
+    Pong,
+    Raw,
+    Close,
+    ReadError { local_disconnect: bool },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WebsocketReadAction {
+    Continue,
+    Break,
+    Return,
+    Error,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WebsocketPrecommitBudgetInput {
@@ -23,6 +70,15 @@ unsafe extern "C" {
         abi_version: i64,
         fields_address: u64,
         field_count: i64,
+        output_address: u64,
+    ) -> i64;
+    fn prodex_runtime_websocket_local_disconnect_v1(abi_version: i64, error_kind: i64) -> i64;
+    fn prodex_runtime_websocket_read_action_v1(
+        abi_version: i64,
+        frame_kind: i64,
+        realtime_duplex: i64,
+        has_socket: i64,
+        local_disconnect: i64,
         output_address: u64,
     ) -> i64;
 }
@@ -66,6 +122,64 @@ pub fn websocket_precommit_budget_exhausted(
         },
         1 => Err(MojoError::InvalidInput),
         4 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn websocket_local_disconnect(kind: WebsocketErrorKind) -> Result<bool, MojoError> {
+    match unsafe {
+        prodex_runtime_websocket_local_disconnect_v1(
+            WEBSOCKET_SESSION_CONTROL_ABI_VERSION,
+            kind as i64,
+        )
+    } {
+        0 => Ok(false),
+        1 => Ok(true),
+        -2 => Err(MojoError::InvalidInput),
+        -3 => Err(MojoError::AbiMismatch),
+        _ => Err(MojoError::InvalidOutput),
+    }
+}
+
+pub fn websocket_read_action(
+    frame: WebsocketReadFrame,
+    realtime_duplex: bool,
+    has_socket: bool,
+) -> Result<WebsocketReadAction, MojoError> {
+    let (frame_kind, local_disconnect) = match frame {
+        WebsocketReadFrame::Text => (WEBSOCKET_FRAME_TEXT, false),
+        WebsocketReadFrame::Binary => (WEBSOCKET_FRAME_BINARY, false),
+        WebsocketReadFrame::Ping => (WEBSOCKET_FRAME_PING, false),
+        WebsocketReadFrame::Pong => (WEBSOCKET_FRAME_PONG, false),
+        WebsocketReadFrame::Raw => (WEBSOCKET_FRAME_RAW, false),
+        WebsocketReadFrame::Close => (WEBSOCKET_FRAME_CLOSE, false),
+        WebsocketReadFrame::ReadError { local_disconnect } => {
+            (WEBSOCKET_FRAME_READ_ERROR, local_disconnect)
+        }
+    };
+    let mut output = -1_i64;
+    let status = unsafe {
+        prodex_runtime_websocket_read_action_v1(
+            WEBSOCKET_SESSION_CONTROL_ABI_VERSION,
+            frame_kind,
+            i64::from(realtime_duplex),
+            i64::from(has_socket),
+            i64::from(local_disconnect),
+            &mut output as *mut i64 as usize as u64,
+        )
+    };
+    if status != 0 {
+        return Err(match status {
+            1 => MojoError::InvalidInput,
+            4 => MojoError::AbiMismatch,
+            _ => MojoError::InvalidOutput,
+        });
+    }
+    match output {
+        WEBSOCKET_READ_CONTINUE => Ok(WebsocketReadAction::Continue),
+        WEBSOCKET_READ_BREAK => Ok(WebsocketReadAction::Break),
+        WEBSOCKET_READ_RETURN => Ok(WebsocketReadAction::Return),
+        WEBSOCKET_READ_ERROR => Ok(WebsocketReadAction::Error),
         _ => Err(MojoError::InvalidOutput),
     }
 }
@@ -161,6 +275,113 @@ mod tests {
                 )
             },
             4,
+        );
+    }
+
+    #[test]
+    fn websocket_read_action_covers_frames_keepalive_and_realtime_return() {
+        assert_eq!(
+            websocket_read_action(WebsocketReadFrame::Text, false, false),
+            Ok(WebsocketReadAction::Continue)
+        );
+        assert_eq!(
+            websocket_read_action(WebsocketReadFrame::Text, true, true),
+            Ok(WebsocketReadAction::Return)
+        );
+        for frame in [
+            WebsocketReadFrame::Binary,
+            WebsocketReadFrame::Ping,
+            WebsocketReadFrame::Pong,
+            WebsocketReadFrame::Raw,
+        ] {
+            assert_eq!(
+                websocket_read_action(frame, true, true),
+                Ok(WebsocketReadAction::Continue)
+            );
+        }
+        assert_eq!(
+            websocket_read_action(WebsocketReadFrame::Close, false, false),
+            Ok(WebsocketReadAction::Break)
+        );
+        assert_eq!(
+            websocket_read_action(
+                WebsocketReadFrame::ReadError {
+                    local_disconnect: true,
+                },
+                false,
+                false,
+            ),
+            Ok(WebsocketReadAction::Break)
+        );
+        assert_eq!(
+            websocket_read_action(
+                WebsocketReadFrame::ReadError {
+                    local_disconnect: false,
+                },
+                false,
+                false,
+            ),
+            Ok(WebsocketReadAction::Error)
+        );
+    }
+
+    #[test]
+    fn websocket_local_disconnect_covers_terminal_and_transient_errors() {
+        for kind in [
+            WebsocketErrorKind::ConnectionClosed,
+            WebsocketErrorKind::AlreadyClosed,
+            WebsocketErrorKind::BrokenPipe,
+            WebsocketErrorKind::ConnectionAborted,
+            WebsocketErrorKind::ConnectionReset,
+            WebsocketErrorKind::NotConnected,
+            WebsocketErrorKind::UnexpectedEof,
+            WebsocketErrorKind::ResetWithoutClosingHandshake,
+        ] {
+            assert_eq!(websocket_local_disconnect(kind), Ok(true));
+        }
+        assert_eq!(
+            websocket_local_disconnect(WebsocketErrorKind::Other),
+            Ok(false)
+        );
+    }
+
+    #[test]
+    fn websocket_read_action_rejects_invalid_abi_inputs() {
+        let mut output = -1_i64;
+        assert_eq!(
+            unsafe {
+                prodex_runtime_websocket_read_action_v1(
+                    WEBSOCKET_SESSION_CONTROL_ABI_VERSION,
+                    99,
+                    0,
+                    0,
+                    0,
+                    &mut output as *mut i64 as usize as u64,
+                )
+            },
+            1
+        );
+        assert_eq!(
+            unsafe {
+                prodex_runtime_websocket_read_action_v1(
+                    WEBSOCKET_SESSION_CONTROL_ABI_VERSION,
+                    WEBSOCKET_FRAME_TEXT,
+                    2,
+                    0,
+                    0,
+                    &mut output as *mut i64 as usize as u64,
+                )
+            },
+            1
+        );
+        assert_eq!(
+            unsafe {
+                prodex_runtime_websocket_local_disconnect_v1(
+                    WEBSOCKET_SESSION_CONTROL_ABI_VERSION,
+                    99,
+                )
+            },
+            -2
         );
     }
 }
