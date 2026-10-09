@@ -441,6 +441,49 @@ mod tests {
     use super::*;
 
     #[test]
+    fn quota_summary_log_formatter_preserves_extremes_and_rejects_invalid_labels() {
+        assert_eq!(
+            format_quota_summary_log_fields(QuotaSummaryLogFields {
+                pressure_band: "quota_unknown",
+                five_hour_status: "critical",
+                five_hour_remaining: i64::MIN,
+                five_hour_reset_at: i64::MAX,
+                weekly_status: "exhausted",
+                weekly_remaining: 0,
+                weekly_reset_at: -1,
+            })
+            .unwrap(),
+            "quota_band=quota_unknown five_hour_status=critical five_hour_remaining=-9223372036854775808 five_hour_reset_at=9223372036854775807 weekly_status=exhausted weekly_remaining=0 weekly_reset_at=-1",
+        );
+
+        let too_long = "z".repeat(65);
+        assert_eq!(
+            format_quota_summary_log_fields(QuotaSummaryLogFields {
+                pressure_band: &too_long,
+                five_hour_status: "critical",
+                five_hour_remaining: 10,
+                five_hour_reset_at: 20,
+                weekly_status: "ready",
+                weekly_remaining: 30,
+                weekly_reset_at: 40,
+            }),
+            Err(MojoError::InvalidInput)
+        );
+        assert_eq!(
+            format_quota_summary_log_fields(QuotaSummaryLogFields {
+                pressure_band: "quota_ready",
+                five_hour_status: "",
+                five_hour_remaining: 10,
+                five_hour_reset_at: 20,
+                weekly_status: "ready",
+                weekly_remaining: 30,
+                weekly_reset_at: 40,
+            }),
+            Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
     fn runtime_state_quota_kernel_smoke() {
         assert!(timestamp_touch_should_persist(0, 11, 10).unwrap());
         assert_eq!(
