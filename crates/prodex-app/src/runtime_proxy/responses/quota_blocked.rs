@@ -233,10 +233,11 @@ pub(super) fn handle_runtime_responses_quota_blocked(
             return Ok(RuntimeResponsesQuotaBlockedAction::Return(Box::new(retry)));
         }
 
+        // The owner fact is independent of stricter pinned/session affinity.
+        // Using the highest-priority no-rotate classification here would lose
+        // valid turn-state ownership when another affinity also exists.
         let turn_state_owner_matches =
-            runtime_proxy_crate::runtime_candidate_no_rotate_affinity(
-                affinity_state.candidate_affinity(&profile_name),
-            ) == Some(runtime_proxy_crate::RuntimeNoRotateAffinity::TurnState);
+            affinity_state.turn_state_profile() == Some(profile_name.as_str());
         let turn_state_full_context_replay =
             prodex_mojo_core::runtime_responses_quota::turn_state_full_context_replay_candidate(
                 previous_response_id.is_some(),

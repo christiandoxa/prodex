@@ -66,6 +66,33 @@ mod tests {
     }
 
     #[test]
+    fn replay_eligibility_matches_intended_contract_for_all_boolean_combinations() {
+        for bits in 0_u8..32 {
+            let previous_response_present = bits & 1 != 0;
+            let turn_state_present = bits & 2 != 0;
+            let turn_state_owner_matches = bits & 4 != 0;
+            let compact_followup_present = bits & 8 != 0;
+            let reconstructable_full_history = bits & 16 != 0;
+            let expected = !previous_response_present
+                && turn_state_present
+                && turn_state_owner_matches
+                && !compact_followup_present
+                && reconstructable_full_history;
+            assert_eq!(
+                turn_state_full_context_replay_candidate(
+                    previous_response_present,
+                    turn_state_present,
+                    turn_state_owner_matches,
+                    compact_followup_present,
+                    reconstructable_full_history,
+                ),
+                Ok(expected),
+                "eligibility mismatch for input mask {bits:05b}"
+            );
+        }
+    }
+
+    #[test]
     fn abi_rejects_unknown_version_and_non_boolean_input() {
         assert_eq!(
             unsafe { prodex_runtime_responses_quota_turn_state_replay_v1(0, 0, 1, 1, 0, 1) },
