@@ -243,6 +243,107 @@ fn websocket_response_completion_classifier_is_mojo_owned() {
 }
 
 #[test]
+fn websocket_response_frame_plan_reaches_live_consumer_once() {
+    let _guard = acquire_test_runtime_lock();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("upstream websocket listener should bind");
+    let upstream_addr = listener
+        .local_addr()
+        .expect("upstream websocket listener should expose address");
+    let upstream = thread::spawn(move || {
+        let (stream, _) = listener
+            .accept()
+            .expect("upstream websocket should accept connection");
+        let mut socket = tungstenite::accept(stream).expect("upstream websocket handshake");
+        let _request = socket
+            .read()
+            .expect("upstream websocket should receive request");
+        socket
+            .send(WsMessage::Text(String::new().into()))
+            .expect("upstream should send an empty text boundary");
+        socket
+            .send(WsMessage::Ping("upstream-keepalive".into()))
+            .expect("upstream should send a keepalive ping");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.created","response":{"id":"resp-frame-plan"}}"#.into(),
+            ))
+            .expect("upstream should send a prelude frame");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.output_text.delta","delta":"ok"}"#.into(),
+            ))
+            .expect("upstream should send first meaningful output");
+        socket
+            .send(WsMessage::Text(
+                r#"{"type":"response.completed","response":{"id":"resp-frame-plan"}}"#.into(),
+            ))
+            .expect("upstream should send a terminal frame");
+    });
+
+    let shared = websocket_test_shared_with_main_profile("frame-plan-consumer", upstream_addr);
+    let (mut local_socket, mut client_socket) = websocket_test_local_pair();
+    let handshake_request = RuntimeProxyRequest {
+        method: "GET".to_string(),
+        path_and_query: "/backend-api/prodex/responses".to_string(),
+        headers: Vec::new(),
+        body: Vec::new(),
+    };
+    let mut websocket_session = RuntimeWebsocketSessionState::default();
+    let attempt = attempt_runtime_websocket_request(RuntimeWebsocketAttemptRequest {
+        request_id: 903,
+        local_socket: &mut local_socket,
+        handshake_request: &handshake_request,
+        request_text: r#"{"type":"response.create"}"#,
+        request_previous_response_id: None,
+        request_prompt_cache_key: None,
+        request_session_id: None,
+        request_turn_state: None,
+        shared: &shared,
+        websocket_session: &mut websocket_session,
+        profile_name: "main",
+        turn_state_override: None,
+        promote_committed_profile: true,
+    })
+    .expect("live websocket frame sequence should complete");
+
+    assert!(matches!(attempt, RuntimeWebsocketAttempt::Delivered));
+    assert!(
+        websocket_session.can_reuse("main", None),
+        "successful response.completed should keep the upstream session reusable"
+    );
+    let frames = (0..4)
+        .map(|_| {
+            client_socket
+                .read()
+                .expect("client should receive frame")
+                .to_string()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(frames[0], "", "empty frame should stay forward-only");
+    assert!(frames[1].contains("response.created"));
+    assert!(frames[2].contains("response.output_text.delta"));
+    assert!(frames[3].contains("response.completed"));
+
+    let log = read_websocket_test_log_after_marker(
+        &shared.log_path,
+        "request=903 transport=websocket committed profile=main",
+    );
+    assert_eq!(
+        log.matches("request=903 transport=websocket committed profile=main")
+            .count(),
+        1,
+        "the first meaningful output must commit exactly once: {log}"
+    );
+
+    upstream
+        .join()
+        .expect("upstream websocket thread should finish");
+    let _ = client_socket.close(None);
+    let _ = std::fs::remove_file(&shared.log_path);
+}
+
+#[test]
 fn websocket_presidio_fail_open_preserves_text_when_local_inspection_hits_limits() {
     let mut shared = websocket_test_shared("presidio-local-limit-fail-open");
     shared.async_runtime = Arc::new(

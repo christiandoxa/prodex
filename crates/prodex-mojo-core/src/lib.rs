@@ -221,6 +221,8 @@ pub mod transport_failure_policy;
 pub mod update_notice_policy;
 #[cfg(feature = "mojo-runtime")]
 pub mod websocket_proxy_policy;
+#[cfg(feature = "mojo-runtime")]
+pub mod websocket_response_tracking;
 
 #[cfg(feature = "mojo-runtime")]
 pub mod launch;

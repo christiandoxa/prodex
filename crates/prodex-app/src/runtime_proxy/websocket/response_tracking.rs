@@ -246,7 +246,7 @@ fn run_runtime_websocket_response_loop(
             },
             Ok(WsMessage::Binary(payload)) => flow.handle_binary(payload)?,
             Ok(WsMessage::Ping(payload)) => flow.handle_ping(payload)?,
-            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => flow.mark_progress()?,
+            Ok(WsMessage::Pong(_)) | Ok(WsMessage::Frame(_)) => flow.handle_keepalive()?,
             Ok(WsMessage::Close(frame)) => {
                 let _ = frame;
                 return flow.handle_close();
@@ -264,22 +264,44 @@ impl RuntimeWebsocketResponseLoop<'_> {
         self.mark_text_progress()?;
         let stream_payload = runtime_websocket_stream_payload_from_text(&text);
         let inspected = self.inspect_text(&text)?;
-        self.observe_generation_start(inspected.event_type.as_deref());
-        if let Some(attempt) = self.retry_attempt(&inspected, &text) {
+        let mut plan = self.plan_frame(
+            &text,
+            &inspected,
+            prodex_mojo_core::websocket_response_tracking::FRAME_TEXT,
+            false,
+        );
+        self.observe_generation_start(plan.generation_start);
+        if let Some(attempt) = self.retry_attempt(&plan, &inspected, &text) {
             return Ok(RuntimeWebsocketTextResult::Attempt(attempt));
         }
-        let promoted_precommit_hold = match self.buffer_precommit_hold(&inspected, &text)? {
-            Some(false) => return Ok(RuntimeWebsocketTextResult::Continue),
-            Some(true) => true,
-            None => false,
+        let promoted_precommit_hold = if plan.action
+            == prodex_mojo_core::websocket_response_tracking::WebsocketResponseFrameAction::Buffer
+        {
+            match self.buffer_precommit_hold(&inspected, &text)? {
+                Some(false) => return Ok(RuntimeWebsocketTextResult::Continue),
+                Some(true) => true,
+                None => false,
+            }
+        } else {
+            false
         };
-        if !self.committed {
+        if promoted_precommit_hold {
+            plan = self.plan_frame(
+                &text,
+                &inspected,
+                prodex_mojo_core::websocket_response_tracking::FRAME_TEXT,
+                true,
+            );
+        }
+        if plan.commit {
             self.commit("committed")?;
-            if promoted_precommit_hold {
+            if plan.action
+                == prodex_mojo_core::websocket_response_tracking::WebsocketResponseFrameAction::CommitBuffered
+            {
                 return Ok(RuntimeWebsocketTextResult::Continue);
             }
         }
-        let committed_previous_response_not_found = self.record_text(&inspected)?;
+        let committed_previous_response_not_found = self.record_text(&inspected, &plan)?;
         if let Some(payload) = stream_payload {
             log_runtime_stream_payload(RuntimeStreamPayloadLog {
                 shared: self.shared,
@@ -289,17 +311,14 @@ impl RuntimeWebsocketResponseLoop<'_> {
                 message: &payload.message,
             });
         }
-        self.forward_text(&text)?;
-        if inspected.terminal_event {
-            let reset_upstream_socket =
-                runtime_proxy_crate::runtime_websocket_terminal_should_reset(
-                    inspected.event_type.as_deref(),
-                    self.realtime_websocket,
-                );
+        if plan.forward {
+            self.forward_text(&text)?;
+        }
+        if plan.terminal {
             return Ok(RuntimeWebsocketTextResult::Terminal(
                 RuntimeWebsocketTextTerminal {
                     event_type: inspected.event_type,
-                    reset_upstream_socket,
+                    reset_upstream_socket: plan.reset_upstream_socket,
                     committed_previous_response_not_found,
                 },
             ));
@@ -333,16 +352,57 @@ impl RuntimeWebsocketResponseLoop<'_> {
         Ok(inspected)
     }
 
+    fn plan_frame(
+        &self,
+        text: &str,
+        inspected: &runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame,
+        frame_kind: i64,
+        promoted_precommit_hold: bool,
+    ) -> prodex_mojo_core::websocket_response_tracking::WebsocketResponseFramePlan {
+        let retry_kind = match inspected.retry_kind {
+            None => prodex_mojo_core::websocket_response_tracking::RETRY_NONE,
+            Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached) => {
+                prodex_mojo_core::websocket_response_tracking::RETRY_CONNECTION_LIMIT
+            }
+            Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked) => {
+                prodex_mojo_core::websocket_response_tracking::RETRY_QUOTA
+            }
+            Some(RuntimeWebsocketRetryInspectionKind::RateLimited) => {
+                prodex_mojo_core::websocket_response_tracking::RETRY_RATE_LIMITED
+            }
+            Some(RuntimeWebsocketRetryInspectionKind::Overloaded) => {
+                prodex_mojo_core::websocket_response_tracking::RETRY_OVERLOADED
+            }
+            Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound) => {
+                prodex_mojo_core::websocket_response_tracking::RETRY_PREVIOUS_RESPONSE_NOT_FOUND
+            }
+        };
+        prodex_mojo_core::websocket_response_tracking::websocket_response_frame_plan(
+            prodex_mojo_core::websocket_response_tracking::WebsocketResponseFrameInput {
+                frame_kind,
+                event_type: inspected.event_type.as_deref(),
+                text_nonempty: !text.is_empty(),
+                committed: self.committed,
+                precommit_hold: inspected.precommit_hold,
+                promoted_precommit_hold,
+                retry_kind,
+                terminal_hint: inspected.terminal_event,
+                realtime_websocket: self.realtime_websocket,
+                generation_started: self.generation_started_at.is_some(),
+            },
+        )
+        .expect("Mojo websocket response-frame planner returned an invalid result")
+    }
+
     fn retry_attempt(
         &mut self,
+        plan: &prodex_mojo_core::websocket_response_tracking::WebsocketResponseFramePlan,
         inspected: &runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame,
         text: &str,
     ) -> Option<RuntimeWebsocketAttempt> {
-        if self.committed {
-            return None;
-        }
-        match inspected.retry_kind {
-            Some(RuntimeWebsocketRetryInspectionKind::ConnectionLimitReached) => {
+        use prodex_mojo_core::websocket_response_tracking::WebsocketResponseFrameAction;
+        match plan.action {
+            WebsocketResponseFrameAction::RetryConnectionLimit => {
                 runtime_proxy_log(
                     self.shared,
                     format!(
@@ -357,14 +417,14 @@ impl RuntimeWebsocketResponseLoop<'_> {
                     event: "connection_limit_reached",
                 })
             }
-            Some(RuntimeWebsocketRetryInspectionKind::QuotaBlocked) => {
+            WebsocketResponseFrameAction::RetryQuota => {
                 self.close_and_reset();
                 Some(RuntimeWebsocketAttempt::QuotaBlocked {
                     profile_name: self.profile_name.to_string(),
                     payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
                 })
             }
-            Some(RuntimeWebsocketRetryInspectionKind::RateLimited) => {
+            WebsocketResponseFrameAction::RetryRateLimited => {
                 self.close_and_reset();
                 Some(RuntimeWebsocketAttempt::RateLimited {
                     profile_name: self.profile_name.to_string(),
@@ -372,14 +432,14 @@ impl RuntimeWebsocketResponseLoop<'_> {
                     retry_after: inspected.retry_after,
                 })
             }
-            Some(RuntimeWebsocketRetryInspectionKind::Overloaded) => {
+            WebsocketResponseFrameAction::RetryOverloaded => {
                 self.close_and_reset();
                 Some(RuntimeWebsocketAttempt::Overloaded {
                     profile_name: self.profile_name.to_string(),
                     payload: RuntimeWebsocketErrorPayload::Text(text.to_string()),
                 })
             }
-            Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound) => {
+            WebsocketResponseFrameAction::RetryPreviousResponseNotFound => {
                 let invalid_previous_response_id =
                     runtime_proxy_crate::runtime_proxy_body_is_invalid_previous_response_id(
                         text.as_bytes(),
@@ -395,7 +455,11 @@ impl RuntimeWebsocketResponseLoop<'_> {
                     invalid_previous_response_id,
                 })
             }
-            None => None,
+            WebsocketResponseFrameAction::Forward
+            | WebsocketResponseFrameAction::ForwardUncommitted
+            | WebsocketResponseFrameAction::Buffer
+            | WebsocketResponseFrameAction::CommitBuffered
+            | WebsocketResponseFrameAction::Keepalive => None,
         }
     }
 
@@ -468,13 +532,14 @@ impl RuntimeWebsocketResponseLoop<'_> {
     fn record_text(
         &mut self,
         inspected: &runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame,
+        plan: &prodex_mojo_core::websocket_response_tracking::WebsocketResponseFramePlan,
     ) -> Result<bool> {
         let event_type = inspected.event_type.as_deref();
         let generation_ms = prodex_mojo_core::json::runtime_response_event_is_completed(event_type)
             .expect("Mojo websocket response event classification returned an invalid result")
             .then(|| runtime_proxy_crate::runtime_generation_elapsed_ms(self.generation_started_at))
             .flatten();
-        if runtime_proxy_crate::runtime_response_ids_should_record(inspected.precommit_hold) {
+        if plan.record_response_ids {
             self.committed_response_ids
                 .extend(inspected.response_ids.iter().cloned());
             self.websocket_session
@@ -532,14 +597,7 @@ impl RuntimeWebsocketResponseLoop<'_> {
                 generation_ms,
             });
         }
-        let committed_previous_response_not_found =
-            runtime_proxy_crate::runtime_committed_previous_response_not_found(
-                self.committed,
-                matches!(
-                    inspected.retry_kind,
-                    Some(RuntimeWebsocketRetryInspectionKind::PreviousResponseNotFound)
-                ),
-            );
+        let committed_previous_response_not_found = plan.committed_previous_response_not_found;
         if committed_previous_response_not_found {
             record_runtime_websocket_committed_previous_response_not_found(
                 RuntimeWebsocketCommittedPreviousResponseNotFoundRequest {
@@ -554,11 +612,8 @@ impl RuntimeWebsocketResponseLoop<'_> {
         Ok(committed_previous_response_not_found)
     }
 
-    fn observe_generation_start(&mut self, event_type: Option<&str>) {
-        if runtime_proxy_crate::runtime_response_generation_should_start(
-            event_type,
-            self.generation_started_at.is_some(),
-        ) {
+    fn observe_generation_start(&mut self, generation_start: bool) {
+        if generation_start {
             self.generation_started_at = Some(Instant::now());
         }
     }
@@ -659,22 +714,46 @@ impl RuntimeWebsocketResponseLoop<'_> {
 
     fn handle_binary(&mut self, payload: Bytes) -> Result<()> {
         self.mark_progress()?;
-        if !self.committed {
+        let inspected = runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame::default();
+        let plan = self.plan_frame(
+            "binary",
+            &inspected,
+            prodex_mojo_core::websocket_response_tracking::FRAME_BINARY,
+            false,
+        );
+        if plan.commit {
             self.commit("committed_binary")?;
         }
-        self.local_socket
-            .send(WsMessage::Binary(payload))
-            .with_context(|| {
-                self.websocket_session.reset();
-                "failed to forward runtime websocket binary frame"
-            })
+        if plan.forward {
+            self.local_socket
+                .send(WsMessage::Binary(payload))
+                .with_context(|| {
+                    self.websocket_session.reset();
+                    "failed to forward runtime websocket binary frame"
+                })?;
+        }
+        Ok(())
     }
 
     fn handle_ping(&mut self, payload: Bytes) -> Result<()> {
-        self.mark_progress()?;
+        self.handle_keepalive()?;
         self.upstream_socket
             .send(WsMessage::Pong(payload))
             .context("failed to respond to upstream websocket ping")
+    }
+
+    fn handle_keepalive(&mut self) -> Result<()> {
+        let inspected = runtime_proxy_crate::RuntimeInspectedWebsocketTextFrame::default();
+        let plan = self.plan_frame(
+            "",
+            &inspected,
+            prodex_mojo_core::websocket_response_tracking::FRAME_KEEPALIVE,
+            false,
+        );
+        if plan.commit {
+            self.commit("committed_keepalive")?;
+        }
+        self.mark_progress()
     }
 
     fn mark_progress(&mut self) -> Result<()> {
