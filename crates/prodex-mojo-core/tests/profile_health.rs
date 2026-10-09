@@ -175,3 +175,92 @@ fn recovery_batch_uses_latest_profile_blocker_and_earliest_profile_across_chunks
     assert!(!plan.can_clear[RUNTIME_PROFILE_SCHEDULE_MAX_COUNT]);
     assert_eq!(plan.earliest_recovery_at, Some(80));
 }
+
+#[test]
+fn recovery_batch_preserves_eligibility_and_saturated_time_boundaries() {
+    let now_values = [i64::MIN, -3, 0, 50, i64::MAX - 1, i64::MAX];
+    for now in now_values {
+        let options = [
+            ProfileRecoveryCandidate {
+                eligible: true,
+                retry_until: None,
+                transport_until: None,
+                circuit_until: None,
+            },
+            ProfileRecoveryCandidate {
+                eligible: false,
+                retry_until: None,
+                transport_until: None,
+                circuit_until: None,
+            },
+            ProfileRecoveryCandidate {
+                eligible: true,
+                retry_until: Some(i64::MIN),
+                transport_until: None,
+                circuit_until: None,
+            },
+            ProfileRecoveryCandidate {
+                eligible: true,
+                retry_until: Some(i64::MAX),
+                transport_until: None,
+                circuit_until: None,
+            },
+            ProfileRecoveryCandidate {
+                eligible: true,
+                retry_until: Some(-1),
+                transport_until: Some(100),
+                circuit_until: Some(90),
+            },
+            ProfileRecoveryCandidate {
+                eligible: false,
+                retry_until: Some(i64::MAX),
+                transport_until: Some(i64::MAX),
+                circuit_until: None,
+            },
+            ProfileRecoveryCandidate {
+                eligible: true,
+                retry_until: Some(50),
+                transport_until: Some(50),
+                circuit_until: Some(50),
+            },
+        ];
+        let inputs = (0..(RUNTIME_PROFILE_SCHEDULE_MAX_COUNT * 2 + 7))
+            .map(|i| options[i % options.len()])
+            .collect::<Vec<_>>();
+        let plan = profile_recovery_plan_batch(&inputs, now).expect("valid batched candidates");
+        assert_eq!(plan.can_clear.len(), inputs.len());
+        let mut expected_earliest = None::<i64>;
+        for (index, input) in inputs.iter().enumerate() {
+            // Independent test-only contract oracle: a profile can clear only if
+            // eligible and no backoff timestamp remains strictly after `now`.
+            let next = [
+                input.retry_until,
+                input.transport_until,
+                input.circuit_until,
+            ]
+            .into_iter()
+            .flatten()
+            .filter(|until| *until > now)
+            .max();
+            assert_eq!(
+                plan.can_clear[index],
+                input.eligible && next.is_none(),
+                "index={index}, now={now}, input={input:?}"
+            );
+            if input.eligible {
+                if let Some(next) = next {
+                    expected_earliest =
+                        Some(expected_earliest.map_or(next, |before| before.min(next)));
+                }
+            }
+        }
+        assert_eq!(plan.earliest_recovery_at, expected_earliest, "now={now}");
+    }
+    assert_eq!(
+        profile_recovery_plan_batch(&[], 0).unwrap(),
+        prodex_mojo_core::runtime::ProfileRecoveryBatchPlan {
+            can_clear: vec![],
+            earliest_recovery_at: None
+        }
+    );
+}
