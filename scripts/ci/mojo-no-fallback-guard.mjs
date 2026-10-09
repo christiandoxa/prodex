@@ -29,6 +29,9 @@ const DOCTOR_PRESENTATION_MOJO_FILE = "mojo/prodex_core/info_render.mojo";
 const PROVIDER_BINDING_IDENTITY_CONSUMER_FILE = "crates/prodex-provider-core/src/binding_identity.rs";
 const PROVIDER_BINDING_IDENTITY_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/provider_binding_identity.rs";
 const PROVIDER_BINDING_IDENTITY_MOJO_FILE = "mojo/prodex_core/provider_binding_identity.mojo";
+const SESSION_REPAIR_CONSUMER_FILE = "crates/prodex-session-store/src/lib.rs";
+const SESSION_REPAIR_ADAPTER_FILE = "crates/prodex-mojo-core/src/json/session_repair.rs";
+const SESSION_REPAIR_MOJO_FILE = "mojo/prodex_core/session_repair.mojo";
 const RUNTIME_DOCTOR_PLAN_ADAPTER_FILE = "crates/prodex-mojo-core/src/rich/runtime_doctor_plan.rs";
 const RUNTIME_DOCTOR_PLAN_MOJO_FILE = "mojo/prodex_core/runtime_doctor_plan.mojo";
 const GOVERNANCE_INSPECTION_CONSUMER_FILE = "crates/prodex-domain/src/governance/inspection.rs";
@@ -337,6 +340,9 @@ const PROMOTED_FILES = [
   PROVIDER_BINDING_IDENTITY_CONSUMER_FILE,
   PROVIDER_BINDING_IDENTITY_ADAPTER_FILE,
   PROVIDER_BINDING_IDENTITY_MOJO_FILE,
+  SESSION_REPAIR_CONSUMER_FILE,
+  SESSION_REPAIR_ADAPTER_FILE,
+  SESSION_REPAIR_MOJO_FILE,
   "crates/prodex-app/src/runtime_external_provider_config.rs",
   "crates/prodex-app/src/runtime_external_provider_config/catalog_model.rs",
   "crates/prodex-app/src/super_expose/protocol.rs",
@@ -4333,6 +4339,52 @@ export function findViolations(files) {
         .filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: provider binding identity semantics must remain Mojo-owned (${marker})`);
     }
+    if (filePath === SESSION_REPAIR_CONSUMER_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::json::{SessionRepairLine, session_repair_plan}",
+        "let plan = session_repair_plan(",
+      ];
+      const restoredRust = [
+        "fn session_repair_metadata(",
+        "let metadata_index = lines",
+        "let has_unreadable_lines = lines",
+        "first_line_is_matching_codex_metadata",
+      ];
+      const violations = required
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: session repair planning must retain Mojo call ${marker}`);
+      if (restoredRust.some((marker) => production.includes(marker))) {
+        violations.push(`${filePath}: contains restored Rust session repair semantics`);
+      }
+      return violations;
+    }
+    if (filePath === SESSION_REPAIR_ADAPTER_FILE) {
+      const required = [
+        "const ABI_VERSION: i64 = 1",
+        "fn prodex_session_repair_plan_v1(",
+        "pub fn session_repair_plan(",
+        "repair_plan_golden_promotes_late_metadata_and_drops_corrupt_duplicates",
+        "clean_prefix_is_a_noop_and_preserves_unicode_line_boundaries",
+        "missing_metadata_needs_explicit_synthesis_and_keeps_valid_chat",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: session repair adapter must retain ${marker}`);
+    }
+    if (filePath === SESSION_REPAIR_MOJO_FILE) {
+      const required = [
+        '@export("prodex_session_repair_plan_v1")',
+        "session_repair_line_valid(",
+        "metadata_index",
+        "first_codex",
+        "synthesize_missing",
+        "output[unsafe_offset=SESSION_REPAIR_HEADER_WORDS + index]",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: session repair semantics must remain Mojo-owned (${marker})`);
+    }
     if (filePath === "mojo/prodex_core/info_render.mojo") {
       const required = [
         "INFO_RENDER_HUMAN_BYTES",
@@ -6383,6 +6435,44 @@ function selfTest() {
     findViolations([[PROVIDER_BINDING_IDENTITY_MOJO_FILE,
       providerBindingMojoCanonical.replace("provider_binding_hex_digit(", "provider_binding_hex_digit_missing(")]]).join("\n"),
     /provider binding identity semantics must remain Mojo-owned/u,
+  );
+  const sessionRepairConsumerCanonical = [
+    "prodex_mojo_core::json::{SessionRepairLine, session_repair_plan}",
+    "let plan = session_repair_plan(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SESSION_REPAIR_CONSUMER_FILE, sessionRepairConsumerCanonical]]), []);
+  assert.match(
+    findViolations([[SESSION_REPAIR_CONSUMER_FILE,
+      `${sessionRepairConsumerCanonical}\nfn session_repair_metadata(`]]).join("\n"),
+    /contains restored Rust session repair semantics/u,
+  );
+  const sessionRepairAdapterCanonical = [
+    "const ABI_VERSION: i64 = 1",
+    "fn prodex_session_repair_plan_v1(",
+    "pub fn session_repair_plan(",
+    "repair_plan_golden_promotes_late_metadata_and_drops_corrupt_duplicates",
+    "clean_prefix_is_a_noop_and_preserves_unicode_line_boundaries",
+    "missing_metadata_needs_explicit_synthesis_and_keeps_valid_chat",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SESSION_REPAIR_ADAPTER_FILE, sessionRepairAdapterCanonical]]), []);
+  assert.match(
+    findViolations([[SESSION_REPAIR_ADAPTER_FILE,
+      sessionRepairAdapterCanonical.replace("pub fn session_repair_plan(", "fn old(")]]).join("\n"),
+    /session repair adapter must retain pub fn session_repair_plan\(/u,
+  );
+  const sessionRepairMojoCanonical = [
+    '@export("prodex_session_repair_plan_v1")',
+    "session_repair_line_valid(",
+    "metadata_index",
+    "first_codex",
+    "synthesize_missing",
+    "output[unsafe_offset=SESSION_REPAIR_HEADER_WORDS + index]",
+  ].join("\n");
+  assert.deepEqual(findViolations([[SESSION_REPAIR_MOJO_FILE, sessionRepairMojoCanonical]]), []);
+  assert.match(
+    findViolations([[SESSION_REPAIR_MOJO_FILE,
+      sessionRepairMojoCanonical.replace("metadata_index", "metadata_slot")]]).join("\n"),
+    /session repair semantics must remain Mojo-owned/u,
   );
   const affinitySource = "crates/prodex-app/src/runtime_proxy/selection/affinity.rs";
   const affinityCanonical = [
