@@ -165,6 +165,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn optional_tool_hex_encode_enforces_capacity_and_does_not_overwrite_canaries() {
+        let mut guard = [0xa5_u8; 10];
+        let input = [0_u8, 1, 0xfe, 0xff];
+        assert_eq!(
+            optional_tool_hex_encode(&input, &mut guard[1..8]),
+            Err(MojoError::Capacity)
+        );
+        assert_eq!(guard[0], 0xa5);
+        assert_eq!(guard[8], 0xa5);
+        assert_eq!(guard[9], 0xa5);
+        assert_eq!(optional_tool_hex_encode(&input, &mut guard[1..9]), Ok(8));
+        assert_eq!(&guard[1..9], b"0001feff");
+        assert_eq!(guard[0], 0xa5);
+        assert_eq!(guard[9], 0xa5);
+        let mut empty: [u8; 0] = [];
+        assert_eq!(optional_tool_hex_encode(&[], &mut empty), Ok(0));
+    }
+
+    #[test]
     fn optional_tools_policy_preserves_aliases_descriptors_and_defaults() {
         assert_eq!(
             optional_tool_class(" CBM ").unwrap(),

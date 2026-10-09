@@ -680,7 +680,11 @@ fn sha256_file(path: &Path, limit: u64) -> Result<String> {
 }
 
 pub(crate) fn hex_digest(bytes: &[u8]) -> String {
-    let mut encoded = vec![0; bytes.len() * 2];
+    let capacity = bytes
+        .len()
+        .checked_mul(2)
+        .expect("optional-tool digest length overflow");
+    let mut encoded = vec![0; capacity];
     optional_tool_hex_encode(bytes, &mut encoded)
         .expect("Mojo optional-tool digest formatter failed");
     String::from_utf8(encoded).expect("Mojo optional-tool digest formatter returned invalid UTF-8")
@@ -734,5 +738,17 @@ mod tests {
     #[test]
     fn digest_formatting_uses_lowercase_hex_at_the_optional_tools_boundary() {
         assert_eq!(hex_digest(&[0, 1, 0xab, 0xff]), "0001abff");
+        let every_byte = (0..=255).map(|n| n as u8).collect::<Vec<_>>();
+        let encoded = hex_digest(&every_byte);
+        assert_eq!(encoded.len(), 512);
+        for (i, chunk) in encoded.as_bytes().chunks_exact(2).enumerate() {
+            assert_eq!(
+                chunk,
+                format!("{:02x}", every_byte[i]).as_bytes(),
+                "byte index={i}"
+            );
+        }
+        assert_eq!(hex_digest(&[]), "");
+        assert_eq!(hex_digest(&[0xff; 32]), "ff".repeat(32));
     }
 }
