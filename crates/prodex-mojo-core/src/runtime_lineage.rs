@@ -472,6 +472,40 @@ mod hard_binding_plan_tests {
     use super::*;
 
     #[test]
+    fn identity_fallback_mojo_distinguishes_empty_from_invalid_presence() {
+        use RuntimeLineageIdentityFallback::{Empty, Invalid};
+        let whitespace = [
+            None,
+            Some(""),
+            Some("  "),
+            Some("\u{2003}\u{3000}"),
+            Some("\u{00a0}"),
+        ];
+        for value in whitespace {
+            for location in 0..3 {
+                let mut inputs = [None, None, None];
+                inputs[location] = value;
+                assert_eq!(
+                    identity_fallback_plan(inputs[0], inputs[1], inputs[2]),
+                    Ok(Empty),
+                    "only trimmed whitespace is not an identity"
+                );
+            }
+        }
+        for value in ["x", "\u{200b}", "\0", "\u{007f}"] {
+            for location in 0..3 {
+                let mut inputs = [None, None, None];
+                inputs[location] = Some(value);
+                assert_eq!(
+                    identity_fallback_plan(inputs[0], inputs[1], inputs[2]),
+                    Ok(Invalid),
+                    "present component must not silently become an empty identity"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn candidate_and_resolution_precedence_is_mojo_authoritative() {
         assert_eq!(
             candidate_plan(true, false, true, true, false, false).unwrap(),

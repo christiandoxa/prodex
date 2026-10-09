@@ -90,6 +90,8 @@ const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
 const PROMOTED_FILES = [
   "crates/prodex-runtime-state/src/admission.rs",
+  "crates/prodex-app/src/runtime_proxy/lineage/lookup.rs",
+  "mojo/prodex_core/runtime_lineage.mojo",
   "crates/prodex-app/src/runtime_proxy/response_forwarding.rs",
   "crates/prodex-app/src/runtime_proxy/responses/attempt/bound_overload.rs",
   "crates/prodex-mojo-core/src/runtime/bound_overload.rs",
@@ -5075,6 +5077,21 @@ export function findViolations(files) {
     return [];
   });
   const runtimeLineageViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_proxy/lineage/lookup.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::runtime_lineage::identity_fallback_plan(",
+      ];
+      const missing = required.filter((marker) => !production.includes(marker));
+      if (production.includes("let supplied = [previous_response_id, turn_state, session_id]")) {
+        missing.push("restored Rust trimmed-presence policy");
+      }
+      return missing.map((marker) => `${filePath}: hard-binding identity fallback must use Mojo (${marker})`);
+    }
+    if (filePath === "mojo/prodex_core/runtime_lineage.mojo") {
+      return contents.includes('@export("prodex_runtime_lineage_identity_fallback_v1")')
+        ? [] : [`${filePath}: hard-binding identity fallback policy must remain Mojo-owned`];
+    }
     if (filePath === LOCAL_REWRITE_UPSTREAM_FILE) {
       const body = contents.match(/pub\(super\) fn\s+candidate_allowed\([^]*?^\}/mu)?.[0];
       const violations = body?.includes("binding_candidate::candidate_allowed(")
@@ -5130,6 +5147,8 @@ export function findViolations(files) {
     }
     if (filePath === "crates/prodex-mojo-core/src/runtime_lineage.rs") {
       const required = [
+        "prodex_runtime_lineage_identity_fallback_v1(",
+        "pub fn identity_fallback_plan(",
         "prodex_runtime_lineage_classify_v1(",
         "prodex_runtime_lineage_build_v1(",
         "prodex_runtime_lineage_parts_v1(",
