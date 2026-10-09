@@ -11,14 +11,7 @@ pub use self::history::{
     deepseek_provider_core_history_has_tool_call, deepseek_provider_core_message_signatures,
     deepseek_provider_core_tool_call_ids, deepseek_provider_core_tool_output_call_ids,
 };
-use self::validation::{
-    deepseek_provider_core_reject_chat_prefix_marker,
-    deepseek_provider_core_validate_input_local_shell_call_item,
-    deepseek_provider_core_validate_input_message_role,
-    deepseek_provider_core_validate_input_tool_call_item,
-    deepseek_provider_core_validate_input_tool_output_item,
-    deepseek_provider_core_validate_supported_message_content,
-};
+use self::validation::deepseek_provider_core_validate_supported_input_item as validate_input_item_mojo;
 use super::deepseek_provider_core_responses_content_text;
 
 pub fn deepseek_provider_core_validate_supported_input_item(
@@ -26,36 +19,7 @@ pub fn deepseek_provider_core_validate_supported_input_item(
     gemini_compat: bool,
     provider_label: &str,
 ) -> Result<(), String> {
-    let Some(object) = item.as_object() else {
-        return Err(format!("{provider_label} input items must be objects"));
-    };
-    deepseek_provider_core_reject_chat_prefix_marker(object, provider_label)?;
-    match object.get("type").and_then(serde_json::Value::as_str) {
-        Some("message") => {
-            deepseek_provider_core_validate_input_message_role(object, provider_label)?;
-            deepseek_provider_core_validate_supported_message_content(
-                object.get("content"),
-                gemini_compat,
-                provider_label,
-            )
-        }
-        Some("function_call" | "custom_tool_call" | "mcp_call") => {
-            deepseek_provider_core_validate_input_tool_call_item(object, provider_label)
-        }
-        Some("local_shell_call") => {
-            deepseek_provider_core_validate_input_local_shell_call_item(object, provider_label)
-        }
-        Some(
-            "function_call_output"
-            | "custom_tool_call_output"
-            | "mcp_tool_result"
-            | "mcp_call_output",
-        ) => deepseek_provider_core_validate_input_tool_output_item(object, provider_label),
-        Some(other) => Err(format!(
-            "{provider_label} input item type `{other}` is not supported by this Responses adapter"
-        )),
-        None => Ok(()),
-    }
+    validate_input_item_mojo(item, gemini_compat, provider_label)
 }
 
 pub fn deepseek_provider_core_system_message(content: &str) -> serde_json::Value {

@@ -35,46 +35,21 @@ pub fn deepseek_provider_core_merge_response_metadata(
 pub fn deepseek_provider_core_chat_assistant_messages_from_response_value(
     value: &serde_json::Value,
 ) -> Vec<serde_json::Value> {
-    let Some(message) = value
-        .get("choices")
-        .and_then(serde_json::Value::as_array)
-        .and_then(|choices| choices.first())
-        .and_then(|choice| choice.get("message"))
-    else {
-        return Vec::new();
-    };
-    let content = message
-        .get("content")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let reasoning_content = message
-        .get("reasoning_content")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    let tool_calls = message.get("tool_calls").cloned();
-    if content.is_empty() && reasoning_content.is_empty() && tool_calls.is_none() {
-        return Vec::new();
+    let source = serde_json::to_string(value).expect("DeepSeek chat response serializes");
+    let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+        prodex_mojo_core::rich::DeepSeekKernelOperation::ChatAssistantMessages,
+    );
+    input.response = Some(&source);
+    let body = prodex_mojo_core::rich::deepseek_kernel(input)
+        .expect("Mojo DeepSeek chat assistant shaping returned invalid output");
+    let mut messages: Vec<serde_json::Value> = serde_json::from_slice(&body)
+        .expect("Mojo DeepSeek chat assistant shaping returned invalid JSON");
+    if let Some(message) = messages.first_mut()
+        && let Some(tool_calls) = message.get_mut("tool_calls")
+    {
+        *tool_calls = deepseek_provider_core_rtk_wrapped_chat_tool_calls(tool_calls.clone());
     }
-    let has_tool_calls = tool_calls.is_some();
-    let mut assistant = serde_json::json!({
-        "role": "assistant",
-        "content": if content.is_empty() {
-            if has_tool_calls {
-                serde_json::Value::String(String::new())
-            } else {
-                serde_json::Value::Null
-            }
-        } else {
-            serde_json::Value::String(content.to_string())
-        },
-    });
-    if !reasoning_content.is_empty() {
-        assistant["reasoning_content"] = serde_json::Value::String(reasoning_content.to_string());
-    }
-    if let Some(tool_calls) = tool_calls {
-        assistant["tool_calls"] = deepseek_provider_core_rtk_wrapped_chat_tool_calls(tool_calls);
-    }
-    vec![assistant]
+    messages
 }
 
 fn deepseek_provider_core_rtk_wrapped_chat_tool_calls(

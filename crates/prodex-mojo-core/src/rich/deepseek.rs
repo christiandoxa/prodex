@@ -51,6 +51,11 @@ pub enum DeepSeekKernelOperation {
     ResponsesHistoryCallId = 42,
     ResponsesHistoryContainsCallId = 43,
     ResponseUsage = 44,
+    ResponsesHistorySummary = 45,
+    ResponsesContentText = 46,
+    ChatRole = 47,
+    InputItemValidation = 48,
+    ChatAssistantMessages = 49,
 }
 
 #[repr(i64)]
@@ -254,7 +259,7 @@ pub const DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES: usize = 16 * 1024 * 1024;
 /// large response payload without widening any individual field limit.
 const DEEPSEEK_RESPONSE_METADATA_MAX_BYTES: usize =
     DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES + DEEPSEEK_KERNEL_MAX_BYTES;
-const DEEPSEEK_KERNEL_ABI_VERSION: i64 = 3;
+const DEEPSEEK_KERNEL_ABI_VERSION: i64 = 6;
 
 fn kernel_view(value: Option<&str>) -> RichStringView {
     value.map(view).unwrap_or_default()
@@ -305,6 +310,11 @@ fn operation_code(operation: DeepSeekKernelOperation) -> i64 {
         DeepSeekKernelOperation::ResponsesHistoryCallId => 42,
         DeepSeekKernelOperation::ResponsesHistoryContainsCallId => 43,
         DeepSeekKernelOperation::ResponseUsage => 44,
+        DeepSeekKernelOperation::ResponsesHistorySummary => 45,
+        DeepSeekKernelOperation::ResponsesContentText => 46,
+        DeepSeekKernelOperation::ChatRole => 47,
+        DeepSeekKernelOperation::InputItemValidation => 48,
+        DeepSeekKernelOperation::ChatAssistantMessages => 49,
     }
 }
 
@@ -376,6 +386,11 @@ fn kernel_input_limit(operation: DeepSeekKernelOperation) -> usize {
         | DeepSeekKernelOperation::BufferedResponse
         | DeepSeekKernelOperation::ResponsesHistoryCallId
         | DeepSeekKernelOperation::ResponsesHistoryContainsCallId => {
+            DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES
+        }
+        DeepSeekKernelOperation::ResponsesHistorySummary
+        | DeepSeekKernelOperation::ResponsesContentText
+        | DeepSeekKernelOperation::ChatAssistantMessages => {
             DEEPSEEK_LARGE_RESPONSE_KERNEL_MAX_BYTES
         }
         DeepSeekKernelOperation::ResponseUsage => DEEPSEEK_KERNEL_MAX_BYTES,

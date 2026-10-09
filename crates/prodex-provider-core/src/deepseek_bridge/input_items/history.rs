@@ -2,10 +2,37 @@
 
 use std::collections::BTreeSet;
 
+fn deepseek_provider_core_history_summary(
+    history: &[serde_json::Value],
+) -> serde_json::Map<String, serde_json::Value> {
+    let source = serde_json::to_string(history).expect("DeepSeek history serializes");
+    let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+        prodex_mojo_core::rich::DeepSeekKernelOperation::ResponsesHistorySummary,
+    );
+    input.messages = Some(&source);
+    let output = prodex_mojo_core::rich::deepseek_kernel(input)
+        .expect("Mojo DeepSeek history summary returned invalid output");
+    serde_json::from_slice::<serde_json::Value>(&output)
+        .expect("Mojo DeepSeek history summary returned invalid JSON")
+        .as_object()
+        .cloned()
+        .expect("Mojo DeepSeek history summary returned a non-object")
+}
+
 pub fn deepseek_provider_core_chat_role(role: &str) -> &str {
-    match role {
-        "assistant" | "system" | "tool" => role,
-        "developer" => "system",
+    let mut input = prodex_mojo_core::rich::DeepSeekKernelInput::new(
+        prodex_mojo_core::rich::DeepSeekKernelOperation::ChatRole,
+    );
+    input.role = Some(role);
+    let output = prodex_mojo_core::rich::deepseek_kernel(input)
+        .expect("Mojo DeepSeek role classifier returned invalid output");
+    match serde_json::from_slice::<String>(&output)
+        .expect("Mojo DeepSeek role classifier returned invalid JSON")
+        .as_str()
+    {
+        "assistant" => "assistant",
+        "system" => "system",
+        "tool" => "tool",
         _ => "user",
     }
 }
@@ -14,10 +41,15 @@ pub fn deepseek_provider_core_history_has_system_message(
     history: &[serde_json::Value],
     content: &str,
 ) -> bool {
-    history.iter().any(|message| {
-        message.get("role").and_then(serde_json::Value::as_str) == Some("system")
-            && message.get("content").and_then(serde_json::Value::as_str) == Some(content)
-    })
+    deepseek_provider_core_history_summary(history)
+        .get("system_messages")
+        .cloned()
+        .and_then(|messages| messages.as_array().cloned())
+        .is_some_and(|messages| {
+            messages
+                .iter()
+                .any(|message| message.as_str() == Some(content))
+        })
 }
 
 pub fn deepseek_provider_core_first_function_call_output_call_id(
@@ -55,47 +87,51 @@ pub fn deepseek_provider_core_history_has_tool_call(
 }
 
 pub fn deepseek_provider_core_tool_call_ids(history: &[serde_json::Value]) -> BTreeSet<String> {
-    history
-        .iter()
-        .filter_map(|message| {
-            message
-                .get("tool_calls")
-                .and_then(serde_json::Value::as_array)
+    deepseek_provider_core_history_summary(history)
+        .get("tool_call_ids")
+        .cloned()
+        .and_then(|ids| ids.as_array().cloned())
+        .map(|ids| {
+            ids.into_iter()
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .collect()
         })
-        .flat_map(|tool_calls| tool_calls.iter())
-        .filter_map(|tool_call| tool_call.get("id").and_then(serde_json::Value::as_str))
-        .filter(|call_id| !call_id.trim().is_empty())
-        .map(str::to_string)
-        .collect()
+        .unwrap_or_default()
 }
 
 pub fn deepseek_provider_core_tool_output_call_ids(
     history: &[serde_json::Value],
 ) -> BTreeSet<String> {
-    history
-        .iter()
-        .filter(|message| message.get("role").and_then(serde_json::Value::as_str) == Some("tool"))
-        .filter_map(|message| {
-            message
-                .get("tool_call_id")
-                .and_then(serde_json::Value::as_str)
+    deepseek_provider_core_history_summary(history)
+        .get("tool_output_call_ids")
+        .cloned()
+        .and_then(|ids| ids.as_array().cloned())
+        .map(|ids| {
+            ids.into_iter()
+                .filter_map(|id| id.as_str().map(str::to_string))
+                .collect()
         })
-        .filter(|call_id| !call_id.trim().is_empty())
-        .map(str::to_string)
-        .collect()
+        .unwrap_or_default()
 }
 
 pub fn deepseek_provider_core_message_signatures(
     history: &[serde_json::Value],
 ) -> BTreeSet<(String, String)> {
-    history
-        .iter()
-        .filter_map(|message| {
-            let role = deepseek_provider_core_chat_role(
-                message.get("role").and_then(serde_json::Value::as_str)?,
-            );
-            let content = message.get("content").and_then(serde_json::Value::as_str)?;
-            (!content.trim().is_empty()).then(|| (role.to_string(), content.to_string()))
+    deepseek_provider_core_history_summary(history)
+        .get("signatures")
+        .cloned()
+        .and_then(|signatures| signatures.as_array().cloned())
+        .map(|signatures| {
+            signatures
+                .into_iter()
+                .filter_map(|signature| {
+                    let object = signature.as_object()?;
+                    Some((
+                        object.get("role")?.as_str()?.to_string(),
+                        object.get("content")?.as_str()?.to_string(),
+                    ))
+                })
+                .collect()
         })
-        .collect()
+        .unwrap_or_default()
 }

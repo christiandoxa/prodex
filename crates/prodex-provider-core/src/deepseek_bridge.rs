@@ -93,6 +93,9 @@ pub fn deepseek_provider_core_rtk_wrapped_tool_arguments(name: &str, arguments: 
 }
 
 #[cfg(test)]
+#[path = "deepseek_bridge/tests/abi_matrix.rs"]
+mod abi_matrix_tests;
+#[cfg(test)]
 #[path = "deepseek_bridge/tests/reasoning.rs"]
 mod reasoning_tests;
 #[cfg(all(test, not(feature = "mojo")))]
