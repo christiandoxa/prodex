@@ -100,7 +100,7 @@ def media_put_inline_text(
     js_escaped(sink, mime)
     js_literal(sink, StringSlice(" media ("))
     media_put_u64(sink, UInt64(data.len))
-    js_literal(sink, StringSlice(' base64 characters."}'))
+    js_literal(sink, StringSlice(' base64 characters)."}'))
 
 
 def media_put_content(
@@ -114,13 +114,14 @@ def media_put_content(
         var data_node = pj_string_field(tree, inline_data, StringSlice("data"))
         if data_node < 0:
             return False
-        var mime = pj_text(tree, mime_node) if mime_node >= 0 else ProdexRichStringView(0, 0)
+        # Empty MIME is an explicitly supplied value. Only missing/non-string
+        # MIME fields fall back to the default, matching Serde as_str behavior.
+        var mime = (
+            pj_text(tree, mime_node)
+            if pj_kind(tree, mime_node) == JSON_STRING
+            else media_mime_literal(StringSlice("application/octet-stream"))
+        )
         var data = pj_text(tree, data_node)
-        if mime.len == 0:
-            mime = ProdexRichStringView(
-                UInt(Int(StringSlice("application/octet-stream").unsafe_ptr())),
-                UInt(StringSlice("application/octet-stream").byte_length()),
-            )
         if media_image_mime(mime):
             js_literal(sink, StringSlice('{"type":"input_image","image_url":"data:'))
             js_escaped(sink, mime)
@@ -172,7 +173,10 @@ def media_put_content(
     if comma < 0 or comma < 12:
         return False
     var metadata = ProdexRichStringView(text.ptr + UInt(5), UInt(comma - 5))
-    if not rich_view_prefix[";base64"](metadata, False) or metadata.len < 7:
+    if metadata.len < 7:
+        return False
+    var suffix = ProdexRichStringView(metadata.ptr + metadata.len - UInt(7), UInt(7))
+    if not rich_view_prefix[";base64"](suffix, False):
         return False
     var mime = ProdexRichStringView(metadata.ptr, metadata.len - UInt(7))
     var data = ProdexRichStringView(text.ptr + UInt(comma + 1), text.len - UInt(comma + 1))
