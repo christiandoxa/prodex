@@ -271,6 +271,9 @@ const PROMOTED_FILES = [
   "crates/prodex-mojo-core/src/codex_config.rs",
   "crates/prodex-codex-config/src/lib.rs",
   "crates/prodex-runtime-state/src/background.rs",
+  "crates/prodex-runtime-state/src/route.rs",
+  "crates/prodex-runtime-state/tests/src/profile_inflight.rs",
+  "crates/prodex-mojo-core/src/runtime_state/route.rs",
   "crates/prodex-mojo-core/src/runtime_state.rs",
   "crates/prodex-redaction/src/lib.rs",
   "crates/prodex-mojo-core/src/redaction.rs",
@@ -929,6 +932,9 @@ const REQUIRED_DEFAULT_FEATURES = new Map([
 const RUNTIME_STATE_BACKGROUND_FILE = "crates/prodex-runtime-state/src/background.rs";
 const RUNTIME_STATE_BACKGROUND_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_state.rs";
 const RUNTIME_STATE_BACKGROUND_MOJO_FILE = "mojo/prodex_core/runtime_state_background.mojo";
+const RUNTIME_STATE_ROUTE_FILE = "crates/prodex-runtime-state/src/route.rs";
+const RUNTIME_STATE_ROUTE_TEST_FILE = "crates/prodex-runtime-state/tests/src/profile_inflight.rs";
+const RUNTIME_STATE_ROUTE_ADAPTER_FILE = "crates/prodex-mojo-core/src/runtime_state/route.rs";
 const RUNTIME_LOG_RETENTION_FILE = "crates/prodex-runtime-log/src/retention.rs";
 const RUNTIME_LOG_RETENTION_SELECTION_FILE = "crates/prodex-runtime-log/src/retention_selection.rs";
 const RUNTIME_STATE_QUOTA_FILE = "crates/prodex-runtime-state/src/quota.rs";
@@ -2435,6 +2441,100 @@ export function findViolations(files) {
           contents.includes("def runtime_state_put_mutation_label(") &&
           contents.includes('StringSlice("profile_auth_backoff_cleared")')
         ? [] : [`${filePath}: runtime-state mutation labels must remain Mojo-owned`];
+    }
+    return [];
+  });
+  const runtimeStateRoutePolicyViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RUNTIME_STATE_ROUTE_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "prodex_mojo_core::runtime_state::route_kind_label(",
+        "prodex_mojo_core::runtime_state::route_kind_from_label(",
+        "prodex_mojo_core::runtime_state::route_coupled_kind(",
+        "prodex_mojo_core::runtime_state::route_key(",
+        "prodex_mojo_core::runtime_state::route_profile_suffix_span(",
+        "prodex_mojo_core::runtime_state::route_circuit_health_key(",
+        "prodex_mojo_core::runtime_state::route_key_parts(",
+      ];
+      const violations = required
+        .filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: route-key policy must retain Mojo dispatch ${marker}`);
+      const restoredRust = [
+        '"responses"',
+        '"compact"',
+        '"websocket"',
+        '"standard"',
+        'key.find(":")',
+        'key.rfind(":")',
+      ];
+      if (restoredRust.some((marker) => production.includes(marker))) {
+        violations.push(`${filePath}: contains restored Rust runtime route label/key policy`);
+      }
+      return violations;
+    }
+    if (filePath === RUNTIME_STATE_ROUTE_TEST_FILE) {
+      const required = [
+        "route_policy_preserves_labels_coupling_and_key_shapes",
+        "route_policy_preserves_parsing_and_malformed_behavior",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: runtime route caller coverage must retain ${marker}`);
+    }
+    if (filePath === RUNTIME_STATE_ROUTE_ADAPTER_FILE) {
+      const required = [
+        "const MODE_ROUTE_LABEL: i64 = 11",
+        "const MODE_ROUTE_FROM_LABEL: i64 = 12",
+        "const MODE_ROUTE_COUPLED: i64 = 13",
+        "const MODE_ROUTE_BUILD_KEY: i64 = 14",
+        "const MODE_ROUTE_KEY_PARTS: i64 = 15",
+        "const MODE_ROUTE_PROFILE_SUFFIX: i64 = 16",
+        "const MODE_ROUTE_CIRCUIT_HEALTH_KEY: i64 = 17",
+        "prodex_runtime_state_route_policy_v1(",
+        "pub fn route_kind_label(",
+        "pub fn route_kind_from_label(",
+        "pub fn route_coupled_kind(",
+        "pub fn route_key(",
+        "pub fn route_key_parts(",
+        "pub fn route_profile_suffix_span(",
+        "pub fn route_circuit_health_key(",
+        "runtime_state_route_kernel_preserves_key_contract",
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: runtime route adapter must retain ${marker}`);
+    }
+    if (filePath === RUNTIME_STATE_BACKGROUND_MOJO_FILE) {
+      const required = [
+        '@export("prodex_runtime_state_route_policy_v1")',
+        "comptime MODE_ROUTE_LABEL: Int64 = 11",
+        "comptime MODE_ROUTE_FROM_LABEL: Int64 = 12",
+        "comptime MODE_ROUTE_COUPLED: Int64 = 13",
+        "comptime MODE_ROUTE_BUILD_KEY: Int64 = 14",
+        "comptime MODE_ROUTE_KEY_PARTS: Int64 = 15",
+        "comptime MODE_ROUTE_PROFILE_SUFFIX: Int64 = 16",
+        "comptime MODE_ROUTE_CIRCUIT_HEALTH_KEY: Int64 = 17",
+        "runtime_state_route_label(",
+        "runtime_state_route_key_prefix(",
+        "runtime_state_route_key(",
+        "runtime_state_route_find_first_colon(",
+        "runtime_state_route_find_last_colon(",
+        "runtime_state_route_replace_circuit_health(",
+        'StringSlice("responses")',
+        'StringSlice("compact")',
+        'StringSlice("websocket")',
+        'StringSlice("standard")',
+        'StringSlice("__route_health__:")',
+        'StringSlice("__route_bad_pairing__:")',
+        'StringSlice("__route_success__:")',
+        'StringSlice("__route_performance__:")',
+        'StringSlice("__route_circuit__:")',
+        'StringSlice("__route_circuit_reopen__:")',
+        'StringSlice("__route_transport_backoff__:")',
+      ];
+      return required
+        .filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: runtime route semantics must remain Mojo-owned (${marker})`);
     }
     return [];
   });
@@ -6250,7 +6350,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -6473,6 +6573,84 @@ function selfTest() {
     findViolations([[SESSION_REPAIR_MOJO_FILE,
       sessionRepairMojoCanonical.replace("metadata_index", "metadata_slot")]]).join("\n"),
     /session repair semantics must remain Mojo-owned/u,
+  );
+  const runtimeStateRouteConsumerCanonical = [
+    "prodex_mojo_core::runtime_state::route_kind_label(",
+    "prodex_mojo_core::runtime_state::route_kind_from_label(",
+    "prodex_mojo_core::runtime_state::route_coupled_kind(",
+    "prodex_mojo_core::runtime_state::route_key(",
+    "prodex_mojo_core::runtime_state::route_profile_suffix_span(",
+    "prodex_mojo_core::runtime_state::route_circuit_health_key(",
+    "prodex_mojo_core::runtime_state::route_key_parts(",
+  ].join("\n");
+  assert.deepEqual(findViolations([[RUNTIME_STATE_ROUTE_FILE, runtimeStateRouteConsumerCanonical]]), []);
+  assert.match(
+    findViolations([[RUNTIME_STATE_ROUTE_FILE,
+      `${runtimeStateRouteConsumerCanonical}\nlet labels = [\"responses\"];`]]).join("\n"),
+    /contains restored Rust runtime route label\/key policy/u,
+  );
+  const runtimeStateRouteAdapterCanonical = [
+    "const MODE_ROUTE_LABEL: i64 = 11",
+    "const MODE_ROUTE_FROM_LABEL: i64 = 12",
+    "const MODE_ROUTE_COUPLED: i64 = 13",
+    "const MODE_ROUTE_BUILD_KEY: i64 = 14",
+    "const MODE_ROUTE_KEY_PARTS: i64 = 15",
+    "const MODE_ROUTE_PROFILE_SUFFIX: i64 = 16",
+    "const MODE_ROUTE_CIRCUIT_HEALTH_KEY: i64 = 17",
+    "prodex_runtime_state_route_policy_v1(",
+    "pub fn route_kind_label(",
+    "pub fn route_kind_from_label(",
+    "pub fn route_coupled_kind(",
+    "pub fn route_key(",
+    "pub fn route_key_parts(",
+    "pub fn route_profile_suffix_span(",
+    "pub fn route_circuit_health_key(",
+    "runtime_state_route_kernel_preserves_key_contract",
+  ].join("\n");
+  assert.deepEqual(findViolations([[RUNTIME_STATE_ROUTE_ADAPTER_FILE, runtimeStateRouteAdapterCanonical]]), []);
+  assert.match(
+    findViolations([[RUNTIME_STATE_ROUTE_ADAPTER_FILE,
+      runtimeStateRouteAdapterCanonical.replace("pub fn route_key(", "fn old_route_key(")]]).join("\n"),
+    /runtime route adapter must retain pub fn route_key\(/u,
+  );
+  const runtimeStateRouteMojoCanonical = [
+    "if mode == MODE_ADMISSION_RELEASE:",
+    '@export("prodex_runtime_state_mutation_reason_v1")',
+    '@export("prodex_runtime_proxy_admission_policy_v1")',
+    "def runtime_state_sections_union(",
+    "def runtime_state_put_mutation_label(",
+    'StringSlice("profile_auth_backoff_cleared")',
+    '@export("prodex_runtime_state_route_policy_v1")',
+    "comptime MODE_ROUTE_LABEL: Int64 = 11",
+    "comptime MODE_ROUTE_FROM_LABEL: Int64 = 12",
+    "comptime MODE_ROUTE_COUPLED: Int64 = 13",
+    "comptime MODE_ROUTE_BUILD_KEY: Int64 = 14",
+    "comptime MODE_ROUTE_KEY_PARTS: Int64 = 15",
+    "comptime MODE_ROUTE_PROFILE_SUFFIX: Int64 = 16",
+    "comptime MODE_ROUTE_CIRCUIT_HEALTH_KEY: Int64 = 17",
+    "runtime_state_route_label(",
+    "runtime_state_route_key_prefix(",
+    "runtime_state_route_key(",
+    "runtime_state_route_find_first_colon(",
+    "runtime_state_route_find_last_colon(",
+    "runtime_state_route_replace_circuit_health(",
+    'StringSlice("responses")',
+    'StringSlice("compact")',
+    'StringSlice("websocket")',
+    'StringSlice("standard")',
+    'StringSlice("__route_health__:")',
+    'StringSlice("__route_bad_pairing__:")',
+    'StringSlice("__route_success__:")',
+    'StringSlice("__route_performance__:")',
+    'StringSlice("__route_circuit__:")',
+    'StringSlice("__route_circuit_reopen__:")',
+    'StringSlice("__route_transport_backoff__:")',
+  ].join("\n");
+  assert.deepEqual(findViolations([[RUNTIME_STATE_BACKGROUND_MOJO_FILE, runtimeStateRouteMojoCanonical]]), []);
+  assert.match(
+    findViolations([[RUNTIME_STATE_BACKGROUND_MOJO_FILE,
+      runtimeStateRouteMojoCanonical.replace("runtime_state_route_key_prefix(", "runtime_state_route_key_prefix_missing(")]]).join("\n"),
+    /runtime route semantics must remain Mojo-owned/u,
   );
   const affinitySource = "crates/prodex-app/src/runtime_proxy/selection/affinity.rs";
   const affinityCanonical = [
