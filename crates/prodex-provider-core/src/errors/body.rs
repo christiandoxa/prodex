@@ -32,6 +32,31 @@ mod tests {
     use super::provider_error_codes;
 
     #[test]
+    fn provider_error_codes_mojo_preserves_structured_fields_without_message_leakage() {
+        let cases: &[(&[u8], &[&str])] = &[
+            (
+                br#"{"code":" UNAVAILABLE ","message":"do not classify me"}"#,
+                &["unavailable"],
+            ),
+            (br#"{"error":"overloaded","message":"rate limit"}"#, &[]),
+            (br#"{"error":[{"code":"A"},{"code":"A"}] }"#, &["a", "a"]),
+            (br#"{"code":["ignored"],"status":false,"reason":null}"#, &[]),
+            (br#"{"reason":"   ","status":-429}"#, &["-429"]),
+            (b"not-json", &[]),
+            (b"", &[]),
+        ];
+        for (body, expected) in cases {
+            assert_eq!(provider_error_codes(body), *expected, "body={body:?}");
+        }
+    }
+
+    #[test]
+    fn provider_error_codes_mojo_preserves_sse_framing_and_skips_malformed_events() {
+        let body = b"event: error\r\ndata: {\"code\":\"BUSY\"}\r\n\r\ndata: {bad json}\n\ndata: {\"status\":429}\n\n";
+        assert_eq!(provider_error_codes(body), ["busy", "429"]);
+    }
+
+    #[test]
     fn provider_error_codes_mojo_preserves_nested_order_and_normalizes_tokens() {
         let body = br#"{"error":[{"code":"  RESOURCE_EXHAUSTED ","status":429},{"reason":"Slow_Down"}],"message":"not a code"}"#;
         assert_eq!(
