@@ -339,6 +339,7 @@ def prodex_runtime_token_usage_progress_plan_v1(
 def prodex_runtime_bound_overload_retry_v1(
     abi_version: Int64,
     hard_affinity: Int64,
+    previous_response_present: Int64,
     committed: Int64,
     retries: UInt64,
     elapsed_ms: UInt64,
@@ -350,13 +351,16 @@ def prodex_runtime_bound_overload_retry_v1(
         return -4
     if (
         (hard_affinity != 0 and hard_affinity != 1)
+        or (previous_response_present != 0 and previous_response_present != 1)
         or (committed != 0 and committed != 1)
         or (retry_after_present != 0 and retry_after_present != 1)
     ):
         return -2
     # Preserve the owner of a live continuation. Never re-send committed output,
     # and never retry indefinitely when the provider remains at capacity.
-    if hard_affinity == 0 or committed == 1 or retries >= 5 or elapsed_ms >= 60_000:
+    # Previous-response-ID repair retains its established full-history signaling.
+    # This additional retry path is for the HTTP client's turn-state-only samples.
+    if hard_affinity == 0 or previous_response_present == 1 or committed == 1 or retries >= 5 or elapsed_ms >= 60_000:
         return -1
     var delay_ms = UInt64(250) * (UInt64(1) << retries) + jitter_key % UInt64(251)
     if retry_after_present == 1 and retry_after_ms > delay_ms:
