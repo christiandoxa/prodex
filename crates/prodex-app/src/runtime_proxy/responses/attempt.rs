@@ -260,26 +260,42 @@ fn runtime_responses_full_history_recovery_request(
     shared: &RuntimeRotationProxyShared,
     profile_name: &str,
     request: &RuntimeProxyRequest,
+    hard_affinity: bool,
     previous_response_id: Option<&str>,
     exact_invalid_previous_response_id: bool,
     full_history_fallback_used: bool,
 ) -> Result<Option<(String, RuntimeProxyRequest)>> {
-    if !exact_invalid_previous_response_id || full_history_fallback_used {
-        return Ok(None);
-    }
     let Some(previous_response_id) = previous_response_id else {
         return Ok(None);
     };
-    if runtime_response_bound_profile(shared, previous_response_id, RuntimeRouteKind::Responses)?
-        .as_deref()
-        != Some(profile_name)
+    let owner_matches_profile =
+        runtime_response_bound_profile(shared, previous_response_id, RuntimeRouteKind::Responses)?
+            .as_deref()
+            == Some(profile_name);
+    let plan =
+        prodex_mojo_core::runtime_responses_attempt::runtime_responses_attempt_recovery_plan(
+            prodex_mojo_core::runtime_responses_attempt::RuntimeResponsesAttemptRecoveryInput {
+                exact_invalid_previous_response_id,
+                full_history_fallback_used,
+                previous_response_present: true,
+                owner_matches_profile,
+                session_present: runtime_request_session_id(request).is_some(),
+                reconstructable_full_history:
+                    runtime_proxy_crate::runtime_request_has_reconstructable_full_history(request),
+                stream_committed: false,
+                hard_affinity,
+            },
+        )
+        .map_err(|error| anyhow::anyhow!("Mojo Responses recovery planning failed: {error:?}"))?;
+    if plan
+        != prodex_mojo_core::runtime_responses_attempt::RuntimeResponsesAttemptRecoveryPlan::RetryFullHistory
     {
         return Ok(None);
     }
-    Ok(
+    let fallback_request =
         runtime_proxy_crate::runtime_request_full_history_without_previous_response_id(request)
-            .map(|request| (previous_response_id.to_string(), request)),
-    )
+            .ok_or_else(|| anyhow::anyhow!("Responses recovery materialization failed"))?;
+    Ok(Some((previous_response_id.to_string(), fallback_request)))
 }
 
 fn take_runtime_responses_sse_recovery_guard(
@@ -464,6 +480,7 @@ pub(crate) fn attempt_runtime_responses_request(
                     shared,
                     profile_name,
                     &request_for_attempt,
+                    hard_affinity,
                     previous_response_id_for_attempt.as_deref(),
                     status == 400 && exact_invalid_previous_response_id,
                     full_history_fallback_used,
@@ -554,6 +571,7 @@ pub(crate) fn attempt_runtime_responses_request(
                 shared,
                 profile_name,
                 &request_for_attempt,
+                hard_affinity,
                 previous_response_id_for_attempt.as_deref(),
                 exact_sse_invalid_previous_response_id,
                 full_history_fallback_used,
