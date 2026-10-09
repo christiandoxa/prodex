@@ -240,6 +240,7 @@ pub(crate) fn runtime_proxy_sync_probe_pressure_mode_active_for_route(
     )
 }
 
+#[cfg(test)]
 pub(crate) fn runtime_proxy_lane_limit_marks_global_overload(lane: RuntimeRouteKind) -> bool {
     runtime_proxy_crate::runtime_proxy_lane_limit_marks_global_overload(lane)
 }

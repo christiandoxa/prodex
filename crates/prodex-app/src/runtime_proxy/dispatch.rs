@@ -66,29 +66,75 @@ fn runtime_proxy_dispatch_error_log_value(error: &str) -> String {
     redaction_redact_secret_like_text(error)
 }
 
+fn runtime_proxy_dispatch_admission_plan(
+    rejection: RuntimeProxyAdmissionRejection,
+    websocket: bool,
+    capture_attempted: bool,
+) -> prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyAdmissionPlan {
+    let (rejection_kind, lane_kind) = match rejection {
+        RuntimeProxyAdmissionRejection::GlobalLimit => (
+            1,
+            if websocket {
+                RuntimeRouteKind::Websocket
+            } else {
+                RuntimeRouteKind::Standard
+            },
+        ),
+        RuntimeProxyAdmissionRejection::LaneLimit(lane) => (2, lane),
+    };
+    prodex_mojo_core::runtime_proxy_dispatch::admission_plan(
+        rejection_kind,
+        lane_kind as u8,
+        websocket,
+        capture_attempted,
+    )
+    .expect("Mojo runtime proxy dispatch admission plan returned invalid output")
+}
+
+fn runtime_proxy_capture_error_response(
+    body_too_large: bool,
+) -> prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse {
+    prodex_mojo_core::runtime_proxy_dispatch::error_response(if body_too_large { 0 } else { 1 })
+        .expect("Mojo runtime proxy capture error plan returned invalid output")
+}
+
+fn runtime_proxy_upstream_error_response(
+    transport_failure: bool,
+) -> prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse {
+    prodex_mojo_core::runtime_proxy_dispatch::error_response(if transport_failure { 2 } else { 3 })
+        .expect("Mojo runtime proxy upstream error plan returned invalid output")
+}
+
 fn reject_runtime_proxy_capture_error(
     request: tiny_http::Request,
     shared: &RuntimeRotationProxyShared,
     request_id: u64,
     err: &anyhow::Error,
 ) {
-    if runtime_proxy_error_is_body_too_large(err) {
-        runtime_proxy_log_dispatch_error(
-            shared,
-            request_id,
-            "request_body_too_large",
-            "request_body_too_large".to_string(),
-        );
-        let _ = request.respond(build_runtime_proxy_text_response(
-            413,
-            "proxied request body is too large",
-        ));
-    } else {
-        runtime_proxy_log_dispatch_error(shared, request_id, "capture_error", err.to_string());
-        let _ = request.respond(build_runtime_proxy_text_response(
-            502,
-            RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE,
-        ));
+    match runtime_proxy_capture_error_response(runtime_proxy_error_is_body_too_large(err)) {
+        prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::BodyTooLarge => {
+            runtime_proxy_log_dispatch_error(
+                shared,
+                request_id,
+                "request_body_too_large",
+                "request_body_too_large".to_string(),
+            );
+            let _ = request.respond(build_runtime_proxy_text_response(
+                413,
+                "proxied request body is too large",
+            ));
+        }
+        prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::CaptureFailed => {
+            runtime_proxy_log_dispatch_error(shared, request_id, "capture_error", err.to_string());
+            let _ = request.respond(build_runtime_proxy_text_response(
+                502,
+                RUNTIME_PROXY_REQUEST_CAPTURE_FAILED_MESSAGE,
+            ));
+        }
+        prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::TransportFailed
+        | prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::RewriteFailed => {
+            unreachable!("capture errors cannot select an upstream response class")
+        }
     }
 }
 
@@ -170,38 +216,41 @@ fn acquire_runtime_proxy_request_slot(
         websocket_request,
     ) {
         Ok(guard) => Ok((guard, request, None)),
-        Err(RuntimeProxyAdmissionRejection::GlobalLimit) => {
-            mark_runtime_proxy_local_overload(shared, "active_request_limit");
-            reject_runtime_proxy_overloaded_request(request, shared, "active_request_limit");
-            Err(())
-        }
-        Err(RuntimeProxyAdmissionRejection::LaneLimit(_)) if !websocket => {
-            let captured = match capture_runtime_proxy_request(
-                &mut request,
-                shared.runtime_config.max_request_body_bytes,
-            ) {
-                Ok(captured) => captured,
-                Err(err) => {
-                    reject_runtime_proxy_capture_error(request, shared, request_id, &err);
-                    return Err(());
+        Err(rejection) => {
+            let plan = runtime_proxy_dispatch_admission_plan(rejection, websocket, false);
+            match plan.action {
+                prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyAdmissionAction::CaptureAndRetry => {
+                    let captured = match capture_runtime_proxy_request(
+                        &mut request,
+                        shared.runtime_config.max_request_body_bytes,
+                    ) {
+                        Ok(captured) => captured,
+                        Err(err) => {
+                            reject_runtime_proxy_capture_error(request, shared, request_id, &err);
+                            return Err(());
+                        }
+                    };
+                    match acquire_runtime_proxy_active_request_slot_with_wait_for_request(
+                        shared,
+                        transport,
+                        path,
+                        Some(&captured),
+                    ) {
+                        Ok(guard) => Ok((guard, request, Some(captured))),
+                        Err(rejection) => {
+                            reject_runtime_proxy_admission_rejection(request, shared, rejection);
+                            Err(())
+                        }
+                    }
                 }
-            };
-            match acquire_runtime_proxy_active_request_slot_with_wait_for_request(
-                shared,
-                transport,
-                path,
-                Some(&captured),
-            ) {
-                Ok(guard) => Ok((guard, request, Some(captured))),
-                Err(rejection) => {
+                prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyAdmissionAction::Reject => {
                     reject_runtime_proxy_admission_rejection(request, shared, rejection);
                     Err(())
                 }
+                prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyAdmissionAction::Allow => {
+                    unreachable!("an admission plan cannot allow an already rejected request")
+                }
             }
-        }
-        Err(rejection) => {
-            reject_runtime_proxy_admission_rejection(request, shared, rejection);
-            Err(())
         }
     }
 }
@@ -211,14 +260,21 @@ fn reject_runtime_proxy_admission_rejection(
     shared: &RuntimeRotationProxyShared,
     rejection: RuntimeProxyAdmissionRejection,
 ) {
+    let plan = runtime_proxy_dispatch_admission_plan(rejection, false, true);
+    debug_assert!(matches!(
+        plan.action,
+        prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyAdmissionAction::Reject
+    ));
     match rejection {
         RuntimeProxyAdmissionRejection::GlobalLimit => {
-            mark_runtime_proxy_local_overload(shared, "active_request_limit");
+            if plan.marks_global_overload {
+                mark_runtime_proxy_local_overload(shared, "active_request_limit");
+            }
             reject_runtime_proxy_overloaded_request(request, shared, "active_request_limit");
         }
         RuntimeProxyAdmissionRejection::LaneLimit(lane) => {
             let reason = format!("lane_limit:{}", runtime_route_kind_label(lane));
-            if runtime_proxy_lane_limit_marks_global_overload(lane) {
+            if plan.marks_global_overload {
                 mark_runtime_proxy_local_overload(shared, &reason);
             }
             reject_runtime_proxy_overloaded_request(request, shared, &reason);
@@ -325,31 +381,39 @@ fn dispatch_runtime_http_responses_request(
     let response = match proxy_runtime_responses_request(request_id, captured, shared) {
         Ok(response) => response,
         Err(err) => {
-            if is_runtime_proxy_transport_failure(&err) {
-                runtime_proxy_log_dispatch_error(
-                    shared,
-                    request_id,
-                    "responses_transport_failure",
-                    format!("{err:#}"),
-                );
-                let _ = request.respond(build_runtime_proxy_response_from_parts(
-                    build_runtime_proxy_text_response_parts(
-                        503,
-                        runtime_proxy_local_selection_failure_message(),
-                    ),
-                ));
-                return;
+            match runtime_proxy_upstream_error_response(is_runtime_proxy_transport_failure(&err)) {
+                prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::TransportFailed => {
+                    runtime_proxy_log_dispatch_error(
+                        shared,
+                        request_id,
+                        "responses_transport_failure",
+                        format!("{err:#}"),
+                    );
+                    let _ = request.respond(build_runtime_proxy_response_from_parts(
+                        build_runtime_proxy_text_response_parts(
+                            503,
+                            runtime_proxy_local_selection_failure_message(),
+                        ),
+                    ));
+                    return;
+                }
+                prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::RewriteFailed => {
+                    runtime_proxy_log_dispatch_error(
+                        shared,
+                        request_id,
+                        "responses_error",
+                        format!("{err:#}"),
+                    );
+                    RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response_parts(
+                        502,
+                        RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE,
+                    ))
+                }
+                prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::BodyTooLarge
+                | prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::CaptureFailed => {
+                    unreachable!("upstream responses errors cannot select capture response classes")
+                }
             }
-            runtime_proxy_log_dispatch_error(
-                shared,
-                request_id,
-                "responses_error",
-                format!("{err:#}"),
-            );
-            RuntimeResponsesReply::Buffered(build_runtime_proxy_text_response_parts(
-                502,
-                RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE,
-            ))
         }
     };
     respond_runtime_responses_reply(request, response);
@@ -364,26 +428,33 @@ fn dispatch_runtime_http_standard_request(
     let response = match proxy_runtime_standard_request(request_id, captured, shared) {
         Ok(response) => response,
         Err(err) => {
-            if is_runtime_proxy_transport_failure(&err) {
-                runtime_proxy_log_dispatch_error(
-                    shared,
-                    request_id,
-                    "standard_transport_failure",
-                    format!("{err:#}"),
-                );
-                let _ = request.respond(build_runtime_proxy_text_response(
-                    503,
-                    runtime_proxy_local_selection_failure_message(),
-                ));
-                return;
+            match runtime_proxy_upstream_error_response(is_runtime_proxy_transport_failure(&err)) {
+                prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::TransportFailed => {
+                    runtime_proxy_log_dispatch_error(
+                        shared,
+                        request_id,
+                        "standard_transport_failure",
+                        format!("{err:#}"),
+                    );
+                    build_runtime_proxy_text_response(
+                        503,
+                        runtime_proxy_local_selection_failure_message(),
+                    )
+                }
+                prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::RewriteFailed => {
+                    runtime_proxy_log_dispatch_error(
+                        shared,
+                        request_id,
+                        "standard_error",
+                        format!("{err:#}"),
+                    );
+                    build_runtime_proxy_text_response(502, RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE)
+                }
+                prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::BodyTooLarge
+                | prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::CaptureFailed => {
+                    unreachable!("upstream standard errors cannot select capture response classes")
+                }
             }
-            runtime_proxy_log_dispatch_error(
-                shared,
-                request_id,
-                "standard_error",
-                format!("{err:#}"),
-            );
-            build_runtime_proxy_text_response(502, RUNTIME_PROXY_REQUEST_REWRITE_FAILED_MESSAGE)
         }
     };
     let _ = request.respond(response);
@@ -420,7 +491,7 @@ fn capture_runtime_proxy_request_with_max(
     request: &mut tiny_http::Request,
     max_body_bytes: u64,
 ) -> Result<RuntimeProxyRequest> {
-    if let Some(content_length) = runtime_proxy_request_content_length(request)
+    if let Some(content_length) = runtime_proxy_request_content_length(request)?
         && runtime_proxy_request_body_exceeds_limit(max_body_bytes, content_length)?
     {
         return Err(RuntimeProxyBodyTooLarge {
@@ -460,14 +531,21 @@ fn runtime_proxy_max_request_body_bytes() -> Result<u64> {
         .max_request_body_bytes)
 }
 
-fn runtime_proxy_request_content_length(request: &tiny_http::Request) -> Option<u64> {
-    request.headers().iter().find_map(|header| {
-        header
-            .field
-            .equiv("Content-Length")
-            .then(|| header.value.as_str().trim().parse::<u64>().ok())
-            .flatten()
-    })
+fn runtime_proxy_request_content_length(request: &tiny_http::Request) -> Result<Option<u64>> {
+    for header in request.headers() {
+        if !header.field.equiv("Content-Length") {
+            continue;
+        }
+        if let Some(value) = runtime_proxy_content_length_value(header.value.as_str())? {
+            return Ok(Some(value));
+        }
+    }
+    Ok(None)
+}
+
+fn runtime_proxy_content_length_value(value: &str) -> Result<Option<u64>> {
+    prodex_mojo_core::runtime_proxy_dispatch::content_length_value(value)
+        .map_err(|error| anyhow::anyhow!("runtime proxy Content-Length plan failed: {error:?}"))
 }
 
 fn runtime_proxy_request_body_exceeds_limit(limit: u64, observed: u64) -> Result<bool> {
@@ -536,6 +614,63 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn runtime_proxy_dispatch_consumer_preserves_empty_malformed_and_exact_headers() {
+        for value in ["", "  ", "malformed", "18446744073709551616"] {
+            assert_eq!(runtime_proxy_content_length_value(value).unwrap(), None);
+        }
+        assert_eq!(
+            runtime_proxy_content_length_value(" +64 ").unwrap(),
+            Some(64)
+        );
+        assert_eq!(
+            runtime_proxy_content_length_value(" \u{2003}64\u{2003} ").unwrap(),
+            Some(64)
+        );
+        assert_eq!(
+            runtime_proxy_content_length_value("18446744073709551615").unwrap(),
+            Some(u64::MAX)
+        );
+    }
+
+    #[test]
+    fn runtime_proxy_dispatch_consumer_preserves_admission_and_error_precedence() {
+        let responses_lane = runtime_proxy_dispatch_admission_plan(
+            RuntimeProxyAdmissionRejection::LaneLimit(RuntimeRouteKind::Responses),
+            false,
+            false,
+        );
+        assert_eq!(
+            responses_lane.action,
+            prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyAdmissionAction::CaptureAndRetry
+        );
+        assert!(responses_lane.marks_global_overload);
+
+        let websocket_lane = runtime_proxy_dispatch_admission_plan(
+            RuntimeProxyAdmissionRejection::LaneLimit(RuntimeRouteKind::Websocket),
+            true,
+            false,
+        );
+        assert_eq!(
+            websocket_lane.action,
+            prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyAdmissionAction::Reject
+        );
+        assert!(!websocket_lane.marks_global_overload);
+
+        assert_eq!(
+            runtime_proxy_capture_error_response(true),
+            prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::BodyTooLarge
+        );
+        assert_eq!(
+            runtime_proxy_upstream_error_response(true),
+            prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::TransportFailed
+        );
+        assert_eq!(
+            runtime_proxy_upstream_error_response(false),
+            prodex_mojo_core::runtime_proxy_dispatch::RuntimeProxyErrorResponse::RewriteFailed
+        );
     }
 
     #[test]
