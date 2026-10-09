@@ -1,6 +1,7 @@
 use super::{
     RUNTIME_CANDIDATE_AVAILABILITY_UNKNOWN, RUNTIME_CANDIDATE_DECISION_FIELD_COUNT,
     RUNTIME_CANDIDATE_PLAN_FIELD_COUNT, RUNTIME_CANDIDATE_SKIP_EXCLUDED, RuntimeCandidateDecision,
+    RuntimeCandidatePlan, prodex_runtime_candidate_plan_batch_v2,
 };
 
 pub(super) fn input_count(
@@ -181,4 +182,51 @@ mod tests {
             Err(crate::MojoError::InvalidOutput)
         ));
     }
+}
+
+pub fn runtime_candidate_plan_batch(
+    fields: &[i64],
+    excluded: &[i64],
+    route_kind: i64,
+    inflight_soft_limit: usize,
+    responses_critical_floor_percent: i64,
+) -> Result<RuntimeCandidatePlan, crate::MojoError> {
+    let count = input_count(fields, excluded, route_kind)?;
+    let inflight_soft_limit =
+        i64::try_from(inflight_soft_limit).map_err(|_| crate::MojoError::InvalidInput)?;
+    let mut decision_tags = vec![0_i64; count * RUNTIME_CANDIDATE_DECISION_FIELD_COUNT];
+    let mut ready_indices = vec![0_i64; count];
+    let mut fallback_indices = vec![0_i64; count];
+    let mut ready_count = 0_i64;
+    let mut fallback_count = 0_i64;
+    let status = unsafe {
+        prodex_runtime_candidate_plan_batch_v2(
+            fields.as_ptr(),
+            excluded.as_ptr(),
+            decision_tags.as_mut_ptr(),
+            ready_indices.as_mut_ptr(),
+            &mut ready_count,
+            fallback_indices.as_mut_ptr(),
+            &mut fallback_count,
+            i64::try_from(count).map_err(|_| crate::MojoError::InvalidInput)?,
+            route_kind,
+            inflight_soft_limit,
+            responses_critical_floor_percent,
+        )
+    };
+    let (ready_indices, fallback_indices, decisions) = output(
+        status,
+        ready_count,
+        fallback_count,
+        &ready_indices,
+        &fallback_indices,
+        &decision_tags,
+        count,
+    )?;
+    validate(fields, &ready_indices, &fallback_indices, &decisions)?;
+    Ok(RuntimeCandidatePlan {
+        ready_indices,
+        fallback_indices,
+        decisions,
+    })
 }
