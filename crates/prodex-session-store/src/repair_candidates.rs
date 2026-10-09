@@ -1,5 +1,26 @@
 use super::*;
 
+pub(super) fn oversized_session_already_repaired(path: &Path, selector: &str) -> Result<bool> {
+    if fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect session {}", path.display()))?
+        .len()
+        <= SESSION_STORE_FILE_MAX_BYTES
+    {
+        return Ok(false);
+    }
+    let mut first_line_is_matching_codex_metadata = false;
+    visit_session_lines(path, |line| {
+        if line.trim().is_empty() {
+            return true;
+        }
+        first_line_is_matching_codex_metadata = session_line_resume_id_matches(line, selector)
+            && session_line_starts_resume_metadata(line)
+            && session_meta::line_starts_codex_rollout_metadata(line);
+        false
+    })?;
+    Ok(first_line_is_matching_codex_metadata)
+}
+
 pub(super) fn collect_exact_repair_candidates(
     candidates: &[SessionRepairCandidate],
     selector: &str,
