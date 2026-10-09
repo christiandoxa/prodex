@@ -43,3 +43,27 @@ fn response_usage_defaults_invalid_fields_and_saturates_missing_total() {
         br#"{"input_tokens":18446744073709551615,"output_tokens":1,"total_tokens":18446744073709551615}"#.to_vec()
     );
 }
+
+#[test]
+fn response_usage_preserves_empty_and_named_metadata_keys() {
+    let cases = [
+        (
+            "",
+            r#"{"input_tokens":0,"output_tokens":0,"total_tokens":0,"input_tokens_details":{"cached_tokens":0},"metadata":{"":{"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":7}}}"#,
+        ),
+        (
+            "deepseek-test",
+            r#"{"input_tokens":0,"output_tokens":0,"total_tokens":0,"input_tokens_details":{"cached_tokens":0},"metadata":{"deepseek-test":{"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":7}}}"#,
+        ),
+    ];
+    for (provider, expected) in cases {
+        assert_eq!(
+            map_usage(
+                r#"{"prompt_cache_hit_tokens":0,"prompt_cache_miss_tokens":7}"#,
+                provider
+            ),
+            expected.as_bytes(),
+            "provider={provider:?}",
+        );
+    }
+}

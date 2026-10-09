@@ -103,9 +103,15 @@ pub(super) fn deepseek_responses_usage_for_provider(
     let mut input = DeepSeekKernelInput::new(DeepSeekKernelOperation::ResponseUsage);
     input.role = Some(provider_label);
     input.usage = Some(&raw);
-    let body = prodex_mojo_core::rich::deepseek_kernel(input).ok()?;
-    let output = serde_json::from_slice(&body).ok()?;
-    (!output.is_null()).then_some(output)
+    let body = prodex_mojo_core::rich::deepseek_kernel(input)
+        .expect("Mojo DeepSeek response usage mapping returned invalid output");
+    let output: Value = serde_json::from_slice(&body)
+        .expect("Mojo DeepSeek response usage mapping emitted invalid JSON");
+    assert!(
+        output.is_object(),
+        "Mojo DeepSeek response usage must be a JSON object"
+    );
+    Some(output)
 }
 
 pub(super) fn deepseek_created_at() -> u64 {
@@ -141,6 +147,34 @@ mod tests {
                 }
             })
         );
+    }
+
+    #[test]
+    fn response_usage_mojo_matches_structured_contract_for_empty_and_extreme_fields() {
+        let cases = [
+            json!({}),
+            json!(null),
+            json!({"prompt_tokens":u64::MAX, "completion_tokens":1}),
+            json!({"prompt_tokens":0, "completion_tokens":9, "total_tokens":3}),
+            json!({"prompt_tokens":-1, "completion_tokens":1.5, "total_tokens":"bad"}),
+            json!({"prompt_cache_hit_tokens":0}),
+            json!({"prompt_cache_miss_tokens":0, "completion_tokens_details":{"reasoning_tokens":0}}),
+            json!({"prompt_cache_hit_tokens":"invalid", "prompt_cache_miss_tokens":3}),
+            json!({"completion_tokens_details":{"reasoning_tokens":u64::MAX}}),
+            json!({"completion_tokens_details":null}),
+            json!({"prompt_tokens":123, "completion_tokens":456, "total_tokens":u64::MAX}),
+        ];
+        for provider in ["deepseek", "", "provider\"雪\n"] {
+            for usage in &cases {
+                let expected =
+                    crate::bridge::provider_core_chat_compatible_responses_usage(usage, provider);
+                assert_eq!(
+                    deepseek_responses_usage_for_provider(usage, provider),
+                    expected,
+                    "provider={provider:?}, usage={usage:?}"
+                );
+            }
+        }
     }
 
     #[test]
