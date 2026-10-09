@@ -104,10 +104,11 @@ fn response_selection_fails_closed_for_unavailable_bound_previous_response() {
 
 #[test]
 fn selection_applies_route_scoped_affinity_conflict_policy() {
-    for (route_kind, turn_state_profile, session_profile, expected_selected, expected_outcome) in [
+    for (route_kind, turn_state_profile, session_profile, previous_response_id, expected_selected, expected_outcome) in [
         (
             RuntimeRouteKind::Responses,
             Some("second"),
+            None,
             None,
             None,
             runtime_proxy_crate::RuntimeRouteDecisionTerminalOutcome::AffinityExhausted,
@@ -117,22 +118,35 @@ fn selection_applies_route_scoped_affinity_conflict_policy() {
             None,
             Some("second"),
             None,
+            None,
             runtime_proxy_crate::RuntimeRouteDecisionTerminalOutcome::AffinityExhausted,
         ),
         (
             RuntimeRouteKind::Responses,
             None,
             Some("second"),
+            Some("resp-pinned"),
             Some("main"),
             runtime_proxy_crate::RuntimeRouteDecisionTerminalOutcome::Selected,
         ),
     ] {
         let temp_dir = TestDir::isolated();
-        let shared = runtime_shared_for_affinity_selection(&temp_dir, BTreeMap::new());
+        let bindings = previous_response_id.map_or_else(BTreeMap::new, |id| {
+            BTreeMap::from([(
+                id.to_string(),
+                ResponseProfileBinding {
+                    binding_identity: None,
+                    profile_name: "main".to_string(),
+                    bound_at: Local::now().timestamp(),
+                },
+            )])
+        });
+        let shared = runtime_shared_for_affinity_selection(&temp_dir, bindings);
         let selected = select_runtime_response_candidate_for_route(
             &shared,
             RuntimeResponseCandidateSelection {
                 pinned_profile: Some("main"),
+                previous_response_id,
                 turn_state_profile,
                 session_profile,
                 ..RuntimeResponseCandidateSelection::fresh(&BTreeSet::new(), route_kind)
