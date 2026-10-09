@@ -704,3 +704,6 @@ fn mojo_observability_labels_preserve_http_error_contracts() {
         "retry_profile"
     );
 }
+
+#[path = "error_policy/retry_headers.rs"]
+mod retry_headers;

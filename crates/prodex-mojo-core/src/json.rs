@@ -1,5 +1,9 @@
 //! Typed, borrowed JSON-tree ABI for complete semantic transforms. JSON wire
 //! parsing and compatibility serialization remain outside the Mojo bridge.
+#[cfg(feature = "mojo-rich")]
+mod retry_headers;
+#[cfg(feature = "mojo-rich")]
+pub use self::retry_headers::runtime_retry_after_json;
 mod response_metadata;
 pub use self::response_metadata::{
     RuntimeResponseMetadataJsonPlan, runtime_response_event_is_completed,

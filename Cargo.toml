@@ -66,6 +66,7 @@ lto = "thin"
 strip = "symbols"
 
 [workspace.dependencies]
+httpdate = "1.0.3"
 aes-gcm-siv = "0.12.0"
 anyhow = "1.0.102"
 argon2 = "0.6.0"

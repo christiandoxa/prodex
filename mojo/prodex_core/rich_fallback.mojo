@@ -1,5 +1,9 @@
 from std.collections import Array
 from std.memory import Pointer
+from parsed_json import (
+    JSON_OBJECT, JSON_STRING, JSON_NUMBER, JSON_TRUE, JSON_FALSE,
+    ParsedJson, ParsedJsonNode, pj_valid, pj_kind, pj_child, pj_next, pj_field, pj_is,
+)
 
 from json_view import (
     deepseek_json_byte,
@@ -2215,3 +2219,102 @@ def prodex_mojo_rate_limit_header_class_v1(
     ):
         return RATE_LIMIT_HEADER_CLASS_QUOTA
     return RATE_LIMIT_HEADER_CLASS_NONE
+
+
+# The host supplies decoded JSON and HTTP-date decoding. Header selection,
+# nested/outer precedence, numeric delays, and the local delay cap live here.
+def runtime_retry_header_value_valid(view: ProdexRichStringView) -> Bool:
+    var ptr = rich_view_ptr(view)
+    for i in range(Int64(view.len)):
+        var byte = ptr[unsafe_offset=i]
+        if byte != 9 and (byte < 32 or byte == 127):
+            return False
+    return True
+
+
+def runtime_retry_header_object(
+    tree: ParsedJson,
+    headers: Int64,
+    date_millis: Pointer[mut=False, Int64, ImmUntrackedOrigin],
+) -> Int64:
+    if pj_kind(tree, headers) != JSON_OBJECT:
+        return -1
+    var selected: Int64 = -1
+    var node = pj_child(tree, headers)
+    while node >= 0:
+        var item = tree.nodes[unsafe_offset=node].copy()
+        if (
+            rich_view_matches_literal["retry-after"](item.key, True)
+            and (item.kind == JSON_STRING or item.kind == JSON_NUMBER
+                 or item.kind == JSON_TRUE or item.kind == JSON_FALSE)
+            and runtime_retry_header_value_valid(item.text)
+        ):
+            # Mirrors HeaderMap::insert in the upstream JSON map iteration order.
+            # A valid HTTP value with invalid advice still replaces older advice.
+            selected = node
+        node = pj_next(tree, node)
+    if selected < 0:
+        return -1
+    var value = tree.nodes[unsafe_offset=selected].text.copy()
+    # HeaderValue::to_str rejects non-ASCII even if HeaderValue accepted bytes.
+    var ascii_ptr = rich_view_ptr(value)
+    for i in range(Int64(value.len)):
+        if ascii_ptr[unsafe_offset=i] >= 128:
+            return -1
+    var bounds = rich_trim_bounds(value)
+    var first = bounds[0]
+    var last = bounds[1]
+    if first < last:
+        var ptr = rich_view_ptr(value)
+        var all_zero = True
+        for i in range(first, last):
+            if ptr[unsafe_offset=i] != 48:
+                all_zero = False
+                break
+        if all_zero:
+            return 0
+        var millis = prodex_mojo_rich_retry_after_millis_v1(
+            PRODEX_RICH_ABI_VERSION, RUNTIME_RETRY_AFTER_MODE_HEADER_SECONDS,
+            value.ptr + UInt(first), last - first,
+        )
+        if millis >= 0:
+            return millis
+    return min(date_millis[unsafe_offset=selected], Int64(RUNTIME_RETRY_AFTER_CAP_MILLIS))
+
+
+@export("prodex_mojo_runtime_retry_after_json_v1")
+def prodex_mojo_runtime_retry_after_json_v1(
+    abi: Int64,
+    nodes_address: UInt,
+    count: Int64,
+    dates_address: UInt,
+    fallback_millis: Int64,
+) abi("C") -> Int64:
+    if (abi != 1 or nodes_address == 0 or dates_address == 0
+        or count <= 0 or count > 65_537
+        or fallback_millis < -1 or fallback_millis > 300_000):
+        return -2
+    var tree = ParsedJson(
+        Pointer[mut=False, ParsedJsonNode, ImmUntrackedOrigin](
+            unsafe_from_address=Int(nodes_address)),
+        count, ProdexRichStringView(0, 0),
+    )
+    if not pj_valid(tree):
+        return -2
+    var dates = Pointer[mut=False, Int64, ImmUntrackedOrigin](
+        unsafe_from_address=Int(dates_address))
+    var event = pj_field(tree, 0, StringSlice("type"))
+    var primary: Int64 = -1
+    var secondary: Int64 = -1
+    if pj_is["response.failed"](tree, event):
+        var response = pj_field(tree, 0, StringSlice("response"))
+        var error = pj_field(tree, response, StringSlice("error"))
+        primary = pj_field(tree, error, StringSlice("headers"))
+    elif pj_is["error"](tree, event):
+        var error = pj_field(tree, 0, StringSlice("error"))
+        primary = pj_field(tree, error, StringSlice("headers"))
+        secondary = pj_field(tree, 0, StringSlice("headers"))
+    var delay = runtime_retry_header_object(tree, primary, dates)
+    if delay < 0:
+        delay = runtime_retry_header_object(tree, secondary, dates)
+    return delay if delay >= 0 else fallback_millis

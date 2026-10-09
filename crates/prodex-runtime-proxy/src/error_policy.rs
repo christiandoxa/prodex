@@ -2,6 +2,7 @@ use std::time::Duration;
 
 mod rate_limit_header;
 mod retry_after;
+mod retry_after_json;
 mod signal;
 mod stream;
 
