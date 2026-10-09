@@ -562,8 +562,7 @@ impl RuntimeSseTapState {
         let Some(token_usage) = token_usage else {
             return;
         };
-        if tap_plan & 8 != 0 && self.logged_token_usage.insert(token_usage)
-        {
+        if tap_plan & 8 != 0 && self.logged_token_usage.insert(token_usage) {
             if let Some(generation_ms) = generation_ms {
                 effects.push(RuntimeSseTapEffect::LogTokenUsageWithGeneration {
                     usage: token_usage,
@@ -752,12 +751,36 @@ mod classifier_tests {
 
     #[test]
     fn tap_plan_is_single_mojo_decision_for_stream_boundaries() {
-        assert_eq!(runtime_sse_tap_plan(Some("response.output_text.delta"), 3), 0b0101);
-        assert_eq!(runtime_sse_tap_plan(Some("response.completed"), 3), 0b1010);
-        assert_eq!(runtime_sse_tap_plan(Some("response.failed"), 0), 0b1000);
-        assert_eq!(runtime_sse_tap_plan(None, 3), 0b1000);
+        // Bits: generation-start, terminal completion, live progress, loggable usage.
+        let cases = [
+            (None, 3, 0b1000),
+            (Some("response.completed"), 3, 0b1010),
+            (Some("response.completed"), 0, 0b1010),
+            (Some("response.failed"), 0, 0b1000),
+            (Some("tool.completed"), 1, 0b1000),
+            (Some("é.completed"), 1, 0b1000),
+            (Some("response.output_text.delta"), 3, 0b0101),
+            (Some("response.output_text.delta"), 0, 0b0001),
+            (Some("response.reasoning_summary_text.delta"), 1, 0b0101),
+            (Some("response.function_call_arguments.delta"), 1, 0b0101),
+            (Some("response.output_text.delta.extra"), 3, 0),
+            (Some("response.created"), 2, 0),
+            (Some("response.completed.extra"), 2, 0),
+            (Some("RESPONSE.COMPLETED"), 2, 0),
+            (Some(""), 0, 0),
+        ];
+        for (event_type, output_tokens, expected) in cases {
+            let actual = runtime_sse_tap_plan(event_type, output_tokens);
+            assert_eq!(
+                actual, expected,
+                "event={event_type:?}, tokens={output_tokens}"
+            );
+        }
+        assert_eq!(
+            runtime_sse_tap_plan(Some("response.output_text.delta"), u64::MAX),
+            0b0101
+        );
     }
-
 }
 
 #[cfg(test)]

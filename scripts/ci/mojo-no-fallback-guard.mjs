@@ -5796,7 +5796,26 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  const sseTapMojoOwnershipViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === RESPONSE_FORWARDING_FILE) {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const required = [
+        "fn runtime_sse_tap_plan(",
+        "let tap_plan = runtime_sse_tap_plan(",
+        "self.log_token_usage(tap_plan,",
+        "tap_plan & 4 != 0",
+        "tap_plan & 8 != 0",
+      ];
+      return required.filter((marker) => !production.includes(marker))
+        .map((marker) => `${filePath}: SSE tap semantic policy must stay Mojo-owned via ${marker}`);
+    }
+    if (filePath === "mojo/prodex_core/response_forwarding.mojo" &&
+        !contents.includes("if operation == RESPONSE_FORWARDING_TAP_PLAN:")) {
+      return [`${filePath}: SSE tap event semantics must remain Mojo-owned`];
+    }
+    return [];
+  });
+  return [...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
