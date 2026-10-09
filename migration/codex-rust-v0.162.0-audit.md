@@ -122,3 +122,25 @@ root across recovery, sleep, and compaction.
 
 Runtime-launch, official-binary, app-server, and Prodex transport tests are not
 claimed until run by their owning worker.
+
+## Coordinator executable boundary verification
+
+The evidence in `codex-rust-v0.162.0-launch-boundary-smoke.json` was produced by
+running the real compiled Prodex launch planner and parsing its actual provider
+arguments with the official Codex 0.162.0 app-server binary. It covers the
+supported `--url` local provider and governed OpenAI provider, both inline-table
+and leaf capability overrides, `external_web_access` true/false, and
+`remote_compaction` `v2`/`unsupported`. All four provider cases passed.
+
+The initial proposed built-in `model_providers.openai` override is not a valid
+upstream configuration: official Codex rejects reserved built-in provider IDs.
+Prodex Super also rejects arbitrary custom provider IDs outside its canonical
+`--url` / `--provider` entry points. Those rejections were preserved; no production
+capability projection or feature-entitlement bypass was added on a false premise.
+Generic config-helper tests do not imply that every custom ID is a supported
+Super launch target.
+
+The official CLI and app-server asset digests matched the GitHub release digests.
+Credential-free `initialize`, `config/read`, and `experimentalFeature/list` RPCs
+passed. No model turn, live provider request, or installed-binary replacement was
+performed during this qualification.

@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "qualification_target": "0.437.0",
+  "verified_at": "2026-10-09T01:53:00.128306+00:00",
+  "upstream_tag": "rust-v0.162.0",
+  "upstream_commit": "c1382380de69521303b416720a52f42d51af6248",
+  "candidate_version": "prodex 0.436.1",
+  "official_cli_version": "codex-cli 0.162.0",
+  "verified_official_archives": [
+    {
+      "name": "codex-app-server-x86_64-unknown-linux-musl.tar.gz",
+      "sha256": "sha256:629ef675191921f687ed1e016ba6d3dfc8c171c62fa506e3082a9db32817dc3e",
+      "verified_release_digest": true
+    },
+    {
+      "name": "codex-x86_64-unknown-linux-musl.tar.gz",
+      "sha256": "sha256:8daf67f6261161aa5939d8d42a516032d760406216779d7ce6040f242140ff73",
+      "verified_release_digest": true
+    }
+  ],
+  "official_app_server": {
+    "initialize": {
+      "status": "PASS",
+      "keys": [
+        "codexHome",
+        "platformFamily",
+        "platformOs",
+        "userAgent"
+      ],
+      "userAgent": "prodex_compat_smoke/0.162.0 (Zorin OS 18.0.0; x86_64) dumb (prodex_compat_smoke; 0.437.0)"
+    },
+    "config_read": {
+      "status": "PASS",
+      "keys": [
+        "config",
+        "origins"
+      ]
+    },
+    "experimentalFeature_list": {
+      "status": "PASS",
+      "keys": [
+        "data",
+        "nextCursor"
+      ]
+    }
+  },
+  "provider_cases": [
+    {
+      "case": "local-inline-unsupported",
+      "prodex_dry_run": "PASS",
+      "official_config_read": "PASS",
+      "selected_provider": "prodex-local",
+      "capabilities": {
+        "external_web_access": false,
+        "remote_compaction": "unsupported"
+      },
+      "model_turns": 0
+    },
+    {
+      "case": "local-leaf-v2",
+      "prodex_dry_run": "PASS",
+      "official_config_read": "PASS",
+      "selected_provider": "prodex-local",
+      "capabilities": {
+        "external_web_access": true,
+        "remote_compaction": "v2"
+      },
+      "model_turns": 0
+    },
+    {
+      "case": "governed-inline-unsupported",
+      "prodex_dry_run": "PASS",
+      "official_config_read": "PASS",
+      "selected_provider": "prodex-openai-governed-http",
+      "capabilities": {
+        "external_web_access": false,
+        "remote_compaction": "unsupported"
+      },
+      "model_turns": 0
+    },
+    {
+      "case": "governed-leaf-v2",
+      "prodex_dry_run": "PASS",
+      "official_config_read": "PASS",
+      "selected_provider": "prodex-openai-governed-http",
+      "capabilities": {
+        "external_web_access": false,
+        "remote_compaction": "v2"
+      },
+      "model_turns": 0
+    }
+  ],
+  "negative_boundaries": {
+    "reserved_openai_override": "Official Codex rejects reserved built-in provider overrides.",
+    "unknown_custom_super_provider": "Prodex Super rejects arbitrary model_provider IDs; use a canonical --url or --provider path, or plain Codex."
+  },
+  "model_turns": 0,
+  "isolation": "Temporary HOME/CODEX_HOME and synthetic profile; no installed binary replaced."
+}
