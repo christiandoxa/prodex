@@ -92,6 +92,9 @@ const PROMOTED_FILES = [
   "crates/prodex-runtime-state/src/admission.rs",
   "crates/prodex-app/src/runtime_proxy/lineage/lookup.rs",
   "mojo/prodex_core/runtime_lineage.mojo",
+  "crates/prodex-app/src/runtime_proxy/selection/affinity.rs",
+  "crates/prodex-mojo-core/src/runtime/selection_planning.rs",
+  "mojo/prodex_core/candidate_decision.mojo",
   "crates/prodex-app/src/runtime_proxy/response_forwarding.rs",
   "crates/prodex-app/src/runtime_proxy/responses/attempt/bound_overload.rs",
   "crates/prodex-mojo-core/src/runtime/bound_overload.rs",
@@ -2174,6 +2177,34 @@ export function findViolations(files) {
       violations.push(filePath + ": contains restored RuntimeCandidateAffinity conversion mirror");
     }
     return violations;
+  });
+  const affinityBindingMojoViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_proxy/selection/affinity.rs") {
+      const production = contents.split("#[cfg(test)]", 1)[0];
+      const missing = [
+        "runtime_proxy_crate::runtime_hard_binding_conflict(",
+        "RuntimeHardBindingConflictInput {",
+      ].filter((marker) => !production.includes(marker));
+      if (production.includes("fn runtime_hard_binding_conflict(")) {
+        missing.push("duplicate Rust hard-binding conflict policy");
+      }
+      return missing.map((marker) => `${filePath}: hard-binding conflict must be Mojo-owned (${marker})`);
+    }
+    if (filePath === "crates/prodex-mojo-core/src/runtime/selection_planning.rs") {
+      return [
+        "prodex_runtime_affinity_binding_conflict_v1(",
+        "pub fn affinity_binding_conflict(",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: hard-binding conflict ABI must stay active (${marker})`);
+    }
+    if (filePath === "mojo/prodex_core/candidate_decision.mojo") {
+      return [
+        '@export("prodex_runtime_affinity_binding_conflict_v1")',
+        "if profile_index == 3 and route_kind != 1:",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: route-scoped hard-binding conflict must remain Mojo-owned (${marker})`);
+    }
+    return [];
   });
   const runtimeStateBackgroundViolations = files.flatMap(([filePath, contents]) => {
     if (filePath === "crates/prodex-runtime-state/src/admission.rs") {
@@ -5894,7 +5925,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,
@@ -5967,6 +5998,16 @@ async function promotedFiles() {
 }
 
 function selfTest() {
+  const affinitySource = "crates/prodex-app/src/runtime_proxy/selection/affinity.rs";
+  const affinityCanonical = [
+    "runtime_proxy_crate::runtime_hard_binding_conflict(",
+    "RuntimeHardBindingConflictInput {",
+  ].join("\n");
+  assert.deepEqual(findViolations([[affinitySource, affinityCanonical]]), []);
+  assert.match(
+    findViolations([[affinitySource, "fn runtime_hard_binding_conflict() {}"]]).join("\n"),
+    /hard-binding conflict must be Mojo-owned/u,
+  );
   const replaySource = "crates/prodex-app/src/runtime_proxy/responses/quota_blocked.rs";
   const replayRequired = [
     "affinity_state.turn_state_profile() == Some(profile_name.as_str())",

@@ -254,6 +254,93 @@ mod affinity_selection_tests {
     use super::super::*;
 
     #[test]
+    fn hard_binding_conflict_mojo_matches_all_route_scoped_ownership_combinations() {
+        const CONFLICT: &str = "__conflict_sentinel__";
+        let names = [None, Some("alpha"), Some("beta"), Some(CONFLICT)];
+        for route_kind in 0..=3_i64 {
+            for strict in names {
+                for pinned in names {
+                    for turn_state in names {
+                        for session in names {
+                            let effective = [
+                                strict,
+                                pinned,
+                                turn_state,
+                                if route_kind == 1 { session } else { None },
+                            ];
+                            let mut owner = None;
+                            let mut expected = false;
+                            for candidate in effective.into_iter().flatten() {
+                                if candidate == CONFLICT
+                                    || owner.is_some_and(|name| name != candidate)
+                                {
+                                    expected = true;
+                                }
+                                if owner.is_none() {
+                                    owner = Some(candidate);
+                                }
+                            }
+                            assert_eq!(
+                                affinity_binding_conflict(AffinityBindingConflictInput {
+                                    route_kind,
+                                    strict_affinity_profile: strict,
+                                    pinned_profile: pinned,
+                                    turn_state_profile: turn_state,
+                                    session_profile: session,
+                                    conflict_profile: CONFLICT,
+                                }),
+                                Ok(expected),
+                                "route={route_kind}, strict={strict:?}, pinned={pinned:?}, turn={turn_state:?}, session={session:?}",
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn hard_binding_conflict_rejects_invalid_route_and_overlong_active_identity() {
+        const CONFLICT: &str = "__conflict_sentinel__";
+        let long = "x".repeat(4097);
+        let base = AffinityBindingConflictInput {
+            route_kind: 0,
+            strict_affinity_profile: Some("alpha"),
+            pinned_profile: None,
+            turn_state_profile: None,
+            session_profile: Some(&long),
+            conflict_profile: CONFLICT,
+        };
+        assert_eq!(
+            affinity_binding_conflict(base),
+            Ok(false),
+            "session must be ignored for Responses"
+        );
+        assert_eq!(
+            affinity_binding_conflict(AffinityBindingConflictInput {
+                route_kind: 1,
+                ..base
+            }),
+            Err(MojoError::InvalidInput)
+        );
+        for route_kind in [-1, 4, i64::MAX] {
+            assert_eq!(
+                affinity_binding_conflict(AffinityBindingConflictInput { route_kind, ..base }),
+                Err(MojoError::InvalidInput)
+            );
+        }
+        assert_eq!(
+            affinity_binding_conflict(AffinityBindingConflictInput {
+                route_kind: 0,
+                strict_affinity_profile: Some(&long),
+                session_profile: None,
+                ..base
+            }),
+            Err(MojoError::InvalidInput)
+        );
+    }
+
+    #[test]
     fn affinity_plan_matches_profile_names_and_keeps_hard_affinity_precedence() {
         let base = AffinitySelectionInput {
             route_kind: 1,
