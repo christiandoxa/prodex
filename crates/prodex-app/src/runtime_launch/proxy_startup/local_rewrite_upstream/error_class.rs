@@ -1,9 +1,14 @@
 use prodex_provider_core::{ProviderErrorClass, classify_provider_error};
 use serde_json::Value;
 
+const NATIVE_FIRST_EVENT_MAX_BYTES: usize = 65_536;
+
 pub(super) fn runtime_local_rewrite_native_first_event_error_class(
     event: &[u8],
 ) -> Option<ProviderErrorClass> {
+    if event.len() > NATIVE_FIRST_EVENT_MAX_BYTES {
+        return None;
+    }
     let payload = event
         .split(|byte| *byte == b'\n')
         .filter_map(|line| line.strip_prefix(b"data:"))

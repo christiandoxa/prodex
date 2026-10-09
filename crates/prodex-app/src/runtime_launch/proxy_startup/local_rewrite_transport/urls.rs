@@ -1,4 +1,5 @@
-use super::{ProviderWireFormat, RuntimeProviderBridgeKind, path_without_query, provider_adapter};
+use super::{RuntimeProviderBridgeKind, path_without_query};
+use prodex_provider_core::provider_adapter;
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_local_rewrite_upstream_url(
     base_url: &str,
@@ -65,19 +66,21 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_deepseek_anthropic_messa
     base_url: &str,
 ) -> String {
     let mut base_url = base_url.trim_end_matches('/');
-    if base_url.ends_with("/anthropic/v1") {
-        return format!("{base_url}/messages");
-    }
-    if base_url.ends_with("/anthropic") {
-        return format!("{base_url}/v1/messages");
-    }
-    for suffix in ["/v1", "/beta"] {
-        if let Some(root) = base_url.strip_suffix(suffix) {
-            base_url = root;
-            break;
+    match prodex_mojo_core::provider_upstream::provider_suffix_plan(0, base_url)
+        .expect("Mojo DeepSeek upstream suffix policy returned invalid output")
+    {
+        0 => format!("{base_url}/messages"),
+        1 => format!("{base_url}/v1/messages"),
+        2 => {
+            base_url = base_url
+                .strip_suffix("/v1")
+                .or_else(|| base_url.strip_suffix("/beta"))
+                .expect("Mojo DeepSeek suffix policy selected a missing suffix");
+            format!("{base_url}/anthropic/v1/messages")
         }
+        3 => format!("{base_url}/anthropic/v1/messages"),
+        _ => unreachable!("validated Mojo DeepSeek upstream suffix policy"),
     }
-    format!("{base_url}/anthropic/v1/messages")
 }
 
 pub(in crate::runtime_launch::proxy_startup) fn runtime_openai_standard_provider_upstream_url(
@@ -88,12 +91,12 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_openai_standard_provider
 ) -> String {
     let adapter = provider_adapter(provider_kind.provider_id());
     let path = path_without_query(path_and_query);
-    if path.ends_with("/responses")
-        && matches!(
-            adapter.upstream_request_format(),
-            ProviderWireFormat::OpenAiChatCompletions
-        )
-    {
+    let use_chat_path = prodex_mojo_core::provider_upstream::standard_path_uses_chat(
+        adapter.upstream_request_format() as i64,
+        path.ends_with("/responses"),
+    )
+    .expect("Mojo provider upstream path policy returned invalid output");
+    if use_chat_path {
         return runtime_local_rewrite_upstream_url(base_url, mount_path, "/chat/completions");
     }
     runtime_local_rewrite_upstream_url(base_url, mount_path, path_and_query)
@@ -110,9 +113,11 @@ pub(in crate::runtime_launch::proxy_startup) fn runtime_gemini_openai_compatible
     base_url: &str,
 ) -> String {
     let base_url = base_url.trim_end_matches('/');
-    if base_url.ends_with("/openai") {
-        format!("{base_url}/chat/completions")
-    } else {
-        format!("{base_url}/openai/chat/completions")
+    match prodex_mojo_core::provider_upstream::provider_suffix_plan(1, base_url)
+        .expect("Mojo Gemini upstream suffix policy returned invalid output")
+    {
+        0 => format!("{base_url}/chat/completions"),
+        1 => format!("{base_url}/openai/chat/completions"),
+        _ => unreachable!("validated Mojo Gemini upstream suffix policy"),
     }
 }
