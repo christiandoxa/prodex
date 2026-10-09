@@ -1,6 +1,6 @@
 //! Chat-compatible assistant tool-call item shaping.
 
-use super::rtk::gemini_rtk_wrapped_tool_arguments;
+use super::{gemini_response_tool_call_signature, rtk::gemini_rtk_wrapped_tool_arguments};
 use serde_json::{Value, json};
 
 pub(crate) fn gemini_chat_assistant_tool_call_with_call_id(
@@ -23,20 +23,13 @@ pub(crate) fn gemini_chat_assistant_tool_call_with_call_id(
         .unwrap_or_else(|| json!({}));
     let args = serde_json::to_string(&args).unwrap_or_else(|_| "{}".to_string());
     let args = gemini_rtk_wrapped_tool_arguments(flat_name, &args);
-    let signature = part
-        .get("thoughtSignature")
-        .and_then(Value::as_str)
-        .or_else(|| {
-            function_call
-                .get("thoughtSignature")
-                .and_then(Value::as_str)
-        });
+    let signature = gemini_response_tool_call_signature(part, function_call);
 
     crate::GeminiProviderCoreStreamToolCall {
         call_id: call_id.to_string(),
         name: flat_name.to_string(),
         arguments: args,
-        thought_signature: signature.map(str::to_string),
+        thought_signature: signature,
     }
 }
 

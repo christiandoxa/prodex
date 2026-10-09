@@ -32,6 +32,40 @@ fn gemini_chat_tool_call_item_keeps_signature_and_wrapped_arguments() {
 }
 
 #[test]
+fn gemini_response_signature_selection_preserves_invalid_and_present_fields() {
+    let invalid_part = gemini_chat_assistant_tool_call_item_with_call_id(
+        &json!({"thoughtSignature": false}),
+        &json!({"name": "lookup", "thoughtSignature": "function"}),
+        None,
+    );
+    assert!(invalid_part.get("gemini_thought_signature").is_none());
+
+    let null_part = gemini_chat_assistant_tool_call_item_with_call_id(
+        &json!({"thoughtSignature": null}),
+        &json!({"name": "lookup", "thoughtSignature": "function"}),
+        None,
+    );
+    assert!(null_part.get("gemini_thought_signature").is_none());
+
+    let whitespace_part = gemini_chat_assistant_tool_call_item_with_call_id(
+        &json!({"thoughtSignature": "\u{2003}\u{3000}"}),
+        &json!({"name": "lookup", "thoughtSignature": "function"}),
+        None,
+    );
+    assert!(whitespace_part.get("gemini_thought_signature").is_none());
+
+    let unicode_part = gemini_chat_assistant_tool_call_item_with_call_id(
+        &json!({"thoughtSignature": "\u{2003}雪\u{3000}sig"}),
+        &json!({"name": "lookup", "thoughtSignature": "function"}),
+        None,
+    );
+    assert_eq!(
+        unicode_part["gemini_thought_signature"],
+        "\u{2003}雪\u{3000}sig"
+    );
+}
+
+#[test]
 fn gemini_apply_patch_unified_diff_is_mojo_owned() {
     let input = concat!(
         "diff --git a/README.md b/docs/README.md\r\n",

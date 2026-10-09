@@ -43,7 +43,3 @@ pub(crate) fn gemini_builtin_tools_from_request(tools: &[Value]) -> Vec<Value> {
         .cloned()
         .unwrap_or_default()
 }
-
-pub(crate) fn gemini_is_supported_builtin_tool(tool: &Value) -> bool {
-    gemini_tool_is_supported_builtin(tool)
-}

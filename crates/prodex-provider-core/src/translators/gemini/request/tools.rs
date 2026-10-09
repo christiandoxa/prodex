@@ -3,53 +3,48 @@
 #[path = "tools/builtin.rs"]
 mod builtin;
 
-pub(crate) use self::builtin::{
-    gemini_builtin_tools_from_request, gemini_is_supported_builtin_tool,
-};
+pub(crate) use self::builtin::gemini_builtin_tools_from_request;
 use serde_json::{Value, json};
 
 use super::schema::sanitize_function_schema;
 
 pub(crate) fn gemini_validate_openai_tools(value: &Value) -> Result<(), String> {
     let Some(tools) = value.as_array() else {
-        return Err(
-            "invalid_tool_declaration: Gemini request field `tools` must be an array".to_string(),
-        );
+        return gemini_validate_tool_value_with_mojo(value, None);
     };
     for (index, tool) in tools.iter().enumerate() {
-        gemini_validate_openai_tool(tool, index)?;
+        gemini_validate_tool_value_with_mojo(tool, Some(index))?;
     }
     Ok(())
 }
 
-fn gemini_validate_openai_tool(tool: &Value, index: usize) -> Result<(), String> {
-    let Some(object) = tool.as_object() else {
-        return Err(format!(
-            "invalid_tool_declaration: Gemini request field `tools[{index}]` must be an object"
-        ));
+fn gemini_validate_tool_value_with_mojo(tool: &Value, index: Option<usize>) -> Result<(), String> {
+    let request = match index {
+        Some(_) => json!({"tools": [tool]}),
+        None => json!({"tools": tool}),
     };
-    let is_function = object
-        .get("type")
-        .and_then(Value::as_str)
-        .is_some_and(|tool_type| tool_type == "function")
-        || object.contains_key("function");
-    if is_function {
-        return gemini_validate_function_tool(object, index);
+    let body = serde_json::to_vec(&request)
+        .map_err(|error| format!("failed to serialize Gemini tool validation: {error}"))?;
+    let plan = crate::gemini_bridge::gemini_bridge_validate_translator(&body)?;
+    if let Some(reason) = plan.reason {
+        return Err(gemini_relabel_tool_validation_reason(&reason, index));
     }
-    if gemini_is_supported_builtin_tool(tool) {
+    if plan.tag != 16 {
         return Ok(());
     }
+
+    let Some(index) = index else {
+        return Err(
+            "invalid_tool_declaration: Gemini request field `tools` is not a supported tool declaration"
+                .to_string(),
+        );
+    };
     let translated = crate::chat_tools_bridge::provider_core_chat_tools_from_responses_request(
-        &json!({"tools": [tool]}),
+        &request,
     )
     .ok_or_else(|| {
-        let field = if object.contains_key("type") {
-            format!("tools[{index}].type")
-        } else {
-            format!("tools[{index}]")
-        };
         format!(
-            "invalid_tool_declaration: Gemini request field `{field}` is not a supported tool declaration"
+            "invalid_tool_declaration: Gemini request field `tools[{index}]` is not a supported tool declaration"
         )
     })?;
     gemini_validate_openai_tools(&Value::Array(translated)).map_err(|reason| {
@@ -59,48 +54,11 @@ fn gemini_validate_openai_tool(tool: &Value, index: usize) -> Result<(), String>
     })
 }
 
-fn gemini_validate_function_tool(
-    object: &serde_json::Map<String, Value>,
-    index: usize,
-) -> Result<(), String> {
-    let (function, field) = match object.get("function") {
-        Some(function) => (
-            function.as_object().ok_or_else(|| {
-                format!(
-                    "invalid_tool_declaration: Gemini request field `tools[{index}].function` must be an object"
-                )
-            })?,
-            format!("tools[{index}].function"),
-        ),
-        None => (object, format!("tools[{index}]")),
+fn gemini_relabel_tool_validation_reason(reason: &str, index: Option<usize>) -> String {
+    let Some(index) = index else {
+        return reason.to_string();
     };
-    if function
-        .get("name")
-        .and_then(Value::as_str)
-        .is_none_or(|name| name.trim().is_empty())
-    {
-        return Err(format!(
-            "invalid_tool_declaration: Gemini request field `{field}.name` must be a non-empty string"
-        ));
-    }
-    let Some(parameters) = function.get("parameters") else {
-        return Err(format!(
-            "invalid_tool_declaration: Gemini request field `{field}.parameters` is required"
-        ));
-    };
-    if !parameters.is_object() {
-        return Err(format!(
-            "invalid_tool_declaration: Gemini request field `{field}.parameters` must be an object"
-        ));
-    }
-    if let Some(description) = function.get("description").filter(|value| !value.is_null())
-        && !description.is_string()
-    {
-        return Err(format!(
-            "invalid_tool_declaration: Gemini request field `{field}.description` must be a string"
-        ));
-    }
-    Ok(())
+    reason.replace("tools[0]", &format!("tools[{index}]"))
 }
 
 pub(crate) fn gemini_function_declaration_from_openai_tool(tool: &Value) -> Option<Value> {

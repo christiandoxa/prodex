@@ -6768,13 +6768,6 @@ def gemini_bridge_request_validate_translator(
             )
         )
         if is_function:
-            if function[0] < 0:
-                return gemini_bridge_validation_put_plan(
-                    writer,
-                    input.primary,
-                    GEMINI_TRANSLATOR_VALIDATION_FUNCTION_OBJECT,
-                    item_index,
-                )
             var result = gemini_bridge_validation_function_tool(
                 input.primary, cursor, item_end, item_index, writer
             )
