@@ -126,12 +126,13 @@ mod tests {
     fn date_codec_rounds_up_without_restarting_or_advancing_the_deadline() {
         let deadline = std::time::UNIX_EPOCH + Duration::from_secs(100);
         let header = httpdate::fmt_http_date(deadline);
+        // Sub-millisecond values representable on Windows' 100ns clock too.
         assert_eq!(
-            decode_http_date_millis(&header, deadline - Duration::from_nanos(1)),
+            decode_http_date_millis(&header, deadline - Duration::from_micros(1)),
             1
         );
         assert_eq!(
-            decode_http_date_millis(&header, deadline - Duration::from_nanos(999_999_999)),
+            decode_http_date_millis(&header, deadline - Duration::from_micros(999_999)),
             1000
         );
         assert_eq!(
