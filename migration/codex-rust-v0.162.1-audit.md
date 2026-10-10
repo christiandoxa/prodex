@@ -88,3 +88,13 @@ is justified by the evidence.
 - `PRODEX_MOJO_REQUIRED=1 cargo test --locked -q -p prodex-app --lib responses_keep_waiting_after_capacity_epoch_while_quota_remains_positive -- --test-threads=1` — pass.
 - `cargo check --workspace --offline` — pass.
 - Official live provider/model traffic was not used.
+
+## Subsequent quota-recovery incident
+
+The capacity assessment above covered the earlier overload report, not the
+later usage-limit incident. A subsequent real-socket regression proved a
+quota-eligibility and soft-session wait-scope defect when another quota-positive
+account was temporarily occupied. Prodex 0.437.2 fixes that local algorithm gap
+while preserving the upstream full-context retry protocol. See
+[the quota recovery and descriptor audit](quota-rotation-04372.md) for the
+reproduction, limits of the original evidence, and tested behavior.

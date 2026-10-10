@@ -111,6 +111,15 @@ fn assert_websocket_invalid_previous_response_replays_full_context(user_agent: &
 
 #[test]
 fn runtime_proxy_websocket_owned_quota_replays_on_ready_profile() {
+    assert_owned_quota_replays_on_ready_profile(false);
+}
+
+#[test]
+fn runtime_proxy_websocket_owned_quota_waits_for_busy_fallback_without_quota_leak() {
+    assert_owned_quota_replays_on_ready_profile(true);
+}
+
+fn assert_owned_quota_replays_on_ready_profile(busy_alternative: bool) {
     let _test_guard = crate::acquire_test_runtime_lock();
     let (_connect_timeout_guard, _progress_timeout_guard) =
         ci_runtime_proxy_websocket_timeout_guards();
@@ -139,6 +148,11 @@ fn runtime_proxy_websocket_owned_quota_replays_on_ready_profile() {
     });
     assert!(first.contains("resp-main"), "{first}");
 
+    let admission = fixture.lane_admission_for_test();
+    if busy_alternative {
+        // A quota-positive account can be temporarily occupied, not exhausted.
+        admission.set_profile_inflight("second", usize::MAX / 2);
+    }
     send_runtime_websocket_json(
         &mut socket,
         serde_json::json!({
@@ -151,7 +165,8 @@ fn runtime_proxy_websocket_owned_quota_replays_on_ready_profile() {
         }),
     );
     let (frames, retry) = read_runtime_websocket_until(&mut socket, |text| {
-        text.contains("previous_response_not_found")
+        text.contains("previous_response_not_found") || text.contains("usage limit")
+            || text.contains("usage_limit_reached") || text.contains("insufficient_quota")
     });
     assert!(retry.contains("previous_response_not_found"), "{retry}");
     assert!(
@@ -160,6 +175,11 @@ fn runtime_proxy_websocket_owned_quota_replays_on_ready_profile() {
     );
     let _ = socket.close(None);
 
+    let releaser = busy_alternative.then(|| std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        admission.set_profile_inflight("second", 0);
+        admission.record_inflight_release();
+    }));
     let mut socket =
         fixture.connect_websocket_with_headers("backend-api/prodex/responses", &headers);
     send_runtime_websocket_json(
@@ -173,10 +193,12 @@ fn runtime_proxy_websocket_owned_quota_replays_on_ready_profile() {
         }),
     );
     let (_, recovered) = read_runtime_websocket_until(&mut socket, |text| {
-        text.contains("response.completed")
+        text.contains("response.completed") || text.contains("response.failed")
+            || text.contains("\"type\":\"error\"")
     });
     let _ = socket.close(None);
 
+    if let Some(releaser) = releaser { releaser.join().unwrap(); }
     assert!(recovered.contains("resp-second"), "{recovered}");
     assert_eq!(
         fixture.backend.responses_accounts(),

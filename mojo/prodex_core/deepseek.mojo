@@ -6051,6 +6051,7 @@ def deepseek_input_item_validation(
                 if not deepseek_json_bounds_is_kind(view, command, 91):
                     return deepseek_input_item_issue(writer, 13, view, missing)
                 var index = deepseek_json_skip_ws(view, command[0] + 1, command[1] - 1)
+                var command_count: Int64 = 0
                 while index < command[1] - 1:
                     var part_end = deepseek_json_value_end(view, index, command[1] - 1, 0)
                     var part = Array[Int64, 2](fill=-1)
@@ -6065,6 +6066,9 @@ def deepseek_input_item_validation(
                         index = deepseek_json_skip_ws(view, index + 1, command[1] - 1)
                     elif index != command[1] - 1:
                         return deepseek_input_item_issue(writer, 13, view, missing)
+                    command_count += 1
+                if command_count == 0:
+                    return deepseek_input_item_issue(writer, 13, view, missing)
                 return deepseek_input_item_issue(writer, 0, view, missing)
         if deepseek_raw_trimmed_string_nonempty(view, command):
             return deepseek_input_item_issue(writer, 0, view, missing)

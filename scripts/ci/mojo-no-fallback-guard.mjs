@@ -98,6 +98,8 @@ const PROFILE_LOGIN_ADAPTER_FILE = "crates/prodex-mojo-core/src/profile_login_po
 const PROFILE_LOGIN_MOJO_FILE = "mojo/prodex_core/profile_login_policy.mojo";
 const PROFILE_LOGIN_TEST_FILE = "crates/prodex-mojo-core/tests/profile_login_policy.rs";
 const PROMOTED_FILES = [
+  "crates/prodex-app/src/runtime_proxy/quota/gate.rs",
+  "crates/prodex-app/src/runtime_proxy/websocket_message/failure_handling/retry_recovery.rs",
   "crates/prodex-mojo-core/src/rich/runtime_doctor_plan/tests.rs",
   "crates/prodex-runtime-broker/src/registry.rs",
   "crates/prodex-runtime-broker/src/process.rs",
@@ -1300,6 +1302,22 @@ export function findViolations(files) {
         '@export("prodex_runtime_broker_startup_grace_seconds_v1")',
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: broker policy must remain Mojo-owned (${marker})`);
+    }
+    return [];
+  });
+  const quotaRecoveryEligibilityViolations = files.flatMap(([filePath, contents]) => {
+    if (filePath === "crates/prodex-app/src/runtime_proxy/quota/gate.rs") {
+      return [
+        "pub(crate) fn runtime_has_route_recoverable_quota_fallback_for_model(",
+        "prodex_mojo_core::runtime::waitable_candidate_eligible(",
+        "WaitableCandidateMode::RetryablePool",
+        "runtime_quota_precommit_guard_reason(summary, route_kind)",
+      ].filter((marker) => !contents.includes(marker))
+        .map((marker) => `${filePath}: recoverable quota pool must retain Mojo auth/quota gating (${marker})`);
+    }
+    if (filePath === "crates/prodex-app/src/runtime_proxy/websocket_message/failure_handling/retry_recovery.rs") {
+      return contents.includes("crate::runtime_has_route_recoverable_quota_fallback_for_model(")
+        ? [] : [`${filePath}: full-context recovery must not use only immediate readiness`];
     }
     return [];
   });
@@ -6391,7 +6409,7 @@ export function findViolations(files) {
     }
     return [];
   });
-  return [...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
+  return [...quotaRecoveryEligibilityViolations, ...runtimeBrokerReuseMojoViolations, ...geminiResponseMediaMojoViolations, ...cookieEvictionMojoViolations, ...websocketBudgetMojoViolations, ...affinityBindingMojoViolations, ...responsesCapacityRecoveryViolations, ...sseTapMojoOwnershipViolations, ...quotaWatchViolations, ...geminiCompactSnippetViolations, ...doctorSmartContextDecisionViolations, ...smartContextCapsuleOrderViolations, ...markerViolations, ...deepseekCatalogPolicyViolations, ...featureOffViolations, ...liveLogRecordViolations, ...runtimePolicyPresetViolations, ...profileHealthCircuitViolations, ...logThroughputViolations, ...operationalDetailSpecViolations, ...transcriptPolicyViolations, ...logLoadPolicyViolations, ...routeReasonViolations, ...runtimeStateQuotaViolations, ...runtimeStateRoutePolicyViolations, ...runtimeProxyRootViolations, ...brokerVersionGuardViolations, ...brokerContinuityViolations, ...brokerLogCacheViolations, ...codexConfigViolations, ...statePolicyViolations, ...quotaSelectionPolicyViolations, ...routeTagMirrorViolations, ...enumTagMirrorViolations, ...appSelectionPolicyMirrorViolations, ...runtimeStateBackgroundViolations, ...redactionViolations, ...profileIdentityViolations, ...governanceInspectionViolations, ...governanceInspectionOrderingViolations, ...exactnessPlannerViolations,
     ...adaptiveBudgetViolations,
     ...providerUsageViolations,
     ...auditUsageViolations,

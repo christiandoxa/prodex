@@ -484,6 +484,8 @@ pub(crate) fn start_runtime_rotation_proxy_with_options(
     };
 
     Ok(RuntimeRotationProxy {
+        #[cfg(test)]
+        test_lane_admission: shared.lane_admission.clone(),
         runtime_config: Arc::clone(&runtime_config),
         server,
         draining: Arc::clone(&shutdown),

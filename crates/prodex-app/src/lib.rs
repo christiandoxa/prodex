@@ -46,6 +46,7 @@ mod command_dispatch;
 mod core_constants;
 mod housekeeping;
 mod presidio_runtime;
+mod process_resources;
 mod profile_commands;
 mod profile_identity;
 mod profile_local_config;
@@ -155,6 +156,8 @@ mod runtime_proxy_contract_tests;
 mod test_env_guard_tests;
 
 struct RuntimeRotationProxy {
+    #[cfg(test)]
+    test_lane_admission: RuntimeProxyLaneAdmission,
     runtime_config: Arc<RuntimeConfig>,
     server: Arc<TinyServer>,
     draining: Arc<AtomicBool>,
@@ -311,6 +314,9 @@ mod runtime_request_id_tests {
 }
 
 pub fn main_entry() {
+    // A low shell soft limit must not strand state loading, runtime sockets or
+    // child launch. Failure is nonfatal; normal I/O still reports its real error.
+    let _ = process_resources::prepare_descriptor_headroom();
     let result = match app_commands::runtime_launch::goal_resume::handle_runtime_goal_session_notify_if_requested() {
         Ok(true) => Ok(()),
         Ok(false) => run(),

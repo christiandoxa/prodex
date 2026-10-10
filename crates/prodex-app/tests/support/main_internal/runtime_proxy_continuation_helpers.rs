@@ -199,6 +199,10 @@ pub(super) fn start_runtime_continuation_fixture(
 }
 
 impl RuntimeContinuationFixture {
+    pub(super) fn lane_admission_for_test(&self) -> RuntimeProxyLaneAdmission {
+        self.proxy.test_lane_admission.clone()
+    }
+
     pub(super) fn restart(self) -> Self {
         let Self {
             proxy,
