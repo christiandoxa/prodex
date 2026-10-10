@@ -94,16 +94,18 @@ fn runtime_process_identity_outcome_for<P: RuntimeProcessPlatform>(
             && recheck_birth.as_ref().is_some_and(|birth| birth.is_none())
             && P::process_absence_proven(pid));
     match prodex_runtime_broker::runtime_process_identity_plan(
-        process_absence_proven,
-        expected_birth_present,
-        birth_present,
-        birth_matches,
-        path_check_enabled,
-        path_present,
-        path_matches,
-        recheck_enabled,
-        recheck_present,
-        recheck_matches,
+        prodex_runtime_broker::BrokerProcessIdentityInput {
+            process_absence_proven,
+            expected_birth_present,
+            birth_present,
+            birth_matches,
+            path_check_enabled,
+            path_present,
+            path_matches,
+            recheck_enabled,
+            recheck_present,
+            recheck_matches,
+        },
     )
     .expect("Mojo runtime broker process identity policy returned invalid output")
     {

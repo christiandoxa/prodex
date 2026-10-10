@@ -123,19 +123,36 @@ unsafe extern "C" {
     ) -> i64;
 }
 
-#[allow(clippy::too_many_arguments)]
+/// Host-observed process identity facts; Mojo owns the identity decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrokerProcessIdentityInput {
+    pub process_absence_proven: bool,
+    pub expected_birth_present: bool,
+    pub birth_present: bool,
+    pub birth_matches: bool,
+    pub path_check_enabled: bool,
+    pub path_present: bool,
+    pub path_matches: bool,
+    pub recheck_enabled: bool,
+    pub recheck_present: bool,
+    pub recheck_matches: bool,
+}
+
 pub fn process_identity_plan(
-    process_absence_proven: bool,
-    expected_birth_present: bool,
-    birth_present: bool,
-    birth_matches: bool,
-    path_check_enabled: bool,
-    path_present: bool,
-    path_matches: bool,
-    recheck_enabled: bool,
-    recheck_present: bool,
-    recheck_matches: bool,
+    input: BrokerProcessIdentityInput,
 ) -> Result<BrokerProcessIdentityPlan, MojoError> {
+    let BrokerProcessIdentityInput {
+        process_absence_proven,
+        expected_birth_present,
+        birth_present,
+        birth_matches,
+        path_check_enabled,
+        path_present,
+        path_matches,
+        recheck_enabled,
+        recheck_present,
+        recheck_matches,
+    } = input;
     let output = unsafe {
         prodex_runtime_broker_process_identity_plan_v1(
             ABI_VERSION,

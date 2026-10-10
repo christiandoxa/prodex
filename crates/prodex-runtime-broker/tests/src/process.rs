@@ -269,8 +269,19 @@ fn broker_key_is_scoped_to_smart_context_window_when_enabled() {
 #[test]
 fn broker_lifecycle_consumers_use_mojo_plans_at_process_boundary() {
     assert_eq!(
-        runtime_process_identity_plan(false, true, true, true, true, true, true, true, true, true)
-            .unwrap(),
+        runtime_process_identity_plan(BrokerProcessIdentityInput {
+            process_absence_proven: false,
+            expected_birth_present: true,
+            birth_present: true,
+            birth_matches: true,
+            path_check_enabled: true,
+            path_present: true,
+            path_matches: true,
+            recheck_enabled: true,
+            recheck_present: true,
+            recheck_matches: true,
+        })
+        .unwrap(),
         BrokerProcessIdentityPlan::Proven
     );
     assert_eq!(
