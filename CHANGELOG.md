@@ -2,6 +2,97 @@
 
 Generated from conventional commits. Run `npm run changelog` to refresh.
 
+## 0.437.2 - 2026-10-10
+
+### Runtime
+
+- Preserve portable affinity recovery and release validation (`a5b927b`)
+- Keep quota recovery reachable across busy accounts (`57a1ee2`)
+- Move compact continuation policy to Mojo (`5f91526`)
+- Exhaust websocket attempts correctly across recovery sweeps (`d191200`)
+- Map Mojo affinity policy errors at app boundary (`d7cc909`)
+- Migrate runtime proxy body limit policy (`5357e12`)
+
+### CLI
+
+- Preserve turn-state owner facts in quota replay eligibility (`77ffdf0`)
+
+### Docs
+
+- Qualify Codex rust-v0.162.1 (`d59ab48`)
+
+### Misc
+
+- Preserve DeepSeek usage output and metadata edge cases (`f71e135`)
+- Preserve Gemini data URL and media text contracts (`0b84d7a`)
+- Select oldest cookie across bounded ABI chunks without Rust fallback (`fff216f`)
+# Prodex 0.437.2
+
+## New Features
+
+Qualifies upstream Codex `rust-v0.162.1` while preserving its native multiline
+async-question rendering and explicit CLI feature-override compatibility checks
+for shared daemons. The upstream source and transport assumptions are recorded
+in the compatibility baseline; Prodex does not duplicate the upstream TUI.
+
+## Bug Fixes
+
+### Recover on quota-positive accounts that are temporarily busy
+
+A quota failure from a bound account could be shown to the user even when another
+account had remaining quota. The recovery-eligibility check incorrectly treated
+temporary local in-flight load or transport backoff as terminal unavailability.
+The existing Mojo retryable-pool policy now distinguishes recoverability from
+immediate readiness. Exhausted quota, incompatible auth, unsupported providers,
+model-specific quota restrictions, and explicit exclusions are still enforced.
+
+### Wait for the new account after safe full-context replay
+
+A retained soft session preference could keep capacity waiting scoped to the
+old, exhausted account after Codex resent complete conversation history. The
+wait now preserves hard continuation ownership without trapping the replay on a
+soft account preference. Temporary transport cooldowns on another account remain
+waitable after a full-context replay. Account B is not used until normal admission
+permits it.
+Opaque previous-response and turn-state ownership, precommit-only rotation, and
+no replay after visible output remain intact.
+
+### Preserve descriptor headroom before state loading
+
+On Unix, Prodex raises a low inherited soft file-descriptor limit toward 8,192,
+never above the existing hard limit and never lowering a larger limit. This runs
+before state reads and worker startup. It mitigates `Too many open files` from
+low inherited limits without discarding state or closing another process's files.
+It is not a claim that all descriptor leaks or host-wide resource shortages are
+eliminated. Already-running sessions must be restarted to load the patched binary.
+
+### Keep account selection portable across Windows and macOS
+
+The hard-binding conflict ABI now transports its sentinel string view as scalar
+address/length arguments instead of a by-value aggregate. This keeps the Rust/Mojo
+calling boundary consistent on Win64 without changing ownership decisions or
+adding a Rust fallback. A direct ABI regression exercises empty candidate sets,
+Unicode sentinels, invalid lengths, and old-version rejection. macOS process
+identity checks explicitly retain executable-path verification, and child-launch
+validation fixtures now use an absolute path on every supported platform.
+
+### Release validation corrections
+
+The release also rejects empty DeepSeek shell-command arrays and preserves the
+correct terminal overload/rate-limit classification after candidate exhaustion.
+CI and the full-test workflow require the real Mojo implementation rather than
+allowing an implicit feature-off substitute.
+
+## Changelog
+
+- Keep temporary local capacity separate from recoverable quota eligibility.
+- Preserve safe full-context account handoff and strict continuation ownership.
+- Cover busy-account rotation with real WebSocket and negative-control tests.
+- Add isolated descriptor-exhaustion, soft-limit preservation, and child-process inheritance regressions.
+- Qualify Codex `rust-v0.162.1` and synchronize standalone release metadata.
+
+Full Changelog: [0.437.1...0.437.2](https://github.com/christiandoxa/prodex/compare/0.437.1...0.437.2)
+
 ## 0.437.1 - 2026-10-09
 
 ### Runtime
@@ -14,70 +105,6 @@ Generated from conventional commits. Run `npm run changelog` to refresh.
 
 - Saturate profile geometry at integer boundaries (`75365cc`)
 - Migrate profile screen geometry policy (`9e04540`)
-# Prodex 0.437.1
-
-## New Features
-
-No new CLI surface. This patch release hardens existing Responses precommit
-recovery while retaining Codex 0.162.0 compatibility.
-
-## Bug Fixes
-
-### Preserve precommit inspection after Codex falls back to HTTP
-
-A Responses request with `stream: true` could receive an HTTP 200 SSE body without
-`Content-Type`. Prodex previously treated every such response as unary success,
-allowing an early `server_is_overloaded` event to reach Codex without running the
-SSE precommit recovery path. Normal SSE fixtures did not expose the gap because
-they always declared `text/event-stream`.
-
-The canonical Mojo framing decision now considers the original request's stream
-flag when the response MIME header is absent or blank. Explicit response MIME
-types keep their previous behavior. Upstream headers and response bytes remain
-unchanged; the fix does not fabricate a MIME header, a success, or a quota error.
-
-### Retry transient capacity safely within a bound turn
-
-A later HTTP sample in the same turn may carry a profile-bound turn-state even
-without a previous-response ID. These requests previously passed an overload
-straight through because rotating their continuation to another account is
-unsafe. They now retry the same owner before commit, using a Mojo-owned policy
-with at most five retries and a 60-second retry-planning window. Existing network
-timeouts still bound each upstream attempt independently.
-
-The delay uses exponential backoff and bounded jitter, and preserves upstream
-`Retry-After`. Advice beyond the remaining planning window is not shortened to
-force an early retry. Failed attempts release their in-flight admission slot
-before waiting and reacquire it before retrying. Exhaustion preserves the
-upstream failure; visible output is never replayed. Fresh requests retain the
-existing eligible-profile rotation path.
-Previous-response-ID repair retains its established full-history retry signaling;
-the additional same-owner retry path is for turn-state-only HTTP samples.
-
-### Release qualification and hygiene
-
-Credential-free production-path regressions reproduce the missing-MIME failure
-and the same-turn recovery gap before their fixes. Coverage includes successful
-and failed headerless streams, explicit JSON and unary requests, precommit
-rotation, same-owner continuation recovery, retry exhaustion, admission release,
-long retry advice, and no replay after visible output. Direct Mojo checks cover
-framing precedence and retry-policy boundaries.
-
-Oversized audit-policy tests, response-forwarding classifier tests, and the
-recovery-batch ABI adapter are split into focused modules without changing their
-public behavior or weakening size and no-fallback guards. Existing Codex 0.162.0
-qualification and the capability-based minimum remain unchanged.
-
-## Changelog
-
-- Inspect requested SSE streams even when upstream omits the MIME header.
-- Retry precommit overloads on the bound owner without cross-account replay.
-- Respect upstream retry advice, local retry bounds, and admission-slot lifetimes.
-- Register missing-header, same-turn, and post-commit regressions in CI.
-- Restore strict module-size and lint qualification without weakening guards.
-- Synchronize standalone release metadata for Prodex 0.437.1.
-
-Full Changelog: [0.437.0...0.437.1](https://github.com/christiandoxa/prodex/compare/0.437.0...0.437.1)
 
 ## 0.437.0 - 2026-10-09
 
@@ -197,20 +224,3 @@ Full Changelog: [0.437.0...0.437.1](https://github.com/christiandoxa/prodex/comp
 ### Runtime
 
 - Backpressure local saturation (`8aaf4e9`)
-
-## 0.435.2 - 2026-10-03
-
-### Runtime
-
-- Stop exhausted same-request probe races (`063f81f`)
-- Keep auto-rotate alive while quota remains (`02997e4`)
-
-### CLI
-
-- Delegate profile health circuit timing (`a00b4dc`)
-
-### Docs
-
-- Record compact-exit checkpoint (`6b67cd6`)
-- Record sub-agent renderer wave (`c5af517`)
-- Record provider surface migration checkpoint (`4e175fc`)
