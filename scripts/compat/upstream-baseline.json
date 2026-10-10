@@ -2,7 +2,7 @@
   "codex": {
     "compatibility": {
       "upstream_repository": "https://github.com/openai/codex",
-      "baseline_source": "openai/codex rust-v0.162.0 release",
+      "baseline_source": "openai/codex rust-v0.162.1 release",
       "guard_command": "node scripts/compat/check-upstream-baseline.mjs",
       "format_version": 2,
       "critical_files": [
@@ -2575,7 +2575,7 @@
           ]
         }
       ],
-      "tested_codex_release": "rust-v0.162.0",
+      "tested_codex_release": "rust-v0.162.1",
       "patch_deltas": [
         {
           "from": "rust-v0.150.0",
@@ -2944,6 +2944,21 @@
           ],
           "prodex_action": "Advance the tested Codex baseline to 0.162.0, move the Azure capability marker to model-provider/src/capabilities.rs, and guard the new retry, provider-capability, namespace, context, partial-answer, remote-MCP, and app-server contracts. Keep Prodex transport, hard affinity, no-midstream-rotate, and existing 0.436.1 capacity fixes unchanged.",
           "compatibility_evidence": "migration/codex-rust-v0.162.0-audit.md and migration/codex-rust-v0.162.0-source-evidence.json record exact tag/source provenance, full archive comparison, critical/semantic marker replay, negative baseline self-tests, and offline capture replay. Runtime-launch and binary smoke evidence remain coordinator-owned."
+        },
+        {
+          "from": "rust-v0.162.0",
+          "to": "rust-v0.162.1",
+          "upstream_commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+          "upstream_tag_object": "7a078f6bb4ce0dc2a81408b334ce52979d92c603",
+          "upstream_release_date": "2026-10-09T19:44:51Z",
+          "tree_comparison": "Exact source archives: 9 modified files and 1 added snapshot (0 removed); 9,016 files / 89,290,436 bytes at 0.162.0 and 9,017 files / 89,296,863 bytes at 0.162.1. The GitHub compare API file list is capped at 300 and was not treated as a full-tree comparison.",
+          "runtime_changes": [
+            "The TUI preserves line breaks and complete hyperlink destinations when asynchronous questions contain multiple logical lines, including CRLF input.",
+            "Daemon compatibility checks compare only explicit command-line feature overrides after reading supported managed settings and feature requirements, avoiding startup failures caused by unrelated daemon defaults.",
+            "Responses HTTP/WebSocket transport, retry and quota classification, hard affinity, session persistence, compaction, and app-server protocol contracts remain compatible with the 0.162.0 baseline."
+          ],
+          "prodex_action": "Advance the tested Codex baseline to 0.162.1, preserve Codex-owned multiline question rendering and daemon feature-compatibility behavior, and keep Prodex transport, hard affinity, no-midstream-rotate, and capacity recovery unchanged.",
+          "compatibility_evidence": "migration/codex-rust-v0.162.1-audit.md and migration/codex-rust-v0.162.1-source-evidence.json record exact tag/source provenance, archive comparison, critical/semantic marker replay, and focused Prodex capacity recovery validation. Runtime-launch and official binary smoke evidence remain coordinator-owned."
         }
       ],
       "app_server_protocol": {
@@ -2966,26 +2981,16 @@
       }
     },
     "latestRelease": {
-      "tag_name": "rust-v0.162.0",
-      "name": "0.162.0",
-      "published_at": "2026-10-08T18:55:59Z",
-      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.162.0",
+      "tag_name": "rust-v0.162.1",
+      "name": "0.162.1",
+      "published_at": "2026-10-09T19:44:51Z",
+      "html_url": "https://github.com/openai/codex/releases/tag/rust-v0.162.1",
       "body_head": [
-        "## New Features",
-        "- Add tools for creating and listing managed Git worktrees from trusted local projects when the worktrees feature is enabled. (#50148)",
-        "- Pin tasks in the agent Command Center with `p` and keep them in a shared Pinned group when supported by the server. (#51500)",
-        "- Navigate and copy transcript blocks with `/copy`, use `Ctrl+Insert` to copy selections, and tune mouse-wheel scrolling with `tui.mouse_scroll_speed`. (#50434, #50215, #50209)",
-        "- Make URLs clickable in approval headers, questions, MCP prompts, warnings, banners, and verification prompts, including when links wrap across lines. (#51439, #51449, #51450, #51451, #51452, #51458)",
-        "- Configure live web access and remote compaction capabilities for custom Responses-compatible model providers. (#50459)",
-        "- Add JavaScript helpers for streaming promise results as they settle, plus opt-in ranked tool search in Code Mode. (#51126, #51209)",
-        "",
         "## Bug Fixes",
-        "- Respect server model and reasoning-summary defaults for new TUI threads while retaining explicit launch overrides. (#50013, #50811, #50913)",
-        "- Preserve existing CRLF line endings in `apply_patch` updates without requiring an opt-in. (#51203)",
-        "- Fix Linux sandbox startup with multiple denied files, reject writable sandbox-construction executables, and keep ripgrep configuration from weakening deny-glob masks. (#50059, #51211, #51407, #51527)",
-        "- Restore ordinary drive-letter file access on Windows 10 and match Windows sandbox temp permissions to the child process environment. (#51511, #51512)",
-        "- Honor server `Retry-After` advice for retryable Responses and WebSocket failures. (#50418, #51440)",
-        "- Fix archive checksum verification when installing through Windows PowerShell with PowerShell 7 module paths present. (#51257)"
+        "- Fixed a TUI crash when asynchronous questions contain multiple lines, preserving line breaks and complete hyperlink destinations. (#51866)",
+        "- Fixed startup failures caused by differences between a running background server's feature settings and CLI defaults. Compatibility checks now apply only to explicit command-line feature overrides. (#52648)",
+        "",
+        "Full Changelog: rust-v0.162.0...rust-v0.162.1"
       ]
     }
   },

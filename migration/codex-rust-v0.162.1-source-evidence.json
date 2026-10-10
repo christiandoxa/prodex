@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "repository": "https://github.com/openai/codex",
+  "release": {
+    "tag": "rust-v0.162.1",
+    "release_date": "2026-10-09T19:44:51Z",
+    "tag_object": "7a078f6bb4ce0dc2a81408b334ce52979d92c603",
+    "peeled_commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d",
+    "previous_tag": "rust-v0.162.0",
+    "previous_commit": "c1382380de69521303b416720a52f42d51af6248"
+  },
+  "source_archives": [
+    {
+      "name": "source-01620.tar.gz",
+      "sha256": "89c5f8139486a9ce723681e977109e1512b039b7e010e2ee9a3a1a6a24952369",
+      "commit": "c1382380de69521303b416720a52f42d51af6248"
+    },
+    {
+      "name": "source-01621.tar.gz",
+      "sha256": "e709bda93494c000a69d4c07a85a1975ce433f5541e737d1a5feddd399c97c60",
+      "commit": "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d"
+    }
+  ],
+  "tree_comparison": {
+    "previous_file_count": 9016,
+    "current_file_count": 9017,
+    "previous_total_bytes": 89290436,
+    "current_total_bytes": 89296863,
+    "modified_files": 9,
+    "added_files": 1,
+    "removed_files": 0,
+    "changed_paths": [
+      "codex-rs/Cargo.toml",
+      "codex-rs/cli/tests/daemon_startup.rs",
+      "codex-rs/tui/src/bottom_pane/async_questions/mod.rs",
+      "codex-rs/tui/src/bottom_pane/async_questions/state_tests.rs",
+      "codex-rs/tui/src/daemon_recovery.rs",
+      "codex-rs/tui/src/daemon_startup.rs",
+      "codex-rs/tui/src/daemon_startup_tests.rs",
+      "codex-rs/tui/src/startup_orchestration.rs",
+      "codex-rs/tui/tests/suite/daemon_compatibility.rs",
+      "codex-rs/tui/src/bottom_pane/async_questions/snapshots/codex_tui__bottom_pane__async_questions__tests__question_multiline.snap"
+    ]
+  },
+  "marker_replay": {
+    "critical_files": 77,
+    "semantic_checks": 86,
+    "markers": 1238,
+    "missing_files": 0,
+    "missing_markers": 0,
+    "source_tree": "rust-v0.162.1 exact tagged source archive",
+    "command": "node scripts/compat/check-upstream-baseline.mjs --source <exact rust-v0.162.1 extracted source directory>"
+  },
+  "reviewed_contracts": [
+    "multiline asynchronous-question line and hyperlink preservation",
+    "explicit CLI feature override daemon compatibility",
+    "managed settings and config requirements precedence",
+    "unchanged Responses/WebSocket retry, quota, affinity, compaction, and app-server boundaries"
+  ],
+  "fixture_and_guard_scope": {
+    "offline_only": true,
+    "live_provider_traffic": false,
+    "capacity_regression_tests": [
+      "runtime_proxy_websocket_fresh_overload_rotates_without_leaking_retryable_error",
+      "missing_content_type_capacity_rotates_before_stream_commit",
+      "delayed_capacity_after_http_headers_rotates_without_restart_or_failed_binding",
+      "responses_keep_waiting_after_capacity_epoch_while_quota_remains_positive"
+    ]
+  }
+}
