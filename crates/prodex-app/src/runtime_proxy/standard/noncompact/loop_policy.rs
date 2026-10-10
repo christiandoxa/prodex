@@ -133,74 +133,20 @@ pub(super) fn runtime_noncompact_next_action(
             let candidate_name = candidate_name.ok_or_else(|| {
                 anyhow::anyhow!("Mojo selected a candidate action without a candidate")
             })?;
-            let candidate_hard_limited = runtime_profile_inflight_hard_limited_for_context(
-                shared,
-                &candidate_name,
-                "standard_http",
-            )?;
-            let admission_action = prodex_mojo_core::runtime::noncompact_loop_action(
-                prodex_mojo_core::runtime::NoncompactLoopInput {
-                    stage: prodex_mojo_core::runtime::NoncompactLoopStage::CandidateAdmission,
-                    excluded_profiles_empty: false,
+            return runtime_noncompact_candidate_admission(
+                RuntimeNoncompactNextActionContext {
+                    request_id,
+                    shared,
+                    request_model_name,
+                    preferred_profile,
                     preferred_is_session,
-                    preferred_hard_limited,
-                    fresh_candidate_present: true,
-                    candidate_hard_affinity: wait_affinity_owner == Some(candidate_name.as_str()),
-                    candidate_hard_limited,
-                    inflight_relieved: false,
                     session_present,
-                    cold_start_profiles_present: false,
-                    cold_start_probe_waited: loop_state.cold_start_probe_waited,
-                    transient_recovered: false,
+                    wait_affinity_owner,
+                    loop_state,
                 },
-            )
-            .map_err(|error| anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}"))?;
-            match admission_action {
-                prodex_mojo_core::runtime::NoncompactLoopAction::AttemptCandidate => {
-                    return Ok(RuntimePrecommitLoopAction::Attempt(candidate_name));
-                }
-                prodex_mojo_core::runtime::NoncompactLoopAction::WaitInflight => {
-                    runtime_proxy_log(
-                        shared,
-                        runtime_proxy_structured_log_message(
-                            "profile_inflight_saturated",
-                            [
-                                runtime_proxy_log_field("request", request_id.to_string()),
-                                runtime_proxy_log_field("transport", "http"),
-                                runtime_proxy_log_field("profile", &candidate_name),
-                                runtime_proxy_log_field(
-                                    "hard_limit",
-                                    shared
-                                        .runtime_config
-                                        .tuning
-                                        .profile_inflight_hard_limit
-                                        .to_string(),
-                                ),
-                            ],
-                        ),
-                    );
-                    loop_state.record_inflight_saturation();
-                    let _ = runtime_proxy_maybe_wait_for_interactive_inflight_relief(
-                        RuntimeInflightReliefWait {
-                            observed_release_revision: None,
-                            request_id,
-                            shared,
-                            excluded_profiles: &loop_state.excluded_profiles,
-                            route_kind: RuntimeRouteKind::Standard,
-                            selection_started_at: &mut loop_state.selection_started_at,
-                            continuation: session_present,
-                            wait_affinity_owner,
-                            selected_profile: None,
-                        },
-                    )?;
-                    return Ok(RuntimePrecommitLoopAction::Continue);
-                }
-                _ => {
-                    return Err(anyhow::anyhow!(
-                        "Mojo noncompact loop returned an invalid candidate admission action"
-                    ));
-                }
-            }
+                candidate_name,
+                preferred_hard_limited,
+            );
         }
         prodex_mojo_core::runtime::NoncompactLoopAction::WaitInflight => {}
         _ => {
@@ -329,5 +275,87 @@ pub(super) fn runtime_noncompact_next_action(
                 ));
             }
         }
+    }
+}
+
+fn runtime_noncompact_candidate_admission(
+    context: RuntimeNoncompactNextActionContext<'_>,
+    candidate_name: String,
+    preferred_hard_limited: bool,
+) -> Result<RuntimePrecommitLoopAction<String, tiny_http::ResponseBox>> {
+    let RuntimeNoncompactNextActionContext {
+        request_id,
+        shared,
+        preferred_is_session,
+        session_present,
+        wait_affinity_owner,
+        loop_state,
+        ..
+    } = context;
+    let candidate_hard_limited = runtime_profile_inflight_hard_limited_for_context(
+        shared,
+        &candidate_name,
+        "standard_http",
+    )?;
+    let admission_action = prodex_mojo_core::runtime::noncompact_loop_action(
+        prodex_mojo_core::runtime::NoncompactLoopInput {
+            stage: prodex_mojo_core::runtime::NoncompactLoopStage::CandidateAdmission,
+            excluded_profiles_empty: false,
+            preferred_is_session,
+            preferred_hard_limited,
+            fresh_candidate_present: true,
+            candidate_hard_affinity: wait_affinity_owner == Some(candidate_name.as_str()),
+            candidate_hard_limited,
+            inflight_relieved: false,
+            session_present,
+            cold_start_profiles_present: false,
+            cold_start_probe_waited: loop_state.cold_start_probe_waited,
+            transient_recovered: false,
+        },
+    )
+    .map_err(|error| anyhow::anyhow!("Mojo noncompact loop policy failed: {error:?}"))?;
+    match admission_action {
+        prodex_mojo_core::runtime::NoncompactLoopAction::AttemptCandidate => {
+            Ok(RuntimePrecommitLoopAction::Attempt(candidate_name))
+        }
+        prodex_mojo_core::runtime::NoncompactLoopAction::WaitInflight => {
+            runtime_proxy_log(
+                shared,
+                runtime_proxy_structured_log_message(
+                    "profile_inflight_saturated",
+                    [
+                        runtime_proxy_log_field("request", request_id.to_string()),
+                        runtime_proxy_log_field("transport", "http"),
+                        runtime_proxy_log_field("profile", &candidate_name),
+                        runtime_proxy_log_field(
+                            "hard_limit",
+                            shared
+                                .runtime_config
+                                .tuning
+                                .profile_inflight_hard_limit
+                                .to_string(),
+                        ),
+                    ],
+                ),
+            );
+            loop_state.record_inflight_saturation();
+            let _ = runtime_proxy_maybe_wait_for_interactive_inflight_relief(
+                RuntimeInflightReliefWait {
+                    observed_release_revision: None,
+                    request_id,
+                    shared,
+                    excluded_profiles: &loop_state.excluded_profiles,
+                    route_kind: RuntimeRouteKind::Standard,
+                    selection_started_at: &mut loop_state.selection_started_at,
+                    continuation: session_present,
+                    wait_affinity_owner,
+                    selected_profile: None,
+                },
+            )?;
+            Ok(RuntimePrecommitLoopAction::Continue)
+        }
+        _ => Err(anyhow::anyhow!(
+            "Mojo noncompact loop returned an invalid candidate admission action"
+        )),
     }
 }

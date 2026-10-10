@@ -2363,14 +2363,14 @@ export function findViolations(files) {
     }
     if (filePath === "crates/prodex-mojo-core/src/runtime/selection_planning.rs") {
       return [
-        "prodex_runtime_affinity_binding_conflict_v1(",
+        "prodex_runtime_affinity_binding_conflict_v2(",
         "pub fn affinity_binding_conflict(",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: hard-binding conflict ABI must stay active (${marker})`);
     }
     if (filePath === "mojo/prodex_core/candidate_decision.mojo") {
       return [
-        '@export("prodex_runtime_affinity_binding_conflict_v1")',
+        '@export("prodex_runtime_affinity_binding_conflict_v2")',
         "if profile_index == 3 and route_kind != 1:",
       ].filter((marker) => !contents.includes(marker))
         .map((marker) => `${filePath}: route-scoped hard-binding conflict must remain Mojo-owned (${marker})`);

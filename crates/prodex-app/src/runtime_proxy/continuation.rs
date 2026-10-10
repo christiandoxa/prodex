@@ -194,17 +194,13 @@ pub(crate) fn runtime_touch_compact_lineage_binding(
     } else {
         RuntimeContinuationBindingKind::TurnState
     };
-    let binding_present = if session_binding {
-        runtime.session_id_bindings.contains_key(key)
-    } else {
-        runtime.turn_state_bindings.contains_key(key)
-    };
     let bindings = if session_binding {
         &runtime.session_id_bindings
     } else {
         &runtime.turn_state_bindings
     };
     let binding = bindings.get(key);
+    let binding_present = binding.is_some();
     let binding_conflict = binding.is_some_and(|binding| {
         binding.profile_name == prodex_runtime_state::RUNTIME_HARD_BINDING_CONFLICT_PROFILE
             || !runtime.state.profiles.contains_key(&binding.profile_name)

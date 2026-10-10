@@ -91,3 +91,37 @@ manifest without skipping the new case.
 All reproduction inputs, accounts, and upstream responses are synthetic. No live
 provider request or user credential is required for these tests. Existing running
 binaries are not patched in memory; restarted Prodex processes use the new code.
+
+## Release portability follow-up
+
+Source CI at `9f876f6c25f37540c86ef2d8b1f56dc5ebba638c` exposed a
+separate Win64 boundary failure in the affinity conflict planner: even the empty
+candidate set returned `InvalidInput`, preventing HTTP and WebSocket selection.
+The conflict sentinel was transported as a by-value 16-byte view. The replacement
+`prodex_runtime_affinity_binding_conflict_v2` carries the address and length as
+separate scalar arguments and keeps the original Mojo ownership algorithm.
+Version-1 calls are rejected; no duplicate Rust conflict implementation is added.
+The direct ABI test and the existing route/owner matrix cover the new boundary.
+
+The same release closes two validation blockers without weakening checks: macOS
+process-identity callers explicitly enable executable-path verification, and the
+child-launch test uses a platform-absolute fixture path so Windows reaches model
+validation rather than failing an unrelated path precondition. The seven Sonar
+complexity findings are addressed by effect-only helper extraction and redundant
+map-lookup removal; the semantic policies and expected regression outcomes remain
+unchanged.
+
+### Win64 lowering evidence
+
+The actual Mojo compiler and Rust compiler were both asked to emit LLVM IR for
+`x86_64-pc-windows-msvc`. The old export lowered to seven arguments, including two
+scalar words for the sentinel view. Rust's version-1 caller lowered the same
+by-value view to one pointer argument and emitted six arguments. Consequently,
+Mojo read the Rust output pointer as the sentinel length and received no valid
+output argument. This is a calling-convention mismatch, not an upstream quota
+response. The new version-2 caller and export both have the identical scalar
+signature `(i64, ptr, i64, i64, i64, i64, ptr) -> i64`.
+
+The comparison was performed without changing a running user session. Native
+Windows execution is additionally covered by the release CI matrix; the local
+IR comparison alone is not claimed as a native Windows integration run.

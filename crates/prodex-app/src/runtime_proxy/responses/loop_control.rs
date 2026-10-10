@@ -410,15 +410,11 @@ fn handle_runtime_responses_budget_exhausted(
                 transient_recovery_pending = false;
             }
             ReturnCompactFailure => {
-                if let Some((profile_name, source)) = affinity_state.compact_followup_profile() {
-                    runtime_proxy_log(
-                        context.shared,
-                        format!(
-                            "request={} transport=http compact_fresh_fallback_blocked profile={profile_name} source={source} reason=precommit_budget_exhausted",
-                            context.request_id
-                        ),
-                    );
-                }
+                log_runtime_responses_compact_fallback_blocked(
+                    context,
+                    affinity_state,
+                    "precommit_budget_exhausted",
+                );
                 return Ok(Some(runtime_responses_final_failure_control(loop_state)));
             }
             DirectFallback => {
@@ -444,6 +440,22 @@ fn handle_runtime_responses_budget_exhausted(
         }
     }
 }
+fn log_runtime_responses_compact_fallback_blocked(
+    context: &RuntimeResponsesRequestContext<'_>,
+    affinity_state: &RuntimeResponsesAffinityState,
+    reason: &str,
+) {
+    if let Some((profile_name, source)) = affinity_state.compact_followup_profile() {
+        runtime_proxy_log(
+            context.shared,
+            format!(
+                "request={} transport=http compact_fresh_fallback_blocked profile={profile_name} source={source} reason={reason}",
+                context.request_id
+            ),
+        );
+    }
+}
+
 fn handle_runtime_responses_candidate_exhausted(
     context: &mut RuntimeResponsesRequestContext<'_>,
     affinity_state: &mut RuntimeResponsesAffinityState,
@@ -518,15 +530,11 @@ fn handle_runtime_responses_candidate_exhausted(
                 }
             }
             ReturnCompactFailure => {
-                if let Some((profile_name, source)) = affinity_state.compact_followup_profile() {
-                    runtime_proxy_log(
-                        context.shared,
-                        format!(
-                            "request={} transport=http compact_fresh_fallback_blocked profile={profile_name} source={source} reason=candidate_exhausted",
-                            context.request_id
-                        ),
-                    );
-                }
+                log_runtime_responses_compact_fallback_blocked(
+                    context,
+                    affinity_state,
+                    "candidate_exhausted",
+                );
                 return Ok(runtime_responses_final_failure_control(loop_state));
             }
             WaitColdStart => {

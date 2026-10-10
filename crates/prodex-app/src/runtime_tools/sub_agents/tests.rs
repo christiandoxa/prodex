@@ -276,7 +276,7 @@ fn local_provider_requires_endpoint() {
 
 fn test_spec(provider: ProviderId) -> ChildLaunchSpec {
     ChildLaunchSpec {
-        executable: PathBuf::from("/opt/Prodex Binary/prodex"),
+        executable: env::temp_dir().join("Prodex Binary").join("prodex"),
         provider,
         model: None,
         effort: None,
@@ -412,6 +412,10 @@ fn child_config_serializes_required_tools_and_rejects_unknown_names() {
 #[test]
 fn child_config_rejects_invalid_model_effort_url_and_scalar_values() {
     let mut empty_model = test_spec(ProviderId::OpenAi);
+    assert!(
+        empty_model.executable.is_absolute(),
+        "fixture must reach model validation on every OS"
+    );
     empty_model.model = Some(" \t".to_string());
     let error = validate_child_launch_spec(&empty_model).unwrap_err();
     assert!(error.to_string().contains("model must be nonempty"));

@@ -743,16 +743,17 @@ comptime AFFINITY_REASON_HARD_BINDING_UNAVAILABLE: Int64 = 3
 comptime AFFINITY_REASON_BOUND_PROFILE_UNAVAILABLE: Int64 = 4
 comptime AFFINITY_REASON_SELECTION_BACKOFF: Int64 = 5
 comptime AFFINITY_REASON_ROUTE_CIRCUIT_HALF_OPEN_PROBE_WAIT: Int64 = 6
-comptime AFFINITY_BINDING_CONFLICT_ABI_VERSION: Int64 = 1
+comptime AFFINITY_BINDING_CONFLICT_ABI_VERSION: Int64 = 2
 
 
-@export("prodex_runtime_affinity_binding_conflict_v1")
-def prodex_runtime_affinity_binding_conflict_v1(
+@export("prodex_runtime_affinity_binding_conflict_v2")
+def prodex_runtime_affinity_binding_conflict_v2(
     abi_version: Int64,
     profile_views: Pointer[mut=False, ProdexRichStringView, _],
     profile_presence_mask: Int64,
     route_kind: Int64,
-    conflict_profile_view: ProdexRichStringView,
+    conflict_profile_address: UInt64,
+    conflict_profile_length: UInt64,
     output: Pointer[mut=True, Int64, _],
 ) abi("C") -> Int64:
     if (
@@ -763,6 +764,10 @@ def prodex_runtime_affinity_binding_conflict_v1(
         or profile_presence_mask > 15
     ):
         return 1
+    # Scalar view transport keeps this C boundary identical on Win64 and Unix.
+    var conflict_profile_view = ProdexRichStringView(
+        UInt(conflict_profile_address), UInt(conflict_profile_length)
+    )
     if not rich_view_valid(conflict_profile_view, RICH_MAX_IDENTIFIER_BYTES):
         return 2
 

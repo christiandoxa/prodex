@@ -143,17 +143,14 @@ struct RuntimeSmartContextBodyInput {
     rewrite_reason_label: &'static str,
 }
 
-fn prepare_runtime_smart_context_body_input(
+fn parse_runtime_smart_context_body_input(
     request_id: u64,
     request: &RuntimeProxyRequest,
     shared: &RuntimeRotationProxyShared,
     route_kind: RuntimeRouteKind,
     transport: RuntimeSmartContextTransport,
     profile_name: Option<&str>,
-) -> Result<Option<RuntimeSmartContextBodyInput>, RuntimeSmartContextPrepareError> {
-    if !cfg!(feature = "mojo-quota") {
-        return Ok(None);
-    }
+) -> Option<serde_json::Value> {
     let value = match serde_json::from_slice::<serde_json::Value>(&request.body) {
         Ok(value) => value,
         Err(_) => {
@@ -177,7 +174,7 @@ fn prepare_runtime_smart_context_body_input(
                 request.body.len(),
                 reason,
             );
-            return Ok(None);
+            return None;
         }
     };
     if let Some(shape_reason) = runtime_smart_context_unsupported_json_shape_reason(&value) {
@@ -205,8 +202,32 @@ fn prepare_runtime_smart_context_body_input(
             request.body.len(),
             reason,
         );
+        return None;
+    }
+    Some(value)
+}
+
+fn prepare_runtime_smart_context_body_input(
+    request_id: u64,
+    request: &RuntimeProxyRequest,
+    shared: &RuntimeRotationProxyShared,
+    route_kind: RuntimeRouteKind,
+    transport: RuntimeSmartContextTransport,
+    profile_name: Option<&str>,
+) -> Result<Option<RuntimeSmartContextBodyInput>, RuntimeSmartContextPrepareError> {
+    if !cfg!(feature = "mojo-quota") {
         return Ok(None);
     }
+    let Some(value) = parse_runtime_smart_context_body_input(
+        request_id,
+        request,
+        shared,
+        route_kind,
+        transport,
+        profile_name,
+    ) else {
+        return Ok(None);
+    };
     let has_rewrite_candidate = runtime_smart_context_body_may_contain_artifact_ref(&request.body)
         || runtime_smart_context_has_duplicate_input_text(&value);
     let Some(scope) = runtime_smart_context_scope_id(shared, profile_name) else {

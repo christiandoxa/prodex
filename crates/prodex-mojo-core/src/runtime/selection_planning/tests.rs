@@ -254,6 +254,84 @@ mod affinity_selection_tests {
     use super::super::*;
 
     #[test]
+    fn hard_binding_conflict_scalar_abi_preserves_view_words_and_rejects_old_version() {
+        let sentinel = "__conflict_雪__";
+        let profiles = [
+            super::super::super::RuntimeStringView {
+                ptr: sentinel.as_ptr() as usize as u64,
+                len: sentinel.len() as u64,
+            },
+            super::super::super::RuntimeStringView { ptr: 0, len: 0 },
+            super::super::super::RuntimeStringView { ptr: 0, len: 0 },
+            super::super::super::RuntimeStringView { ptr: 0, len: 0 },
+        ];
+        let mut output = -1_i64;
+        let call = |version, mask, address, length, output: &mut i64| unsafe {
+            prodex_runtime_affinity_binding_conflict_v2(
+                version,
+                profiles.as_ptr(),
+                mask,
+                0,
+                address,
+                length,
+                output,
+            )
+        };
+        assert_eq!(
+            call(
+                AFFINITY_BINDING_CONFLICT_ABI_VERSION,
+                0,
+                sentinel.as_ptr() as usize as u64,
+                sentinel.len() as u64,
+                &mut output
+            ),
+            0
+        );
+        assert_eq!(
+            output, 0,
+            "an empty affinity set must remain selectable on Win64"
+        );
+        assert_eq!(
+            call(
+                AFFINITY_BINDING_CONFLICT_ABI_VERSION,
+                1,
+                sentinel.as_ptr() as usize as u64,
+                sentinel.len() as u64,
+                &mut output
+            ),
+            0
+        );
+        assert_eq!(
+            output, 1,
+            "sentinel must cross the ABI without aggregate lowering"
+        );
+        assert_eq!(
+            call(
+                1,
+                0,
+                sentinel.as_ptr() as usize as u64,
+                sentinel.len() as u64,
+                &mut output
+            ),
+            1
+        );
+        assert_eq!(
+            call(AFFINITY_BINDING_CONFLICT_ABI_VERSION, 0, 0, 1, &mut output),
+            2
+        );
+        assert_eq!(
+            call(
+                AFFINITY_BINDING_CONFLICT_ABI_VERSION,
+                0,
+                sentinel.as_ptr() as usize as u64,
+                u64::MAX,
+                &mut output
+            ),
+            2
+        );
+    }
+
+    #[test]
     fn hard_binding_conflict_mojo_matches_all_route_scoped_ownership_combinations() {
         const CONFLICT: &str = "__conflict_sentinel__";
         let names = [None, Some("alpha"), Some("beta"), Some(CONFLICT)];
