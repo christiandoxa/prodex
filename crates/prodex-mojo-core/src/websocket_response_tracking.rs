@@ -170,6 +170,64 @@ mod tests {
         }
     }
 
+    fn expected_uncommitted(
+        input: &WebsocketResponseFrameInput<'_>,
+        generation_start: bool,
+    ) -> Option<WebsocketResponseFramePlan> {
+        let retry_action = match input.retry_kind {
+            RETRY_CONNECTION_LIMIT => Some(WebsocketResponseFrameAction::RetryConnectionLimit),
+            RETRY_QUOTA => Some(WebsocketResponseFrameAction::RetryQuota),
+            RETRY_RATE_LIMITED => Some(WebsocketResponseFrameAction::RetryRateLimited),
+            RETRY_OVERLOADED => Some(WebsocketResponseFrameAction::RetryOverloaded),
+            RETRY_PREVIOUS_RESPONSE_NOT_FOUND => {
+                Some(WebsocketResponseFrameAction::RetryPreviousResponseNotFound)
+            }
+            RETRY_NONE => None,
+            _ => panic!("test input uses an invalid retry tag"),
+        };
+        if let Some(action) = retry_action {
+            return Some(WebsocketResponseFramePlan {
+                action,
+                commit: false,
+                forward: false,
+                terminal: false,
+                reset_upstream_socket: false,
+                record_response_ids: false,
+                generation_start,
+                committed_previous_response_not_found: false,
+            });
+        }
+        if input.precommit_hold {
+            return Some(WebsocketResponseFramePlan {
+                action: if input.promoted_precommit_hold {
+                    WebsocketResponseFrameAction::CommitBuffered
+                } else {
+                    WebsocketResponseFrameAction::Buffer
+                },
+                commit: input.promoted_precommit_hold,
+                forward: false,
+                terminal: false,
+                reset_upstream_socket: false,
+                record_response_ids: false,
+                generation_start,
+                committed_previous_response_not_found: false,
+            });
+        }
+        if !input.text_nonempty || input.event_type.is_none() {
+            return Some(WebsocketResponseFramePlan {
+                action: WebsocketResponseFrameAction::ForwardUncommitted,
+                commit: false,
+                forward: true,
+                terminal: false,
+                reset_upstream_socket: false,
+                record_response_ids: false,
+                generation_start,
+                committed_previous_response_not_found: false,
+            });
+        }
+        None
+    }
+
     fn expected(input: WebsocketResponseFrameInput<'_>) -> WebsocketResponseFramePlan {
         let generation_start = !input.generation_started
             && matches!(
@@ -208,58 +266,10 @@ mod tests {
                 committed_previous_response_not_found: false,
             };
         }
-        if !input.committed {
-            let retry_action = match input.retry_kind {
-                RETRY_CONNECTION_LIMIT => Some(WebsocketResponseFrameAction::RetryConnectionLimit),
-                RETRY_QUOTA => Some(WebsocketResponseFrameAction::RetryQuota),
-                RETRY_RATE_LIMITED => Some(WebsocketResponseFrameAction::RetryRateLimited),
-                RETRY_OVERLOADED => Some(WebsocketResponseFrameAction::RetryOverloaded),
-                RETRY_PREVIOUS_RESPONSE_NOT_FOUND => {
-                    Some(WebsocketResponseFrameAction::RetryPreviousResponseNotFound)
-                }
-                RETRY_NONE => None,
-                _ => panic!("test input uses an invalid retry tag"),
-            };
-            if let Some(action) = retry_action {
-                return WebsocketResponseFramePlan {
-                    action,
-                    commit: false,
-                    forward: false,
-                    terminal: false,
-                    reset_upstream_socket: false,
-                    record_response_ids: false,
-                    generation_start,
-                    committed_previous_response_not_found: false,
-                };
-            }
-            if input.precommit_hold {
-                return WebsocketResponseFramePlan {
-                    action: if input.promoted_precommit_hold {
-                        WebsocketResponseFrameAction::CommitBuffered
-                    } else {
-                        WebsocketResponseFrameAction::Buffer
-                    },
-                    commit: input.promoted_precommit_hold,
-                    forward: false,
-                    terminal: false,
-                    reset_upstream_socket: false,
-                    record_response_ids: false,
-                    generation_start,
-                    committed_previous_response_not_found: false,
-                };
-            }
-            if !input.text_nonempty || input.event_type.is_none() {
-                return WebsocketResponseFramePlan {
-                    action: WebsocketResponseFrameAction::ForwardUncommitted,
-                    commit: false,
-                    forward: true,
-                    terminal: false,
-                    reset_upstream_socket: false,
-                    record_response_ids: false,
-                    generation_start,
-                    committed_previous_response_not_found: false,
-                };
-            }
+        if !input.committed
+            && let Some(plan) = expected_uncommitted(&input, generation_start)
+        {
+            return plan;
         }
         let terminal = input.terminal_hint;
         WebsocketResponseFramePlan {

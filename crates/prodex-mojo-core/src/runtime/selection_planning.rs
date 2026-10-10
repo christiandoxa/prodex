@@ -29,7 +29,7 @@ pub const ADAPTIVE_PLAN_REASON_ADAPTIVE_ENABLED: i64 = 2;
 pub const ADAPTIVE_PLAN_REASON_SHADOW_EXPLORATION: i64 = 3;
 pub const ADAPTIVE_PLAN_REASON_ADAPTIVE_EXPLORATION: i64 = 4;
 const AFFINITY_PROFILE_MAX_BYTES: usize = 4_096;
-const AFFINITY_BINDING_CONFLICT_ABI_VERSION: i64 = 1;
+const AFFINITY_BINDING_CONFLICT_ABI_VERSION: i64 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SoftAffinityPolicyInput {
@@ -232,12 +232,13 @@ unsafe extern "C" {
         local_rejection: i64,
         output: *mut i64,
     ) -> i64;
-    fn prodex_runtime_affinity_binding_conflict_v1(
+    fn prodex_runtime_affinity_binding_conflict_v2(
         abi_version: i64,
         profile_views: *const super::RuntimeStringView,
         profile_presence_mask: i64,
         route_kind: i64,
-        conflict_profile_view: super::RuntimeStringView,
+        conflict_profile_address: u64,
+        conflict_profile_length: u64,
         output: *mut i64,
     ) -> i64;
     fn prodex_runtime_affinity_selection_plan_v2(
@@ -466,18 +467,21 @@ pub fn affinity_binding_conflict(
         .fold(0_i64, |mask, (index, profile)| {
             mask | (i64::from(profile.is_some()) << index)
         });
+    // Avoid a by-value 16-byte aggregate: Win64 and the Mojo export lower it
+    // differently. V2 transports the view as two scalar machine words.
     let conflict_profile_view = super::RuntimeStringView {
         ptr: input.conflict_profile.as_ptr() as usize as u64,
         len: input.conflict_profile.len() as u64,
     };
     let mut output = -1_i64;
     let status = unsafe {
-        prodex_runtime_affinity_binding_conflict_v1(
+        prodex_runtime_affinity_binding_conflict_v2(
             AFFINITY_BINDING_CONFLICT_ABI_VERSION,
             profile_views.as_ptr(),
             profile_presence_mask,
             input.route_kind,
-            conflict_profile_view,
+            conflict_profile_view.ptr,
+            conflict_profile_view.len,
             &mut output,
         )
     };

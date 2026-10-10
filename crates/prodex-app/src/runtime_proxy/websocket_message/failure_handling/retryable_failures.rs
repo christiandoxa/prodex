@@ -310,16 +310,8 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
         {
             return Ok(RuntimeWebsocketMessageLoopAction::Continue);
         }
-        let full_context_retry_available = if affinity_releasable {
-            false
-        } else {
-            self.full_context_retry_available(&profile_name)?
-        };
-        let quota_fallback_available = if affinity_releasable {
-            self.prepare_quota_fallback(&profile_name)?
-        } else {
-            false
-        };
+        let (full_context_retry_available, quota_fallback_available) =
+            self.quota_recovery_availability(&profile_name, affinity_releasable)?;
         let plan = self.websocket_failure_plan(
             runtime_proxy_crate::RuntimeWebsocketFailureClass::QuotaBlocked,
             affinity_releasable,
@@ -345,15 +337,11 @@ impl<'a> RuntimeWebsocketTextMessageFlow<'a> {
             }
             runtime_proxy_crate::RuntimeWebsocketFailureAction::Rotate
             | runtime_proxy_crate::RuntimeWebsocketFailureAction::Continue => {
-                let released_affinity = if plan.release_affinity {
-                    let released_affinity = self.release_quota_blocked_affinity(&profile_name)?;
-                    if plan.clear_affinity {
-                        self.clear_profile_affinity(&profile_name, true);
-                    }
-                    released_affinity
-                } else {
-                    false
-                };
+                let released_affinity = self.apply_quota_affinity_release(
+                    &profile_name,
+                    plan.release_affinity,
+                    plan.clear_affinity,
+                )?;
                 if released_affinity {
                     runtime_proxy_log(
                         self.shared,

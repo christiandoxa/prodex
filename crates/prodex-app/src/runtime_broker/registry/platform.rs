@@ -1,4 +1,4 @@
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(target_os = "linux")]
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -546,6 +546,7 @@ fn macos_process_wait(
             pid,
             Some(expected_birth_identity),
             Some(expected_executable_path),
+            true,
         ) {
             RuntimeProcessIdentityOutcome::Absent
             | RuntimeProcessIdentityOutcome::OwnershipChanged => {
@@ -594,6 +595,7 @@ fn terminate_runtime_process_macos(
         pid,
         Some(expected_birth_identity),
         Some(expected_executable_path),
+        true,
     ) {
         RuntimeProcessIdentityOutcome::Absent => {
             return RuntimeProcessTerminationOutcome::NotRunning;
